@@ -3,6 +3,7 @@ use base64::Engine;
 pub(super) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::str;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct UpstreamPayloadEvent {
@@ -24,7 +25,21 @@ pub(crate) fn upstream_payload_event_from_runtime_line(line: &str) -> Option<Ups
     }
     let payload_b64 = parsed.fields.get("payload_b64")?;
     let payload_bytes = BASE64_STANDARD.decode(payload_b64).ok()?;
-    let payload = String::from_utf8_lossy(&payload_bytes).into_owned();
+    let bytes = parsed
+        .fields
+        .get("bytes")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(payload_bytes.len());
+    let logged_bytes = parsed
+        .fields
+        .get("logged_bytes")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(payload_bytes.len());
+    let truncated = parsed
+        .fields
+        .get("truncated")
+        .is_some_and(|value| value == "true");
+    let payload = readable_upstream_payload(&payload_bytes, &parsed.fields);
     Some(UpstreamPayloadEvent {
         timestamp: local_log_timestamp(&parsed.timestamp),
         request: parsed
@@ -46,22 +61,65 @@ pub(crate) fn upstream_payload_event_from_runtime_line(line: &str) -> Option<Ups
             .get("profile")
             .cloned()
             .unwrap_or_else(|| "-".to_string()),
-        bytes: parsed
-            .fields
-            .get("bytes")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(payload_bytes.len()),
-        logged_bytes: parsed
-            .fields
-            .get("logged_bytes")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(payload_bytes.len()),
-        truncated: parsed
-            .fields
-            .get("truncated")
-            .is_some_and(|value| value == "true"),
+        bytes,
+        logged_bytes,
+        truncated,
         payload,
     })
+}
+
+fn readable_upstream_payload(payload_bytes: &[u8], fields: &BTreeMap<String, String>) -> String {
+    if let Ok(payload) = str::from_utf8(payload_bytes)
+        && upstream_payload_is_readable_text(payload)
+    {
+        return payload.to_string();
+    }
+
+    if let Some(path) = upstream_payload_binary_path(fields) {
+        return format!("[binary payload: path={path}]");
+    }
+    format!(
+        "[binary payload: {}]",
+        upstream_payload_binary_kind(payload_bytes)
+    )
+}
+
+fn upstream_payload_is_readable_text(payload: &str) -> bool {
+    !payload
+        .chars()
+        .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
+}
+
+fn upstream_payload_binary_path(fields: &BTreeMap<String, String>) -> Option<&str> {
+    [
+        "path",
+        "file_path",
+        "local_path",
+        "absolute_path",
+        "image_path",
+        "attachment_path",
+        "uri",
+    ]
+    .into_iter()
+    .find_map(|key| fields.get(key).map(String::as_str))
+    .map(|path| path.trim())
+    .filter(|path| !path.is_empty())
+}
+
+fn upstream_payload_binary_kind(payload_bytes: &[u8]) -> &'static str {
+    match payload_bytes {
+        bytes if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "PNG image",
+        bytes if bytes.starts_with(&[0xff, 0xd8, 0xff]) => "JPEG image",
+        bytes if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") => "GIF image",
+        bytes if bytes.starts_with(b"%PDF-") => "PDF document",
+        bytes if bytes.starts_with(b"PK\x03\x04") => "ZIP archive",
+        bytes if bytes.starts_with(&[0x1f, 0x8b]) => "gzip stream",
+        bytes if bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) => "zstd stream",
+        bytes if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" => {
+            "WebP image"
+        }
+        _ => "unknown binary data",
+    }
 }
 
 pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<String> {
@@ -381,6 +439,43 @@ mod tests {
         let event = upstream_payload_event_from_runtime_line(&line).unwrap();
         assert_eq!(event.request, Some(9));
         assert_eq!(event.payload, "{\"input\":\"hello <EMAIL_ADDRESS>\"}");
+    }
+
+    #[test]
+    fn summarizes_binary_payloads_instead_of_lossy_text() {
+        let payload = b"\x89PNG\r\n\x1a\n\0\x01\x02\x03";
+        let encoded = BASE64_STANDARD.encode(payload);
+        let line = format!(
+            "[2026-06-20 12:00:00.000 +07:00] upstream_payload request=9 transport=websocket route=websocket profile=main bytes={} logged_bytes={} truncated=false payload_b64={encoded}",
+            payload.len(),
+            payload.len()
+        );
+
+        let event = upstream_payload_event_from_runtime_line(&line).unwrap();
+
+        assert_eq!(event.payload, "[binary payload: PNG image]");
+        assert!(!event.payload.contains('\u{fffd}'));
+        assert!(
+            !render_upstream_payload_lines(&event.payload, 80)
+                .join("\n")
+                .contains('\u{fffd}')
+        );
+    }
+
+    #[test]
+    fn summarizes_binary_payloads_with_path_when_available() {
+        let payload = b"\xff\xd8\xff\xe0\0\x10JFIF";
+        let encoded = BASE64_STANDARD.encode(payload);
+        let line = format!(
+            "[2026-06-20 12:00:00.000 +07:00] upstream_payload request=9 transport=websocket route=websocket profile=main bytes={} logged_bytes={} truncated=false path=/tmp/screenshot.jpg payload_b64={encoded}",
+            payload.len(),
+            payload.len()
+        );
+
+        let event = upstream_payload_event_from_runtime_line(&line).unwrap();
+
+        assert_eq!(event.payload, "[binary payload: path=/tmp/screenshot.jpg]");
+        assert!(!event.payload.contains('\u{fffd}'));
     }
 
     #[test]

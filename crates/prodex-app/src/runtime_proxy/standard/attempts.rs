@@ -145,6 +145,30 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
                     response: build_runtime_proxy_response_from_parts(parts),
                 });
             }
+            let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+                status,
+                &parts.body,
+                runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+            );
+            let retryable_quota = error_policy.class
+                == runtime_proxy_crate::RuntimeHttpErrorClass::Quota
+                && error_policy.action
+                    == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
+            if retryable_quota {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http standard_usage_retryable_failure profile={profile_name} status={status} rule={} message={}",
+                        error_policy.rule.unwrap_or("-"),
+                        error_policy.message.as_deref().unwrap_or("-"),
+                    ),
+                );
+                return Ok(RuntimeStandardAttempt::RetryableFailure {
+                    profile_name: profile_name.to_string(),
+                    response: build_runtime_proxy_response_from_parts(parts),
+                    overload: false,
+                });
+            }
             if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
                 update_runtime_profile_probe_cache_with_usage(shared, profile_name, usage)?;
             }

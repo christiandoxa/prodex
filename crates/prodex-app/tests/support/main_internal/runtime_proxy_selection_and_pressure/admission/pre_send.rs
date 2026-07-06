@@ -82,6 +82,53 @@ fn scripted_backend_fault_plain_429_passes_through_without_rotation() {
 }
 
 #[test]
+fn usage_workspace_credits_error_rotates_to_ready_profile() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
+        [RuntimeProxyBackendFaultStep::workspace_credits_exhausted(
+            RuntimeProxyBackendFaultRoute::Usage,
+            "main-account",
+        )],
+    ));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/wham/usage".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let response = proxy_runtime_standard_request(12, &request, harness.shared())
+        .expect("usage quota failure should rotate to another ready profile");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 200, "usage retry should succeed on second profile: {body}");
+    assert!(
+        body.contains("second@example.com"),
+        "ready second profile usage response should be returned: {body}"
+    );
+    assert!(
+        !body.contains("workspace is out of credits"),
+        "workspace credits error must not leak while a ready profile succeeds: {body}"
+    );
+    let usage_accounts = backend.usage_accounts();
+    assert_eq!(
+        usage_accounts.first().map(String::as_str),
+        Some("main-account"),
+        "usage route should try main first: {usage_accounts:?}"
+    );
+    assert!(
+        usage_accounts.iter().any(|account| account == "second-account"),
+        "usage route should rotate to the ready second profile: {usage_accounts:?}"
+    );
+}
+
+#[test]
 fn precommit_quota_gate_allows_weekly_exhausted_continuation_from_persisted_snapshot() {
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",

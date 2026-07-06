@@ -1715,6 +1715,44 @@ mod tests {
     }
 
     #[test]
+    fn log_stream_summarizes_binary_upstream_payloads() {
+        let root = env::temp_dir().join(format!(
+            "prodex-runtime-binary-payload-follow-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("runtime.log");
+        fs::write(
+            &path,
+            "[2026-07-01 21:52:36.700 +07:00] upstream_payload request=28 transport=websocket route=websocket profile=main bytes=12 logged_bytes=12 truncated=false payload_b64=iVBORw0KGgoAAQID\n",
+        )
+        .unwrap();
+
+        let items =
+            collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default()).unwrap();
+        let items = items.into_iter().collect::<VecDeque<_>>();
+        let rendered = log_stream_tui_text(&items, 20, 80)
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("binary payload: PNG image"));
+        assert!(!rendered.contains('\u{fffd}'));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn dedupes_consecutive_equivalent_transcript_events() {
         let root = env::temp_dir().join(format!(
             "prodex-transcript-dedupe-{}-{}",
