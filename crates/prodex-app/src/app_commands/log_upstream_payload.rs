@@ -109,12 +109,12 @@ fn upstream_payload_binary_path(fields: &BTreeMap<String, String>) -> Option<&st
 fn upstream_payload_binary_kind(payload_bytes: &[u8]) -> &'static str {
     match payload_bytes {
         bytes if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "PNG image",
-        bytes if bytes.starts_with(&[0xff, 0xd8, 0xff]) => "JPEG image",
+        [0xff, 0xd8, 0xff, ..] => "JPEG image",
         bytes if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") => "GIF image",
         bytes if bytes.starts_with(b"%PDF-") => "PDF document",
         bytes if bytes.starts_with(b"PK\x03\x04") => "ZIP archive",
-        bytes if bytes.starts_with(&[0x1f, 0x8b]) => "gzip stream",
-        bytes if bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) => "zstd stream",
+        [0x1f, 0x8b, ..] => "gzip stream",
+        [0x28, 0xb5, 0x2f, 0xfd, ..] => "zstd stream",
         bytes if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" => {
             "WebP image"
         }
