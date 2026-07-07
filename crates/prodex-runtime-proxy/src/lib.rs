@@ -564,13 +564,35 @@ pub fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<Strin
 }
 
 pub fn runtime_request_without_previous_response_id(
-    _request: &RuntimeProxyRequest,
+    request: &RuntimeProxyRequest,
 ) -> Option<RuntimeProxyRequest> {
-    None
+    let mut value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
+    if runtime_request_value_requires_previous_response_affinity(&value)
+        || runtime_request_session_id(request).is_some()
+    {
+        return None;
+    }
+    remove_previous_response_id(&mut value)?;
+    let mut request = request.clone();
+    request.body = serde_json::to_vec(&value).ok()?;
+    Some(request)
 }
 
-pub fn runtime_request_text_without_previous_response_id(_request_text: &str) -> Option<String> {
-    None
+pub fn runtime_request_text_without_previous_response_id(request_text: &str) -> Option<String> {
+    let mut value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
+    if runtime_request_value_requires_previous_response_affinity(&value)
+        || runtime_request_session_id_from_value(&value).is_some()
+    {
+        return None;
+    }
+    remove_previous_response_id(&mut value)?;
+    Some(value.to_string())
+}
+
+fn remove_previous_response_id(value: &mut serde_json::Value) -> Option<()> {
+    let object = value.as_object_mut()?;
+    object.remove("previous_response_id")?;
+    Some(())
 }
 
 #[cfg(test)]

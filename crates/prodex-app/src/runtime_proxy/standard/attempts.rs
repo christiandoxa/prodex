@@ -365,10 +365,15 @@ fn runtime_patch_openai_spark_models_response(
         .find(|model| runtime_model_catalog_entry_matches_slug(model, "gpt-5.3-codex-spark"))
     {
         runtime_patch_openai_spark_model_entry(model);
-    } else if let Some(mut model) = models
+    } else if let Some(mut model) = ["gpt-5.3-codex", "gpt-5.4", "gpt-5.5"]
         .iter()
-        .find(|model| runtime_model_catalog_entry_matches_slug(model, "gpt-5.3-codex"))
-        .cloned()
+        .find_map(|slug| {
+            models
+                .iter()
+                .find(|model| runtime_model_catalog_entry_matches_slug(model, slug))
+                .cloned()
+        })
+        .or_else(|| models.first().cloned())
     {
         runtime_patch_openai_spark_model_entry(&mut model);
         models.push(model);
@@ -758,6 +763,32 @@ mod tests {
     }
 
     #[test]
+    fn openai_models_response_adds_spark_when_codex_metadata_is_absent() {
+        let parts = runtime_patch_openai_spark_models_response(response_parts(json!({
+            "models": [{
+                "slug": "gpt-5.4",
+                "display_name": "gpt-5.4",
+                "context_window": 272000,
+                "max_context_window": 1000000,
+                "auto_compact_token_limit": null,
+                "effective_context_window_percent": 95
+            }]
+        })));
+        let value: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
+        let spark = value["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|model| model["slug"] == "gpt-5.3-codex-spark")
+            .unwrap();
+
+        assert_eq!(spark["display_name"], "gpt-5.3-codex-spark");
+        assert_eq!(spark["context_window"], 128_000);
+        assert_eq!(spark["max_context_window"], 128_000);
+        assert_eq!(spark["auto_compact_token_limit"], 115_200);
+    }
+
+    #[test]
     fn openai_models_response_corrects_existing_spark_context() {
         let parts = runtime_patch_openai_spark_models_response(response_parts(json!({
             "models": [{
@@ -781,6 +812,9 @@ mod tests {
     fn openai_models_metadata_path_matches_codex_and_openai_routes() {
         assert!(runtime_openai_models_metadata_path(
             "/backend-api/codex/models?client_version=0.124.0"
+        ));
+        assert!(runtime_openai_models_metadata_path(
+            "/backend-api/prodex/models?client_version=0.142.5"
         ));
         assert!(runtime_openai_models_metadata_path(
             "/v1/models?client_version=0.124.0"

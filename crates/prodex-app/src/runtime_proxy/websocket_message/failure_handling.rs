@@ -1,5 +1,7 @@
 use super::*;
-use runtime_proxy_crate::runtime_proxy_websocket_error_payload_text;
+use runtime_proxy_crate::{
+    runtime_proxy_websocket_error_payload_text, runtime_request_text_without_previous_response_id,
+};
 
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn handle_direct_current_fallback_attempt(
@@ -144,10 +146,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         payload: RuntimeWebsocketErrorPayload,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
-        if !self.quota_blocked_affinity_is_releasable(
-            &profile_name,
-            self.request_requires_previous_response_affinity,
-        ) {
+        let force_fresh_fallback =
+            self.prepare_workspace_credit_fresh_fallback(&profile_name, &payload)?;
+        if !force_fresh_fallback
+            && !self.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                self.request_requires_previous_response_affinity,
+            )
+        {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
@@ -269,10 +275,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             quota_message.as_deref(),
             request_model_name.as_deref(),
         )?;
-        if !self.quota_blocked_affinity_is_releasable(
-            &profile_name,
-            self.request_requires_previous_response_affinity,
-        ) {
+        let force_fresh_fallback =
+            self.prepare_workspace_credit_fresh_fallback(&profile_name, &payload)?;
+        if !force_fresh_fallback
+            && !self.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                self.request_requires_previous_response_affinity,
+            )
+        {
             runtime_proxy_log(
                 self.shared,
                 format!(
@@ -306,6 +316,47 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         self.excluded_profiles.insert(profile_name);
         self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
+    }
+
+    fn prepare_workspace_credit_fresh_fallback(
+        &mut self,
+        profile_name: &str,
+        payload: &RuntimeWebsocketErrorPayload,
+    ) -> Result<bool> {
+        if self.request_requires_previous_response_affinity
+            || self.request_turn_state.is_some()
+            || self.turn_state_profile.is_some()
+            || !runtime_websocket_workspace_credit_depleted_payload(payload)
+            || !runtime_has_route_eligible_quota_fallback(
+                self.shared,
+                profile_name,
+                &BTreeSet::new(),
+                RuntimeRouteKind::Websocket,
+            )?
+        {
+            return Ok(false);
+        }
+        let Some(request_text) =
+            runtime_request_text_without_previous_response_id(&self.request_text)
+        else {
+            return Ok(false);
+        };
+
+        // ponytail: workspace-credit failures are terminal for this account; strip only after a fallback exists.
+        self.request_text = request_text;
+        self.previous_response_id = None;
+        self.previous_response_fresh_fallback_shape = None;
+        self.bound_profile = None;
+        self.pinned_profile = None;
+        self.trusted_previous_response_affinity = false;
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} workspace_credit_fresh_fallback profile={profile_name}",
+                self.request_id, self.session_id
+            ),
+        );
+        Ok(true)
     }
 
     pub(super) fn handle_candidate_overloaded(
@@ -384,6 +435,22 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         self.excluded_profiles.insert(profile_name);
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
+}
+
+fn runtime_websocket_workspace_credit_depleted_payload(
+    payload: &RuntimeWebsocketErrorPayload,
+) -> bool {
+    let text = match payload {
+        RuntimeWebsocketErrorPayload::Text(text) => text.as_str().into(),
+        RuntimeWebsocketErrorPayload::Binary(bytes) => String::from_utf8_lossy(bytes),
+        RuntimeWebsocketErrorPayload::Empty => return false,
+    };
+    let lower = text.to_ascii_lowercase();
+    lower.contains("workspace_member_credits_depleted")
+        || lower.contains("workspace is out of credits")
+        || (lower.contains("out of credits")
+            && lower.contains("workspace owner")
+            && lower.contains("refill"))
 }
 
 #[cfg(test)]

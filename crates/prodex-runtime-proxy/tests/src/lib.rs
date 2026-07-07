@@ -180,6 +180,48 @@ fn explicit_session_headers_keep_legacy_precedence() {
 }
 
 #[test]
+fn strips_previous_response_id_from_request_body_for_fresh_retry() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("x-test".to_string(), "keep".to_string())],
+        body: br#"{"model":"gpt-5.5","previous_response_id":"resp_old","input":"again"}"#.to_vec(),
+    };
+
+    let rewritten = runtime_request_without_previous_response_id(&request)
+        .expect("previous_response_id should be removable");
+    let value = serde_json::from_slice::<serde_json::Value>(&rewritten.body).unwrap();
+
+    assert_eq!(rewritten.headers, request.headers);
+    assert_eq!(
+        value.get("model").and_then(serde_json::Value::as_str),
+        Some("gpt-5.5")
+    );
+    assert_eq!(
+        value.get("input").and_then(serde_json::Value::as_str),
+        Some("again")
+    );
+    assert!(value.get("previous_response_id").is_none());
+    assert!(runtime_request_without_previous_response_id(&rewritten).is_none());
+}
+
+#[test]
+fn strips_previous_response_id_from_websocket_text_for_fresh_retry() {
+    let rewritten = runtime_request_text_without_previous_response_id(
+        r#"{"type":"response.create","previous_response_id":"resp_old","input":[]}"#,
+    )
+    .expect("previous_response_id should be removable");
+    let value = serde_json::from_str::<serde_json::Value>(&rewritten).unwrap();
+
+    assert_eq!(
+        value.get("type").and_then(serde_json::Value::as_str),
+        Some("response.create")
+    );
+    assert!(value.get("previous_response_id").is_none());
+    assert!(runtime_request_text_without_previous_response_id(&rewritten).is_none());
+}
+
+#[test]
 fn detects_internal_interactive_origin_case_insensitively() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
