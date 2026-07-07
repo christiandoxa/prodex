@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.252.0 - 2026-07-07
+
+### Runtime
+
+- Prefer direct runtime API auth (`5027f7e`)
+
+### CLI
+
+- Support Spark quota pools (`5c167cc`)
+
 ## 0.251.0 - 2026-07-07
 
 ### Runtime
@@ -70,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Improve log stream coverage (`6ac759f`)
-
-## 0.240.0 - 2026-07-01
-
-### Misc
-
-- Per-model auto_compact_token_limit from API context_window (`76791c9`)
