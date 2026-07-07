@@ -39,37 +39,36 @@ pub(super) use proxy_startup::{
     RuntimeRotationProxyStartOptions, start_runtime_rotation_proxy_with_options,
 };
 
-const OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
-const OPENAI_CODEX_SPARK_AUTO_COMPACT_TOKEN_LIMIT: u64 =
-    OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS * 9 / 10;
+const OPENAI_CODEX_DEFAULT_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
 
 pub(super) fn runtime_launch_openai_spark_context_codex_args(
     codex_home: &Path,
     args: &[OsString],
 ) -> Vec<OsString> {
-    if !runtime_launch_openai_provider_for_args(codex_home, args)
-        || !runtime_launch_model_is_openai_codex_spark(codex_home, args)
-    {
+    if !runtime_launch_openai_provider_for_args(codex_home, args) {
         return args.to_vec();
     }
-    if runtime_launch_openai_spark_context_from_models_cache(codex_home) {
+    let Some(model) = runtime_launch_openai_model(codex_home, args) else {
+        return args.to_vec();
+    };
+    if !runtime_launch_openai_model_uses_large_context(&model) {
         return args.to_vec();
     }
 
     let profile_v2_name = codex_cli_profile_v2_name(args);
-    let mut overrides = Vec::new();
-    if runtime_launch_cli_model_context_window_tokens(args)
-        .or_else(|| {
+    let explicit_context_window =
+        runtime_launch_cli_model_context_window_tokens(args).or_else(|| {
             runtime_launch_config_model_context_window_tokens_with_profile_v2(
                 codex_home,
                 profile_v2_name.as_deref(),
             )
-        })
-        .is_none()
-    {
-        overrides.push(format!(
-            "model_context_window={OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS}"
-        ));
+        });
+    let context_window = explicit_context_window
+        .or_else(|| runtime_launch_openai_model_context_from_models_cache(codex_home, &model))
+        .unwrap_or(OPENAI_CODEX_DEFAULT_CONTEXT_WINDOW_TOKENS);
+    let mut overrides = Vec::new();
+    if explicit_context_window.is_none() {
+        overrides.push(format!("model_context_window={context_window}"));
     }
     if runtime_launch_cli_model_auto_compact_token_limit(args)
         .or_else(|| {
@@ -81,7 +80,8 @@ pub(super) fn runtime_launch_openai_spark_context_codex_args(
         .is_none()
     {
         overrides.push(format!(
-            "model_auto_compact_token_limit={OPENAI_CODEX_SPARK_AUTO_COMPACT_TOKEN_LIMIT}"
+            "model_auto_compact_token_limit={}",
+            context_window * 9 / 10
         ));
     }
     if overrides.is_empty() {
@@ -213,44 +213,52 @@ fn runtime_launch_openai_provider_for_args(codex_home: &Path, args: &[OsString])
         .is_none_or(|provider| provider.trim().eq_ignore_ascii_case("openai"))
 }
 
-fn runtime_launch_model_is_openai_codex_spark(codex_home: &Path, args: &[OsString]) -> bool {
+fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Option<String> {
     runtime_launch_cli_model(args)
         .or_else(|| codex_cli_config_override_value(args, "model"))
         .or_else(|| codex_config_value_for_args(codex_home, args, "model"))
-        .is_some_and(|model| {
-            matches!(
-                model.trim().to_ascii_lowercase().as_str(),
-                "gpt-5.3-codex-spark" | "gpt-5.3-spark"
-            )
-        })
 }
 
-fn runtime_launch_openai_spark_context_from_models_cache(codex_home: &Path) -> bool {
+fn runtime_launch_openai_model_uses_large_context(model: &str) -> bool {
+    let model = model.trim().to_ascii_lowercase();
+    model.starts_with("gpt-5")
+        || matches!(
+            model.as_str(),
+            "gpt-5.3-codex-spark" | "gpt-5.3-spark" | "codex-auto-review"
+        )
+}
+
+fn runtime_launch_openai_model_context_from_models_cache(
+    codex_home: &Path,
+    model: &str,
+) -> Option<u64> {
     let raw = match fs::read_to_string(codex_home.join("models_cache.json")) {
         Ok(raw) => raw,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return false;
+        return None;
     };
+    let expected = model.trim().to_ascii_lowercase();
     value
         .get("models")
         .and_then(serde_json::Value::as_array)
-        .is_some_and(|models| {
-            models.iter().any(|model| {
-                model
+        .and_then(|models| {
+            models.iter().find_map(|entry| {
+                let matches_slug = entry
                     .get("slug")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|slug| {
-                        matches!(
-                            slug.trim().to_ascii_lowercase().as_str(),
-                            "gpt-5.3-codex-spark" | "gpt-5.3-spark"
-                        )
-                    })
-                    && model
-                        .get("context_window")
-                        .and_then(serde_json::Value::as_i64)
-                        .is_some_and(|context_window| context_window > 1)
+                    .or_else(|| entry.get("id").and_then(serde_json::Value::as_str))
+                    .is_some_and(|slug| slug.trim().eq_ignore_ascii_case(&expected));
+                if !matches_slug {
+                    return None;
+                }
+                entry
+                    .get("context_window")
+                    .or_else(|| entry.get("max_context_window"))
+                    .or_else(|| entry.get("max_context_window_tokens"))
+                    .and_then(serde_json::Value::as_u64)
+                    .filter(|context_window| *context_window > 1)
             })
         })
 }

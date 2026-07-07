@@ -90,12 +90,37 @@ fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
     })
 }
 
-pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
-    main_window_snapshots(usage).is_some_and(|(five_hour, weekly)| {
-        five_hour.remaining_percent > 0 && weekly.remaining_percent > 0
-    }) || spark_window_snapshots(usage).is_some_and(|(five_hour, weekly)| {
-        five_hour.remaining_percent > 0 && weekly.remaining_percent > 0
+fn window_pair_has_ready_windows(pair: &WindowPair) -> bool {
+    let now = Local::now().timestamp();
+    ["5h", "weekly"].into_iter().all(|label| {
+        required_window_snapshot_at(pair, label, now)
+            .is_some_and(|window| window.remaining_percent > 0)
     })
+}
+
+pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
+    if usage
+        .rate_limit
+        .as_ref()
+        .is_some_and(window_pair_has_ready_windows)
+    {
+        return usage.rate_limit.as_ref();
+    }
+
+    let spark = usage
+        .additional_rate_limits
+        .iter()
+        .find(|additional| additional_rate_limit_is_spark(additional))
+        .map(|additional| &additional.rate_limit);
+    if spark.is_some_and(window_pair_has_ready_windows) {
+        return spark;
+    }
+
+    usage.rate_limit.as_ref().or(spark)
+}
+
+pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
+    openai_quota_runtime_window_pair(usage).is_some_and(window_pair_has_ready_windows)
 }
 
 pub fn quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaWindowSummary {
@@ -397,33 +422,35 @@ pub fn collect_blocked_limits(
 ) -> Vec<BlockedLimit> {
     let mut blocked = Vec::new();
 
-    if let Some(main) = usage.rate_limit.as_ref() {
-        push_required_main_window(&mut blocked, main, "5h");
-        push_required_main_window(&mut blocked, main, "weekly");
-    } else {
-        blocked.push(BlockedLimit {
-            message: "5h quota unavailable".to_string(),
-        });
-        blocked.push(BlockedLimit {
-            message: "weekly quota unavailable".to_string(),
-        });
-    }
+    if !openai_quota_has_ready_limit(usage) {
+        if let Some(main) = usage.rate_limit.as_ref() {
+            push_required_main_window(&mut blocked, main, "5h");
+            push_required_main_window(&mut blocked, main, "weekly");
+        } else {
+            blocked.push(BlockedLimit {
+                message: "5h quota unavailable".to_string(),
+            });
+            blocked.push(BlockedLimit {
+                message: "weekly quota unavailable".to_string(),
+            });
+        }
 
-    for additional in &usage.additional_rate_limits {
-        let label = additional
-            .limit_name
-            .as_deref()
-            .or(additional.metered_feature.as_deref());
-        push_blocked_window(
-            &mut blocked,
-            label,
-            additional.rate_limit.primary_window.as_ref(),
-        );
-        push_blocked_window(
-            &mut blocked,
-            label,
-            additional.rate_limit.secondary_window.as_ref(),
-        );
+        for additional in &usage.additional_rate_limits {
+            let label = additional
+                .limit_name
+                .as_deref()
+                .or(additional.metered_feature.as_deref());
+            push_blocked_window(
+                &mut blocked,
+                label,
+                additional.rate_limit.primary_window.as_ref(),
+            );
+            push_blocked_window(
+                &mut blocked,
+                label,
+                additional.rate_limit.secondary_window.as_ref(),
+            );
+        }
     }
 
     if include_code_review && let Some(code_review) = usage.code_review_rate_limit.as_ref() {

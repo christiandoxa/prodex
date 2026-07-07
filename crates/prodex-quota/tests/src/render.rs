@@ -371,6 +371,7 @@ fn quota_reports_status_is_ready_when_spark_remains() {
     );
 
     assert_eq!(format_openai_quota_status(&usage), "Ready");
+    assert!(collect_blocked_limits(&usage, false).is_empty());
     assert!(output.contains("Available:"));
     assert!(output.contains("1/1 profile"));
     assert!(
@@ -395,6 +396,7 @@ fn quota_reports_status_stays_ready_when_main_remains_but_spark_is_blocked() {
     );
 
     assert_eq!(format_openai_quota_status(&usage), "Ready");
+    assert!(collect_blocked_limits(&usage, false).is_empty());
     assert!(output.contains("Available:"));
     assert!(output.contains("1/1 profile"));
     assert!(output.contains("Usable now:"));

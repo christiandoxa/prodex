@@ -43,13 +43,34 @@ fn runtime_launch_uses_cached_openai_spark_context_metadata() {
         ],
     );
 
-    assert_eq!(
-        args,
-        vec![
-            OsString::from("--model"),
-            OsString::from("gpt-5.3-codex-spark")
-        ]
-    );
+    let rendered = args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert!(rendered.contains(&"model_context_window=128000".to_string()));
+    assert!(rendered.contains(&"model_auto_compact_token_limit=115200".to_string()));
+}
+
+#[test]
+fn runtime_launch_injects_cached_openai_gpt5_context_metadata() {
+    let root = temp_dir("openai-gpt5-context-cache");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("config.toml"), r#"model = "gpt-5.5""#).unwrap();
+    fs::write(
+        root.join("models_cache.json"),
+        r#"{"models":[{"slug":"gpt-5.5","context_window":272000}]}"#,
+    )
+    .unwrap();
+
+    let args = runtime_launch_openai_spark_context_codex_args(&root, &[]);
+    let rendered = args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    assert!(rendered.contains(&"model_context_window=272000".to_string()));
+    assert!(rendered.contains(&"model_auto_compact_token_limit=244800".to_string()));
 }
 
 #[test]

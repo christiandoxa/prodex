@@ -1,8 +1,8 @@
 use super::*;
 use chrono::Local;
 use prodex_quota::{
-    AuthSummary, RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
-    RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
+    AdditionalRateLimit, AuthSummary, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
+    RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };
 use prodex_runtime_state::{RuntimeProbeCacheFreshness, RuntimeRouteKind};
 use prodex_shared_types::{RuntimeProfileProbeCacheEntry, RuntimeQuotaSource};
@@ -44,6 +44,25 @@ fn probe_cache_entry(checked_at: i64) -> RuntimeProfileProbeCacheEntry {
     }
 }
 
+fn spark_limit(five_hour_remaining: i64, weekly_remaining: i64, now: i64) -> AdditionalRateLimit {
+    AdditionalRateLimit {
+        limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
+        metered_feature: Some("codex_bengalfox".to_string()),
+        rate_limit: WindowPair {
+            primary_window: Some(UsageWindow {
+                used_percent: Some(100 - five_hour_remaining),
+                reset_at: Some(now + 7_200),
+                limit_window_seconds: Some(18_000),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: Some(100 - weekly_remaining),
+                reset_at: Some(now + 172_800),
+                limit_window_seconds: Some(604_800),
+            }),
+        },
+    }
+}
+
 #[test]
 fn quota_summary_for_route_matches_usage_windows() {
     let now = Local::now().timestamp();
@@ -56,6 +75,25 @@ fn quota_summary_for_route_matches_usage_windows() {
     assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(summary.weekly.remaining_percent, 80);
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Critical);
+}
+
+#[test]
+fn quota_summary_uses_spark_windows_when_main_is_exhausted() {
+    let now = Local::now().timestamp();
+    let mut usage = usage_response(100, 100, now);
+    usage.additional_rate_limits.push(spark_limit(89, 97, now));
+
+    let summary = runtime_quota_summary_for_route(&usage, RuntimeRouteKind::Responses);
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+
+    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(summary.five_hour.remaining_percent, 89);
+    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(summary.weekly.remaining_percent, 97);
+    assert_eq!(snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(snapshot.five_hour_remaining_percent, 89);
+    assert_eq!(snapshot.weekly_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(snapshot.weekly_remaining_percent, 97);
 }
 
 #[test]

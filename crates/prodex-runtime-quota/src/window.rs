@@ -1,7 +1,7 @@
 use chrono::Local;
 use prodex_quota::{
     RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, find_main_window,
-    remaining_percent,
+    openai_quota_runtime_window_pair, remaining_percent,
 };
 
 pub fn runtime_quota_window_status_to_proxy(
@@ -72,7 +72,7 @@ pub fn runtime_quota_window_observation_at(
     label: &str,
     now: i64,
 ) -> Option<runtime_proxy::RuntimeProxyQuotaWindowObservation> {
-    let window = find_main_window(usage.rate_limit.as_ref()?, label)?;
+    let window = find_main_window(openai_quota_runtime_window_pair(usage)?, label)?;
     let remaining_percent = remaining_percent(window.used_percent);
     let reset_at = window.reset_at.unwrap_or(i64::MAX);
     let seconds_until_reset = if reset_at == i64::MAX {
