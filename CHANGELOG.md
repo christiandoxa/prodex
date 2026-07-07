@@ -2,9 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.255.0 - Unreleased
+## 0.256.0 - 2026-07-07
 
-Changes after `0.254.0`.
+### CLI
+
+- Unblock Spark quota and GPT-5 context launches (`e5a6122`)
+
+## 0.255.0 - 2026-07-07
 
 ### CLI
 
@@ -73,16 +77,3 @@ Changes after `0.254.0`.
 
 - Drop mojibake tool output from log stream (`3cf53da`)
 - Hide internal attachment paths in log stream (`a096138`)
-
-## 0.244.0 - 2026-07-03
-
-### Runtime
-
-- Resume unfinished goals after usage limits (`a8706b7`)
-- Add Kiro provider parity (`6fe8650`)
-
-## 0.243.0 - 2026-07-02
-
-### Misc
-
-- Add provider conformance layer v1 (`4fe4c61`)
