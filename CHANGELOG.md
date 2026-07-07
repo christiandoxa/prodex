@@ -2,13 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.254.0 - Unreleased
+## 0.255.0 - Unreleased
 
-Changes after `0.253.0`.
+Changes after `0.254.0`.
+
+### CLI
+
+- Keep main quota ready when spark is exhausted (`a40abc9`)
+
+## 0.254.0 - 2026-07-07
 
 ### Misc
 
-- Respect cached Spark context metadata (`d7bd71e`)
+- Respect cached Spark context metadata (`977eff3`)
 
 ## 0.253.0 - 2026-07-07
 
@@ -80,11 +86,3 @@ Changes after `0.253.0`.
 ### Misc
 
 - Add provider conformance layer v1 (`4fe4c61`)
-
-## 0.242.0 - 2026-07-02
-
-### Misc
-
-- Resolve size guard violations for provider conformance files (`8395bdc`)
-- Resolve CI failures — clippy warnings and churn hygiene allowance (`a26de9a`)
-- Provider Conformance Layer v1 (`8b1c810`)
