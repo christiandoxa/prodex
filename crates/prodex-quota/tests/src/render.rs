@@ -29,6 +29,30 @@ fn main_windows(
     }
 }
 
+fn spark_limit(
+    five_hour_remaining: i64,
+    five_hour_reset_at: i64,
+    weekly_remaining: i64,
+    weekly_reset_at: i64,
+) -> AdditionalRateLimit {
+    AdditionalRateLimit {
+        limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
+        metered_feature: Some("codex_bengalfox".to_string()),
+        rate_limit: WindowPair {
+            primary_window: Some(UsageWindow {
+                used_percent: Some(100 - five_hour_remaining),
+                reset_at: Some(five_hour_reset_at),
+                limit_window_seconds: Some(18_000),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: Some(100 - weekly_remaining),
+                reset_at: Some(weekly_reset_at),
+                limit_window_seconds: Some(604_800),
+            }),
+        },
+    }
+}
+
 fn openai_report(name: &str, usage: UsageResponse) -> QuotaReport {
     QuotaReport {
         name: name.to_string(),
@@ -316,6 +340,44 @@ fn profile_quota_render_shows_monthly_workspace_limits() {
 
     assert!(rendered.contains("Workspace credits monthly"));
     assert!(rendered.contains("73% left"));
+}
+
+#[test]
+fn quota_reports_detail_shows_spark_additional_limit() {
+    let mut usage = main_windows(65, 1_783_413_134, 48, 1_783_999_934);
+    usage
+        .additional_rate_limits
+        .push(spark_limit(89, 1_783_413_134, 97, 1_783_999_934));
+
+    let output = render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 160);
+
+    assert!(output.contains("GPT-5.3-Codex-Spark: 5h 89% | weekly 97%; resets:"));
+    assert!(output.contains("Spark remaining pool:"));
+    assert!(output.contains("5h 89% | weekly 97% across 1 profile(s)"));
+}
+
+#[test]
+fn quota_reports_status_is_ready_when_spark_remains() {
+    let mut usage = main_windows(0, 1_700_001_800, 0, 1_700_259_200);
+    usage
+        .additional_rate_limits
+        .push(spark_limit(89, 1_783_413_134, 97, 1_783_999_934));
+
+    let output = render_quota_reports_with_layout(
+        &[openai_report("spark-only", usage.clone())],
+        true,
+        None,
+        160,
+    );
+
+    assert_eq!(format_openai_quota_status(&usage), "Ready");
+    assert!(output.contains("Available:"));
+    assert!(output.contains("1/1 profile"));
+    assert!(
+        output
+            .lines()
+            .any(|line| line.contains("spark-only") && line.contains("Ready"))
+    );
 }
 
 #[test]

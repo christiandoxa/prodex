@@ -8,8 +8,8 @@ use terminal_ui::{
 #[cfg(test)]
 use super::ExternalQuotaDetail;
 use super::{
-    BlockedLimit, CopilotQuotaInfo, ExternalQuotaInfo, GeminiQuotaBucket, GeminiQuotaInfo,
-    MainWindowSnapshot, ProviderQuotaSnapshot, QuotaReport, QuotaReportSort,
+    AdditionalRateLimit, BlockedLimit, CopilotQuotaInfo, ExternalQuotaInfo, GeminiQuotaBucket,
+    GeminiQuotaInfo, MainWindowSnapshot, ProviderQuotaSnapshot, QuotaReport, QuotaReportSort,
     RenderedQuotaReportWindow, RuntimeQuotaPressureBand, RuntimeQuotaSummary,
     RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, UsageWindow, WindowPair,
 };

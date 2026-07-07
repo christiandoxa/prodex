@@ -90,7 +90,9 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&overlay_home)?;
         }
-        let codex_args = profile_openai_compatible_codex_args(&overlay_home, &self.codex_args);
+        let codex_args =
+            runtime_launch_openai_spark_context_codex_args(&overlay_home, &self.codex_args);
+        let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args);
         let codex_args = prepare_local_provider_catalog_codex_args(&overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(&overlay_home, &codex_args)?;
         let codex_args = prepare_deepseek_provider_codex_args(&overlay_home, &codex_args)?;

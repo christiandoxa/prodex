@@ -856,6 +856,11 @@ fn build_all_quota_watch_tui_row(report: &QuotaReport, detail: bool) -> AllQuota
             detail_line.push(credits);
         }
     }
+    if detail && let Ok(ProviderQuotaSnapshot::OpenAi(usage)) = &report.result {
+        detail_line.extend(prodex_quota::format_openai_additional_limit_summaries(
+            usage,
+        ));
+    }
     AllQuotaWatchTuiRow {
         profile: vec![report.name.clone()],
         current: vec![if report.active { "*" } else { "" }.to_string()],

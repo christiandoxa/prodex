@@ -14,6 +14,18 @@ fn model_registry_resolves_known_models_after_normalization() {
 }
 
 #[test]
+fn model_registry_resolves_openai_codex_spark_window() {
+    assert_eq!(
+        smart_context_model_context_window(Some("gpt-5.3-codex-spark")).map(|window| window.tokens),
+        Some(128_000)
+    );
+    assert_eq!(
+        smart_context_model_context_window(Some("GPT-5.3-Spark")).map(|window| window.tokens),
+        Some(128_000)
+    );
+}
+
+#[test]
 fn model_registry_uses_family_defaults_for_known_large_window_providers() {
     assert_eq!(
         smart_context_model_context_window(Some("gemini-3-pro")).map(|window| window.tokens),

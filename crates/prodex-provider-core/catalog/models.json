@@ -108,6 +108,40 @@
   {
     "provider": "openai",
     "owned_by": "openai",
+    "id": "gpt-5.3-codex-spark",
+    "display_name": "GPT-5.3 Codex Spark",
+    "description": "Spark-tier Codex-optimized coding model routed through OpenAI Responses.",
+    "context_window_tokens": 128000,
+    "input_cost_per_million_microusd": null,
+    "output_cost_per_million_microusd": null,
+    "supported_endpoints": [
+      "responses",
+      "chat-completions",
+      "messages",
+      "models",
+      "embeddings",
+      "images",
+      "audio",
+      "batches",
+      "rerank",
+      "a2a"
+    ],
+    "aliases": [
+      "spark"
+    ],
+    "feature_flags": {
+      "tools": true,
+      "json_schema": true,
+      "vision": false,
+      "audio": false,
+      "web_search": true,
+      "reasoning": true
+    },
+    "pricing_known": false
+  },
+  {
+    "provider": "openai",
+    "owned_by": "openai",
     "id": "gpt-5.2",
     "display_name": "GPT-5.2",
     "description": "General frontier model routed through OpenAI Responses.",

@@ -21,7 +21,7 @@ use crate::{
     preview_local_provider_catalog_codex_args, profile_openai_compatible_codex_args,
     runtime_caveman_extract_launch_prefixes, runtime_caveman_extract_presidio_prefix,
     runtime_launch_cli_gemini_thinking_budget_tokens,
-    runtime_launch_cli_model_context_window_tokens,
+    runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
 };
 pub(crate) use prodex_runtime_launch::{
     RuntimeLaunchDryRunChild, default_child_removed_env, extract_prodex_dry_run_flag,
@@ -391,6 +391,8 @@ fn profile_openai_compatible_dry_run_child(
 ) -> Result<RuntimeLaunchDryRunChild> {
     match child {
         RuntimeLaunchDryRunChild::Codex { codex_args } => {
+            let codex_args =
+                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args);
             let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args);
             let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;
@@ -399,6 +401,8 @@ fn profile_openai_compatible_dry_run_child(
             Ok(RuntimeLaunchDryRunChild::Codex { codex_args })
         }
         RuntimeLaunchDryRunChild::Caveman { codex_args } => {
+            let codex_args =
+                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args);
             let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args);
             let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;

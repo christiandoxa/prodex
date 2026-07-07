@@ -12,9 +12,13 @@ pub(super) struct QuotaPoolAggregate {
     ready_five_hour_pool_remaining: i64,
     ready_weekly_pool_remaining: i64,
     main_pool_remaining: i64,
+    spark_profiles_with_data: usize,
+    spark_five_hour_pool_remaining: i64,
+    spark_weekly_pool_remaining: i64,
     earliest_five_hour_reset_at: Option<i64>,
     earliest_weekly_reset_at: Option<i64>,
     earliest_main_reset_at: Option<i64>,
+    earliest_spark_reset_at: Option<i64>,
     last_updated_at: Option<i64>,
 }
 
@@ -65,6 +69,20 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
                             .earliest_weekly_reset_at
                             .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
                     );
+                }
+                if let Some((spark_five_hour, spark_weekly)) = spark_window_snapshots(usage) {
+                    aggregate.spark_profiles_with_data += 1;
+                    aggregate.spark_five_hour_pool_remaining += spark_five_hour.remaining_percent;
+                    aggregate.spark_weekly_pool_remaining += spark_weekly.remaining_percent;
+                    for reset_at in [spark_five_hour.reset_at, spark_weekly.reset_at] {
+                        if reset_at != i64::MAX {
+                            aggregate.earliest_spark_reset_at = Some(
+                                aggregate
+                                    .earliest_spark_reset_at
+                                    .map_or(reset_at, |current| current.min(reset_at)),
+                            );
+                        }
+                    }
                 }
             }
             ProviderQuotaSnapshot::Gemini(info) => {
@@ -129,7 +147,7 @@ fn copilot_main_remaining_percent(info: &CopilotQuotaInfo) -> Option<i64> {
 
 fn provider_quota_snapshot_is_available(snapshot: &ProviderQuotaSnapshot) -> bool {
     match snapshot {
-        ProviderQuotaSnapshot::OpenAi(usage) => collect_blocked_limits(usage, false).is_empty(),
+        ProviderQuotaSnapshot::OpenAi(usage) => openai_quota_has_ready_limit(usage),
         ProviderQuotaSnapshot::Copilot(info) => copilot_quota_is_ready(info),
         ProviderQuotaSnapshot::Gemini(info) => gemini_quota_is_ready(info),
         ProviderQuotaSnapshot::External(info) => info.available.unwrap_or(false),
@@ -237,6 +255,17 @@ fn quota_pool_summary_fields_for_aggregate(
             ),
         ]);
     }
+    if aggregate.spark_profiles_with_data > 0 {
+        fields.push((
+            "Spark remaining pool".to_string(),
+            format_dual_pool_remaining(
+                aggregate.spark_five_hour_pool_remaining,
+                aggregate.spark_weekly_pool_remaining,
+                aggregate.spark_profiles_with_data,
+                aggregate.earliest_spark_reset_at,
+            ),
+        ));
+    }
     fields
 }
 
@@ -251,6 +280,28 @@ fn format_ready_pool_remaining(
     format!(
         "5h {five_hour_remaining}% | weekly {weekly_remaining}% across {ready_profiles} ready profile(s)"
     )
+}
+
+fn format_dual_pool_remaining(
+    five_hour_remaining: i64,
+    weekly_remaining: i64,
+    profiles_with_data: usize,
+    earliest_reset_at: Option<i64>,
+) -> String {
+    if profiles_with_data == 0 {
+        return "Unavailable".to_string();
+    }
+
+    let mut value = format!(
+        "5h {five_hour_remaining}% | weekly {weekly_remaining}% across {profiles_with_data} profile(s)"
+    );
+    if let Some(reset_at) = earliest_reset_at {
+        value.push_str(&format!(
+            "; earliest reset {}",
+            format_precise_reset_time(Some(reset_at))
+        ));
+    }
+    value
 }
 
 pub fn format_info_pool_remaining(

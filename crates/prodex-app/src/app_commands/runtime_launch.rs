@@ -306,7 +306,8 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     ) -> Result<RuntimeLaunchPlan> {
         repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?;
         let codex_args =
-            profile_openai_compatible_codex_args(&prepared.codex_home, &self.codex_args);
+            runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args);
+        let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args);
         let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);

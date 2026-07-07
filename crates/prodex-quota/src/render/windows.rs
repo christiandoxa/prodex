@@ -21,7 +21,15 @@ pub fn required_main_window_snapshot_at(
     label: &str,
     now: i64,
 ) -> Option<MainWindowSnapshot> {
-    let window = find_main_window(usage.rate_limit.as_ref()?, label)?;
+    required_window_snapshot_at(usage.rate_limit.as_ref()?, label, now)
+}
+
+pub(super) fn required_window_snapshot_at(
+    pair: &WindowPair,
+    label: &str,
+    now: i64,
+) -> Option<MainWindowSnapshot> {
+    let window = find_main_window(pair, label)?;
     let remaining_percent = remaining_percent(window.used_percent);
     let reset_at = window.reset_at.unwrap_or(i64::MAX);
     let seconds_until_reset = if reset_at == i64::MAX {
@@ -39,6 +47,54 @@ pub fn required_main_window_snapshot_at(
         reset_at,
         pressure_score,
     })
+}
+
+pub fn spark_window_snapshots(
+    usage: &UsageResponse,
+) -> Option<(MainWindowSnapshot, MainWindowSnapshot)> {
+    spark_window_snapshots_at(usage, Local::now().timestamp())
+}
+
+pub fn usage_has_spark_limit(usage: &UsageResponse) -> bool {
+    usage
+        .additional_rate_limits
+        .iter()
+        .any(additional_rate_limit_is_spark)
+}
+
+pub fn spark_window_snapshots_at(
+    usage: &UsageResponse,
+    now: i64,
+) -> Option<(MainWindowSnapshot, MainWindowSnapshot)> {
+    let rate_limit = &usage
+        .additional_rate_limits
+        .iter()
+        .find(|additional| additional_rate_limit_is_spark(additional))?
+        .rate_limit;
+    Some((
+        required_window_snapshot_at(rate_limit, "5h", now)?,
+        required_window_snapshot_at(rate_limit, "weekly", now)?,
+    ))
+}
+
+fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
+    [
+        additional.limit_name.as_deref(),
+        additional.metered_feature.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| {
+        let normalized = value.to_ascii_lowercase();
+        normalized.contains("spark") || normalized.contains("bengalfox")
+    })
+}
+
+pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
+    collect_blocked_limits(usage, false).is_empty()
+        || spark_window_snapshots(usage).is_some_and(|(five_hour, weekly)| {
+            five_hour.remaining_percent > 0 && weekly.remaining_percent > 0
+        })
 }
 
 pub fn quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaWindowSummary {
@@ -288,7 +344,7 @@ pub(super) fn format_window_pair(rate_limit: &WindowPair) -> String {
     }
 }
 
-fn format_window_pair_compact(rate_limit: &WindowPair) -> String {
+pub(super) fn format_window_pair_compact(rate_limit: &WindowPair) -> String {
     let mut parts = Vec::new();
     if let Some(primary) = rate_limit.primary_window.as_ref() {
         parts.push(format_window_status_compact(primary));
@@ -457,12 +513,12 @@ pub fn format_blocked_limits(blocked: &[BlockedLimit]) -> String {
 }
 
 pub fn format_openai_quota_status(usage: &UsageResponse) -> String {
-    let blocked = collect_blocked_limits(usage, false);
-    if blocked.is_empty() {
-        "Ready".to_string()
-    } else {
-        format_blocked_quota_status(&blocked)
+    if openai_quota_has_ready_limit(usage) {
+        return "Ready".to_string();
     }
+
+    let blocked = collect_blocked_limits(usage, false);
+    format_blocked_quota_status(&blocked)
 }
 
 pub fn format_blocked_quota_status(blocked: &[BlockedLimit]) -> String {

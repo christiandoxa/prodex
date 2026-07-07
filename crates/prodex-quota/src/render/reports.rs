@@ -285,8 +285,55 @@ fn render_quota_report_section(
     if detail && let Some(resets) = view.resets.as_deref() {
         section.extend(wrap_text(resets, total_width.max(1)));
     }
+    if detail && let Ok(ProviderQuotaSnapshot::OpenAi(usage)) = &report.result {
+        for line in format_openai_additional_limit_summaries(usage) {
+            section.extend(wrap_text(&line, total_width.max(1)));
+        }
+    }
     section.push(String::new());
     section
+}
+
+pub fn format_openai_additional_limit_summaries(usage: &UsageResponse) -> Vec<String> {
+    usage
+        .additional_rate_limits
+        .iter()
+        .filter_map(format_openai_additional_limit_summary)
+        .collect()
+}
+
+fn format_openai_additional_limit_summary(additional: &AdditionalRateLimit) -> Option<String> {
+    let name = additional
+        .limit_name
+        .as_deref()
+        .or(additional.metered_feature.as_deref())
+        .unwrap_or("Additional");
+    let main = format_window_pair_compact(&additional.rate_limit);
+    if main == "-" {
+        return None;
+    }
+    Some(format!(
+        "{name}: {main}; resets: {}",
+        format_additional_reset_pair(&additional.rate_limit)
+    ))
+}
+
+fn format_additional_reset_pair(rate_limit: &WindowPair) -> String {
+    [
+        rate_limit.primary_window.as_ref(),
+        rate_limit.secondary_window.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|window| {
+        format!(
+            "{} {}",
+            window_label(window.limit_window_seconds),
+            format_precise_reset_time(window.reset_at)
+        )
+    })
+    .collect::<Vec<_>>()
+    .join(" | ")
 }
 
 fn quota_report_openai_email(report: &QuotaReport) -> Option<&str> {
@@ -547,10 +594,10 @@ fn quota_report_current_sort_key(report: &QuotaReport) -> usize {
 fn quota_report_current_blocked_sort_key(report: &QuotaReport) -> usize {
     match report.result.as_ref().ok() {
         Some(ProviderQuotaSnapshot::OpenAi(usage)) => {
-            let blocked = collect_blocked_limits(usage, false);
-            if blocked.is_empty() {
+            if openai_quota_has_ready_limit(usage) {
                 return 0;
             }
+            let blocked = collect_blocked_limits(usage, false);
             if blocked
                 .iter()
                 .any(|limit| limit.message.to_ascii_lowercase().contains("5h"))
@@ -581,11 +628,7 @@ fn quota_report_plan_sort_value(report: &QuotaReport) -> String {
 
 fn quota_report_status_rank(report: &QuotaReport) -> usize {
     match &report.result {
-        Ok(ProviderQuotaSnapshot::OpenAi(usage))
-            if collect_blocked_limits(usage, false).is_empty() =>
-        {
-            0
-        }
+        Ok(ProviderQuotaSnapshot::OpenAi(usage)) if openai_quota_has_ready_limit(usage) => 0,
         Ok(ProviderQuotaSnapshot::OpenAi(_)) => 1,
         Ok(ProviderQuotaSnapshot::Copilot(info)) if copilot_quota_is_ready(info) => 0,
         Ok(ProviderQuotaSnapshot::Copilot(_)) => 1,

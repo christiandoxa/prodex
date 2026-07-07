@@ -39,8 +39,69 @@ pub(super) use proxy_startup::{
     RuntimeRotationProxyStartOptions, start_runtime_rotation_proxy_with_options,
 };
 
+const OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
+const OPENAI_CODEX_SPARK_AUTO_COMPACT_TOKEN_LIMIT: u64 =
+    OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS * 9 / 10;
+
+pub(super) fn runtime_launch_openai_spark_context_codex_args(
+    codex_home: &Path,
+    args: &[OsString],
+) -> Vec<OsString> {
+    if !runtime_launch_openai_provider_for_args(codex_home, args)
+        || !runtime_launch_model_is_openai_codex_spark(codex_home, args)
+    {
+        return args.to_vec();
+    }
+
+    let profile_v2_name = codex_cli_profile_v2_name(args);
+    let mut overrides = Vec::new();
+    if runtime_launch_cli_model_context_window_tokens(args)
+        .or_else(|| {
+            runtime_launch_config_model_context_window_tokens_with_profile_v2(
+                codex_home,
+                profile_v2_name.as_deref(),
+            )
+        })
+        .is_none()
+    {
+        overrides.push(format!(
+            "model_context_window={OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS}"
+        ));
+    }
+    if runtime_launch_cli_model_auto_compact_token_limit(args)
+        .or_else(|| {
+            runtime_launch_config_model_auto_compact_token_limit_with_profile_v2(
+                codex_home,
+                profile_v2_name.as_deref(),
+            )
+        })
+        .is_none()
+    {
+        overrides.push(format!(
+            "model_auto_compact_token_limit={OPENAI_CODEX_SPARK_AUTO_COMPACT_TOKEN_LIMIT}"
+        ));
+    }
+    if overrides.is_empty() {
+        return args.to_vec();
+    }
+
+    let mut next_args = Vec::with_capacity(args.len() + overrides.len() * 2);
+    for override_entry in overrides {
+        next_args.push(OsString::from("-c"));
+        next_args.push(OsString::from(override_entry));
+    }
+    next_args.extend(args.iter().cloned());
+    next_args
+}
+
 pub(super) fn runtime_launch_cli_model_context_window_tokens(args: &[OsString]) -> Option<u64> {
     codex_cli_config_override_value(args, "model_context_window")
+        .as_deref()
+        .and_then(runtime_launch_parse_model_context_window_tokens)
+}
+
+fn runtime_launch_cli_model_auto_compact_token_limit(args: &[OsString]) -> Option<u64> {
+    codex_cli_config_override_value(args, "model_auto_compact_token_limit")
         .as_deref()
         .and_then(runtime_launch_parse_model_context_window_tokens)
 }
@@ -85,10 +146,32 @@ pub(super) fn runtime_launch_config_gemini_thinking_budget_tokens_with_profile_v
         .or_else(|| runtime_launch_config_gemini_thinking_budget_tokens(codex_home))
 }
 
+fn runtime_launch_config_model_auto_compact_token_limit_with_profile_v2(
+    codex_home: &Path,
+    profile_v2_name: Option<&str>,
+) -> Option<u64> {
+    profile_v2_name
+        .and_then(|profile_v2_name| codex_profile_v2_config_path(codex_home, profile_v2_name))
+        .and_then(|config_path| {
+            runtime_launch_config_file_model_auto_compact_token_limit(&config_path)
+        })
+        .or_else(|| {
+            runtime_launch_config_file_model_auto_compact_token_limit(
+                &codex_home.join("config.toml"),
+            )
+        })
+}
+
 fn runtime_launch_config_file_model_context_window_tokens(config_path: &Path) -> Option<u64> {
     let raw = fs::read_to_string(config_path).ok()?;
     let value = toml::from_str::<toml::Value>(&raw).ok()?;
     runtime_launch_toml_model_context_window_tokens(value.get("model_context_window")?)
+}
+
+fn runtime_launch_config_file_model_auto_compact_token_limit(config_path: &Path) -> Option<u64> {
+    let raw = fs::read_to_string(config_path).ok()?;
+    let value = toml::from_str::<toml::Value>(&raw).ok()?;
+    runtime_launch_toml_model_context_window_tokens(value.get("model_auto_compact_token_limit")?)
 }
 
 fn runtime_launch_config_file_gemini_thinking_budget_tokens(config_path: &Path) -> Option<u64> {
@@ -119,4 +202,47 @@ fn runtime_launch_parse_model_context_window_tokens(value: &str) -> Option<u64> 
 
 fn runtime_launch_parse_gemini_thinking_budget_tokens(value: &str) -> Option<u64> {
     value.trim().parse::<u64>().ok()
+}
+
+fn runtime_launch_openai_provider_for_args(codex_home: &Path, args: &[OsString]) -> bool {
+    codex_cli_config_override_value(args, "model_provider")
+        .or_else(|| codex_config_value_for_args(codex_home, args, "model_provider"))
+        .is_none_or(|provider| provider.trim().eq_ignore_ascii_case("openai"))
+}
+
+fn runtime_launch_model_is_openai_codex_spark(codex_home: &Path, args: &[OsString]) -> bool {
+    runtime_launch_cli_model(args)
+        .or_else(|| codex_cli_config_override_value(args, "model"))
+        .or_else(|| codex_config_value_for_args(codex_home, args, "model"))
+        .is_some_and(|model| {
+            matches!(
+                model.trim().to_ascii_lowercase().as_str(),
+                "gpt-5.3-codex-spark" | "gpt-5.3-spark"
+            )
+        })
+}
+
+fn runtime_launch_cli_model(args: &[OsString]) -> Option<String> {
+    let mut index = 0;
+    while index < args.len() {
+        let Some(arg) = args[index].to_str() else {
+            index += 1;
+            continue;
+        };
+        let model = if matches!(arg, "--model" | "-m") {
+            index += 1;
+            args.get(index).and_then(|value| value.to_str())
+        } else if let Some(value) = arg.strip_prefix("--model=") {
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("-m") {
+            (!value.is_empty()).then_some(value.trim_start_matches('='))
+        } else {
+            None
+        };
+        if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+            return Some(model.to_string());
+        }
+        index += 1;
+    }
+    None
 }

@@ -135,6 +135,36 @@ pub fn runtime_launch_dry_run_report(
 }
 
 fn dry_run_config_value(args: &[OsString], codex_home: &Path, key: &str) -> Option<String> {
+    if key == "model"
+        && let Some(model) = dry_run_cli_model(args)
+    {
+        return Some(model);
+    }
     codex_config::codex_cli_config_override_value(args, key)
         .or_else(|| codex_config::codex_config_value_for_args(codex_home, args, key))
+}
+
+fn dry_run_cli_model(args: &[OsString]) -> Option<String> {
+    let mut index = 0;
+    while index < args.len() {
+        let Some(arg) = args[index].to_str() else {
+            index += 1;
+            continue;
+        };
+        let model = if matches!(arg, "--model" | "-m") {
+            index += 1;
+            args.get(index).and_then(|value| value.to_str())
+        } else if let Some(value) = arg.strip_prefix("--model=") {
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("-m") {
+            (!value.is_empty()).then_some(value.trim_start_matches('='))
+        } else {
+            None
+        };
+        if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
+            return Some(model.to_string());
+        }
+        index += 1;
+    }
+    None
 }

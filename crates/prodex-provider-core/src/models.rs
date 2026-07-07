@@ -5,6 +5,7 @@ use super::{
 };
 
 const OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
+const OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
 const ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
 const COPILOT_OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
 const COPILOT_EXTENDED_CONTEXT_WINDOW_TOKENS: u64 = 1_000_000;
@@ -67,6 +68,18 @@ const OPENAI_MODELS: &[ProviderModelSpec] = &[
         None,
         OPENAI_ENDPOINTS,
         ["codex", "sonnet"]
+    ),
+    model!(
+        ProviderId::OpenAi,
+        "openai",
+        "gpt-5.3-codex-spark",
+        "GPT-5.3 Codex Spark",
+        "Spark-tier Codex-optimized coding model routed through OpenAI Responses.",
+        Some(OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS),
+        None,
+        None,
+        OPENAI_ENDPOINTS,
+        ["spark"]
     ),
     model!(
         ProviderId::OpenAi,

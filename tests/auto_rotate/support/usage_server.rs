@@ -131,6 +131,9 @@ fn handle_usage_request(
                 (Some("Bearer test-token"), Some("third-account")) => {
                     ("HTTP/1.1 200 OK", third_usage_body())
                 }
+                (Some("Bearer test-token"), Some("spark-account")) => {
+                    ("HTTP/1.1 200 OK", spark_usage_body())
+                }
                 (Some("Bearer test-token"), Some("elite-account")) => {
                     ("HTTP/1.1 200 OK", elite_usage_body())
                 }
@@ -265,6 +268,44 @@ fn third_usage_body() -> String {
                 "limit_window_seconds": 604_800
             }
         }
+    })
+    .to_string()
+}
+
+fn spark_usage_body() -> String {
+    json!({
+        "email": "spark@example.com",
+        "plan_type": "pro_lite",
+        "rate_limit": {
+            "primary_window": {
+                "used_percent": 20,
+                "reset_at": future_epoch(7_200),
+                "limit_window_seconds": 18_000
+            },
+            "secondary_window": {
+                "used_percent": 30,
+                "reset_at": future_epoch(518_400),
+                "limit_window_seconds": 604_800
+            }
+        },
+        "additional_rate_limits": [
+            {
+                "limit_name": "GPT-5.3-Codex-Spark",
+                "metered_feature": "codex_bengalfox",
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 11,
+                        "reset_at": future_epoch(18_000),
+                        "limit_window_seconds": 18_000
+                    },
+                    "secondary_window": {
+                        "used_percent": 3,
+                        "reset_at": future_epoch(604_800),
+                        "limit_window_seconds": 604_800
+                    }
+                }
+            }
+        ]
     })
     .to_string()
 }

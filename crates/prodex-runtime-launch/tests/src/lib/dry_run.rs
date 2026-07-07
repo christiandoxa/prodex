@@ -64,6 +64,21 @@ fn runtime_launch_dry_run_report_redacts_secret_env_and_args() {
 }
 
 #[test]
+fn runtime_launch_dry_run_report_prefers_cli_model_flag() {
+    let codex_home = PathBuf::from("/tmp/prodex-home");
+    let plan = RuntimeLaunchPlan::new(
+        ChildProcessPlan::new(OsString::from("codex"), codex_home.clone()).with_args(vec![
+            OsString::from("--model"),
+            OsString::from("gpt-5.3-codex-spark"),
+        ]),
+    );
+
+    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan);
+
+    assert!(report.contains("Model: gpt-5.3-codex-spark"));
+}
+
+#[test]
 fn runtime_launch_dry_run_report_reads_profile_v2_overlay() {
     let codex_home = std::env::temp_dir().join(format!(
         "prodex-runtime-launch-profile-v2-dry-run-{}-{}",
