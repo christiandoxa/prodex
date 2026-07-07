@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.251.0 - 2026-07-07
+
+### Runtime
+
+- Honor Copilot prompt token limits (`d1f2ce8`)
+
 ## 0.250.0 - 2026-07-07
 
 ### Runtime
@@ -70,9 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Per-model auto_compact_token_limit from API context_window (`76791c9`)
-
-## 0.239.0 - 2026-07-01
-
-### Runtime
-
-- Allow remaining five-hour quota usage (`b2fabd0`)
