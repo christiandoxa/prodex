@@ -25,6 +25,9 @@ use prodex_profile_export::{
 };
 
 const COPILOT_KEYCHAIN_SERVICE: &str = "copilot-cli";
+const COPILOT_RUNTIME_INTEGRATION_ID: &str = "copilot-developer-cli";
+const COPILOT_RUNTIME_API_VERSION: &str = "2025-04-01";
+const COPILOT_RUNTIME_USER_AGENT: &str = "copilot/1.0.65 (client/github/cli)";
 
 mod keychain;
 use keychain::{read_copilot_keychain_token, read_copilot_libsecret_token};
@@ -302,8 +305,89 @@ fn refresh_copilot_runtime_api_auth(
         "{}/copilot_internal/v2/token",
         copilot_user_api_origin(host)?
     );
+    let api_url = default_copilot_models_api_url(host);
+    refresh_copilot_runtime_api_auth_with_urls(&client, &token_url, &api_url, access_token)
+}
+
+fn refresh_copilot_runtime_api_auth_with_urls(
+    client: &Client,
+    token_url: &str,
+    api_url: &str,
+    access_token: &str,
+) -> Result<CopilotRuntimeApiAuth> {
+    // Copilot CLI >= 1.0.65 no longer exchanges the GitHub OAuth token through
+    // /copilot_internal/v2/token.  It sends the OAuth token directly as the
+    // Bearer credential to the Copilot API.  Prefer that path first so a removed
+    // or blocked legacy exchange endpoint cannot prevent launch.
+    match fetch_copilot_runtime_models_with_oauth(client, api_url, access_token) {
+        Ok(auth) => return Ok(auth),
+        Err(oauth_err) => {
+            match fetch_copilot_runtime_legacy_token(client, token_url, access_token) {
+                Ok(auth) => Ok(auth),
+                Err(legacy_err) => {
+                    bail!(
+                        "Copilot runtime auth failed: direct OAuth request failed ({:#}); legacy token exchange failed ({:#})",
+                        oauth_err,
+                        legacy_err
+                    )
+                }
+            }
+        }
+    }
+}
+
+fn fetch_copilot_runtime_models_with_oauth(
+    client: &Client,
+    api_url: &str,
+    access_token: &str,
+) -> Result<CopilotRuntimeApiAuth> {
+    let models_url = format!("{}/models", api_url.trim_end_matches('/'));
+    let models_resp = client
+        .get(&models_url)
+        .bearer_auth(access_token)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("Copilot-Integration-Id", COPILOT_RUNTIME_INTEGRATION_ID)
+        .header("x-github-api-version", COPILOT_RUNTIME_API_VERSION)
+        .header("User-Agent", COPILOT_RUNTIME_USER_AGENT)
+        .send()
+        .with_context(|| format!("failed to query {models_url}"))?;
+    let models_status = models_resp.status();
+    let models_body = models_resp
+        .bytes()
+        .with_context(|| format!("failed to read {models_url}"))?;
+    if !models_status.is_success() {
+        let body_text = format_response_body(&models_body);
+        if body_text.is_empty() {
+            bail!(
+                "models endpoint returned HTTP {} at {}",
+                models_status.as_u16(),
+                models_url
+            );
+        }
+        bail!(
+            "models endpoint returned HTTP {} at {}: {}",
+            models_status.as_u16(),
+            models_url,
+            body_text
+        );
+    }
+    let models_value: serde_json::Value = serde_json::from_slice(&models_body)
+        .with_context(|| format!("failed to parse {models_url}"))?;
+    let model_catalog = copilot_runtime_model_catalog_from_token(&models_value);
+    Ok(CopilotRuntimeApiAuth {
+        api_key: access_token.to_string(),
+        model_catalog,
+    })
+}
+
+fn fetch_copilot_runtime_legacy_token(
+    client: &Client,
+    token_url: &str,
+    access_token: &str,
+) -> Result<CopilotRuntimeApiAuth> {
     let response = client
-        .get(&token_url)
+        .get(token_url)
         .header("Authorization", format!("token {access_token}"))
         .header("Accept", "application/json")
         .header("Content-Type", "application/json")
@@ -329,48 +413,6 @@ fn refresh_copilot_runtime_api_auth(
         let model_catalog = copilot_runtime_model_catalog_from_token(&value);
         return Ok(CopilotRuntimeApiAuth {
             api_key,
-            model_catalog,
-        });
-    }
-    // /copilot_internal/v2/token was removed by GitHub.  Copilot CLI >= 1.0.65
-    // uses the OAuth token directly as a Bearer credential.  Fall back when the
-    // exchange endpoint returns 404 Not Found (not when a valid token is
-    // rejected with 401/403).
-    if status.as_u16() == 404 {
-        // Fetch models from the GitHub Copilot API with the OAuth token.
-        let api_url = default_copilot_models_api_url(host);
-        let models_url = format!("{api_url}/models");
-        let models_resp = client
-            .get(&models_url)
-            .header("Authorization", format!("Bearer {access_token}"))
-            .header("Accept", "application/json")
-            .send()
-            .with_context(|| format!("failed to query {models_url}"))?;
-        let models_status = models_resp.status();
-        let models_body = models_resp
-            .bytes()
-            .with_context(|| format!("failed to read {models_url}"))?;
-        if !models_status.is_success() {
-            let body_text = format_response_body(&models_body);
-            if body_text.is_empty() {
-                bail!(
-                    "Copilot runtime token refresh failed: models endpoint returned HTTP {} at {}",
-                    models_status.as_u16(),
-                    models_url
-                );
-            }
-            bail!(
-                "Copilot runtime token refresh failed: models endpoint returned HTTP {} at {}: {}",
-                models_status.as_u16(),
-                models_url,
-                body_text
-            );
-        }
-        let models_value: serde_json::Value = serde_json::from_slice(&models_body)
-            .with_context(|| format!("failed to parse {models_url}"))?;
-        let model_catalog = copilot_runtime_model_catalog_from_token(&models_value);
-        return Ok(CopilotRuntimeApiAuth {
-            api_key: access_token.to_string(),
             model_catalog,
         });
     }
@@ -604,6 +646,66 @@ fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<se
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+    use std::thread::JoinHandle;
+
+    fn start_copilot_auth_test_server(
+        routes: Vec<(&'static str, u16, serde_json::Value)>,
+    ) -> (String, Arc<Mutex<Vec<String>>>, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let base_url = format!(
+            "http://{}",
+            listener
+                .local_addr()
+                .expect("test server address should resolve")
+        );
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let observed_for_thread = Arc::clone(&observed);
+        let handle = std::thread::spawn(move || {
+            for (path, status, body) in routes {
+                let (mut stream, _) = listener.accept().expect("test server should accept");
+                let mut raw = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                loop {
+                    let read = stream.read(&mut buffer).expect("request should read");
+                    if read == 0 {
+                        break;
+                    }
+                    raw.extend_from_slice(&buffer[..read]);
+                    if raw.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request = String::from_utf8_lossy(&raw).to_string();
+                let first_line = request.lines().next().unwrap_or_default().to_string();
+                assert_eq!(first_line, format!("GET {path} HTTP/1.1"));
+                observed_for_thread
+                    .lock()
+                    .expect("observed requests lock should not be poisoned")
+                    .push(request);
+                let body = body.to_string();
+                let status_text = if status == 200 { "OK" } else { "Test" };
+                let response = format!(
+                    "HTTP/1.1 {status} {status_text}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("response should write");
+            }
+        });
+        (base_url, observed, handle)
+    }
+
+    fn request_header<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+        request.lines().find_map(|line| {
+            let (header, value) = line.split_once(':')?;
+            header.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
 
     #[test]
     fn copilot_import_candidates_try_last_user_then_other_logged_in_users() {
@@ -630,6 +732,110 @@ mod tests {
         assert_eq!(users.len(), 2);
         assert_eq!(users[0].login, "missing-token");
         assert_eq!(users[1].login, "usable");
+    }
+
+    #[test]
+    fn copilot_runtime_auth_uses_oauth_models_before_legacy_exchange() {
+        let (base_url, observed, handle) = start_copilot_auth_test_server(vec![(
+            "/models",
+            200,
+            serde_json::json!({
+                "data": [
+                    {
+                        "id": "gpt-5.3-codex",
+                        "name": "GPT-5.3 Codex",
+                        "capabilities": {
+                            "limits": {
+                                "max_context_window_tokens": 400000,
+                                "max_prompt_tokens": 272000
+                            }
+                        }
+                    }
+                ]
+            }),
+        )]);
+        let client = Client::new();
+
+        let auth = refresh_copilot_runtime_api_auth_with_urls(
+            &client,
+            &format!("{base_url}/copilot_internal/v2/token"),
+            &base_url,
+            "oauth-token",
+        )
+        .expect("direct OAuth models request should succeed");
+
+        handle.join().expect("test server should finish");
+        let requests = observed
+            .lock()
+            .expect("observed requests lock should not be poisoned");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            request_header(&requests[0], "authorization"),
+            Some("Bearer oauth-token")
+        );
+        assert_eq!(
+            request_header(&requests[0], "copilot-integration-id"),
+            Some(COPILOT_RUNTIME_INTEGRATION_ID)
+        );
+        assert_eq!(
+            request_header(&requests[0], "x-github-api-version"),
+            Some(COPILOT_RUNTIME_API_VERSION)
+        );
+        assert_eq!(auth.api_key, "oauth-token");
+        assert_eq!(auth.model_catalog.len(), 1);
+        assert_eq!(auth.model_catalog[0]["id"], "gpt-5.3-codex");
+        assert_eq!(auth.model_catalog[0]["context_window"], 272000);
+    }
+
+    #[test]
+    fn copilot_runtime_auth_falls_back_to_legacy_exchange_when_models_fails() {
+        let (base_url, observed, handle) = start_copilot_auth_test_server(vec![
+            (
+                "/models",
+                404,
+                serde_json::json!({
+                    "message": "Not Found"
+                }),
+            ),
+            (
+                "/copilot_internal/v2/token",
+                200,
+                serde_json::json!({
+                    "token": "runtime-token",
+                    "models": [
+                        {
+                            "id": "gpt-5.1-codex",
+                            "name": "GPT-5.1 Codex",
+                            "context_window": 400000
+                        }
+                    ]
+                }),
+            ),
+        ]);
+        let client = Client::new();
+
+        let auth = refresh_copilot_runtime_api_auth_with_urls(
+            &client,
+            &format!("{base_url}/copilot_internal/v2/token"),
+            &base_url,
+            "oauth-token",
+        )
+        .expect("legacy exchange should be used after models failure");
+
+        handle.join().expect("test server should finish");
+        let requests = observed
+            .lock()
+            .expect("observed requests lock should not be poisoned");
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].starts_with("GET /models HTTP/1.1"));
+        assert!(requests[1].starts_with("GET /copilot_internal/v2/token HTTP/1.1"));
+        assert_eq!(
+            request_header(&requests[1], "authorization"),
+            Some("token oauth-token")
+        );
+        assert_eq!(auth.api_key, "runtime-token");
+        assert_eq!(auth.model_catalog.len(), 1);
+        assert_eq!(auth.model_catalog[0]["id"], "gpt-5.1-codex");
     }
 
     #[test]

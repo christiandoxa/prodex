@@ -252,7 +252,7 @@ prodex profile import copilot
 prodex s --provider copilot --model gpt-5.3-codex
 ```
 
-Without `--api-key`, Prodex uses imported Copilot CLI profiles, refreshes Copilot runtime API tokens before launch, can rotate fresh native Responses requests across multiple eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` or `GITHUB_COPILOT_API_KEYS` is also accepted when you already have Copilot runtime API token(s); plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.
+Without `--api-key`, Prodex uses imported Copilot CLI profiles, resolves the stored Copilot OAuth token before launch, refreshes the Copilot model catalog, can rotate fresh native Responses requests across multiple eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` or `GITHUB_COPILOT_API_KEYS` is also accepted when you already have a usable Copilot API bearer token; plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.
 
 Use Kiro with either the Codex/Super front end or the native Kiro CLI:
 
