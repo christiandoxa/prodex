@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.253.0 - 2026-07-07
+
+### Runtime
+
+- Honor no-auto-rotate in smart context proxy (`cb67b16`)
+
 ## 0.252.0 - 2026-07-07
 
 ### Runtime
@@ -74,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Resolve size guard violations for provider conformance files (`8395bdc`)
 - Resolve CI failures — clippy warnings and churn hygiene allowance (`a26de9a`)
 - Provider Conformance Layer v1 (`8b1c810`)
-
-## 0.241.0 - 2026-07-01
-
-### Misc
-
-- Improve log stream coverage (`6ac759f`)
