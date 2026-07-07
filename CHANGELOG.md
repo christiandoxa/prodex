@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.250.0 - 2026-07-07
+
+### Runtime
+
+- Rotate usage-not-included quota errors (`236e405`)
+
 ## 0.249.0 - 2026-07-06
 
 ### Misc
@@ -70,10 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Allow remaining five-hour quota usage (`b2fabd0`)
-
-## 0.238.0 - 2026-07-01
-
-### Runtime
-
-- Satisfy clippy test module ordering (`0a8e2e2`)
-- Keep prodex launch responsive under startup load (`7e71e83`)
