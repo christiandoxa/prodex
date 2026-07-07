@@ -2,6 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.257.0 - Unreleased
+
+Changes after `0.256.0`.
+
+### Runtime
+
+- Preserve main quota for spark exhaustion (`04609bd`)
+
 ## 0.256.0 - 2026-07-07
 
 ### CLI
