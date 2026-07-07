@@ -2,13 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.257.0 - Unreleased
-
-Changes after `0.256.0`.
+## 0.258.0 - 2026-07-07
 
 ### Runtime
 
-- Preserve main quota for spark exhaustion (`04609bd`)
+- Retry ready profiles after workspace credit depletion (`c9bb063`)
+
+## 0.257.0 - 2026-07-07
+
+### Runtime
+
+- Preserve main quota for spark exhaustion (`72994d8`)
 
 ## 0.256.0 - 2026-07-07
 
@@ -74,14 +78,3 @@ Changes after `0.256.0`.
 
 - Refresh yanked transitive dependency (`db7ce2c`)
 - Satisfy clippy for binary payload detection (`572ef2a`)
-
-## 0.246.0 - 2026-07-03
-
-- No grouped changes.
-
-## 0.245.0 - 2026-07-03
-
-### Misc
-
-- Drop mojibake tool output from log stream (`3cf53da`)
-- Hide internal attachment paths in log stream (`a096138`)
