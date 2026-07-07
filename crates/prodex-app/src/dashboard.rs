@@ -324,7 +324,11 @@ fn quota_summary(snapshot: &ProviderQuotaSnapshot) -> Value {
             json!({
                 "account": usage.email,
                 "plan": usage.plan_type,
-                "status": if blocked.is_empty() { "Ready".to_string() } else { format!("Blocked ({})", crate::format_blocked_limits(&blocked)) },
+                "status": if prodex_quota::openai_quota_has_ready_limit(usage) {
+                    "Ready".to_string()
+                } else {
+                    format!("Blocked ({})", crate::format_blocked_limits(&blocked))
+                },
                 "main": format_main_windows(usage),
                 "reset": prodex_quota::format_main_reset_summary(usage),
                 "windows": {

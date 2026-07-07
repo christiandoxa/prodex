@@ -91,10 +91,11 @@ fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
 }
 
 pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
-    collect_blocked_limits(usage, false).is_empty()
-        || spark_window_snapshots(usage).is_some_and(|(five_hour, weekly)| {
-            five_hour.remaining_percent > 0 && weekly.remaining_percent > 0
-        })
+    main_window_snapshots(usage).is_some_and(|(five_hour, weekly)| {
+        five_hour.remaining_percent > 0 && weekly.remaining_percent > 0
+    }) || spark_window_snapshots(usage).is_some_and(|(five_hour, weekly)| {
+        five_hour.remaining_percent > 0 && weekly.remaining_percent > 0
+    })
 }
 
 pub fn quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaWindowSummary {

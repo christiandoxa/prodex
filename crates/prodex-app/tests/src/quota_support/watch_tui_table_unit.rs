@@ -139,6 +139,58 @@ fn all_quota_watch_tui_detail_shows_spark_limit() {
 }
 
 #[test]
+fn all_quota_watch_tui_status_stays_ready_when_only_spark_is_blocked() {
+    let mut usage = test_openai_usage_with_windows(50, 63, 1_783_413_134);
+    usage
+        .additional_rate_limits
+        .push(prodex_quota::AdditionalRateLimit {
+            limit_name: Some("GPT-5.3-Codex-Spark".to_string()),
+            metered_feature: Some("codex_bengalfox".to_string()),
+            rate_limit: WindowPair {
+                primary_window: Some(UsageWindow {
+                    used_percent: Some(100),
+                    reset_at: Some(1_783_413_134),
+                    limit_window_seconds: Some(18_000),
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some(31),
+                    reset_at: Some(1_783_999_934),
+                    limit_window_seconds: Some(604_800),
+                }),
+            },
+        });
+    let snapshot = AllQuotaWatchSnapshot::Reports {
+        updated: "2026-06-26 10:00:00 UTC".to_string(),
+        profile_count: 1,
+        reports: vec![test_openai_quota_report(usage)],
+    };
+
+    let frame = build_all_quota_watch_tui_frame(
+        &snapshot,
+        AllQuotaWatchLayout {
+            detail: true,
+            scroll_offset: 0,
+            sort: QuotaReportSort::Current,
+            provider_filter: QuotaProviderFilter::All,
+            provider_filter_locked: false,
+            total_width: 100,
+            max_lines: Some(20),
+        },
+    );
+
+    let row = &frame.table.as_ref().expect("table").rows[0];
+    assert_eq!(row.status, vec!["Ready".to_string()]);
+    assert_eq!(row.remaining, vec!["5h 50% | weekly 37%".to_string()]);
+    assert!(row.detail[0].contains("GPT-5.3-Codex-Spark: 5h 0% | weekly 69%"));
+    assert!(frame.overview_fields.iter().any(|(label, value)| {
+        label == "Available" && value.contains("1/1 profile")
+    }));
+    assert!(frame.overview_fields.iter().any(|(label, value)| {
+        label == "Usable now" && value.contains("5h 50% | weekly 37% across 1 ready profile(s)")
+    }));
+}
+
+#[test]
 fn all_quota_watch_tui_error_detail_replaces_resets() {
     let snapshot = AllQuotaWatchSnapshot::Reports {
         updated: "2026-06-26 10:00:00 UTC".to_string(),

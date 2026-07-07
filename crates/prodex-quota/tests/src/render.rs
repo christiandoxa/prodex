@@ -381,6 +381,33 @@ fn quota_reports_status_is_ready_when_spark_remains() {
 }
 
 #[test]
+fn quota_reports_status_stays_ready_when_main_remains_but_spark_is_blocked() {
+    let mut usage = main_windows(50, 1_783_413_134, 37, 1_783_999_934);
+    usage
+        .additional_rate_limits
+        .push(spark_limit(0, 1_783_413_134, 69, 1_783_999_934));
+
+    let output = render_quota_reports_with_layout(
+        &[openai_report("spark-blocked", usage.clone())],
+        true,
+        None,
+        160,
+    );
+
+    assert_eq!(format_openai_quota_status(&usage), "Ready");
+    assert!(output.contains("Available:"));
+    assert!(output.contains("1/1 profile"));
+    assert!(output.contains("Usable now:"));
+    assert!(output.contains("5h 50% | weekly 37% across 1 ready profile(s)"));
+    assert!(output.contains("GPT-5.3-Codex-Spark: 5h 0% | weekly 69%"));
+    assert!(
+        output
+            .lines()
+            .any(|line| line.contains("spark-blocked") && line.contains("Ready"))
+    );
+}
+
+#[test]
 fn quota_report_sort_modes_order_by_selected_columns() {
     let mut beta_usage = main_windows(90, 1_700_007_200, 95, 1_700_172_800);
     beta_usage.email = Some("alpha@example.com".to_string());

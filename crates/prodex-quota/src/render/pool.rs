@@ -49,7 +49,7 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
                 aggregate.profiles_with_data += 1;
                 aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
                 aggregate.weekly_pool_remaining += weekly.remaining_percent;
-                if collect_blocked_limits(usage, false).is_empty() {
+                if five_hour.remaining_percent > 0 && weekly.remaining_percent > 0 {
                     aggregate.ready_profiles_with_data += 1;
                     aggregate.ready_five_hour_pool_remaining += five_hour.remaining_percent;
                     aggregate.ready_weekly_pool_remaining += weekly.remaining_percent;
