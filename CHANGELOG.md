@@ -2,11 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.254.0 - Unreleased
+
+Changes after `0.253.0`.
+
+### Misc
+
+- Respect cached Spark context metadata (`d7bd71e`)
+
 ## 0.253.0 - 2026-07-07
 
 ### Runtime
 
-- Honor no-auto-rotate in smart context proxy (`cb67b16`)
+- Honor no-auto-rotate in smart context proxy (`1057370`)
 
 ## 0.252.0 - 2026-07-07
 
