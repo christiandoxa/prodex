@@ -320,7 +320,7 @@ fn refresh_copilot_runtime_api_auth_with_urls(
     // Bearer credential to the Copilot API.  Prefer that path first so a removed
     // or blocked legacy exchange endpoint cannot prevent launch.
     match fetch_copilot_runtime_models_with_oauth(client, api_url, access_token) {
-        Ok(auth) => return Ok(auth),
+        Ok(auth) => Ok(auth),
         Err(oauth_err) => {
             match fetch_copilot_runtime_legacy_token(client, token_url, access_token) {
                 Ok(auth) => Ok(auth),
