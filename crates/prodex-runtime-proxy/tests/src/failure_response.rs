@@ -127,6 +127,10 @@ fn precommit_budget_attempt_limit_covers_profile_pool_matrix() {
         for pressure_mode in [false, true] {
             let (base_attempt_limit, base_budget) =
                 runtime_proxy_precommit_budget(continuation, pressure_mode);
+            assert!(
+                base_attempt_limit >= 3,
+                "pre-commit auto-rotate should try at least three profiles before surfacing a final error"
+            );
 
             for profile_count in 0..=base_attempt_limit + 8 {
                 let (attempt_limit, budget) = runtime_proxy_precommit_budget_for_profile_count(

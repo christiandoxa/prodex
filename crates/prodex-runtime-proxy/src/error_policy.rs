@@ -97,6 +97,10 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
     },
     RuntimePayloadCodeRule {
+        code: "usage_not_included",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
         code: "server_is_overloaded",
         signal: RuntimeHttpErrorSignal::ExplicitOverload,
     },

@@ -489,7 +489,11 @@ fn quota_http_body_detection_requires_explicit_error_code() {
         None
     );
 
-    for code in ["insufficient_quota", "rate_limit_exceeded"] {
+    for code in [
+        "insufficient_quota",
+        "rate_limit_exceeded",
+        "usage_not_included",
+    ] {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {
                 "code": code,
@@ -605,6 +609,18 @@ fn inspect_sse_buffer_detects_previous_response_not_found_from_partial_event() {
     assert!(matches!(
         progress,
         RuntimeSseInspectionProgress::PreviousResponseNotFound
+    ));
+}
+
+#[test]
+fn inspect_sse_buffer_detects_usage_not_included_before_commit() {
+    let progress = inspect_runtime_sse_buffer(
+            b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"usage_not_included\",\"message\":\"Your workspace is out of credits.\"}}}",
+        );
+
+    assert!(matches!(
+        progress,
+        RuntimeSseInspectionProgress::QuotaBlocked
     ));
 }
 

@@ -301,6 +301,8 @@ fn runtime_sse_payload_needs_full_inspection(payload: &str) -> bool {
     payload.contains("\"error\"")
         || payload.contains("insufficient_quota")
         || payload.contains("rate_limit_exceeded")
+        || payload.contains("usage_limit_reached")
+        || payload.contains("usage_not_included")
         || payload.contains("previous_response_not_found")
         || payload.contains("\"usage\"")
         || payload.contains("x-codex-turn-state")

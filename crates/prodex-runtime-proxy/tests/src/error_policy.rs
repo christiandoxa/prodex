@@ -90,6 +90,7 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
         ("insufficient_quota", "Quota exhausted"),
         (" rate_limit_exceeded ", "Rate limit exceeded"),
         ("USAGE_LIMIT_REACHED", "Usage limit reached"),
+        ("usage_not_included", "Workspace credits exhausted"),
     ] {
         for shape in 0u8..9 {
             let body = json_body(explicit_quota_payload(code, message, shape));
@@ -216,7 +217,11 @@ fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code()
 
 #[test]
 fn explicit_quota_codes_rotate_only_before_commit() {
-    for code in ["insufficient_quota", "rate_limit_exceeded"] {
+    for code in [
+        "insufficient_quota",
+        "rate_limit_exceeded",
+        "usage_not_included",
+    ] {
         let body = json_body(serde_json::json!({
             "error": {
                 "code": code,
@@ -290,6 +295,20 @@ fn explicit_quota_code_matrix_rotates_only_before_commit() {
                 ]
             })),
             "Usage limit reached",
+        ),
+        (
+            "nested_usage_not_included_type",
+            json_body(serde_json::json!({
+                "outer": [
+                    {
+                        "error": {
+                            "type": "usage_not_included",
+                            "message": "Workspace credits exhausted"
+                        }
+                    }
+                ]
+            })),
+            "Workspace credits exhausted",
         ),
     ];
 

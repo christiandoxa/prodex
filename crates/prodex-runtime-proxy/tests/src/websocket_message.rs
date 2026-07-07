@@ -153,30 +153,33 @@ fn websocket_precommit_previous_response_plain_text_translation_uses_proxy_error
 
 #[test]
 fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
-    let payload = serde_json::json!({
-        "type": "response.failed",
-        "error": {
-            "code": "insufficient_quota",
-            "message": "quota exceeded",
-        },
-        "response": {
-            "id": "resp_1",
-            "headers": {
-                "x-codex-turn-state": "turn-1"
+    for code in ["insufficient_quota", "usage_not_included"] {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "error": {
+                "code": code,
+                "message": "quota exceeded",
+            },
+            "response": {
+                "id": "resp_1",
+                "headers": {
+                    "x-codex-turn-state": "turn-1"
+                }
             }
-        }
-    })
-    .to_string();
+        })
+        .to_string();
 
-    let inspected = inspect_runtime_websocket_text_frame(&payload);
+        let inspected = inspect_runtime_websocket_text_frame(&payload);
 
-    assert_eq!(
-        inspected.retry_kind,
-        Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
-    );
-    assert_eq!(inspected.response_ids, vec!["resp_1".to_string()]);
-    assert_eq!(inspected.turn_state.as_deref(), Some("turn-1"));
-    assert!(inspected.terminal_event);
+        assert_eq!(
+            inspected.retry_kind,
+            Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked),
+            "{code}"
+        );
+        assert_eq!(inspected.response_ids, vec!["resp_1".to_string()]);
+        assert_eq!(inspected.turn_state.as_deref(), Some("turn-1"));
+        assert!(inspected.terminal_event);
+    }
 }
 
 #[test]
