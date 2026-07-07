@@ -44,6 +44,7 @@ pub(crate) fn proxy_runtime_responses_request(
     let mut request_turn_state = runtime_request_turn_state(&request);
     let explicit_request_session_id = runtime_request_explicit_session_id(&request);
     let request_session_id = runtime_request_session_id(&request);
+    let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
     let prompt_cache_key = runtime_smart_context_effective_prompt_cache_key(
         &request,
         shared,
@@ -382,11 +383,12 @@ pub(crate) fn proxy_runtime_responses_request(
                 }
                 let quota_message =
                     extract_runtime_proxy_quota_message_from_response_reply(&response);
-                mark_runtime_profile_quota_quarantine(
+                mark_runtime_profile_quota_quarantine_for_request_model(
                     shared,
                     &profile_name,
                     RuntimeRouteKind::Responses,
                     quota_message.as_deref(),
+                    request_model_name.as_deref(),
                 )?;
                 if !affinity_state.quota_blocked_affinity_is_releasable(
                     &profile_name,

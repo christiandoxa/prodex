@@ -260,11 +260,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name
             ),
         );
-        mark_runtime_profile_quota_quarantine(
+        let request_model_name =
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes());
+        mark_runtime_profile_quota_quarantine_for_request_model(
             self.shared,
             &profile_name,
             RuntimeRouteKind::Websocket,
             quota_message.as_deref(),
+            request_model_name.as_deref(),
         )?;
         if !self.quota_blocked_affinity_is_releasable(
             &profile_name,
