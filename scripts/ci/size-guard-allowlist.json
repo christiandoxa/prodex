@@ -81,8 +81,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
-    "maxLines": 1128,
-    "reason": "Runtime launch run-command strategy regression coverage, including OpenAI Spark context args, remains capped while matrix cases are split by CLI/runtime family."
+    "maxLines": 1080,
+    "reason": "Runtime launch run-command strategy regression coverage remains capped while matrix cases are split by CLI/runtime family."
   },
   {
     "file": "crates/prodex-app/tests/src/quota_support/watch_unit.rs",

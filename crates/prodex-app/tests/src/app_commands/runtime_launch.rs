@@ -1,6 +1,8 @@
 use super::*;
 #[path = "runtime_launch/arg0_cleanup.rs"]
 mod arg0_cleanup;
+#[path = "runtime_launch/openai_spark_context.rs"]
+mod openai_spark_context;
 #[path = "runtime_launch/preflight.rs"]
 mod preflight;
 #[path = "runtime_launch/profile_selection.rs"]

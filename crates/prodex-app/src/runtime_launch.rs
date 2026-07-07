@@ -52,6 +52,9 @@ pub(super) fn runtime_launch_openai_spark_context_codex_args(
     {
         return args.to_vec();
     }
+    if runtime_launch_openai_spark_context_from_models_cache(codex_home) {
+        return args.to_vec();
+    }
 
     let profile_v2_name = codex_cli_profile_v2_name(args);
     let mut overrides = Vec::new();
@@ -219,6 +222,36 @@ fn runtime_launch_model_is_openai_codex_spark(codex_home: &Path, args: &[OsStrin
                 model.trim().to_ascii_lowercase().as_str(),
                 "gpt-5.3-codex-spark" | "gpt-5.3-spark"
             )
+        })
+}
+
+fn runtime_launch_openai_spark_context_from_models_cache(codex_home: &Path) -> bool {
+    let raw = match fs::read_to_string(codex_home.join("models_cache.json")) {
+        Ok(raw) => raw,
+        Err(_) => return false,
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+    value
+        .get("models")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|models| {
+            models.iter().any(|model| {
+                model
+                    .get("slug")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|slug| {
+                        matches!(
+                            slug.trim().to_ascii_lowercase().as_str(),
+                            "gpt-5.3-codex-spark" | "gpt-5.3-spark"
+                        )
+                    })
+                    && model
+                        .get("context_window")
+                        .and_then(serde_json::Value::as_i64)
+                        .is_some_and(|context_window| context_window > 1)
+            })
         })
 }
 
