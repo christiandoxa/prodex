@@ -22,6 +22,7 @@ use session_delete::{
     cleanup_codex_deleted_session_binding, clear_codex_session_binding,
     resolve_codex_delete_session_id,
 };
+use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -610,21 +611,23 @@ impl RuntimeProxyStartupFactory {
 
         let runtime_upstream_base_url = quota_base_url(request.base_url);
         if request.presidio_redaction_enabled || request.smart_context_enabled {
-            return Ok(Some(start_dedicated_runtime_proxy_endpoint(
+            return Ok(Some(start_runtime_proxy_endpoint(
                 paths,
                 state,
                 selection,
                 request,
                 runtime_upstream_base_url,
+                !request.allow_auto_rotate,
             )?));
         }
         if request.force_runtime_proxy && !request.allow_auto_rotate {
-            return Ok(Some(start_fixed_runtime_proxy_endpoint(
+            return Ok(Some(start_runtime_proxy_endpoint(
                 paths,
                 state,
                 selection,
                 request,
                 runtime_upstream_base_url,
+                true,
             )?));
         }
         if request.force_runtime_proxy
@@ -755,18 +758,20 @@ fn runtime_local_rewrite_proxy_dry_run_endpoint(
     })
 }
 
-fn start_dedicated_runtime_proxy_endpoint(
+fn start_runtime_proxy_endpoint(
     paths: &AppPaths,
     state: &AppState,
     selection: &RuntimeLaunchSelection,
     request: &RuntimeLaunchRequest<'_>,
     runtime_upstream_base_url: String,
+    fixed: bool,
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, selection);
+    let proxy_state = runtime_proxy_endpoint_state(state, selection, fixed)?;
     let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
         paths,
-        state,
+        state: proxy_state.as_ref(),
         current_profile: &selection.selected_profile_name,
         upstream_base_url: runtime_upstream_base_url,
         include_code_review: request.include_code_review,
@@ -783,42 +788,11 @@ fn start_dedicated_runtime_proxy_endpoint(
         local_model_provider_id: None,
         realtime_ws_base_url: None,
         realtime_ws_model: None,
-        lease_dir: paths.root.join("runtime-dedicated-proxy-leases"),
-        _lease: None,
-        _direct_proxy: Some(proxy),
-    })
-}
-
-fn start_fixed_runtime_proxy_endpoint(
-    paths: &AppPaths,
-    state: &AppState,
-    selection: &RuntimeLaunchSelection,
-    request: &RuntimeLaunchRequest<'_>,
-    runtime_upstream_base_url: String,
-) -> Result<RuntimeProxyEndpoint> {
-    let model_context_window_tokens =
-        runtime_launch_effective_model_context_window_tokens(request, selection);
-    let fixed_state = fixed_runtime_proxy_state(state, &selection.selected_profile_name)?;
-    let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
-        paths,
-        state: &fixed_state,
-        current_profile: &selection.selected_profile_name,
-        upstream_base_url: runtime_upstream_base_url,
-        include_code_review: request.include_code_review,
-        upstream_no_proxy: request.upstream_no_proxy,
-        auto_redeem: request.auto_redeem,
-        smart_context_enabled: request.smart_context_enabled,
-        presidio_redaction_enabled: request.presidio_redaction_enabled,
-        model_context_window_tokens,
-        preferred_listen_addr: None,
-    })?;
-    Ok(RuntimeProxyEndpoint {
-        listen_addr: proxy.listen_addr,
-        openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
-        local_model_provider_id: None,
-        realtime_ws_base_url: None,
-        realtime_ws_model: None,
-        lease_dir: paths.root.join("runtime-fixed-proxy-leases"),
+        lease_dir: paths.root.join(if fixed {
+            "runtime-fixed-proxy-leases"
+        } else {
+            "runtime-dedicated-proxy-leases"
+        }),
         _lease: None,
         _direct_proxy: Some(proxy),
     })
@@ -892,6 +866,18 @@ fn local_rewrite_proxy_upstream_base_url(
             )
         })
         .filter(|base_url| !base_url.trim().is_empty())
+}
+
+fn runtime_proxy_endpoint_state<'a>(
+    state: &'a AppState,
+    selection: &RuntimeLaunchSelection,
+    fixed: bool,
+) -> Result<Cow<'a, AppState>> {
+    if fixed {
+        fixed_runtime_proxy_state(state, &selection.selected_profile_name).map(Cow::Owned)
+    } else {
+        Ok(Cow::Borrowed(state))
+    }
 }
 
 fn fixed_runtime_proxy_state(state: &AppState, profile_name: &str) -> Result<AppState> {

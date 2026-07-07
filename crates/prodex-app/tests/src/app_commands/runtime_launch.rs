@@ -7,6 +7,8 @@ mod preflight;
 mod profile_selection;
 #[path = "runtime_launch/provider_rewrite.rs"]
 mod provider_rewrite;
+#[path = "runtime_launch/proxy_state.rs"]
+mod proxy_state;
 #[path = "runtime_launch/routes.rs"]
 mod routes;
 #[path = "runtime_launch/run_command_strategy.rs"]
@@ -690,6 +692,7 @@ fn prepare_runtime_launch_rejects_force_proxy_for_profileless_local_home() {
     assert!(message.contains(SUPER_LOCAL_PROVIDER_ID));
     assert!(message.contains("prodex claude"));
 }
+
 fn write_state(root: &Path, state: AppState) {
     fs::create_dir_all(root).unwrap();
     let paths = AppPaths::discover().unwrap();

@@ -11,7 +11,7 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 930,
+    "maxLines": 916,
     "reason": "Runtime launch command routing, provider selection, proxy wiring, and session/runtime entry planning remain capped while command routing is split from provider-specific launch ownership."
   },
   {
