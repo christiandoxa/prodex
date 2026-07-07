@@ -11,7 +11,7 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 929,
+    "maxLines": 930,
     "reason": "Runtime launch command routing, provider selection, proxy wiring, and session/runtime entry planning remain capped while command routing is split from provider-specific launch ownership."
   },
   {
@@ -25,9 +25,14 @@
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
   },
   {
+    "file": "crates/prodex-app/src/profile_commands/copilot.rs",
+    "maxLines": 914,
+    "reason": "Copilot profile import, direct runtime API auth, model catalog refresh, and legacy token fallback remain capped while auth refresh is split from profile import ownership."
+  },
+  {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1867,
-    "reason": "Live quota ratatui rendering, status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
+    "maxLines": 1872,
+    "reason": "Live quota ratatui rendering, Spark status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_kiro_acp.rs",
@@ -76,8 +81,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
-    "maxLines": 1080,
-    "reason": "Runtime launch run-command strategy regression coverage remains capped while matrix cases are split by CLI/runtime family."
+    "maxLines": 1128,
+    "reason": "Runtime launch run-command strategy regression coverage, including OpenAI Spark context args, remains capped while matrix cases are split by CLI/runtime family."
   },
   {
     "file": "crates/prodex-app/tests/src/quota_support/watch_unit.rs",
@@ -103,6 +108,11 @@
     "file": "crates/prodex-cli/src/runtime_args.rs",
     "maxLines": 1081,
     "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
+  },
+  {
+    "file": "crates/prodex-provider-core/src/models.rs",
+    "maxLines": 859,
+    "reason": "Static provider/model catalog defaults, including OpenAI Spark aliases and limits, remain capped while generated catalog data is split from fallback helpers."
   },
   {
     "file": "crates/prodex-provider-core/src/translators/deepseek.rs",
