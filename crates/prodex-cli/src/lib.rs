@@ -10,6 +10,7 @@ mod profile;
 mod runtime_args;
 mod runtime_features;
 mod session_context;
+pub(crate) mod super_provider_limits;
 
 pub use cleanup::*;
 pub use help::RUNTIME_PROXY_DOCTOR_TAIL_BYTES;
@@ -20,6 +21,10 @@ pub use profile::*;
 pub use runtime_args::*;
 pub use runtime_features::*;
 pub use session_context::*;
+pub use super_provider_limits::{
+    SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
+    super_copilot_prompt_token_limit_for_model,
+};
 
 mod presidio;
 

@@ -592,8 +592,6 @@ pub const SUPER_COPILOT_PROVIDER_ID: &str = "prodex-copilot";
 const SUPER_COPILOT_PROVIDER_NAME: &str = "GitHub Copilot";
 pub const SUPER_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
 const SUPER_COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";
-pub const SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW: usize = 1_000_000;
-pub const SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT: usize = 950_000;
 pub const SUPER_KIRO_PROVIDER_ID: &str = "prodex-kiro";
 const SUPER_KIRO_PROVIDER_NAME: &str = "Kiro";
 pub const SUPER_KIRO_DEFAULT_MODEL: &str = "claude-sonnet-4";
@@ -674,7 +672,7 @@ impl SuperExternalProvider {
     fn default_context_window(self) -> usize {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
-            Self::Copilot => SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
+            Self::Copilot => crate::SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
             Self::Gemini => SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW,
             Self::Kiro => SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
@@ -684,7 +682,7 @@ impl SuperExternalProvider {
     fn default_auto_compact_token_limit(self) -> usize {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT,
-            Self::Copilot => SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
+            Self::Copilot => crate::SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::Gemini => SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::Kiro => SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
@@ -780,13 +778,15 @@ pub fn super_external_provider_codex_args(
     let model = model
         .filter(|model| !model.trim().is_empty())
         .unwrap_or_else(|| provider.default_model());
-    let context_window = context_window
-        .filter(|value| *value > 1)
-        .unwrap_or_else(|| provider.default_context_window());
-    let auto_compact_token_limit = auto_compact_token_limit
-        .filter(|value| *value > 0)
-        .unwrap_or_else(|| provider.default_auto_compact_token_limit())
-        .min(context_window.saturating_sub(1));
+    let (context_window, auto_compact_token_limit) =
+        crate::super_provider_limits::external_provider_token_limits(
+            model,
+            provider == SuperExternalProvider::Copilot,
+            provider.default_context_window(),
+            provider.default_auto_compact_token_limit(),
+            context_window,
+            auto_compact_token_limit,
+        );
     let overrides = [
         format!("model_provider={}", toml_string_literal(provider_id)),
         format!("model={}", toml_string_literal(model)),

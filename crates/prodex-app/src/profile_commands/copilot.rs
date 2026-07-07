@@ -484,7 +484,7 @@ fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serd
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .unwrap_or(id);
-    let context_window = object
+    let max_context_window = object
         .get("context_window")
         .or_else(|| object.get("context_window_tokens"))
         .or_else(|| object.get("max_context_tokens"))
@@ -496,7 +496,21 @@ fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serd
                 .and_then(|l| l.get("max_context_window_tokens"))
         })
         .and_then(serde_json::Value::as_u64)
-        .unwrap_or(200_000);
+        .filter(|tokens| *tokens > 1);
+    let max_prompt_tokens = object
+        .get("max_prompt_tokens")
+        .or_else(|| {
+            object
+                .get("capabilities")
+                .and_then(|c| c.get("limits"))
+                .and_then(|l| l.get("max_prompt_tokens"))
+        })
+        .and_then(serde_json::Value::as_u64)
+        .filter(|tokens| *tokens > 1);
+    // Copilot CLI distinguishes total context from prompt/input limit. Codex's
+    // custom model catalog has one effective context budget, so keep it at the
+    // prompt limit when available to avoid sending requests Copilot will reject.
+    let context_window = max_prompt_tokens.or(max_context_window).unwrap_or(200_000);
     let mut entry = serde_json::json!({
         "id": id,
         "object": "model",
@@ -507,6 +521,12 @@ fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serd
         "input_cost_per_million_microusd": 0,
         "output_cost_per_million_microusd": 0,
     });
+    if let Some(max_context_window) = max_context_window {
+        entry["max_context_window"] = serde_json::json!(max_context_window);
+    }
+    if let Some(max_prompt_tokens) = max_prompt_tokens {
+        entry["max_prompt_tokens"] = serde_json::json!(max_prompt_tokens);
+    }
     if let Some(capabilities) = object.get("capabilities") {
         entry["capabilities"] = capabilities.clone();
     }
@@ -639,6 +659,33 @@ mod tests {
         assert_eq!(catalog[0]["context_window"], 400000);
         assert_eq!(catalog[0]["capabilities"]["tool_calls"], true);
         assert_eq!(catalog[1]["id"], "claude-sonnet-4.5");
+    }
+
+    #[test]
+    fn copilot_runtime_model_catalog_prefers_prompt_limit_for_codex_budget() {
+        let value = serde_json::json!({
+            "models": [
+                {
+                    "id": "gpt-5.3-codex",
+                    "name": "GPT-5.3-Codex",
+                    "capabilities": {
+                        "limits": {
+                            "max_context_window_tokens": 400000,
+                            "max_prompt_tokens": 272000,
+                            "max_output_tokens": 128000
+                        }
+                    }
+                }
+            ]
+        });
+
+        let catalog = copilot_runtime_model_catalog_from_token(&value);
+
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0]["id"], "gpt-5.3-codex");
+        assert_eq!(catalog[0]["context_window"], 272000);
+        assert_eq!(catalog[0]["max_context_window"], 400000);
+        assert_eq!(catalog[0]["max_prompt_tokens"], 272000);
     }
 
     #[test]

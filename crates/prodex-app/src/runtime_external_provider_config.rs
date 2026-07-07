@@ -5,6 +5,7 @@ use prodex_cli::{
     SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_ANTHROPIC_PROVIDER_ID,
     SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
     SUPER_COPILOT_DEFAULT_MODEL, SUPER_COPILOT_PROVIDER_ID,
+    super_copilot_prompt_token_limit_for_model,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -174,39 +175,47 @@ fn external_catalog_models(
     let dynamic_models = external_dynamic_catalog_models(codex_home, provider);
     let mut models = Vec::with_capacity(provider.models().len() + dynamic_models.len() + 1);
     let mut seen = BTreeSet::new();
-    let launch_model_compact_limit = dynamic_models
+    let launch_model_context_window = dynamic_models
         .iter()
         .find(|model| model.slug.eq_ignore_ascii_case(launch_model))
         .and_then(|model| model.context_window)
-        .map(|cw| cw.saturating_mul(95).saturating_div(100));
+        .or_else(|| provider.model_prompt_token_limit(launch_model));
     let default_compact_limit = auto_compact_token_limit;
-    for slug in std::iter::once((launch_model, launch_model_compact_limit))
+    for slug in std::iter::once((launch_model, launch_model_context_window))
         .chain(dynamic_models.iter().map(|model| {
-            let limit = model
-                .context_window
-                .map(|cw| cw.saturating_mul(95).saturating_div(100))
-                .unwrap_or(auto_compact_token_limit);
-            (model.slug.as_str(), Some(limit))
+            (
+                model.slug.as_str(),
+                model
+                    .context_window
+                    .or_else(|| provider.model_prompt_token_limit(&model.slug)),
+            )
         }))
-        .chain(provider.models().iter().map(|model| (model.0, None::<u64>)))
+        .chain(
+            provider
+                .models()
+                .iter()
+                .map(|model| (model.0, provider.model_prompt_token_limit(model.0))),
+        )
     {
-        let (slug, per_model_compact_limit) = slug;
+        let (slug, per_model_context_window) = slug;
         let slug = slug.trim();
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
             continue;
         }
         let priority = models.len() + 1;
         let (display_name, description) = provider.model_metadata(slug);
-        let model_compact_limit = per_model_compact_limit
+        let model_context_window = per_model_context_window.unwrap_or(context_window);
+        let model_compact_limit = per_model_context_window
+            .map(|cw| cw.saturating_mul(95).saturating_div(100))
             .unwrap_or(default_compact_limit)
-            .min(context_window.saturating_sub(1));
+            .min(model_context_window.saturating_sub(1));
         models.push(external_catalog_model(
             provider,
             slug,
             display_name,
             description,
             priority,
-            context_window,
+            model_context_window,
             model_compact_limit,
         ));
     }
@@ -246,9 +255,12 @@ fn external_dynamic_catalog_models(
                 .or_else(|| model.get("model"))
                 .and_then(serde_json::Value::as_str)?
                 .trim();
-            let context_window = model
-                .get("context_window")
-                .and_then(serde_json::Value::as_u64)
+            let context_window = copilot_catalog_entry_prompt_token_limit(model)
+                .or_else(|| {
+                    model
+                        .get("context_window")
+                        .and_then(serde_json::Value::as_u64)
+                })
                 .filter(|cw| *cw > 1);
             if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
                 return None;
@@ -264,6 +276,19 @@ fn external_dynamic_catalog_models(
             })
         })
         .collect()
+}
+
+fn copilot_catalog_entry_prompt_token_limit(model: &serde_json::Value) -> Option<u64> {
+    model
+        .get("max_prompt_tokens")
+        .or_else(|| {
+            model
+                .get("capabilities")
+                .and_then(|c| c.get("limits"))
+                .and_then(|l| l.get("max_prompt_tokens"))
+        })
+        .and_then(serde_json::Value::as_u64)
+        .filter(|tokens| *tokens > 1)
 }
 
 fn copilot_dynamic_model_is_responses_compatible(
@@ -370,6 +395,13 @@ impl ExternalCatalogProvider {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::Copilot => SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
+        }
+    }
+
+    fn model_prompt_token_limit(self, model: &str) -> Option<u64> {
+        match self {
+            Self::Anthropic => None,
+            Self::Copilot => super_copilot_prompt_token_limit_for_model(model).map(|v| v as u64),
         }
     }
 
@@ -618,6 +650,8 @@ mod tests {
         let catalog: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
         assert_eq!(catalog["models"][0]["slug"], "gpt-5.3-codex");
+        assert_eq!(catalog["models"][0]["context_window"], 272000);
+        assert_eq!(catalog["models"][0]["auto_compact_token_limit"], 258400);
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         assert_eq!(catalog["models"][0]["web_search_tool_type"], "text");
     }
@@ -639,6 +673,8 @@ mod tests {
         let catalog: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
         assert_eq!(catalog["models"][0]["slug"], "gpt-5.5");
+        assert_eq!(catalog["models"][0]["context_window"], 922000);
+        assert_eq!(catalog["models"][0]["auto_compact_token_limit"], 875900);
         let efforts = catalog["models"][0]["supported_reasoning_levels"]
             .as_array()
             .expect("reasoning levels should be present")
@@ -692,6 +728,43 @@ mod tests {
                 .iter()
                 .any(|model| { model["slug"] == "gpt-4o" })
         );
+    }
+
+    #[test]
+    fn external_provider_catalog_uses_copilot_dynamic_prompt_limit_as_context_budget() {
+        let codex_home = temp_codex_home("copilot-dynamic-prompt-limit");
+        write_copilot_runtime_model_catalog(
+            &codex_home,
+            &[json!({
+                "id": "gpt-5.6-account-only-model",
+                "object": "model",
+                "owned_by": "github-copilot",
+                "capabilities": {
+                    "limits": {
+                        "max_context_window_tokens": 1050000,
+                        "max_prompt_tokens": 333000,
+                        "max_output_tokens": 128000
+                    }
+                }
+            })],
+        )
+        .expect("dynamic Copilot catalog should write");
+        let user_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-copilot\""),
+            OsString::from("-c"),
+            OsString::from("model=\"gpt-5.6-account-only-model\""),
+        ];
+
+        prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
+            .expect("Copilot catalog should prepare");
+
+        let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
+        let catalog: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&catalog_path).unwrap()).unwrap();
+        assert_eq!(catalog["models"][0]["slug"], "gpt-5.6-account-only-model");
+        assert_eq!(catalog["models"][0]["context_window"], 333000);
+        assert_eq!(catalog["models"][0]["auto_compact_token_limit"], 316350);
     }
 
     #[test]
