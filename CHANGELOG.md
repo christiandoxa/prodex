@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.260.0 - 2026-07-08
+
+### Runtime
+
+- Rotate deactivated workspace profiles (`6a4d2be`)
+
 ## 0.259.0 - 2026-07-08
 
 ### Runtime
@@ -71,9 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Align Codex OpenAI metadata (`bd4dbe1`)
-
-## 0.248.0 - 2026-07-06
-
-### Misc
-
-- Add interactive log search and scroll (`d2b7150`)
