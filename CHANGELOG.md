@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.261.0 - 2026-07-08
+
+### Misc
+
+- Add dashboard local control plane (`5b5ac65`)
+
 ## 0.260.0 - 2026-07-08
 
 ### Runtime
@@ -71,9 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Rotate usage-not-included quota errors (`236e405`)
-
-## 0.249.0 - 2026-07-06
-
-### Misc
-
-- Align Codex OpenAI metadata (`bd4dbe1`)
