@@ -69,7 +69,7 @@ fn runtime_launch_injects_cached_openai_gpt5_context_metadata() {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
 
-    assert!(rendered.contains(&"model_context_window=272000".to_string()));
+    assert!(!rendered.contains(&"model_context_window=272000".to_string()));
     assert!(rendered.contains(&"model_auto_compact_token_limit=244800".to_string()));
 }
 

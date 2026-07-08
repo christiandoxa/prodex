@@ -129,7 +129,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     assert_eq!(providers.status().as_u16(), 200);
     let providers: serde_json::Value = providers.json().expect("providers response should be json");
     assert_eq!(providers["object"], "gateway.providers");
-    assert_eq!(providers["providers"].as_array().unwrap().len(), 6);
+    assert_eq!(providers["providers"].as_array().unwrap().len(), 7);
     assert_eq!(providers["providers"][0]["provider"], "openai");
     assert_eq!(
         providers["providers"][0]["client_request_format"],

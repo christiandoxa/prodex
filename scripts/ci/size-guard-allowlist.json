@@ -85,11 +85,6 @@
     "reason": "Runtime launch run-command strategy regression coverage remains capped while matrix cases are split by CLI/runtime family."
   },
   {
-    "file": "crates/prodex-app/tests/src/quota_support/watch_unit.rs",
-    "maxLines": 868,
-    "reason": "Quota watch unit coverage remains capped while rendering, refresh, and truncation scenarios are split by view behavior."
-  },
-  {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
     "maxLines": 924,
     "reason": "HTTP continuation, tool-output, and compact regression coverage remains capped while compact-specific fixtures are split by route."

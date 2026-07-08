@@ -1,6 +1,10 @@
 use anyhow::{Context, Result, anyhow};
+use prodex_provider_core::{
+    ProviderId, provider_adapter_contract_matrix, provider_model_catalog_json,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::fs;
 use std::net::SocketAddr;
 use terminal_ui::print_panel;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
@@ -13,7 +17,18 @@ use crate::{
     format_copilot_main_quota, format_copilot_quota_status, format_copilot_reset_summary,
     format_gemini_main_quota, format_gemini_quota_status, format_gemini_reset_summary,
     format_main_windows, managed_profile_home_path, prepare_managed_codex_home,
+    runtime_proxy_log_dir,
 };
+
+const DASHBOARD_PROVIDER_IDS: &[ProviderId] = &[
+    ProviderId::OpenAi,
+    ProviderId::Gemini,
+    ProviderId::Anthropic,
+    ProviderId::Copilot,
+    ProviderId::DeepSeek,
+    ProviderId::Kiro,
+    ProviderId::Local,
+];
 
 #[derive(Debug)]
 struct DashboardServer {
@@ -88,6 +103,14 @@ impl DashboardServer {
             (Method::Get, "/api/state") => respond_json_result(request, self.state_json()),
             (Method::Get, "/api/accounts") => respond_json_result(request, self.accounts_json()),
             (Method::Get, "/api/usage") => respond_json_result(request, self.usage_json()),
+            (Method::Get, "/api/providers") => respond_json_result(request, self.providers_json()),
+            (Method::Get, "/api/provider-presets") => {
+                respond_json_result(request, self.provider_presets_json())
+            }
+            (Method::Get, "/api/models") => respond_json_result(request, self.models_json()),
+            (Method::Get, "/api/runtime-status") => {
+                respond_json_result(request, self.runtime_status_json())
+            }
             (Method::Post, "/api/profile") => self.handle_add_profile(request),
             (Method::Post, "/api/profile/active") => self.handle_set_active(request),
             (Method::Delete, path) if path.starts_with("/api/profile/") => {
@@ -205,6 +228,83 @@ impl DashboardServer {
         }))
     }
 
+    fn providers_json(&self) -> Result<Value> {
+        let state = AppState::load(&self.paths)?;
+        Ok(json!({
+            "activeProfile": state.active_profile,
+            "providers": provider_presets(&state),
+            "contracts": provider_adapter_contract_matrix(),
+        }))
+    }
+
+    fn provider_presets_json(&self) -> Result<Value> {
+        let state = AppState::load(&self.paths)?;
+        Ok(json!({ "providers": provider_presets(&state) }))
+    }
+
+    fn models_json(&self) -> Result<Value> {
+        let state = AppState::load(&self.paths)?;
+        let mut models = Vec::new();
+        for provider in DASHBOARD_PROVIDER_IDS {
+            let default_model = provider_default_model(*provider);
+            let availability =
+                provider_available_through(*provider, provider_profile_count(&state, *provider));
+            for mut model in provider_model_catalog_json(*provider) {
+                let id = model
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let recommended = id == default_model;
+                if let Some(object) = model.as_object_mut() {
+                    object.insert(
+                        "providerName".to_string(),
+                        json!(provider_display_name(*provider)),
+                    );
+                    object.insert("recommended".to_string(), json!(recommended));
+                    object.insert("default".to_string(), json!(recommended));
+                    object.insert("availableThrough".to_string(), json!(availability));
+                    object.insert(
+                        "launchCommand".to_string(),
+                        json!(provider_launch_command(*provider, Some(&id))),
+                    );
+                }
+                models.push(model);
+            }
+        }
+        Ok(json!({ "models": models, "providers": provider_presets(&state) }))
+    }
+
+    fn runtime_status_json(&self) -> Result<Value> {
+        let log_dir = runtime_proxy_log_dir();
+        let latest_pointer = log_dir.join(crate::RUNTIME_PROXY_LATEST_LOG_POINTER);
+        let latest_log = fs::read_to_string(&latest_pointer)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let latest_log_exists = latest_log
+            .as_deref()
+            .map(std::path::Path::new)
+            .is_some_and(std::path::Path::exists);
+
+        Ok(json!({
+            "runtime": {
+                "status": if latest_log_exists { "log-available" } else { "not-running-or-no-log" },
+                "logDir": log_dir.display().to_string(),
+                "latestLogPointer": latest_pointer.display().to_string(),
+                "latestLog": latest_log,
+                "latestLogExists": latest_log_exists,
+                "doctorCommand": "prodex doctor --runtime",
+            },
+            "gateway": {
+                "status": "available-on-demand",
+                "startCommand": "prodex gateway --provider <provider>",
+                "providersCommand": "prodex gateway providers --json",
+                "modelsCommand": "prodex gateway models --provider <provider> --json",
+            }
+        }))
+    }
+
     fn handle_set_active(&self, mut request: Request) -> Result<()> {
         let payload: ActiveProfileRequest = match read_json_body(&mut request) {
             Ok(payload) => payload,
@@ -314,6 +414,235 @@ impl DashboardServer {
             request,
             json!({ "status": "ok", "activeProfile": state.active_profile }),
         )
+    }
+}
+
+fn provider_presets(state: &AppState) -> Vec<Value> {
+    DASHBOARD_PROVIDER_IDS
+        .iter()
+        .copied()
+        .map(|provider| {
+            let configured_profiles = provider_profile_count(state, provider);
+            let default_model = provider_default_model(provider);
+            json!({
+                "id": provider.label(),
+                "label": provider_display_name(provider),
+                "auth": provider_auth_summary(provider),
+                "defaultModel": default_model,
+                "recommendedModel": default_model,
+                "modelCount": provider_model_catalog_json(provider).len(),
+                "configuredProfiles": configured_profiles,
+                "active": provider_has_active_profile(state, provider),
+                "availableThrough": provider_available_through(provider, configured_profiles),
+                "commands": {
+                    "setup": provider_setup_commands(provider),
+                    "launch": provider_launch_command(provider, None),
+                    "quota": provider_quota_command(provider),
+                    "gateway": provider_gateway_command(provider),
+                },
+                "notes": provider_notes(provider),
+            })
+        })
+        .collect()
+}
+
+fn provider_profile_count(state: &AppState, provider: ProviderId) -> usize {
+    state
+        .profiles
+        .values()
+        .filter(|profile| profile_catalog_provider(profile) == Some(provider))
+        .count()
+}
+
+fn provider_has_active_profile(state: &AppState, provider: ProviderId) -> bool {
+    state
+        .active_profile
+        .as_ref()
+        .and_then(|name| state.profiles.get(name))
+        .and_then(profile_catalog_provider)
+        == Some(provider)
+}
+
+fn profile_catalog_provider(profile: &ProfileEntry) -> Option<ProviderId> {
+    match &profile.provider {
+        ProfileProvider::Openai => {
+            let model_provider = crate::codex_non_openai_model_provider(&profile.codex_home, None);
+            match model_provider
+                .as_ref()
+                .map(|provider| provider.provider_id.as_str())
+            {
+                Some(id) if id.eq_ignore_ascii_case(crate::SUPER_DEEPSEEK_PROVIDER_ID) => {
+                    Some(ProviderId::DeepSeek)
+                }
+                Some(id) if id.eq_ignore_ascii_case(crate::SUPER_LOCAL_PROVIDER_ID) => {
+                    Some(ProviderId::Local)
+                }
+                _ => Some(ProviderId::OpenAi),
+            }
+        }
+        ProfileProvider::Gemini { .. } => Some(ProviderId::Gemini),
+        ProfileProvider::Anthropic { .. } => Some(ProviderId::Anthropic),
+        ProfileProvider::Copilot { .. } => Some(ProviderId::Copilot),
+        ProfileProvider::Kiro { .. } => Some(ProviderId::Kiro),
+        ProfileProvider::Agy { .. } => None,
+    }
+}
+
+fn provider_display_name(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "OpenAI / ChatGPT Codex",
+        ProviderId::Gemini => "Google Gemini",
+        ProviderId::Anthropic => "Anthropic Claude",
+        ProviderId::Copilot => "GitHub Copilot",
+        ProviderId::DeepSeek => "DeepSeek",
+        ProviderId::Kiro => "Kiro CLI",
+        ProviderId::Local => "Local OpenAI-compatible",
+    }
+}
+
+fn provider_auth_summary(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "ChatGPT login, device code, or API key profile",
+        ProviderId::Gemini => "Google OAuth profile or GEMINI_API_KEY(S)",
+        ProviderId::Anthropic => "Claude OAuth import or ANTHROPIC_API_KEY(S)",
+        ProviderId::Copilot => "Copilot CLI import or GITHUB_COPILOT_API_KEY(S)",
+        ProviderId::DeepSeek => "DEEPSEEK_API_KEY(S)",
+        ProviderId::Kiro => "Kiro CLI import",
+        ProviderId::Local => "Local base URL; API key optional",
+    }
+}
+
+fn provider_default_model(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "gpt-5.3-codex",
+        ProviderId::Gemini => crate::SUPER_GEMINI_DEFAULT_MODEL,
+        ProviderId::Anthropic => crate::SUPER_ANTHROPIC_DEFAULT_MODEL,
+        ProviderId::Copilot => crate::SUPER_COPILOT_DEFAULT_MODEL,
+        ProviderId::DeepSeek => crate::SUPER_DEEPSEEK_DEFAULT_MODEL,
+        ProviderId::Kiro => crate::SUPER_KIRO_DEFAULT_MODEL,
+        ProviderId::Local => crate::SUPER_DEFAULT_LOCAL_MODEL,
+    }
+}
+
+fn provider_available_through(
+    provider: ProviderId,
+    configured_profiles: usize,
+) -> Vec<&'static str> {
+    let mut routes = Vec::new();
+    if configured_profiles > 0 {
+        routes.push("profile-backed routing");
+    }
+    match provider {
+        ProviderId::OpenAi => {
+            routes.push("gateway");
+        }
+        ProviderId::Gemini
+        | ProviderId::Anthropic
+        | ProviderId::Copilot
+        | ProviderId::DeepSeek
+        | ProviderId::Kiro => {
+            routes.push("runtime provider launch");
+            routes.push("gateway");
+        }
+        ProviderId::Local => {
+            routes.push("local URL");
+            routes.push("gateway");
+        }
+    }
+    routes
+}
+
+fn provider_setup_commands(provider: ProviderId) -> Vec<&'static str> {
+    match provider {
+        ProviderId::OpenAi => vec![
+            "prodex profile add openai-main --activate",
+            "prodex login --profile openai-main",
+            "prodex profile import-current openai-main",
+        ],
+        ProviderId::Gemini => vec![
+            "prodex login --with-google",
+            "GEMINI_API_KEY=... prodex s gemini --model auto",
+        ],
+        ProviderId::Anthropic => vec![
+            "prodex login --with-claude",
+            "prodex profile import claude --activate",
+            "ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6",
+        ],
+        ProviderId::Copilot => vec![
+            "prodex profile import copilot --activate",
+            "GITHUB_COPILOT_API_KEY=... prodex s --provider copilot --model gpt-5.3-codex",
+        ],
+        ProviderId::DeepSeek => {
+            vec!["DEEPSEEK_API_KEY=... prodex s deepseek --model deepseek-v4-pro"]
+        }
+        ProviderId::Kiro => vec![
+            "prodex profile import kiro --activate",
+            "prodex s --provider kiro --model claude-sonnet-4",
+        ],
+        ProviderId::Local => {
+            vec!["prodex super --url http://127.0.0.1:8131 --model unsloth/qwen3.5-35b-a3b"]
+        }
+    }
+}
+
+fn provider_launch_command(provider: ProviderId, model: Option<&str>) -> String {
+    let model = model.unwrap_or_else(|| provider_default_model(provider));
+    match provider {
+        ProviderId::OpenAi => format!("prodex s -m {model}"),
+        ProviderId::Gemini => format!("prodex s gemini --model {model}"),
+        ProviderId::Anthropic => format!("prodex s --provider anthropic --model {model}"),
+        ProviderId::Copilot => format!("prodex s --provider copilot --model {model}"),
+        ProviderId::DeepSeek => format!("prodex s deepseek --model {model}"),
+        ProviderId::Kiro => format!("prodex s --provider kiro --model {model}"),
+        ProviderId::Local => format!("prodex super --url http://127.0.0.1:8131 --model {model}"),
+    }
+}
+
+fn provider_quota_command(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "prodex quota --all --provider openai --once",
+        ProviderId::Gemini => "prodex quota --all --provider gemini --once",
+        ProviderId::Anthropic => "prodex quota --all --provider anthropic --once",
+        ProviderId::Copilot => "prodex quota --all --provider copilot --once",
+        ProviderId::DeepSeek => "prodex quota --all --provider deepseek --once",
+        ProviderId::Kiro => "prodex quota --all --provider kiro --once",
+        ProviderId::Local => {
+            "prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once"
+        }
+    }
+}
+
+fn provider_gateway_command(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "prodex gateway",
+        ProviderId::Gemini => "prodex gateway --provider gemini",
+        ProviderId::Anthropic => "prodex gateway --provider anthropic",
+        ProviderId::Copilot => "prodex gateway --provider copilot",
+        ProviderId::DeepSeek => "prodex gateway --provider deepseek",
+        ProviderId::Kiro => "prodex gateway --provider kiro",
+        ProviderId::Local => "prodex gateway --base-url http://127.0.0.1:8131/v1",
+    }
+}
+
+fn provider_notes(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => {
+            "Prodex profile pool keeps quota-aware rotation and continuation affinity."
+        }
+        ProviderId::Gemini => {
+            "OAuth profiles use Code Assist; API-key launches use the Gemini OpenAI-compatible endpoint."
+        }
+        ProviderId::Anthropic => {
+            "Command generation only; dashboard does not store Anthropic secrets."
+        }
+        ProviderId::Copilot => {
+            "Imported profiles keep Copilot credentials in Copilot-owned storage."
+        }
+        ProviderId::DeepSeek => {
+            "API-key runtime bridge; no profile secret is stored by this dashboard."
+        }
+        ProviderId::Kiro => "Import snapshots Kiro CLI auth for Prodex routing.",
+        ProviderId::Local => "Point Prodex at a local OpenAI-compatible /v1 server.",
     }
 }
 
