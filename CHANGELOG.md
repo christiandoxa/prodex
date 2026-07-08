@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.265.0 - 2026-07-08
+
+### CLI
+
+- Simplify log quota header (`5bf9567`)
+
 ## 0.264.0 - 2026-07-08
 
 ### CLI
@@ -75,9 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Respect cached Spark context metadata (`977eff3`)
-
-## 0.253.0 - 2026-07-07
-
-### Runtime
-
-- Honor no-auto-rotate in smart context proxy (`1057370`)
