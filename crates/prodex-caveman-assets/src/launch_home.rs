@@ -320,6 +320,7 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
 
     let features = ensure_child_table(&mut table, "features");
     features.insert("plugins".to_string(), toml::Value::Boolean(false));
+    features.insert("remote_plugin".to_string(), toml::Value::Boolean(false));
 
     let caveman_hook_group_index = configure_caveman_session_start_hook(&mut table);
     configure_caveman_hook_trust_state(&mut table, &config_path, caveman_hook_group_index)?;

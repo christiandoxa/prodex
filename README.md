@@ -983,7 +983,7 @@ prodex run --respect-system-proxy
 
 `--current-time-reminder` enables Codex's `[features.current_time_reminder]` config. The default system clock source is owned by Codex. `--current-time-clock-source external` is intended for Codex app-server clients that implement the upstream `currentTime/read` request.
 
-`--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the bundled/upstream Codex supports it. Codex 0.142.2 uses this opt-in feature for Windows and macOS auth clients so PAC, WPAD, static system proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
+`--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the bundled/upstream Codex supports it. Codex 0.143.0 extends this path to auth and Responses API traffic on Windows and macOS so PAC, WPAD, static system proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
 
 Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config.toml` launch override. Prodex therefore does not invent a competing CLI config flag. Launch `prodex app-server` or `prodex run app-server` and pass upstream `multiAgentMode` values (`none`, `explicitRequestOnly`, or `proactive`) through the Codex app-server API.
 
@@ -1384,7 +1384,7 @@ Auto-rotate and quota checks apply to supported OpenAI/Codex profiles. `prodex q
 
 If a profile's `config.toml` sets `model_provider` to a non-OpenAI backend such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy.
 
-Codex 0.142.3 expands the upstream Bedrock static catalog with `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna`. Prodex leaves those model IDs and Bedrock's default-only service-tier behavior owned by the direct Codex launch.
+Codex 0.143.0 includes upstream Bedrock catalog entries for `openai.gpt-5.6-sol`, `openai.gpt-5.6-terra`, and `openai.gpt-5.6-luna`, plus Codex-owned `max` reasoning effort handling. Prodex leaves those model IDs and Bedrock service-tier behavior owned by the direct Codex launch.
 
 Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider, not by Prodex.
 

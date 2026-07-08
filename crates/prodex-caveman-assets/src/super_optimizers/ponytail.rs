@@ -58,6 +58,7 @@ fn configure_ponytail_plugin_config(codex_home: &Path) -> Result<()> {
 
     let features = ensure_child_table(&mut table, "features");
     features.insert("plugins".to_string(), toml::Value::Boolean(true));
+    features.insert("remote_plugin".to_string(), toml::Value::Boolean(false));
 
     let marketplaces = ensure_child_table(&mut table, "marketplaces");
     let ponytail_marketplace = ensure_child_table(marketplaces, MARKETPLACE_NAME);

@@ -149,6 +149,7 @@ fn prepare_prodex_overlay_home_localizes_config_and_installs_plugin() {
 
     let rendered_config = fs::read_to_string(&temp_config).expect("temp config should read");
     assert!(rendered_config.contains("plugins = false"));
+    assert!(rendered_config.contains("remote_plugin = false"));
     assert!(!rendered_config.contains("codex_hooks"));
     assert!(!rendered_config.contains("suppress_unstable_features_warning"));
     assert!(rendered_config.contains("[[hooks.SessionStart]]"));

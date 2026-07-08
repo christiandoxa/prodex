@@ -716,6 +716,7 @@ fn super_optimizer_overlay_installs_ponytail_checkout_when_available() {
     let config = fs::read_to_string(codex_home.join("config.toml")).expect("config");
     assert!(config.contains("[features]"));
     assert!(config.contains("plugins = true"));
+    assert!(config.contains("remote_plugin = false"));
     assert!(config.contains("[plugins.\"ponytail@ponytail\"]"));
     assert!(config.contains("enabled = true"));
     let awareness = render_super_optimizer_awareness(

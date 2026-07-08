@@ -271,6 +271,7 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
         fs::read_to_string(overlay.join("config.toml")).expect("overlay config.toml");
     assert!(overlay_config.contains("prodex-caveman"));
     assert!(overlay_config.contains("plugins = false"));
+    assert!(overlay_config.contains("remote_plugin = false"));
     let hook_script = fs::read_to_string(overlay.join("bin").join("prodex-caveman-sessionstart"))
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
