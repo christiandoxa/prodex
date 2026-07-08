@@ -29,11 +29,10 @@ impl LogTuiTerminal {
             return Err(err)
                 .with_context(|| format!("failed to enter {label} TUI alternate screen"));
         }
-        let terminal = Terminal::new(CrosstermBackend::new(stdout)).map_err(|err| {
+        let terminal = Terminal::new(CrosstermBackend::new(stdout)).inspect_err(|_| {
             let mut stdout = io::stdout();
             let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
             let _ = disable_raw_mode();
-            err
         })?;
         Ok(Self { terminal })
     }
