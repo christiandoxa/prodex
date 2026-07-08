@@ -1,6 +1,6 @@
 use super::log::{LogStreamItem, TranscriptEvent};
 use super::log_format::render_text_body;
-use super::log_tui::{LogTuiState, contains_ignore_ascii_case, visible_text};
+use super::log_tui::{LogTuiState, contains_ignore_ascii_case, marquee_text, visible_text};
 use super::log_upstream_payload::{UpstreamPayloadEvent, render_upstream_payload_lines};
 use prodex_app_reports::InfoTokenUsageEvent;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -9,8 +9,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::VecDeque;
 use terminal_ui::{
-    tui_accent_style, tui_border_style, tui_metric_style, tui_muted_style, tui_primary_style,
-    tui_title_style, tui_tool_style,
+    text_width, tui_accent_style, tui_border_style, tui_metric_style, tui_muted_style,
+    tui_primary_style, tui_title_style, tui_tool_style,
 };
 
 pub(super) fn log_snapshot_tui_height(
@@ -80,6 +80,7 @@ pub(super) fn render_log_stream_tui(
     items: &VecDeque<LogStreamItem>,
     state: &LogTuiState,
     header_detail: Option<&str>,
+    header_tick: usize,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -95,14 +96,24 @@ pub(super) fn render_log_stream_tui(
         None => format!("{} event(s)", items.len()),
     };
 
+    let title = "Prodex Log Stream";
+    let count_width = text_width(&count);
     let mut header_spans = vec![
-        Span::styled("Prodex Log Stream", tui_title_style()),
+        Span::styled(title, tui_title_style()),
         Span::raw("  "),
         Span::styled(count, tui_muted_style()),
     ];
     if let Some(detail) = header_detail {
-        header_spans.push(Span::raw("  "));
-        header_spans.push(Span::styled(detail.to_string(), tui_primary_style()));
+        let header_width = usize::from(chunks[0].width).saturating_sub(2);
+        let used = text_width(title) + 2 + count_width;
+        let detail_width = header_width.saturating_sub(used + 2);
+        if detail_width > 0 {
+            header_spans.push(Span::raw("  "));
+            header_spans.push(Span::styled(
+                marquee_text(detail, detail_width, header_tick),
+                tui_primary_style(),
+            ));
+        }
     }
     let header = Paragraph::new(Line::from(header_spans)).block(
         Block::default()

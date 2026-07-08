@@ -2,7 +2,7 @@ use super::collect_recent_runtime_log_paths;
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
     LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, LogTuiTerminal,
-    contains_ignore_ascii_case, log_tui_header_detail, visible_text,
+    contains_ignore_ascii_case, log_tui_header_detail, marquee_text, visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
-    tui_title_style,
+    text_width, tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style,
+    tui_success_style, tui_title_style,
 };
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -84,6 +84,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     }
     let mut header_profile = latest_upstream_payload_profile(&events).map(str::to_string);
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
+    let header_marquee_started_at = Instant::now();
     let mut header_refresh_at = Instant::now() + LOG_TUI_HEADER_REFRESH_INTERVAL;
 
     let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
@@ -115,7 +116,14 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             header_refresh_at = now + LOG_TUI_HEADER_REFRESH_INTERVAL;
         }
         tui.terminal.draw(|frame| {
-            render_upstream_payload_tui(frame, &events, &view, header_detail.as_deref());
+            render_upstream_payload_tui(
+                frame,
+                &events,
+                &view,
+                header_detail.as_deref(),
+                (now.duration_since(header_marquee_started_at).as_millis()
+                    / LOG_STREAM_POLL_INTERVAL.as_millis()) as usize,
+            );
         })?;
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
             && let Event::Key(key) = event::read()?
@@ -216,6 +224,7 @@ fn render_upstream_payload_tui(
     events: &VecDeque<UpstreamPayloadEvent>,
     state: &LogTuiState,
     header_detail: Option<&str>,
+    header_tick: usize,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -230,14 +239,24 @@ fn render_upstream_payload_tui(
         Some(_) => format!("{matches}/{} match(es)", events.len()),
         None => format!("{} event(s)", events.len()),
     };
+    let title = "Prodex Upstream Payloads";
+    let count_width = text_width(&count);
     let mut header_spans = vec![
-        Span::styled("Prodex Upstream Payloads", tui_title_style()),
+        Span::styled(title, tui_title_style()),
         Span::raw("  "),
         Span::styled(count, tui_secondary_style()),
     ];
     if let Some(detail) = header_detail {
-        header_spans.push(Span::raw("  "));
-        header_spans.push(Span::styled(detail.to_string(), tui_primary_style()));
+        let header_width = usize::from(chunks[0].width).saturating_sub(2);
+        let used = text_width(title) + 2 + count_width;
+        let detail_width = header_width.saturating_sub(used + 2);
+        if detail_width > 0 {
+            header_spans.push(Span::raw("  "));
+            header_spans.push(Span::styled(
+                marquee_text(detail, detail_width, header_tick),
+                tui_primary_style(),
+            ));
+        }
     }
     let header = Paragraph::new(Line::from(header_spans)).block(
         Block::default()

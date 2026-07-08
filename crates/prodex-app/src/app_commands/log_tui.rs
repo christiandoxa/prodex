@@ -170,6 +170,19 @@ pub(super) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
         .contains(&needle.to_ascii_lowercase())
 }
 
+pub(super) fn marquee_text(value: &str, width: usize, tick: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let chars = value.chars().chain("   ".chars()).collect::<Vec<_>>();
+    if value.chars().count() <= width {
+        return value.to_string();
+    }
+    (0..width)
+        .map(|index| chars[(tick + index) % chars.len()])
+        .collect()
+}
+
 pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<String> {
     let paths = AppPaths::discover().ok();
     let state = paths.as_ref().and_then(|paths| AppState::load(paths).ok());
@@ -250,6 +263,14 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(rendered, ["line 2", "line 3"]);
+    }
+
+    #[test]
+    fn marquee_text_scrolls_long_header_detail() {
+        assert_eq!(marquee_text("abcdef", 4, 0), "abcd");
+        assert_eq!(marquee_text("abcdef", 4, 2), "cdef");
+        assert_eq!(marquee_text("abcdef", 4, 6), "   a");
+        assert_eq!(marquee_text("abc", 4, 99), "abc");
     }
 
     #[test]

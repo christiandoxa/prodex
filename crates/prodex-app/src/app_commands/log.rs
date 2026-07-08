@@ -181,6 +181,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
     }
     let mut header_profile = latest_log_stream_profile(&items).map(str::to_string);
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
+    let header_marquee_started_at = Instant::now();
     let mut header_refresh_at = Instant::now() + LOG_TUI_HEADER_REFRESH_INTERVAL;
 
     let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
@@ -232,7 +233,16 @@ fn stream_token_usage_events_tui() -> Result<()> {
         }
 
         tui.terminal
-            .draw(|frame| render_log_stream_tui(frame, &items, &view, header_detail.as_deref()))
+            .draw(|frame| {
+                render_log_stream_tui(
+                    frame,
+                    &items,
+                    &view,
+                    header_detail.as_deref(),
+                    (now.duration_since(header_marquee_started_at).as_millis()
+                        / LOG_STREAM_POLL_INTERVAL.as_millis()) as usize,
+                )
+            })
             .context("failed to draw log stream TUI")?;
 
         if event::poll(LOG_STREAM_POLL_INTERVAL).context("failed to poll log stream TUI input")? {
