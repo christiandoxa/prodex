@@ -2,11 +2,25 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.263.0 - 2026-07-08
+
+### CLI
+
+- Marquee log quota header (`c5cc036`)
+
+### Misc
+
+- Update upstream compatibility watchdog (`b5db7c3`)
+
 ## 0.262.0 - 2026-07-08
 
 ### CLI
 
 - Show profile quota in log headers (`5719800`)
+
+### Misc
+
+- Satisfy log TUI clippy gate (`559f856`)
 
 ## 0.261.0 - 2026-07-08
 
@@ -71,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Support Spark quota pools (`5c167cc`)
-
-## 0.251.0 - 2026-07-07
-
-### Runtime
-
-- Honor Copilot prompt token limits (`d1f2ce8`)
