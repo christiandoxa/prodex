@@ -145,6 +145,17 @@ const FETCH_FIXTURES = Object.freeze({
     docHtml:
       '<html><head><title>Claude Code fixture</title><meta name="description" content="Use Claude Code in terminal."></head><body>Claude Code works in terminal.</body></html>',
   },
+  apiFallback: {
+    codexRelease: CODEX_RELEASE,
+    claudeRelease: CLAUDE_RELEASE,
+    apiErrorRef: CODEX_RELEASE.tag_name,
+    files: {
+      "codex-rs/core/src/client.rs": SYNC_CLIENT,
+      "codex-rs/core/src/compact_remote.rs": SYNC_COMPACT,
+    },
+    docHtml:
+      '<html><head><title>Claude Code fixture</title><meta name="description" content="Use Claude Code in terminal."></head><body>Claude Code works in terminal.</body></html>',
+  },
 });
 
 function mockFetchModule() {
@@ -183,6 +194,29 @@ function rawRequestParts(url) {
   };
 }
 
+function apiContentsRequestParts(url) {
+  const parsed = new URL(url);
+  const prefix = "/repos/openai/codex/contents/";
+  if (!parsed.pathname.startsWith(prefix)) {
+    return null;
+  }
+  return {
+    ref: parsed.searchParams.get("ref") ?? "main",
+    filePath: parsed.pathname
+      .slice(prefix.length)
+      .split("/")
+      .map((part) => decodeURIComponent(part))
+      .join("/"),
+  };
+}
+
+function contentsResponse(body) {
+  return jsonResponse({
+    encoding: "base64",
+    content: Buffer.from(body).toString("base64"),
+  });
+}
+
 globalThis.fetch = async (url) => {
   const href = String(url);
   if (href === "https://api.github.com/repos/openai/codex/releases/latest") {
@@ -193,6 +227,19 @@ globalThis.fetch = async (url) => {
   }
   if (href === DOC_URL) {
     return textResponse(fixture.docHtml, { "content-type": "text/html" });
+  }
+  if (href.startsWith("https://api.github.com/repos/openai/codex/contents/")) {
+    const parts = apiContentsRequestParts(href);
+    if (parts?.ref === fixture.fallbackRawRef) {
+      return new Response("not found", { status: 404, statusText: "Not Found" });
+    }
+    if (parts?.ref === fixture.apiErrorRef) {
+      return new Response("temporary error", { status: 500, statusText: "Server Error" });
+    }
+    if (parts && Object.hasOwn(fixture.files, parts.filePath)) {
+      return contentsResponse(fixture.files[parts.filePath]);
+    }
+    return new Response(\`unmocked contents fixture: \${href}\`, { status: 404, statusText: "Not Found" });
   }
   if (href.startsWith("https://raw.githubusercontent.com/openai/codex/")) {
     const parts = rawRequestParts(href);
@@ -416,7 +463,7 @@ const FIXTURES = [
     },
   },
   {
-    name: "release raw 404 fallback is reported without drift",
+    name: "release file 404 fallback is reported without drift",
     mode: "fallback",
     expectedExit: 0,
     assert(result) {
@@ -435,6 +482,16 @@ const FIXTURES = [
           ["main", true, null],
         ],
       );
+    },
+  },
+  {
+    name: "contents API failure falls back to raw file",
+    mode: "apiFallback",
+    expectedExit: 0,
+    assert(result) {
+      assert.match(result.stdout, /Status: in sync/);
+      assert.deepEqual(result.report.diffs, []);
+      assert.equal(result.report.current.codex.compatibility.critical_files[0].source_ref, CODEX_RELEASE.tag_name);
     },
   },
 ];
