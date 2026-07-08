@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.264.0 - 2026-07-08
+
+### CLI
+
+- Smooth adaptive log quota header (`33273cd`)
+
 ## 0.263.0 - 2026-07-08
 
 ### CLI
@@ -75,13 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Honor no-auto-rotate in smart context proxy (`1057370`)
-
-## 0.252.0 - 2026-07-07
-
-### Runtime
-
-- Prefer direct runtime API auth (`5027f7e`)
-
-### CLI
-
-- Support Spark quota pools (`5c167cc`)
