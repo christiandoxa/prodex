@@ -1,8 +1,8 @@
 use super::collect_recent_runtime_log_paths;
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
-    LogTuiInput, LogTuiState, LogTuiTerminal, contains_ignore_ascii_case, log_tui_header_detail,
-    log_tui_header_next_refresh_at, marquee_text, marquee_tick, visible_text,
+    LogTuiHeaderDetail, LogTuiInput, LogTuiState, LogTuiTerminal, contains_ignore_ascii_case,
+    log_tui_header_detail, log_tui_header_next_refresh_at, visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -29,7 +29,7 @@ use terminal_ui::{
     tui_success_style, tui_title_style,
 };
 
-const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(80);
+const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const UPSTREAM_TUI_EVENT_LIMIT: usize = 100;
 
@@ -116,7 +116,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             header_refresh_at = log_tui_header_next_refresh_at(header_detail.as_ref(), now);
         }
         tui.terminal.draw(|frame| {
-            render_upstream_payload_tui(frame, &events, &view, header_detail.as_deref());
+            render_upstream_payload_tui(frame, &events, &view, header_detail.as_ref());
         })?;
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
             && let Event::Key(key) = event::read()?
@@ -216,7 +216,7 @@ fn render_upstream_payload_tui(
     frame: &mut ratatui::Frame<'_>,
     events: &VecDeque<UpstreamPayloadEvent>,
     state: &LogTuiState,
-    header_detail: Option<&str>,
+    header_detail: Option<&LogTuiHeaderDetail>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -245,7 +245,7 @@ fn render_upstream_payload_tui(
         if detail_width > 0 {
             header_spans.push(Span::raw("  "));
             header_spans.push(Span::styled(
-                marquee_text(detail, detail_width, marquee_tick()),
+                detail.render(detail_width),
                 tui_primary_style(),
             ));
         }

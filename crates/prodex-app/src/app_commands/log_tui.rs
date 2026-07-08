@@ -4,18 +4,21 @@ use crate::{
     load_runtime_usage_snapshots, quota_watch_detail_refresh_interval_for_cached_openai,
 };
 use anyhow::{Context, Result};
-use chrono::Local;
+use chrono::{Local, TimeZone};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use prodex_quota::{RuntimeQuotaWindowStatus, format_reset_time};
+use prodex_quota::RuntimeQuotaWindowStatus;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::text::{Line, Text};
 use std::io;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
+
+const LOG_TUI_SHORT_RESET_TIME_FORMAT: &str = "%H:%M";
+const LOG_TUI_RESET_TIME_FORMAT: &str = "%m-%d %H:%M";
 
 pub(super) struct LogTuiTerminal {
     pub(super) terminal: Terminal<CrosstermBackend<io::Stdout>>,
@@ -62,14 +65,47 @@ pub(super) enum LogTuiInput {
 
 #[derive(Debug, Clone)]
 pub(super) struct LogTuiHeaderDetail {
-    text: String,
+    profile: String,
+    quota: Option<LogTuiQuotaDetail>,
     refresh_interval: Duration,
 }
 
+#[derive(Debug, Clone)]
+struct LogTuiQuotaDetail {
+    five_hour_left: String,
+    five_hour_reset: String,
+    weekly_left: String,
+    weekly_reset: String,
+}
+
 impl LogTuiHeaderDetail {
-    fn new(text: String, refresh_interval: Duration) -> Self {
+    fn profile_only(profile: String, refresh_interval: Duration) -> Self {
         Self {
-            text,
+            profile,
+            quota: None,
+            refresh_interval,
+        }
+    }
+
+    fn quota(
+        profile: String,
+        snapshot: &RuntimeProfileUsageSnapshot,
+        refresh_interval: Duration,
+    ) -> Self {
+        Self {
+            profile,
+            quota: Some(LogTuiQuotaDetail {
+                five_hour_left: format_percent(snapshot.five_hour_remaining_percent),
+                five_hour_reset: format_snapshot_reset(
+                    snapshot.five_hour_reset_at,
+                    LOG_TUI_SHORT_RESET_TIME_FORMAT,
+                ),
+                weekly_left: format_percent(snapshot.weekly_remaining_percent),
+                weekly_reset: format_snapshot_reset(
+                    snapshot.weekly_reset_at,
+                    LOG_TUI_RESET_TIME_FORMAT,
+                ),
+            }),
             refresh_interval,
         }
     }
@@ -77,13 +113,24 @@ impl LogTuiHeaderDetail {
     fn refresh_interval(&self) -> Duration {
         self.refresh_interval
     }
-}
 
-impl std::ops::Deref for LogTuiHeaderDetail {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.text
+    pub(super) fn render(&self, width: usize) -> String {
+        if width == 0 {
+            return String::new();
+        }
+        let suffix = self.quota.as_ref().map(|quota| {
+            format!(
+                "  5h {} reset {}  weekly {} reset {}",
+                quota.five_hour_left, quota.five_hour_reset, quota.weekly_left, quota.weekly_reset
+            )
+        });
+        let suffix_text = suffix.as_deref().unwrap_or("");
+        let reserved = terminal_ui::text_width(suffix_text);
+        if reserved >= width {
+            return terminal_ui::fit_cell(&format!("{}{suffix_text}", self.profile), width);
+        }
+        let profile = middle_ellipsize(&self.profile, width - reserved);
+        format!("{profile}{suffix_text}")
     }
 }
 
@@ -207,48 +254,6 @@ pub(super) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
         .contains(&needle.to_ascii_lowercase())
 }
 
-pub(super) fn marquee_text(value: &str, width: usize, tick: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    if terminal_ui::text_width(value) <= width {
-        return value.to_string();
-    }
-    let scroll = format!("{value}   ");
-    let offset = tick % terminal_ui::text_width(&scroll).max(1);
-    marquee_display_slice(&format!("{scroll}{scroll}"), offset, width)
-}
-
-fn marquee_display_slice(value: &str, start: usize, width: usize) -> String {
-    let end = start.saturating_add(width);
-    let mut output = String::new();
-    let mut position = 0;
-    for ch in value.chars() {
-        let char_width = terminal_ui::text_width(&ch.to_string());
-        let next = position + char_width;
-        if next > start && position < end {
-            if position >= start && next <= end {
-                output.push(ch);
-            } else {
-                output.push_str(&" ".repeat(next.min(end).saturating_sub(position.max(start))));
-            }
-        }
-        position = next;
-        if position >= end {
-            break;
-        }
-    }
-    output.push_str(&" ".repeat(width.saturating_sub(terminal_ui::text_width(&output))));
-    output
-}
-
-pub(super) fn marquee_tick() -> usize {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() / 80)
-        .unwrap_or_default() as usize
-}
-
 pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<LogTuiHeaderDetail> {
     let paths = AppPaths::discover().ok();
     let state = paths.as_ref().and_then(|paths| AppState::load(paths).ok());
@@ -265,8 +270,9 @@ pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<L
     if let Some(cache) = quota_watch_cache.as_ref()
         && let Some(snapshot) = cache.snapshots.get(&profile)
     {
-        return Some(LogTuiHeaderDetail::new(
-            format_log_tui_quota_detail(&profile, snapshot),
+        return Some(LogTuiHeaderDetail::quota(
+            profile,
+            snapshot,
             cache.refresh_interval_at(now),
         ));
     }
@@ -282,8 +288,9 @@ pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<L
             log_tui_header_cache_or_missing_refresh_interval(quota_watch_cache.as_ref(), now),
         ));
     };
-    Some(LogTuiHeaderDetail::new(
-        format_log_tui_quota_detail(&profile, snapshot),
+    Some(LogTuiHeaderDetail::quota(
+        profile,
+        snapshot,
         quota_watch_cache
             .as_ref()
             .map(|cache| cache.refresh_interval_at(now))
@@ -304,7 +311,7 @@ fn log_tui_header_profile_only_detail_with_interval(
     profile: String,
     refresh_interval: Duration,
 ) -> LogTuiHeaderDetail {
-    LogTuiHeaderDetail::new(format!("profile {profile}"), refresh_interval)
+    LogTuiHeaderDetail::profile_only(profile, refresh_interval)
 }
 
 fn log_tui_header_cache_or_missing_refresh_interval(
@@ -344,22 +351,56 @@ fn log_tui_header_snapshot_refresh_interval(
     )
 }
 
-fn format_log_tui_quota_detail(profile: &str, snapshot: &RuntimeProfileUsageSnapshot) -> String {
-    format!(
-        "profile {profile}  5h left {} reset {}  weekly left {} reset {}",
-        format_percent(snapshot.five_hour_remaining_percent),
-        format_snapshot_reset(snapshot.five_hour_reset_at),
-        format_percent(snapshot.weekly_remaining_percent),
-        format_snapshot_reset(snapshot.weekly_reset_at)
-    )
-}
-
 fn format_percent(value: i64) -> String {
     format!("{}%", value.clamp(0, 100))
 }
 
-fn format_snapshot_reset(reset_at: i64) -> String {
-    format_reset_time((reset_at != i64::MAX).then_some(reset_at))
+fn format_snapshot_reset(reset_at: i64, pattern: &str) -> String {
+    if reset_at == i64::MAX {
+        return "-".to_string();
+    }
+    Local
+        .timestamp_opt(reset_at, 0)
+        .single()
+        .map(|dt| dt.format(pattern).to_string())
+        .unwrap_or_else(|| reset_at.to_string())
+}
+
+fn middle_ellipsize(value: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if terminal_ui::text_width(value) <= width {
+        return value.to_string();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+
+    let mut left = String::new();
+    let mut left_width = 0;
+    let left_limit = (width - 3) / 2;
+    for ch in value.chars() {
+        let ch_width = terminal_ui::text_width(&ch.to_string());
+        if left_width + ch_width > left_limit {
+            break;
+        }
+        left.push(ch);
+        left_width += ch_width;
+    }
+
+    let mut right = String::new();
+    let mut right_width = 0;
+    let right_limit = width - 3 - left_width;
+    for ch in value.chars().rev() {
+        let ch_width = terminal_ui::text_width(&ch.to_string());
+        if right_width + ch_width > right_limit {
+            break;
+        }
+        right.insert(0, ch);
+        right_width += ch_width;
+    }
+    format!("{left}...{right}")
 }
 
 #[cfg(test)]
@@ -407,12 +448,10 @@ mod tests {
     }
 
     #[test]
-    fn marquee_text_scrolls_long_header_detail() {
-        assert_eq!(marquee_text("abcdef", 4, 0), "abcd");
-        assert_eq!(marquee_text("abcdef", 4, 2), "cdef");
-        assert_eq!(marquee_text("abcdef", 4, 6), "   a");
-        assert_eq!(marquee_text("abc", 4, 99), "abc");
-        assert_eq!(terminal_ui::text_width(&marquee_text("表abcdef", 4, 1)), 4);
+    fn middle_ellipsizes_long_header_profile() {
+        assert_eq!(middle_ellipsize("abcdefghijkl", 8), "ab...jkl");
+        assert_eq!(middle_ellipsize("abc", 8), "abc");
+        assert_eq!(middle_ellipsize("abcdef", 3), "...");
     }
 
     #[test]
@@ -427,10 +466,33 @@ mod tests {
             weekly_reset_at: i64::MAX,
         };
 
-        assert_eq!(
-            format_log_tui_quota_detail("main", &snapshot),
-            "profile main  5h left 42% reset -  weekly left 7% reset -"
+        let detail =
+            LogTuiHeaderDetail::quota("main".to_string(), &snapshot, Duration::from_secs(1));
+        assert_eq!(detail.render(80), "main  5h 42% reset -  weekly 7% reset -");
+    }
+
+    #[test]
+    fn header_detail_omits_reset_year_and_fits_width() {
+        let snapshot = RuntimeProfileUsageSnapshot {
+            checked_at: 0,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 42,
+            five_hour_reset_at: 1_783_523_600,
+            weekly_status: RuntimeQuotaWindowStatus::Critical,
+            weekly_remaining_percent: 7,
+            weekly_reset_at: 1_783_527_200,
+        };
+        let detail = LogTuiHeaderDetail::quota(
+            "christiandoxahamansiah_gmail.com".to_string(),
+            &snapshot,
+            Duration::from_secs(1),
         );
+        let rendered = detail.render(72);
+
+        assert!(terminal_ui::text_width(&rendered) <= 72);
+        assert!(rendered.contains("..."));
+        assert!(!rendered.contains("2026-"));
+        assert!(!rendered.contains(" left "));
     }
 
     #[test]

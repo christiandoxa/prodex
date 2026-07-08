@@ -31,7 +31,7 @@ use std::thread;
 use std::time::SystemTime;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(80);
+const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;
 const SESSION_FOLLOW_LIMIT: usize = 32;
@@ -232,7 +232,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
         }
 
         tui.terminal
-            .draw(|frame| render_log_stream_tui(frame, &items, &view, header_detail.as_deref()))
+            .draw(|frame| render_log_stream_tui(frame, &items, &view, header_detail.as_ref()))
             .context("failed to draw log stream TUI")?;
 
         if event::poll(LOG_STREAM_POLL_INTERVAL).context("failed to poll log stream TUI input")? {
