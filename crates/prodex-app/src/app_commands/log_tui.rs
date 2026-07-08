@@ -1,12 +1,51 @@
 use crate::{
     AppPaths, AppState, AppStateIoExt, RuntimeProfileUsageSnapshot, load_runtime_usage_snapshots,
 };
+use anyhow::{Context, Result};
+use crossterm::cursor::{Hide, Show};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use prodex_quota::format_reset_time;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use ratatui::text::{Line, Text};
+use std::io;
 use std::time::Duration;
 
 pub(super) const LOG_TUI_HEADER_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+pub(super) struct LogTuiTerminal {
+    pub(super) terminal: Terminal<CrosstermBackend<io::Stdout>>,
+}
+
+impl LogTuiTerminal {
+    pub(super) fn new(label: &str) -> Result<Self> {
+        enable_raw_mode().with_context(|| format!("failed to enable {label} TUI raw mode"))?;
+        let mut stdout = io::stdout();
+        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(err)
+                .with_context(|| format!("failed to enter {label} TUI alternate screen"));
+        }
+        let terminal = Terminal::new(CrosstermBackend::new(stdout)).map_err(|err| {
+            let mut stdout = io::stdout();
+            let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
+            let _ = disable_raw_mode();
+            err
+        })?;
+        Ok(Self { terminal })
+    }
+}
+
+impl Drop for LogTuiTerminal {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct LogTuiState {

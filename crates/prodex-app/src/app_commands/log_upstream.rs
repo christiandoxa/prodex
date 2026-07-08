@@ -1,22 +1,16 @@
 use super::collect_recent_runtime_log_paths;
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
-    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, contains_ignore_ascii_case,
-    log_tui_header_detail, visible_text,
+    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, LogTuiTerminal,
+    contains_ignore_ascii_case, log_tui_header_detail, visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
 };
 use crate::{prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
 use prodex_runtime_doctor::read_runtime_log_tail;
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -43,40 +37,6 @@ const UPSTREAM_TUI_EVENT_LIMIT: usize = 100;
 struct FollowedLog {
     offset: u64,
     pending: String,
-}
-
-struct UpstreamPayloadTui {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
-}
-
-impl UpstreamPayloadTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable upstream payload TUI raw mode")?;
-        let mut stdout = io::stdout();
-        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter upstream payload TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stdout = io::stdout();
-                let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize upstream payload TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for UpstreamPayloadTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
 }
 
 pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
@@ -116,7 +76,7 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
 }
 
 fn stream_upstream_payload_events_tui() -> Result<()> {
-    let mut tui = UpstreamPayloadTui::new()?;
+    let mut tui = LogTuiTerminal::new("upstream payload")?;
     let mut view = LogTuiState::default();
     let mut events = VecDeque::<UpstreamPayloadEvent>::new();
     if let Some(event) = latest_upstream_payload_event() {

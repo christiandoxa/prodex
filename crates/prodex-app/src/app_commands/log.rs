@@ -8,7 +8,8 @@ use super::log_stream_tui::{
     log_snapshot_tui_height, render_log_snapshot_tui, render_log_stream_tui,
 };
 use super::log_tui::{
-    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, log_tui_header_detail,
+    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, LogTuiTerminal,
+    log_tui_header_detail,
 };
 use super::log_upstream::stream_upstream_payload_events;
 use super::log_upstream_payload::{
@@ -16,16 +17,10 @@ use super::log_upstream_payload::{
 };
 use crate::{LogArgs, LogMode, prodex_runtime_log_paths_in_dir, runtime_proxy_log_dir};
 use anyhow::{Context, Result};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
 use prodex_app_reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use prodex_core::AppPaths;
 use prodex_runtime_doctor::read_runtime_log_tail;
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use std::collections::{BTreeMap, VecDeque};
 #[cfg(test)]
 use std::env;
@@ -61,40 +56,6 @@ pub(super) enum LogStreamItem {
     Transcript(TranscriptEvent),
     TokenUsage(InfoTokenUsageEvent),
     UpstreamPayload(UpstreamPayloadEvent),
-}
-
-struct LogStreamTui {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
-}
-
-impl LogStreamTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable log stream TUI raw mode")?;
-        let mut stdout = io::stdout();
-        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter log stream TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stdout = io::stdout();
-                let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize log stream TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for LogStreamTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
 }
 
 pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
@@ -206,7 +167,7 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
 }
 
 fn stream_token_usage_events_tui() -> Result<()> {
-    let mut tui = LogStreamTui::new()?;
+    let mut tui = LogTuiTerminal::new("log stream")?;
     let mut view = LogTuiState::default();
     let mut items = VecDeque::<LogStreamItem>::new();
     if let Some(event) = latest_transcript_event()? {

@@ -6,7 +6,7 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",
-    "maxLines": 1531,
+    "maxLines": 1512,
     "reason": "Log stream routing, transcript extraction, binary-like tool-output suppression including mojibake filtering, and internal attachment-path filtering remain capped after moving mixed stream TUI rendering out of this command module."
   },
   {
