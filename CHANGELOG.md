@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.262.0 - 2026-07-08
+
+### CLI
+
+- Show profile quota in log headers (`5719800`)
+
 ## 0.261.0 - 2026-07-08
 
 ### Misc
@@ -71,9 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Honor Copilot prompt token limits (`d1f2ce8`)
-
-## 0.250.0 - 2026-07-07
-
-### Runtime
-
-- Rotate usage-not-included quota errors (`236e405`)
