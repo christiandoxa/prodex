@@ -1,8 +1,8 @@
 use super::collect_recent_runtime_log_paths;
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
-    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, LogTuiTerminal,
-    contains_ignore_ascii_case, log_tui_header_detail, marquee_text, marquee_tick, visible_text,
+    LogTuiInput, LogTuiState, LogTuiTerminal, contains_ignore_ascii_case, log_tui_header_detail,
+    log_tui_header_next_refresh_at, marquee_text, marquee_tick, visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -29,7 +29,7 @@ use terminal_ui::{
     tui_success_style, tui_title_style,
 };
 
-const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(80);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const UPSTREAM_TUI_EVENT_LIMIT: usize = 100;
 
@@ -84,7 +84,8 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     }
     let mut header_profile = latest_upstream_payload_profile(&events).map(str::to_string);
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
-    let mut header_refresh_at = Instant::now() + LOG_TUI_HEADER_REFRESH_INTERVAL;
+    let mut header_refresh_at =
+        log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
 
     let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
     for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
@@ -112,7 +113,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
         if latest_profile != header_profile || now >= header_refresh_at {
             header_profile = latest_profile;
             header_detail = log_tui_header_detail(header_profile.as_deref());
-            header_refresh_at = now + LOG_TUI_HEADER_REFRESH_INTERVAL;
+            header_refresh_at = log_tui_header_next_refresh_at(header_detail.as_ref(), now);
         }
         tui.terminal.draw(|frame| {
             render_upstream_payload_tui(frame, &events, &view, header_detail.as_deref());

@@ -778,7 +778,7 @@ fn mcp_tools_list_non_empty_jsonl(path: &Path, args: &[&str]) -> bool {
         }
     }
     drop(stdin);
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let mut ready = false;
     while std::time::Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());

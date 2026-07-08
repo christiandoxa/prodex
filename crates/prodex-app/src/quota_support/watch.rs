@@ -47,13 +47,6 @@ struct AllQuotaWatchLayout {
 }
 
 const QUOTA_WATCH_INPUT_POLL_MS: u64 = 100;
-const ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS: u64 = DEFAULT_WATCH_INTERVAL_SECONDS;
-const ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS: u64 = 10;
-const ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS: u64 = 45;
-const ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS: u64 = 90;
-const ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS: u64 = 2;
-const ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS: i64 = 2 * 60;
-const ALL_QUOTA_WATCH_NEAR_RESET_SECONDS: i64 = 15 * 60;
 const ALL_QUOTA_WATCH_AUTH_BACKOFF_POLL_SECONDS: u64 = 1;
 enum QuotaWatchCommand {
     Up,
@@ -509,7 +502,13 @@ fn watch_all_quotas_plain(
         if let Some(next_snapshot) = refresh.take_latest() {
             snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
-            next_refresh_at = Some(all_quota_watch_next_refresh_at(&snapshot, detail));
+            next_refresh_at = Some(all_quota_watch_next_refresh_at(
+                paths,
+                &snapshot,
+                detail,
+                &auth_filter,
+                collection_provider_filter,
+            ));
         }
 
         if redraw_needed {
@@ -597,7 +596,13 @@ fn watch_all_quotas_tui(
         if let Some(next_snapshot) = refresh.take_latest() {
             snapshot = merge_all_quota_watch_snapshot(&snapshot, next_snapshot);
             redraw_needed = true;
-            next_refresh_at = Some(all_quota_watch_next_refresh_at(&snapshot, detail));
+            next_refresh_at = Some(all_quota_watch_next_refresh_at(
+                paths,
+                &snapshot,
+                detail,
+                &auth_filter,
+                collection_provider_filter,
+            ));
         }
 
         if redraw_needed {
@@ -1553,8 +1558,42 @@ fn quota_watch_next_refresh_at() -> Instant {
     Instant::now() + Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
 }
 
-fn all_quota_watch_next_refresh_at(snapshot: &AllQuotaWatchSnapshot, detail: bool) -> Instant {
-    Instant::now() + all_quota_watch_refresh_interval(snapshot, detail, Local::now().timestamp())
+fn all_quota_watch_next_refresh_at(
+    paths: &AppPaths,
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    auth_filter: &QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
+) -> Instant {
+    let interval = all_quota_watch_refresh_interval(snapshot, detail, Local::now().timestamp());
+    maybe_save_all_quota_watch_runtime_usage_cache(
+        paths,
+        snapshot,
+        detail,
+        auth_filter,
+        provider_filter,
+        interval,
+    );
+    Instant::now() + interval
+}
+
+fn maybe_save_all_quota_watch_runtime_usage_cache(
+    paths: &AppPaths,
+    snapshot: &AllQuotaWatchSnapshot,
+    detail: bool,
+    auth_filter: &QuotaAuthFilter,
+    provider_filter: QuotaProviderFilter,
+    refresh_interval: Duration,
+) {
+    if !detail
+        || !matches!(auth_filter, QuotaAuthFilter::All)
+        || provider_filter != QuotaProviderFilter::All
+    {
+        return;
+    }
+    if let AllQuotaWatchSnapshot::Reports { reports, .. } = snapshot {
+        save_quota_watch_runtime_usage_cache(paths, reports, refresh_interval);
+    }
 }
 
 fn all_quota_watch_refresh_interval(
@@ -1586,30 +1625,7 @@ fn all_quota_watch_reports_refresh_interval(
         .max()
         .unwrap_or(QuotaRefreshSignal::Stable);
 
-    let base = match signal {
-        QuotaRefreshSignal::Imminent => ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS,
-        QuotaRefreshSignal::Watch => ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS,
-        QuotaRefreshSignal::Stable => {
-            if detail {
-                ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS
-            } else {
-                ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS
-            }
-        }
-    };
-    let scaled = base.max(
-        u64::try_from(reports.len())
-            .unwrap_or(u64::MAX)
-            .saturating_mul(ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS),
-    );
-    Duration::from_secs(quota_watch_jittered_interval_seconds(scaled, now))
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum QuotaRefreshSignal {
-    Stable,
-    Watch,
-    Imminent,
+    quota_watch_refresh_interval_for_signal(signal, detail, reports.len(), now)
 }
 
 fn report_quota_refresh_signal(report: &QuotaReport, now: i64) -> QuotaRefreshSignal {
@@ -1665,26 +1681,6 @@ fn main_quota_reset_refresh_signal(usage: &UsageResponse, now: i64) -> QuotaRefr
         .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
         .max()
         .unwrap_or(QuotaRefreshSignal::Stable)
-}
-
-fn quota_reset_refresh_signal(reset_at: i64, now: i64) -> QuotaRefreshSignal {
-    if reset_at <= now + ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS {
-        QuotaRefreshSignal::Imminent
-    } else if reset_at <= now + ALL_QUOTA_WATCH_NEAR_RESET_SECONDS {
-        QuotaRefreshSignal::Watch
-    } else {
-        QuotaRefreshSignal::Stable
-    }
-}
-
-fn quota_watch_jittered_interval_seconds(seconds: u64, now: i64) -> u64 {
-    if seconds <= ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS {
-        return seconds;
-    }
-    let jitter_span = (seconds / 10).max(1);
-    let bucket = now.unsigned_abs() % (jitter_span.saturating_mul(2).saturating_add(1));
-    let delta = i64::try_from(bucket).unwrap_or(0) - i64::try_from(jitter_span).unwrap_or(0);
-    seconds.saturating_add_signed(delta).max(1)
 }
 
 fn parse_quota_reset_epoch(value: &str) -> Option<i64> {

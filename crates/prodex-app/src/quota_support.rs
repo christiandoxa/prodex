@@ -1,5 +1,6 @@
 use super::*;
 
+mod adaptive_refresh;
 mod auth;
 mod codex_openai_auth;
 mod external_provider;
@@ -7,6 +8,7 @@ mod render;
 mod virtual_provider;
 mod watch;
 
+pub(super) use self::adaptive_refresh::*;
 pub(super) use self::auth::*;
 use self::external_provider::{
     custom_model_provider_quota_info, fetch_agy_quota_info, fetch_anthropic_quota_info,

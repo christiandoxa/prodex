@@ -8,8 +8,7 @@ use super::log_stream_tui::{
     log_snapshot_tui_height, render_log_snapshot_tui, render_log_stream_tui,
 };
 use super::log_tui::{
-    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, LogTuiTerminal,
-    log_tui_header_detail,
+    LogTuiInput, LogTuiState, LogTuiTerminal, log_tui_header_detail, log_tui_header_next_refresh_at,
 };
 use super::log_upstream::stream_upstream_payload_events;
 use super::log_upstream_payload::{
@@ -32,7 +31,7 @@ use std::thread;
 use std::time::SystemTime;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(80);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
 const SESSION_SNAPSHOT_TAIL_BYTES: usize = 2 * 1024 * 1024;
 const SESSION_FOLLOW_LIMIT: usize = 32;
@@ -181,7 +180,8 @@ fn stream_token_usage_events_tui() -> Result<()> {
     }
     let mut header_profile = latest_log_stream_profile(&items).map(str::to_string);
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
-    let mut header_refresh_at = Instant::now() + LOG_TUI_HEADER_REFRESH_INTERVAL;
+    let mut header_refresh_at =
+        log_tui_header_next_refresh_at(header_detail.as_ref(), Instant::now());
 
     let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
     for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
@@ -228,7 +228,7 @@ fn stream_token_usage_events_tui() -> Result<()> {
         if latest_profile != header_profile || now >= header_refresh_at {
             header_profile = latest_profile;
             header_detail = log_tui_header_detail(header_profile.as_deref());
-            header_refresh_at = now + LOG_TUI_HEADER_REFRESH_INTERVAL;
+            header_refresh_at = log_tui_header_next_refresh_at(header_detail.as_ref(), now);
         }
 
         tui.terminal

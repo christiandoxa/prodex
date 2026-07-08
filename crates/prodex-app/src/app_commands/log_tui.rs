@@ -1,20 +1,21 @@
 use crate::{
-    AppPaths, AppState, AppStateIoExt, RuntimeProfileUsageSnapshot, load_runtime_usage_snapshots,
+    AppPaths, AppState, AppStateIoExt, LiveQuotaWatchRuntimeUsageCache,
+    RuntimeProfileUsageSnapshot, load_live_quota_watch_runtime_usage_cache,
+    load_runtime_usage_snapshots, quota_watch_detail_refresh_interval_for_cached_openai,
 };
 use anyhow::{Context, Result};
+use chrono::Local;
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use prodex_quota::format_reset_time;
+use prodex_quota::{RuntimeQuotaWindowStatus, format_reset_time};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::text::{Line, Text};
 use std::io;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-pub(super) const LOG_TUI_HEADER_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) struct LogTuiTerminal {
     pub(super) terminal: Terminal<CrosstermBackend<io::Stdout>>,
@@ -57,6 +58,42 @@ pub(super) struct LogTuiState {
 pub(super) enum LogTuiInput {
     Continue,
     Quit,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct LogTuiHeaderDetail {
+    text: String,
+    refresh_interval: Duration,
+}
+
+impl LogTuiHeaderDetail {
+    fn new(text: String, refresh_interval: Duration) -> Self {
+        Self {
+            text,
+            refresh_interval,
+        }
+    }
+
+    fn refresh_interval(&self) -> Duration {
+        self.refresh_interval
+    }
+}
+
+impl std::ops::Deref for LogTuiHeaderDetail {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.text
+    }
+}
+
+pub(super) fn log_tui_header_next_refresh_at(
+    detail: Option<&LogTuiHeaderDetail>,
+    now: Instant,
+) -> Instant {
+    now + detail
+        .map(LogTuiHeaderDetail::refresh_interval)
+        .unwrap_or_else(log_tui_header_missing_refresh_interval)
 }
 
 impl LogTuiState {
@@ -174,23 +211,45 @@ pub(super) fn marquee_text(value: &str, width: usize, tick: usize) -> String {
     if width == 0 {
         return String::new();
     }
-    let chars = value.chars().chain("   ".chars()).collect::<Vec<_>>();
-    if value.chars().count() <= width {
+    if terminal_ui::text_width(value) <= width {
         return value.to_string();
     }
-    (0..width)
-        .map(|index| chars[(tick + index) % chars.len()])
-        .collect()
+    let scroll = format!("{value}   ");
+    let offset = tick % terminal_ui::text_width(&scroll).max(1);
+    marquee_display_slice(&format!("{scroll}{scroll}"), offset, width)
+}
+
+fn marquee_display_slice(value: &str, start: usize, width: usize) -> String {
+    let end = start.saturating_add(width);
+    let mut output = String::new();
+    let mut position = 0;
+    for ch in value.chars() {
+        let char_width = terminal_ui::text_width(&ch.to_string());
+        let next = position + char_width;
+        if next > start && position < end {
+            if position >= start && next <= end {
+                output.push(ch);
+            } else {
+                output.push_str(&" ".repeat(next.min(end).saturating_sub(position.max(start))));
+            }
+        }
+        position = next;
+        if position >= end {
+            break;
+        }
+    }
+    output.push_str(&" ".repeat(width.saturating_sub(terminal_ui::text_width(&output))));
+    output
 }
 
 pub(super) fn marquee_tick() -> usize {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() / 250)
+        .map(|duration| duration.as_millis() / 80)
         .unwrap_or_default() as usize
 }
 
-pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<String> {
+pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<LogTuiHeaderDetail> {
     let paths = AppPaths::discover().ok();
     let state = paths.as_ref().and_then(|paths| AppState::load(paths).ok());
     let profile = preferred_profile.map(ToOwned::to_owned).or_else(|| {
@@ -199,15 +258,90 @@ pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<S
             .and_then(|state| state.active_profile.clone())
     })?;
     let Some((paths, state)) = paths.as_ref().zip(state.as_ref()) else {
-        return Some(format!("profile {profile}"));
+        return Some(log_tui_header_profile_only_detail(profile));
     };
-    let Some(snapshot) = load_runtime_usage_snapshots(paths, &state.profiles)
-        .ok()
-        .and_then(|snapshots| snapshots.get(&profile).cloned())
-    else {
-        return Some(format!("profile {profile}"));
+    let now = Local::now().timestamp();
+    let quota_watch_cache = load_live_quota_watch_runtime_usage_cache(paths, &state.profiles, now);
+    if let Some(cache) = quota_watch_cache.as_ref()
+        && let Some(snapshot) = cache.snapshots.get(&profile)
+    {
+        return Some(LogTuiHeaderDetail::new(
+            format_log_tui_quota_detail(&profile, snapshot),
+            cache.refresh_interval_at(now),
+        ));
+    }
+    let Ok(snapshots) = load_runtime_usage_snapshots(paths, &state.profiles) else {
+        return Some(log_tui_header_profile_only_detail_with_interval(
+            profile,
+            log_tui_header_cache_or_missing_refresh_interval(quota_watch_cache.as_ref(), now),
+        ));
     };
-    Some(format_log_tui_quota_detail(&profile, &snapshot))
+    let Some(snapshot) = snapshots.get(&profile) else {
+        return Some(log_tui_header_profile_only_detail_with_interval(
+            profile,
+            log_tui_header_cache_or_missing_refresh_interval(quota_watch_cache.as_ref(), now),
+        ));
+    };
+    Some(LogTuiHeaderDetail::new(
+        format_log_tui_quota_detail(&profile, snapshot),
+        quota_watch_cache
+            .as_ref()
+            .map(|cache| cache.refresh_interval_at(now))
+            .unwrap_or_else(|| {
+                log_tui_header_snapshot_refresh_interval(snapshot, state.profiles.len(), now)
+            }),
+    ))
+}
+
+fn log_tui_header_profile_only_detail(profile: String) -> LogTuiHeaderDetail {
+    log_tui_header_profile_only_detail_with_interval(
+        profile,
+        log_tui_header_missing_refresh_interval(),
+    )
+}
+
+fn log_tui_header_profile_only_detail_with_interval(
+    profile: String,
+    refresh_interval: Duration,
+) -> LogTuiHeaderDetail {
+    LogTuiHeaderDetail::new(format!("profile {profile}"), refresh_interval)
+}
+
+fn log_tui_header_cache_or_missing_refresh_interval(
+    cache: Option<&LiveQuotaWatchRuntimeUsageCache>,
+    now: i64,
+) -> Duration {
+    cache
+        .map(|cache| cache.refresh_interval_at(now))
+        .unwrap_or_else(log_tui_header_missing_refresh_interval)
+}
+
+fn log_tui_header_missing_refresh_interval() -> Duration {
+    quota_watch_detail_refresh_interval_for_cached_openai(&[], true, 1, Local::now().timestamp())
+}
+
+fn log_tui_header_snapshot_refresh_interval(
+    snapshot: &RuntimeProfileUsageSnapshot,
+    profile_count: usize,
+    now: i64,
+) -> Duration {
+    let watch = matches!(
+        snapshot.five_hour_status,
+        RuntimeQuotaWindowStatus::Exhausted | RuntimeQuotaWindowStatus::Unknown
+    ) || matches!(
+        snapshot.weekly_status,
+        RuntimeQuotaWindowStatus::Exhausted | RuntimeQuotaWindowStatus::Unknown
+    );
+    let reset_windows = [snapshot.five_hour_reset_at, snapshot.weekly_reset_at]
+        .into_iter()
+        .filter(|reset_at| *reset_at != i64::MAX)
+        .collect::<Vec<_>>();
+    quota_watch_detail_refresh_interval_for_cached_openai(
+        &reset_windows,
+        watch,
+        profile_count.max(1),
+        now,
+    )
 }
 
 fn format_log_tui_quota_detail(profile: &str, snapshot: &RuntimeProfileUsageSnapshot) -> String {
@@ -278,6 +412,7 @@ mod tests {
         assert_eq!(marquee_text("abcdef", 4, 2), "cdef");
         assert_eq!(marquee_text("abcdef", 4, 6), "   a");
         assert_eq!(marquee_text("abc", 4, 99), "abc");
+        assert_eq!(terminal_ui::text_width(&marquee_text("表abcdef", 4, 1)), 4);
     }
 
     #[test]
@@ -295,6 +430,46 @@ mod tests {
         assert_eq!(
             format_log_tui_quota_detail("main", &snapshot),
             "profile main  5h left 42% reset -  weekly left 7% reset -"
+        );
+    }
+
+    #[test]
+    fn header_refresh_interval_uses_quota_detail_algorithm() {
+        let snapshot = RuntimeProfileUsageSnapshot {
+            checked_at: 0,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 80,
+            five_hour_reset_at: i64::MAX,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: i64::MAX,
+        };
+
+        assert_eq!(
+            log_tui_header_snapshot_refresh_interval(&snapshot, 1, 0),
+            Duration::from_secs(41)
+        );
+        assert_eq!(
+            log_tui_header_snapshot_refresh_interval(
+                &RuntimeProfileUsageSnapshot {
+                    five_hour_reset_at: 15 * 60,
+                    ..snapshot.clone()
+                },
+                1,
+                0
+            ),
+            Duration::from_secs(9)
+        );
+        assert_eq!(
+            log_tui_header_snapshot_refresh_interval(
+                &RuntimeProfileUsageSnapshot {
+                    five_hour_reset_at: 2 * 60,
+                    ..snapshot
+                },
+                1,
+                0
+            ),
+            Duration::from_secs(5)
         );
     }
 }
