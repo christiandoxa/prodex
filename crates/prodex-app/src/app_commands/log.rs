@@ -7,7 +7,9 @@ use super::log_stream_tui::log_stream_tui_text;
 use super::log_stream_tui::{
     log_snapshot_tui_height, render_log_snapshot_tui, render_log_stream_tui,
 };
-use super::log_tui::{LogTuiInput, LogTuiState};
+use super::log_tui::{
+    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, log_tui_header_detail,
+};
 use super::log_upstream::stream_upstream_payload_events;
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -33,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 #[cfg(test)]
 use std::time::SystemTime;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LOG_SNAPSHOT_TAIL_BYTES: usize = 1024 * 1024;
@@ -216,6 +218,9 @@ fn stream_token_usage_events_tui() -> Result<()> {
     if let Some(event) = latest_token_usage_event() {
         push_log_stream_item(&mut items, LogStreamItem::TokenUsage(event));
     }
+    let mut header_profile = latest_log_stream_profile(&items).map(str::to_string);
+    let mut header_detail = log_tui_header_detail(header_profile.as_deref());
+    let mut header_refresh_at = Instant::now() + LOG_TUI_HEADER_REFRESH_INTERVAL;
 
     let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
     for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
@@ -257,9 +262,16 @@ fn stream_token_usage_events_tui() -> Result<()> {
                 push_log_stream_item(&mut items, LogStreamItem::Transcript(event));
             }
         }
+        let latest_profile = latest_log_stream_profile(&items).map(str::to_string);
+        let now = Instant::now();
+        if latest_profile != header_profile || now >= header_refresh_at {
+            header_profile = latest_profile;
+            header_detail = log_tui_header_detail(header_profile.as_deref());
+            header_refresh_at = now + LOG_TUI_HEADER_REFRESH_INTERVAL;
+        }
 
         tui.terminal
-            .draw(|frame| render_log_stream_tui(frame, &items, &view))
+            .draw(|frame| render_log_stream_tui(frame, &items, &view, header_detail.as_deref()))
             .context("failed to draw log stream TUI")?;
 
         if event::poll(LOG_STREAM_POLL_INTERVAL).context("failed to poll log stream TUI input")? {
@@ -335,6 +347,14 @@ fn push_log_stream_item(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem
     while items.len() > LOG_TUI_EVENT_LIMIT {
         items.pop_front();
     }
+}
+
+fn latest_log_stream_profile(items: &VecDeque<LogStreamItem>) -> Option<&str> {
+    items.iter().rev().find_map(|item| match item {
+        LogStreamItem::TokenUsage(event) => Some(event.profile.as_str()),
+        LogStreamItem::UpstreamPayload(event) => Some(event.profile.as_str()),
+        LogStreamItem::Transcript(_) => None,
+    })
 }
 
 fn read_new_runtime_log_events(path: &Path, state: &mut FollowedLog, json: bool) -> Result<()> {

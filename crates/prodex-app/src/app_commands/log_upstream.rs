@@ -1,6 +1,9 @@
 use super::collect_recent_runtime_log_paths;
 use super::log_format::{current_log_width, render_log_block};
-use super::log_tui::{LogTuiInput, LogTuiState, contains_ignore_ascii_case, visible_text};
+use super::log_tui::{
+    LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, contains_ignore_ascii_case,
+    log_tui_header_detail, visible_text,
+};
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
 };
@@ -24,7 +27,7 @@ use std::fs;
 use std::io::{self, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 use terminal_ui::{
@@ -119,6 +122,9 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     if let Some(event) = latest_upstream_payload_event() {
         push_upstream_payload_event(&mut events, event);
     }
+    let mut header_profile = latest_upstream_payload_profile(&events).map(str::to_string);
+    let mut header_detail = log_tui_header_detail(header_profile.as_deref());
+    let mut header_refresh_at = Instant::now() + LOG_TUI_HEADER_REFRESH_INTERVAL;
 
     let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
     for path in prodex_runtime_log_paths_in_dir(&runtime_proxy_log_dir()) {
@@ -141,8 +147,15 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
                 push_upstream_payload_event(&mut events, event);
             }
         }
+        let latest_profile = latest_upstream_payload_profile(&events).map(str::to_string);
+        let now = Instant::now();
+        if latest_profile != header_profile || now >= header_refresh_at {
+            header_profile = latest_profile;
+            header_detail = log_tui_header_detail(header_profile.as_deref());
+            header_refresh_at = now + LOG_TUI_HEADER_REFRESH_INTERVAL;
+        }
         tui.terminal.draw(|frame| {
-            render_upstream_payload_tui(frame, &events, &view);
+            render_upstream_payload_tui(frame, &events, &view, header_detail.as_deref());
         })?;
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
             && let Event::Key(key) = event::read()?
@@ -162,6 +175,10 @@ fn push_upstream_payload_event(
     while events.len() > UPSTREAM_TUI_EVENT_LIMIT {
         events.pop_front();
     }
+}
+
+fn latest_upstream_payload_profile(events: &VecDeque<UpstreamPayloadEvent>) -> Option<&str> {
+    events.back().map(|event| event.profile.as_str())
 }
 
 fn collect_new_upstream_payload_events(
@@ -238,6 +255,7 @@ fn render_upstream_payload_tui(
     frame: &mut ratatui::Frame<'_>,
     events: &VecDeque<UpstreamPayloadEvent>,
     state: &LogTuiState,
+    header_detail: Option<&str>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -252,12 +270,16 @@ fn render_upstream_payload_tui(
         Some(_) => format!("{matches}/{} match(es)", events.len()),
         None => format!("{} event(s)", events.len()),
     };
-    let header = Paragraph::new(Line::from(vec![
+    let mut header_spans = vec![
         Span::styled("Prodex Upstream Payloads", tui_title_style()),
         Span::raw("  "),
         Span::styled(count, tui_secondary_style()),
-    ]))
-    .block(
+    ];
+    if let Some(detail) = header_detail {
+        header_spans.push(Span::raw("  "));
+        header_spans.push(Span::styled(detail.to_string(), tui_primary_style()));
+    }
+    let header = Paragraph::new(Line::from(header_spans)).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(tui_border_style()),

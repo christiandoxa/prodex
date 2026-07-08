@@ -79,6 +79,7 @@ pub(super) fn render_log_stream_tui(
     frame: &mut ratatui::Frame<'_>,
     items: &VecDeque<LogStreamItem>,
     state: &LogTuiState,
+    header_detail: Option<&str>,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -94,12 +95,16 @@ pub(super) fn render_log_stream_tui(
         None => format!("{} event(s)", items.len()),
     };
 
-    let header = Paragraph::new(Line::from(vec![
+    let mut header_spans = vec![
         Span::styled("Prodex Log Stream", tui_title_style()),
         Span::raw("  "),
         Span::styled(count, tui_muted_style()),
-    ]))
-    .block(
+    ];
+    if let Some(detail) = header_detail {
+        header_spans.push(Span::raw("  "));
+        header_spans.push(Span::styled(detail.to_string(), tui_primary_style()));
+    }
+    let header = Paragraph::new(Line::from(header_spans)).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(tui_border_style()),

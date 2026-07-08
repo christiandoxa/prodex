@@ -1,5 +1,12 @@
+use crate::{
+    AppPaths, AppState, AppStateIoExt, RuntimeProfileUsageSnapshot, load_runtime_usage_snapshots,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use prodex_quota::format_reset_time;
 use ratatui::text::{Line, Text};
+use std::time::Duration;
+
+pub(super) const LOG_TUI_HEADER_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct LogTuiState {
@@ -125,10 +132,49 @@ pub(super) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
         .contains(&needle.to_ascii_lowercase())
 }
 
+pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<String> {
+    let paths = AppPaths::discover().ok();
+    let state = paths.as_ref().and_then(|paths| AppState::load(paths).ok());
+    let profile = preferred_profile.map(ToOwned::to_owned).or_else(|| {
+        state
+            .as_ref()
+            .and_then(|state| state.active_profile.clone())
+    })?;
+    let Some((paths, state)) = paths.as_ref().zip(state.as_ref()) else {
+        return Some(format!("profile {profile}"));
+    };
+    let Some(snapshot) = load_runtime_usage_snapshots(paths, &state.profiles)
+        .ok()
+        .and_then(|snapshots| snapshots.get(&profile).cloned())
+    else {
+        return Some(format!("profile {profile}"));
+    };
+    Some(format_log_tui_quota_detail(&profile, &snapshot))
+}
+
+fn format_log_tui_quota_detail(profile: &str, snapshot: &RuntimeProfileUsageSnapshot) -> String {
+    format!(
+        "profile {profile}  5h left {} reset {}  weekly left {} reset {}",
+        format_percent(snapshot.five_hour_remaining_percent),
+        format_snapshot_reset(snapshot.five_hour_reset_at),
+        format_percent(snapshot.weekly_remaining_percent),
+        format_snapshot_reset(snapshot.weekly_reset_at)
+    )
+}
+
+fn format_percent(value: i64) -> String {
+    format!("{}%", value.clamp(0, 100))
+}
+
+fn format_snapshot_reset(reset_at: i64) -> String {
+    format_reset_time((reset_at != i64::MAX).then_some(reset_at))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use prodex_quota::RuntimeQuotaWindowStatus;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -166,5 +212,23 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(rendered, ["line 2", "line 3"]);
+    }
+
+    #[test]
+    fn formats_header_profile_quota_detail() {
+        let snapshot = RuntimeProfileUsageSnapshot {
+            checked_at: 0,
+            five_hour_status: RuntimeQuotaWindowStatus::Ready,
+            five_hour_remaining_percent: 42,
+            five_hour_reset_at: i64::MAX,
+            weekly_status: RuntimeQuotaWindowStatus::Critical,
+            weekly_remaining_percent: 7,
+            weekly_reset_at: i64::MAX,
+        };
+
+        assert_eq!(
+            format_log_tui_quota_detail("main", &snapshot),
+            "profile main  5h left 42% reset -  weekly left 7% reset -"
+        );
     }
 }
