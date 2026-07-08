@@ -488,6 +488,10 @@ fn quota_http_body_detection_requires_explicit_error_code() {
         ),
         None
     );
+    assert_eq!(
+        extract_runtime_proxy_quota_message(br#"{"detail":{"code":"deactivated_workspace"}}"#),
+        None
+    );
 
     for code in [
         "insufficient_quota",

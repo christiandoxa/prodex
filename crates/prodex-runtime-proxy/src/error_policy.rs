@@ -9,6 +9,7 @@ pub enum RuntimeHttpErrorPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeHttpErrorClass {
     Quota,
+    ProfileUnavailable,
     Overload,
     TransientServer,
     Other,
@@ -29,9 +30,10 @@ pub struct RuntimeHttpErrorPolicy {
     pub message: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum RuntimeHttpErrorSignal {
     ExplicitQuota,
+    ExplicitProfileUnavailable,
     ExplicitOverload,
     TransientStatus,
 }
@@ -54,6 +56,13 @@ struct RuntimeHttpErrorRule {
 const RUNTIME_TRANSIENT_HTTP_STATUSES: &[u16] = &[500, 502, 503, 504, 529];
 
 const RUNTIME_HTTP_ERROR_RULES: &[RuntimeHttpErrorRule] = &[
+    RuntimeHttpErrorRule {
+        name: "profile_unavailable",
+        statuses: &[402, 403],
+        signal: RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
+        class: RuntimeHttpErrorClass::ProfileUnavailable,
+        precommit_action: RuntimeHttpErrorAction::RotateProfile,
+    },
     RuntimeHttpErrorRule {
         name: "explicit_quota",
         statuses: &[402, 403, 429],
@@ -101,6 +110,10 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
     },
     RuntimePayloadCodeRule {
+        code: "deactivated_workspace",
+        signal: RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
+    },
+    RuntimePayloadCodeRule {
         code: "server_is_overloaded",
         signal: RuntimeHttpErrorSignal::ExplicitOverload,
     },
@@ -122,6 +135,13 @@ impl RuntimeHttpErrorRule {
                 RuntimeHttpErrorSignal::ExplicitQuota,
                 RuntimeQuotaMatchMode::ExplicitCode,
             ),
+            RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
+                runtime_error_signal_message_from_body(
+                    body,
+                    RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
+                    RuntimeQuotaMatchMode::ExplicitCode,
+                )
+            }
             RuntimeHttpErrorSignal::ExplicitOverload => runtime_error_signal_message_from_body(
                 body,
                 RuntimeHttpErrorSignal::ExplicitOverload,
@@ -186,6 +206,7 @@ pub fn runtime_http_error_policy(
 pub fn runtime_http_error_class_label(class: RuntimeHttpErrorClass) -> &'static str {
     match class {
         RuntimeHttpErrorClass::Quota => "quota",
+        RuntimeHttpErrorClass::ProfileUnavailable => "profile_unavailable",
         RuntimeHttpErrorClass::Overload => "overload",
         RuntimeHttpErrorClass::TransientServer => "transient_5xx",
         RuntimeHttpErrorClass::Other => "other",
@@ -212,6 +233,13 @@ pub fn runtime_error_signal_message_from_value(
                 RuntimeQuotaMatchMode::UsageMessage,
             )
         }),
+        RuntimeHttpErrorClass::ProfileUnavailable => runtime_json_find(value, |candidate| {
+            runtime_error_signal_candidate(
+                candidate,
+                RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
+                RuntimeQuotaMatchMode::ExplicitCode,
+            )
+        }),
         RuntimeHttpErrorClass::Overload => runtime_json_find(value, |candidate| {
             runtime_error_signal_candidate(
                 candidate,
@@ -235,6 +263,9 @@ pub fn runtime_error_signal_message_from_text(
     match signal {
         RuntimeHttpErrorClass::Quota => {
             runtime_usage_limit_text_message(trimmed).then(|| trimmed.to_string())
+        }
+        RuntimeHttpErrorClass::ProfileUnavailable => {
+            runtime_profile_unavailable_text_message(trimmed).then(|| trimmed.to_string())
         }
         RuntimeHttpErrorClass::Overload => {
             runtime_overload_text_message(trimmed).then(|| trimmed.to_string())
@@ -300,6 +331,9 @@ fn runtime_error_signal_message_from_body(
                 runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Quota)
             }
         },
+        RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
+            runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::ProfileUnavailable)
+        }
         RuntimeHttpErrorSignal::ExplicitOverload => {
             runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Overload)
         }
@@ -324,6 +358,9 @@ fn runtime_error_signal_candidate(
                     runtime_usage_limit_text_message(message).then(|| message.to_string())
                 }
             },
+            RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
+                runtime_profile_unavailable_text_message(message).then(|| message.to_string())
+            }
             RuntimeHttpErrorSignal::ExplicitOverload => {
                 runtime_error_signal_message_from_text(message, RuntimeHttpErrorClass::Overload)
             }
@@ -363,6 +400,11 @@ fn runtime_error_signal_candidate(
                             .to_string(),
                     )
                 }
+                RuntimeHttpErrorSignal::ExplicitProfileUnavailable if explicit_code => Some(
+                    message
+                        .unwrap_or("Upstream Codex workspace is deactivated for this profile.")
+                        .to_string(),
+                ),
                 RuntimeHttpErrorSignal::ExplicitOverload if explicit_code => Some(
                     message
                         .unwrap_or("Upstream Codex backend is currently overloaded.")
@@ -371,9 +413,9 @@ fn runtime_error_signal_candidate(
                 RuntimeHttpErrorSignal::ExplicitOverload => message
                     .filter(|message| runtime_overload_text_message(message))
                     .map(str::to_string),
-                RuntimeHttpErrorSignal::ExplicitQuota | RuntimeHttpErrorSignal::TransientStatus => {
-                    None
-                }
+                RuntimeHttpErrorSignal::ExplicitQuota
+                | RuntimeHttpErrorSignal::ExplicitProfileUnavailable
+                | RuntimeHttpErrorSignal::TransientStatus => None,
             }
         }
         _ => None,
@@ -381,34 +423,16 @@ fn runtime_error_signal_candidate(
 }
 
 fn runtime_payload_code_matches(code: &str, signal: RuntimeHttpErrorSignal) -> bool {
-    RUNTIME_PAYLOAD_CODE_RULES.iter().any(|rule| {
-        matches!(
-            (rule.signal, signal),
-            (
-                RuntimeHttpErrorSignal::ExplicitQuota,
-                RuntimeHttpErrorSignal::ExplicitQuota
-            ) | (
-                RuntimeHttpErrorSignal::ExplicitOverload,
-                RuntimeHttpErrorSignal::ExplicitOverload
-            )
-        ) && rule.code.eq_ignore_ascii_case(code.trim())
-    })
+    RUNTIME_PAYLOAD_CODE_RULES
+        .iter()
+        .any(|rule| rule.signal == signal && rule.code.eq_ignore_ascii_case(code.trim()))
 }
 
 fn runtime_text_has_payload_code(text: &str, signal: RuntimeHttpErrorSignal) -> bool {
     let lower = text.to_ascii_lowercase();
-    RUNTIME_PAYLOAD_CODE_RULES.iter().any(|rule| {
-        matches!(
-            (rule.signal, signal),
-            (
-                RuntimeHttpErrorSignal::ExplicitQuota,
-                RuntimeHttpErrorSignal::ExplicitQuota
-            ) | (
-                RuntimeHttpErrorSignal::ExplicitOverload,
-                RuntimeHttpErrorSignal::ExplicitOverload
-            )
-        ) && lower.contains(rule.code)
-    })
+    RUNTIME_PAYLOAD_CODE_RULES
+        .iter()
+        .any(|rule| rule.signal == signal && lower.contains(rule.code))
 }
 
 fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
@@ -417,6 +441,10 @@ fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
         || (lower.contains("out of credits")
             && lower.contains("workspace owner")
             && lower.contains("refill"))
+}
+
+fn runtime_profile_unavailable_text_message(message: &str) -> bool {
+    runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitProfileUnavailable)
 }
 
 fn runtime_transient_http_error_message(status: u16, body: &[u8]) -> String {

@@ -34,6 +34,20 @@ pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
     }
 }
 
+pub(crate) fn runtime_proxy_precommit_error_rotates_profile(status: u16, body: &[u8]) -> bool {
+    let policy = runtime_proxy_crate::runtime_http_error_policy(
+        status,
+        body,
+        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+    );
+    policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
+        && matches!(
+            policy.class,
+            runtime_proxy_crate::RuntimeHttpErrorClass::Quota
+                | runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable
+        )
+}
+
 pub(crate) fn runtime_proxy_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {
     redaction_redacted_body_snippet(body, max_chars)
 }
