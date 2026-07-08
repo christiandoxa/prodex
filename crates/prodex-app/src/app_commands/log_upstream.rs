@@ -2,7 +2,7 @@ use super::collect_recent_runtime_log_paths;
 use super::log_format::{current_log_width, render_log_block};
 use super::log_tui::{
     LOG_TUI_HEADER_REFRESH_INTERVAL, LogTuiInput, LogTuiState, LogTuiTerminal,
-    contains_ignore_ascii_case, log_tui_header_detail, marquee_text, visible_text,
+    contains_ignore_ascii_case, log_tui_header_detail, marquee_text, marquee_tick, visible_text,
 };
 use super::log_upstream_payload::{
     UpstreamPayloadEvent, render_upstream_payload_lines, upstream_payload_event_from_runtime_line,
@@ -84,7 +84,6 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
     }
     let mut header_profile = latest_upstream_payload_profile(&events).map(str::to_string);
     let mut header_detail = log_tui_header_detail(header_profile.as_deref());
-    let header_marquee_started_at = Instant::now();
     let mut header_refresh_at = Instant::now() + LOG_TUI_HEADER_REFRESH_INTERVAL;
 
     let mut followed_runtime_logs = BTreeMap::<PathBuf, FollowedLog>::new();
@@ -116,14 +115,7 @@ fn stream_upstream_payload_events_tui() -> Result<()> {
             header_refresh_at = now + LOG_TUI_HEADER_REFRESH_INTERVAL;
         }
         tui.terminal.draw(|frame| {
-            render_upstream_payload_tui(
-                frame,
-                &events,
-                &view,
-                header_detail.as_deref(),
-                (now.duration_since(header_marquee_started_at).as_millis()
-                    / LOG_STREAM_POLL_INTERVAL.as_millis()) as usize,
-            );
+            render_upstream_payload_tui(frame, &events, &view, header_detail.as_deref());
         })?;
         if event::poll(LOG_STREAM_POLL_INTERVAL)?
             && let Event::Key(key) = event::read()?
@@ -224,7 +216,6 @@ fn render_upstream_payload_tui(
     events: &VecDeque<UpstreamPayloadEvent>,
     state: &LogTuiState,
     header_detail: Option<&str>,
-    header_tick: usize,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -253,7 +244,7 @@ fn render_upstream_payload_tui(
         if detail_width > 0 {
             header_spans.push(Span::raw("  "));
             header_spans.push(Span::styled(
-                marquee_text(detail, detail_width, header_tick),
+                marquee_text(detail, detail_width, marquee_tick()),
                 tui_primary_style(),
             ));
         }

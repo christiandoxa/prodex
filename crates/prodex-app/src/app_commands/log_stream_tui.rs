@@ -1,6 +1,8 @@
 use super::log::{LogStreamItem, TranscriptEvent};
 use super::log_format::render_text_body;
-use super::log_tui::{LogTuiState, contains_ignore_ascii_case, marquee_text, visible_text};
+use super::log_tui::{
+    LogTuiState, contains_ignore_ascii_case, marquee_text, marquee_tick, visible_text,
+};
 use super::log_upstream_payload::{UpstreamPayloadEvent, render_upstream_payload_lines};
 use prodex_app_reports::InfoTokenUsageEvent;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -80,7 +82,6 @@ pub(super) fn render_log_stream_tui(
     items: &VecDeque<LogStreamItem>,
     state: &LogTuiState,
     header_detail: Option<&str>,
-    header_tick: usize,
 ) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -110,7 +111,7 @@ pub(super) fn render_log_stream_tui(
         if detail_width > 0 {
             header_spans.push(Span::raw("  "));
             header_spans.push(Span::styled(
-                marquee_text(detail, detail_width, header_tick),
+                marquee_text(detail, detail_width, marquee_tick()),
                 tui_primary_style(),
             ));
         }

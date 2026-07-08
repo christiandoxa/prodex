@@ -12,7 +12,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::text::{Line, Text};
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(super) const LOG_TUI_HEADER_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -181,6 +181,13 @@ pub(super) fn marquee_text(value: &str, width: usize, tick: usize) -> String {
     (0..width)
         .map(|index| chars[(tick + index) % chars.len()])
         .collect()
+}
+
+pub(super) fn marquee_tick() -> usize {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() / 250)
+        .unwrap_or_default() as usize
 }
 
 pub(super) fn log_tui_header_detail(preferred_profile: Option<&str>) -> Option<String> {
