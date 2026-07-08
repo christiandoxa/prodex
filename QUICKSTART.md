@@ -41,10 +41,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.258.0`:
+The current local version in this repo is `0.259.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.258.0
+npm install -g @christiandoxa/prodex@0.259.0
 ```
 
 Dependency status in this repo:
@@ -182,7 +182,7 @@ New Codex top-level subcommands stay on this managed path by default. For exampl
 
 Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure Bedrock or another provider in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
 
-Codex 0.142.3 includes the upstream Bedrock GPT-5.6 Sol, Terra, and Luna catalog entries. Prodex does not proxy or rewrite those Bedrock launches.
+Codex 0.143.0 includes the upstream Bedrock GPT-5.6 Sol, Terra, and Luna catalog entries and Codex-owned `max` reasoning effort handling. Prodex does not proxy or rewrite those Bedrock launches.
 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy. `prodex quota` still shows the configured provider metadata; Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider.
 

@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.259.0 - 2026-07-08
+
+### Runtime
+
+- Honor cached model context windows (`4064c8f`)
+
 ## 0.258.0 - 2026-07-07
 
 ### Runtime
@@ -71,10 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add interactive log search and scroll (`d2b7150`)
-
-## 0.247.0 - 2026-07-06
-
-### Misc
-
-- Refresh yanked transitive dependency (`db7ce2c`)
-- Satisfy clippy for binary payload detection (`572ef2a`)
