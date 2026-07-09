@@ -674,7 +674,7 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_ENV_PARALLEL_TAGS,
   },
   {
-    name: "runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_stale_continuation",
+    name: "runtime_proxy_websocket_previous_response_not_found_after_commit_passes_through",
     tags: CONTINUATION_TAGS,
   },
   {
