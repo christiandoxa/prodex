@@ -28,10 +28,7 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
                 MCP_MESSAGE_MAX_BYTES
             );
         }
-        loop {
-            let Some(header) = read_limited_line(reader, MCP_HEADER_LINE_MAX_BYTES)? else {
-                break;
-            };
+        while let Some(header) = read_limited_line(reader, MCP_HEADER_LINE_MAX_BYTES)? {
             let trimmed = header.trim();
             if trimmed.is_empty() {
                 break;

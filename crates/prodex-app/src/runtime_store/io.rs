@@ -359,10 +359,7 @@ where
 }
 
 fn read_json_file_to_string(path: &Path) -> io::Result<String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) => return Err(err),
-    };
+    let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(io::Error::other(format!(
             "refusing to read json through symlink {}",

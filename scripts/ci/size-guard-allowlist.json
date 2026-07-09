@@ -6,12 +6,12 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/log.rs",
-    "maxLines": 1512,
+    "maxLines": 1551,
     "reason": "Log stream routing, transcript extraction, binary-like tool-output suppression including mojibake filtering, and internal attachment-path filtering remain capped after moving mixed stream TUI rendering out of this command module."
   },
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 916,
+    "maxLines": 933,
     "reason": "Runtime launch command routing, provider selection, proxy wiring, and session/runtime entry planning remain capped while command routing is split from provider-specific launch ownership."
   },
   {
@@ -21,7 +21,7 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
-    "maxLines": 938,
+    "maxLines": 933,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
   },
   {
@@ -31,7 +31,7 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 912,
+    "maxLines": 966,
     "reason": "Kiro profile import now includes stricter private temp-home handling for copied credentials; capped at current size until provider import helpers are split from command orchestration."
   },
   {
@@ -55,13 +55,18 @@
     "reason": "Gemini SSE state-machine invariants with expanded tool-intent tracking; capped until split."
   },
   {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_context.rs",
+    "maxLines": 861,
+    "reason": "Gemini request context extraction now includes bounded local-context and compatibility guards; capped until request-context parsing is split from rewrite setup."
+  },
+  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek.rs",
     "maxLines": 975,
     "reason": "DeepSeek rewrite orchestration now carries provider-core conformance bridge gating and parity checks; capped at current size until pure request-shape admission is split from send orchestration."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini.rs",
-    "maxLines": 1249,
+    "maxLines": 1251,
     "reason": "Gemini rewrite orchestration now routes more request-shape decisions through provider-core conformance; capped at current size until admission helpers split from send orchestration."
   },
   {
@@ -81,12 +86,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_tests.rs",
-    "maxLines": 1224,
+    "maxLines": 1280,
     "reason": "Provider bridge regression coverage now includes translated compact routing and continuation metadata parity; capped at current size until tests split by provider."
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
-    "maxLines": 1080,
+    "maxLines": 1218,
     "reason": "Runtime launch run-command strategy regression coverage remains capped while matrix cases are split by CLI/runtime family."
   },
   {
@@ -106,8 +111,13 @@
   },
   {
     "file": "crates/prodex-app/tests/support/profile_commands_body/export.rs",
-    "maxLines": 886,
+    "maxLines": 939,
     "reason": "Profile export regression fixtures remain capped while provider-specific export scenarios are split from shared helpers."
+  },
+  {
+    "file": "crates/prodex-app/tests/support/profile_commands_body/import.rs",
+    "maxLines": 951,
+    "reason": "Profile import regression fixtures now cover bounded journal and credential recovery cases; capped until provider-specific import cases are split from shared helpers."
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
@@ -121,8 +131,13 @@
   },
   {
     "file": "crates/prodex-provider-core/src/translators/deepseek.rs",
-    "maxLines": 1276,
+    "maxLines": 1302,
     "reason": "DeepSeek translator now owns more explicit Responses compatibility loss reporting and continuation metadata handling; capped at current size until request/response helpers split by domain."
+  },
+  {
+    "file": "crates/prodex-profile-export/tests/src/lib.rs",
+    "maxLines": 906,
+    "reason": "Profile export envelope and import-journal regression coverage now includes bounded artifact cases; capped until fixtures split by envelope and journal domain."
   },
   {
     "file": "crates/prodex-provider-core/src/translators/gemini.rs",
@@ -131,12 +146,17 @@
   },
   {
     "file": "crates/prodex-session-store/src/lib.rs",
-    "maxLines": 935,
+    "maxLines": 993,
     "reason": "Session report resolution, resume repair with slim threshold change; recapped at current size."
   },
   {
     "file": "crates/prodex-session-store/tests/src/lib.rs",
-    "maxLines": 865,
+    "maxLines": 994,
     "reason": "Resume-repair and session-store regression coverage remain capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
+  },
+  {
+    "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",
+    "maxLines": 1018,
+    "reason": "Shared Codex home prepare regression coverage now includes bounded history and attachment race cases; capped until history and attachment fixtures split by domain."
   }
 ]

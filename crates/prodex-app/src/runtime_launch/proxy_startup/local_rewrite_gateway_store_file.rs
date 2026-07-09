@@ -200,7 +200,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "do not touch");
-        assert!(!std::fs::symlink_metadata(&tmp_path).is_ok());
+        assert!(std::fs::symlink_metadata(&tmp_path).is_err());
         assert!(path.is_file());
         std::fs::remove_dir_all(root).unwrap();
     }

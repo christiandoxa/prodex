@@ -157,7 +157,7 @@ fn gemini_cli_compat_does_not_cleanup_symlinked_generated_skill_dirs() {
     let outside = root.join("outside").join("generated-skill");
     fs::create_dir_all(&skills_root).unwrap();
     fs::create_dir_all(&outside).unwrap();
-    fs::write(&outside.join(GENERATED_SKILL_MARKER_FILE), "outside").unwrap();
+    fs::write(outside.join(GENERATED_SKILL_MARKER_FILE), "outside").unwrap();
     let linked = skills_root.join("gemini-linked");
     std::os::unix::fs::symlink(&outside, &linked).unwrap();
 

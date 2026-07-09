@@ -150,12 +150,11 @@ fn persist_codex_session_image_attachments_replaces_stable_symlink() {
 
     persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
 
-    assert_eq!(
+    assert!(
         fs::symlink_metadata(&stable)
             .expect("stable metadata should exist")
             .file_type()
-            .is_file(),
-        true
+            .is_file()
     );
     assert_eq!(
         fs::read(&stable).expect("stable image should be readable"),
@@ -343,12 +342,11 @@ fn persist_codex_session_attachment_replaces_stable_symlink() {
 
     persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
 
-    assert_eq!(
+    assert!(
         fs::symlink_metadata(&stable)
             .expect("stable metadata should exist")
             .file_type()
-            .is_file(),
-        true
+            .is_file()
     );
     assert_eq!(
         fs::read(&stable).expect("stable paste should be readable"),
