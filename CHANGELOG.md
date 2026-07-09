@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.266.0 - 2026-07-09
+
+### Misc
+
+- Connect stacked panel borders (`7e0c16f`)
+
 ## 0.265.0 - 2026-07-08
 
 ### CLI
@@ -75,9 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Keep main quota ready when spark is exhausted (`a40abc9`)
-
-## 0.254.0 - 2026-07-07
-
-### Misc
-
-- Respect cached Spark context metadata (`977eff3`)
