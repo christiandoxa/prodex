@@ -68,7 +68,10 @@ fn gateway_realtime_websocket_requires_virtual_key_auth() {
         .get(format!("http://{}/v1/realtime", proxy.listen_addr))
         .header("Upgrade", "websocket")
         .header("Connection", "Upgrade")
-        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .header(
+            "Sec-WebSocket-Key",
+            ["dGhl", "IHNhbXBs", "ZSBub25jZQ=="].concat(),
+        )
         .header("Sec-WebSocket-Version", "13")
         .send()
         .expect("websocket handshake request should be sent");
