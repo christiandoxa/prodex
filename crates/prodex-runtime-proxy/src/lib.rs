@@ -122,6 +122,7 @@ pub fn path_without_query(path_and_query: &str) -> &str {
 pub fn runtime_proxy_openai_suffix(path: &str) -> Option<&str> {
     if let Some(suffix) = path.strip_prefix(LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX)
         && let Some(version_suffix_index) = suffix.find('/')
+        && runtime_proxy_legacy_version_segment(&suffix[..version_suffix_index])
     {
         return Some(&suffix[version_suffix_index..]);
     }
@@ -133,6 +134,14 @@ pub fn runtime_proxy_openai_suffix(path: &str) -> Option<&str> {
     }
 
     None
+}
+
+fn runtime_proxy_legacy_version_segment(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment.bytes().any(|byte| byte.is_ascii_digit())
+        && segment
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
 }
 
 pub fn runtime_proxy_normalize_openai_path(path_and_query: &str) -> Cow<'_, str> {

@@ -88,17 +88,31 @@ pub(super) fn required_auth_json_text(codex_home: &Path) -> Result<String> {
 }
 
 pub(super) fn ensure_managed_profiles_root(paths: &AppPaths) -> Result<()> {
-    fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
-        format!(
-            "failed to create managed profile root {}",
-            paths.managed_profiles_root.display()
-        )
-    })
+    prodex_shared_codex_fs::ensure_managed_profiles_root(paths)
 }
 
 pub(super) fn managed_profile_home_path(paths: &AppPaths, profile_name: &str) -> Result<PathBuf> {
     ensure_managed_profiles_root(paths)?;
     absolutize(paths.managed_profiles_root.join(profile_name))
+}
+
+pub(super) fn prepare_profile_codex_home(paths: &AppPaths, profile: &ProfileEntry) -> Result<()> {
+    if profile.managed {
+        ensure_managed_profiles_root(paths)?;
+        if !prodex_core::path_is_strictly_under_root(
+            &paths.managed_profiles_root,
+            &profile.codex_home,
+        ) {
+            bail!(
+                "managed profile home {} is outside {}",
+                profile.codex_home.display(),
+                paths.managed_profiles_root.display()
+            );
+        }
+        prepare_managed_codex_home(paths, &profile.codex_home)
+    } else {
+        create_codex_home_if_missing(&profile.codex_home)
+    }
 }
 
 pub(super) fn update_existing_profile_auth(
@@ -115,11 +129,7 @@ pub(super) fn update_existing_profile_auth(
         .with_context(|| format!("profile '{}' is missing", profile_name))?
         .clone();
 
-    if profile.managed {
-        prepare_managed_codex_home(paths, &profile.codex_home)?;
-    } else {
-        create_codex_home_if_missing(&profile.codex_home)?;
-    }
+    prepare_profile_codex_home(paths, &profile)?;
     write_secret_text_file(
         &secret_store::auth_json_path(&profile.codex_home),
         auth_json,

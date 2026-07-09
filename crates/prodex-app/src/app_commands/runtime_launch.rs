@@ -436,6 +436,7 @@ fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildPr
             .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
             .managed
     {
+        ensure_managed_runtime_launch_home_under_root(&paths, &selection.codex_home)?;
         prepare_managed_codex_home_for_runtime_launch(&paths, &selection.codex_home)?;
     }
 
@@ -479,6 +480,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
 
         let managed = self.selected_profile_is_managed()?;
         if managed {
+            ensure_managed_runtime_launch_home_under_root(&self.paths, &self.selection.codex_home)?;
             // ponytail: keep launch hot path out of full shared-session maintenance;
             // targeted resume repair runs before child launch, and full maintenance already runs
             // after child exit.
@@ -582,6 +584,21 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             })?
             .managed)
     }
+}
+
+fn ensure_managed_runtime_launch_home_under_root(
+    paths: &AppPaths,
+    codex_home: &Path,
+) -> Result<()> {
+    prodex_shared_codex_fs::ensure_managed_profiles_root(paths)?;
+    if !prodex_core::path_is_strictly_under_root(&paths.managed_profiles_root, codex_home) {
+        bail!(
+            "managed profile home {} is outside {}",
+            codex_home.display(),
+            paths.managed_profiles_root.display()
+        );
+    }
+    Ok(())
 }
 
 struct RuntimeProxyStartupFactory;

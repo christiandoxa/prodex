@@ -38,23 +38,23 @@ fn ensure_shared_codex_file(path: &Path, metadata: &fs::Metadata) -> Result<()> 
 }
 
 fn ensure_shared_codex_path_is_directory(path: &Path) -> Result<()> {
-    if path.is_dir() {
-        return Ok(());
-    }
-    bail!(
-        "expected {} to be a directory for shared Codex state",
-        path.display()
-    );
+    let Some(metadata) = load_shared_codex_entry_metadata(path)? else {
+        bail!(
+            "expected {} to be a directory for shared Codex state",
+            path.display()
+        );
+    };
+    ensure_shared_codex_directory(path, &metadata)
 }
 
 fn ensure_shared_codex_path_is_file(path: &Path) -> Result<()> {
-    if path.is_file() {
-        return Ok(());
-    }
-    bail!(
-        "expected {} to be a file for shared Codex state",
-        path.display()
-    );
+    let Some(metadata) = load_shared_codex_entry_metadata(path)? else {
+        bail!(
+            "expected {} to be a file for shared Codex state",
+            path.display()
+        );
+    };
+    ensure_shared_codex_file(path, &metadata)
 }
 
 fn ensure_shared_codex_target_is_directory(path: &Path) -> Result<()> {
@@ -88,8 +88,9 @@ pub(super) fn copy_shared_codex_file_replacing_existing(
 ) -> Result<()> {
     ensure_shared_codex_parent_dir(destination)?;
     remove_existing_shared_codex_file_destination(destination)?;
-    let source_metadata =
-        fs::metadata(source).with_context(|| format!("failed to inspect {}", source.display()))?;
+    let source_metadata = fs::symlink_metadata(source)
+        .with_context(|| format!("failed to inspect {}", source.display()))?;
+    ensure_shared_codex_file(source, &source_metadata)?;
     fs::copy(source, destination).with_context(|| {
         format!(
             "{context} {} to {}",
@@ -196,7 +197,7 @@ fn create_symlink(target: &Path, link: &Path, kind: SharedCodexEntryKind) -> Res
     Ok(())
 }
 
-fn remove_existing_shared_codex_file_destination(path: &Path) -> Result<()> {
+pub(super) fn remove_existing_shared_codex_file_destination(path: &Path) -> Result<()> {
     let Some(metadata) = load_shared_codex_entry_metadata(path)? else {
         return Ok(());
     };
@@ -266,6 +267,41 @@ pub fn create_codex_home_if_missing(path: &Path) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let permissions = fs::Permissions::from_mode(0o700);
         let _ = fs::set_permissions(path, permissions);
+    }
+    Ok(())
+}
+
+pub fn ensure_managed_profiles_root(paths: &AppPaths) -> Result<()> {
+    let root = &paths.managed_profiles_root;
+    match fs::symlink_metadata(root) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                bail!(
+                    "managed profile root {} must not be a symbolic link",
+                    root.display()
+                );
+            }
+            if !metadata.is_dir() {
+                bail!(
+                    "managed profile root {} must be a directory",
+                    root.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir_all(root)
+                .with_context(|| format!("failed to create {}", root.display()))?;
+        }
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to inspect {}", root.display()));
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = fs::Permissions::from_mode(0o700);
+        let _ = fs::set_permissions(root, permissions);
     }
     Ok(())
 }

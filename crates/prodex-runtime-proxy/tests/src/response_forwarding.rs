@@ -4,7 +4,13 @@ use super::*;
 fn skips_runtime_response_headers_case_insensitively() {
     assert!(should_skip_runtime_response_header("Connection"));
     assert!(should_skip_runtime_response_header("content-length"));
+    assert!(should_skip_runtime_response_header("Keep-Alive"));
+    assert!(should_skip_runtime_response_header("Proxy-Authenticate"));
+    assert!(should_skip_runtime_response_header("Proxy-Authorization"));
+    assert!(should_skip_runtime_response_header("TE"));
+    assert!(should_skip_runtime_response_header("Trailer"));
     assert!(should_skip_runtime_response_header("TRANSFER-ENCODING"));
+    assert!(should_skip_runtime_response_header("Upgrade"));
     assert!(!should_skip_runtime_response_header("x-codex-turn-state"));
     assert!(!should_skip_runtime_response_header("content-type"));
 }
@@ -23,6 +29,20 @@ fn filters_text_response_headers_without_rewriting_values() {
             ("Content-Type".to_string(), "text/event-stream".to_string()),
             ("x-codex-turn-state".to_string(), " ts-1 ".to_string()),
         ]
+    );
+}
+
+#[test]
+fn filters_connection_named_text_response_headers() {
+    let headers = runtime_forward_text_response_headers([
+        ("Connection", "keep-alive, X-Local-Hop"),
+        ("X-Local-Hop", "strip-me"),
+        ("x-codex-turn-state", "keep-me"),
+    ]);
+
+    assert_eq!(
+        headers,
+        vec![("x-codex-turn-state".to_string(), "keep-me".to_string())]
     );
 }
 
@@ -91,6 +111,20 @@ fn filters_binary_response_headers_without_utf8_requirement() {
 }
 
 #[test]
+fn filters_connection_named_binary_response_headers() {
+    let headers = runtime_forward_binary_response_headers([
+        ("Connection", b"X-Local-Hop".as_slice()),
+        ("X-Local-Hop", b"strip-me".as_slice()),
+        ("x-binary", b"\xff\x00".as_slice()),
+    ]);
+
+    assert_eq!(
+        headers,
+        vec![("x-binary".to_string(), b"\xff\x00".to_vec())]
+    );
+}
+
+#[test]
 fn extracts_buffered_response_metadata_from_binary_headers() {
     let headers = [
         ("x-extra", b"ignored".as_slice()),
@@ -110,14 +144,14 @@ fn extracts_buffered_response_metadata_from_binary_headers() {
 }
 
 #[test]
-fn classifies_sse_content_type_with_existing_case_sensitive_match() {
+fn classifies_sse_content_type_case_insensitively() {
     assert_eq!(
         runtime_response_forwarding_body_kind(Some("text/event-stream; charset=utf-8")),
         RuntimeResponseForwardingBodyKind::Sse
     );
     assert_eq!(
         runtime_response_forwarding_body_kind(Some("TEXT/EVENT-STREAM")),
-        RuntimeResponseForwardingBodyKind::Unary
+        RuntimeResponseForwardingBodyKind::Sse
     );
     assert_eq!(
         runtime_response_forwarding_body_kind(None),

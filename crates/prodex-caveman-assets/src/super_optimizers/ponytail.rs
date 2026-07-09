@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::fs_ops::{read_text_file_limited, remove_existing_dir_path, write_text_file};
 use crate::toml_helpers::ensure_child_table;
 
 const MARKETPLACE_NAME: &str = "ponytail";
@@ -19,10 +20,8 @@ pub(super) fn install_ponytail_plugin(codex_home: &Path, checkout: &Path) -> Res
         .join("plugins/cache")
         .join(MARKETPLACE_NAME)
         .join(PLUGIN_NAME);
-    if plugin_cache_base.exists() {
-        fs::remove_dir_all(&plugin_cache_base)
-            .with_context(|| format!("failed to clear {}", plugin_cache_base.display()))?;
-    }
+    remove_existing_dir_path(&plugin_cache_base)
+        .with_context(|| format!("failed to clear {}", plugin_cache_base.display()))?;
     copy_ponytail_checkout(checkout, &plugin_cache_base.join(&plugin_version))?;
     configure_ponytail_plugin_config(codex_home)?;
     Ok(())
@@ -44,7 +43,7 @@ pub(super) fn find_ponytail_checkout(optimizer_roots: &[PathBuf]) -> Option<Path
 
 fn configure_ponytail_plugin_config(codex_home: &Path) -> Result<()> {
     let config_path = codex_home.join("config.toml");
-    let contents = fs::read_to_string(&config_path).unwrap_or_default();
+    let contents = read_text_file_limited(&config_path)?.unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
         toml::Table::new()
     } else {
@@ -81,8 +80,7 @@ fn configure_ponytail_plugin_config(codex_home: &Path) -> Result<()> {
 
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Ponytail plugin config overlay")?;
-    fs::write(&config_path, rendered)
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    write_text_file(&config_path, &rendered)?;
     Ok(())
 }
 
@@ -100,10 +98,8 @@ fn ponytail_plugin_version(plugin_json: &Path) -> Result<String> {
 }
 
 fn copy_ponytail_checkout(source: &Path, destination: &Path) -> Result<()> {
-    if destination.exists() {
-        fs::remove_dir_all(destination)
-            .with_context(|| format!("failed to clear {}", destination.display()))?;
-    }
+    remove_existing_dir_path(destination)
+        .with_context(|| format!("failed to clear {}", destination.display()))?;
     copy_ponytail_dir(source, destination)
 }
 

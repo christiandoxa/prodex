@@ -4,11 +4,12 @@ use reqwest::blocking::Client;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::env;
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_MEMORY_LIMIT: i64 = 20;
+const MEM0_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const PRODEX_MEMORY_BACKEND_ENV: &str = "PRODEX_MEMORY_BACKEND";
 const PRODEX_MEM0_API_URL_ENV: &str = "PRODEX_MEM0_API_URL";
 const PRODEX_MEM0_API_KEY_ENV: &str = "PRODEX_MEM0_API_KEY";
@@ -310,8 +311,7 @@ fn mem0_memory_add(client: &Mem0MemoryClient, args: &Value) -> Result<String> {
         .send()
         .context("failed to call Mem0 /memories")?;
     let status = response.status();
-    let body: Value = response
-        .json()
+    let body = read_mem0_json_response(response)
         .with_context(|| format!("failed to parse Mem0 /memories response ({status})"))?;
     if !status.is_success() {
         anyhow::bail!("Mem0 /memories returned {status}: {body}");
@@ -338,8 +338,7 @@ fn mem0_memory_search(client: &Mem0MemoryClient, args: &Value) -> Result<String>
         .send()
         .context("failed to call Mem0 /search")?;
     let status = response.status();
-    let body: Value = response
-        .json()
+    let body = read_mem0_json_response(response)
         .with_context(|| format!("failed to parse Mem0 /search response ({status})"))?;
     if !status.is_success() {
         anyhow::bail!("Mem0 /search returned {status}: {body}");
@@ -357,8 +356,7 @@ fn mem0_memory_context(client: &Mem0MemoryClient, args: &Value) -> Result<String
         .send()
         .context("failed to call Mem0 /memories")?;
     let status = response.status();
-    let body: Value = response
-        .json()
+    let body = read_mem0_json_response(response)
         .with_context(|| format!("failed to parse Mem0 /memories response ({status})"))?;
     if !status.is_success() {
         anyhow::bail!("Mem0 /memories returned {status}: {body}");
@@ -377,11 +375,37 @@ fn mem0_memory_delete(client: &Mem0MemoryClient, args: &Value) -> Result<String>
         .send()
         .context("failed to call Mem0 delete memory")?;
     let status = response.status();
-    let body = response.text().unwrap_or_default();
+    let body = read_mem0_text_response(response).unwrap_or_default();
     if !status.is_success() {
         anyhow::bail!("Mem0 delete returned {status}: {body}");
     }
     Ok(format!("deleted Mem0 memory id={id}"))
+}
+
+fn read_mem0_json_response(response: reqwest::blocking::Response) -> Result<Value> {
+    let body = read_mem0_response_body(response)?;
+    serde_json::from_slice(&body).context("invalid Mem0 JSON response")
+}
+
+fn read_mem0_text_response(response: reqwest::blocking::Response) -> Result<String> {
+    let body = read_mem0_response_body(response)?;
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+fn read_mem0_response_body(mut response: reqwest::blocking::Response) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    response
+        .by_ref()
+        .take((MEM0_RESPONSE_MAX_BYTES as u64).saturating_add(1))
+        .read_to_end(&mut body)
+        .context("failed to read Mem0 response")?;
+    if body.len() > MEM0_RESPONSE_MAX_BYTES {
+        anyhow::bail!(
+            "Mem0 response exceeded safe size limit ({})",
+            MEM0_RESPONSE_MAX_BYTES
+        );
+    }
+    Ok(body)
 }
 
 fn format_mem0_memories(value: &Value, limit: usize) -> Result<String> {

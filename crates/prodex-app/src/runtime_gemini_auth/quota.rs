@@ -7,6 +7,7 @@ use super::{
     GeminiOAuthSecret, force_refresh_gemini_oauth_secret, gemini_oauth_project_from_env,
     normalize_gemini_project_id, refresh_gemini_oauth_secret_if_needed, write_gemini_oauth_secret,
 };
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_text_with_limit};
 use anyhow::{Context, Result, bail};
 use prodex_quota::GeminiQuotaInfo;
 use reqwest::blocking::Client;
@@ -173,9 +174,11 @@ fn retrieve_gemini_user_quota(
             .send()
             .context("failed to fetch Gemini quota")?;
         let status = response.status();
-        let body = response
-            .text()
-            .context("failed to read Gemini quota response")?;
+        let body = read_blocking_response_text_with_limit(
+            response,
+            RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+            "failed to read Gemini quota response",
+        )?;
         if status.is_success() {
             return serde_json::from_str(&body).context("failed to parse Gemini quota response");
         }

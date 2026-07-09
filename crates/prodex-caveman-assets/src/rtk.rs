@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
 use std::env;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use crate::fs_ops::{read_text_file_limited, write_executable_file, write_text_file};
 use crate::localization::localize_text_file;
 use crate::{AGENTS_MD, PRODEX_RTK_CODEX_AWARENESS, RTK_MD};
 
@@ -14,8 +13,7 @@ const RTK_STATE_DIR_NAME: &str = "rtk";
 pub fn configure_rtk_codex_home(codex_home: &Path) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let rtk_md_path = codex_home.join(RTK_MD);
-    fs::write(&rtk_md_path, PRODEX_RTK_CODEX_AWARENESS)
-        .with_context(|| format!("failed to write {}", rtk_md_path.display()))?;
+    write_text_file(&rtk_md_path, PRODEX_RTK_CODEX_AWARENESS)?;
     localize_text_file(&codex_home.join(AGENTS_MD))?;
     ensure_rtk_agents_reference(codex_home, &rtk_md_path)?;
     configure_rtk_wrapper(codex_home)
@@ -24,8 +22,7 @@ pub fn configure_rtk_codex_home(codex_home: &Path) -> Result<()> {
 fn ensure_rtk_agents_reference(codex_home: &Path, rtk_md_path: &Path) -> Result<()> {
     let agents_path = codex_home.join(AGENTS_MD);
     let reference = format!("@{}", rtk_md_path.display());
-    let contents = fs::read_to_string(&agents_path)
-        .with_context(|| format!("failed to read {}", agents_path.display()))?;
+    let contents = read_text_file_limited(&agents_path)?.unwrap_or_default();
     if contents.lines().any(|line| line.trim() == reference) {
         return Ok(());
     }
@@ -40,8 +37,7 @@ fn ensure_rtk_agents_reference(codex_home: &Path, rtk_md_path: &Path) -> Result<
         updated.push_str(&reference);
         updated.push('\n');
     }
-    fs::write(&agents_path, updated)
-        .with_context(|| format!("failed to write {}", agents_path.display()))?;
+    write_text_file(&agents_path, &updated)?;
     Ok(())
 }
 
@@ -263,21 +259,7 @@ fn home_dir_from_env() -> Option<PathBuf> {
 }
 
 fn write_executable_script(path: &Path, script: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::write(path, script).with_context(|| format!("failed to write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path)
-            .with_context(|| format!("failed to stat {}", path.display()))?
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to chmod {}", path.display()))?;
-    }
-    Ok(())
+    write_executable_file(path, script)
 }
 
 #[cfg(test)]

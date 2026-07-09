@@ -395,7 +395,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("path", request_path.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&request_path)),
                 ],
             ),
         );
@@ -446,7 +446,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                             runtime_proxy_log_field("request", request_id.to_string()),
                             runtime_proxy_log_field("transport", "websocket"),
                             runtime_proxy_log_field("reason", rejection.code()),
-                            runtime_proxy_log_field("path", request_path.as_str()),
+                            runtime_proxy_log_field("path", path_without_query(&request_path)),
                         ],
                     ),
                 );
@@ -467,7 +467,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("path", request_path),
+                    runtime_proxy_log_field("path", path_without_query(&request_path)),
                 ],
             ),
         );
@@ -493,7 +493,10 @@ fn handle_runtime_local_rewrite_proxy_request(
                     ],
                 ),
             );
-            let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
+            let _ = request.respond(build_runtime_proxy_text_response(
+                runtime_proxy_capture_error_status(&err),
+                &err.to_string(),
+            ));
             return;
         }
     };
@@ -529,7 +532,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -544,7 +547,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
                     runtime_proxy_log_field("reason", rejection.code()),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -568,7 +571,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("phase", "pre"),
                     runtime_proxy_log_field("reason", block.reason.as_str()),
                     runtime_proxy_log_field("value", block.value.as_str()),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -592,7 +595,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("transport", "http"),
                     runtime_proxy_log_field("reason", block.kind.as_str()),
                     runtime_proxy_log_field("value", block.value.as_str()),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -630,7 +633,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("alias", rewrite.alias.as_str()),
                     runtime_proxy_log_field("strategy", rewrite.strategy.as_str()),
                     runtime_proxy_log_field("model", rewrite.model.as_str()),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -642,7 +645,12 @@ fn handle_runtime_local_rewrite_proxy_request(
             return;
         }
         if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = &shared.provider {
-            let parts = runtime_kiro_compact_response_parts(request_id, &captured.body, auth);
+            let parts = runtime_kiro_compact_response_parts(
+                request_id,
+                &captured.body,
+                &shared.runtime_shared.async_runtime,
+                auth,
+            );
             let _ = request.respond(runtime_local_rewrite_response_with_call_id(
                 parts, request_id, shared,
             ));

@@ -14,6 +14,22 @@ fn normalizes_prodex_openai_mount_paths() {
         "/backend-api/codex/responses"
     );
     assert_eq!(
+        runtime_proxy_normalize_openai_path("/backend-api/prodex/v123/responses").as_ref(),
+        "/backend-api/codex/responses"
+    );
+    assert_eq!(
+        runtime_proxy_normalize_openai_path("/backend-api/prodex/v0.2.99/responses").as_ref(),
+        "/backend-api/codex/responses"
+    );
+    assert_eq!(
+        runtime_proxy_normalize_openai_path("/backend-api/prodex/victim/responses").as_ref(),
+        "/backend-api/codex/victim/responses"
+    );
+    assert_eq!(
+        runtime_proxy_normalize_openai_path("/backend-api/prodex/v/responses").as_ref(),
+        "/backend-api/codex/v/responses"
+    );
+    assert_eq!(
         runtime_proxy_normalize_openai_path("/backend-api/codex/responses").as_ref(),
         "/backend-api/codex/responses"
     );

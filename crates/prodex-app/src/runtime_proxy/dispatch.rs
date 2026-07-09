@@ -19,6 +19,36 @@ fn runtime_proxy_log_dispatch_error(
     );
 }
 
+const RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug)]
+struct RuntimeProxyRequestBodyTooLarge {
+    limit: usize,
+}
+
+impl std::fmt::Display for RuntimeProxyRequestBodyTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "proxied Codex request body exceeds {} bytes",
+            self.limit
+        )
+    }
+}
+
+impl std::error::Error for RuntimeProxyRequestBodyTooLarge {}
+
+pub(crate) fn runtime_proxy_capture_error_status(err: &anyhow::Error) -> u16 {
+    if err
+        .downcast_ref::<RuntimeProxyRequestBodyTooLarge>()
+        .is_some()
+    {
+        413
+    } else {
+        502
+    }
+}
+
 pub(crate) fn handle_runtime_rotation_proxy_request(
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
@@ -43,6 +73,7 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         let _ = request.respond(response);
         return;
     }
+    let mut captured_after_lane_limit = None;
     let _active_request_guard = match acquire_runtime_proxy_active_request_slot_with_wait(
         shared,
         request_transport,
@@ -53,6 +84,52 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
             mark_runtime_proxy_local_overload(shared, "active_request_limit");
             reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
             return;
+        }
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(_lane)) if !websocket => {
+            let captured = match capture_runtime_proxy_request(&mut request) {
+                Ok(captured) => captured,
+                Err(err) => {
+                    runtime_proxy_log_dispatch_error(
+                        shared,
+                        request_id,
+                        "capture_error",
+                        err.to_string(),
+                    );
+                    let _ = request.respond(build_runtime_proxy_text_response(
+                        runtime_proxy_capture_error_status(&err),
+                        &err.to_string(),
+                    ));
+                    return;
+                }
+            };
+            match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+                shared,
+                request_transport,
+                &request_path,
+                Some(&captured),
+            ) {
+                Ok(guard) => {
+                    captured_after_lane_limit = Some(captured);
+                    guard
+                }
+                Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
+                    mark_runtime_proxy_local_overload(shared, "active_request_limit");
+                    reject_runtime_proxy_overloaded_request(
+                        request,
+                        shared,
+                        "active_request_limit",
+                    );
+                    return;
+                }
+                Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
+                    let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
+                    if runtime_proxy_lane_limit_marks_global_overload(lane) {
+                        mark_runtime_proxy_local_overload(shared, &reason);
+                    }
+                    reject_runtime_proxy_overloaded_request(request, shared, &reason);
+                    return;
+                }
+            }
         }
         Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
             let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
@@ -72,7 +149,7 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("path", request.url()),
+                    runtime_proxy_log_field("path", runtime_proxy_log_url(request.url())),
                 ],
             ),
         );
@@ -80,21 +157,33 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         return;
     }
 
-    dispatch_runtime_http_proxy_request(request_id, request, shared);
+    dispatch_runtime_http_proxy_request(request_id, request, shared, captured_after_lane_limit);
 }
 
 fn dispatch_runtime_http_proxy_request(
     request_id: u64,
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
+    captured: Option<RuntimeProxyRequest>,
 ) {
-    let mut captured = match capture_runtime_proxy_request(&mut request) {
-        Ok(captured) => captured,
-        Err(err) => {
-            runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
-            let _ = request.respond(build_runtime_proxy_text_response(502, &err.to_string()));
-            return;
-        }
+    let mut captured = match captured {
+        Some(captured) => captured,
+        None => match capture_runtime_proxy_request(&mut request) {
+            Ok(captured) => captured,
+            Err(err) => {
+                runtime_proxy_log_dispatch_error(
+                    shared,
+                    request_id,
+                    "capture_error",
+                    err.to_string(),
+                );
+                let _ = request.respond(build_runtime_proxy_text_response(
+                    runtime_proxy_capture_error_status(&err),
+                    &err.to_string(),
+                ));
+                return;
+            }
+        },
     };
     if let Err(err) = apply_runtime_presidio_redaction_to_request(request_id, &mut captured, shared)
     {
@@ -115,7 +204,7 @@ fn dispatch_runtime_http_proxy_request(
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                runtime_proxy_log_field("path", runtime_proxy_log_url(&captured.path_and_query)),
                 runtime_proxy_log_field(
                     "previous_response_id",
                     format!("{:?}", runtime_request_previous_response_id(&captured)),
@@ -264,11 +353,18 @@ pub(crate) fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bo
 pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
 ) -> Result<RuntimeProxyRequest> {
-    let mut body = Vec::new();
-    request
-        .as_reader()
-        .read_to_end(&mut body)
-        .context("failed to read proxied Codex request body")?;
+    if let Some(body_length) = request.body_length()
+        && body_length > RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES
+    {
+        return Err(RuntimeProxyRequestBodyTooLarge {
+            limit: RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES,
+        }
+        .into());
+    }
+    let body = read_runtime_proxy_request_body_limited(
+        request.as_reader(),
+        RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES,
+    )?;
 
     Ok(RuntimeProxyRequest {
         method: request.method().as_str().to_string(),
@@ -302,6 +398,18 @@ pub(crate) fn runtime_proxy_request_headers(request: &tiny_http::Request) -> Vec
         .collect()
 }
 
+fn read_runtime_proxy_request_body_limited(reader: impl Read, limit: usize) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    let mut reader = reader.take((limit as u64).saturating_add(1));
+    reader
+        .read_to_end(&mut body)
+        .context("failed to read proxied Codex request body")?;
+    if body.len() > limit {
+        return Err(RuntimeProxyRequestBodyTooLarge { limit }.into());
+    }
+    Ok(body)
+}
+
 pub(crate) fn proxy_runtime_responses_websocket_request(
     request_id: u64,
     request: tiny_http::Request,
@@ -317,7 +425,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("unsupported_path", request.url()),
+                    runtime_proxy_log_field(
+                        "unsupported_path",
+                        runtime_proxy_log_url(request.url()),
+                    ),
                 ],
             ),
         );
@@ -337,7 +448,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
+                    runtime_proxy_log_field(
+                        "path",
+                        runtime_proxy_log_url(&handshake_request.path_and_query),
+                    ),
                 ],
             ),
         );
@@ -378,7 +492,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "websocket"),
-                runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
+                runtime_proxy_log_field(
+                    "path",
+                    runtime_proxy_log_url(&handshake_request.path_and_query),
+                ),
                 runtime_proxy_log_field(
                     "previous_response_id",
                     format!(
@@ -555,4 +672,38 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
         ),
     }
     Ok(translated_response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_proxy_request_body_limit_allows_exact_limit() {
+        let body = vec![b'a'; 4];
+
+        let captured = read_runtime_proxy_request_body_limited(Cursor::new(body.clone()), 4)
+            .expect("body at limit should be accepted");
+
+        assert_eq!(captured, body);
+    }
+
+    #[test]
+    fn runtime_proxy_request_body_limit_rejects_limit_plus_one() {
+        let err = read_runtime_proxy_request_body_limited(Cursor::new(vec![b'a'; 5]), 4)
+            .expect_err("body above limit should be rejected");
+
+        assert_eq!(runtime_proxy_capture_error_status(&err), 413);
+        assert!(
+            err.downcast_ref::<RuntimeProxyRequestBodyTooLarge>()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_capture_error_status_keeps_other_capture_errors_as_bad_gateway() {
+        let err = anyhow::anyhow!("read failed");
+
+        assert_eq!(runtime_proxy_capture_error_status(&err), 502);
+    }
 }

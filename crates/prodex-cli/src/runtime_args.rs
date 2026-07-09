@@ -3,6 +3,9 @@ use clap::{ArgGroup, Args, Subcommand};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+#[path = "runtime_args/super_tail_extract.rs"]
+mod super_tail_extract;
+
 pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "ponytail"];
 
 #[derive(Args, Debug)]
@@ -342,66 +345,10 @@ pub struct GatewayProviderFilterArgs {
 
 impl SuperArgs {
     /// The first positional arg can look like a session ID when `trailing_var_arg=true`
-    /// leaves provider flags unseen by clap. Extract `--provider`, `--model`, and `--api-key`
-    /// from `codex_args` and apply them to the struct so downstream provider logic works.
+    /// leaves Super flags unseen by clap. Extract the small set of Super-only flags that
+    /// users commonly place after a session id so they do not leak into `codex resume`.
     pub fn extract_provider_overrides_from_codex_args(&mut self) {
-        let mut i = 0;
-        while i < self.codex_args.len() {
-            let Some(arg) = self.codex_args[i].to_str() else {
-                i += 1;
-                continue;
-            };
-            let (consumed, skip) = match arg {
-                "--provider" => {
-                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                        self.provider = parse_super_external_provider(val).ok();
-                        (2, true)
-                    } else {
-                        (1, false)
-                    }
-                }
-                a if a.starts_with("--provider=") => {
-                    if let Some(val) = a.strip_prefix("--provider=") {
-                        self.provider = parse_super_external_provider(val).ok();
-                    }
-                    (1, true)
-                }
-                "--api-key" => {
-                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                        self.api_key = Some(val.to_string());
-                        (2, true)
-                    } else {
-                        (1, false)
-                    }
-                }
-                a if a.starts_with("--api-key=") => {
-                    self.api_key = a.strip_prefix("--api-key=").map(|v| v.to_string());
-                    (1, true)
-                }
-                "--model" => {
-                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                        self.local_model = Some(val.to_string());
-                        (2, true)
-                    } else {
-                        (1, false)
-                    }
-                }
-                a if a.starts_with("--model=") => {
-                    self.local_model = a.strip_prefix("--model=").map(|v| v.to_string());
-                    (1, true)
-                }
-                _ => {
-                    i += 1;
-                    continue;
-                }
-            };
-            if skip {
-                let drain_end = (i + consumed).min(self.codex_args.len());
-                self.codex_args.drain(i..drain_end);
-            } else {
-                i += consumed;
-            }
-        }
+        super_tail_extract::extract_provider_overrides_from_codex_args(self);
     }
 
     pub fn presidio_preference(&self) -> Option<bool> {

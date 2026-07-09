@@ -1,4 +1,7 @@
 use super::*;
+use std::io::{Read, Write};
+
+const CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";
 const SESSION_ATTACHMENT_DIR: &str = "attachments";
@@ -56,14 +59,89 @@ pub(crate) fn persist_codex_session_file_image_attachments(
     codex_home: &Path,
     session_file: &Path,
 ) -> Result<String> {
-    let contents = fs::read_to_string(session_file)
-        .with_context(|| format!("failed to read {}", session_file.display()))?;
+    let contents = read_codex_session_attachment_file(session_file)?;
     let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &contents)?;
     if rewritten != contents {
-        fs::write(session_file, &rewritten)
-            .with_context(|| format!("failed to write {}", session_file.display()))?;
+        write_codex_session_attachment_file(session_file, &rewritten)?;
     }
     Ok(rewritten)
+}
+
+fn read_codex_session_attachment_file(path: &Path) -> Result<String> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "refusing to read session through symlink {}",
+            path.display()
+        );
+    }
+    if !metadata.file_type().is_file() {
+        bail!("session path {} is not a file", path.display());
+    }
+    if metadata.len() > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        bail!(
+            "session {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES
+        );
+    }
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    if !codex_session_same_file_metadata(&metadata, &file.metadata()?) {
+        bail!("session path changed while opening {}", path.display());
+    }
+    let mut bytes = Vec::new();
+    file.take(CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if bytes.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        bail!(
+            "session {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES
+        );
+    }
+    String::from_utf8(bytes).with_context(|| format!("failed to decode {}", path.display()))
+}
+
+fn write_codex_session_attachment_file(path: &Path, contents: &str) -> Result<()> {
+    if contents.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        bail!(
+            "rewritten session {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES
+        );
+    }
+    let temp_path = path.with_extension(format!(
+        "{}.prodex-attachments-tmp-{}",
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("jsonl"),
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&temp_path);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .with_context(|| format!("failed to write {}", temp_path.display()))?;
+    file.write_all(contents.as_bytes())
+        .with_context(|| format!("failed to write {}", temp_path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync {}", temp_path.display()))?;
+    fs::rename(&temp_path, path).with_context(|| format!("failed to write {}", path.display()))
+}
+
+#[cfg(unix)]
+fn codex_session_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn codex_session_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
 }
 
 pub(crate) fn codex_session_image_attachments_are_stable(
@@ -199,8 +277,8 @@ fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<
     let destination = codex_home
         .join(SESSION_IMAGE_ATTACHMENT_DIR)
         .join(file_name);
-    if !destination.is_file() {
-        if !source.is_file() {
+    if !path_is_regular_file(&destination)? {
+        if !codex_clipboard_source_is_persistable(source) || !path_is_regular_file(source)? {
             return Ok(None);
         }
         copy_shared_codex_file(source, &destination)?;
@@ -325,8 +403,8 @@ fn stable_codex_session_attachment_path(
     let destination = codex_home
         .join(SESSION_ATTACHMENT_DIR)
         .join(relative_attachment_path);
-    if !destination.is_file() {
-        if !source.is_file() {
+    if !path_is_regular_file(&destination)? {
+        if !path_is_regular_file(source)? {
             return Ok(None);
         }
         copy_shared_codex_file(source, &destination)?;
@@ -364,6 +442,18 @@ fn codex_attachment_file_name_is_persistable(file_name: &str) -> bool {
     file_name.starts_with(CODEX_PASTED_TEXT_PREFIX)
         || file_name.starts_with(CODEX_ATTACHMENT_IMAGE_PREFIX)
         || file_name == CODEX_GOAL_OBJECTIVE_FILE
+}
+
+fn codex_clipboard_source_is_persistable(source: &Path) -> bool {
+    prodex_core::path_is_under_root(&env::temp_dir(), source)
+}
+
+fn path_is_regular_file(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.file_type().is_file()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
+    }
 }
 
 #[cfg(test)]

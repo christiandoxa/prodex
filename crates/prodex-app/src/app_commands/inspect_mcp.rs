@@ -1,4 +1,7 @@
-use crate::{AppPaths, AppState, AppStateIoExt, ProfileProviderExt};
+use crate::{
+    AppPaths, AppState, AppStateIoExt, ProfileProviderExt,
+    runtime_proxy_latest_log_path_from_pointer_text,
+};
 use anyhow::{Context, Result};
 use prodex_cli::InspectMcpArgs;
 use prodex_mcp_stdio::{read_mcp_message, write_mcp_message};
@@ -6,7 +9,7 @@ use serde_json::{Value, json};
 use std::env;
 use std::fs;
 use std::io::{self, BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const RUNTIME_LATEST_POINTER: &str = "prodex-runtime-latest.path";
 const RUNTIME_LOG_TAIL_BYTES: usize = 32 * 1024;
@@ -175,8 +178,7 @@ fn prodex_latest_runtime_log_json(arguments: &Value) -> Result<Value> {
     let pointer_path = runtime_log_pointer_path();
     let log_path = fs::read_to_string(&pointer_path)
         .ok()
-        .map(|raw| PathBuf::from(raw.trim()))
-        .filter(|path| !path.as_os_str().is_empty());
+        .and_then(|raw| runtime_proxy_latest_log_path_from_pointer_text(&runtime_log_dir(), &raw));
     let Some(log_path) = log_path else {
         return Ok(json!({
             "pointer_path": pointer_path,
@@ -186,7 +188,7 @@ fn prodex_latest_runtime_log_json(arguments: &Value) -> Result<Value> {
             "message": "No latest runtime log pointer has been created."
         }));
     };
-    let exists = log_path.exists();
+    let exists = runtime_log_path_is_regular_file(&log_path);
     let tail = if exists {
         read_file_tail_lossy(&log_path, tail_bytes)?
     } else {
@@ -201,6 +203,12 @@ fn prodex_latest_runtime_log_json(arguments: &Value) -> Result<Value> {
     }))
 }
 
+fn runtime_log_path_is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
+        .unwrap_or(false)
+}
+
 fn runtime_log_pointer_path() -> PathBuf {
     runtime_log_dir().join(RUNTIME_LATEST_POINTER)
 }
@@ -211,7 +219,7 @@ fn runtime_log_dir() -> PathBuf {
         .unwrap_or_else(env::temp_dir)
 }
 
-fn read_file_tail_lossy(path: &PathBuf, max_bytes: usize) -> Result<String> {
+fn read_file_tail_lossy(path: &Path, max_bytes: usize) -> Result<String> {
     let mut file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let len = file
@@ -256,6 +264,32 @@ mod tests {
                 .iter()
                 .any(|tool| tool["name"] == "prodex_latest_runtime_log")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspect_mcp_latest_runtime_log_does_not_follow_symlink_log_file() {
+        let _lock = crate::TestEnvVarGuard::lock();
+        let root =
+            env::temp_dir().join(format!("prodex-inspect-log-symlink-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let _env = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", root.to_str().unwrap());
+        let target = root.join("secret.txt");
+        let log_path = root.join("prodex-runtime-symlink.log");
+        fs::write(&target, "do not leak\n").unwrap();
+        std::os::unix::fs::symlink(&target, &log_path).unwrap();
+        fs::write(
+            runtime_log_pointer_path(),
+            format!("{}\n", log_path.display()),
+        )
+        .unwrap();
+
+        let payload = prodex_latest_runtime_log_json(&json!({ "tail_bytes": 1024 })).unwrap();
+
+        assert_eq!(payload["exists"], false);
+        assert_eq!(payload["tail"], "");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

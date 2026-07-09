@@ -3,6 +3,8 @@ use super::local_rewrite_transport::runtime_local_rewrite_log_url;
 use super::*;
 use base64::Engine;
 
+const RUNTIME_GATEWAY_GUARDRAIL_WEBHOOK_MAX_RESPONSE_BYTES: usize = 64 * 1024;
+
 pub(super) struct RuntimeGatewayGuardrailWebhookBlock {
     pub(super) reason: String,
     pub(super) value: String,
@@ -53,7 +55,11 @@ pub(super) fn runtime_gateway_guardrail_webhook_block(
         }
     };
     let status = response.status();
-    let body = match response.bytes() {
+    let body = match read_runtime_buffered_response_body_with_limit(
+        response,
+        RUNTIME_GATEWAY_GUARDRAIL_WEBHOOK_MAX_RESPONSE_BYTES,
+        "failed to read gateway guardrail webhook response body",
+    ) {
         Ok(body) => body,
         Err(err) => {
             return shared.gateway_guardrail_webhook.fail_closed.then(|| {

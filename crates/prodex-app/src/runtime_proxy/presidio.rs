@@ -1,10 +1,10 @@
 use super::await_runtime_proxy_async_task;
-use crate::RuntimePresidioRedactionConfig;
 use crate::presidio_runtime::PresidioLanguageMode;
 use crate::runtime_core_shared::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
+use crate::{RuntimePresidioRedactionConfig, read_async_response_body_with_limit};
 use anyhow::{Context, Result};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -13,6 +13,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const PRESIDIO_RESPONSE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 static RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimePresidioRedactionConfig>>,
@@ -264,7 +265,7 @@ async fn runtime_presidio_redact_text(
         return Ok(text.to_string());
     }
 
-    let anonymized = client
+    let anonymized_response = client
         .post(presidio_endpoint(&config.anonymizer_url, "anonymize"))
         .json(&serde_json::json!({
             "text": text,
@@ -274,9 +275,14 @@ async fn runtime_presidio_redact_text(
         .await
         .context("failed to call Presidio Anonymizer")?
         .error_for_status()
-        .context("Presidio Anonymizer returned an error")?
-        .json::<PresidioAnonymizeResponse>()
-        .await
+        .context("Presidio Anonymizer returned an error")?;
+    let anonymized_body = read_async_response_body_with_limit(
+        anonymized_response,
+        PRESIDIO_RESPONSE_MAX_BYTES,
+        "failed to read Presidio Anonymizer response",
+    )
+    .await?;
+    let anonymized = serde_json::from_slice::<PresidioAnonymizeResponse>(&anonymized_body)
         .context("failed to parse Presidio Anonymizer response")?;
     Ok(anonymized.text)
 }
@@ -348,7 +354,7 @@ async fn presidio_analyze_async(
     text: &str,
     language: &str,
 ) -> Result<Vec<PresidioAnalyzerResult>> {
-    let results = client
+    let response = client
         .post(presidio_endpoint(analyzer_url, "analyze"))
         .json(&serde_json::json!({
             "text": text,
@@ -358,9 +364,14 @@ async fn presidio_analyze_async(
         .await
         .context("failed to call Presidio Analyzer")?
         .error_for_status()
-        .context("Presidio Analyzer returned an error")?
-        .json::<Vec<PresidioAnalyzerResult>>()
-        .await
+        .context("Presidio Analyzer returned an error")?;
+    let body = read_async_response_body_with_limit(
+        response,
+        PRESIDIO_RESPONSE_MAX_BYTES,
+        "failed to read Presidio Analyzer response",
+    )
+    .await?;
+    let results = serde_json::from_slice::<Vec<PresidioAnalyzerResult>>(&body)
         .context("failed to parse Presidio Analyzer response")?;
     Ok(results)
 }

@@ -64,8 +64,7 @@ pub(crate) fn claude_credentials_path(config_dir: &Path) -> PathBuf {
 
 pub(crate) fn read_claude_oauth_secret(config_dir: &Path) -> Result<ClaudeOAuthSecret> {
     let path = claude_credentials_path(config_dir);
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let text = read_claude_credentials_text(&path)?;
     parse_claude_oauth_secret_text(&text)
         .with_context(|| format!("failed to parse {}", path.display()))
 }
@@ -75,8 +74,7 @@ pub(crate) fn copy_claude_oauth_credentials(
     to_config_dir: &Path,
 ) -> Result<()> {
     let from_path = claude_credentials_path(from_config_dir);
-    let text = std::fs::read_to_string(&from_path)
-        .with_context(|| format!("failed to read {}", from_path.display()))?;
+    let text = read_claude_credentials_text(&from_path)?;
     parse_claude_oauth_secret_text(&text)
         .with_context(|| format!("failed to parse {}", from_path.display()))?;
     create_codex_home_if_missing(to_config_dir)?;
@@ -85,6 +83,14 @@ pub(crate) fn copy_claude_oauth_credentials(
         .write_text(&secret_store::SecretLocation::file(&to_path), &text)
         .map_err(anyhow::Error::new)
         .with_context(|| format!("failed to write {}", to_path.display()))
+}
+
+fn read_claude_credentials_text(path: &Path) -> Result<String> {
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .read_text(&secret_store::SecretLocation::file(path))
+        .map_err(anyhow::Error::new)
+        .with_context(|| format!("failed to read {}", path.display()))?
+        .with_context(|| format!("failed to read {}", path.display()))
 }
 
 pub(crate) fn login_with_claude_oauth(
@@ -268,19 +274,41 @@ fn claude_binary() -> String {
 mod tests {
     use super::*;
 
+    fn claude_credentials_text() -> String {
+        r#"{
+          "claudeAiOauth": {
+            "accessToken": "oauth-token",
+            "expiresAt": 1900000000000,
+            "subscriptionType": "max",
+            "email": "user@example.com"
+          }
+        }"#
+        .to_string()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_claude_oauth_secret_rejects_symlink() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-claude-oauth-symlink-{}-{}",
+            std::process::id(),
+            current_time_ms()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.json");
+        std::fs::write(&target, claude_credentials_text()).unwrap();
+        std::os::unix::fs::symlink(&target, claude_credentials_path(&root)).unwrap();
+
+        let err = read_claude_oauth_secret(&root).expect_err("symlink secret must be rejected");
+
+        assert!(err.to_string().contains("failed to read"));
+        assert!(format!("{err:#}").contains("regular secret file"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn parses_nested_claude_ai_oauth_credentials() {
-        let secret = parse_claude_oauth_secret_text(
-            r#"{
-              "claudeAiOauth": {
-                "accessToken": "oauth-token",
-                "expiresAt": 1900000000000,
-                "subscriptionType": "max",
-                "email": "user@example.com"
-              }
-            }"#,
-        )
-        .unwrap();
+        let secret = parse_claude_oauth_secret_text(&claude_credentials_text()).unwrap();
 
         assert_eq!(secret.access_token, "oauth-token");
         assert_eq!(secret.expires_at, Some(1900000000000));

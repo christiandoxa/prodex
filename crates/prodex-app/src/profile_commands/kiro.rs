@@ -14,7 +14,7 @@ use crate::runtime_kiro_acp::{runtime_kiro_acp_bootstrap, runtime_kiro_acp_model
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     audit_log_event_best_effort, create_codex_home_if_missing, ensure_path_is_unique, kiro_bin,
-    managed_profile_home_path, prepare_managed_codex_home,
+    managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
 };
 
 pub(crate) const KIRO_CREDENTIALS_FILE: &str = "kiro_auth.json";
@@ -84,8 +84,9 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
         let activate = state.active_profile.is_none() || args.activate;
         let profile = state
             .profiles
-            .get_mut(&existing_name)
+            .get(&existing_name)
             .with_context(|| format!("profile '{}' is missing", existing_name))?;
+        prepare_profile_codex_home(&paths, profile)?;
         write_kiro_auth_secret(
             &profile.codex_home,
             &kiro_auth_secret_from_context(&context),
@@ -94,6 +95,10 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
             &profile.codex_home,
             &kiro_auth_secret_from_context(&context),
         );
+        let profile = state
+            .profiles
+            .get_mut(&existing_name)
+            .with_context(|| format!("profile '{}' is missing", existing_name))?;
         profile.provider = provider.clone();
         profile.email = context.email.clone();
         if activate {
@@ -473,10 +478,16 @@ pub(crate) fn parse_kiro_model_catalog_text(text: &str) -> Result<Vec<Value>> {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret> {
     let path = codex_home.join(KIRO_CREDENTIALS_FILE);
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let text = read_kiro_auth_secret_text(&path)?;
     parse_kiro_auth_secret_text(&text)
         .with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn read_kiro_auth_secret_text(path: &Path) -> Result<String> {
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .read_text(&secret_store::SecretLocation::file(path))
+        .map_err(anyhow::Error::new)?
+        .with_context(|| format!("failed to read {}", path.display()))
 }
 
 pub(crate) fn write_kiro_cli_data_dir(data_dir: &Path, secret: &KiroAuthSecret) -> Result<()> {
@@ -735,6 +746,49 @@ mod tests {
         }
         let _ = fs::remove_dir_all(first);
         let _ = fs::remove_dir_all(second);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_kiro_auth_secret_rejects_symlink() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-kiro-secret-symlink-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let codex_home = root.join("codex-home");
+        let outside = root.join("outside");
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let outside_secret = outside.join(KIRO_CREDENTIALS_FILE);
+        fs::write(
+            &outside_secret,
+            serde_json::to_string(&KiroAuthSecret {
+                auth_key: "codewhisperer:odic:token".to_string(),
+                auth_kind: "builder-id".to_string(),
+                auth_json: serde_json::json!({"access_token": "outside"}).to_string(),
+                email: None,
+                profile_arn: None,
+                profile_name: None,
+                start_url: None,
+                region: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside_secret, codex_home.join(KIRO_CREDENTIALS_FILE))
+            .unwrap();
+
+        let err = read_kiro_auth_secret(&codex_home).expect_err("symlink secret should reject");
+
+        assert!(
+            err.to_string().contains("not a regular secret file"),
+            "unexpected error: {err:#}"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     struct EnvGuard {

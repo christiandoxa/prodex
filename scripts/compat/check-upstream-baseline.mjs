@@ -210,6 +210,7 @@ const REQUIRED_FILE_CONTAINS = {
     "openai-model",
     "x-reasoning-included",
     "X-Models-Etag",
+    "bio_policy",
     "SafetyBuffering",
     "safety_buffering",
     "ResponseEvent::SafetyBuffering",

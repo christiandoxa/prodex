@@ -20,8 +20,8 @@ pub use self::entries::{SharedCodexEntry, SharedCodexEntryKind};
 use self::history::*;
 pub use self::image_attachments::persist_codex_session_image_attachments;
 use self::migration::*;
-pub use self::ops::create_codex_home_if_missing;
 use self::ops::*;
+pub use self::ops::{create_codex_home_if_missing, ensure_managed_profiles_root};
 pub use self::prepare::{
     maintain_managed_codex_sessions, prepare_managed_codex_home,
     prepare_managed_codex_home_for_runtime_launch,

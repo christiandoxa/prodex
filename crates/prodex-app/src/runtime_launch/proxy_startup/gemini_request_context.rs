@@ -1,12 +1,15 @@
+use super::super::gemini_request_io::runtime_gemini_path_has_symlink_component;
 use super::gemini_request_local_context::{
     RUNTIME_GEMINI_CONTEXT_FILE_LIMIT, RuntimeGeminiFileReadBudget,
     runtime_gemini_part_from_local_path, runtime_gemini_resolve_local_path,
     runtime_gemini_skip_context_path_name,
 };
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 const RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT: usize = 2048;
+const RUNTIME_GEMINI_IGNORE_FILE_BYTE_LIMIT: usize = 256 * 1024;
 const RUNTIME_GEMINI_DEFAULT_CONTEXT_EXCLUDES: &[&str] = &[
     "**/node_modules/**",
     "**/.git/**",
@@ -176,6 +179,9 @@ fn runtime_gemini_collect_glob_file_parts(
     let Some(root) = runtime_gemini_resolve_local_path(&root) else {
         return;
     };
+    if runtime_gemini_path_has_symlink_component(&root) {
+        return;
+    }
     let mut candidates = Vec::new();
     let mut scanned = 0;
     runtime_gemini_collect_context_candidates(
@@ -228,14 +234,20 @@ fn runtime_gemini_collect_context_candidates(
         if use_default_excludes && runtime_gemini_skip_context_path_name(name) {
             continue;
         }
-        if path.is_dir() {
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
             runtime_gemini_collect_context_candidates(
                 &path,
                 use_default_excludes,
                 candidates,
                 scanned,
             );
-        } else if path.is_file() {
+        } else if metadata.is_file() {
             candidates.push(path);
         }
     }
@@ -469,10 +481,16 @@ fn runtime_gemini_load_nested_gitignore_rules(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if !path.is_dir() || name == ".git" {
+        if name == ".git" {
             continue;
         }
         if use_default_excludes && runtime_gemini_skip_context_path_name(name) {
+            continue;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
             continue;
         }
         *scanned = scanned.saturating_add(1);
@@ -493,7 +511,7 @@ fn runtime_gemini_load_ignore_rules(
     project_root: &Path,
     rules: &mut Vec<RuntimeGeminiIgnoreRule>,
 ) {
-    let Ok(content) = fs::read_to_string(path) else {
+    let Some(content) = runtime_gemini_read_ignore_file(path) else {
         return;
     };
     let base_dir = base_dir
@@ -520,6 +538,41 @@ fn runtime_gemini_load_ignore_rules(
             directory_only: pattern.ends_with('/'),
         });
     }
+}
+
+fn runtime_gemini_read_ignore_file(path: &Path) -> Option<String> {
+    if runtime_gemini_path_has_symlink_component(path) {
+        return None;
+    }
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > RUNTIME_GEMINI_IGNORE_FILE_BYTE_LIMIT as u64 {
+        return None;
+    }
+    let file = fs::File::open(path).ok()?;
+    let opened_metadata = file.metadata().ok()?;
+    if !runtime_gemini_same_ignore_file(&metadata, &opened_metadata) {
+        return None;
+    }
+
+    let mut bytes = Vec::new();
+    file.take((RUNTIME_GEMINI_IGNORE_FILE_BYTE_LIMIT as u64).saturating_add(1))
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > RUNTIME_GEMINI_IGNORE_FILE_BYTE_LIMIT {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+#[cfg(unix)]
+fn runtime_gemini_same_ignore_file(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_gemini_same_ignore_file(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
+    true
 }
 
 fn runtime_gemini_ignore_rule_matches(rule: &RuntimeGeminiIgnoreRule, path: &str) -> bool {
@@ -719,10 +772,7 @@ mod tests {
 
     #[test]
     fn gemini_context_filter_honors_nested_gitignore_base_rules() {
-        let directory = std::env::temp_dir().join(format!(
-            "prodex-gemini-nested-ignore-{}",
-            std::process::id()
-        ));
+        let directory = runtime_gemini_context_test_dir("nested-ignore");
         let nested = directory.join("nested");
         let other = directory.join("other");
         fs::create_dir_all(&nested).unwrap();
@@ -751,5 +801,61 @@ mod tests {
         assert!(!filter.is_excluded(&nested.join("keep.log"), &[]));
         assert!(!filter.is_excluded(&other.join("ignored.log"), &[]));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gemini_context_ignore_rules_reject_oversize_file() {
+        let directory = runtime_gemini_context_test_dir("oversize-ignore");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join(".gitignore"),
+            vec![b'a'; RUNTIME_GEMINI_IGNORE_FILE_BYTE_LIMIT + 1],
+        )
+        .unwrap();
+        let mut rules = Vec::new();
+
+        runtime_gemini_load_ignore_rules(
+            &directory.join(".gitignore"),
+            &directory,
+            &directory,
+            &mut rules,
+        );
+
+        assert!(rules.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gemini_context_ignore_rules_reject_symlink_file() {
+        let directory = runtime_gemini_context_test_dir("symlink-ignore");
+        let outside = runtime_gemini_context_test_dir("symlink-ignore-outside");
+        fs::create_dir_all(&directory).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("ignore"), "*.secret\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("ignore"), directory.join(".gitignore")).unwrap();
+        let mut rules = Vec::new();
+
+        runtime_gemini_load_ignore_rules(
+            &directory.join(".gitignore"),
+            &directory,
+            &directory,
+            &mut rules,
+        );
+
+        assert!(rules.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    fn runtime_gemini_context_test_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "prodex-gemini-context-{name}-{}-{nanos}",
+            std::process::id()
+        ))
     }
 }

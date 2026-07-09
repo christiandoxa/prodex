@@ -1,6 +1,6 @@
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,6 +22,7 @@ use crate::data_model::{
 use crate::{PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, ProfileExportEnvelope};
 
 static PROFILE_EXPORT_BUNDLE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+pub(crate) const PROFILE_EXPORT_BUNDLE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn serialize_profile_export_payload<T>(payload: &T, password: Option<&str>) -> Result<Vec<u8>>
 where
@@ -42,14 +43,67 @@ pub fn read_profile_export_envelope<T>(path: &Path) -> Result<(ProfileExportEnve
 where
     T: DeserializeOwned,
 {
-    let content = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let content = read_profile_export_bundle(path)?;
     let envelope: ProfileExportEnvelope<T> = serde_json::from_slice(&content)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     let encrypted = matches!(envelope, ProfileExportEnvelope::Encrypted { .. });
     Ok((envelope, encrypted))
 }
 
+fn read_profile_export_bundle(path: &Path) -> Result<Vec<u8>> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
+    if !metadata.file_type().is_file() {
+        bail!("profile export bundle {} is not a file", path.display());
+    }
+    if metadata.len() > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    if !profile_export_same_file_metadata(&metadata, &file.metadata()?) {
+        bail!(
+            "profile export bundle changed while opening {}",
+            path.display()
+        );
+    }
+    let mut bytes = Vec::new();
+    file.take(PROFILE_EXPORT_BUNDLE_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if bytes.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn profile_export_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn profile_export_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
+}
+
 pub fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
+    if content.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;

@@ -106,7 +106,7 @@ pub(super) fn attempt_runtime_noncompact_standard_request_with_policy(
                     err,
                 );
             })?;
-        if request.path_and_query.ends_with("/backend-api/wham/usage") {
+        if runtime_wham_usage_path(&request.path_and_query) {
             let status = response.status().as_u16();
             let parts = await_runtime_proxy_async_task(
                 shared,
@@ -347,6 +347,13 @@ fn runtime_openai_models_metadata_path(path_and_query: &str) -> bool {
     let normalized = runtime_proxy_normalize_openai_path(path_and_query);
     let path = path_without_query(normalized.as_ref()).trim_end_matches('/');
     path == "/models" || path == "/v1/models" || path.ends_with("/codex/models")
+}
+
+fn runtime_wham_usage_path(path_and_query: &str) -> bool {
+    let normalized = runtime_proxy_normalize_openai_path(path_and_query);
+    path_without_query(normalized.as_ref())
+        .trim_end_matches('/')
+        .ends_with("/wham/usage")
 }
 
 fn runtime_patch_openai_spark_models_response(
@@ -821,5 +828,17 @@ mod tests {
             "/v1/models?client_version=0.124.0"
         ));
         assert!(!runtime_openai_models_metadata_path("/v1/responses"));
+    }
+
+    #[test]
+    fn wham_usage_path_matches_codex_prodex_mounts_and_query() {
+        assert!(runtime_wham_usage_path("/backend-api/wham/usage"));
+        assert!(runtime_wham_usage_path(
+            "/backend-api/wham/usage?client_version=0.142.5"
+        ));
+        assert!(runtime_wham_usage_path(
+            "/backend-api/prodex/wham/usage?client_version=0.142.5"
+        ));
+        assert!(!runtime_wham_usage_path("/backend-api/codex/responses"));
     }
 }

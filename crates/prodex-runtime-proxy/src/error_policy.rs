@@ -312,12 +312,10 @@ fn runtime_error_signal_message_from_body(
     signal: RuntimeHttpErrorSignal,
     quota_mode: RuntimeQuotaMatchMode,
 ) -> Option<String> {
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body)
-        && let Some(message) = runtime_json_find(&value, |candidate| {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        return runtime_json_find(&value, |candidate| {
             runtime_error_signal_candidate(candidate, signal, quota_mode)
-        })
-    {
-        return Some(message);
+        });
     }
 
     runtime_utf8_text(body).and_then(|text| match signal {
@@ -347,36 +345,16 @@ fn runtime_error_signal_candidate(
     quota_mode: RuntimeQuotaMatchMode,
 ) -> Option<String> {
     match value {
-        serde_json::Value::String(message) => match signal {
-            RuntimeHttpErrorSignal::ExplicitQuota => match quota_mode {
-                RuntimeQuotaMatchMode::ExplicitCode => {
-                    (runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitQuota)
-                        || runtime_workspace_credit_exhausted_text_message(message))
-                    .then(|| message.to_string())
-                }
-                RuntimeQuotaMatchMode::UsageMessage => {
-                    runtime_usage_limit_text_message(message).then(|| message.to_string())
-                }
-            },
-            RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
-                runtime_profile_unavailable_text_message(message).then(|| message.to_string())
-            }
-            RuntimeHttpErrorSignal::ExplicitOverload => {
-                runtime_error_signal_message_from_text(message, RuntimeHttpErrorClass::Overload)
-            }
-            RuntimeHttpErrorSignal::TransientStatus => None,
-        },
+        serde_json::Value::String(_) => None,
         serde_json::Value::Object(map) => {
             let message = map
                 .get("message")
                 .and_then(serde_json::Value::as_str)
                 .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
                 .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
-            let code = map.get("code").and_then(serde_json::Value::as_str);
-            let error_type = map.get("type").and_then(serde_json::Value::as_str);
-            let explicit_code = code
+            let explicit_code = ["code", "type", "status", "reason", "error"]
                 .into_iter()
-                .chain(error_type)
+                .filter_map(|key| map.get(key).and_then(serde_json::Value::as_str))
                 .any(|code| runtime_payload_code_matches(code, signal));
 
             match signal {

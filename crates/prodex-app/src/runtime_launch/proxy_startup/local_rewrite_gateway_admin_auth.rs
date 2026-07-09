@@ -4,6 +4,7 @@ use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayScimUser, RuntimeGatewayVirtualKeyEntry,
 };
 use super::*;
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use std::collections::BTreeMap;
 
@@ -126,14 +127,19 @@ fn runtime_gateway_verify_oidc_token(
     let header = decode_header(token).context("failed to decode gateway OIDC JWT header")?;
     let alg = runtime_gateway_oidc_algorithm(header.alg)?;
     let jwks_url = runtime_gateway_oidc_jwks_url(config, shared)?;
-    let jwks = shared
+    let jwks_response = shared
         .client
         .get(&jwks_url)
         .send()
         .context("failed to fetch gateway OIDC JWKS")?
         .error_for_status()
-        .context("gateway OIDC JWKS endpoint returned an error")?
-        .json::<JwkSet>()
+        .context("gateway OIDC JWKS endpoint returned an error")?;
+    let jwks_body = read_blocking_response_body_with_limit(
+        jwks_response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read gateway OIDC JWKS",
+    )?;
+    let jwks = serde_json::from_slice::<JwkSet>(&jwks_body)
         .context("failed to parse gateway OIDC JWKS")?;
     let key = jwks
         .keys
@@ -168,14 +174,19 @@ fn runtime_gateway_oidc_jwks_url(
         "{}/.well-known/openid-configuration",
         config.issuer.trim_end_matches('/')
     );
-    let discovery = shared
+    let discovery_response = shared
         .client
         .get(&discovery_url)
         .send()
         .context("failed to fetch gateway OIDC discovery document")?
         .error_for_status()
-        .context("gateway OIDC discovery endpoint returned an error")?
-        .json::<serde_json::Value>()
+        .context("gateway OIDC discovery endpoint returned an error")?;
+    let discovery_body = read_blocking_response_body_with_limit(
+        discovery_response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read gateway OIDC discovery document",
+    )?;
+    let discovery = serde_json::from_slice::<serde_json::Value>(&discovery_body)
         .context("failed to parse gateway OIDC discovery document")?;
     discovery
         .get("jwks_uri")

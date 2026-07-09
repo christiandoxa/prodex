@@ -2,6 +2,7 @@ use super::{
     GeminiOAuthSecret, gemini_oauth_project_from_env, normalize_gemini_project_id,
     refresh_gemini_oauth_secret_if_needed, write_gemini_oauth_secret,
 };
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_text_with_limit};
 use anyhow::{Context, Result, bail};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -275,9 +276,11 @@ fn parse_gemini_code_assist_response(
     method: &str,
 ) -> Result<Value> {
     let status = response.status();
-    let body = response
-        .text()
-        .with_context(|| format!("failed to read Gemini Code Assist {method} response"))?;
+    let body = read_blocking_response_text_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        &format!("failed to read Gemini Code Assist {method} response"),
+    )?;
     if !status.is_success() {
         if let Some(validation) = gemini_validation_from_body(&body) {
             bail!("{}", gemini_validation_error_message(&validation));

@@ -21,10 +21,9 @@ pub(crate) fn setup_fixture() -> Fixture {
     let usage_base_url = usage_server.base_url();
     let prodex_home = temp_dir.path.join("prodex-home");
     let shared_codex_home = temp_dir.path.join("shared-codex-home");
-    let homes_root = temp_dir.path.join("homes");
     let bin_root = temp_dir.path.join("bin");
-    let main_home = homes_root.join("main");
-    let second_home = homes_root.join("second");
+    let main_home = prodex_home.join("profiles/main");
+    let second_home = prodex_home.join("profiles/second");
     let codex_log = temp_dir.path.join("codex-home.log");
     let codex_args_log = temp_dir.path.join("codex-args.log");
     let codex_stdin_log = temp_dir.path.join("codex-stdin.log");

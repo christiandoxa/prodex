@@ -35,7 +35,7 @@ pub(crate) fn reject_runtime_proxy_overloaded_request(
             "runtime_proxy_queue_overloaded",
             [
                 runtime_proxy_log_field("transport", if websocket { "websocket" } else { "http" }),
-                runtime_proxy_log_field("path", path.as_str()),
+                runtime_proxy_log_field("path", runtime_proxy_log_url(&path)),
                 runtime_proxy_log_field("reason", reason),
             ],
         ),

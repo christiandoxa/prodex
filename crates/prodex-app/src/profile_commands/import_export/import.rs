@@ -216,11 +216,7 @@ fn apply_imported_existing_profile_updates(
             .get(&update.name)
             .with_context(|| format!("profile '{}' is missing", update.name))?
             .clone();
-        if profile.managed {
-            prepare_managed_codex_home(paths, &profile.codex_home)?;
-        } else {
-            create_codex_home_if_missing(&profile.codex_home)?;
-        }
+        prepare_profile_codex_home(paths, &profile)?;
         for secret_file in &update.secret_files {
             validate_exported_secret_file_path(&secret_file.path, &update.name)?;
             write_secret_text_file(
@@ -333,14 +329,24 @@ pub(super) fn recover_imported_auth_update_journals(
 
     let mut journals = Vec::new();
     for journal_path in journal_paths {
-        let journal_text = fs::read_to_string(&journal_path)
-            .with_context(|| format!("failed to read {}", journal_path.display()))?;
-        let journal: ImportedExistingProfileAuthUpdateJournal = serde_json::from_str(&journal_text)
-            .with_context(|| format!("failed to parse {}", journal_path.display()))?;
-        if let Err(err) =
-            prodex_profile_export::validate_import_auth_update_journal_version(journal.version)
-        {
-            bail!("{err} in {}", journal_path.display());
+        let journal =
+            prodex_profile_export::read_profile_import_auth_update_journal(&journal_path)?;
+        let profile = state.profiles.get(&journal.profile_name).with_context(|| {
+            format!(
+                "auth update journal {} references missing profile '{}'",
+                journal_path.display(),
+                journal.profile_name
+            )
+        })?;
+        let journal_codex_home = PathBuf::from(&journal.codex_home);
+        if journal_codex_home != profile.codex_home {
+            bail!(
+                "auth update journal {} targets {} but profile '{}' uses {}",
+                journal_path.display(),
+                journal_codex_home.display(),
+                journal.profile_name,
+                profile.codex_home.display()
+            );
         }
         journals.push((journal_path, journal));
     }

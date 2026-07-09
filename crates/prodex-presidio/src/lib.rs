@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 pub use prodex_cli::PresidioLanguageMode;
 use serde::{Deserialize, Deserializer};
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ const DEFAULT_PRESIDIO_ANALYZER_URL: &str = "http://localhost:5002";
 const DEFAULT_PRESIDIO_ANONYMIZER_URL: &str = "http://localhost:5001";
 const DEFAULT_PRESIDIO_LANGUAGE: &str = "en";
 const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const PRESIDIO_RESPONSE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 struct ProdexPresidioRuntimeFileConfig {
@@ -170,12 +172,10 @@ pub fn presidio_analyze(
         .context("failed to call Presidio Analyzer")?;
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().unwrap_or_default();
+        let body = read_presidio_text_response(response).unwrap_or_default();
         anyhow::bail!("Presidio Analyzer returned {status}: {}", body.trim());
     }
-    response
-        .json::<Vec<PresidioAnalyzerResult>>()
-        .context("failed to parse Presidio Analyzer response")
+    read_presidio_json_response(response).context("failed to parse Presidio Analyzer response")
 }
 
 pub fn presidio_anonymize(
@@ -194,19 +194,17 @@ pub fn presidio_anonymize(
         .context("failed to call Presidio Anonymizer")?;
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().unwrap_or_default();
+        let body = read_presidio_text_response(response).unwrap_or_default();
         anyhow::bail!("Presidio Anonymizer returned {status}: {}", body.trim());
     }
-    response
-        .json::<PresidioAnonymizeResponse>()
-        .context("failed to parse Presidio Anonymizer response")
+    read_presidio_json_response(response).context("failed to parse Presidio Anonymizer response")
 }
 
 pub fn probe_presidio_health(client: &reqwest::blocking::Client, base_url: &str) -> PresidioHealth {
     match client.get(presidio_endpoint(base_url, "health")).send() {
         Ok(response) => {
             let status = response.status();
-            let message = response.text().unwrap_or_default();
+            let message = read_presidio_text_response(response).unwrap_or_default();
             PresidioHealth {
                 ok: status.is_success(),
                 message: if message.trim().is_empty() {
@@ -221,6 +219,34 @@ pub fn probe_presidio_health(client: &reqwest::blocking::Client, base_url: &str)
             message: err.to_string(),
         },
     }
+}
+
+fn read_presidio_json_response<T: serde::de::DeserializeOwned>(
+    response: reqwest::blocking::Response,
+) -> Result<T> {
+    let body = read_presidio_response_body(response)?;
+    serde_json::from_slice(&body).context("invalid Presidio JSON response")
+}
+
+fn read_presidio_text_response(response: reqwest::blocking::Response) -> Result<String> {
+    let body = read_presidio_response_body(response)?;
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+fn read_presidio_response_body(mut response: reqwest::blocking::Response) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    response
+        .by_ref()
+        .take((PRESIDIO_RESPONSE_MAX_BYTES as u64).saturating_add(1))
+        .read_to_end(&mut body)
+        .context("failed to read Presidio response")?;
+    if body.len() > PRESIDIO_RESPONSE_MAX_BYTES {
+        anyhow::bail!(
+            "Presidio response exceeded safe size limit ({})",
+            PRESIDIO_RESPONSE_MAX_BYTES
+        );
+    }
+    Ok(body)
 }
 
 pub fn validate_presidio_url(url: &str, field: &str) -> Result<()> {

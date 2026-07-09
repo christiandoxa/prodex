@@ -270,6 +270,59 @@ fn profile_export_round_trip_preserves_oauth_provider_secret_files() {
     assert!(!imported_anthropic.codex_home.join("auth.json").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn profile_export_rejects_symlink_provider_secret_file() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let source_dir = ProfileCommandsTestDir::new("provider-export-symlink-source");
+    let source_paths = profile_commands_test_paths(&source_dir.path);
+    let gemini_home = source_paths.managed_profiles_root.join("gemini-main");
+    let outside_secret = source_dir.path.join("outside-gemini.json");
+    create_codex_home_if_missing(&gemini_home).expect("Gemini home should exist");
+    fs::write(
+        &outside_secret,
+        serde_json::json!({
+            "auth_mode": "gemini_oauth",
+            "access_token": "outside-access-token",
+            "refresh_token": "outside-refresh-token",
+            "token_type": "Bearer",
+            "scope": "https://www.googleapis.com/auth/cloud-platform",
+            "expiry_date": 1900000000000_i64,
+            "email": "gemini@example.com",
+            "project_id": "gemini-project"
+        })
+        .to_string(),
+    )
+    .expect("outside secret should be written");
+    std::os::unix::fs::symlink(&outside_secret, gemini_home.join(GEMINI_OAUTH_SECRET_FILE))
+        .expect("Gemini secret symlink should be created");
+
+    let source_state = AppState {
+        profiles: BTreeMap::from([(
+            "gemini-main".to_string(),
+            ProfileEntry {
+                codex_home: gemini_home,
+                managed: true,
+                email: Some("gemini@example.com".to_string()),
+                provider: ProfileProvider::Gemini {
+                    email: "gemini@example.com".to_string(),
+                    project_id: Some("gemini-project".to_string()),
+                },
+            },
+        )]),
+        ..AppState::default()
+    };
+
+    let err = build_profile_export_payload(&source_state, &["gemini-main".to_string()])
+        .expect_err("symlink provider secret should not export");
+
+    assert!(
+        err.to_string().contains("not a regular secret file"),
+        "unexpected export error: {err:#}"
+    );
+}
+
 #[test]
 fn profile_export_round_trip_encrypted_requires_matching_password() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");

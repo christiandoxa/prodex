@@ -26,8 +26,8 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/copilot.rs",
-    "maxLines": 914,
-    "reason": "Copilot profile import, direct runtime API auth, model catalog refresh, and legacy token fallback remain capped while auth refresh is split from profile import ownership."
+    "maxLines": 923,
+    "reason": "Copilot profile import, direct runtime API auth, model catalog refresh, legacy token fallback, and bounded HTTP response reads remain capped while auth refresh is split from profile import ownership."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
@@ -41,8 +41,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_kiro_acp.rs",
-    "maxLines": 1883,
-    "reason": "Kiro ACP runtime translation, event routing, and session orchestration remain capped while protocol handling is split by domain."
+    "maxLines": 1887,
+    "reason": "Kiro ACP runtime translation, event routing, session orchestration, and bounded stderr capture remain capped while protocol handling is split by domain."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs",
@@ -66,8 +66,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 2219,
-    "reason": "Kiro local rewrite request/response translation and compatibility handling remain capped while request parsing and protocol mapping are split."
+    "maxLines": 2233,
+    "reason": "Kiro local rewrite request/response translation and compatibility handling remain capped while request parsing and protocol mapping are split; includes bounded runtime-pool cleanup/streaming worker handling and bounded stderr capture."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
@@ -111,7 +111,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1081,
+    "maxLines": 1028,
     "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
   },
   {

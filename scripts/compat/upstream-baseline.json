@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.142.4 release",
+      "baseline_source": "openai/codex rust-v0.144.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -217,6 +217,7 @@
             "openai-model",
             "x-reasoning-included",
             "X-Models-Etag",
+            "bio_policy",
             "insufficient_quota",
             "rate_limit_exceeded",
             "SafetyBuffering",
@@ -1161,7 +1162,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.142.4",
+      "tested_codex_release": "rust-v0.144.1",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,

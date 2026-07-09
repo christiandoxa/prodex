@@ -453,6 +453,29 @@ fn previous_response_message_ignores_non_error_content_text() {
         extract_runtime_proxy_previous_response_message_from_value(&payload),
         None
     );
+
+    let leading_payload = serde_json::json!({
+        "type": "response.output_text.delta",
+        "delta": "previous_response_not_found is an upstream error code.",
+    });
+
+    assert_eq!(
+        extract_runtime_proxy_previous_response_message_from_value(&leading_payload),
+        None
+    );
+
+    let message_payload = serde_json::json!({
+        "type": "response.output_item.done",
+        "item": {
+            "type": "message",
+            "message": "Previous response with id 'resp-example' not found is an example.",
+        },
+    });
+
+    assert_eq!(
+        extract_runtime_proxy_previous_response_message_from_value(&message_payload),
+        None
+    );
 }
 
 #[test]
@@ -473,6 +496,19 @@ fn quota_message_detects_nested_error_payloads() {
     assert_eq!(
         extract_runtime_proxy_quota_message_from_value(&payload),
         Some("You've hit your usage limit. Try again at 8pm.".to_string())
+    );
+}
+
+#[test]
+fn quota_message_ignores_non_error_content_text() {
+    let payload = serde_json::json!({
+        "type": "response.output_text.delta",
+        "delta": "The docs mention insufficient_quota and rate_limit_exceeded as examples.",
+    });
+
+    assert_eq!(
+        extract_runtime_proxy_quota_message_from_value(&payload),
+        None
     );
 }
 

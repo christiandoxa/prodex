@@ -3,6 +3,7 @@ use super::{
     SUPER_DEEPSEEK_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID, build_upstream_blocking_http_client,
     first_line_of_error, format_response_body, refresh_claude_oauth_secret_if_needed,
 };
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
 use std::env;
@@ -278,9 +279,11 @@ fn fetch_anthropic_rate_limits_json(api_key: &str) -> Result<serde_json::Value> 
         .send()
         .context("failed to fetch Anthropic rate limits")?;
     let status = response.status();
-    let body = response
-        .bytes()
-        .context("failed to read Anthropic rate limit response")?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read Anthropic rate limit response",
+    )?;
     if !status.is_success() {
         bail!(
             "Anthropic rate limit request failed (HTTP {}): {}",

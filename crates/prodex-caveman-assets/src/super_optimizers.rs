@@ -2,12 +2,11 @@ use anyhow::{Context, Result};
 use std::env;
 use std::fs;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use crate::fs_ops::{read_text_file_limited, write_executable_file, write_text_file};
 use crate::localization::localize_text_file;
 use crate::toml_helpers::ensure_child_table;
 use crate::{AGENTS_MD, PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
@@ -96,8 +95,7 @@ pub fn configure_super_optimizer_codex_home_with_options(
         presidio_enabled,
         memory_config,
     );
-    fs::write(&optimizers_path, awareness)
-        .with_context(|| format!("failed to write {}", optimizers_path.display()))?;
+    write_text_file(&optimizers_path, &awareness)?;
     localize_text_file(&codex_home.join(AGENTS_MD))?;
     ensure_agents_reference(codex_home, &optimizers_path)?;
     configure_super_optimizer_mcp_servers_with_sources(
@@ -192,8 +190,7 @@ fn availability_label(path: Option<&Path>) -> String {
 fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<()> {
     let agents_path = codex_home.join(AGENTS_MD);
     let reference = format!("@{}", reference_path.display());
-    let contents = fs::read_to_string(&agents_path)
-        .with_context(|| format!("failed to read {}", agents_path.display()))?;
+    let contents = read_text_file_limited(&agents_path)?.unwrap_or_default();
     if contents.lines().any(|line| line.trim() == reference) {
         return Ok(());
     }
@@ -208,8 +205,7 @@ fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<(
         updated.push_str(&reference);
         updated.push('\n');
     }
-    fs::write(&agents_path, updated)
-        .with_context(|| format!("failed to write {}", agents_path.display()))?;
+    write_text_file(&agents_path, &updated)?;
     Ok(())
 }
 
@@ -222,7 +218,7 @@ fn configure_super_optimizer_mcp_servers_with_sources(
     memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> Result<()> {
     let config_path = codex_home.join("config.toml");
-    let contents = fs::read_to_string(&config_path).unwrap_or_default();
+    let contents = read_text_file_limited(&config_path)?.unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
         toml::Table::new()
     } else {
@@ -303,8 +299,7 @@ fn configure_super_optimizer_mcp_servers_with_sources(
 
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Super optimizer config overlay")?;
-    fs::write(&config_path, rendered)
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    write_text_file(&config_path, &rendered)?;
     Ok(())
 }
 
@@ -335,10 +330,6 @@ pub(super) fn write_shell_wrapper_with_env(
     args: &[&str],
     env_vars: &[(&str, String)],
 ) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
     let args = args
         .iter()
         .map(|arg| format!(" '{}'", arg.replace('\'', "'\\''")))
@@ -350,17 +341,7 @@ pub(super) fn write_shell_wrapper_with_env(
         command.display().to_string().replace('\'', "'\\''"),
         args
     );
-    fs::write(path, script).with_context(|| format!("failed to write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path)
-            .with_context(|| format!("failed to stat {}", path.display()))?
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to chmod {}", path.display()))?;
-    }
-    Ok(())
+    write_executable_file(path, &script)
 }
 
 pub(super) fn shell_exports(env_vars: &[(&str, String)]) -> String {
@@ -574,8 +555,7 @@ fn write_token_savior_sitecustomize(state_dirs: &TokenSaviorStateDirs) -> Result
     fs::create_dir_all(&state_dirs.python_path_dir)
         .with_context(|| format!("failed to create {}", state_dirs.python_path_dir.display()))?;
     let sitecustomize_path = state_dirs.python_path_dir.join("sitecustomize.py");
-    fs::write(&sitecustomize_path, TOKEN_SAVIOR_SITECUSTOMIZE)
-        .with_context(|| format!("failed to write {}", sitecustomize_path.display()))?;
+    write_text_file(&sitecustomize_path, TOKEN_SAVIOR_SITECUSTOMIZE)?;
     Ok(())
 }
 

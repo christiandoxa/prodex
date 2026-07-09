@@ -9,10 +9,12 @@ use super::local_rewrite::{
 use super::local_rewrite_gemini::send_runtime_gemini_upstream_request;
 use super::local_rewrite_response::runtime_local_rewrite_response_with_call_id;
 use super::*;
-use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use crate::{
+    RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    read_runtime_buffered_response_body_with_limit,
+};
 use anyhow::{Context, Result, bail};
 use prodex_runtime_gemini::GEMINI_CHAT_COMPRESSION_MODEL;
-use std::io::Read;
 
 const GEMINI_LOCAL_COMPACT_SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
 const GEMINI_SEMANTIC_COMPACT_INSTRUCTIONS: &str = "\
@@ -181,14 +183,15 @@ pub(super) fn runtime_gemini_semantic_compact_request_body(body: &[u8]) -> Resul
 
 pub(super) fn runtime_gemini_semantic_compact_response_parts(
     status: u16,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
     request_id: u64,
     compact_request_body: &[u8],
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read Gemini semantic compact response")?;
+    let body = read_runtime_buffered_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_COMPACT_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read Gemini semantic compact response",
+    )?;
     let value: serde_json::Value = serde_json::from_slice(&body)
         .context("failed to parse Gemini semantic compact response")?;
     runtime_gemini_semantic_compact_response_parts_from_value(

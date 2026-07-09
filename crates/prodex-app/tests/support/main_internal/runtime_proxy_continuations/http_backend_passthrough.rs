@@ -50,6 +50,8 @@ fn runtime_proxy_http_preserves_codex_0142_backend_headers_and_payload() {
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .header("authorization", "Bearer caller-token")
         .header("chatgpt-account-id", "caller-account")
+        .header("connection", "keep-alive, x-local-hop")
+        .header("x-local-hop", "strip-me")
         .header("session-id", "sess-0142")
         .header("thread-id", "thread-0142")
         .header("x-client-request-id", "thread-0142")
@@ -114,6 +116,10 @@ fn runtime_proxy_http_preserves_codex_0142_backend_headers_and_payload() {
         headers.get("chatgpt-account-id").map(String::as_str),
         Some("second-account"),
         "proxy must replace caller ChatGPT account with selected profile account"
+    );
+    assert!(
+        !headers.contains_key("x-local-hop"),
+        "proxy must not forward headers named by Connection"
     );
 
     let responses_bodies = backend.responses_bodies();

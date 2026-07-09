@@ -2,7 +2,7 @@ use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, GeminiOAuthSecret, ProfileEntry, ProfileProvider,
-    create_codex_home_if_missing, managed_profile_home_path, prepare_managed_codex_home,
+    managed_profile_home_path, prepare_managed_codex_home, prepare_profile_codex_home,
     remove_dir_if_exists, write_gemini_oauth_secret,
 };
 use anyhow::{Context, Result, bail};
@@ -25,11 +25,7 @@ pub(super) fn prepare_gemini_profile_login_home(
         );
     }
     let codex_home = profile.codex_home.clone();
-    if profile.managed {
-        prepare_managed_codex_home(paths, &codex_home)?;
-    } else {
-        create_codex_home_if_missing(&codex_home)?;
-    }
+    prepare_profile_codex_home(paths, profile)?;
     Ok(codex_home)
 }
 

@@ -71,6 +71,45 @@ fn copilot_workspace_custom_instructions_reads_github_files_only() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn copilot_workspace_custom_instructions_do_not_follow_symlinks() {
+    let root = temp_copilot_instruction_root("symlink");
+    let outside = root.with_file_name(format!(
+        "{}-outside",
+        root.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(root.join(".github")).unwrap();
+    std::fs::create_dir_all(outside.join("instructions")).unwrap();
+    std::fs::write(
+        outside.join("copilot-instructions.md"),
+        "outside global secret",
+    )
+    .unwrap();
+    std::fs::write(
+        outside.join("instructions").join("leak.instructions.md"),
+        "outside scoped secret",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        outside.join("copilot-instructions.md"),
+        root.join(".github").join("copilot-instructions.md"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        outside.join("instructions"),
+        root.join(".github").join("instructions"),
+    )
+    .unwrap();
+
+    let instructions = runtime_copilot_workspace_custom_instructions(&root).unwrap();
+
+    assert_eq!(instructions, None);
+    let _ = std::fs::remove_dir_all(root);
+    let _ = std::fs::remove_dir_all(outside);
+}
+
 #[test]
 fn copilot_custom_instructions_merge_into_chat_body() {
     let mut translated = RuntimeDeepSeekTranslatedRequest {

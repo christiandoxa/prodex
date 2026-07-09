@@ -1,6 +1,7 @@
 mod asset_verification;
 mod embedded_files;
 mod embedded_tree;
+mod fs_ops;
 mod hook_trust;
 mod launch_home;
 mod localization;

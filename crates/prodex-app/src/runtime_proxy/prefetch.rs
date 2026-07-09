@@ -200,6 +200,24 @@ mod tests {
     }
 
     #[test]
+    fn prefetch_lookahead_commits_non_error_quota_code_text() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"The docs mention rate_limit_exceeded as an example.\"}\r\n\r\n".to_vec(),
+            )],
+            "non-error-quota-code-text",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::Commit { prelude, .. } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("rate_limit_exceeded"));
+            }
+            other => panic!("expected commit, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn prefetch_lookahead_rate_limits_before_quota_stays_retryable() {
         let (inspection, _prefetch) = block_on_lookahead(
             vec![
@@ -239,6 +257,24 @@ mod tests {
                 assert!(String::from_utf8_lossy(&prelude).contains("previous_response_not_found"));
             }
             other => panic!("expected previous response not found, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_lookahead_commits_non_error_previous_response_code_text() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"previous_response_not_found is an upstream error code.\"}\r\n\r\n".to_vec(),
+            )],
+            "non-error-previous-response-code-text",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::Commit { prelude, .. } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("previous_response_not_found"));
+            }
+            other => panic!("expected commit, got {other:?}"),
         }
     }
 

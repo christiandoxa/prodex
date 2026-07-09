@@ -167,7 +167,7 @@ pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
     transport: &str,
     path: &str,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
-    match probe_runtime_proxy_active_request_slot(shared, transport, path) {
+    match probe_runtime_proxy_active_request_slot(shared, transport, path, None) {
         Ok(guard) => Ok(guard),
         Err(rejection) => {
             record_runtime_proxy_admission_rejection(shared, transport, path, rejection);
@@ -180,10 +180,14 @@ fn probe_runtime_proxy_active_request_slot(
     shared: &RuntimeRotationProxyShared,
     transport: &str,
     path: &str,
+    request: Option<&RuntimeProxyRequest>,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
     let lane = runtime_proxy_request_lane(path, transport == "websocket");
     let lane_active_count = shared.lane_admission.active_counter(lane);
     let lane_limit = shared.lane_admission.limit(lane);
+    let bypass_owned_affinity_lane_limit = request.is_some_and(|request| {
+        runtime_proxy_request_has_owned_lane_affinity(shared, lane, request)
+    });
     loop {
         let active = shared.active_request_count.load(Ordering::SeqCst);
         if active >= shared.active_request_limit {
@@ -198,7 +202,8 @@ fn probe_runtime_proxy_active_request_slot(
         }
         let lane_active = lane_active_count.load(Ordering::SeqCst);
         let bypass_lane_limit = lane == RuntimeRouteKind::Standard
-            && runtime_proxy_startup_standard_lane_priority_path(path);
+            && runtime_proxy_startup_standard_lane_priority_path(path)
+            || bypass_owned_affinity_lane_limit;
         if lane_active >= lane_limit && !bypass_lane_limit {
             runtime_proxy_log(
                 shared,
@@ -208,6 +213,15 @@ fn probe_runtime_proxy_active_request_slot(
                 ),
             );
             return Err(RuntimeProxyAdmissionRejection::LaneLimit(lane));
+        }
+        if lane_active >= lane_limit && bypass_owned_affinity_lane_limit {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "runtime_proxy_lane_limit_bypassed_affinity transport={transport} path={path} lane={} active={lane_active} limit={lane_limit}",
+                    runtime_route_kind_label(lane)
+                ),
+            );
         }
         if shared
             .active_request_count
@@ -252,6 +266,53 @@ fn probe_runtime_proxy_active_request_slot(
     }
 }
 
+fn runtime_proxy_request_has_owned_lane_affinity(
+    shared: &RuntimeRotationProxyShared,
+    lane: RuntimeRouteKind,
+    request: &RuntimeProxyRequest,
+) -> bool {
+    let Ok(runtime) = shared.runtime.lock() else {
+        return false;
+    };
+    let profile_exists = |profile_name: &str| runtime.state.profiles.contains_key(profile_name);
+    let binding_profile_exists =
+        |binding: &ResponseProfileBinding| profile_exists(binding.profile_name.as_str());
+
+    if lane == RuntimeRouteKind::Responses {
+        if runtime_request_previous_response_id(request)
+            .as_deref()
+            .and_then(|response_id| runtime.state.response_profile_bindings.get(response_id))
+            .is_some_and(binding_profile_exists)
+        {
+            return true;
+        }
+        if runtime_request_turn_state(request)
+            .as_deref()
+            .and_then(|turn_state| runtime.turn_state_bindings.get(turn_state))
+            .is_some_and(binding_profile_exists)
+        {
+            return true;
+        }
+    }
+
+    if lane == RuntimeRouteKind::Compact
+        && let Some(session_id) = runtime_request_session_id(request)
+    {
+        return runtime
+            .session_id_bindings
+            .get(session_id.as_str())
+            .or_else(|| {
+                runtime
+                    .state
+                    .session_profile_bindings
+                    .get(session_id.as_str())
+            })
+            .is_some_and(binding_profile_exists);
+    }
+
+    false
+}
+
 fn record_runtime_proxy_admission_rejection(
     shared: &RuntimeRotationProxyShared,
     transport: &str,
@@ -281,13 +342,22 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait(
     transport: &str,
     path: &str,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
+    acquire_runtime_proxy_active_request_slot_with_wait_for_request(shared, transport, path, None)
+}
+
+pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+    shared: &RuntimeRotationProxyShared,
+    transport: &str,
+    path: &str,
+    request: Option<&RuntimeProxyRequest>,
+) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
     let started_at = Instant::now();
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
     let budget = runtime_proxy_admission_wait_budget(path, pressure_mode);
     let mut waited = false;
     loop {
-        match probe_runtime_proxy_active_request_slot(shared, transport, path) {
+        match probe_runtime_proxy_active_request_slot(shared, transport, path, request) {
             Ok(guard) => {
                 if waited {
                     runtime_proxy_log(
@@ -340,7 +410,8 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait(
                 let wait_guard = mutex
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if let Ok(guard) = probe_runtime_proxy_active_request_slot(shared, transport, path)
+                if let Ok(guard) =
+                    probe_runtime_proxy_active_request_slot(shared, transport, path, request)
                 {
                     return Ok(guard);
                 }
@@ -424,7 +495,7 @@ where
                                 "runtime_proxy_queue_wait_exhausted",
                                 [
                                     runtime_proxy_log_field("transport", transport),
-                                    runtime_proxy_log_field("path", path),
+                                    runtime_proxy_log_field("path", runtime_proxy_log_url(path)),
                                     runtime_proxy_log_field(
                                         "waited_ms",
                                         started_at.elapsed().as_millis().to_string(),
@@ -454,7 +525,7 @@ where
                         "runtime_proxy_queue_wait_exhausted",
                         [
                             runtime_proxy_log_field("transport", transport),
-                            runtime_proxy_log_field("path", path),
+                            runtime_proxy_log_field("path", runtime_proxy_log_url(path)),
                             runtime_proxy_log_field(
                                 "waited_ms",
                                 started_at.elapsed().as_millis().to_string(),

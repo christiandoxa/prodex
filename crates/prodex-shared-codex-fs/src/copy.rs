@@ -21,6 +21,14 @@ pub fn copy_codex_home(source: &Path, destination: &Path) -> Result<()> {
 }
 
 pub(super) fn copy_directory_contents(source: &Path, destination: &Path) -> Result<()> {
+    copy_directory_contents_under_root(source, source, destination)
+}
+
+fn copy_directory_contents_under_root(
+    source_root: &Path,
+    source: &Path,
+    destination: &Path,
+) -> Result<()> {
     for entry in fs::read_dir(source)
         .with_context(|| format!("failed to read directory {}", source.display()))?
     {
@@ -31,20 +39,21 @@ pub(super) fn copy_directory_contents(source: &Path, destination: &Path) -> Resu
         let file_type = entry
             .file_type()
             .with_context(|| format!("failed to read metadata for {}", source_path.display()))?;
-        copy_directory_entry(&source_path, &destination_path, file_type)?;
+        copy_directory_entry(source_root, &source_path, &destination_path, file_type)?;
     }
 
     Ok(())
 }
 
 fn copy_directory_entry(
+    source_root: &Path,
     source_path: &Path,
     destination_path: &Path,
     file_type: fs::FileType,
 ) -> Result<()> {
     if file_type.is_dir() {
         create_codex_home_if_missing(destination_path)?;
-        return copy_directory_contents(source_path, destination_path);
+        return copy_directory_contents_under_root(source_root, source_path, destination_path);
     }
 
     if file_type.is_file() {
@@ -53,29 +62,26 @@ fn copy_directory_entry(
     }
 
     if file_type.is_symlink() {
-        return recreate_symlink(source_path, destination_path);
+        return copy_symlinked_file_under_root(source_root, source_path, destination_path);
     }
 
     Ok(())
 }
 
-fn recreate_symlink(source_path: &Path, destination_path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        let target = fs::read_link(source_path)
-            .with_context(|| format!("failed to read symlink {}", source_path.display()))?;
-        if fs::symlink_metadata(destination_path).is_ok() {
-            remove_path(destination_path)?;
-        }
-        std::os::unix::fs::symlink(target, destination_path)
-            .with_context(|| format!("failed to recreate symlink {}", destination_path.display()))
+fn copy_symlinked_file_under_root(
+    source_root: &Path,
+    source_path: &Path,
+    destination_path: &Path,
+) -> Result<()> {
+    let source_root = fs::canonicalize(source_root)
+        .with_context(|| format!("failed to resolve {}", source_root.display()))?;
+    let Ok(target) = fs::canonicalize(source_path) else {
+        return Ok(());
+    };
+    if !target.starts_with(&source_root) {
+        return Ok(());
     }
-
-    #[cfg(not(unix))]
-    {
-        let _ = (source_path, destination_path);
-        bail!("symlinks are not supported on this platform");
-    }
+    copy_shared_codex_file_replacing_existing(&target, destination_path, "failed to copy")
 }
 
 #[cfg(test)]

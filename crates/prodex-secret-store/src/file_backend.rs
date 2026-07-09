@@ -3,10 +3,11 @@ use crate::{
 };
 use std::fs;
 use std::fs::OpenOptions;
-use std::io;
-use std::io::Write;
+use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const FILE_SECRET_MAX_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FileSecretBackend;
@@ -20,26 +21,51 @@ impl FileSecretBackend {
 impl SecretBackend for FileSecretBackend {
     fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {
         let path = file_path(location)?;
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
+        let Some(metadata) = secret_file_metadata(path)? else {
+            return Ok(None);
+        };
+        if metadata.len() > FILE_SECRET_MAX_BYTES {
+            return Err(secret_size_error(path));
+        }
+
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(SecretError::io(path, err)),
         };
+        let opened_metadata = file.metadata().map_err(|err| SecretError::io(path, err))?;
+        if !same_secret_file_metadata(&metadata, &opened_metadata) {
+            return Err(SecretError::invalid_location(format!(
+                "{} changed while reading",
+                path.display()
+            )));
+        }
 
-        match String::from_utf8(bytes.clone()) {
+        let mut bytes = Vec::new();
+        file.take(FILE_SECRET_MAX_BYTES.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|err| SecretError::io(path, err))?;
+        if bytes.len() as u64 > FILE_SECRET_MAX_BYTES {
+            return Err(secret_size_error(path));
+        }
+
+        match String::from_utf8(bytes) {
             Ok(text) => Ok(Some(SecretValue::Text(text))),
-            Err(_) => Ok(Some(SecretValue::Bytes(bytes))),
+            Err(err) => Ok(Some(SecretValue::Bytes(err.into_bytes()))),
         }
     }
 
     fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {
         let path = file_path(location)?;
+        let bytes = value.into_bytes();
+        if bytes.len() as u64 > FILE_SECRET_MAX_BYTES {
+            return Err(secret_size_error(path));
+        }
 
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|err| SecretError::io(parent, err))?;
         }
 
-        let bytes = value.into_bytes();
         let temp_path = unique_temp_path(path);
         write_secure_temp_file(&temp_path, &bytes)?;
         replace_file(&temp_path, path)?;
@@ -65,10 +91,9 @@ impl SecretRevisionBackend for FileSecretBackend {
     ) -> Result<Option<SecretRevision>, SecretError> {
         let path = file_path(location)?;
 
-        match fs::metadata(path) {
-            Ok(metadata) => Ok(Some(SecretRevision::from_metadata(&metadata))),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(SecretError::io(path, err)),
+        match secret_file_metadata(path)? {
+            Some(metadata) => Ok(Some(SecretRevision::from_metadata(&metadata))),
+            None => Ok(None),
         }
     }
 }
@@ -80,6 +105,41 @@ fn file_path(location: &SecretLocation) -> Result<&Path, SecretError> {
             "keyring://{service}/{account}"
         ))),
     }
+}
+
+fn secret_file_metadata(path: &Path) -> Result<Option<fs::Metadata>, SecretError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(SecretError::io(path, err)),
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() || !file_type.is_file() {
+        return Err(SecretError::invalid_location(format!(
+            "{} is not a regular secret file",
+            path.display()
+        )));
+    }
+    Ok(Some(metadata))
+}
+
+#[cfg(unix)]
+fn same_secret_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn same_secret_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
+    true
+}
+
+fn secret_size_error(path: &Path) -> SecretError {
+    SecretError::invalid_location(format!(
+        "{} exceeds safe size limit ({} bytes)",
+        path.display(),
+        FILE_SECRET_MAX_BYTES
+    ))
 }
 
 fn unique_temp_path(path: &Path) -> PathBuf {

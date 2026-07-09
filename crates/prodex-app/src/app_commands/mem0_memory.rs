@@ -1,12 +1,16 @@
 use super::runtime_launch;
-use crate::{AppPaths, RuntimeLaunchRequest, RuntimeRotationProxy, print_launch_status};
+use crate::{
+    AppPaths, RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeLaunchRequest,
+    RuntimeRotationProxy, print_launch_status, read_blocking_response_body_with_limit,
+    read_blocking_response_text_with_limit,
+};
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
+use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -70,7 +74,7 @@ pub(crate) fn start_managed_mem0_memory(
     let root = paths.root.join("mem0");
     let checkout = root.join("mem0");
     let server_dir = checkout.join("server");
-    if server_dir.join("docker-compose.yaml").is_file() {
+    if mem0_checkout_has_server_compose(&checkout)? {
         print_launch_status(&format!(
             "using existing Mem0 server checkout at {}.",
             server_dir.display()
@@ -170,7 +174,12 @@ fn configure_mem0_server(
         .send()
         .context("failed to configure managed Mem0 server")?;
     let status = response.status();
-    let body = response.text().unwrap_or_default();
+    let body = read_blocking_response_text_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read managed Mem0 configure response",
+    )
+    .unwrap_or_default();
     if !status.is_success() {
         bail!("managed Mem0 /configure returned {status}: {body}");
     }
@@ -178,20 +187,16 @@ fn configure_mem0_server(
 }
 
 fn ensure_mem0_checkout(checkout: &Path) -> Result<()> {
-    let server_compose = checkout.join("server").join("docker-compose.yaml");
-    if server_compose.is_file() {
+    if mem0_checkout_has_server_compose(checkout)? {
         return Ok(());
     }
-    if checkout.exists() {
+    if mem0_path_exists(checkout)? {
         bail!(
             "{} exists but does not look like a Mem0 checkout with server/docker-compose.yaml",
             checkout.display()
         );
     }
-    if let Some(parent) = checkout.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
+    ensure_mem0_checkout_parent(checkout)?;
     let status = Command::new("git")
         .args(["clone", "--depth=1", MEM0_REPO_URL])
         .arg(checkout)
@@ -204,6 +209,60 @@ fn ensure_mem0_checkout(checkout: &Path) -> Result<()> {
         bail!("failed to clone Mem0 server from {MEM0_REPO_URL}");
     }
     Ok(())
+}
+
+fn ensure_mem0_checkout_parent(checkout: &Path) -> Result<()> {
+    let Some(parent) = checkout.parent() else {
+        return Ok(());
+    };
+    if mem0_path_exists(parent)? {
+        if !mem0_path_is_regular_dir(parent)? {
+            bail!(
+                "Mem0 checkout parent {} is not a directory",
+                parent.display()
+            );
+        }
+        return Ok(());
+    }
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    if !mem0_path_is_regular_dir(parent)? {
+        bail!(
+            "Mem0 checkout parent {} is not a directory",
+            parent.display()
+        );
+    }
+    Ok(())
+}
+
+fn mem0_checkout_has_server_compose(checkout: &Path) -> Result<bool> {
+    let server = checkout.join("server");
+    Ok(mem0_path_is_regular_dir(checkout)?
+        && mem0_path_is_regular_dir(&server)?
+        && mem0_path_is_regular_file(&server.join("docker-compose.yaml"))?)
+}
+
+fn mem0_path_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn mem0_path_is_regular_dir(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(!metadata.file_type().is_symlink() && metadata.is_dir()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn mem0_path_is_regular_file(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(!metadata.file_type().is_symlink() && metadata.is_file()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,21 +318,10 @@ fn write_mem0_env(
 }
 
 fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
-    restrict_file_permissions_if_exists(path)?;
-    let mut options = fs::OpenOptions::new();
-    options.create(true).truncate(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
-    file.write_all(contents.as_bytes())
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    restrict_file_permissions(path)?;
-    Ok(())
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(path), contents)
+        .map_err(anyhow::Error::new)
+        .with_context(|| format!("failed to write {}", path.display()))
 }
 
 fn render_mem0_env(
@@ -431,7 +479,13 @@ fn select_mem0_memory_model(proxy: &RuntimeRotationProxy, gateway_token: &str) -
     if !response.status().is_success() {
         return None;
     }
-    let value: Value = response.json().ok()?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read managed Mem0 model response",
+    )
+    .ok()?;
+    let value: Value = serde_json::from_slice(&body).ok()?;
     let models = value
         .get("data")
         .and_then(Value::as_array)?
@@ -482,26 +536,6 @@ fn random_url_safe_token(prefix: &str) -> Result<String> {
     Ok(format!("{prefix}-{token}"))
 }
 
-#[cfg(unix)]
-fn restrict_file_permissions(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("failed to restrict {}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn restrict_file_permissions(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-fn restrict_file_permissions_if_exists(path: &Path) -> Result<()> {
-    if path.exists() {
-        restrict_file_permissions(path)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,6 +579,46 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn ensure_mem0_checkout_rejects_symlink_checkout() {
+        let root = temp_mem0_dir("checkout-symlink");
+        let checkout = root.join("mem0");
+        let outside = root.join("outside");
+        fs::create_dir_all(outside.join("server")).unwrap();
+        fs::write(outside.join("server/docker-compose.yaml"), "services: {}\n").unwrap();
+        std::os::unix::fs::symlink(&outside, &checkout).unwrap();
+
+        let err = ensure_mem0_checkout(&checkout).expect_err("symlink checkout should reject");
+
+        assert!(
+            err.to_string()
+                .contains("does not look like a Mem0 checkout"),
+            "unexpected error: {err:#}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_mem0_checkout_rejects_symlink_parent() {
+        let root = temp_mem0_dir("checkout-parent-symlink");
+        let outside = root.join("outside-parent");
+        let parent = root.join("mem0-root");
+        let checkout = parent.join("mem0");
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &parent).unwrap();
+
+        let err = ensure_mem0_checkout(&checkout).expect_err("symlink parent should reject");
+
+        assert!(
+            err.to_string().contains("is not a directory"),
+            "unexpected error: {err:#}"
+        );
+        assert!(!outside.join("mem0").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn write_mem0_env_restricts_existing_env_file() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -572,6 +646,46 @@ mod tests {
         assert_eq!(
             fs::metadata(&env_path).unwrap().permissions().mode() & 0o777,
             0o600
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_mem0_env_replaces_symlink_without_touching_target() {
+        let root = temp_mem0_dir("env-symlink");
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.env");
+        let env_path = root.join(".env");
+        fs::write(&target, "DO_NOT_TOUCH=1\n").unwrap();
+        std::os::unix::fs::symlink(&target, &env_path).unwrap();
+        let secrets = Mem0Secrets {
+            postgres_password: "pg".to_string(),
+            admin_api_key: "admin".to_string(),
+            jwt_secret: "jwt".to_string(),
+        };
+
+        write_mem0_env(
+            &root,
+            "gateway-token",
+            "http://host",
+            &secrets,
+            "llm",
+            "embedder",
+        )
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "DO_NOT_TOUCH=1\n");
+        assert!(
+            !fs::symlink_metadata(&env_path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::read_to_string(&env_path)
+                .unwrap()
+                .contains("OPENAI_API_KEY=gateway-token\n")
         );
         let _ = fs::remove_dir_all(root);
     }

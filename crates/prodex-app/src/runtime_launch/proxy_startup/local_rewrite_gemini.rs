@@ -18,8 +18,9 @@ use super::local_rewrite_gemini_models::{
     runtime_gemini_unsupported_tool_fallback_body,
 };
 use super::local_rewrite_gemini_quota::{
-    runtime_gemini_body_has_terminal_quota, runtime_gemini_buffered_parts_are_quota_blocked,
-    runtime_gemini_normalized_error_parts, runtime_gemini_retry_delay_ms,
+    runtime_gemini_body_has_rate_limit, runtime_gemini_body_has_terminal_quota,
+    runtime_gemini_buffered_parts_are_quota_blocked, runtime_gemini_normalized_error_parts,
+    runtime_gemini_retry_delay_ms,
 };
 use super::local_rewrite_gemini_retry::{
     RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
@@ -360,12 +361,12 @@ pub(super) fn send_runtime_gemini_upstream_request(
                     }
                     if runtime_gemini_should_rotate_after_quota_response(
                         status,
+                        quota_blocked,
                         selected.hard_affinity,
                         selected.quota_fallback_allowed,
                         attempt_index,
                         attempt_count,
-                    ) && (status == 429 || quota_blocked)
-                    {
+                    ) {
                         runtime_proxy_log(
                             &shared.runtime_shared,
                             runtime_proxy_structured_log_message(
@@ -497,6 +498,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                         }
                     }
                     if status == 429
+                        && runtime_gemini_body_has_rate_limit(&parts.body)
                         && !runtime_gemini_body_has_terminal_quota(&parts.body)
                         && delay_ms > 0
                         && rate_limit_retry_index < RUNTIME_GEMINI_LOCAL_RETRY_LIMIT

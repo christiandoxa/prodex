@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -177,6 +178,9 @@ pub(crate) fn runtime_load_json_file_or_default<T>(path: &Path, valid: impl Fn(&
 where
     T: DeserializeOwned + Default,
 {
+    if !runtime_json_path_is_regular_file(path) {
+        return T::default();
+    }
     let Ok(bytes) = fs::read(path) else {
         return T::default();
     };
@@ -203,5 +207,109 @@ where
     let existing = runtime_load_json_file_or_default(path, valid_existing);
     let merged = merge(existing, incoming);
     let bytes = serde_json::to_vec(&merged).context("failed to encode JSON")?;
-    fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+    runtime_write_json_file_atomic(path, &bytes)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn runtime_json_path_is_regular_file(path: &Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata.file_type().is_file(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => false,
+        Err(_) => false,
+    }
+}
+
+fn runtime_write_json_file_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let temp_path = crate::runtime_store::unique_state_temp_file_path(path);
+    write_private_file(&temp_path, bytes)
+        .with_context(|| format!("failed to write {}", temp_path.display()))?;
+    if let Err(err) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err).with_context(|| format!("failed to replace {}", path.display()));
+    }
+    Ok(())
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = open_private_file(path)?;
+    file.write_all(bytes)
+}
+
+#[cfg(unix)]
+fn open_private_file(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_private_file(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::env;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        env::temp_dir().join(format!(
+            "prodex-token-calibration-save-{name}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_merged_json_replaces_symlink_without_reading_or_touching_target() {
+        let root = temp_dir("symlink");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("calibration.json");
+        let target = root.join("target.json");
+        fs::write(&target, r#"{"outside":"secret"}"#).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+
+        let incoming = BTreeMap::from([("safe".to_string(), "value".to_string())]);
+        runtime_save_merged_json_file(
+            &path,
+            incoming,
+            |_existing: &BTreeMap<String, String>| true,
+            |mut existing, incoming| {
+                existing.extend(incoming);
+                existing
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            r#"{"outside":"secret"}"#
+        );
+        assert!(
+            !fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let saved: BTreeMap<String, String> =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved,
+            BTreeMap::from([("safe".to_string(), "value".to_string())])
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }

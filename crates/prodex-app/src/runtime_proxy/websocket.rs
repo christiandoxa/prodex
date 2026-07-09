@@ -137,24 +137,25 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
         &runtime.upstream_base_url,
         &handshake_request.path_and_query,
     )?;
+    let log_url = runtime_proxy_log_url(&upstream_url);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     loop {
         let auth = runtime_profile_usage_auth(shared, profile_name)?;
         let mut request = upstream_url
             .as_str()
             .into_client_request()
-            .with_context(|| {
-                format!("failed to build runtime websocket request for {upstream_url}")
-            })?;
+            .with_context(|| format!("failed to build runtime websocket request for {log_url}"))?;
 
-        for (name, value) in &handshake_request.headers {
+        for (name, value) in runtime_forward_request_headers(
+            handshake_request
+                .headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        ) {
             if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
                 continue;
             }
             if name.eq_ignore_ascii_case("cookie") {
-                continue;
-            }
-            if should_skip_runtime_request_header(name) {
                 continue;
             }
             let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {
@@ -205,7 +206,7 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
                     runtime_proxy_log_field("profile", profile_name),
-                    runtime_proxy_log_field("url", upstream_url.as_str()),
+                    runtime_proxy_log_field("url", log_url.as_str()),
                     runtime_proxy_log_field(
                         "turn_state_override",
                         format!("{turn_state_override:?}"),

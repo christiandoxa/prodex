@@ -5,6 +5,9 @@ use super::local_rewrite::{
 use super::local_rewrite_gateway_file_ledger::{
     runtime_gateway_file_ledger_append_deltas, runtime_gateway_file_ledger_load,
 };
+use super::local_rewrite_gateway_store_file::{
+    runtime_gateway_read_regular_file, runtime_gateway_write_file_atomic,
+};
 use super::local_rewrite_gateway_usage_backend::{
     RuntimeGatewayVirtualKeyUsageDelta, runtime_gateway_postgres_usage_apply_deltas,
     runtime_gateway_postgres_usage_load, runtime_gateway_redis_usage_apply_deltas,
@@ -16,6 +19,7 @@ use anyhow::Result;
 use fs2::FileExt;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -186,9 +190,7 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
         );
     }
     let payload = serde_json::to_vec_pretty(&usage).map_err(std::io::Error::other)?;
-    let tmp_path = path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, payload)?;
-    std::fs::rename(tmp_path, path)?;
+    runtime_gateway_write_file_atomic(path, "json.tmp", |file| file.write_all(&payload))?;
     runtime_gateway_file_ledger_append_deltas(ledger_path, &unique_deltas)?;
     let _ = lock_file.unlock();
     Ok(())
@@ -197,12 +199,11 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
 fn runtime_gateway_virtual_key_usage_file_load_strict(
     path: &Path,
 ) -> std::io::Result<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>> {
-    match std::fs::read(path) {
-        Ok(bytes) => serde_json::from_slice::<
+    match runtime_gateway_read_regular_file(path)? {
+        Some(bytes) => serde_json::from_slice::<
             BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>,
         >(&bytes)
         .map_err(std::io::Error::other),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
-        Err(err) => Err(err),
+        None => Ok(BTreeMap::new()),
     }
 }

@@ -11,6 +11,10 @@ use super::{
     format_response_body, quota_base_url, rate_limit_reset_credit_consume_url, read_auth_json_text,
     usage_url,
 };
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit,
+    read_blocking_response_text_with_limit,
+};
 use anyhow::{Context, Result, bail};
 use chrono::Local;
 use codex_config::codex_non_openai_model_provider;
@@ -366,7 +370,11 @@ pub(crate) fn read_profile_workspace_from_auth(
         return Ok(fallback());
     };
     let status = response.status();
-    let Ok(body) = response.bytes() else {
+    let Ok(body) = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read accounts response body",
+    ) else {
         return Ok(fallback());
     };
     if !status.is_success() {
@@ -554,10 +562,11 @@ fn send_usage_request(
         .send()
         .with_context(|| format!("failed to request quota endpoint {}", usage_url))?;
     let status = response.status();
-    let body = response
-        .bytes()
-        .context("failed to read quota response body")?
-        .to_vec();
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read quota response body",
+    )?;
     Ok((status, body))
 }
 
@@ -581,10 +590,11 @@ fn send_rate_limit_reset_credit_consume_request(
         .send()
         .with_context(|| format!("failed to request reset-credit endpoint {consume_url}"))?;
     let status = response.status();
-    let body = response
-        .bytes()
-        .context("failed to read reset-credit response body")?
-        .to_vec();
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read reset-credit response body",
+    )?;
     Ok((status, body))
 }
 
@@ -682,9 +692,11 @@ fn request_chatgpt_auth_refresh_direct(
             .send()
             .context("failed to request ChatGPT auth refresh")?;
     let status = response.status();
-    let body = response
-        .text()
-        .context("failed to read auth refresh body")?;
+    let body = read_blocking_response_text_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read auth refresh body",
+    )?;
     if !status.is_success() {
         bail!(
             "failed to refresh ChatGPT auth (HTTP {}): {}",

@@ -13,7 +13,7 @@ use super::super::local_rewrite_search_fallback::{
 };
 use super::super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_gemini_openai_compatible_upstream_url,
-    runtime_local_rewrite_api_key_attempts,
+    runtime_local_rewrite_api_key_attempts, runtime_local_rewrite_log_url,
 };
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_request_conformance,
@@ -56,7 +56,7 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
             "local_rewrite_gemini_openai_compatible",
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("endpoint", upstream_url.as_str()),
+                runtime_proxy_log_field("endpoint", runtime_local_rewrite_log_url(&upstream_url)),
                 runtime_proxy_log_field("auth", "api-key"),
                 runtime_proxy_log_field("attempts", attempt_count.to_string()),
             ],

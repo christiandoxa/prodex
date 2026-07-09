@@ -48,8 +48,12 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
         while shared_for_thread.pty.running.load(Ordering::SeqCst) {
             match server_for_thread.recv_timeout(Duration::from_millis(250)) {
                 Ok(Some(request)) => {
-                    let shared = Arc::clone(&shared_for_thread);
-                    thread::spawn(move || handle_expose_request(request, &shared));
+                    if expose_request_requires_worker(&request, &shared_for_thread.token) {
+                        let shared = Arc::clone(&shared_for_thread);
+                        thread::spawn(move || handle_expose_request(request, &shared));
+                    } else {
+                        handle_expose_request(request, &shared_for_thread);
+                    }
                 }
                 Ok(None) => {}
                 Err(_) => break,
@@ -287,6 +291,14 @@ fn handle_expose_request(request: tiny_http::Request, shared: &Arc<ExposeShared>
     }
 }
 
+fn expose_request_requires_worker(request: &tiny_http::Request, token: &str) -> bool {
+    expose_url_requires_worker(request.url(), token)
+}
+
+fn expose_url_requires_worker(url: &str, token: &str) -> bool {
+    url != "/app.js" && expose_request_authorized(url, token)
+}
+
 fn handle_expose_stream(request: tiny_http::Request, shared: &Arc<ExposeShared>) {
     if shared.active_clients.fetch_add(1, Ordering::SeqCst) >= shared.max_clients {
         shared.active_clients.fetch_sub(1, Ordering::SeqCst);
@@ -482,6 +494,24 @@ mod tests {
         assert!(!expose_request_authorized("/t/abc", "abc"));
         assert!(!expose_request_authorized(
             "/t/abc?access_token=wrong",
+            "abc"
+        ));
+    }
+
+    #[test]
+    fn expose_workers_are_reserved_for_authorized_session_requests() {
+        assert!(!expose_url_requires_worker("/app.js", "abc"));
+        assert!(!expose_url_requires_worker("/t/abc", "abc"));
+        assert!(!expose_url_requires_worker(
+            "/t/abc?access_token=wrong",
+            "abc"
+        ));
+        assert!(expose_url_requires_worker(
+            "/stream/abc?access_token=abc",
+            "abc"
+        ));
+        assert!(expose_url_requires_worker(
+            "/input/abc?access_token=abc",
             "abc"
         ));
     }

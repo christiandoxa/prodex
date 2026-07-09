@@ -4,6 +4,50 @@ use super::gemini_rewrite_test_support::conversation_store;
 use super::runtime_gemini_generate_request_body;
 use std::fs;
 
+#[cfg(unix)]
+#[test]
+fn gemini_read_many_files_does_not_follow_symlinked_context_paths() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-gemini-context-symlink-{}",
+        std::process::id()
+    ));
+    let directory = root.join("workspace");
+    let outside = root.join("outside");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&directory).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(directory.join("visible.txt"), "visible context").unwrap();
+    fs::write(outside.join("secret.txt"), "symlink secret").unwrap();
+    std::os::unix::fs::symlink(outside.join("secret.txt"), directory.join("linked.txt")).unwrap();
+    std::os::unix::fs::symlink(&outside, directory.join("linked_dir")).unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "model": "gemini-2.5-pro",
+        "input": "Review context",
+        "include_paths": [directory.join("linked.txt")],
+        "read_many_files": {
+            "include": [format!("{}/**/*", directory.display())],
+            "useDefaultExcludes": true
+        },
+    }))
+    .unwrap();
+
+    let translated =
+        runtime_gemini_generate_request_body(&body, &conversation_store(), false, None, None)
+            .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
+    let text = value["contents"][0]["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(text.contains("visible context"));
+    assert!(!text.contains("symlink secret"));
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn gemini_request_translation_expands_at_paths_and_read_many_files() {
     let directory =

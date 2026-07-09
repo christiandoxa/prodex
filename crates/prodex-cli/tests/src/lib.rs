@@ -8,6 +8,7 @@ mod external_provider;
 mod ping;
 mod redeem;
 mod runtime_features;
+mod session_tail;
 mod shortcuts;
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");

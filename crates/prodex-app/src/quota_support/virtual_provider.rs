@@ -3,6 +3,7 @@ use super::{
     AuthSummary, ExternalQuotaDetail, ExternalQuotaInfo, ProviderQuotaSnapshot,
     QuotaProviderFilter, QuotaReport, build_upstream_blocking_http_client, format_response_body,
 };
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
 use chrono::Local;
 use prodex_state::ProfileProvider;
@@ -200,9 +201,11 @@ fn fetch_deepseek_balance_json(api_key: &str, base_url: Option<&str>) -> Result<
         .send()
         .context("failed to fetch DeepSeek balance")?;
     let status = response.status();
-    let body = response
-        .bytes()
-        .context("failed to read DeepSeek balance response")?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read DeepSeek balance response",
+    )?;
     if !status.is_success() {
         bail!(
             "DeepSeek balance request failed (HTTP {}): {}",
@@ -236,9 +239,11 @@ fn fetch_local_openai_compatible_quota_info(base_url: &str) -> Result<ExternalQu
         .send()
         .context("failed to fetch local OpenAI-compatible models")?;
     let status = response.status();
-    let body = response
-        .bytes()
-        .context("failed to read local OpenAI-compatible response")?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read local OpenAI-compatible response",
+    )?;
     if !status.is_success() {
         bail!(
             "local OpenAI-compatible models request failed (HTTP {}): {}",

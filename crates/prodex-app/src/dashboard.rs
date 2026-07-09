@@ -4,7 +4,7 @@ use prodex_provider_core::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::fs;
+use std::io::Read;
 use std::net::SocketAddr;
 use terminal_ui::print_panel;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
@@ -17,7 +17,7 @@ use crate::{
     format_copilot_main_quota, format_copilot_quota_status, format_copilot_reset_summary,
     format_gemini_main_quota, format_gemini_quota_status, format_gemini_reset_summary,
     format_main_windows, managed_profile_home_path, prepare_managed_codex_home,
-    runtime_proxy_log_dir,
+    runtime_proxy_latest_log_path_from_pointer, runtime_proxy_log_dir,
 };
 
 const DASHBOARD_PROVIDER_IDS: &[ProviderId] = &[
@@ -29,6 +29,24 @@ const DASHBOARD_PROVIDER_IDS: &[ProviderId] = &[
     ProviderId::Kiro,
     ProviderId::Local,
 ];
+const DASHBOARD_MAX_JSON_BODY_BYTES: usize = 64 * 1024;
+
+#[derive(Debug)]
+struct DashboardJsonBodyTooLarge {
+    limit: usize,
+}
+
+impl std::fmt::Display for DashboardJsonBodyTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "dashboard request body exceeds {} bytes",
+            self.limit
+        )
+    }
+}
+
+impl std::error::Error for DashboardJsonBodyTooLarge {}
 
 #[derive(Debug)]
 struct DashboardServer {
@@ -278,21 +296,15 @@ impl DashboardServer {
     fn runtime_status_json(&self) -> Result<Value> {
         let log_dir = runtime_proxy_log_dir();
         let latest_pointer = log_dir.join(crate::RUNTIME_PROXY_LATEST_LOG_POINTER);
-        let latest_log = fs::read_to_string(&latest_pointer)
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let latest_log_exists = latest_log
-            .as_deref()
-            .map(std::path::Path::new)
-            .is_some_and(std::path::Path::exists);
+        let latest_log = runtime_proxy_latest_log_path_from_pointer();
+        let latest_log_exists = latest_log.as_ref().is_some_and(|path| path.exists());
 
         Ok(json!({
             "runtime": {
                 "status": if latest_log_exists { "log-available" } else { "not-running-or-no-log" },
                 "logDir": log_dir.display().to_string(),
                 "latestLogPointer": latest_pointer.display().to_string(),
-                "latestLog": latest_log,
+                "latestLog": latest_log.map(|path| path.display().to_string()),
                 "latestLogExists": latest_log_exists,
                 "doctorCommand": "prodex doctor --runtime",
             },
@@ -308,7 +320,7 @@ impl DashboardServer {
     fn handle_set_active(&self, mut request: Request) -> Result<()> {
         let payload: ActiveProfileRequest = match read_json_body(&mut request) {
             Ok(payload) => payload,
-            Err(err) => return respond_error(request, StatusCode(400), err),
+            Err(err) => return respond_error(request, dashboard_json_body_error_status(&err), err),
         };
         let mut state = match AppState::load(&self.paths) {
             Ok(state) => state,
@@ -334,7 +346,7 @@ impl DashboardServer {
     fn handle_add_profile(&self, mut request: Request) -> Result<()> {
         let payload: AddProfileRequest = match read_json_body(&mut request) {
             Ok(payload) => payload,
-            Err(err) => return respond_error(request, StatusCode(400), err),
+            Err(err) => return respond_error(request, dashboard_json_body_error_status(&err), err),
         };
         let name = payload.name.trim().to_string();
         if let Err(err) = prodex_profile_identity::validate_profile_name(&name) {
@@ -702,12 +714,29 @@ fn window_json(window: &prodex_quota::UsageWindow) -> Value {
 }
 
 fn read_json_body<T: for<'de> Deserialize<'de>>(request: &mut Request) -> Result<T> {
-    let mut body = String::new();
-    request
-        .as_reader()
-        .read_to_string(&mut body)
+    let body =
+        read_dashboard_json_body_limited(request.as_reader(), DASHBOARD_MAX_JSON_BODY_BYTES)?;
+    serde_json::from_slice(&body).context("invalid JSON request body")
+}
+
+fn dashboard_json_body_error_status(err: &anyhow::Error) -> StatusCode {
+    if err.downcast_ref::<DashboardJsonBodyTooLarge>().is_some() {
+        StatusCode(413)
+    } else {
+        StatusCode(400)
+    }
+}
+
+fn read_dashboard_json_body_limited(reader: impl Read, limit: usize) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    let mut reader = reader.take((limit as u64).saturating_add(1));
+    reader
+        .read_to_end(&mut body)
         .context("failed to read dashboard request body")?;
-    serde_json::from_str(&body).context("invalid JSON request body")
+    if body.len() > limit {
+        return Err(DashboardJsonBodyTooLarge { limit }.into());
+    }
+    Ok(body)
 }
 
 fn respond_json(request: Request, value: Value) -> Result<()> {
@@ -801,5 +830,13 @@ mod tests {
             "Warning".to_string(),
             "dashboard has no password auth".to_string()
         )));
+    }
+
+    #[test]
+    fn dashboard_json_body_limit_rejects_limit_plus_one() {
+        let err = read_dashboard_json_body_limited(std::io::Cursor::new(vec![b'a'; 5]), 4)
+            .expect_err("body above limit should be rejected");
+
+        assert_eq!(dashboard_json_body_error_status(&err), StatusCode(413));
     }
 }

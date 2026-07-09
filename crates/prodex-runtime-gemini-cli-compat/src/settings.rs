@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
-use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const GEMINI_SETTINGS_FILE_LIMIT: usize = 512 * 1024;
@@ -18,7 +16,8 @@ pub fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsSource> 
     let paths = gemini_settings_source_paths(cwd);
     let mut sources = Vec::new();
     for (name, path) in paths {
-        let Some(text) = read_text_limited(&path, GEMINI_SETTINGS_FILE_LIMIT) else {
+        let Some(text) = crate::fs_utils::read_text_limited(&path, GEMINI_SETTINGS_FILE_LIMIT)
+        else {
             continue;
         };
         let Some(value) = parse_gemini_settings_json(&text) else {
@@ -187,17 +186,4 @@ fn strip_json_comments(text: &str) -> String {
         output.push(ch);
     }
     output
-}
-
-fn read_text_limited(path: &Path, limit: usize) -> Option<String> {
-    let mut file = fs::File::open(path).ok()?;
-    let mut buffer = Vec::new();
-    file.by_ref()
-        .take(limit as u64 + 1)
-        .read_to_end(&mut buffer)
-        .ok()?;
-    if buffer.len() > limit {
-        return None;
-    }
-    String::from_utf8(buffer).ok()
 }

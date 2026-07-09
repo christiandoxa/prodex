@@ -304,11 +304,10 @@ fn quota_current_runtime_profile_name(state: &AppState) -> Option<String> {
 }
 
 pub(crate) fn quota_runtime_auth_backoff_profiles() -> std::collections::BTreeSet<String> {
-    if let Ok(path) = fs::read_to_string(runtime_proxy_latest_log_pointer_path()) {
-        let path = PathBuf::from(path.trim());
-        if path.exists() {
-            return quota_runtime_auth_backoff_profiles_from_paths([path]);
-        }
+    if let Some(path) = runtime_proxy_latest_log_path_from_pointer()
+        && path.exists()
+    {
+        return quota_runtime_auth_backoff_profiles_from_paths([path]);
     }
     quota_runtime_auth_backoff_profiles_from_paths(prodex_runtime_log_paths_in_dir(
         &runtime_proxy_log_dir(),

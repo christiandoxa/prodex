@@ -8,6 +8,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const RUNTIME_KIRO_ACP_STDERR_MAX_BYTES: u64 = 64 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RuntimeKiroAcpClientInfo<'a> {
@@ -407,7 +409,9 @@ fn runtime_kiro_acp_prompt_turn_child(
 
 fn runtime_kiro_acp_read_stderr(stderr: &mut impl Read) -> String {
     let mut stderr_text = String::new();
-    let _ = stderr.read_to_string(&mut stderr_text);
+    let _ = stderr
+        .take(RUNTIME_KIRO_ACP_STDERR_MAX_BYTES)
+        .read_to_string(&mut stderr_text);
     stderr_text
 }
 

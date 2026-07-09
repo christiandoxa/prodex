@@ -246,7 +246,7 @@ fn runtime_proxy_http_previous_response_not_found_after_commit_passes_through() 
 }
 
 #[test]
-fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_stale_continuation() {
+fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_through() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -343,12 +343,12 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_surfaces_sta
         "client should see committed model output before the later continuation error: {frames:?}"
     );
     assert!(
-        error_message.contains("\"code\":\"stale_continuation\""),
-        "post-commit websocket continuation error should surface stale_continuation: {error_message}"
+        error_message.contains("\"code\":\"previous_response_not_found\""),
+        "post-commit websocket continuation error should pass through upstream code: {error_message}"
     );
     assert!(
-        !error_message.contains("previous_response_not_found"),
-        "proxy should not leak raw previous_response_not_found after a committed websocket chain dies: {error_message}"
+        !error_message.contains("\"code\":\"stale_continuation\""),
+        "proxy should not rewrite post-commit websocket upstream error: {error_message}"
     );
 
     let log_tail = wait_for_runtime_log_tail_until(

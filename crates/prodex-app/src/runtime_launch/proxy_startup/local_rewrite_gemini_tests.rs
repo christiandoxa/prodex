@@ -490,22 +490,25 @@ fn gemini_binding_recorder_reads_custom_tool_calls() {
 #[test]
 fn gemini_quota_rotation_predicate_respects_affinity_and_attempt_budget() {
     assert!(runtime_gemini_should_rotate_after_quota_response(
-        429, false, false, 0, 2
+        429, true, false, false, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, false, false, 0, 1
+        429, false, false, false, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, true, false, 0, 2
+        429, true, false, false, 0, 1
+    ));
+    assert!(!runtime_gemini_should_rotate_after_quota_response(
+        429, true, true, false, 0, 2
     ));
     assert!(runtime_gemini_should_rotate_after_quota_response(
-        429, true, true, 0, 2
+        429, true, true, true, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, false, false, 1, 2
+        429, true, false, false, 1, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        500, false, false, 0, 2
+        500, true, false, false, 0, 2
     ));
 }
 

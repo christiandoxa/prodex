@@ -244,10 +244,36 @@ fn provider_model_fallback_supports_aliases_and_combo() {
 }
 
 #[test]
-fn provider_error_rules_do_not_treat_generic_429_as_quota() {
+fn provider_error_rules_do_not_treat_generic_429_as_quota_or_rate_limit() {
     assert_eq!(
         runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, 429, b"too many requests"),
-        RuntimeProviderErrorClass::RateLimit
+        RuntimeProviderErrorClass::Fatal
+    );
+    let message_only_rate_limit_body = serde_json::to_vec(&serde_json::json!({
+        "error": {
+            "message": "The docs mention rate_limit_exceeded as an example."
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        runtime_provider_error_class(
+            RuntimeProviderBridgeKind::DeepSeek,
+            429,
+            &message_only_rate_limit_body
+        ),
+        RuntimeProviderErrorClass::Fatal
+    );
+    let output_text_rate_limit_body =
+        br#"data: {"type":"response.output_text.delta","delta":"rate_limit_exceeded"}
+
+"#;
+    assert_eq!(
+        runtime_provider_error_class(
+            RuntimeProviderBridgeKind::DeepSeek,
+            429,
+            output_text_rate_limit_body
+        ),
+        RuntimeProviderErrorClass::Fatal
     );
     let body = serde_json::to_vec(&serde_json::json!({
         "error": {
@@ -259,6 +285,36 @@ fn provider_error_rules_do_not_treat_generic_429_as_quota() {
     assert_eq!(
         runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, 429, &body),
         RuntimeProviderErrorClass::Quota
+    );
+    let forbidden_quota_body = serde_json::to_vec(&serde_json::json!({
+        "error": {
+            "code": "insufficient_quota",
+            "message": "Quota exhausted."
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        runtime_provider_error_class(
+            RuntimeProviderBridgeKind::DeepSeek,
+            403,
+            &forbidden_quota_body
+        ),
+        RuntimeProviderErrorClass::Quota
+    );
+    let forbidden_rate_limit_body = serde_json::to_vec(&serde_json::json!({
+        "error": {
+            "code": "rate_limit_exceeded",
+            "message": "Rate limit exceeded."
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        runtime_provider_error_class(
+            RuntimeProviderBridgeKind::DeepSeek,
+            403,
+            &forbidden_rate_limit_body
+        ),
+        RuntimeProviderErrorClass::RateLimit
     );
     assert_eq!(
         runtime_provider_error_class(RuntimeProviderBridgeKind::DeepSeek, 401, b"{}"),

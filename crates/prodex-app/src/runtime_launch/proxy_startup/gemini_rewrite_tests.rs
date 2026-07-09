@@ -2,9 +2,33 @@
 
 use super::gemini_rewrite_test_support::conversation_store;
 use super::{
-    runtime_gemini_generate_request_body, runtime_gemini_request_body_without_tool,
-    runtime_gemini_responses_value_from_generate_value,
+    RuntimeGeminiAuth, runtime_gemini_generate_request_body, runtime_gemini_native_upstream_url,
+    runtime_gemini_request_body_without_tool, runtime_gemini_responses_value_from_generate_value,
 };
+
+#[test]
+fn gemini_native_upstream_url_neutralizes_dot_segments_before_url_parsing_can_escape_base() {
+    let auth = RuntimeGeminiAuth::ApiKey {
+        api_key: "key".to_string(),
+    };
+
+    assert_eq!(
+        runtime_gemini_native_upstream_url(
+            "https://generativelanguage.googleapis.com/v1beta",
+            &auth,
+            "/v1beta/../admin?x=1",
+        ),
+        "https://generativelanguage.googleapis.com/v1beta/%252e%252e/admin?x=1"
+    );
+    assert_eq!(
+        runtime_gemini_native_upstream_url(
+            "https://generativelanguage.googleapis.com/v1beta",
+            &auth,
+            "/v1beta/%2e%2e/admin",
+        ),
+        "https://generativelanguage.googleapis.com/v1beta/%252e%252e/admin"
+    );
+}
 
 #[test]
 fn gemini_request_translation_maps_tools_and_thinking() {

@@ -1,4 +1,4 @@
-use super::fs_utils::read_text_limited;
+use super::fs_utils::{read_text_limited, write_file_atomic_no_symlink};
 use super::utils::GeminiCompatVars;
 use super::{
     GEMINI_COMPAT_FILE_LIMIT, GeminiExtension, ensure_child_table, read_toml_table,
@@ -8,7 +8,6 @@ use crate::{GeminiSettingsSource, gemini_settings_sources};
 use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(super) fn write_gemini_hooks(
@@ -69,13 +68,11 @@ pub(super) fn write_gemini_hooks(
     {
         let rendered = serde_json::to_string_pretty(&hooks_root)
             .context("failed to serialize generated Gemini hooks")?;
-        fs::write(&hooks_path, rendered)
-            .with_context(|| format!("failed to write {}", hooks_path.display()))?;
+        write_file_atomic_no_symlink(&hooks_path, rendered)?;
     } else if hooks_path.exists() {
         let rendered = serde_json::to_string_pretty(&hooks_root)
             .context("failed to serialize hooks after Gemini cleanup")?;
-        fs::write(&hooks_path, rendered)
-            .with_context(|| format!("failed to write {}", hooks_path.display()))?;
+        write_file_atomic_no_symlink(&hooks_path, rendered)?;
     }
 
     if has_generated_hooks {
@@ -312,7 +309,7 @@ fn enable_codex_hooks_feature(codex_home: &Path) -> Result<()> {
 }
 
 fn read_hooks_json(path: &Path) -> Result<serde_json::Value> {
-    let contents = fs::read_to_string(path).unwrap_or_default();
+    let contents = read_text_limited(path, GEMINI_COMPAT_FILE_LIMIT).unwrap_or_default();
     if contents.trim().is_empty() {
         return Ok(json!({"hooks": {}}));
     }

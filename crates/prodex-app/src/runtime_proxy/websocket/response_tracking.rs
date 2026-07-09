@@ -269,11 +269,7 @@ pub(crate) fn attempt_runtime_websocket_request(
                         },
                     );
                 }
-                let text = if committed_previous_response_not_found {
-                    runtime_translate_precommit_previous_response_websocket_text_frame(&text)
-                } else {
-                    runtime_translate_previous_response_websocket_text_frame(&text)
-                };
+                let text = runtime_translate_previous_response_websocket_text_frame(&text);
                 local_socket
                     .send(WsMessage::Text(text.into()))
                     .with_context(|| {

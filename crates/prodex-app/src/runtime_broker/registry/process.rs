@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -12,6 +13,8 @@ use crate::{
     ProcessRow, RuntimeBrokerHealth, RuntimeBrokerRegistry, RuntimeProdexBinaryIdentity,
     collect_process_rows, parse_prodex_version_output,
 };
+
+const RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 struct RuntimeProcessVersionResolution {
@@ -175,9 +178,58 @@ pub(crate) fn runtime_executable_sha256(path: &Path) -> Result<String> {
     if cfg!(debug_assertions) && env::var_os("PRODEX_TEST_SKIP_BINARY_SHA256").is_some() {
         return Ok("test-skip-sha256".to_string());
     }
-    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let digest = Sha256::digest(&bytes);
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
+    if metadata.len() > RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES {
+        bail!(
+            "{} exceeds executable hash size limit ({} bytes)",
+            path.display(),
+            RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES
+        );
+    }
+
+    let mut file =
+        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let opened_metadata = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    if !runtime_process_same_file_metadata(&metadata, &opened_metadata) {
+        bail!("{} changed while hashing", path.display());
+    }
+
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut read_bytes = 0_u64;
+    loop {
+        let len = file
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if len == 0 {
+            break;
+        }
+        read_bytes = read_bytes.saturating_add(len as u64);
+        if read_bytes > RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES {
+            bail!(
+                "{} exceeds executable hash size limit ({} bytes)",
+                path.display(),
+                RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES
+            );
+        }
+        hasher.update(&buffer[..len]);
+    }
+    let digest = hasher.finalize();
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+#[cfg(unix)]
+fn runtime_process_same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_process_same_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
+    true
 }
 
 pub(crate) fn runtime_current_binary_identity() -> (Option<String>, Option<String>) {
@@ -356,4 +408,58 @@ pub(crate) fn terminate_runtime_process(pid: u32) {
 
     RuntimeProcessPlatformImpl::terminate_step(&pid_value, true);
     let _ = wait_for_exit(250);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    #[test]
+    fn runtime_executable_sha256_hashes_small_files() {
+        if cfg!(debug_assertions) && env::var_os("PRODEX_TEST_SKIP_BINARY_SHA256").is_some() {
+            return;
+        }
+        let path = runtime_process_test_path("small-sha256");
+        let mut file = fs::File::create(&path).expect("test executable should be created");
+        file.write_all(b"abc")
+            .expect("test executable should be written");
+
+        let digest = runtime_executable_sha256(&path).expect("test executable should hash");
+
+        assert_eq!(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn runtime_executable_sha256_rejects_oversized_files_before_reading() {
+        if cfg!(debug_assertions) && env::var_os("PRODEX_TEST_SKIP_BINARY_SHA256").is_some() {
+            return;
+        }
+        let path = runtime_process_test_path("oversized-sha256");
+        fs::File::create(&path)
+            .expect("test executable should be created")
+            .set_len(RUNTIME_PRODEX_EXECUTABLE_HASH_MAX_BYTES + 1)
+            .expect("test executable should be made oversized");
+
+        let err = runtime_executable_sha256(&path)
+            .expect_err("oversized executable should not be hashed");
+
+        assert!(format!("{err:#}").contains("exceeds executable hash size limit"));
+        let _ = fs::remove_file(path);
+    }
+
+    fn runtime_process_test_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "prodex-runtime-process-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
 }

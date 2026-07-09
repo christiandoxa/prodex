@@ -7,10 +7,12 @@ use super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
     runtime_provider_response_conformance_result,
 };
-use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    read_runtime_buffered_response_body_with_limit,
+};
 use anyhow::{Context, Result};
 use prodex_provider_core::ProviderTransformLoss;
-use std::io::Read;
 use std::path::PathBuf;
 
 #[path = "gemini_apply_patch.rs"]
@@ -106,16 +108,17 @@ pub(super) struct RuntimeGeminiTranslatedRequest {
 
 pub(super) fn runtime_gemini_generate_buffered_response_parts(
     status: u16,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
     conversations: &RuntimeDeepSeekConversationStore,
     runtime_shared: &crate::RuntimeRotationProxyShared,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read Gemini response body")?;
+    let body = read_runtime_buffered_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read Gemini response body",
+    )?;
     let value: serde_json::Value =
         serde_json::from_slice(&body).context("failed to parse Gemini response JSON")?;
     let translated = runtime_provider_response_conformance_result(
@@ -315,6 +318,8 @@ pub(super) fn runtime_gemini_native_upstream_url(
     auth: &RuntimeGeminiAuth,
     path_and_query: &str,
 ) -> String {
+    let path_and_query = runtime_proxy_crate::runtime_escape_url_path_dot_segments(path_and_query);
+    let path_and_query = path_and_query.as_ref();
     match auth {
         RuntimeGeminiAuth::ApiKey { .. } => format!(
             "{}{}",

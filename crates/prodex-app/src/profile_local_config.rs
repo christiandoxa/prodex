@@ -57,7 +57,9 @@ pub(crate) fn write_profile_openai_compatible_base_url(
         openai_compatible_base_url: base_url,
     };
     let contents = toml::to_string_pretty(&config).context("failed to serialize profile config")?;
-    fs::write(&config_path, contents)
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(&config_path), contents)
+        .map_err(anyhow::Error::new)
         .with_context(|| format!("failed to write {}", config_path.display()))
 }
 
@@ -102,4 +104,50 @@ pub(crate) fn profile_openai_compatible_codex_args(
 
 fn toml_string_literal(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "prodex-profile-local-config-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_profile_config_replaces_symlink_without_touching_target() {
+        let root = temp_dir("symlink");
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.toml");
+        let config_path = profile_local_config_path(&root);
+        fs::write(&target, "do_not_touch = true\n").unwrap();
+        std::os::unix::fs::symlink(&target, &config_path).unwrap();
+
+        write_profile_openai_compatible_base_url(&root, Some("http://127.0.0.1:11434")).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "do_not_touch = true\n"
+        );
+        assert!(
+            !fs::symlink_metadata(&config_path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(
+            read_profile_openai_compatible_base_url(&root).as_deref(),
+            Some("http://127.0.0.1:11434")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }

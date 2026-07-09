@@ -76,6 +76,9 @@ pub(crate) fn cleanup_codex_arg0_temp_dirs_best_effort(codex_home: &Path) {
 }
 
 fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
+    if !arg0_path_is_regular_dir(arg0_root)? {
+        return Ok(());
+    }
     let entries = match fs::read_dir(arg0_root) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -87,7 +90,7 @@ fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() || !arg0_dir_name_is_owned(&path) {
+        if !arg0_path_is_regular_dir(&path)? || !arg0_dir_name_is_owned(&path) {
             continue;
         }
         let Some(_lock_file) = try_lock_codex_arg0_dir(&path)? else {
@@ -106,6 +109,14 @@ fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn arg0_path_is_regular_dir(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(!metadata.file_type().is_symlink() && metadata.is_dir()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
 }
 
 fn arg0_dir_name_is_owned(path: &Path) -> bool {
@@ -144,6 +155,9 @@ fn repair_codex_arg0_permissions_best_effort(path: &Path) {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return;
     };
+    if metadata.file_type().is_symlink() {
+        return;
+    }
     if metadata.is_dir() {
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
         if let Ok(entries) = fs::read_dir(path) {
@@ -151,7 +165,7 @@ fn repair_codex_arg0_permissions_best_effort(path: &Path) {
                 repair_codex_arg0_permissions_best_effort(&entry.path());
             }
         }
-    } else {
+    } else if metadata.is_file() {
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
     }
 }

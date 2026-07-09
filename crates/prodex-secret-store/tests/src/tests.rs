@@ -73,6 +73,62 @@ fn file_backend_preserves_binary_values() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn file_backend_rejects_oversized_secret_reads() {
+    let root = temp_dir("oversized-read");
+    let path = root.join("auth.json");
+    let file = fs::File::create(&path).unwrap();
+    file.set_len(1024 * 1024 + 1).unwrap();
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(&path);
+
+    let err = store.read(&location).unwrap_err();
+    assert!(matches!(err, SecretError::InvalidLocation { .. }));
+    assert!(err.to_string().contains("exceeds safe size limit"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn file_backend_rejects_oversized_secret_writes() {
+    let root = temp_dir("oversized-write");
+    let path = root.join("auth.json");
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(&path);
+
+    let err = store
+        .write(&location, SecretValue::bytes(vec![b'x'; 1024 * 1024 + 1]))
+        .unwrap_err();
+    assert!(matches!(err, SecretError::InvalidLocation { .. }));
+    assert!(err.to_string().contains("exceeds safe size limit"));
+    assert!(!path.exists());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_backend_rejects_symlink_secret_reads() {
+    let root = temp_dir("symlink-read");
+    let target = root.join("target.json");
+    let path = root.join("auth.json");
+    fs::write(&target, "{\"access_token\":\"leaked\"}").unwrap();
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(&path);
+
+    assert!(matches!(
+        store.read_text(&location).unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+    assert!(matches!(
+        store.probe_revision(&location).unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+
+    let _ = fs::remove_dir_all(root);
+}
+
 #[cfg(unix)]
 #[test]
 fn file_backend_writes_secret_files_with_private_permissions() {
@@ -253,6 +309,93 @@ fn refresh_lease_follower_reads_committed_result() {
             assert_eq!(result_json, "{\"access_token\":\"redacted-result\"}");
         }
         other => panic!("expected follower, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn refresh_lease_ignores_oversized_result_file() {
+    let root = temp_dir("refresh-lease-oversized-result");
+    let coordinator = RefreshLeaseCoordinator::new(&root);
+    let sensitive_key = "shared-refresh-token-secret";
+    let paths = coordinator.paths_for_key(sensitive_key);
+    let file = fs::File::create(paths.result_path()).unwrap();
+    file.set_len(1024 * 1024 + 1).unwrap();
+
+    match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => {
+            assert_eq!(owner.lock_path(), paths.lock_path());
+            assert!(!paths.result_path().exists());
+        }
+        other => panic!("expected owner after oversized result cleanup, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn refresh_lease_rejects_oversized_committed_result() {
+    let root = temp_dir("refresh-lease-oversized-commit");
+    let coordinator = RefreshLeaseCoordinator::new(&root);
+    let sensitive_key = "shared-refresh-token-secret";
+    let paths = coordinator.paths_for_key(sensitive_key);
+    let owner = match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner,
+        other => panic!("expected owner, got {other:?}"),
+    };
+
+    let err = owner
+        .commit_result("x".repeat(1024 * 1024 + 1))
+        .unwrap_err();
+    assert!(err.to_string().contains("exceeds safe size limit"));
+    assert!(!paths.result_path().exists());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn refresh_lease_ignores_symlinked_result() {
+    let root = temp_dir("refresh-lease-symlink-result");
+    let coordinator = RefreshLeaseCoordinator::new(&root);
+    let paths = coordinator.paths_for_key("shared-refresh-token-secret");
+    let outside = root.join("outside-result.json");
+    fs::write(&outside, "{\"access_token\":\"attacker\"}").unwrap();
+    std::os::unix::fs::symlink(&outside, paths.result_path()).unwrap();
+
+    match coordinator.acquire("shared-refresh-token-secret").unwrap() {
+        RefreshLeaseDecision::Owner(owner) => {
+            assert_eq!(owner.lock_path(), paths.lock_path());
+            assert!(!paths.result_path().is_symlink());
+            assert_eq!(
+                fs::read_to_string(&outside).unwrap(),
+                "{\"access_token\":\"attacker\"}"
+            );
+        }
+        other => panic!("expected owner after unsafe result cleanup, got {other:?}"),
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn refresh_lease_removes_symlinked_lock_before_acquiring() {
+    let root = temp_dir("refresh-lease-symlink-lock");
+    let coordinator = RefreshLeaseCoordinator::new(&root);
+    let paths = coordinator.paths_for_key("shared-refresh-token-secret");
+    let outside = root.join("outside-lock");
+    fs::write(&outside, "pid=attacker\n").unwrap();
+    std::os::unix::fs::symlink(&outside, paths.lock_path()).unwrap();
+
+    match coordinator.acquire("shared-refresh-token-secret").unwrap() {
+        RefreshLeaseDecision::Owner(owner) => {
+            assert_eq!(owner.lock_path(), paths.lock_path());
+            assert!(!owner.lock_path().is_symlink());
+            assert_eq!(fs::read_to_string(&outside).unwrap(), "pid=attacker\n");
+        }
+        other => panic!("expected owner after unsafe lock cleanup, got {other:?}"),
     }
 
     let _ = fs::remove_dir_all(root);

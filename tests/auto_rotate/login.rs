@@ -152,7 +152,7 @@ fn login_without_profile_reuses_existing_profile_for_same_email() {
             "profiles": {
                 "primary": {
                     "codex_home": fixture.main_home,
-                    "managed": true
+                    "managed": false
                 }
             }
         }),
@@ -204,7 +204,7 @@ fn login_without_profile_does_not_reuse_email_derived_profile_name_for_other_ema
             "profiles": {
                 "customeradroit_gmail.com": {
                     "codex_home": fixture.main_home,
-                    "managed": true,
+                    "managed": false,
                     "email": "main@example.com"
                 }
             }
@@ -246,7 +246,7 @@ fn login_without_profile_updates_token_only_for_duplicate_email() {
             "profiles": {
                 "primary": {
                     "codex_home": fixture.main_home,
-                    "managed": true
+                    "managed": false
                 }
             }
         }),
@@ -322,7 +322,7 @@ fn login_without_profile_adds_suffix_when_email_name_is_taken() {
             "profiles": {
                 "main_example.com": {
                     "codex_home": fixture.second_home,
-                    "managed": true,
+                    "managed": false,
                     "email": "second@example.com"
                 }
             }

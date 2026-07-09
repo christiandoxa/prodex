@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
+#[cfg(test)]
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use crate::fs_ops::{read_text_file_limited, write_executable_file, write_text_file};
 use crate::hook_trust::configure_trusted_session_start_command_hook;
 
 const AUTO_WRAPPER: &str = "prodex-claw-compactor-auto";
@@ -62,7 +62,7 @@ pub(super) fn configure_session_hook(
     }
 
     let config_path = codex_home.join("config.toml");
-    let contents = fs::read_to_string(&config_path).unwrap_or_default();
+    let contents = read_text_file_limited(&config_path)?.unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
         toml::Table::new()
     } else {
@@ -80,8 +80,7 @@ pub(super) fn configure_session_hook(
 
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Claw-Compactor session hook config")?;
-    fs::write(&config_path, rendered)
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    write_text_file(&config_path, &rendered)?;
     Ok(())
 }
 
@@ -304,21 +303,7 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn write_executable_script(path: &Path, script: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::write(path, script).with_context(|| format!("failed to write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path)
-            .with_context(|| format!("failed to stat {}", path.display()))?
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to chmod {}", path.display()))?;
-    }
-    Ok(())
+    write_executable_file(path, script)
 }
 
 #[cfg(test)]

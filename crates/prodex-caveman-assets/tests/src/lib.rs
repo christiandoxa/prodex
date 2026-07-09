@@ -131,6 +131,34 @@ fn prepare_prodex_overlay_home_drops_inherited_codex_apps_cache() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_prodex_overlay_home_rejects_symlink_managed_root() {
+    let root = temp_dir("overlay-symlink-root");
+    let managed = root.join("managed");
+    let outside = root.join("outside");
+    let base = root.join("base");
+    fs::create_dir_all(&outside).expect("outside root should exist");
+    fs::create_dir_all(&base).expect("base should exist");
+    std::os::unix::fs::symlink(&outside, &managed).expect("managed symlink should be created");
+
+    let err = prepare_prodex_overlay_home(&managed, &base)
+        .expect_err("symlink managed root should be rejected");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        fs::read_dir(&outside)
+            .expect("outside target should be readable")
+            .next()
+            .is_none(),
+        "overlay creation must not write through symlinked managed root"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
 fn configure_rtk_codex_home_localizes_agents_symlink() {
     let source = temp_dir("rtk-source");
     let overlay = temp_dir("rtk-overlay");
@@ -395,7 +423,10 @@ fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
     let state_db = shared.join("state_5.sqlite");
     let state_shm = shared.join("state_5.sqlite-shm");
     let state_wal = shared.join("state_5.sqlite-wal");
-    fs::write(&state_db, "shared rollout state").expect("state db");
+    let mut state_db_contents = b"shared rollout state".to_vec();
+    state_db_contents.extend(vec![b'x'; 600 * 1024]);
+    let state_db_len = state_db_contents.len() as u64;
+    fs::write(&state_db, &state_db_contents).expect("state db");
     fs::write(&state_shm, "shared rollout shm").expect("state shm");
     fs::write(&state_wal, "shared rollout wal").expect("state wal");
     std::os::unix::fs::symlink(&state_db, base.join("state_5.sqlite")).expect("state db symlink");
@@ -425,6 +456,14 @@ fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
                 .expect("overlay state should read from local copy")
                 .starts_with("shared rollout")
         );
+        if name == "state_5.sqlite" {
+            assert_eq!(
+                fs::metadata(&link)
+                    .expect("localized state metadata should read")
+                    .len(),
+                state_db_len
+            );
+        }
         fs::write(&link, format!("local {name}")).expect("overlay state write");
         assert!(
             fs::read_to_string(&target)

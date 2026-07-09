@@ -29,11 +29,12 @@ use super::provider_bridge::{
     runtime_provider_stream_event_conformance_result,
 };
 use crate::{
-    RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeStreamingResponse,
-    build_runtime_proxy_json_error_response, build_runtime_proxy_response_from_parts,
-    build_runtime_proxy_text_response, write_runtime_streaming_response,
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_json_error_response,
+    build_runtime_proxy_response_from_parts, build_runtime_proxy_text_response,
+    read_runtime_buffered_response_body_with_limit, write_runtime_streaming_response,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use runtime_proxy_crate::path_without_query;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::Read;
@@ -683,12 +684,13 @@ fn respond_runtime_gemini_rewrite(
 fn runtime_local_rewrite_buffered_response_parts(
     status: u16,
     headers: Vec<(String, Vec<u8>)>,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read local provider response body")?;
+    let body = read_runtime_buffered_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read local provider response body",
+    )?;
     Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers,

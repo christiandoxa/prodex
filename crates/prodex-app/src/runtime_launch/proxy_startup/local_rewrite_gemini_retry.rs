@@ -13,12 +13,14 @@ pub(super) fn runtime_gemini_invalid_stream_retry_delay_ms(retry_index: usize) -
 
 pub(super) fn runtime_gemini_should_rotate_after_quota_response(
     status: u16,
+    quota_blocked: bool,
     hard_affinity: bool,
     quota_fallback_allowed: bool,
     attempt_index: usize,
     attempt_count: usize,
 ) -> bool {
-    runtime_gemini_response_retryable_quota(status)
+    quota_blocked
+        && runtime_gemini_response_retryable_quota(status)
         && (!hard_affinity || quota_fallback_allowed)
         && attempt_index + 1 < attempt_count
 }

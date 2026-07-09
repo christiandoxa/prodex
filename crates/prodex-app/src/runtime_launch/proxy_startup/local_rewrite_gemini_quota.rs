@@ -49,6 +49,12 @@ pub(super) fn runtime_gemini_body_has_terminal_quota(body: &[u8]) -> bool {
         .any(runtime_gemini_value_has_terminal_quota)
 }
 
+pub(super) fn runtime_gemini_body_has_rate_limit(body: &[u8]) -> bool {
+    runtime_gemini_values_from_body(body)
+        .iter()
+        .any(runtime_gemini_value_has_rate_limit)
+}
+
 pub(super) fn runtime_gemini_response_retryable_quota(status: u16) -> bool {
     matches!(status, 403 | 429)
 }
@@ -83,7 +89,7 @@ fn runtime_gemini_normalized_error_body(status: u16, body: &[u8]) -> Option<Vec<
         if error.is_object() {
             let message = runtime_gemini_error_message(error)
                 .unwrap_or_else(|| format!("Gemini upstream returned HTTP {status}."));
-            let (error_type, code) = runtime_gemini_openai_error_kind(status, &value, body);
+            let (error_type, code) = runtime_gemini_openai_error_kind(status, &value, body, false);
             let normalized = serde_json::json!({
                 "error": {
                     "message": message,
@@ -107,7 +113,7 @@ fn runtime_gemini_normalized_error_body(status: u16, body: &[u8]) -> Option<Vec<
         "message": message.clone(),
         "status": status,
     });
-    let (error_type, code) = runtime_gemini_openai_error_kind(status, &gemini_error, body);
+    let (error_type, code) = runtime_gemini_openai_error_kind(status, &gemini_error, body, true);
     let normalized = serde_json::json!({
         "error": {
             "message": message,
@@ -147,14 +153,15 @@ fn runtime_gemini_openai_error_kind(
     status: u16,
     value: &serde_json::Value,
     body: &[u8],
+    allow_plain_text_quota: bool,
 ) -> (&'static str, &'static str) {
     if runtime_gemini_body_has_terminal_quota(body)
         || runtime_gemini_value_has_terminal_quota(value)
-        || runtime_gemini_plain_text_has_terminal_quota(body)
+        || (allow_plain_text_quota && runtime_gemini_plain_text_has_terminal_quota(body))
     {
         return ("insufficient_quota", "insufficient_quota");
     }
-    if status == 429 || runtime_gemini_value_has_rate_limit(value) {
+    if runtime_gemini_value_has_rate_limit(value) {
         return ("rate_limit_error", "rate_limit_exceeded");
     }
     match status {
@@ -626,7 +633,18 @@ mod tests {
     }
 
     #[test]
-    fn gemini_plain_text_rate_limit_error_normalizes_to_openai_shape() {
+    fn gemini_body_rate_limit_detection_requires_explicit_code() {
+        assert!(!runtime_gemini_body_has_rate_limit(b"too many requests"));
+        assert!(!runtime_gemini_body_has_rate_limit(
+            br#"{"error":{"code":429,"message":"busy"}}"#
+        ));
+        assert!(runtime_gemini_body_has_rate_limit(
+            br#"{"error":{"details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}"#
+        ));
+    }
+
+    #[test]
+    fn gemini_generic_plain_text_429_does_not_normalize_as_rate_limit() {
         let original = b"try later".to_vec();
         let parts = RuntimeHeapTrimmedBufferedResponseParts {
             status: 429,
@@ -637,10 +655,55 @@ mod tests {
         let normalized = runtime_gemini_normalized_error_parts(429, parts);
         let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
 
-        assert_eq!(value["error"]["type"], "rate_limit_error");
-        assert_eq!(value["error"]["code"], "rate_limit_exceeded");
+        assert_eq!(value["error"]["type"], "api_error");
+        assert_eq!(value["error"]["code"], "provider_error");
         assert_eq!(value["error"]["message"], "try later");
         assert_eq!(value["error"]["gemini_error"]["status"], 429);
+    }
+
+    #[test]
+    fn gemini_generic_json_429_does_not_normalize_as_rate_limit() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "code": 429,
+                "message": "busy"
+            }
+        }))
+        .unwrap();
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 429,
+            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+            body: body.into(),
+        };
+
+        let normalized = runtime_gemini_normalized_error_parts(429, parts);
+        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
+
+        assert_eq!(value["error"]["type"], "api_error");
+        assert_eq!(value["error"]["code"], "provider_error");
+        assert_eq!(value["error"]["message"], "busy");
+    }
+
+    #[test]
+    fn gemini_json_quota_words_without_code_do_not_normalize_as_quota() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "code": 429,
+                "message": "The docs mention quota exhausted as an example."
+            }
+        }))
+        .unwrap();
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 429,
+            headers: vec![("content-type".to_string(), b"application/json".to_vec())],
+            body: body.into(),
+        };
+
+        let normalized = runtime_gemini_normalized_error_parts(429, parts);
+        let value: serde_json::Value = serde_json::from_slice(&normalized.body).unwrap();
+
+        assert_eq!(value["error"]["type"], "api_error");
+        assert_eq!(value["error"]["code"], "provider_error");
     }
 
     #[test]

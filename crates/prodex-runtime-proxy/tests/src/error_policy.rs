@@ -5,7 +5,7 @@ fn json_body(value: serde_json::Value) -> Vec<u8> {
 }
 
 fn explicit_quota_payload(code: &str, message: &str, shape: u8) -> serde_json::Value {
-    match shape % 3 {
+    match shape % 5 {
         0 => serde_json::json!({
             "error": {
                 "code": code,
@@ -18,16 +18,27 @@ fn explicit_quota_payload(code: &str, message: &str, shape: u8) -> serde_json::V
                 "detail": message,
             },
         }),
-        _ => serde_json::json!({
+        2 => serde_json::json!({
+            "error": code,
+            "message": message,
+        }),
+        3 => serde_json::json!({
+            "error": {
+                "status": code,
+                "message": message,
+            },
+        }),
+        4 => serde_json::json!({
             "outer": [
                 {
                     "inner": {
-                        "code": code,
+                        "reason": code,
                         "message": message,
                     },
                 },
             ],
         }),
+        _ => unreachable!(),
     }
 }
 
@@ -44,6 +55,12 @@ fn generic_429_payload_corpus_never_rotates_without_explicit_quota_code() {
             "plain rate limit type is not enough",
         ),
         ("rate limit exceeded words", None, Some("server_error"), ""),
+        (
+            "The docs mention rate_limit_exceeded and insufficient_quota.",
+            None,
+            None,
+            "non-error prose",
+        ),
         (
             "generic punctuation .,!?",
             Some("usage_limit"),
@@ -81,6 +98,28 @@ fn generic_429_payload_corpus_never_rotates_without_explicit_quota_code() {
             assert_eq!(policy.rule, None, "{message} {phase:?}");
             assert_eq!(policy.message, None, "{message} {phase:?}");
         }
+    }
+}
+
+#[test]
+fn codex_content_policy_errors_pass_through_without_quota_rotation() {
+    for code in ["invalid_prompt", "bio_policy", "cyber_policy"] {
+        let body = json_body(serde_json::json!({
+            "type": "response.failed",
+            "response": {
+                "error": {
+                    "code": code,
+                    "message": "Content policy rejected this request."
+                }
+            }
+        }));
+
+        let policy = runtime_http_error_policy(429, &body, RuntimeHttpErrorPhase::PreCommit);
+
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{code}");
+        assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough, "{code}");
+        assert_eq!(policy.rule, None, "{code}");
+        assert_eq!(policy.message, None, "{code}");
     }
 }
 

@@ -3,7 +3,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Mutex, OnceLock};
@@ -17,6 +17,7 @@ use crate::{
 use crate::{AppPaths, AppState, RecoveredLoad};
 
 static RUNTIME_SIDECAR_GENERATION_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
+const RUNTIME_STORE_JSON_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
     fs::create_dir_all(&paths.root)
@@ -122,9 +123,9 @@ pub(crate) fn runtime_sidecar_generation_from_content(content: &str) -> Result<u
 }
 
 pub(crate) fn runtime_sidecar_generation_from_disk(path: &Path, backup_path: &Path) -> Result<u64> {
-    match fs::read_to_string(path) {
+    match read_json_file_to_string(path) {
         Ok(content) => runtime_sidecar_generation_from_content(&content).or_else(|primary_err| {
-            match fs::read_to_string(backup_path) {
+            match read_json_file_to_string(backup_path) {
                 Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
                     .with_context(|| {
                         format!(
@@ -139,7 +140,7 @@ pub(crate) fn runtime_sidecar_generation_from_disk(path: &Path, backup_path: &Pa
             }
         }),
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            match fs::read_to_string(backup_path) {
+            match read_json_file_to_string(backup_path) {
                 Ok(backup_content) => runtime_sidecar_generation_from_content(&backup_content)
                     .with_context(|| format!("failed to parse {}", backup_path.display())),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(0),
@@ -169,8 +170,8 @@ pub(crate) fn read_versioned_json_file_with_backup<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
-    let primary =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()));
+    let primary = read_json_file_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()));
     match primary.and_then(|content| {
         parse_versioned_json_or_raw::<T>(&content)
             .with_context(|| format!("failed to parse {}", path.display()))
@@ -181,7 +182,7 @@ where
             recovered_from_backup: false,
         }),
         Err(primary_err) => {
-            let backup_content = fs::read_to_string(backup_path)
+            let backup_content = read_json_file_to_string(backup_path)
                 .with_context(|| format!("failed to read {}", backup_path.display()))?;
             let (value, generation) = parse_versioned_json_or_raw::<T>(&backup_content)
                 .with_context(|| {
@@ -272,8 +273,15 @@ pub(crate) fn write_json_file_with_backup(
     validate: impl Fn(&str) -> Result<()>,
 ) -> Result<()> {
     validate(json).with_context(|| format!("failed to validate staged {}", path.display()))?;
+    if json.len() as u64 > RUNTIME_STORE_JSON_MAX_BYTES {
+        bail!(
+            "runtime store json {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            RUNTIME_STORE_JSON_MAX_BYTES
+        );
+    }
     write_json_file_atomic_private(path, json)?;
-    let written = fs::read_to_string(path)
+    let written = read_json_file_to_string(path)
         .with_context(|| format!("failed to re-read {}", path.display()))?;
     validate(&written).with_context(|| format!("failed to validate {}", path.display()))?;
     write_json_file_atomic_private(backup_path, &written)
@@ -323,8 +331,8 @@ pub(crate) fn load_json_file_with_backup<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
-    let primary =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()));
+    let primary = read_json_file_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()));
     match primary.and_then(|content| {
         serde_json::from_str::<T>(&content)
             .with_context(|| format!("failed to parse {}", path.display()))
@@ -334,7 +342,7 @@ where
             recovered_from_backup: false,
         }),
         Err(primary_err) => {
-            let backup_content = fs::read_to_string(backup_path)
+            let backup_content = read_json_file_to_string(backup_path)
                 .with_context(|| format!("failed to read {}", backup_path.display()))?;
             let value = serde_json::from_str::<T>(&backup_content).with_context(|| {
                 format!(
@@ -348,6 +356,62 @@ where
             })
         }
     }
+}
+
+fn read_json_file_to_string(path: &Path) -> io::Result<String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) => return Err(err),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::other(format!(
+            "refusing to read json through symlink {}",
+            path.display()
+        )));
+    }
+    if !metadata.file_type().is_file() {
+        return Err(io::Error::other(format!(
+            "json path {} is not a file",
+            path.display()
+        )));
+    }
+    if metadata.len() > RUNTIME_STORE_JSON_MAX_BYTES {
+        return Err(io::Error::other(format!(
+            "json path {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            RUNTIME_STORE_JSON_MAX_BYTES
+        )));
+    }
+
+    let file = fs::File::open(path)?;
+    if !runtime_store_same_file_metadata(&metadata, &file.metadata()?) {
+        return Err(io::Error::other(format!(
+            "json path changed while opening {}",
+            path.display()
+        )));
+    }
+    let mut bytes = Vec::new();
+    file.take(RUNTIME_STORE_JSON_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > RUNTIME_STORE_JSON_MAX_BYTES {
+        return Err(io::Error::other(format!(
+            "json path {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            RUNTIME_STORE_JSON_MAX_BYTES
+        )));
+    }
+    String::from_utf8(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+#[cfg(unix)]
+fn runtime_store_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_store_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
 }
 
 pub(crate) fn unique_state_temp_file_path(state_file: &Path) -> PathBuf {
@@ -457,6 +521,39 @@ mod tests {
             0o600
         );
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_json_file_to_string_rejects_oversized_file_before_reading() {
+        let root = temp_root("oversized-read");
+        let path = root.join("state.json");
+        fs::File::create(&path)
+            .expect("state file should be created")
+            .set_len(RUNTIME_STORE_JSON_MAX_BYTES + 1)
+            .expect("state file size should be set");
+
+        let err = read_json_file_to_string(&path).expect_err("oversized state should be rejected");
+
+        assert!(err.to_string().contains("exceeds safe size limit"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_json_file_to_string_rejects_symlink() {
+        let root = temp_root("symlink-read");
+        let target = root.join("target.json");
+        let link = root.join("state.json");
+        fs::write(&target, "{}").expect("target should write");
+        std::os::unix::fs::symlink(&target, &link).expect("symlink should be created");
+
+        let err = read_json_file_to_string(&link).expect_err("symlink should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("refusing to read json through symlink")
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

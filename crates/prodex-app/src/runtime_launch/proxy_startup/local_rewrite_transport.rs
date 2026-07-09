@@ -124,7 +124,19 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                     name.eq_ignore_ascii_case("authorization")
                         && runtime_local_rewrite_authorization_is_gateway_credential(shared, value)
                 });
+            let connection_headers = runtime_proxy_crate::runtime_connection_header_tokens(
+                request
+                    .headers
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.as_str())),
+            );
             for (name, value) in &request.headers {
+                if runtime_proxy_crate::runtime_header_name_matches_connection_token(
+                    name,
+                    &connection_headers,
+                ) {
+                    continue;
+                }
                 if should_skip_runtime_local_rewrite_request_header(name) {
                     continue;
                 }
@@ -310,14 +322,18 @@ pub(super) fn emit_runtime_gateway_spend_event(
             request = request.bearer_auth(token);
         }
         if let Err(err) = request.send() {
+            let error = reqwest::Error::without_url(err).to_string();
             runtime_proxy_log(
                 &shared.runtime_shared,
                 runtime_proxy_structured_log_message(
                     "gateway_observability_http_failed",
                     [
                         runtime_proxy_log_field("request", event.request.to_string()),
-                        runtime_proxy_log_field("endpoint", endpoint),
-                        runtime_proxy_log_field("error", err.to_string()),
+                        runtime_proxy_log_field(
+                            "endpoint",
+                            runtime_local_rewrite_log_url(endpoint),
+                        ),
+                        runtime_proxy_log_field("error", error),
                     ],
                 ),
             );
@@ -389,10 +405,12 @@ pub(super) fn runtime_local_rewrite_upstream_url(
 ) -> String {
     let base_url = base_url.trim_end_matches('/');
     let mount_path = mount_path.trim_end_matches('/');
+    let path_and_query = runtime_proxy_crate::runtime_escape_url_path_dot_segments(path_and_query);
     let (path, query) = path_and_query
+        .as_ref()
         .split_once('?')
         .map(|(path, query)| (path, Some(query)))
-        .unwrap_or((path_and_query, None));
+        .unwrap_or((path_and_query.as_ref(), None));
     let suffix = path
         .strip_prefix(mount_path)
         .filter(|suffix| suffix.is_empty() || suffix.starts_with('/'))
@@ -552,7 +570,7 @@ fn runtime_local_rewrite_header<'a>(
 }
 
 fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
+    let lower = name.trim().to_ascii_lowercase();
     matches!(
         lower.as_str(),
         "connection"
@@ -646,6 +664,26 @@ mod tests {
                 format!("https://upstream.test{path}")
             );
         }
+    }
+
+    #[test]
+    fn local_rewrite_upstream_url_neutralizes_dot_segments_before_url_parsing_can_escape_base() {
+        assert_eq!(
+            runtime_local_rewrite_upstream_url(
+                "https://upstream.test/v1",
+                "/v1",
+                "/v1/../admin?x=1"
+            ),
+            "https://upstream.test/v1/%252e%252e/admin?x=1"
+        );
+        assert_eq!(
+            runtime_local_rewrite_upstream_url(
+                "https://upstream.test/v1",
+                "/v1",
+                "/v1/%2e%2e/admin"
+            ),
+            "https://upstream.test/v1/%252e%252e/admin"
+        );
     }
 
     #[test]

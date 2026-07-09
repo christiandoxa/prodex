@@ -43,6 +43,50 @@ fn runtime_log_selection_removes_oldest_excess_first() {
 }
 
 #[test]
+fn path_root_checks_normalize_missing_dot_dot_segments() {
+    let root = Path::new("/tmp/prodex/profiles");
+
+    assert!(path_is_strictly_under_root(
+        root,
+        Path::new("/tmp/prodex/profiles/main")
+    ));
+    assert!(!path_is_strictly_under_root(
+        root,
+        Path::new("/tmp/prodex/profiles/../outside")
+    ));
+    assert!(!path_is_under_root(
+        root,
+        Path::new("/tmp/prodex/profiles/../../profiles-escape")
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn path_root_checks_resolve_existing_symlink_parent_for_missing_child() {
+    let root = env::temp_dir().join(format!(
+        "prodex-core-path-root-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let profiles = root.join("profiles");
+    let outside = root.join("outside");
+    let link = profiles.join("link");
+    let candidate = link.join("main");
+
+    fs::create_dir_all(&profiles).expect("profiles root should exist");
+    fs::create_dir_all(&outside).expect("outside target should exist");
+    std::os::unix::fs::symlink(&outside, &link).expect("symlink parent should exist");
+
+    assert!(!path_is_under_root(&profiles, &candidate));
+    assert!(!path_is_strictly_under_root(&profiles, &candidate));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn runtime_broker_artifact_key_parses_registry_and_lease_names() {
     assert_eq!(
         runtime_broker_artifact_key("runtime-broker-main.json", false),

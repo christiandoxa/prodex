@@ -43,7 +43,7 @@ use self::login_menu::{
 use self::profile_names::*;
 use self::request::*;
 use super::manage::print_profile_panel;
-use super::write_secret_text_file;
+use super::{prepare_profile_codex_home, write_secret_text_file};
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
     agy_bin, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
@@ -223,13 +223,8 @@ fn prepare_profile_login_home(
             profile.provider.display_name()
         );
     }
-    let codex_home = profile.codex_home.clone();
-    if profile.managed {
-        prepare_managed_codex_home(paths, &codex_home)?;
-    } else {
-        create_codex_home_if_missing(&codex_home)?;
-    }
-    Ok(codex_home)
+    prepare_profile_codex_home(paths, profile)?;
+    Ok(profile.codex_home.clone())
 }
 
 fn finish_named_profile_login(

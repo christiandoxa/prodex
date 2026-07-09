@@ -1,12 +1,13 @@
 use crate::runtime_panic::{catch_runtime_unwind_silently, runtime_panic_payload_label};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
+#[cfg(test)]
 use std::fs;
 use std::io;
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 
-use super::{runtime_proxy_latest_log_pointer_path, runtime_proxy_log_to_path};
+use super::{runtime_proxy_latest_log_path_from_pointer, runtime_proxy_log_to_path};
 
 pub(crate) fn spawn_runtime_background_worker_or_log(
     name: impl Into<String>,
@@ -87,9 +88,7 @@ fn log_runtime_background_worker_event(log_path: Option<&Path>, message: String)
 }
 
 fn runtime_background_latest_log_path() -> Option<PathBuf> {
-    let pointer = fs::read_to_string(runtime_proxy_latest_log_pointer_path()).ok()?;
-    let path = pointer.lines().next()?.trim();
-    (!path.is_empty()).then(|| PathBuf::from(path))
+    runtime_proxy_latest_log_path_from_pointer()
 }
 
 #[cfg(test)]

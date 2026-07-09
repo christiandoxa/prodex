@@ -41,9 +41,10 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::runtime::Runtime as TokioRuntime;
 
 const KIRO_SEMANTIC_COMPACT_INSTRUCTIONS: &str = "\
 Compact the supplied coding-agent transcript into one durable continuation summary. \
@@ -51,6 +52,7 @@ Preserve the user's goals, repository instructions, decisions, files changed, ex
 commands and test results, unresolved failures, current worktree state, and the next concrete steps. \
 Remove redundant narration and obsolete intermediate reasoning. Do not call tools. \
 Return only the continuation summary, with no preamble or completion claim.";
+const RUNTIME_KIRO_STDERR_MAX_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct RuntimeKiroProfileAuth {
@@ -317,16 +319,17 @@ pub(super) fn send_runtime_kiro_upstream_request(
             })
         }
     })();
-    let _ = fs::remove_dir_all(&overlay_root);
+    schedule_runtime_kiro_overlay_cleanup(&shared.runtime_shared.async_runtime, overlay_root);
     result
 }
 
 pub(super) fn runtime_kiro_compact_response_parts(
     request_id: u64,
     body: &[u8],
+    async_runtime: &Arc<TokioRuntime>,
     auth: &RuntimeKiroProfileAuth,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
-    match runtime_kiro_semantic_compact_summary(request_id, body, auth) {
+    match runtime_kiro_semantic_compact_summary(request_id, body, async_runtime, auth) {
         Ok(summary) => runtime_gemini_compact_response_parts(&summary),
         Err(_) => runtime_gemini_local_compact_response_parts(body),
     }
@@ -335,6 +338,7 @@ pub(super) fn runtime_kiro_compact_response_parts(
 fn runtime_kiro_semantic_compact_summary(
     request_id: u64,
     body: &[u8],
+    async_runtime: &Arc<TokioRuntime>,
     auth: &RuntimeKiroProfileAuth,
 ) -> Result<String> {
     let mut value: Value =
@@ -401,8 +405,14 @@ fn runtime_kiro_semantic_compact_summary(
         let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
         runtime_kiro_compact_summary_from_response(&response)
     })();
-    let _ = fs::remove_dir_all(&overlay_root);
+    schedule_runtime_kiro_overlay_cleanup(async_runtime, overlay_root);
     result
+}
+
+fn schedule_runtime_kiro_overlay_cleanup(async_runtime: &Arc<TokioRuntime>, overlay_root: PathBuf) {
+    drop(async_runtime.spawn_blocking(move || {
+        let _ = fs::remove_dir_all(overlay_root);
+    }));
 }
 
 fn runtime_kiro_compact_summary_from_response(response: &Value) -> Result<String> {
@@ -1211,7 +1221,7 @@ fn runtime_kiro_streaming_reader(
     let conversations = shared.deepseek_conversations.clone();
     let (sender, receiver) = mpsc::channel();
     let error_sender = sender.clone();
-    thread::spawn(move || {
+    drop(shared.runtime_shared.async_runtime.spawn_blocking(move || {
         let result = runtime_kiro_streaming_worker(
             sender,
             request_id,
@@ -1225,13 +1235,13 @@ fn runtime_kiro_streaming_reader(
             chat_completions_route,
             conversations,
         );
-        let _ = fs::remove_dir_all(&overlay_root);
+        let _ = fs::remove_dir_all(overlay_root);
         if let Err(err) = result {
             let _ = error_sender.send(RuntimeKiroStreamingChunk::Error(io::Error::other(
                 err.to_string(),
             )));
         }
-    });
+    }));
     Ok(RuntimeKiroStreamingReader {
         receiver,
         pending: Cursor::new(Vec::new()),
@@ -1870,7 +1880,9 @@ fn runtime_kiro_created_at() -> u64 {
 
 fn runtime_kiro_read_stderr(stderr: &mut impl Read) -> String {
     let mut stderr_text = String::new();
-    let _ = stderr.read_to_string(&mut stderr_text);
+    let _ = stderr
+        .take(RUNTIME_KIRO_STDERR_MAX_BYTES)
+        .read_to_string(&mut stderr_text);
     stderr_text
 }
 
@@ -2186,6 +2198,7 @@ print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), f
             })],
             command: Some(write_fake_kiro_compact_agent(&root)),
         };
+        let async_runtime = Arc::new(TokioRuntime::new().expect("runtime should start"));
         let summary = runtime_kiro_semantic_compact_summary(
             7,
             &serde_json::to_vec(&json!({
@@ -2210,6 +2223,7 @@ print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), f
                 ]
             }))
             .expect("request body"),
+            &async_runtime,
             &auth,
         )
         .expect("semantic compact summary should succeed");

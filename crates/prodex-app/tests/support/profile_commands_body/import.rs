@@ -137,6 +137,64 @@ fn profile_import_updates_existing_profile_refresh_token() {
 }
 
 #[test]
+fn profile_import_rejects_existing_managed_profile_home_outside_root() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-existing-outside-root");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let outside_home = target_dir.path.join("outside/main");
+    create_codex_home_if_missing(&outside_home).expect("outside home should exist");
+    write_secret_text_file(
+        &outside_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("outside auth should be written");
+
+    let mut existing_state = AppState {
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: outside_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: Some("main@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_auth_json_with_email(
+                "main@example.com",
+                "fresh-token",
+                "main-account",
+            ),
+            secret_files: Vec::new(),
+        }],
+    };
+
+    let err = import_profile_export_payload(&target_paths, &mut existing_state, &payload)
+        .expect_err("managed profile outside root should be rejected");
+
+    assert!(
+        err.to_string().contains("is outside"),
+        "unexpected error: {err:#}"
+    );
+    assert_eq!(
+        profile_commands_read_access_token(&outside_home),
+        "old-token",
+        "import must not overwrite auth outside managed profile root"
+    );
+}
+
+#[test]
 fn profile_import_rejects_provider_profile_missing_required_secret_file() {
     let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
@@ -167,6 +225,50 @@ fn profile_import_rejects_provider_profile_missing_required_secret_file() {
         "unexpected error: {err:#}"
     );
     assert!(state.profiles.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn profile_import_rejects_symlink_managed_profiles_root() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-symlink-managed-root");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let outside = target_dir.path.join("outside-profiles");
+    fs::create_dir_all(&outside).expect("outside target should exist");
+    std::os::unix::fs::symlink(&outside, &target_paths.managed_profiles_root)
+        .expect("managed root symlink should be created");
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: Some("main@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: profile_commands_auth_json_with_email(
+                "main@example.com",
+                "fresh-token",
+                "main-account",
+            ),
+            secret_files: Vec::new(),
+        }],
+    };
+    let mut state = AppState::default();
+
+    let err = import_profile_export_payload(&target_paths, &mut state, &payload)
+        .expect_err("symlink managed root should be rejected");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(state.profiles.is_empty());
+    assert!(
+        !outside.join("main").exists(),
+        "import must not stage profiles through a symlinked managed root"
+    );
 }
 
 #[test]
@@ -424,6 +526,65 @@ fn profile_import_auth_update_journal_recovers_orphaned_auth_overwrite() {
         profile_commands_import_auth_journal_paths(&target_paths).is_empty(),
         "recovery should remove recovered auth overwrite journals"
     );
+}
+
+#[test]
+fn profile_import_auth_update_journal_rejects_mismatched_codex_home() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-journal-mismatch");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("main");
+    let attack_home = target_dir.path.join("outside-target");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    create_codex_home_if_missing(&attack_home).expect("attack home should exist");
+    write_secret_text_file(
+        &existing_home.join("auth.json"),
+        &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
+    )
+    .expect("existing auth should be written");
+
+    let mut state = AppState {
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    };
+    let journal_root =
+        prodex_profile_export::ensure_profile_import_auth_update_journal_root(&target_paths.root)
+            .expect("journal root should exist");
+    let journal = prodex_profile_export::ImportedExistingProfileAuthUpdateJournal::new(
+        "main".to_string(),
+        attack_home.display().to_string(),
+        Some("main@example.com".to_string()),
+        Some(profile_commands_auth_json_with_email(
+            "main@example.com",
+            "forged-token",
+            "main-account",
+        )),
+        Local::now().to_rfc3339(),
+    );
+    fs::write(
+        journal_root.join("main-forged.json"),
+        serde_json::to_string_pretty(&journal).expect("journal should serialize"),
+    )
+    .expect("forged journal should be written");
+
+    let err = super::import_export::repair_profile_import_auth_journals(&target_paths, &mut state)
+        .expect_err("mismatched journal should be rejected");
+
+    assert!(
+        err.to_string().contains("targets"),
+        "unexpected recovery error: {err:#}"
+    );
+    assert_eq!(profile_commands_read_access_token(&existing_home), "old-token");
+    assert!(!attack_home.join("auth.json").exists());
 }
 
 #[test]

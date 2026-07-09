@@ -182,8 +182,10 @@ fn write_provider_runtime_codex_auth(codex_home: &std::path::Path) -> Result<()>
         "last_refresh": null,
         "agent_identity": null
     });
-    let bytes = serde_json::to_vec_pretty(&auth_json)?;
-    std::fs::write(&auth_path, bytes)
+    let text = serde_json::to_string_pretty(&auth_json)?;
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(&auth_path), text)
+        .map_err(anyhow::Error::new)
         .with_context(|| format!("failed to write {}", auth_path.display()))?;
     Ok(())
 }
@@ -523,6 +525,29 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "model_provider=\"prodex-gemini\"")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_runtime_codex_auth_is_written_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let codex_home = env::temp_dir().join(format!(
+            "prodex-caveman-auth-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        create_codex_home_if_missing(&codex_home).expect("codex home should exist");
+
+        write_provider_runtime_codex_auth(&codex_home).expect("provider auth should write");
+
+        let auth_path = codex_home.join("auth.json");
+        let mode = std::fs::metadata(&auth_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(codex_home);
     }
 
     #[test]

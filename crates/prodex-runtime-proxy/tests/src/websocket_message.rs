@@ -183,6 +183,34 @@ fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
 }
 
 #[test]
+fn websocket_text_frame_inspection_ignores_non_error_quota_code_text() {
+    let payload = serde_json::json!({
+        "type": "response.output_text.delta",
+        "delta": "The docs mention rate_limit_exceeded as an example.",
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(inspected.retry_kind, None);
+    assert!(!inspected.terminal_event);
+}
+
+#[test]
+fn websocket_text_frame_inspection_ignores_non_error_previous_response_code_text() {
+    let payload = serde_json::json!({
+        "type": "response.output_text.delta",
+        "delta": "previous_response_not_found is an upstream error code.",
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(inspected.retry_kind, None);
+    assert!(!inspected.terminal_event);
+}
+
+#[test]
 fn websocket_text_frame_inspection_classifies_connection_limit() {
     let payload = serde_json::json!({
         "type": "error",

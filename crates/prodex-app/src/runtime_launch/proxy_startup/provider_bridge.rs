@@ -572,9 +572,9 @@ fn runtime_provider_error_class_from_core(
 
 fn runtime_provider_error_classification_rank(class: ProviderErrorClass) -> u8 {
     match class {
-        ProviderErrorClass::Auth => 0,
-        ProviderErrorClass::Quota => 1,
-        ProviderErrorClass::RateLimit => 2,
+        ProviderErrorClass::Quota => 0,
+        ProviderErrorClass::RateLimit => 1,
+        ProviderErrorClass::Auth => 2,
         ProviderErrorClass::NotFound => 3,
         ProviderErrorClass::Transient => 4,
         ProviderErrorClass::Other => 5,
@@ -700,10 +700,7 @@ fn runtime_provider_error_tokens_from_value(value: &serde_json::Value, output: &
     match value {
         serde_json::Value::Object(object) => {
             for (key, value) in object {
-                if matches!(
-                    key.as_str(),
-                    "code" | "status" | "reason" | "type" | "message" | "detail" | "error"
-                ) {
+                if matches!(key.as_str(), "code" | "status" | "reason" | "type") {
                     match value {
                         serde_json::Value::String(text) => {
                             runtime_provider_push_error_token(output, text)
@@ -712,6 +709,12 @@ fn runtime_provider_error_tokens_from_value(value: &serde_json::Value, output: &
                             runtime_provider_push_error_token(output, &number.to_string())
                         }
                         _ => runtime_provider_error_tokens_from_value(value, output),
+                    }
+                } else if key == "error" {
+                    if let serde_json::Value::String(text) = value {
+                        runtime_provider_push_error_token(output, text);
+                    } else {
+                        runtime_provider_error_tokens_from_value(value, output);
                     }
                 } else {
                     runtime_provider_error_tokens_from_value(value, output);
@@ -723,7 +726,7 @@ fn runtime_provider_error_tokens_from_value(value: &serde_json::Value, output: &
                 runtime_provider_error_tokens_from_value(value, output);
             }
         }
-        serde_json::Value::String(text) => runtime_provider_push_error_token(output, text),
+        serde_json::Value::String(_) => {}
         _ => {}
     }
 }

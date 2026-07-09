@@ -187,6 +187,24 @@ const ALLOWLIST = Object.freeze([
       "single bounded Gemini Live sidecar acceptor created during launch and owned by the runtime shutdown handle",
   },
   {
+    name: "kiro-overlay-cleanup-background",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::remove_dir_all\s*\(/,
+    maxHits: 2,
+    reason:
+      "Kiro per-request temp overlay cleanup runs on the bounded runtime blocking pool after request work completes",
+  },
+  {
+    name: "kiro-bounded-runtime-blocking-work",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
+    id: "spawn-blocking",
+    pattern: /\bspawn_blocking\s*\(/,
+    maxHits: 2,
+    reason:
+      "Kiro streaming worker and temp overlay cleanup use the bounded runtime blocking pool instead of unbounded OS thread spawning",
+  },
+  {
     name: "gemini-bounded-context-directory-scans",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
     id: "blocking-disk-io",
@@ -354,8 +372,9 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-test-fixture-disk-io",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
     id: "blocking-disk-io",
-    pattern: /\bfs::(?:read|read_to_string|remove_dir_all|create_dir_all)\s*\(/,
-    maxHits: 7,
+    pattern:
+      /\bfs::(?:read|read_to_string|write|remove_dir_all|create_dir_all|metadata|set_permissions)\s*\(/,
+    maxHits: 71,
     reason:
       "test fixtures inspect audit logs, ledgers, and isolated temp state after proxy requests complete",
   },
@@ -371,9 +390,17 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-split-test-ledger-read",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
     id: "blocking-disk-io",
-    pattern: /\bfs::read_to_string\s*\(/,
-    maxHits: 1,
+    pattern: /\bfs::(?:read_to_string|write)\s*\(/,
+    maxHits: 4,
     reason: "split gateway state tests inspect ledger output after proxy requests complete",
+  },
+  {
+    name: "local-rewrite-split-test-admin-auth-state",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::write\s*\(/,
+    maxHits: 1,
+    reason: "split gateway admin auth tests write isolated malformed fixture state",
   },
   {
     name: "local-rewrite-split-test-audit-read",
@@ -398,6 +425,14 @@ const ALLOWLIST = Object.freeze([
     pattern: /\bthread::spawn\s*\(/,
     maxHits: 3,
     reason: "split test-only mock upstream servers run on bounded fixture threads",
+  },
+  {
+    name: "local-rewrite-split-test-gateway-usage-thread",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_usage.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 1,
+    reason: "split gateway usage test mock server runs on one fixture thread",
   },
   {
     name: "local-rewrite-transport-log-dir-create",

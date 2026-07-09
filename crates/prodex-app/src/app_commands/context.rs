@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::env;
+use std::fmt;
 use std::fs;
 use std::io::IsTerminal;
 use std::io::{self, Read};
@@ -18,6 +19,8 @@ pub(crate) use prodex_context::{
     collect_context_audit_report, compact_command_output_with_options, compress_context_path,
     render_context_audit_report_with_width, render_context_compress_report,
 };
+
+const CONTEXT_TEXT_INPUT_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn handle_context_audit(args: ContextAuditArgs) -> Result<()> {
     let root = args.root.map(absolutize).transpose()?.unwrap_or_else(|| {
@@ -85,8 +88,7 @@ pub(crate) fn handle_context_compress(args: ContextCompressArgs) -> Result<()> {
 
 pub(crate) fn handle_context_replay_report(args: ContextReplayReportArgs) -> Result<()> {
     let path = absolutize(args.path)?;
-    let input =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let input = read_context_text_file(&path)?;
     let evaluation = runtime_proxy_crate::smart_context_evaluate_replay_corpus_json(&input)
         .with_context(|| {
             format!(
@@ -117,16 +119,12 @@ pub(crate) fn handle_context_replay_report(args: ContextReplayReportArgs) -> Res
 pub(crate) fn handle_context_compact_output(args: ContextCompactOutputArgs) -> Result<()> {
     let input = if let Some(path) = args.path {
         let path = absolutize(path)?;
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?
+        read_context_text_file(&path)?
     } else {
         if io::stdin().is_terminal() {
             bail!("pass a text file path or pipe command output to stdin");
         }
-        let mut input = String::new();
-        io::stdin()
-            .read_to_string(&mut input)
-            .context("failed to read command output from stdin")?;
-        input
+        read_context_text_limited(io::stdin(), "stdin")?
     };
     let options = CommandOutputCompactOptions::from_limits(CommandOutputCompactLimits {
         kind: context_compact_output_kind(args.kind),
@@ -168,17 +166,34 @@ fn print_context_human_output(title: &str, output: &str) -> Result<()> {
 }
 
 fn default_context_export_path(session_id: &str) -> Result<PathBuf> {
+    let session_id = context_export_file_stem(session_id);
     Ok(env::current_dir()
         .context("failed to determine current directory")?
         .join(format!("context_{session_id}.md")))
+}
+
+fn context_export_file_stem(session_id: &str) -> String {
+    let stem = session_id
+        .chars()
+        .map(|ch| match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '_' | '-' => ch,
+            _ => '_',
+        })
+        .collect::<String>()
+        .trim_matches('.')
+        .to_string();
+    if stem.is_empty() {
+        "unknown-session".to_string()
+    } else {
+        stem
+    }
 }
 
 fn render_session_context_export_markdown(
     report: &prodex_app_reports::SessionReport,
     session_path: &Path,
 ) -> Result<String> {
-    let raw = fs::read_to_string(session_path)
-        .with_context(|| format!("failed to read {}", session_path.display()))?;
+    let raw = read_context_text_file(session_path)?;
     let mut output = String::new();
     output.push_str("# Session Context Export\n\n");
     output.push_str(&format!("- session_id: `{}`\n", report.id));
@@ -214,6 +229,37 @@ fn render_session_context_export_markdown(
         output.push_str(&render_transcript_event_markdown(index + 1, event));
     }
     Ok(output)
+}
+
+fn read_context_text_file(path: &Path) -> Result<String> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
+    if metadata.len() > CONTEXT_TEXT_INPUT_MAX_BYTES {
+        bail!(
+            "{} exceeds safe size limit ({} bytes)",
+            path.display(),
+            CONTEXT_TEXT_INPUT_MAX_BYTES
+        );
+    }
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    read_context_text_limited(file, path.display())
+}
+
+fn read_context_text_limited(reader: impl Read, label: impl fmt::Display) -> Result<String> {
+    let label = label.to_string();
+    let mut bytes = Vec::new();
+    reader
+        .take(CONTEXT_TEXT_INPUT_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read {label}"))?;
+    if bytes.len() as u64 > CONTEXT_TEXT_INPUT_MAX_BYTES {
+        bail!(
+            "{label} exceeds safe size limit ({} bytes)",
+            CONTEXT_TEXT_INPUT_MAX_BYTES
+        );
+    }
+    String::from_utf8(bytes).with_context(|| format!("failed to decode {label}"))
 }
 
 fn render_transcript_event_markdown(index: usize, event: &TranscriptEvent) -> String {
@@ -253,6 +299,18 @@ mod tests {
     fn default_context_export_path_uses_current_directory() {
         let path = default_context_export_path("session-123").unwrap();
         assert!(path.ends_with("context_session-123.md"));
+    }
+
+    #[test]
+    fn default_context_export_path_sanitizes_metadata_session_id_for_file_name() {
+        let path = default_context_export_path("foo/../../outside").unwrap();
+        let file_name = path.file_name().and_then(|name| name.to_str());
+
+        assert_eq!(file_name, Some("context_foo_.._.._outside.md"));
+        assert!(
+            path.parent()
+                .is_some_and(|parent| prodex_core::same_path(parent, &env::current_dir().unwrap()))
+        );
     }
 
     #[test]
@@ -302,6 +360,31 @@ mod tests {
         assert!(markdown.contains("/tmp/work"));
         assert!(markdown.contains("### 5. assistant"));
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn render_session_context_export_markdown_rejects_oversized_session() {
+        let root = env::temp_dir().join(format!(
+            "prodex-context-export-oversized-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let session_path = root.join("session.jsonl");
+        fs::File::create(&session_path)
+            .unwrap()
+            .set_len(CONTEXT_TEXT_INPUT_MAX_BYTES + 1)
+            .unwrap();
+        let report = SessionReport::from_path(&session_path, 0);
+
+        let err = render_session_context_export_markdown(&report, &session_path)
+            .expect_err("oversized session export should be rejected");
+
+        assert!(format!("{err:#}").contains("exceeds safe size limit"));
         fs::remove_dir_all(root).unwrap();
     }
 

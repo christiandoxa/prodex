@@ -3,8 +3,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io;
-use std::io::Write;
+use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -13,6 +12,7 @@ const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
 const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_RESULT_TTL: Duration = Duration::from_secs(300);
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const REFRESH_LEASE_RESULT_MAX_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct RefreshLeaseCoordinator {
@@ -285,6 +285,10 @@ fn create_lock(path: &Path) -> io::Result<()> {
 }
 
 fn write_result(path: &Path, result_json: &str) -> Result<(), RefreshLeaseError> {
+    if result_json.len() as u64 > REFRESH_LEASE_RESULT_MAX_BYTES {
+        return Err(refresh_result_size_error(path));
+    }
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| RefreshLeaseError::io(parent, err))?;
     }
@@ -319,16 +323,41 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), RefreshLeaseError
 }
 
 fn read_fresh_result(path: &Path, ttl: Duration) -> Result<Option<String>, RefreshLeaseError> {
-    if is_path_stale(path, ttl)? {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(RefreshLeaseError::io(path, err)),
+    };
+    if !metadata.file_type().is_file()
+        || metadata_is_stale(&metadata, ttl)
+        || metadata.len() > REFRESH_LEASE_RESULT_MAX_BYTES
+    {
         let _ = fs::remove_file(path);
         return Ok(None);
     }
 
-    match fs::read_to_string(path) {
-        Ok(value) => Ok(Some(value)),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(RefreshLeaseError::io(path, err)),
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(RefreshLeaseError::io(path, err)),
+    };
+    let opened_metadata = file
+        .metadata()
+        .map_err(|err| RefreshLeaseError::io(path, err))?;
+    if !same_refresh_result_metadata(&metadata, &opened_metadata) {
+        let _ = fs::remove_file(path);
+        return Ok(None);
     }
+
+    let mut value = String::new();
+    file.take(REFRESH_LEASE_RESULT_MAX_BYTES.saturating_add(1))
+        .read_to_string(&mut value)
+        .map_err(|err| RefreshLeaseError::io(path, err))?;
+    if value.len() as u64 > REFRESH_LEASE_RESULT_MAX_BYTES {
+        let _ = fs::remove_file(path);
+        return Ok(None);
+    }
+    Ok(Some(value))
 }
 
 fn remove_stale_result(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseError> {
@@ -346,21 +375,51 @@ fn cleanup_stale_lock(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseErro
 }
 
 fn is_path_stale(path: &Path, ttl: Duration) -> Result<bool, RefreshLeaseError> {
-    let metadata = match fs::metadata(path) {
+    let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(RefreshLeaseError::io(path, err)),
     };
+    if !metadata.file_type().is_file() {
+        return Ok(true);
+    }
 
+    Ok(metadata_is_stale(&metadata, ttl))
+}
+
+fn metadata_is_stale(metadata: &fs::Metadata, ttl: Duration) -> bool {
     let modified = match metadata.modified() {
         Ok(modified) => modified,
-        Err(_) => return Ok(false),
+        Err(_) => return false,
     };
 
-    Ok(SystemTime::now()
+    SystemTime::now()
         .duration_since(modified)
         .map(|age| age > ttl)
-        .unwrap_or(false))
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn same_refresh_result_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn same_refresh_result_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
+    true
+}
+
+fn refresh_result_size_error(path: &Path) -> RefreshLeaseError {
+    RefreshLeaseError::io(
+        path,
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "refresh lease result exceeds safe size limit ({REFRESH_LEASE_RESULT_MAX_BYTES} bytes)"
+            ),
+        ),
+    )
 }
 
 fn next_sleep(poll_interval: Duration, wait_timeout: Duration, started: Instant) -> Duration {

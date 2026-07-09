@@ -71,6 +71,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
         .clone();
     let upstream_url =
         runtime_proxy_upstream_url(&runtime.upstream_base_url, &request.path_and_query);
+    let log_url = runtime_proxy_log_url(&upstream_url);
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
         format!(
             "failed to proxy unsupported HTTP method '{}' for runtime auto-rotate",
@@ -84,17 +85,19 @@ async fn send_runtime_proxy_upstream_request_with_events(
         shared.async_client.clone()
     };
     let mut upstream_request = upstream_client.request(method, &upstream_url);
-    for (name, value) in &request.headers {
+    for (name, value) in runtime_forward_request_headers(
+        request
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    ) {
         if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
             continue;
         }
         if name.eq_ignore_ascii_case("cookie") {
             continue;
         }
-        if should_skip_runtime_request_header(name) {
-            continue;
-        }
-        upstream_request = upstream_request.header(name.as_str(), value.as_str());
+        upstream_request = upstream_request.header(name, value);
     }
     if let Some(turn_state) = turn_state_override {
         upstream_request = upstream_request.header("x-codex-turn-state", turn_state);
@@ -143,7 +146,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("profile", profile_name),
                 runtime_proxy_log_field("method", request.method.as_str()),
-                runtime_proxy_log_field("url", upstream_url.as_str()),
+                runtime_proxy_log_field("url", log_url.as_str()),
                 runtime_proxy_log_field("turn_state_override", format!("{turn_state_override:?}")),
                 runtime_proxy_log_field(
                     "previous_response_id",
@@ -168,7 +171,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
             );
             return Err(anyhow::Error::new(err).context(format!(
                 "failed to proxy runtime request for profile '{}' to {}",
-                profile_name, upstream_url
+                profile_name, log_url
             )));
         }
     };
@@ -212,33 +215,64 @@ async fn send_runtime_proxy_upstream_request_with_events(
     Ok(response)
 }
 
-pub(crate) use runtime_proxy_crate::{
-    runtime_proxy_upstream_url, should_skip_runtime_request_header,
-};
+pub(crate) use runtime_proxy_crate::{runtime_forward_request_headers, runtime_proxy_upstream_url};
 
 pub(super) fn runtime_proxy_upstream_websocket_url(
     base_url: &str,
     path_and_query: &str,
 ) -> Result<String> {
     let upstream_url = runtime_proxy_upstream_url(base_url, path_and_query);
+    let log_url = runtime_proxy_log_url(&upstream_url);
     let mut url = reqwest::Url::parse(&upstream_url)
-        .with_context(|| format!("failed to parse upstream websocket URL {}", upstream_url))?;
+        .with_context(|| format!("failed to parse upstream websocket URL {}", log_url))?;
     match url.scheme() {
         "http" => {
-            url.set_scheme("ws").map_err(|_| {
-                anyhow::anyhow!("failed to set websocket scheme for {upstream_url}")
-            })?;
+            url.set_scheme("ws")
+                .map_err(|_| anyhow::anyhow!("failed to set websocket scheme for {log_url}"))?;
         }
         "https" => {
-            url.set_scheme("wss").map_err(|_| {
-                anyhow::anyhow!("failed to set websocket scheme for {upstream_url}")
-            })?;
+            url.set_scheme("wss")
+                .map_err(|_| anyhow::anyhow!("failed to set websocket scheme for {log_url}"))?;
         }
         "ws" | "wss" => {}
         scheme => bail!(
             "unsupported upstream websocket scheme '{scheme}' in {}",
-            upstream_url
+            log_url
         ),
     }
     Ok(url.to_string())
+}
+
+pub(super) fn runtime_proxy_log_url(value: &str) -> String {
+    if let Ok(mut url) = reqwest::Url::parse(value) {
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        return url.to_string();
+    }
+    value
+        .split_once('?')
+        .map(|(path, _)| path)
+        .unwrap_or(value)
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_proxy_log_url;
+
+    #[test]
+    fn runtime_proxy_log_url_strips_userinfo_query_and_fragment() {
+        assert_eq!(
+            runtime_proxy_log_url(
+                "https://user:secret@example.test/backend-api/codex/responses?access_token=secret#frag"
+            ),
+            "https://example.test/backend-api/codex/responses"
+        );
+        assert_eq!(
+            runtime_proxy_log_url("/backend-api/codex/responses?key=secret"),
+            "/backend-api/codex/responses"
+        );
+    }
 }

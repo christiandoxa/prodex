@@ -329,7 +329,14 @@ pub(crate) fn extension_skill_dirs(extension: &GeminiExtension) -> Vec<PathBuf> 
     let mut dirs = entries
         .flatten()
         .map(|entry| entry.path())
-        .filter(|path| path.is_dir() && path.join("SKILL.md").is_file())
+        .filter(|path| {
+            let Ok(metadata) = fs::symlink_metadata(path) else {
+                return false;
+            };
+            metadata.is_dir()
+                && !metadata.file_type().is_symlink()
+                && read_text_limited(&path.join("SKILL.md"), GEMINI_COMPAT_FILE_LIMIT).is_some()
+        })
         .take(GEMINI_EXTENSION_SCAN_LIMIT)
         .collect::<Vec<_>>();
     dirs.sort();
@@ -360,6 +367,9 @@ fn active_extension_manifests_from_roots(
         if manifests.len() >= GEMINI_EXTENSION_SCAN_LIMIT {
             break;
         }
+        if path_has_symlink_component(root) {
+            continue;
+        }
         if root.join("gemini-extension.json").is_file() {
             if let Some(manifest) = load_extension_manifest(root, root.parent(), cwd)
                 && seen.insert(manifest.name.to_ascii_lowercase())
@@ -376,7 +386,13 @@ fn active_extension_manifests_from_roots(
                 break;
             }
             let directory = entry.path();
-            if !directory.is_dir() || !directory.join("gemini-extension.json").is_file() {
+            let Ok(metadata) = fs::symlink_metadata(&directory) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink()
+                || !metadata.is_dir()
+                || !directory.join("gemini-extension.json").is_file()
+            {
                 continue;
             }
             if let Some(manifest) = load_extension_manifest(&directory, Some(root), cwd)
@@ -550,7 +566,7 @@ fn gemini_mcp_server_enabled_by_filters(
 }
 
 pub(crate) fn read_toml_table(path: &Path) -> Result<toml::Table> {
-    let contents = fs::read_to_string(path).unwrap_or_default();
+    let contents = read_text_limited(path, GEMINI_COMPAT_FILE_LIMIT).unwrap_or_default();
     if contents.trim().is_empty() {
         return Ok(toml::Table::new());
     }
@@ -565,11 +581,7 @@ pub(crate) fn read_toml_table(path: &Path) -> Result<toml::Table> {
 pub(crate) fn write_toml_table(path: &Path, table: toml::Table, context: &str) -> Result<()> {
     let rendered = toml::to_string(&toml::Value::Table(table))
         .with_context(|| format!("failed to render {context}"))?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::write(path, rendered).with_context(|| format!("failed to write {}", path.display()))
+    write_file_atomic_no_symlink(path, rendered)
 }
 
 fn remove_generated_mcp_servers(table: &mut toml::Table) {

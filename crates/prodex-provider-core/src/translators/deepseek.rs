@@ -643,22 +643,22 @@ fn deepseek_messages_from_input_item(item: &Value) -> Vec<Value> {
         Some("function_call_output") => {
             return vec![json!({
                 "role": "tool",
-                "tool_call_id": item.get("call_id").and_then(Value::as_str).unwrap_or("call_1"),
-                "content": item.get("output").cloned().unwrap_or_else(|| Value::String(String::new())),
+                "tool_call_id": deepseek_input_item_call_id(item),
+                "content": deepseek_tool_output_text(item),
             })];
         }
         Some("custom_tool_call_output") => {
             return vec![json!({
                 "role": "tool",
-                "tool_call_id": item.get("call_id").and_then(Value::as_str).unwrap_or("call_1"),
-                "content": deepseek_tool_output_value(item),
+                "tool_call_id": deepseek_input_item_call_id(item),
+                "content": deepseek_tool_output_text(item),
             })];
         }
         Some("mcp_tool_result") | Some("mcp_call_output") => {
             return vec![json!({
                 "role": "tool",
-                "tool_call_id": item.get("call_id").and_then(Value::as_str).unwrap_or("call_1"),
-                "content": deepseek_tool_output_value(item),
+                "tool_call_id": deepseek_input_item_call_id(item),
+                "content": deepseek_tool_output_text(item),
             })];
         }
         _ => {}
@@ -697,6 +697,15 @@ fn deepseek_messages_from_input_item(item: &Value) -> Vec<Value> {
         object.insert("tool_calls".to_string(), Value::Array(tool_calls));
     }
     vec![message]
+}
+
+fn deepseek_input_item_call_id(item: &Value) -> &str {
+    item.get("call_id")
+        .or_else(|| item.get("tool_call_id"))
+        .or_else(|| item.get("id"))
+        .and_then(Value::as_str)
+        .filter(|call_id| !call_id.trim().is_empty())
+        .unwrap_or("call_1")
 }
 
 fn deepseek_message_content_text(value: Option<&Value>) -> Option<String> {
@@ -909,7 +918,7 @@ fn deepseek_input_mcp_call_messages(item: &Value) -> Option<Vec<Value>> {
         messages.push(json!({
             "role": "tool",
             "tool_call_id": call_id,
-            "content": deepseek_tool_output_value(item),
+            "content": deepseek_tool_output_text(item),
         }));
     }
     Some(messages)
@@ -977,6 +986,23 @@ fn deepseek_tool_output_value(item: &Value) -> Value {
         .or_else(|| item.get("error"))
         .cloned()
         .unwrap_or_else(|| Value::String(String::new()))
+}
+
+fn deepseek_tool_output_text(item: &Value) -> String {
+    let value = deepseek_tool_output_value(item);
+    deepseek_content_value_text(&value)
+}
+
+fn deepseek_content_value_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(deepseek_message_content_part_text)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => other.to_string(),
+    }
 }
 
 fn deepseek_mcp_call_has_result(item: &Value) -> bool {

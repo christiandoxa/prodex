@@ -57,12 +57,7 @@ struct RuntimeDoctorCollector {
 impl RuntimeDoctorCollector {
     fn discover(tail_bytes: usize) -> Self {
         let pointer_path = runtime_proxy_latest_log_pointer_path();
-        let pointed_log_path = fs::read_to_string(&pointer_path)
-            .ok()
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from);
+        let pointed_log_path = runtime_proxy_latest_log_path_from_pointer();
         Self {
             paths: AppPaths::discover().ok(),
             pointer_path,
@@ -226,6 +221,9 @@ fn runtime_doctor_collect_binary_identities(summary: &mut RuntimeDoctorSummary) 
 
 fn runtime_doctor_count_stale_runtime_broker_leases(paths: &AppPaths, broker_key: &str) -> usize {
     let lease_dir = runtime_broker_lease_dir(paths, broker_key);
+    if !runtime_broker_lease_dir_is_regular_dir(&lease_dir) {
+        return 0;
+    }
     let Ok(entries) = fs::read_dir(&lease_dir) else {
         return 0;
     };
@@ -236,6 +234,9 @@ fn runtime_doctor_count_stale_runtime_broker_leases(paths: &AppPaths, broker_key
             let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
                 return false;
             };
+            if !runtime_broker_lease_path_is_regular_file(&path) {
+                return false;
+            }
             let pid = file_name
                 .split('-')
                 .next()
@@ -258,9 +259,18 @@ fn runtime_doctor_probe_runtime_broker_health_status(
             if !response.status().is_success() {
                 return ("health_unreachable", None);
             }
-            match response.json::<RuntimeBrokerHealth>() {
-                Ok(health) => ("healthy", Some(health)),
-                Err(_) => ("health_unreachable", None),
+            let body = read_blocking_response_body_with_limit(
+                response,
+                RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+                "failed to read runtime broker health response",
+            );
+            match body
+                .as_deref()
+                .ok()
+                .and_then(|body| serde_json::from_slice::<RuntimeBrokerHealth>(body).ok())
+            {
+                Some(health) => ("healthy", Some(health)),
+                None => ("health_unreachable", None),
             }
         }
         Err(err) if err.is_timeout() => ("health_timeout", None),

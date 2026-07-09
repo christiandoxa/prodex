@@ -2,9 +2,11 @@ use super::json::{RuntimeSmartContextJsonParser, RuntimeSmartContextJsonValue};
 use super::*;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
+
+const RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn runtime_smart_context_artifact_store_to_json(
     store: &RuntimeSmartContextArtifactStore,
@@ -94,12 +96,8 @@ pub fn load_runtime_smart_context_artifact_store(
     policy: RuntimeSmartContextArtifactStorePolicy,
 ) -> io::Result<RuntimeSmartContextArtifactStore> {
     let path = path.as_ref();
-    let content = match fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(RuntimeSmartContextArtifactStore::default());
-        }
-        Err(error) => return Err(error),
+    let Some(content) = runtime_smart_context_read_artifact_store(path)? else {
+        return Ok(RuntimeSmartContextArtifactStore::default());
     };
     let store = runtime_smart_context_artifact_store_from_json(&content)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -151,6 +149,54 @@ pub(super) fn runtime_smart_context_write_artifact_store(
         return Err(error);
     }
     Ok(())
+}
+
+fn runtime_smart_context_read_artifact_store(path: &Path) -> io::Result<Option<String>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !metadata.file_type().is_file()
+        || metadata.len() > RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES
+    {
+        return Ok(None);
+    }
+
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let opened_metadata = file.metadata()?;
+    if !runtime_smart_context_same_artifact_store_file(&metadata, &opened_metadata) {
+        return Ok(None);
+    }
+
+    let mut content = String::new();
+    file.take(RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES.saturating_add(1))
+        .read_to_string(&mut content)?;
+    if content.len() as u64 > RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES {
+        return Ok(None);
+    }
+    Ok(Some(content))
+}
+
+#[cfg(unix)]
+fn runtime_smart_context_same_artifact_store_file(
+    before: &fs::Metadata,
+    after: &fs::Metadata,
+) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_smart_context_same_artifact_store_file(
+    _before: &fs::Metadata,
+    _after: &fs::Metadata,
+) -> bool {
+    true
 }
 
 pub(super) fn runtime_smart_context_artifact_store_temp_path(path: &Path) -> PathBuf {

@@ -15,6 +15,62 @@ fn input(case: &prodex_provider_core::ProviderConformanceCase) -> ProviderTransf
 }
 
 #[test]
+fn deepseek_request_output_items_preserve_alias_call_ids() {
+    let request = serde_json::json!({
+        "model": "deepseek-chat",
+        "input": [
+            {
+                "type": "function_call",
+                "id": "call_function_alias",
+                "name": "grep",
+                "arguments": {"pattern": "ProviderTranslator"}
+            },
+            {
+                "type": "function_call_output",
+                "tool_call_id": "call_function_alias",
+                "output": {"match_count": 1}
+            },
+            {
+                "type": "custom_tool_call",
+                "id": "call_custom_alias",
+                "name": "apply_patch",
+                "input": "*** Begin Patch\n*** End Patch"
+            },
+            {
+                "type": "custom_tool_call_output",
+                "id": "call_custom_alias",
+                "output": [{"type": "output_text", "text": "applied"}]
+            },
+            {
+                "type": "mcp_call",
+                "id": "call_mcp_alias",
+                "name": "mcp__prodex_sqz__compress",
+                "arguments": {"text": "large repeated content"}
+            },
+            {
+                "type": "mcp_tool_result",
+                "tool_call_id": "call_mcp_alias",
+                "content": [{"type": "output_text", "text": "ref:abc123"}]
+            }
+        ]
+    });
+    let result =
+        provider_translator(ProviderId::DeepSeek).transform_request(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            serde_json::to_vec(&request).unwrap(),
+        ));
+    let body: serde_json::Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+    let messages = body["messages"].as_array().unwrap();
+
+    assert_eq!(messages[1]["tool_call_id"], "call_function_alias");
+    assert_eq!(messages[1]["content"], "{\"match_count\":1}");
+    assert_eq!(messages[3]["tool_call_id"], "call_custom_alias");
+    assert_eq!(messages[3]["content"], "applied");
+    assert_eq!(messages[5]["tool_call_id"], "call_mcp_alias");
+    assert_eq!(messages[5]["content"], "ref:abc123");
+}
+
+#[test]
 fn v1_conformance_fixtures_cover_translated_gemini_and_deepseek_flows() {
     let cases = provider_conformance_cases();
     assert!(cases.len() >= 8);

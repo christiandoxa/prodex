@@ -8,26 +8,29 @@ use super::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages,
     RuntimeDeepSeekPendingRequest, runtime_deepseek_rtk_wrapped_tool_arguments,
 };
-use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    read_runtime_buffered_response_body_with_limit,
+};
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
 use prodex_provider_core::ProviderTransformLoss;
-use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(
     status: u16,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
     response_metadata: Option<serde_json::Value>,
     conversations: &RuntimeDeepSeekConversationStore,
     runtime_shared: &crate::RuntimeRotationProxyShared,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read DeepSeek chat response body")?;
+    let body = read_runtime_buffered_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read DeepSeek chat response body",
+    )?;
     let value: serde_json::Value =
         serde_json::from_slice(&body).context("failed to parse DeepSeek chat response JSON")?;
     let translated = runtime_provider_response_conformance_result(
