@@ -1,4 +1,142 @@
+use super::super::gemini_rewrite::RuntimeGeminiProviderAuth;
 use super::*;
+use std::thread;
+use tiny_http::{Response as TinyResponse, Server as TinyServer};
+
+fn start_guardrail_webhook_response(body: &'static str) -> std::net::SocketAddr {
+    let server = TinyServer::http("127.0.0.1:0").expect("guardrail webhook should bind");
+    let addr = server
+        .server_addr()
+        .to_ip()
+        .expect("guardrail webhook should expose TCP addr");
+    thread::spawn(move || {
+        if let Ok(request) = server.recv() {
+            let _ = request.respond(TinyResponse::from_string(body).with_status_code(200));
+        }
+    });
+    addr
+}
+
+#[test]
+fn gateway_realtime_websocket_requires_virtual_key_auth() {
+    let root = temp_root("gateway-realtime-websocket-auth");
+    let paths = app_paths_for_root(root);
+    let virtual_token = "team-a-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::Gemini {
+            auth: RuntimeGeminiProviderAuth::ApiKeys {
+                api_keys: vec!["gemini-key".to_string()],
+            },
+            thinking_budget_tokens: None,
+            model_resolution: crate::RuntimeGeminiModelResolution::from_current_settings(),
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
+            allowed_models: Vec::new(),
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: None,
+        }],
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .get(format!("http://{}/v1/realtime", proxy.listen_addr))
+        .header("Upgrade", "websocket")
+        .header("Connection", "Upgrade")
+        .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .header("Sec-WebSocket-Version", "13")
+        .send()
+        .expect("websocket handshake request should be sent");
+    assert_eq!(response.status().as_u16(), 401);
+    let body: serde_json::Value = response.json().expect("error response should be json");
+    assert_eq!(body["error"]["code"], "invalid_gateway_key");
+}
+
+#[test]
+fn gateway_guardrail_webhook_fail_closed_blocks_missing_allow_field() {
+    let root = temp_root("gateway-guardrail-webhook-missing-allow");
+    let paths = app_paths_for_root(root);
+    let webhook_addr = start_guardrail_webhook_response("{}");
+    let upstream = TestUpstream::start_n(0);
+    let virtual_token = "team-a-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
+            allowed_models: vec!["gpt-5.4".to_string()],
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: None,
+        }],
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
+            url: Some(format!("http://{webhook_addr}/check")),
+            phases: vec!["pre".to_string()],
+            bearer_token: None,
+            fail_closed: true,
+        },
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(virtual_token)
+        .json(&serde_json::json!({"model": "gpt-5.4", "input": "hello"}))
+        .send()
+        .expect("gateway request should be sent");
+    assert_eq!(response.status().as_u16(), 403);
+    let body: serde_json::Value = response.json().expect("error response should be json");
+    assert_eq!(body["error"]["code"], "policy_violation");
+}
 
 #[test]
 fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
@@ -237,6 +375,337 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
         .json()
         .expect("restarted usage response should be json");
     assert_eq!(restarted_usage["keys"][0]["usage"]["requests_total"], 1);
+}
+
+#[test]
+fn gateway_virtual_key_token_is_not_forwarded_to_openai_passthrough_upstream() {
+    let root = temp_root("gateway-virtual-key-no-upstream-leak");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start();
+    let virtual_token = "team-a-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: Vec::new(),
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
+            allowed_models: vec!["gpt-5.4".to_string()],
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: None,
+        }],
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(virtual_token)
+        .header("ChatGPT-Account-Id", "acct-client")
+        .json(&serde_json::json!({
+            "model": "gpt-5.4",
+            "input": "hello"
+        }))
+        .send()
+        .expect("gateway request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let headers = upstream
+        .headers_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("upstream should receive gateway request");
+    assert!(
+        headers.iter().all(|(name, value)| {
+            !name.eq_ignore_ascii_case("authorization") || value != "Bearer team-a-token"
+        }),
+        "gateway virtual key must not be forwarded as upstream Authorization: {headers:?}"
+    );
+    assert!(
+        headers
+            .iter()
+            .all(|(name, _)| !name.eq_ignore_ascii_case("chatgpt-account-id")),
+        "gateway virtual key must not forward client ChatGPT-Account-Id: {headers:?}"
+    );
+}
+
+#[test]
+fn gateway_default_bearer_token_is_not_forwarded_to_openai_passthrough_upstream() {
+    let root = temp_root("gateway-default-token-no-upstream-leak");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start();
+    let gateway_token = "gateway-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: Vec::new(),
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth(gateway_token)
+        .header("ChatGPT-Account-Id", "acct-client")
+        .json(&serde_json::json!({
+            "model": "gpt-5.4",
+            "input": "hello"
+        }))
+        .send()
+        .expect("gateway request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let headers = upstream
+        .headers_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("upstream should receive gateway request");
+    assert!(
+        headers.iter().all(|(name, value)| {
+            !name.eq_ignore_ascii_case("authorization") || value != "Bearer gateway-token"
+        }),
+        "gateway bearer token must not be forwarded as upstream Authorization: {headers:?}"
+    );
+    assert!(
+        headers
+            .iter()
+            .all(|(name, _)| !name.eq_ignore_ascii_case("chatgpt-account-id")),
+        "gateway bearer token must not forward client ChatGPT-Account-Id: {headers:?}"
+    );
+}
+
+#[test]
+fn gateway_disabled_last_virtual_key_does_not_open_gateway() {
+    let root = temp_root("gateway-disabled-last-key");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(1);
+    let admin_token = "admin-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let created = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/keys",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"name": "alpha"}))
+        .send()
+        .expect("admin create key request should be sent");
+    assert_eq!(created.status().as_u16(), 201);
+
+    let disabled = client
+        .patch(format!(
+            "http://{}/v1/prodex/gateway/keys/alpha",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"disabled": true}))
+        .send()
+        .expect("admin disable key request should be sent");
+    assert_eq!(disabled.status().as_u16(), 200);
+
+    let rejected = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .json(&serde_json::json!({"model": "gpt-5.4", "input": "must not pass"}))
+        .send()
+        .expect("unauthenticated gateway request should be sent");
+    assert_eq!(rejected.status().as_u16(), 401);
+    let rejected: serde_json::Value = rejected.json().expect("rejection should be json");
+    assert_eq!(rejected["error"]["code"], "invalid_gateway_key");
+}
+
+#[test]
+fn openai_passthrough_provider_api_key_drops_client_account_id() {
+    let root = temp_root("openai-passthrough-provider-key-no-client-account");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start();
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth("client-token")
+        .header("ChatGPT-Account-Id", "acct-client")
+        .json(&serde_json::json!({
+            "model": "gpt-5.4",
+            "input": "hello"
+        }))
+        .send()
+        .expect("gateway request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let headers = upstream
+        .headers_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("upstream should receive passthrough request");
+    assert!(
+        headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization") && value == "Bearer upstream-key"
+        }),
+        "provider API key should replace client Authorization: {headers:?}"
+    );
+    assert!(
+        headers
+            .iter()
+            .all(|(name, _)| !name.eq_ignore_ascii_case("chatgpt-account-id")),
+        "provider API key must not forward client ChatGPT-Account-Id: {headers:?}"
+    );
+}
+
+#[test]
+fn openai_passthrough_preserves_client_authorization_when_gateway_auth_is_disabled() {
+    let root = temp_root("openai-passthrough-client-auth");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start();
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: Vec::new(),
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .bearer_auth("upstream-user-token")
+        .header("ChatGPT-Account-Id", "acct-upstream")
+        .json(&serde_json::json!({
+            "model": "gpt-5.4",
+            "input": "hello"
+        }))
+        .send()
+        .expect("gateway request should be sent");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let headers = upstream
+        .headers_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("upstream should receive passthrough request");
+    assert!(
+        headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization") && value == "Bearer upstream-user-token"
+        }),
+        "non-gateway client Authorization should remain passthrough: {headers:?}"
+    );
+    assert!(
+        headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("chatgpt-account-id") && value == "acct-upstream"
+        }),
+        "non-gateway client ChatGPT-Account-Id should remain passthrough: {headers:?}"
+    );
 }
 
 #[test]

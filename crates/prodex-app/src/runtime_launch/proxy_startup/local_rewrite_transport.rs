@@ -14,7 +14,8 @@ use super::provider_bridge::{
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
 use runtime_proxy_crate::{
-    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    local_bridge_authorization_bearer_token, path_without_query, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message,
 };
 use std::io::Write;
 use std::sync::atomic::Ordering;
@@ -118,11 +119,19 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             }
         }
         RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => {
+            let replacing_openai_auth = api_key.is_some()
+                || request.headers.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("authorization")
+                        && runtime_local_rewrite_authorization_is_gateway_credential(shared, value)
+                });
             for (name, value) in &request.headers {
                 if should_skip_runtime_local_rewrite_request_header(name) {
                     continue;
                 }
-                if api_key.is_some() && name.eq_ignore_ascii_case("authorization") {
+                if replacing_openai_auth
+                    && (name.eq_ignore_ascii_case("authorization")
+                        || name.eq_ignore_ascii_case("chatgpt-account-id"))
+                {
                     continue;
                 }
                 upstream_request = upstream_request.header(name.as_str(), value.as_str());
@@ -182,7 +191,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("method", request.method.as_str()),
-                runtime_proxy_log_field("url", upstream_url),
+                runtime_proxy_log_field("url", runtime_local_rewrite_log_url(upstream_url)),
                 runtime_proxy_log_field("provider", runtime_provider_label(provider_kind)),
                 runtime_proxy_log_field("model", model.as_deref().unwrap_or("unknown")),
                 runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
@@ -193,7 +202,13 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     let response = upstream_request
         .body(body)
         .send()
-        .with_context(|| format!("failed to proxy local provider request to {upstream_url}"))?;
+        .map_err(reqwest::Error::without_url)
+        .with_context(|| {
+            format!(
+                "failed to proxy local provider request to {}",
+                runtime_local_rewrite_log_url(upstream_url)
+            )
+        })?;
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -396,6 +411,21 @@ pub(super) fn runtime_local_rewrite_upstream_url(
     upstream_url
 }
 
+pub(super) fn runtime_local_rewrite_log_url(value: &str) -> String {
+    if let Ok(mut url) = reqwest::Url::parse(value) {
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        return url.to_string();
+    }
+    value
+        .split_once('?')
+        .map(|(path, _)| path)
+        .unwrap_or(value)
+        .to_string()
+}
+
 pub(super) fn runtime_deepseek_upstream_url(
     base_url: &str,
     mount_path: &str,
@@ -539,6 +569,31 @@ fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
         || lower.starts_with("x-prodex-internal-")
 }
 
+fn runtime_local_rewrite_authorization_is_gateway_credential(
+    shared: &RuntimeLocalRewriteProxyShared,
+    authorization: &str,
+) -> bool {
+    if shared
+        .gateway_auth_token_hash
+        .as_ref()
+        .is_some_and(|hash| hash.verify_authorization_header(authorization))
+    {
+        return true;
+    }
+    let Some(token) = local_bridge_authorization_bearer_token(authorization) else {
+        return false;
+    };
+    shared
+        .gateway_virtual_keys
+        .lock()
+        .map(|entries| {
+            entries
+                .iter()
+                .any(|entry| !entry.disabled && entry.key.token_hash.verify_bearer_token(token))
+        })
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,5 +722,17 @@ mod tests {
 
         let langfuse = runtime_gateway_observability_http_payload(&event, "langfuse");
         assert_eq!(langfuse["batch"][0]["type"], "trace-create");
+    }
+
+    #[test]
+    fn log_url_strips_query_fragment_and_userinfo() {
+        let url = runtime_local_rewrite_log_url(
+            "https://user:secret@example.test/v1/responses?access_token=secret#frag",
+        );
+        assert_eq!(url, "https://example.test/v1/responses");
+        assert_eq!(
+            runtime_local_rewrite_log_url("/v1/responses?key=secret"),
+            "/v1/responses"
+        );
     }
 }

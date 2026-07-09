@@ -3,7 +3,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Mutex, OnceLock};
@@ -271,18 +271,49 @@ pub(crate) fn write_json_file_with_backup(
     json: &str,
     validate: impl Fn(&str) -> Result<()>,
 ) -> Result<()> {
-    let temp_file = unique_state_temp_file_path(path);
-    fs::write(&temp_file, json)
-        .with_context(|| format!("failed to write {}", temp_file.display()))?;
-    validate(json).with_context(|| format!("failed to validate staged {}", temp_file.display()))?;
-    fs::rename(&temp_file, path)
-        .with_context(|| format!("failed to replace {}", path.display()))?;
+    validate(json).with_context(|| format!("failed to validate staged {}", path.display()))?;
+    write_json_file_atomic_private(path, json)?;
     let written = fs::read_to_string(path)
         .with_context(|| format!("failed to re-read {}", path.display()))?;
     validate(&written).with_context(|| format!("failed to validate {}", path.display()))?;
-    fs::write(backup_path, &written)
+    write_json_file_atomic_private(backup_path, &written)
         .with_context(|| format!("failed to refresh {}", backup_path.display()))?;
     Ok(())
+}
+
+fn write_json_file_atomic_private(path: &Path, json: &str) -> Result<()> {
+    let temp_file = unique_state_temp_file_path(path);
+    write_private_file(&temp_file, json)
+        .with_context(|| format!("failed to write {}", temp_file.display()))?;
+    if let Err(err) = fs::rename(&temp_file, path) {
+        let _ = fs::remove_file(&temp_file);
+        return Err(err).with_context(|| format!("failed to replace {}", path.display()));
+    }
+    Ok(())
+}
+
+fn write_private_file(path: &Path, content: &str) -> io::Result<()> {
+    let mut file = open_private_file(path)?;
+    file.write_all(content.as_bytes())
+}
+
+#[cfg(unix)]
+fn open_private_file(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_private_file(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 pub(crate) fn load_json_file_with_backup<T>(
@@ -381,4 +412,51 @@ pub(crate) fn write_state_json_atomic(paths: &AppPaths, json: &str) -> Result<()
             Ok(())
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-store-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("test root should be created");
+        root
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_json_file_with_backup_restricts_primary_and_backup_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("permissions");
+        let path = root.join("state.json");
+        let backup_path = root.join("state.last-good.json");
+
+        write_json_file_with_backup(&path, &backup_path, r#"{"ok":true}"#, |content| {
+            let _: serde_json::Value =
+                serde_json::from_str(content).context("json should parse")?;
+            Ok(())
+        })
+        .expect("json should be written");
+
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&backup_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

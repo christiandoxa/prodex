@@ -12,6 +12,7 @@ use super::local_rewrite_gateway_usage_backend::{
     runtime_gateway_sqlite_usage_load,
 };
 use super::*;
+use anyhow::Result;
 use fs2::FileExt;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -22,110 +23,36 @@ use std::sync::atomic::Ordering;
 const RUNTIME_GATEWAY_REDIS_USAGE_KEY: &str = "prodex:gateway:virtual_key_usage";
 const RUNTIME_GATEWAY_REDIS_USAGE_LOCK: &str = "prodex:gateway:virtual_key_usage:lock";
 
-pub(super) fn runtime_gateway_virtual_key_usage_load(
+pub(super) fn runtime_gateway_virtual_key_usage_load_strict(
     state_store: &RuntimeGatewayStateStore,
     log_path: &Path,
-) -> BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage> {
+) -> Result<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>> {
     let path = state_store.usage_path();
-    match state_store {
-        RuntimeGatewayStateStore::Sqlite { path } => {
-            return match runtime_gateway_sqlite_usage_load(path) {
-                Ok(usage) => usage,
-                Err(err) => {
-                    runtime_proxy_log_to_path(
-                        log_path,
-                        &runtime_proxy_structured_log_message(
-                            "gateway_virtual_key_usage_load_failed",
-                            [
-                                runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
-                            ],
-                        ),
-                    );
-                    BTreeMap::new()
-                }
-            };
+    let usage = match state_store {
+        RuntimeGatewayStateStore::Sqlite { path } => runtime_gateway_sqlite_usage_load(path),
+        RuntimeGatewayStateStore::Postgres { url, .. } => runtime_gateway_postgres_usage_load(url),
+        RuntimeGatewayStateStore::Redis { url, .. } => {
+            runtime_gateway_redis_usage_load(url, RUNTIME_GATEWAY_REDIS_USAGE_KEY)
         }
-        RuntimeGatewayStateStore::Postgres {
-            url, state_path, ..
-        } => {
-            return match runtime_gateway_postgres_usage_load(url) {
-                Ok(usage) => usage,
-                Err(err) => {
-                    runtime_proxy_log_to_path(
-                        log_path,
-                        &runtime_proxy_structured_log_message(
-                            "gateway_virtual_key_usage_load_failed",
-                            [
-                                runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", state_path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
-                            ],
-                        ),
-                    );
-                    BTreeMap::new()
-                }
-            };
-        }
-        RuntimeGatewayStateStore::Redis { url, state_path } => {
-            return match runtime_gateway_redis_usage_load(url, RUNTIME_GATEWAY_REDIS_USAGE_KEY) {
-                Ok(usage) => usage,
-                Err(err) => {
-                    runtime_proxy_log_to_path(
-                        log_path,
-                        &runtime_proxy_structured_log_message(
-                            "gateway_virtual_key_usage_load_failed",
-                            [
-                                runtime_proxy_log_field("backend", state_store.label()),
-                                runtime_proxy_log_field("path", state_path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
-                            ],
-                        ),
-                    );
-                    BTreeMap::new()
-                }
-            };
-        }
-        RuntimeGatewayStateStore::File { .. } => {}
-    }
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            match serde_json::from_slice::<
-                BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>,
-            >(&bytes)
-            {
-                Ok(usage) => usage,
-                Err(err) => {
-                    runtime_proxy_log_to_path(
-                        log_path,
-                        &runtime_proxy_structured_log_message(
-                            "gateway_virtual_key_usage_load_failed",
-                            [
-                                runtime_proxy_log_field("path", path.display().to_string()),
-                                runtime_proxy_log_field("error", err.to_string()),
-                            ],
-                        ),
-                    );
-                    BTreeMap::new()
-                }
-            }
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-        Err(err) => {
-            runtime_proxy_log_to_path(
-                log_path,
-                &runtime_proxy_structured_log_message(
-                    "gateway_virtual_key_usage_load_failed",
-                    [
-                        runtime_proxy_log_field("path", path.display().to_string()),
-                        runtime_proxy_log_field("error", err.to_string()),
-                    ],
-                ),
-            );
-            BTreeMap::new()
+        RuntimeGatewayStateStore::File { .. } => {
+            runtime_gateway_virtual_key_usage_file_load_strict(path)
+                .map_err(|err| anyhow::anyhow!(err.to_string()))
         }
     }
+    .inspect_err(|err| {
+        runtime_proxy_log_to_path(
+            log_path,
+            &runtime_proxy_structured_log_message(
+                "gateway_virtual_key_usage_load_failed",
+                [
+                    runtime_proxy_log_field("backend", state_store.label()),
+                    runtime_proxy_log_field("path", path.display().to_string()),
+                    runtime_proxy_log_field("error", err.to_string()),
+                ],
+            ),
+        );
+    })?;
+    Ok(usage)
 }
 
 pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
@@ -243,7 +170,7 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let mut usage = runtime_gateway_virtual_key_usage_load_strict(path)?;
+    let mut usage = runtime_gateway_virtual_key_usage_file_load_strict(path)?;
     for delta in &unique_deltas {
         let entry = usage.entry(delta.key_name.clone()).or_default();
         let admission = runtime_proxy_crate::RuntimeGatewayVirtualKeyAdmission {
@@ -267,7 +194,7 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
     Ok(())
 }
 
-fn runtime_gateway_virtual_key_usage_load_strict(
+fn runtime_gateway_virtual_key_usage_file_load_strict(
     path: &Path,
 ) -> std::io::Result<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>> {
     match std::fs::read(path) {

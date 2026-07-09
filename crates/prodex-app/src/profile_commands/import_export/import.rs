@@ -493,7 +493,7 @@ pub(super) fn stage_imported_profiles(
                     let staging_home = prodex_profile_export::profile_import_staging_home(
                         &paths.managed_profiles_root,
                         &exported.name,
-                        &runtime_random_token("profile"),
+                        &runtime_random_token("profile")?,
                     );
                     create_codex_home_if_missing(&staging_home)?;
                     prepare_managed_codex_home(paths, &staging_home)?;
@@ -690,7 +690,7 @@ fn write_imported_auth_update_journal(
     let journal_path = prodex_profile_export::unique_profile_import_auth_update_journal_path(
         &paths.root,
         profile_name,
-        &runtime_random_token("auth"),
+        &runtime_random_token("auth")?,
     )?;
     let journal = ImportedExistingProfileAuthUpdateJournal::new(
         profile_name.to_string(),

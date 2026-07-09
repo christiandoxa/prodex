@@ -6,6 +6,7 @@ use reqwest::blocking::Client;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -253,9 +254,25 @@ fn write_mem0_env(
         llm_model,
         embedder_model,
     );
-    fs::write(&env_path, contents)
-        .with_context(|| format!("failed to write {}", env_path.display()))?;
-    restrict_file_permissions_best_effort(&env_path);
+    write_secret_file(&env_path, &contents)?;
+    Ok(())
+}
+
+fn write_secret_file(path: &Path, contents: &str) -> Result<()> {
+    restrict_file_permissions_if_exists(path)?;
+    let mut options = fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.write_all(contents.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    restrict_file_permissions(path)?;
     Ok(())
 }
 
@@ -466,13 +483,24 @@ fn random_url_safe_token(prefix: &str) -> Result<String> {
 }
 
 #[cfg(unix)]
-fn restrict_file_permissions_best_effort(path: &Path) {
+fn restrict_file_permissions(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("failed to restrict {}", path.display()))
 }
 
 #[cfg(not(unix))]
-fn restrict_file_permissions_best_effort(_path: &Path) {}
+fn restrict_file_permissions(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+fn restrict_file_permissions_if_exists(path: &Path) -> Result<()> {
+    if path.exists() {
+        restrict_file_permissions(path)?;
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -512,6 +540,39 @@ mod tests {
         assert_eq!(secrets.postgres_password, "pg secret");
         assert_eq!(secrets.admin_api_key, "admin");
         assert_eq!(secrets.jwt_secret, "jwt secret");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_mem0_env_restricts_existing_env_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_mem0_dir("env-mode");
+        fs::create_dir_all(&root).unwrap();
+        let env_path = root.join(".env");
+        fs::write(&env_path, "OLD_SECRET=leaky\n").unwrap();
+        fs::set_permissions(&env_path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let secrets = Mem0Secrets {
+            postgres_password: "pg".to_string(),
+            admin_api_key: "admin".to_string(),
+            jwt_secret: "jwt".to_string(),
+        };
+        write_mem0_env(
+            &root,
+            "gateway-token",
+            "http://host.docker.internal:1234",
+            &secrets,
+            "llm",
+            "embedder",
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::metadata(&env_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         let _ = fs::remove_dir_all(root);
     }
 

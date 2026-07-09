@@ -16,6 +16,7 @@ pub(super) use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_g
 pub(super) use super::local_rewrite_gateway_keys::{
     runtime_gateway_virtual_key_entries_from_sources, runtime_gateway_virtual_key_entries_is_empty,
     runtime_gateway_virtual_key_rejection, runtime_gateway_virtual_key_store_load,
+    runtime_gateway_virtual_key_store_load_strict, runtime_gateway_websocket_rejection,
     runtime_local_rewrite_request_is_authorized,
 };
 pub(super) use super::local_rewrite_gateway_ledger::{
@@ -26,7 +27,7 @@ use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 #[cfg(test)]
 pub(super) use super::local_rewrite_gateway_usage::runtime_gateway_virtual_key_usage_apply_deltas;
 pub(super) use super::local_rewrite_gateway_usage::{
-    runtime_gateway_virtual_key_usage_load, schedule_runtime_gateway_virtual_key_usage_save,
+    runtime_gateway_virtual_key_usage_load_strict, schedule_runtime_gateway_virtual_key_usage_save,
 };
 pub(super) use super::local_rewrite_gateway_usage_backend::RuntimeGatewayVirtualKeyUsageDelta;
 pub(super) use super::local_rewrite_gateway_util::runtime_gateway_generate_virtual_key_token;
@@ -64,6 +65,7 @@ use super::provider_bridge::{
     runtime_provider_request_ledger_message,
 };
 use super::*;
+use anyhow::Context;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
@@ -226,9 +228,11 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         gateway_virtual_keys,
         &gateway_state_store,
         &log_path,
-    );
+    )
+    .context("failed to load gateway virtual key store")?;
     let gateway_virtual_key_usage =
-        runtime_gateway_virtual_key_usage_load(&gateway_state_store, &log_path);
+        runtime_gateway_virtual_key_usage_load_strict(&gateway_state_store, &log_path)
+            .context("failed to load gateway virtual key usage")?;
     let gateway_auth_required =
         gateway_auth_token_hash.is_some() || !gateway_virtual_key_entries.is_empty();
     runtime_proxy_log_to_path(
@@ -431,6 +435,28 @@ fn handle_runtime_local_rewrite_proxy_request(
             RuntimeLocalRewriteProviderOptions::Gemini { .. }
         ) && is_runtime_realtime_websocket_path(&request_path)
         {
+            if let Some(rejection) =
+                runtime_gateway_websocket_rejection(request_id, &request, shared)
+            {
+                runtime_proxy_log(
+                    runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_virtual_key_rejected",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "websocket"),
+                            runtime_proxy_log_field("reason", rejection.code()),
+                            runtime_proxy_log_field("path", request_path.as_str()),
+                        ],
+                    ),
+                );
+                let _ = request.respond(build_runtime_proxy_json_error_response(
+                    rejection.status(),
+                    rejection.code(),
+                    "gateway virtual key policy rejected this request",
+                ));
+                return;
+            }
             handle_runtime_gemini_live_websocket_request(request_id, request, shared);
             return;
         }

@@ -200,6 +200,31 @@ mod tests {
     }
 
     #[test]
+    fn prefetch_lookahead_rate_limits_before_quota_stays_retryable() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![
+                RuntimePrefetchChunk::Data(
+                    b"data: {\"type\":\"codex.rate_limits\",\"rate_limits\":[]}\r\n\r\n".to_vec(),
+                ),
+                RuntimePrefetchChunk::Data(
+                    b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"quota exhausted\"}}}\r\n\r\n".to_vec(),
+                ),
+            ],
+            "rate-limits-before-quota",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::QuotaBlocked(prelude) => {
+                let prelude = String::from_utf8_lossy(&prelude);
+                assert!(prelude.contains("codex.rate_limits"));
+                assert!(prelude.contains("insufficient_quota"));
+            }
+            other => panic!("expected quota blocked after sideband prelude, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn prefetch_lookahead_detects_previous_response_not_found_before_commit() {
         let (inspection, _prefetch) = block_on_lookahead(
             vec![RuntimePrefetchChunk::Data(

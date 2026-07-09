@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use postgres::GenericClient;
 use redis::Commands;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, types::Type};
 
 use super::local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_open, runtime_gateway_redis_connection, runtime_gateway_sqlite_open,
@@ -40,7 +40,9 @@ pub(super) fn runtime_gateway_sqlite_load_key_store_from_conn(
     let rows = stmt.query_map([], |row| {
         let allowed_models_json: String = row.get(7)?;
         let allowed_models =
-            serde_json::from_str::<Vec<String>>(&allowed_models_json).unwrap_or_default();
+            serde_json::from_str::<Vec<String>>(&allowed_models_json).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(7, Type::Text, Box::new(err))
+            })?;
         Ok(RuntimeGatewayStoredVirtualKey {
             name: row.get(0)?,
             tenant_id: row.get(1)?,
@@ -93,7 +95,7 @@ pub(super) fn runtime_gateway_postgres_load_key_store_from_client<C: GenericClie
     )?;
     let mut keys = Vec::new();
     for row in rows {
-        keys.push(runtime_gateway_postgres_stored_key_from_row(&row));
+        keys.push(runtime_gateway_postgres_stored_key_from_row(&row)?);
     }
     Ok(RuntimeGatewayVirtualKeyStoreFile {
         version: runtime_gateway_virtual_key_store_version(),
@@ -117,7 +119,9 @@ fn runtime_gateway_sqlite_load_scim_users_from_conn(
     let rows = stmt.query_map([], |row| {
         let prefixes_json: String = row.get(11)?;
         let allowed_key_prefixes =
-            serde_json::from_str::<Vec<String>>(&prefixes_json).unwrap_or_default();
+            serde_json::from_str::<Vec<String>>(&prefixes_json).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(11, Type::Text, Box::new(err))
+            })?;
         Ok(RuntimeGatewayScimUser {
             id: row.get(0)?,
             user_name: row.get(1)?,
@@ -171,7 +175,7 @@ fn runtime_gateway_postgres_load_scim_users_from_client<C: GenericClient>(
             active: row.get::<_, bool>(9),
             role: row.get(10),
             allowed_key_prefixes: serde_json::from_str::<Vec<String>>(&prefixes_json)
-                .unwrap_or_default(),
+                .context("failed to parse gateway postgres SCIM allowed key prefixes")?,
             created_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(12)),
             updated_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(13)),
         });
@@ -181,11 +185,11 @@ fn runtime_gateway_postgres_load_scim_users_from_client<C: GenericClient>(
 
 fn runtime_gateway_postgres_stored_key_from_row(
     row: &postgres::Row,
-) -> RuntimeGatewayStoredVirtualKey {
+) -> Result<RuntimeGatewayStoredVirtualKey> {
     let allowed_models_json: String = row.get(7);
-    let allowed_models =
-        serde_json::from_str::<Vec<String>>(&allowed_models_json).unwrap_or_default();
-    RuntimeGatewayStoredVirtualKey {
+    let allowed_models = serde_json::from_str::<Vec<String>>(&allowed_models_json)
+        .context("failed to parse gateway postgres allowed models")?;
+    Ok(RuntimeGatewayStoredVirtualKey {
         name: row.get(0),
         tenant_id: row.get(1),
         team_id: row.get(2),
@@ -201,7 +205,7 @@ fn runtime_gateway_postgres_stored_key_from_row(
         disabled: Some(row.get::<_, bool>(12)),
         created_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(13)),
         updated_at_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(14)),
-    }
+    })
 }
 
 pub(super) fn runtime_gateway_redis_load_key_store(
@@ -435,6 +439,77 @@ mod tests {
         let loaded = runtime_gateway_sqlite_load_key_store(&path).unwrap();
         assert_eq!(loaded.keys[0].name, "alpha");
         assert_eq!(loaded.scim_users[0].user_name, "user@example.com");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sqlite_key_store_rejects_invalid_policy_json() {
+        let root = temp_dir("sqlite-invalid-json");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("state.sqlite");
+        let mut conn = runtime_gateway_sqlite_open(&path).unwrap();
+        let tx = conn.transaction().unwrap();
+        let store = RuntimeGatewayVirtualKeyStoreFile {
+            version: runtime_gateway_virtual_key_store_version(),
+            keys: vec![RuntimeGatewayStoredVirtualKey {
+                name: "alpha".to_string(),
+                token_hash_base64: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+                    "secret",
+                )
+                .hash_base64(),
+                tenant_id: None,
+                team_id: None,
+                project_id: None,
+                user_id: None,
+                budget_id: None,
+                allowed_models: vec!["gpt-5".to_string()],
+                budget_microusd: None,
+                request_budget: None,
+                rpm_limit: None,
+                tpm_limit: None,
+                disabled: Some(false),
+                created_at_epoch: 1,
+                updated_at_epoch: 1,
+            }],
+            scim_users: vec![RuntimeGatewayScimUser {
+                id: "user-1".to_string(),
+                user_name: "user@example.com".to_string(),
+                external_id: None,
+                display_name: None,
+                active: true,
+                role: Some("admin".to_string()),
+                tenant_id: None,
+                team_id: None,
+                project_id: None,
+                user_id: None,
+                budget_id: None,
+                allowed_key_prefixes: vec!["alpha".to_string()],
+                created_at_epoch: 1,
+                updated_at_epoch: 1,
+            }],
+        };
+        runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store).unwrap();
+        tx.commit().unwrap();
+
+        conn.execute(
+            "UPDATE prodex_gateway_virtual_keys SET allowed_models_json = '{'",
+            [],
+        )
+        .unwrap();
+        assert!(runtime_gateway_sqlite_load_key_store(&path).is_err());
+
+        conn.execute(
+            "UPDATE prodex_gateway_virtual_keys SET allowed_models_json = '[\"gpt-5\"]'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE prodex_gateway_scim_users SET allowed_key_prefixes_json = '{'",
+            [],
+        )
+        .unwrap();
+        assert!(runtime_gateway_sqlite_load_key_store(&path).is_err());
 
         std::fs::remove_dir_all(root).unwrap();
     }

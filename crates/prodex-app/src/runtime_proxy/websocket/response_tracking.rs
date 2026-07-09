@@ -134,6 +134,20 @@ pub(crate) fn attempt_runtime_websocket_request(
 
                 if !committed {
                     match inspected.retry_kind {
+                        Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached) => {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=websocket connection_limit_reached profile={profile_name}"
+                                ),
+                            );
+                            let _ = upstream_socket.close(None);
+                            websocket_session.reset();
+                            return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                                profile_name: profile_name.to_string(),
+                                event: "connection_limit_reached",
+                            });
+                        }
                         Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked) => {
                             let _ = upstream_socket.close(None);
                             websocket_session.reset();
@@ -274,6 +288,11 @@ pub(crate) fn attempt_runtime_websocket_request(
                             websocket_session,
                             profile_name,
                             event_type: inspected.event_type.as_deref(),
+                            reset_upstream_socket: !realtime_websocket
+                                && matches!(
+                                    inspected.event_type.as_deref(),
+                                    Some("error" | "response.failed" | "response.incomplete")
+                                ),
                             precommit_hold_count,
                             committed_previous_response_not_found,
                             upstream_socket,

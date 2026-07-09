@@ -15,7 +15,9 @@ use super::provider_sse_events::{
     runtime_provider_sse_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
 };
-use crate::profile_commands::{read_kiro_auth_secret, write_kiro_cli_data_dir};
+use crate::profile_commands::{
+    create_private_kiro_temp_root, read_kiro_auth_secret, write_kiro_cli_data_dir,
+};
 use crate::runtime_anthropic::{
     RuntimeAnthropicMessagesRequest, build_runtime_anthropic_error_parts,
     translate_runtime_anthropic_messages_request, translate_runtime_responses_reply_to_anthropic,
@@ -199,7 +201,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
     )?;
     let prompt_messages = translated.messages.clone();
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
-    let overlay_root = runtime_kiro_temp_dir("runtime");
+    let overlay_root = create_private_kiro_temp_root("runtime")?;
     let result = (|| {
         let secret = read_kiro_auth_secret(&auth.codex_home)?;
         let data_dir = overlay_root.join("kiro-data");
@@ -374,7 +376,7 @@ fn runtime_kiro_semantic_compact_summary(
         Default::default(),
     )?;
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
-    let overlay_root = runtime_kiro_temp_dir("compact");
+    let overlay_root = create_private_kiro_temp_root("compact")?;
     let result = (|| {
         let secret = read_kiro_auth_secret(&auth.codex_home)?;
         let data_dir = overlay_root.join("kiro-data");
@@ -1021,14 +1023,6 @@ fn runtime_kiro_role_label(role: &str) -> &'static str {
     }
 }
 
-fn runtime_kiro_temp_dir(name: &str) -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    env::temp_dir().join(format!("prodex-kiro-{name}-{}-{stamp}", std::process::id()))
-}
-
 fn runtime_kiro_json_parts(status: u16, body: Value) -> RuntimeHeapTrimmedBufferedResponseParts {
     let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
     RuntimeHeapTrimmedBufferedResponseParts {
@@ -1195,7 +1189,7 @@ fn runtime_kiro_streaming_reader(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeKiroStreamingReader> {
     let secret = read_kiro_auth_secret(&auth.codex_home)?;
-    let overlay_root = runtime_kiro_temp_dir("runtime");
+    let overlay_root = create_private_kiro_temp_root("runtime")?;
     let data_dir = overlay_root.join("kiro-data");
     write_kiro_cli_data_dir(&data_dir, &secret)?;
     let mut extra_env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];

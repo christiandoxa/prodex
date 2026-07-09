@@ -4,9 +4,9 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 use std::env;
 use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::manage::print_profile_panel;
 use super::write_secret_text_file;
@@ -480,8 +480,7 @@ pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret>
 }
 
 pub(crate) fn write_kiro_cli_data_dir(data_dir: &Path, secret: &KiroAuthSecret) -> Result<()> {
-    std::fs::create_dir_all(data_dir)
-        .with_context(|| format!("failed to create {}", data_dir.display()))?;
+    ensure_private_kiro_data_dir(data_dir)?;
     let database_path = data_dir.join("data.sqlite3");
     let connection = Connection::open(&database_path)
         .with_context(|| format!("failed to open {}", database_path.display()))?;
@@ -549,6 +548,18 @@ pub(crate) fn write_kiro_cli_data_dir(data_dir: &Path, secret: &KiroAuthSecret) 
     Ok(())
 }
 
+fn ensure_private_kiro_data_dir(data_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(data_dir)
+        .with_context(|| format!("failed to create {}", data_dir.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to make {} private", data_dir.display()))?;
+    }
+    Ok(())
+}
+
 fn write_kiro_auth_secret(codex_home: &Path, secret: &KiroAuthSecret) -> Result<()> {
     let path = codex_home.join(KIRO_CREDENTIALS_FILE);
     write_secret_text_file(
@@ -565,7 +576,7 @@ pub(crate) fn write_kiro_model_catalog_snapshot(
     codex_home: &Path,
     secret: &KiroAuthSecret,
 ) -> Result<()> {
-    let overlay_root = unique_kiro_snapshot_temp_dir("catalog");
+    let overlay_root = create_private_kiro_temp_root("catalog")?;
     let result = (|| {
         let data_dir = overlay_root.join("kiro-data");
         write_kiro_cli_data_dir(&data_dir, secret)?;
@@ -596,12 +607,50 @@ pub(crate) fn write_kiro_model_catalog_snapshot(
     result
 }
 
-fn unique_kiro_snapshot_temp_dir(name: &str) -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    env::temp_dir().join(format!("prodex-kiro-{name}-{}-{stamp}", std::process::id()))
+pub(crate) fn create_private_kiro_temp_root(name: &str) -> Result<PathBuf> {
+    for _ in 0..8 {
+        let mut random = [0_u8; 16];
+        getrandom::fill(&mut random)
+            .context("failed to generate Kiro snapshot temp directory name")?;
+        let path = env::temp_dir().join(format!(
+            "prodex-kiro-{name}-{}-{}",
+            std::process::id(),
+            kiro_hex(&random)
+        ));
+        match create_private_kiro_temp_root_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to create private {}", path.display()));
+            }
+        }
+    }
+    bail!("failed to create unique Kiro snapshot temp directory")
+}
+
+fn create_private_kiro_temp_root_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder.create(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir(path)
+    }
+}
+
+fn kiro_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
 }
 
 fn read_kiro_whoami_json() -> Result<Value> {
@@ -662,6 +711,31 @@ mod tests {
     use crate::{TestEnvLockGuard, acquire_test_env_lock};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn kiro_snapshot_temp_dir_is_unique_and_private() {
+        let first =
+            create_private_kiro_temp_root("test").expect("first temp dir should be created");
+        let second =
+            create_private_kiro_temp_root("test").expect("second temp dir should be created");
+        assert_ne!(first, second);
+        assert!(first.is_dir());
+        assert!(second.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&first).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&second).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        let _ = fs::remove_dir_all(first);
+        let _ = fs::remove_dir_all(second);
+    }
 
     struct EnvGuard {
         _lock: TestEnvLockGuard,
@@ -748,6 +822,14 @@ sys.exit(1)
         };
 
         write_kiro_cli_data_dir(&data_dir, &secret).expect("data dir should materialize");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&data_dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
 
         let connection =
             Connection::open(data_dir.join("data.sqlite3")).expect("sqlite db should open");

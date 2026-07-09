@@ -98,6 +98,377 @@ fn websocket_precommit_hold_response_created_commits_at_terminal_event() {
 }
 
 #[test]
+fn websocket_response_incomplete_is_terminal() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.incomplete","response":{"id":"resp-incomplete","incomplete_details":{"reason":"max_output_tokens"}}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send response.incomplete");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("response-incomplete", upstream_addr);
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 38,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("response.incomplete should finish the websocket attempt");
+    let incomplete = client_socket
+        .read()
+        .expect("client should receive response.incomplete");
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    assert!(incomplete.to_string().contains("response.incomplete"));
+    assert!(
+        !websocket_session.can_reuse("main", None),
+        "Responses error terminals should drop the upstream websocket like upstream Codex"
+    );
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log =
+        read_websocket_test_log_after_marker(&shared.log_path, "event_type=response.incomplete");
+    assert!(
+        log.contains("request=38 transport=websocket terminal_event profile=main event_type=response.incomplete"),
+        "response.incomplete must release websocket attempt as terminal: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
+fn websocket_connection_limit_is_precommit_reuse_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"error","error":{"code":"websocket_connection_limit_reached","message":"Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue."}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send connection-limit error");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("connection-limit", upstream_addr);
+    let (mut local_socket, _client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 39,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("connection-limit error should be handled before commit");
+
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+            profile_name,
+            event: "connection_limit_reached",
+        } if profile_name == "main"
+    ));
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "connection_limit_reached");
+    assert!(
+        log.contains("request=39") && !log.contains("transport=websocket committed profile=main"),
+        "connection limit must not commit raw error to Codex: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
+fn websocket_wrapped_status_error_is_forwarded_as_terminal_without_reuse() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"error","status_code":400,"error":{"type":"invalid_request_error","message":"Model does not support image inputs"}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send wrapped status error");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("wrapped-status-error", upstream_addr);
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 40,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("wrapped status error should finish after forwarding");
+
+    let error = client_socket
+        .read()
+        .expect("client should receive wrapped status error");
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    assert!(error.to_string().contains("invalid_request_error"));
+    assert!(
+        !websocket_session.can_reuse("main", None),
+        "wrapped status errors should drop the upstream websocket like upstream Codex"
+    );
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "event_type=error");
+    assert!(
+        log.contains("request=40 transport=websocket terminal_event profile=main event_type=error"),
+        "wrapped status error should be terminal after forwarding: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
+fn websocket_response_failed_error_is_forwarded_as_terminal_without_reuse() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.failed","response":{"id":"resp-failed","error":{"code":"invalid_prompt","message":"Invalid request."}}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send response.failed");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("response-failed-terminal", upstream_addr);
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 41,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("response.failed should finish after forwarding");
+
+    let failed = client_socket
+        .read()
+        .expect("client should receive response.failed");
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    assert!(failed.to_string().contains("response.failed"));
+    assert!(
+        !websocket_session.can_reuse("main", None),
+        "response.failed should drop the upstream websocket like upstream Codex"
+    );
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "event_type=response.failed");
+    assert!(
+        log.contains(
+            "request=41 transport=websocket terminal_event profile=main event_type=response.failed"
+        ),
+        "response.failed should be terminal after forwarding: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
+fn websocket_rate_limits_before_quota_stays_precommit_retryable() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"codex.rate_limits","primary":{"used_percent":99}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send rate limits");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.failed","status":429,"response":{"error":{"code":"insufficient_quota","message":"quota exhausted"}}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send quota failure");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("rate-limits-before-quota", upstream_addr);
+    let (mut local_socket, _client_socket) = websocket_test_local_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 40,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("quota after rate-limit metadata should be retryable before commit");
+
+    assert!(matches!(
+        attempt,
+        RuntimeWebsocketAttempt::QuotaBlocked {
+            profile_name,
+            ..
+        } if profile_name == "main"
+    ));
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "precommit_hold");
+    assert!(
+        log.contains("request=40")
+            && log.contains("event_type=codex.rate_limits")
+            && !log.contains("request=40 transport=websocket committed profile=main"),
+        "rate-limit metadata must not commit before retryable quota: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
 fn websocket_quota_after_response_created_stays_precommit_retryable() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")

@@ -1,4 +1,5 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite_transport::runtime_local_rewrite_log_url;
 use super::*;
 use base64::Engine;
 
@@ -30,6 +31,7 @@ pub(super) fn runtime_gateway_guardrail_webhook_block(
     let response = match request.send() {
         Ok(response) => response,
         Err(err) => {
+            let err = err.without_url();
             runtime_proxy_log(
                 &shared.runtime_shared,
                 runtime_proxy_structured_log_message(
@@ -37,7 +39,7 @@ pub(super) fn runtime_gateway_guardrail_webhook_block(
                     [
                         runtime_proxy_log_field("request", request_id.to_string()),
                         runtime_proxy_log_field("phase", phase),
-                        runtime_proxy_log_field("url", url),
+                        runtime_proxy_log_field("url", runtime_local_rewrite_log_url(url)),
                         runtime_proxy_log_field("error", format!("{err:#}")),
                     ],
                 ),
@@ -51,7 +53,17 @@ pub(super) fn runtime_gateway_guardrail_webhook_block(
         }
     };
     let status = response.status();
-    let body = response.bytes().unwrap_or_default();
+    let body = match response.bytes() {
+        Ok(body) => body,
+        Err(err) => {
+            return shared.gateway_guardrail_webhook.fail_closed.then(|| {
+                RuntimeGatewayGuardrailWebhookBlock {
+                    reason: "webhook_body".to_string(),
+                    value: err.to_string(),
+                }
+            });
+        }
+    };
     if !status.is_success() {
         return shared.gateway_guardrail_webhook.fail_closed.then(|| {
             RuntimeGatewayGuardrailWebhookBlock {
@@ -60,11 +72,25 @@ pub(super) fn runtime_gateway_guardrail_webhook_block(
             }
         });
     }
-    let value = serde_json::from_slice::<serde_json::Value>(&body).ok()?;
-    let allow = value
-        .get("allow")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
+    let value = match serde_json::from_slice::<serde_json::Value>(&body) {
+        Ok(value) => value,
+        Err(err) => {
+            return shared.gateway_guardrail_webhook.fail_closed.then(|| {
+                RuntimeGatewayGuardrailWebhookBlock {
+                    reason: "webhook_response".to_string(),
+                    value: err.to_string(),
+                }
+            });
+        }
+    };
+    let Some(allow) = value.get("allow").and_then(serde_json::Value::as_bool) else {
+        return shared.gateway_guardrail_webhook.fail_closed.then(|| {
+            RuntimeGatewayGuardrailWebhookBlock {
+                reason: "webhook_response".to_string(),
+                value: "missing allow field".to_string(),
+            }
+        });
+    };
     (!allow).then(|| RuntimeGatewayGuardrailWebhookBlock {
         reason: value
             .get("reason")

@@ -76,7 +76,10 @@ fn runtime_gateway_oidc_admin_auth(
         .or_else(|| runtime_gateway_oidc_claim_string(&claims, "email"))
         .or_else(|| runtime_gateway_oidc_claim_string(&claims, "preferred_username"))
         .or_else(|| runtime_gateway_oidc_claim_string(&claims, "sub"))?;
-    let scim_user = runtime_gateway_scim_user_by_name(shared, &name);
+    let scim_user = match runtime_gateway_scim_user_by_name(shared, &name) {
+        Ok(user) => user,
+        Err(()) => return None,
+    };
     if scim_user.as_ref().is_some_and(|user| !user.active) {
         return None;
     }
@@ -252,7 +255,10 @@ fn runtime_gateway_sso_admin_auth(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("sso-admin");
-    let scim_user = runtime_gateway_scim_user_by_name(shared, name);
+    let scim_user = match runtime_gateway_scim_user_by_name(shared, name) {
+        Ok(user) => user,
+        Err(()) => return None,
+    };
     if scim_user.as_ref().is_some_and(|user| !user.active) {
         return None;
     }
@@ -317,18 +323,31 @@ fn runtime_gateway_parse_sso_prefixes(value: &str) -> Vec<String> {
 fn runtime_gateway_scim_user_by_name(
     shared: &RuntimeLocalRewriteProxyShared,
     name: &str,
-) -> Option<RuntimeGatewayScimUser> {
+) -> Result<Option<RuntimeGatewayScimUser>, ()> {
     let name = name.trim();
     if name.is_empty() {
-        return None;
+        return Ok(None);
     }
-    super::local_rewrite::runtime_gateway_virtual_key_store_load(
+    let store = match super::local_rewrite::runtime_gateway_virtual_key_store_load_strict(
         &shared.gateway_state_store,
         &shared.runtime_shared.log_path,
-    )
-    .scim_users
-    .into_iter()
-    .find(|user| user.user_name.eq_ignore_ascii_case(name))
+    ) {
+        Ok(store) => store,
+        Err(err) => {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_admin_scim_state_unavailable",
+                    [runtime_proxy_log_field("error", err.to_string())],
+                ),
+            );
+            return Err(());
+        }
+    };
+    Ok(store
+        .scim_users
+        .into_iter()
+        .find(|user| user.user_name.eq_ignore_ascii_case(name)))
 }
 
 impl RuntimeGatewayAdminAuth {
