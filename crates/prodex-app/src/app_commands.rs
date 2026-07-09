@@ -12,8 +12,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::io::{BufRead, IsTerminal, Write};
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
-    tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
+    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 mod app_server_broker;
@@ -232,11 +232,7 @@ fn prompt_super_opt_in_tui(title: &str, question: &str, detail: &str) -> Result<
                 Span::raw("  "),
                 Span::styled("launch option", tui_secondary_style()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(vec![
@@ -265,11 +261,7 @@ fn prompt_super_opt_in_tui(title: &str, question: &str, detail: &str) -> Result<
                 Span::styled("esc", tui_hint_style()),
                 Span::raw(" skip"),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
         })?;
 

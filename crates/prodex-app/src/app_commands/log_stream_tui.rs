@@ -9,8 +9,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::VecDeque;
 use terminal_ui::{
-    text_width, tui_accent_style, tui_border_style, tui_metric_style, tui_muted_style,
-    tui_primary_style, tui_title_style, tui_tool_style,
+    text_width, tui_accent_style, tui_border_style, tui_connected_footer_block,
+    tui_connected_header_block, tui_metric_style, tui_muted_style, tui_primary_style,
+    tui_title_style, tui_tool_style,
 };
 
 pub(super) fn log_snapshot_tui_height(
@@ -54,11 +55,7 @@ pub(super) fn render_log_snapshot_tui(
         Span::raw("  "),
         Span::styled(format!("{} event(s)", items.len()), tui_muted_style()),
     ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(tui_border_style()),
-    );
+    .block(tui_connected_header_block(tui_border_style()));
     frame.render_widget(header, chunks[0]);
 
     let body = Paragraph::new(log_stream_tui_text(
@@ -114,11 +111,8 @@ pub(super) fn render_log_stream_tui(
             ));
         }
     }
-    let header = Paragraph::new(Line::from(header_spans)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(tui_border_style()),
-    );
+    let header = Paragraph::new(Line::from(header_spans))
+        .block(tui_connected_header_block(tui_border_style()));
     frame.render_widget(header, chunks[0]);
 
     let body = Paragraph::new(log_stream_tui_text_for_view(
@@ -140,11 +134,7 @@ pub(super) fn render_log_stream_tui(
         state.footer_text("live transcript + token usage | q quit"),
         tui_title_style(),
     ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(tui_border_style()),
-    );
+    .block(tui_connected_footer_block(tui_border_style()));
     frame.render_widget(footer, chunks[2]);
 }
 
@@ -389,5 +379,16 @@ mod tests {
         ));
         assert!(scrolled.contains("alpha first"));
         assert!(!scrolled.contains("beta second"));
+    }
+
+    #[test]
+    fn log_stream_section_borders_connect_outer_verticals() {
+        let header = terminal_ui::tui_connected_header_border_set();
+        assert_eq!(header.bottom_left, "├");
+        assert_eq!(header.bottom_right, "┤");
+
+        let footer = terminal_ui::tui_connected_footer_border_set();
+        assert_eq!(footer.top_left, "├");
+        assert_eq!(footer.top_right, "┤");
     }
 }

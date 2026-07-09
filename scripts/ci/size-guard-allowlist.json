@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
-    "maxLines": 934,
+    "maxLines": 931,
     "reason": "Capability report rendering, dry-run command probing, provider capability summaries, and optional Codebase Memory probe status remain capped while command execution probes are split from presentation."
   },
   {
@@ -21,7 +21,7 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
-    "maxLines": 945,
+    "maxLines": 938,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
   },
   {
@@ -31,8 +31,8 @@
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1868,
-    "reason": "Live quota ratatui rendering, Spark status columns, snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped while the screen is split into narrower native-rendering modules."
+    "maxLines": 1103,
+    "reason": "Live quota snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped after native TUI rendering helpers moved to a sibling module."
   },
   {
     "file": "crates/prodex-app/src/runtime_kiro_acp.rs",

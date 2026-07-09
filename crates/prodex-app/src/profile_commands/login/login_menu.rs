@@ -13,8 +13,9 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use std::io::{self, IsTerminal, Write};
 use terminal_ui::{
-    tui_border_style, tui_detail_style, tui_error_style, tui_hint_style, tui_primary_style,
-    tui_secondary_style, tui_success_style, tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_detail_style,
+    tui_error_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
+    tui_title_style,
 };
 
 const LOGIN_MENU_MIN_VISIBLE_ITEMS: usize = 3;
@@ -415,11 +416,7 @@ fn render_login_menu_tui(
             tui_secondary_style(),
         ),
     ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(tui_border_style()),
-    );
+    .block(tui_connected_header_block(tui_border_style()));
     frame.render_widget(header, chunks[0]);
 
     let items = if entries.is_empty() {
@@ -476,11 +473,7 @@ fn render_login_menu_tui(
         )
     };
     let detail = Paragraph::new(detail)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        )
+        .block(tui_connected_footer_block(tui_border_style()))
         .wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(detail, chunks[2]);
 }

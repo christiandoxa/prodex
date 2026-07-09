@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use terminal_ui::{
-    print_panel, print_stdout_line, text_width, tui_border_style, tui_secondary_style,
-    tui_title_style,
+    print_panel, print_stdout_line, text_width, tui_border_style, tui_connected_header_block,
+    tui_secondary_style, tui_title_style,
 };
 
 #[derive(Debug, Clone)]
@@ -340,11 +340,8 @@ fn print_capability_panels(panels: &[CapabilityPanel]) -> Result<()> {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
-        let header = Paragraph::new(Line::styled("Prodex Capabilities", tui_title_style())).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        let header = Paragraph::new(Line::styled("Prodex Capabilities", tui_title_style()))
+            .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
         let body = Paragraph::new(capability_tui_text(panels))
             .block(

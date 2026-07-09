@@ -8,7 +8,10 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
-use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{
+    tui_border_style, tui_connected_header_block, tui_primary_style, tui_secondary_style,
+    tui_title_style,
+};
 
 use super::{
     SuperMemoryStatusMode, collect_super_tool_statuses_with_memory_mode, render_super_tool_statuses,
@@ -311,11 +314,7 @@ fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
             Span::raw("  "),
             Span::styled(flow.to_string(), tui_secondary_style()),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
         let body = Paragraph::new(runtime_launch_dry_run_tui_text(output))

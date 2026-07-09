@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 use terminal_ui::{
-    text_width, tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style,
-    tui_success_style, tui_title_style,
+    text_width, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
+    tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -250,11 +250,8 @@ fn render_upstream_payload_tui(
             ));
         }
     }
-    let header = Paragraph::new(Line::from(header_spans)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(tui_border_style()),
-    );
+    let header = Paragraph::new(Line::from(header_spans))
+        .block(tui_connected_header_block(tui_border_style()));
     frame.render_widget(header, chunks[0]);
 
     let width = chunks[1].width.saturating_sub(4).max(24) as usize;
@@ -277,11 +274,7 @@ fn render_upstream_payload_tui(
         state.footer_text("q quit esc close"),
         tui_title_style(),
     ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(tui_border_style()),
-    );
+    .block(tui_connected_footer_block(tui_border_style()));
     frame.render_widget(footer, chunks[2]);
 }
 

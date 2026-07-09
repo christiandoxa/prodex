@@ -5,7 +5,9 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use terminal_ui::{text_width, tui_border_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{
+    text_width, tui_border_style, tui_connected_header_block, tui_secondary_style, tui_title_style,
+};
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, collect_active_runtime_log_paths,
@@ -175,11 +177,7 @@ fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
             Span::raw("  "),
             Span::styled(format!("{} field(s)", fields.len()), tui_secondary_style()),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
         let body = Paragraph::new(info_panel_tui_text(fields))

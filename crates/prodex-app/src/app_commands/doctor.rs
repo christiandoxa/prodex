@@ -6,7 +6,8 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use redaction::{redaction_key_looks_sensitive, redaction_redacted_body_snippet};
 use terminal_ui::{
-    text_width, tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style,
+    text_width, tui_border_style, tui_connected_header_block, tui_primary_style,
+    tui_secondary_style, tui_title_style,
 };
 
 #[derive(Debug, Clone)]
@@ -356,11 +357,7 @@ fn print_doctor_output(panels: &[DoctorPanel], suggestion_lines: &[String]) -> R
             Span::raw("  "),
             Span::styled(format!("{} panel(s)", panels.len()), tui_secondary_style()),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
         let body = Paragraph::new(doctor_tui_text(panels, suggestion_lines))
