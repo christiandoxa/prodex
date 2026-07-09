@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.267.0 - 2026-07-09
+
+### Runtime
+
+- Harden auth and gateway enforcement (`c457bfe`)
+
 ## 0.266.0 - 2026-07-09
 
 ### Misc
@@ -75,9 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Unblock Spark quota and GPT-5 context launches (`e5a6122`)
-
-## 0.255.0 - 2026-07-07
-
-### CLI
-
-- Keep main quota ready when spark is exhausted (`a40abc9`)
