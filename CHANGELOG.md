@@ -2,10 +2,11 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.267.0 - 2026-07-09
+## 0.268.0 - 2026-07-10
 
 ### Runtime
 
+- Harden runtime compatibility and launch handling (`1476ca5`)
 - Harden auth and gateway enforcement (`c457bfe`)
 
 ## 0.266.0 - 2026-07-09
