@@ -800,7 +800,7 @@ After the Presidio prompt, Super asks whether to enable prodex-memory through ma
 
 Super prints prelaunch progress for runtime proxy setup, Presidio auto-start/checks, and managed Mem0 Docker startup. The output happens before Codex starts; runtime notices still go to logs once the TUI is running.
 
-Full access maps to Codex's sandbox-bypass launch flag. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
+Full access maps to Codex's sandbox-bypass launch flag. Super also marks its launch directory as trusted for that session, so Codex does not show a separate directory-trust prompt. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
 
 Use `prodex s doctor` to inspect the Super optimizer stack without launching Codex. Add `--json` for machine-readable output, `--strict` to exit non-zero when any optimizer check is unavailable, and `--presidio` to include local Presidio Analyzer/Anonymizer health checks. `prodex s --dry-run` also prints the same optimizer matrix for the launch preview.
 

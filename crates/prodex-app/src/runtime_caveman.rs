@@ -90,8 +90,12 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&overlay_home)?;
         }
-        let codex_args =
-            runtime_launch_openai_spark_context_codex_args(&overlay_home, &self.codex_args);
+        let codex_args = if self.args.super_optimizer_overlay {
+            trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
+        } else {
+            self.codex_args.clone()
+        };
+        let codex_args = runtime_launch_openai_spark_context_codex_args(&overlay_home, &codex_args);
         let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args);
         let codex_args = prepare_local_provider_catalog_codex_args(&overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(&overlay_home, &codex_args)?;
@@ -153,6 +157,20 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
     }
+}
+
+fn trusted_workspace_codex_args(workspace: &Path, codex_args: &[OsString]) -> Vec<OsString> {
+    let workspace = workspace
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let mut args = Vec::with_capacity(codex_args.len() + 2);
+    args.push(OsString::from("-c"));
+    args.push(OsString::from(format!(
+        "projects.\"{workspace}\".trust_level=\"trusted\""
+    )));
+    args.extend(codex_args.iter().cloned());
+    args
 }
 
 impl CavemanLaunchStrategy {
@@ -360,6 +378,21 @@ mod tests {
                 OsString::from("--dangerously-bypass-hook-trust"),
                 OsString::from("exec"),
                 OsString::from("hi")
+            ]
+        );
+    }
+
+    #[test]
+    fn super_trusts_workspace_without_persisting_config() {
+        assert_eq!(
+            trusted_workspace_codex_args(
+                Path::new("/tmp/project"),
+                &[OsString::from("--dangerously-bypass-approvals-and-sandbox")],
+            ),
+            vec![
+                OsString::from("-c"),
+                OsString::from("projects.\"/tmp/project\".trust_level=\"trusted\""),
+                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
             ]
         );
     }

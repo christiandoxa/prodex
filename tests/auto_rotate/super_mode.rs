@@ -79,6 +79,14 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
         args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
         "Super should still launch Codex with full access, args: {args:?}"
     );
+    let trust_override = format!(
+        "projects.\"{}\".trust_level=\"trusted\"",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    assert!(
+        args.contains(&trust_override.as_str()),
+        "Super should trust its launch directory for this session, args: {args:?}"
+    );
     assert_eq!(
         args.last(),
         Some(&"hello"),
