@@ -1,17 +1,12 @@
 [
   {
-    "file": "crates/prodex-app/src/app_commands/capability.rs",
-    "maxLines": 931,
-    "reason": "Capability report rendering, dry-run command probing, provider capability summaries, and optional Codebase Memory probe status remain capped while command execution probes are split from presentation."
-  },
-  {
     "file": "crates/prodex-app/src/app_commands/log.rs",
     "maxLines": 1551,
     "reason": "Log stream routing, transcript extraction, binary-like tool-output suppression including mojibake filtering, and internal attachment-path filtering remain capped after moving mixed stream TUI rendering out of this command module."
   },
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 933,
+    "maxLines": 931,
     "reason": "Runtime launch command routing, provider selection, proxy wiring, and session/runtime entry planning remain capped while command routing is split from provider-specific launch ownership."
   },
   {
@@ -76,7 +71,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3153,
+    "maxLines": 3083,
     "reason": "Local rewrite cross-provider regression coverage remains capped while provider-specific cases are split from shared harness coverage."
   },
   {
@@ -121,7 +116,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1028,
+    "maxLines": 975,
     "reason": "SuperArgs provider-flag extraction for trailing-var-arg session-ID-first syntax coexists with struct definition and tests; tightly coupled arg-parsing surface."
   },
   {
@@ -141,7 +136,7 @@
   },
   {
     "file": "crates/prodex-provider-core/src/translators/gemini.rs",
-    "maxLines": 2078,
+    "maxLines": 2070,
     "reason": "Gemini translator now owns more explicit Responses compatibility loss reporting and continuation metadata handling; capped at current size until request/response helpers split by domain."
   },
   {
