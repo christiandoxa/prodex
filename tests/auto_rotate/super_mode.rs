@@ -80,7 +80,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
         "Super should still launch Codex with full access, args: {args:?}"
     );
     let trust_override = format!(
-        "projects.\"{}\".trust_level=\"trusted\"",
+        "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
         env!("CARGO_MANIFEST_DIR")
     );
     assert!(

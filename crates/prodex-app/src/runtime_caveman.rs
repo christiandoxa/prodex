@@ -127,14 +127,12 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
 }
 
 fn trusted_workspace_codex_args(workspace: &Path, codex_args: &[OsString]) -> Vec<OsString> {
-    let workspace = workspace
-        .to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
+    let workspace = serde_json::to_string(&workspace.to_string_lossy())
+        .expect("workspace path should serialize as a TOML-compatible string");
     let mut args = Vec::with_capacity(codex_args.len() + 2);
     args.push(OsString::from("-c"));
     args.push(OsString::from(format!(
-        "projects.\"{workspace}\".trust_level=\"trusted\""
+        "projects={{{workspace}={{trust_level=\"trusted\"}}}}"
     )));
     args.extend(codex_args.iter().cloned());
     args
@@ -331,16 +329,24 @@ mod tests {
 
     #[test]
     fn super_trusts_workspace_without_persisting_config() {
+        let args = trusted_workspace_codex_args(
+            Path::new("/tmp/project"),
+            &[OsString::from("--dangerously-bypass-approvals-and-sandbox")],
+        );
         assert_eq!(
-            trusted_workspace_codex_args(
-                Path::new("/tmp/project"),
-                &[OsString::from("--dangerously-bypass-approvals-and-sandbox")],
-            ),
+            args,
             vec![
                 OsString::from("-c"),
-                OsString::from("projects.\"/tmp/project\".trust_level=\"trusted\""),
+                OsString::from("projects={\"/tmp/project\"={trust_level=\"trusted\"}}"),
                 OsString::from("--dangerously-bypass-approvals-and-sandbox"),
             ]
+        );
+        let config: toml::Value =
+            toml::from_str(args[1].to_str().expect("config override should be UTF-8"))
+                .expect("config override should be valid TOML");
+        assert_eq!(
+            config["projects"]["/tmp/project"]["trust_level"].as_str(),
+            Some("trusted")
         );
     }
 
