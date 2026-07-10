@@ -231,6 +231,7 @@ test("runtime hotpath guard default scan excludes split test fixtures", async ()
   assert.equal(
     result.files.some(
       (filePath) =>
+        filePath.endsWith("/tests.rs") ||
         filePath.endsWith("/local_rewrite_tests.rs") ||
         filePath.includes("/local_rewrite_tests/"),
     ),

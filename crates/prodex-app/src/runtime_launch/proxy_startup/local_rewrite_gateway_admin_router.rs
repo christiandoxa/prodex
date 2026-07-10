@@ -521,19 +521,13 @@ fn runtime_gateway_admin_idempotency_response(
         Ok(Some(_)) => {}
         Err(_) => {}
     }
-    let action = match runtime_gateway_admin_control_plane_action(&http, admin_auth) {
-        Some(action) => action,
-        None => return None,
-    };
+    let action = runtime_gateway_admin_control_plane_action(&http, admin_auth)?;
     let idempotency_key = match plan_application_control_plane_idempotency_from_http_digest(
         action,
         &http,
         runtime_gateway_request_body_sha256(&captured.body),
     ) {
-        Ok(plan) => match plan.operation {
-            Some(operation) => operation.key,
-            None => return None,
-        },
+        Ok(plan) => plan.operation?.key,
         Err(error) => {
             let response = plan_application_control_plane_idempotency_error_response(&error);
             runtime_gateway_audit_admin_request_denied_event(
@@ -602,16 +596,10 @@ fn runtime_gateway_admin_if_match_response(
     path: &str,
 ) -> Option<tiny_http::ResponseBox> {
     let http = runtime_gateway_http_request_meta(captured, path);
-    let action = match runtime_gateway_admin_control_plane_action(&http, admin_auth) {
-        Some(action) => action,
-        None => return None,
-    };
+    let action = runtime_gateway_admin_control_plane_action(&http, admin_auth)?;
     let expected_match = match plan_application_control_plane_precondition_from_http(action, &http)
     {
-        Ok(plan) => match plan.entity_tag {
-            Some(tag) => tag,
-            None => return None,
-        },
+        Ok(plan) => plan.entity_tag?,
         Err(error) => {
             let response = plan_application_control_plane_precondition_error_response(&error);
             runtime_gateway_audit_admin_request_denied_event(

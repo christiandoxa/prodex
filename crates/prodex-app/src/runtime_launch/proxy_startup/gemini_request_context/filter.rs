@@ -1,5 +1,6 @@
 //! Gemini local context ignore/filter rules, including gitignore and geminiignore handling.
 
+use super::super::super::gemini_request_io::runtime_gemini_read_text_limited;
 use super::RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT;
 use super::path_match::{
     runtime_gemini_context_match_path, runtime_gemini_glob_matches,
@@ -10,6 +11,8 @@ use prodex_provider_core::{
 };
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const RUNTIME_GEMINI_IGNORE_BYTE_LIMIT: usize = 64 * 1024;
 
 const RUNTIME_GEMINI_DEFAULT_CONTEXT_EXCLUDES: &[&str] = &[
     "**/node_modules/**",
@@ -251,12 +254,19 @@ fn runtime_gemini_load_nested_gitignore_rules(
     let Ok(entries) = fs::read_dir(directory) else {
         return;
     };
-    let mut entries = entries.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
+    let remaining = RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT.saturating_sub(*scanned);
+    let entries = entries.take(remaining).collect::<Vec<_>>();
+    *scanned = scanned.saturating_add(entries.iter().filter(|entry| entry.is_err()).count());
+    let mut entries = entries
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .collect::<Vec<_>>();
     entries.sort_by_key(|entry| entry.path());
     for entry in entries {
         if *scanned >= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT {
             return;
         }
+        *scanned = scanned.saturating_add(1);
         let path = entry.path();
         let name = path
             .file_name()
@@ -268,7 +278,6 @@ fn runtime_gemini_load_nested_gitignore_rules(
         if use_default_excludes && gemini_provider_core_skip_context_path_name(name) {
             continue;
         }
-        *scanned = scanned.saturating_add(1);
         runtime_gemini_load_ignore_rules(&path.join(".gitignore"), &path, project_root, rules);
         runtime_gemini_load_nested_gitignore_rules(
             &path,
@@ -286,7 +295,8 @@ fn runtime_gemini_load_ignore_rules(
     project_root: &Path,
     rules: &mut Vec<RuntimeGeminiIgnoreRule>,
 ) {
-    let Ok(content) = fs::read_to_string(path) else {
+    let Some(content) = runtime_gemini_read_text_limited(path, RUNTIME_GEMINI_IGNORE_BYTE_LIMIT)
+    else {
         return;
     };
     let base_dir = base_dir
@@ -409,6 +419,51 @@ mod tests {
         assert!(filter.is_excluded(&nested.join("ignored.log"), &[]));
         assert!(!filter.is_excluded(&nested.join("keep.log"), &[]));
         assert!(!filter.is_excluded(&other.join("ignored.log"), &[]));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gemini_context_filter_caps_ignore_file_reads() {
+        let directory =
+            std::env::temp_dir().join(format!("prodex-gemini-ignore-limit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let content = format!(
+            "#{}\nlate.secret\n",
+            "x".repeat(RUNTIME_GEMINI_IGNORE_BYTE_LIMIT)
+        );
+        let ignore_path = directory.join(".gitignore");
+        fs::write(&ignore_path, content).unwrap();
+
+        let mut rules = Vec::new();
+        runtime_gemini_load_ignore_rules(&ignore_path, &directory, &directory, &mut rules);
+
+        assert!(rules.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gemini_context_filter_counts_files_toward_scan_limit() {
+        let directory = std::env::temp_dir().join(format!(
+            "prodex-gemini-ignore-scan-limit-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("ordinary.txt"), "content").unwrap();
+
+        let mut rules = Vec::new();
+        let mut scanned = RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT - 1;
+        runtime_gemini_load_nested_gitignore_rules(
+            &directory,
+            &directory,
+            false,
+            &mut rules,
+            &mut scanned,
+        );
+
+        assert_eq!(scanned, RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT);
+        assert!(rules.is_empty());
         fs::remove_dir_all(directory).unwrap();
     }
 }

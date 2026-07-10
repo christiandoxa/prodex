@@ -6,14 +6,16 @@ use crate::runtime_kiro_acp::{
 use anyhow::Result;
 use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::runtime::Runtime as TokioRuntime;
 
 pub(super) fn runtime_kiro_prompt_turn(
     auth: &RuntimeKiroProfileAuth,
     temp_name: &str,
     prompt: &str,
+    async_runtime: &Arc<TokioRuntime>,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
     let overlay_root = runtime_kiro_temp_dir(temp_name);
     let result = (|| {
@@ -38,7 +40,7 @@ pub(super) fn runtime_kiro_prompt_turn(
             .unwrap_or(default_command.as_os_str());
         runtime_kiro_acp_prompt_turn_with_command(command, &cwd, &extra_env, prompt)
     })();
-    let _ = fs::remove_dir_all(&overlay_root);
+    super::schedule_runtime_kiro_overlay_cleanup(async_runtime, overlay_root);
     result
 }
 

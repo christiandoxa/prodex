@@ -131,7 +131,6 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_call_id_header: Option<String>,
     pub(super) gateway_observability: RuntimeGatewayObservabilityConfig,
     pub(super) gateway_observability_slots: Arc<tokio::sync::Semaphore>,
-    pub(super) gateway_reconcile_slots: Arc<tokio::sync::Semaphore>,
     pub(super) allow_local_file_access: bool,
     pub(super) gateway_draining: Arc<AtomicBool>,
 }
@@ -438,9 +437,6 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
         gateway_call_id_header,
         gateway_observability,
         gateway_observability_slots: Arc::new(tokio::sync::Semaphore::new(
-            RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT,
-        )),
-        gateway_reconcile_slots: Arc::new(tokio::sync::Semaphore::new(
             RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT,
         )),
         allow_local_file_access,

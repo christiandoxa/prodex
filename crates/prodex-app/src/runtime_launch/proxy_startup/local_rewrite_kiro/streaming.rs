@@ -24,12 +24,10 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::io::{self, BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
 
 #[path = "events.rs"]
 mod events;
@@ -64,9 +62,10 @@ pub(super) fn runtime_kiro_streaming_reader(
         .unwrap_or_else(|| PathBuf::from(default_command));
     let profile_name = auth.profile_name.clone();
     let conversations = shared.deepseek_conversations.clone();
+    let async_runtime = shared.runtime_shared.async_runtime.clone();
     let (sender, receiver) = mpsc::channel();
     let error_sender = sender.clone();
-    thread::spawn(move || {
+    super::schedule_runtime_kiro_blocking_work(&async_runtime, move || {
         let result = runtime_kiro_streaming_worker(
             sender,
             request_id,
@@ -80,7 +79,7 @@ pub(super) fn runtime_kiro_streaming_reader(
             chat_completions_route,
             conversations,
         );
-        let _ = fs::remove_dir_all(&overlay_root);
+        super::runtime_kiro_remove_overlay(overlay_root);
         if let Err(err) = result {
             let _ = error_sender.send(RuntimeKiroStreamingChunk::Error(io::Error::other(
                 err.to_string(),

@@ -36,12 +36,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1401,
+    "maxLines": 1397,
     "reason": "Local rewrite and gateway request orchestration now performs header-first admin and virtual-key authentication, tenant conversation scoping, and bounded background-task admission; capped until request admission is split from proxy startup."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 2231,
+    "maxLines": 2242,
     "reason": "Kiro local rewrite request/response translation remains capped while request parsing and protocol mapping are split; includes bounded streaming delivery and tenant-scoped conversation persistence."
   },
   {
@@ -66,7 +66,7 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2296,
+    "maxLines": 2299,
     "reason": "Runtime launch command tests cover provider-aware gateway configuration, authentication, routing aliases, and process planning; capped until gateway cases move to focused fixtures."
   },
   {
@@ -226,7 +226,7 @@
   },
   {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
-    "maxLines": 1669,
+    "maxLines": 1668,
     "reason": "PostgreSQL storage characterization is capped while migration, tenant isolation, and accounting tests are split."
   },
   {
@@ -236,7 +236,7 @@
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
-    "maxLines": 1610,
+    "maxLines": 1609,
     "reason": "SQLite storage characterization is capped while migration, tenant isolation, and accounting tests are split."
   },
   {
@@ -256,7 +256,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth.rs",
-    "maxLines": 1503,
+    "maxLines": 1504,
     "reason": "Gateway admin token, SSO, OIDC cache, refresh, and fail-closed SCIM authorization remain capped after the reviewed enterprise integration."
   },
   {
@@ -266,7 +266,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_router.rs",
-    "maxLines": 910,
+    "maxLines": 898,
     "reason": "Gateway admin routing and control-plane authorization remain capped until route dispatch is split by resource family."
   },
   {
@@ -281,7 +281,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 1043,
+    "maxLines": 1027,
     "reason": "Virtual-key admission and durable reservation accounting remain capped after atomic fail-closed integration."
   },
   {
@@ -300,13 +300,8 @@
     "reason": "Gateway durable state and cross-proxy reservation coverage remains capped while backend scenarios are split."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
-    "maxLines": 946,
-    "reason": "Local rewrite transport and bounded response handling remain capped until transport phases are split."
-  },
-  {
     "file": "src/bin/prodex-control-plane.rs",
-    "maxLines": 1301,
+    "maxLines": 1290,
     "reason": "Enterprise control-plane composition, storage setup, publication, and observability remain capped while service wiring is split."
   },
   {

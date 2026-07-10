@@ -14,13 +14,16 @@ use prodex_provider_core::{
     kiro_provider_core_semantic_compact_request_body,
 };
 use serde_json::Value;
+use std::sync::Arc;
+use tokio::runtime::Runtime as TokioRuntime;
 
 pub(crate) fn runtime_kiro_compact_response_parts(
     request_id: u64,
     body: &[u8],
+    async_runtime: &Arc<TokioRuntime>,
     auth: &RuntimeKiroProfileAuth,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
-    match runtime_kiro_semantic_compact_summary(request_id, body, auth) {
+    match runtime_kiro_semantic_compact_summary(request_id, body, async_runtime, auth) {
         Ok(summary) => runtime_gemini_compact_response_parts(&summary),
         Err(_) => runtime_gemini_local_compact_response_parts(body),
     }
@@ -29,6 +32,7 @@ pub(crate) fn runtime_kiro_compact_response_parts(
 pub(super) fn runtime_kiro_semantic_compact_summary(
     request_id: u64,
     body: &[u8],
+    async_runtime: &Arc<TokioRuntime>,
     auth: &RuntimeKiroProfileAuth,
 ) -> Result<String> {
     let rewritten =
@@ -43,7 +47,7 @@ pub(super) fn runtime_kiro_semantic_compact_summary(
         Default::default(),
     )?;
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
-    runtime_kiro_prompt_turn(auth, "compact", &prompt).and_then(|turn| {
+    runtime_kiro_prompt_turn(auth, "compact", &prompt, async_runtime).and_then(|turn| {
         let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
         runtime_kiro_compact_summary_from_response(&response)
     })

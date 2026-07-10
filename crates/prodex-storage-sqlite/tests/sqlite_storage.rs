@@ -653,7 +653,6 @@ fn sqlite_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope()
     let barrier = Arc::new(Barrier::new(2));
     let run = |barrier: Arc<Barrier>| {
         let path = path.clone();
-        let make_command = make_command.clone();
         std::thread::spawn(move || {
             let command = make_command();
             barrier.wait();

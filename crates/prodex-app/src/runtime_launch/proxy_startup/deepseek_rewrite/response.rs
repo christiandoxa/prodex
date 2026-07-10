@@ -76,6 +76,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
     })
 }
 
+#[cfg(test)]
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_value_from_chat_value(
     value: &serde_json::Value,
     _request_id: u64,

@@ -120,7 +120,13 @@ pub(crate) fn send_runtime_kiro_upstream_request(
     )?;
     let prompt_messages = translated.messages.clone();
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
-    super::invoke::runtime_kiro_prompt_turn(auth, "runtime", &prompt).and_then(|turn| {
+    super::invoke::runtime_kiro_prompt_turn(
+        auth,
+        "runtime",
+        &prompt,
+        &shared.runtime_shared.async_runtime,
+    )
+    .and_then(|turn| {
         let mut response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
         prodex_provider_core::kiro_provider_core_apply_response_runtime_metadata(
             &mut response,

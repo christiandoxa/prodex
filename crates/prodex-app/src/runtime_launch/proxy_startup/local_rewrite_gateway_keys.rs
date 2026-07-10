@@ -55,22 +55,6 @@ pub(super) fn runtime_gateway_virtual_key_entries_is_empty(
         .unwrap_or(false)
 }
 
-pub(super) fn runtime_gateway_active_virtual_keys(
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey> {
-    shared
-        .gateway_virtual_keys
-        .lock()
-        .map(|entries| {
-            entries
-                .iter()
-                .filter(|entry| !entry.disabled)
-                .map(|entry| entry.key.clone())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 struct RuntimeGatewayVirtualKeySnapshot {
     active_keys: Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>,
     configured_count: usize,

@@ -359,20 +359,6 @@ impl LocalBridgeBearerTokenHash {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::LocalBridgeBearerTokenHash;
-
-    #[test]
-    fn bearer_token_hash_base64_decode_is_exact() {
-        let encoded = LocalBridgeBearerTokenHash::from_token("secret").hash_base64();
-
-        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&encoded).is_some());
-        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&format!(" {encoded}")).is_none());
-        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&format!("{encoded}\n")).is_none());
-    }
-}
-
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     let max_len = left.len().max(right.len());
     let mut diff = left.len() ^ right.len();
@@ -482,4 +468,18 @@ fn sha256(input: &[u8]) -> [u8; 32] {
         output[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LocalBridgeBearerTokenHash;
+
+    #[test]
+    fn bearer_token_hash_base64_decode_is_exact() {
+        let encoded = LocalBridgeBearerTokenHash::from_token("secret").hash_base64();
+
+        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&encoded).is_some());
+        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&format!(" {encoded}")).is_none());
+        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&format!("{encoded}\n")).is_none());
+    }
 }

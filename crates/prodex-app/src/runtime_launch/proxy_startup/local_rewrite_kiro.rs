@@ -409,9 +409,20 @@ fn runtime_kiro_semantic_compact_summary(
 }
 
 fn schedule_runtime_kiro_overlay_cleanup(async_runtime: &Arc<TokioRuntime>, overlay_root: PathBuf) {
-    drop(async_runtime.spawn_blocking(move || {
-        let _ = fs::remove_dir_all(overlay_root);
-    }));
+    schedule_runtime_kiro_blocking_work(async_runtime, move || {
+        runtime_kiro_remove_overlay(overlay_root);
+    });
+}
+
+fn runtime_kiro_remove_overlay(overlay_root: PathBuf) {
+    let _ = fs::remove_dir_all(overlay_root);
+}
+
+fn schedule_runtime_kiro_blocking_work(
+    async_runtime: &Arc<TokioRuntime>,
+    work: impl FnOnce() + Send + 'static,
+) {
+    drop(async_runtime.spawn_blocking(work));
 }
 
 fn runtime_kiro_compact_summary_from_response(response: &Value) -> Result<String> {
@@ -1221,7 +1232,7 @@ fn runtime_kiro_streaming_reader(
     let async_runtime = shared.runtime_shared.async_runtime.clone();
     let (sender, receiver) = mpsc::channel();
     let error_sender = sender.clone();
-    drop(async_runtime.spawn_blocking(move || {
+    schedule_runtime_kiro_blocking_work(&async_runtime, move || {
         let result = runtime_kiro_streaming_worker(
             sender,
             request_id,
@@ -1235,13 +1246,13 @@ fn runtime_kiro_streaming_reader(
             chat_completions_route,
             conversations,
         );
-        let _ = fs::remove_dir_all(&overlay_root);
+        runtime_kiro_remove_overlay(overlay_root);
         if let Err(err) = result {
             let _ = error_sender.send(RuntimeKiroStreamingChunk::Error(io::Error::other(
                 err.to_string(),
             )));
         }
-    }));
+    });
     Ok(RuntimeKiroStreamingReader {
         receiver,
         pending: Cursor::new(Vec::new()),

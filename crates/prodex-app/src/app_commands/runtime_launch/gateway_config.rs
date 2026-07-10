@@ -31,8 +31,7 @@ pub(super) use gateway_observability_config::gateway_observability_config;
 pub(super) use gateway_provider_config::resolve_gateway_provider_config;
 #[cfg(test)]
 pub(super) use gateway_provider_config::{
-    gateway_normalize_upstream_base_url, gateway_openai_api_keys, gateway_upstream_base_url,
-    resolve_gateway_provider_config,
+    gateway_openai_api_keys, gateway_upstream_base_url, resolve_gateway_provider_config,
 };
 #[cfg(test)]
 pub(super) use gateway_provider_config::{gateway_policy_provider, gateway_provider_options};

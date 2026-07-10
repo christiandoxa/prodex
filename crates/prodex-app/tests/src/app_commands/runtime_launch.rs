@@ -84,8 +84,10 @@ fn gateway_launch_config_rejects_invalid_policy_provider() {
     let args = gateway_args();
 
     for value in [" openai ", "unknown-provider"] {
-        let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
-        policy.provider = Some(value.to_string());
+        let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings {
+            provider: Some(value.to_string()),
+            ..Default::default()
+        };
 
         let err = match resolve_gateway_launch_config(&paths, &state, &args, &policy) {
             Ok(_) => panic!("expected invalid gateway.provider to fail closed"),
@@ -352,7 +354,6 @@ fn gateway_launch_config_rejects_padded_listen_addr() {
     let root = temp_dir("gateway-listen-addr-exact");
     let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let paths = AppPaths::discover().unwrap();
-    let state = AppState::default();
     let mut args = gateway_args();
     args.listen = Some(" 127.0.0.1:4000 ".to_string());
     let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
@@ -951,8 +952,10 @@ fn gateway_upstream_base_url_rejects_empty_explicit_urls() {
     );
 
     let args = gateway_args();
-    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
-    policy.base_url = Some(String::new());
+    let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings {
+        base_url: Some(String::new()),
+        ..Default::default()
+    };
     let err = gateway_upstream_base_url(&args, &policy, None).unwrap_err();
 
     assert!(err.to_string().contains("gateway.base_url cannot be empty"));

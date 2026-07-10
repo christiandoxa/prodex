@@ -12,7 +12,7 @@ static RUNTIME_POLICY_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, Option<RuntimePoli
 #[cfg(test)]
 thread_local! {
     static RUNTIME_POLICY_CACHE: std::cell::RefCell<BTreeMap<PathBuf, Option<RuntimePolicyConfig>>> =
-        std::cell::RefCell::new(BTreeMap::new());
+        const { std::cell::RefCell::new(BTreeMap::new()) };
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

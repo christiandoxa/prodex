@@ -37,8 +37,8 @@ use prodex_application::{
 use prodex_config::{ConfigPublicationEventPlan, ConfigPublicationEventTarget};
 use prodex_control_plane::{
     ConfigurationPublicationDecision, ConfigurationPublicationErrorStatus,
-    ConfigurationPublicationRequest, ControlPlaneActionRequest, ControlPlaneOperation,
-    ControlPlaneResourceRef, decide_configuration_publication,
+    ConfigurationPublicationPlan, ConfigurationPublicationRequest, ControlPlaneActionRequest,
+    ControlPlaneOperation, ControlPlaneResourceRef, decide_configuration_publication,
     plan_configuration_publication_error_response,
 };
 use prodex_domain::{
@@ -536,17 +536,7 @@ fn run_plan_config_publication(args: impl Iterator<Item = String>) -> Result<Str
     let request = load_config_publication_request(&request_path)?;
     match decide_configuration_publication(request) {
         ConfigurationPublicationDecision::Authorized(plan) => {
-            encode_configuration_publication_plan_success(
-                plan.action.tenant.tenant_id,
-                plan.candidate.revision_id,
-                plan.action.requirement.required_role,
-                plan.action.requirement.resource,
-                plan.action.requirement.action,
-                plan.action.audit_event.action.as_str(),
-                serde_json::to_value(plan.action.audit_event.outcome)
-                    .unwrap_or(serde_json::Value::Null),
-                plan.action.audit_write.tenant_partition_key,
-            )
+            encode_configuration_publication_plan_success(plan)
         }
         ConfigurationPublicationDecision::Denied {
             error,
@@ -813,10 +803,8 @@ fn append_control_plane_http_traceparent_otlp_attributes(
     http: &GatewayHttpRequestMeta,
     include_trace_id: bool,
 ) {
-    if include_trace_id {
-        if let Some(trace_id) = control_plane_http_traceparent_trace_id(http) {
-            attributes.push(OtlpLogAttribute::string("trace_id", trace_id));
-        }
+    if include_trace_id && let Some(trace_id) = control_plane_http_traceparent_trace_id(http) {
+        attributes.push(OtlpLogAttribute::string("trace_id", trace_id));
     }
     if let Some(span_id) = control_plane_http_traceparent_span_id(http) {
         attributes.push(OtlpLogAttribute::string("span_id", span_id));
@@ -909,35 +897,36 @@ fn encode_configuration_publication_plan_failure(
 }
 
 fn encode_configuration_publication_plan_success(
-    tenant_id: TenantId,
-    revision_id: PolicyRevisionId,
-    required_role: Role,
-    resource_kind: ResourceKind,
-    resource_action: ResourceAction,
-    audit_action: &str,
-    audit_outcome: serde_json::Value,
-    audit_partition_tenant_id: TenantId,
+    plan: ConfigurationPublicationPlan<serde_json::Value>,
 ) -> Result<String, String> {
+    let audit_outcome =
+        serde_json::to_value(plan.action.audit_event.outcome).unwrap_or(serde_json::Value::Null);
     let otlp_log_export = otlp_http_log_export_status(
         CONTROL_PLANE_SERVICE_NAME,
         CONTROL_PLANE_SCOPE_NAME,
         CONTROL_PLANE_CONFIGURATION_PUBLICATION_PLAN_EVENT_NAME,
         vec![
             OtlpLogAttribute::bool("authorized", true),
-            OtlpLogAttribute::string("required_role", role_label(required_role)),
-            OtlpLogAttribute::string("resource_action", resource_action_label(resource_action)),
+            OtlpLogAttribute::string(
+                "required_role",
+                role_label(plan.action.requirement.required_role),
+            ),
+            OtlpLogAttribute::string(
+                "resource_action",
+                resource_action_label(plan.action.requirement.action),
+            ),
         ],
     );
     serde_json::to_string_pretty(&serde_json::json!({
         "authorized": true,
-        "tenant_id": tenant_id,
-        "revision_id": revision_id,
-        "required_role": required_role,
-        "resource_kind": resource_kind,
-        "resource_action": resource_action,
-        "audit_action": audit_action,
+        "tenant_id": plan.action.tenant.tenant_id,
+        "revision_id": plan.candidate.revision_id,
+        "required_role": plan.action.requirement.required_role,
+        "resource_kind": plan.action.requirement.resource,
+        "resource_action": plan.action.requirement.action,
+        "audit_action": plan.action.audit_event.action,
         "audit_outcome": audit_outcome,
-        "audit_partition_tenant_id": audit_partition_tenant_id,
+        "audit_partition_tenant_id": plan.action.audit_write.tenant_partition_key,
         "otlp_log_export": otlp_log_export,
     }))
     .map_err(|err| format!("failed to encode publication plan: {err}"))

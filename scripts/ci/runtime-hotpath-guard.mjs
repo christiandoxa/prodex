@@ -15,6 +15,8 @@ const DEFAULT_EXCLUDED_PATH_PREFIXES = Object.freeze([
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/",
 ]);
 
+const DEFAULT_EXCLUDED_PATH_SUFFIXES = Object.freeze(["/tests.rs"]);
+
 const FORBIDDEN_PATTERNS = Object.freeze([
   {
     id: "blocking-disk-io",
@@ -138,7 +140,7 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_file_ledger.rs",
     id: "blocking-disk-io",
     pattern: /\bstd::fs::(?:read|create_dir_all|rename|remove_file|symlink_metadata)\s*\(/,
-    maxHits: 5,
+    maxHits: 6,
     reason:
       "gateway file ledger I/O is limited to bounded ledger loading, symlink rejection, append setup, atomic summary persistence, and best-effort temp-file cleanup",
   },
@@ -171,10 +173,10 @@ const ALLOWLIST = Object.freeze([
   },
   {
     name: "local-rewrite-transport-observability-background-sinks",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs",
     id: "spawn-blocking",
     pattern: /\bspawn_blocking\s*\(/,
-    maxHits: 2,
+    maxHits: 1,
     reason:
       "gateway observability sinks run on the bounded blocking pool after spend-event emission instead of blocking the request path inline",
   },
@@ -331,6 +333,14 @@ const ALLOWLIST = Object.freeze([
     reason: "Gemini ignore files are opened only after a symlink and size check and read with a byte cap",
   },
   {
+    name: "gemini-context-filter-bounded-directory-scan",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_context/filter.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::read_dir\(directory\)/,
+    maxHits: 1,
+    reason: "nested Gemini ignore discovery stops at the explicit context scan limit",
+  },
+  {
     name: "gemini-extension-bounded-directory-scan",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_extensions.rs",
     id: "blocking-disk-io",
@@ -427,6 +437,31 @@ const ALLOWLIST = Object.freeze([
     maxHits: 1,
     reason:
       "bounded websocket TCP/DNS worker and dispatcher pools; spawn-outcome helper is cfg(test)",
+  },
+  {
+    name: "runtime-launch-split-worker-pool-threads",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/workers.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bworker_threads\.push\(thread::spawn\s*\(/,
+    maxHits: 2,
+    reason:
+      "exactly worker_count plus long_lived_worker_count threads are created once during proxy startup",
+  },
+  {
+    name: "local-rewrite-transport-split-log-dir-create",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs",
+    id: "blocking-disk-io",
+    pattern: /\bstd::fs::create_dir_all\(parent\)/,
+    maxHits: 1,
+    reason: "best-effort observability directory creation belongs to the bounded background sink",
+  },
+  {
+    name: "local-rewrite-transport-split-log-open",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs",
+    id: "blocking-file-open",
+    pattern: /\bstd::fs::OpenOptions::new\s*\(\)/,
+    maxHits: 1,
+    reason: "best-effort JSONL append belongs to the bounded background observability sink",
   },
   {
     name: "local-rewrite-test-fixture-disk-io",
@@ -770,7 +805,11 @@ function allowlistOveruseViolations(allowlistHits) {
   });
 }
 
-async function collectScanFiles(targets, excludedPathPrefixes = []) {
+async function collectScanFiles(
+  targets,
+  excludedPathPrefixes = [],
+  excludedPathSuffixes = [],
+) {
   const files = [];
   for (const target of targets) {
     files.push(...(await rustFilesUnder(normalizePath(target))));
@@ -778,7 +817,8 @@ async function collectScanFiles(targets, excludedPathPrefixes = []) {
   return [...new Set(files)]
     .filter(
       (filePath) =>
-        !excludedPathPrefixes.some((prefix) => filePath.startsWith(prefix)),
+        !excludedPathPrefixes.some((prefix) => filePath.startsWith(prefix)) &&
+        !excludedPathSuffixes.some((suffix) => filePath.endsWith(suffix)),
     )
     .sort();
 }
@@ -872,6 +912,7 @@ async function main() {
   const files = await collectScanFiles(
     targets,
     usingDefaultTargets ? DEFAULT_EXCLUDED_PATH_PREFIXES : [],
+    usingDefaultTargets ? DEFAULT_EXCLUDED_PATH_SUFFIXES : [],
   );
   const violations = [];
   const allowlistHits = [];

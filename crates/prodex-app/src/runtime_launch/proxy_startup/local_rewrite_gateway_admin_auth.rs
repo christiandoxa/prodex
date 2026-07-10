@@ -712,6 +712,7 @@ fn runtime_gateway_authorization_bearer_token(value: &str) -> Option<&str> {
     Some(token)
 }
 
+#[cfg(test)]
 fn runtime_gateway_oidc_claim_string(
     claims: &BTreeMap<String, serde_json::Value>,
     field: &str,
