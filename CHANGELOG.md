@@ -2,7 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.271.0 - 2026-07-10
+## 0.272.0 - 2026-07-10
 
 ### Runtime
 
