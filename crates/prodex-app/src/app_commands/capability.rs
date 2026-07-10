@@ -694,14 +694,11 @@ fn managed_optimizer_command_candidates_for_super_status(
     command: &str,
 ) -> Vec<PathBuf> {
     let mut candidates = vec![root.join(command)];
-    match command {
-        "codebase-memory-mcp" => {
-            let checkout = root.join("codebase-memory-mcp");
-            candidates.push(checkout.join(command));
-            candidates.push(checkout.join("build").join("c").join(command));
-            candidates.push(checkout.join("bin").join(command));
-        }
-        _ => {}
+    if command == "codebase-memory-mcp" {
+        let checkout = root.join("codebase-memory-mcp");
+        candidates.push(checkout.join(command));
+        candidates.push(checkout.join("build").join("c").join(command));
+        candidates.push(checkout.join("bin").join(command));
     }
     candidates
 }
