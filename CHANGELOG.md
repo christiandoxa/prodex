@@ -2,11 +2,22 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.269.0 - 2026-07-10
+
+### Misc
+
+- Protect active session transcripts (`f2113d1`)
+
 ## 0.268.0 - 2026-07-10
 
 ### Runtime
 
 - Harden runtime compatibility and launch handling (`1476ca5`)
+
+## 0.267.0 - 2026-07-09
+
+### Runtime
+
 - Harden auth and gateway enforcement (`c457bfe`)
 
 ## 0.266.0 - 2026-07-09
@@ -70,15 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Retry ready profiles after workspace credit depletion (`c9bb063`)
-
-## 0.257.0 - 2026-07-07
-
-### Runtime
-
-- Preserve main quota for spark exhaustion (`72994d8`)
-
-## 0.256.0 - 2026-07-07
-
-### CLI
-
-- Unblock Spark quota and GPT-5 context launches (`e5a6122`)
