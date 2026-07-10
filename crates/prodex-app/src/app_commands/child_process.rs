@@ -13,9 +13,7 @@ use terminal_ui::{
     tui_title_style,
 };
 
-use super::{
-    SuperMemoryStatusMode, collect_super_tool_statuses_with_memory_mode, render_super_tool_statuses,
-};
+use super::{collect_super_tool_statuses, render_super_tool_statuses};
 use crate::{
     CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
@@ -202,7 +200,7 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
-    let (rtk_enabled, super_optimizer_overlay, memory_prefix_enabled, codex_args) =
+    let (rtk_enabled, super_optimizer_overlay, codex_args) =
         runtime_caveman_extract_launch_prefixes(&args.codex_args);
     let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
@@ -233,32 +231,18 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
             .map(crate::SuperExternalProvider::as_str),
         external_provider_api_key: args.external_provider_api_key.as_deref(),
     };
-    let memory_enabled =
-        memory_prefix_enabled || args.memory_backend == crate::SuperMemoryBackend::Mem0;
-    let memory_backend = match (memory_enabled, args.memory_backend) {
-        (false, _) => "disabled",
-        (true, crate::SuperMemoryBackend::Sqlite) => "local sqlite",
-        (true, crate::SuperMemoryBackend::Mem0) => "managed Mem0 Docker (would start)",
-    };
     let mut extra_report = format!(
-        "Prodex overlay: rtk={}; super={}\nMemory backend: {}",
+        "Prodex overlay: rtk={}; super={}",
         if rtk_enabled { "enabled" } else { "disabled" },
         if super_optimizer_overlay {
             "enabled"
         } else {
             "disabled"
-        },
-        memory_backend,
+        }
     );
     if super_optimizer_overlay {
         let paths = crate::AppPaths::discover()?;
-        let memory_mode = if memory_enabled {
-            SuperMemoryStatusMode::Selected(args.memory_backend)
-        } else {
-            SuperMemoryStatusMode::Disabled
-        };
-        let statuses =
-            collect_super_tool_statuses_with_memory_mode(&paths, presidio_enabled, memory_mode);
+        let statuses = collect_super_tool_statuses(&paths, presidio_enabled);
         extra_report.push('\n');
         extra_report.push_str(&render_super_tool_statuses(&statuses));
     }

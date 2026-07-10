@@ -6,7 +6,7 @@ fn smart_context_enabled_from_default_super_shortcut() -> bool {
     let Commands::Super(args) = command else {
         panic!("expected Super command from prodex s");
     };
-    args.into_caveman_args_with_choices(false, false)
+    args.into_caveman_args()
         .smart_context
 }
 

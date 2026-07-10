@@ -694,14 +694,14 @@ mod tests {
             "input": [
                 {
                     "type": "mcp_call",
-                    "id": "call_sqz_1",
-                    "name": "mcp__prodex_sqz__compress",
+                    "id": "call_graph_1",
+                    "name": "mcp__codebase_memory_mcp__search_graph",
                     "arguments": {"text": "large repeated content"},
                     "output": "ref:abc123"
                 },
                 {
                     "type": "mcp_tool_result",
-                    "call_id": "call_sqz_1",
+                    "call_id": "call_graph_1",
                     "content": [{"type": "output_text", "text": "ref:abc123"}]
                 }
             ]

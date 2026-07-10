@@ -116,7 +116,7 @@ function extendedOptionalToolDisciplineCommand(marker, workspace) {
           "Update the optional tool demo-optimizer in this workspace.",
           "Use local evidence first: OWNER.txt tells which installer owns it.",
           "Do not use curl, web search, cargo install, npm install, or pip install for this fake local tool.",
-          "Do not use SQZ, Token Savior, Claw Compactor, optimizer MCP tools, or compressed file-read tools for this fake local tool.",
+          "Do not use optimizer MCP tools or compressed file-read tools for this fake local tool.",
           "After updating, run exactly: ./bin/demo-optimizer --version",
           "Answer with only the command output.",
         ].join("\n"),
@@ -217,7 +217,7 @@ function optionalMcpCommand(marker) {
   args.push(
     "exec",
     [
-      "If the mcp__prodex_sqz__compress tool is available, use it to compress this text: alpha beta alpha beta.",
+      "If the mcp__codebase_memory_mcp__list_projects tool is available, use it once.",
       "If it is unavailable, use the shell to print the marker.",
       `Answer with exactly one line containing: ${marker}`,
     ].join(" "),
@@ -392,7 +392,7 @@ function assertOptionalToolDiscipline(sessionId) {
     .filter((item) => item?.type === "response_item" && item.payload?.type === "function_call")
     .map((item) => `${item.payload.name} ${item.payload.arguments ?? ""}`);
   const forbidden = calls.find((call) =>
-    /\bcurl\b|\bcargo\s+install\b|\bnpm\s+install\b|\bpip\s+install\b|web_search|search_query|sqz_|prodex-sqz|token[_-]?savior|claw[_-]?compactor/i.test(call),
+    /\bcurl\b|\bcargo\s+install\b|\bnpm\s+install\b|\bpip\s+install\b|web_search|search_query|codebase_memory/i.test(call),
   );
   if (forbidden) {
     throw new Error(`extended optional-tool discipline used forbidden command/tool: ${forbidden}`);
@@ -429,7 +429,6 @@ function assertNoInternalLeak(output, label) {
     "If an optimizer breaks or stalls",
     "If an optimizer breaks output layout",
     "If a `rtk` command drops",
-    "If a `token-savior` edit corrupts",
     "For critical signals",
     "Do not apply these tools to configuration",
     "If the user's explicit requested answer or command output",
@@ -451,7 +450,6 @@ function assertNoInternalLeak(output, label) {
     "Execute requested tool tasks fully",
     "If the user requests exact text",
     "bypass all optimizers",
-    "RTK, SQZ, and Token Savior",
     "native Codex MCP",
     "agent's meta-operations",
     "Prodex Super code bug",
@@ -492,7 +490,6 @@ function assertNoInternalLeak(output, label) {
     "The Prodex bridge handles auto-compression",
     "When reviewing diffs of files managed by Prodex Super",
     "For queries related to `presidio`",
-    "Only use `prodex-sqz` or `token-savior` tools",
     "The `rtk proxy` fallback allows you",
     "Use these capabilities only as directed",
     "If reads or basic config debugging",
@@ -509,8 +506,8 @@ function assertNoInternalLeak(output, label) {
     throw new Error(`Gemini leaked internal optimizer instruction during ${label}: ${leaked}`);
   }
   const optimizerInstructionLeak =
-    /(optimizer|rtk|prodex-sqz|token-savior|claw-compactor|mcp server)[\s\S]{0,240}(do not|never|token-saving|lossless deduplication|syntactic abbreviation|bypass it for that turn|strip rtk proxy banners|normal shell commands or file reads)/i.test(assistantOutput) ||
-    /(do not|never|token-saving|lossless deduplication|syntactic abbreviation|bypass it for that turn|strip rtk proxy banners|normal shell commands or file reads)[\s\S]{0,240}(optimizer|rtk|prodex-sqz|token-savior|claw-compactor|mcp server)/i.test(assistantOutput);
+    /(optimizer|rtk|codebase-memory|ponytail|mcp server)[\s\S]{0,240}(do not|never|token-saving|bypass it for that turn|normal shell commands or file reads)/i.test(assistantOutput) ||
+    /(do not|never|token-saving|bypass it for that turn|normal shell commands or file reads)[\s\S]{0,240}(optimizer|rtk|codebase-memory|ponytail|mcp server)/i.test(assistantOutput);
   if (optimizerInstructionLeak) {
     throw new Error(`Gemini leaked internal optimizer instruction during ${label}`);
   }

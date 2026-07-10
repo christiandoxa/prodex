@@ -55,22 +55,20 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
 
     let awareness = fs::read_to_string(dir.join("SUPER_OPTIMIZERS.md"))
         .expect("SUPER_OPTIMIZERS.md should exist");
-    assert!(awareness.contains("sqz"));
-    assert!(awareness.contains("Presidio redaction and prodex-memory are opt-in surfaces"));
-    assert!(awareness.contains("RTK handles upstream/input command output"));
-    assert!(awareness.contains("local optimizer stack"));
-    assert!(awareness.contains("auto-wrappers are only a backstop"));
-    assert!(awareness.contains("SQZ handles downstream/context reuse"));
-    assert!(awareness.contains("prodex-sqz"));
-    assert!(awareness.contains("token-savior"));
-    assert!(awareness.contains("Locating symbols, callers, dead code, or API changes"));
-    assert!(awareness.contains("claw-compactor"));
-    assert!(awareness.contains("prodex-claw-compactor-auto"));
-    assert!(awareness.contains("- prodex-inspect MCP:"));
-    assert!(awareness.contains("- prodex-memory backend: disabled"));
+    assert!(awareness.contains("Use visible `rtk <cmd>`"));
+    assert!(awareness.contains("codebase-memory-mcp"));
+    assert!(awareness.contains("Ponytail"));
+    for removed in [
+        "prodex-sqz",
+        "token-savior",
+        "claw-compactor",
+        "prodex-inspect",
+        "prodex-memory",
+    ] {
+        assert!(!awareness.contains(removed));
+    }
     let config = fs::read_to_string(dir.join("config.toml")).expect("config should exist");
-    assert!(config.contains("[mcp_servers.prodex-inspect]"));
-    assert!(config.contains("__inspect-mcp"));
+    assert!(!config.contains("prodex-inspect"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(
@@ -303,13 +301,10 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
     let hook_script = fs::read_to_string(overlay.join("bin").join("prodex-caveman-sessionstart"))
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
-    assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(hook_script.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
     assert!(hook_script.contains("Ponytail applies smallest-correct-implementation pressure"));
     assert!(hook_script.contains("rtk <cmd>"));
-    assert!(hook_script.contains("prodex-sqz"));
-    assert!(hook_script.contains("prodex-token-savior"));
     assert!(hook_script.contains("codebase-memory-mcp"));
-    assert!(hook_script.contains("prodex-claw-compactor"));
     assert!(hook_script.contains("Presidio is opt-in only"));
     assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
 
@@ -502,12 +497,9 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
     assert!(first.status.success());
     let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
     assert!(first_stdout.contains("CAVEMAN MODE ACTIVE"));
-    assert!(first_stdout.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(first_stdout.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
     assert!(first_stdout.contains("Ponytail applies smallest-correct-implementation pressure"));
-    assert!(first_stdout.contains("prodex-sqz"));
-    assert!(first_stdout.contains("prodex-token-savior"));
     assert!(first_stdout.contains("codebase-memory-mcp"));
-    assert!(first_stdout.contains("prodex-claw-compactor"));
     assert!(first_stdout.contains("Presidio is opt-in only"));
 
     let second = std::process::Command::new(&script)

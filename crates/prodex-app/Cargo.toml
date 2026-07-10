@@ -37,7 +37,6 @@ prodex_context = { workspace = true }
 prodex_core = { workspace = true }
 prodex_housekeeping = { workspace = true }
 prodex_mcp_stdio = { workspace = true }
-prodex_memory = { workspace = true }
 prodex_presidio = { workspace = true }
 prodex_profile_export = { workspace = true }
 prodex_profile_identity = { workspace = true }

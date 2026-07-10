@@ -1993,14 +1993,6 @@ const GEMINI_RTK_NOISY_SHELL_COMMANDS: &[GeminiRtkNoisyShellCommand] = &[
         command: "tree",
         subcommands: &[],
     },
-    GeminiRtkNoisyShellCommand {
-        command: "claw-compactor",
-        subcommands: &["benchmark", "compact", "summarize"],
-    },
-    GeminiRtkNoisyShellCommand {
-        command: "prodex-claw-compactor-auto",
-        subcommands: &[],
-    },
 ];
 
 fn gemini_responses_usage(usage: &Value) -> Option<Value> {

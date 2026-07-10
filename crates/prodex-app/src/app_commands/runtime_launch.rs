@@ -1,7 +1,6 @@
 use super::*;
 mod gateway_config;
 mod gateway_status;
-mod mem0_gateway;
 mod preflight;
 mod provider_names;
 mod providers;
@@ -13,7 +12,6 @@ use gateway_config::resolve_gateway_launch_config;
 #[cfg(test)]
 use gateway_config::{gateway_sso_config, gateway_state_store_config};
 use gateway_status::print_gateway_status;
-pub(crate) use mem0_gateway::start_mem0_memory_gateway_for_runtime_request;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
 use rusqlite::OptionalExtension;
 use selection::RuntimeLaunchSelection;

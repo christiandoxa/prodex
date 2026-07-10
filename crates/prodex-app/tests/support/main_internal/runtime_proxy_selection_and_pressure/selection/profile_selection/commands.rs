@@ -151,33 +151,9 @@ fn optimizer_shortcuts_parse_as_dedicated_commands() {
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert_eq!(args.codex_args, vec![OsString::from("exec"), OsString::from("review")]);
 
-    let sqz = parse_cli_command_from(["prodex", "sqz", "exec", "review"])
-        .expect("sqz shortcut should parse");
-    assert!(matches!(sqz, Commands::Sqz(_)));
-
-    let token_savior = parse_cli_command_from(["prodex", "tokensavior", "exec", "review"])
-        .expect("tokensavior shortcut should parse");
-    assert!(matches!(token_savior, Commands::TokenSavior(_)));
-
-    let token_savior_alias = parse_cli_command_from(["prodex", "token-savior", "exec", "review"])
-        .expect("token-savior alias should parse");
-    assert!(matches!(token_savior_alias, Commands::TokenSavior(_)));
-
-    let claw_compactor = parse_cli_command_from(["prodex", "clawcompactor", "exec", "review"])
-        .expect("clawcompactor shortcut should parse");
-    assert!(matches!(claw_compactor, Commands::ClawCompactor(_)));
-
-    let claw_compactor_alias = parse_cli_command_from(["prodex", "claw-compactor", "exec", "review"])
-        .expect("claw-compactor alias should parse");
-    assert!(matches!(claw_compactor_alias, Commands::ClawCompactor(_)));
-
-    let mem = parse_cli_command_from(["prodex", "mem", "exec", "review"])
-        .expect("mem shortcut should parse");
-    assert!(matches!(mem, Commands::Mem(_)));
-
-    let memory_alias = parse_cli_command_from(["prodex", "memory", "exec", "review"])
-        .expect("memory alias should parse");
-    assert!(matches!(memory_alias, Commands::Mem(_)));
+    let ponytail = parse_cli_command_from(["prodex", "ponytail", "exec", "review"])
+        .expect("ponytail shortcut should parse");
+    assert!(matches!(ponytail, Commands::Ponytail(_)));
 }
 
 #[test]
@@ -203,9 +179,6 @@ fn super_command_parses_as_distinct_subcommand_and_expands_to_full_super_prefix_
         args.codex_args,
         vec![
             OsString::from("rtk"),
-            OsString::from("sqz"),
-            OsString::from("tokensavior"),
-            OsString::from("clawcompactor"),
             OsString::from("ponytail"),
             OsString::from("--dangerously-bypass-hook-trust"),
             OsString::from("exec"),
@@ -251,24 +224,6 @@ fn super_doctor_alias_routes_to_capability_super_doctor() {
         panic!("expected capability super-doctor command");
     };
     assert!(args.presidio);
-}
-
-#[test]
-fn hidden_memory_mcp_command_accepts_store_path() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "__memory-mcp",
-        "--store",
-        "/tmp/prodex-memory.sqlite",
-    ])
-    .expect("memory mcp command should parse");
-    let Commands::MemoryMcp(args) = command else {
-        panic!("expected memory mcp command");
-    };
-    assert_eq!(
-        args.store.as_deref(),
-        Some(std::path::Path::new("/tmp/prodex-memory.sqlite"))
-    );
 }
 
 #[test]
@@ -491,9 +446,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     assert_eq!(rendered.first().map(String::as_str), Some("rtk"));
-    assert_eq!(rendered.get(1).map(String::as_str), Some("sqz"));
-    assert_eq!(rendered.get(2).map(String::as_str), Some("tokensavior"));
-    assert_eq!(rendered.get(3).map(String::as_str), Some("clawcompactor"));
+    assert_eq!(rendered.get(1).map(String::as_str), Some("ponytail"));
     assert!(rendered.contains(&"model_provider=\"prodex-local\"".to_string()));
     assert!(rendered.contains(&"model=\"local/qwen\"".to_string()));
     assert!(rendered.contains(
@@ -513,7 +466,7 @@ fn super_command_url_expands_to_local_openai_provider_config() {
         ["exec", "review this repo"]
     );
 
-    let (_, _, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
+    let (_, _, codex_args) = runtime_caveman_extract_launch_prefixes(&args.codex_args);
     assert_eq!(
         codex_cli_config_override_value(&codex_args, "model_provider").as_deref(),
         Some("prodex-local")

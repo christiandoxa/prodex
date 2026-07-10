@@ -147,510 +147,64 @@ If you install from source, make sure the `codex` binary in your `PATH` is alrea
 
 ## Optional tools
 
-`prodex` can run without RTK, SQZ, token-savior, codebase-memory-mcp, claw-compactor, Ponytail, Presidio, or prodex-memory. `prodex-inspect` is a built-in read-only MCP server for profile/runtime diagnostics and is auto-registered in Prodex overlay sessions. `prodex-memory` is built in and opt-in through the `mem` prefix or managed Mem0 Super prompt.
+Prodex Super keeps a deliberately small optional stack:
 
-Install them only if you want to use commands such as:
+- [RTK](https://github.com/rtk-ai/rtk) for noisy shell output.
+- [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp) for structural code navigation.
+- [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
+- [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-<details>
-<summary>Optional tool commands</summary>
-
-```bash
-prodex rtk
-prodex sqz
-prodex tokensavior
-prodex clawcompactor
-prodex ponytail
-prodex mem
-prodex s doctor
-prodex presidio doctor
-prodex presidio redact --text "My phone is 212-555-1234"
-prodex gateway --provider gemini
-prodex s
-prodex super
-```
-
-</details>
+Caveman and Smart Context are built into Prodex. Prodex runs without every external tool above; missing tools are skipped instead of blocking launch.
 
 <details>
-<summary>Install Ponytail</summary>
+<summary>Install and verify the Super tools</summary>
 
-Ponytail is used by `prodex ponytail` and by Super mode when a Ponytail checkout is available under a managed optimizer root. Prodex installs the checkout into the temporary Codex overlay marketplace/cache for that session, enables `ponytail@ponytail`, and leaves the base Codex profile unchanged.
-
-Recommended source checkout:
-
-```bash
-git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail
-```
-
-Then launch:
-
-```bash
-prodex ponytail
-prodex caveman ponytail
-prodex rtk caveman ponytail
-prodex s
-```
-
-Ponytail's Codex plugin uses Node.js lifecycle hooks. If `node` is not on the non-interactive shell `PATH`, Ponytail skills remain installed but the always-on hook activation may stay quiet.
-
-</details>
-
-<details>
-<summary>Prodex inspect MCP</summary>
-
-`prodex-inspect` exposes read-only MCP tools for agent-side diagnostics:
-
-- `prodex_status`: Prodex paths, active profile, profile count, binding counts, and version.
-- `prodex_profiles`: configured profiles without secrets.
-- `prodex_latest_runtime_log`: latest runtime log pointer plus a bounded tail excerpt.
-
-Prodex auto-registers it for Prodex overlay sessions. For direct diagnostics:
-
-```bash
-prodex __inspect-mcp
-```
-
-</details>
-
-<details>
-<summary>Prodex memory mode (advanced)</summary>
-
-```bash
-prodex s
-prodex super
-prodex caveman mem
-prodex s doctor
-```
-
-`prodex s` leaves `prodex-memory` disabled unless you opt in.
-The base Codex profile stays unchanged; memory state is owned by Prodex.
-Use `prodex caveman mem` when you want only Caveman plus the local memory MCP server, without the full Super stack.
-
-`prodex-memory` provides Mem0-style local memory without Mem0 Cloud, Mem0 CLI, or `MEM0_API_KEY`.
-The local `mem` prefix stores memories in a SQLite database under `PRODEX_HOME`:
-
-```text
-$PRODEX_HOME/memory/prodex-memory.sqlite
-```
-
-`prodex s` asks the Presidio prompt first, then asks whether to enable prodex-memory through managed Mem0 Docker. Empty input or `n` leaves the memory MCP disabled. Answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server. Use `--no-mem0` to skip that prompt non-interactively, or `prodex s mem` / `prodex caveman mem` / `prodex mem` for the lightweight SQLite backend.
-
-The SQLite path remains the fastest OOTB memory path when you request memory:
-
-- no Mem0 Cloud endpoint
-- no `MEM0_API_KEY`
-- no user-visible Mem0 auth
-- local SQLite storage
-- MCP tools exposed as `prodex-memory`
-
-Managed Mem0 mode requires Docker Compose (`docker compose` or `docker-compose`). It does not require a Mem0 Cloud token or a user-supplied provider API key for the default memory path. OpenAI-compatible API-key profiles, `--url` local providers, and supported provider bridges can provide richer upstream LLM/embedding behavior; otherwise Prodex falls back to local embeddings for Mem0.
-
-<details>
-<summary>Managed Mem0 internals (advanced)</summary>
-
-Managed Mem0 mode is still local-first:
-
-- Prodex clones `https://github.com/mem0ai/mem0` under `$PRODEX_HOME/mem0` if needed.
-- Prodex writes the Mem0 server `.env` with generated local `ADMIN_API_KEY`, `JWT_SECRET`, and Postgres password.
-- Mem0 auth stays enabled; Prodex keeps the local API key internal and injects it only into the temporary MCP overlay.
-- Mem0 receives `OPENAI_BASE_URL=http://host.docker.internal:<prodex-gateway-port>/v1`.
-- Mem0 receives an internal Prodex gateway bearer token as `OPENAI_API_KEY`.
-- The gateway selects an efficient memory LLM when available, preferring nano/mini models, and defaults embeddings to `text-embedding-3-small`.
-- If no upstream API-key profile is available, the internal gateway still serves deterministic local embeddings for Mem0 and disables generation endpoints for that Mem0-only gateway.
-- Prodex writes raw/no-infer memories by default, so the managed path does not spend LLM quota for memory extraction.
-- No Mem0 Cloud endpoint and no user-managed `MEM0_API_KEY` are used.
-
-</details>
-
-<details>
-<summary>Memory diagnostics (advanced)</summary>
-
-Use `prodex s doctor` to verify that the built-in memory store can be opened before launching Codex. The hidden MCP server can also be launched directly for diagnostics:
-
-```bash
-prodex s doctor
-prodex __memory-mcp --store /tmp/prodex-memory.sqlite
-```
-
-Mem0 Cloud's official MCP endpoint is intentionally not part of Prodex Super's default path. Configure it manually only when you explicitly want Mem0 Platform auth and are willing to manage `MEM0_API_KEY` yourself.
-
-</details>
-
-</details>
-
-<details>
-<summary>Install RTK</summary>
-
-RTK is used by the `rtk` variants and by my daily `prodex s` / `prodex super` workflow.
-
-### Homebrew
+RTK:
 
 ```bash
 brew install rtk-ai/tap/rtk
-```
-
-### Linux/macOS quick install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/master/install.sh | sh
-```
-
-If it installs to `~/.local/bin`, make sure that directory is in your `PATH`:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-```
-
-For Zsh:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-```
-
-### Cargo
-
-```bash
+# or
 cargo install --git https://github.com/rtk-ai/rtk rtk
-```
 
-### Verify RTK
-
-```bash
 rtk --version
 rtk gain
 ```
 
-If `rtk --version` works but `rtk gain` fails, you may have installed a different package named `rtk`.
-
-Remove it and reinstall from the Git URL:
-
-```bash
-cargo uninstall rtk
-cargo install --git https://github.com/rtk-ai/rtk rtk
-```
-
-### Initialize RTK
-
-For Codex:
-
-```bash
-rtk init -g --codex
-```
-
-For Claude Code:
-
-```bash
-rtk init -g
-```
-
-Then restart your coding tool.
-
-</details>
-
-<details>
-<summary>Install SQZ</summary>
-
-SQZ is used by `prodex sqz` and by Super mode when the `sqz-mcp` binary is available on `PATH` or under a managed optimizer checkout.
-
-Recommended Linux/macOS install:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.sh | sh
-```
-
-Windows PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/ojuschugh1/sqz/main/install.ps1 | iex
-```
-
-Alternative npm install:
-
-```bash
-npm install -g sqz-cli
-```
-
-Optional source install:
-
-```bash
-cargo install sqz-cli
-```
-
-Initialize hooks if you also want SQZ outside Prodex:
-
-```bash
-sqz init --global
-# or only for the current project
-sqz init
-```
-
-Verify:
-
-```bash
-sqz --version
-sqz gain
-which sqz-mcp
-```
-
-Prodex auto-registers `prodex-sqz` for Prodex overlay sessions when `sqz-mcp` is discoverable.
-
-</details>
-
-<details>
-<summary>Install token-savior</summary>
-
-token-savior is used by `prodex tokensavior` and by Super mode when the `token-savior` binary is available on `PATH` or under a managed optimizer checkout.
-
-Recommended isolated install:
-
-```bash
-git clone https://github.com/Mibayy/token-savior ~/.local/share/prodex-optimizers/token-savior
-python3.12 -m venv ~/.local/share/prodex-optimizers/token-savior/.venv
-~/.local/share/prodex-optimizers/token-savior/.venv/bin/pip install -e "$HOME/.local/share/prodex-optimizers/token-savior[mcp]"
-ln -sf ~/.local/share/prodex-optimizers/token-savior/.venv/bin/token-savior ~/.local/bin/token-savior
-```
-
-Use a stable Python interpreter supported by token-savior dependencies, such as Python 3.11, 3.12, or 3.13. Avoid pointing this MCP server at experimental Python releases unless its native dependencies already support them.
-
-Make sure `~/.local/bin` is on `PATH`:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-```
-
-If you use Zsh:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-```
-
-Verify:
-
-```bash
-token-savior --help
-which token-savior
-```
-
-Prodex handles MCP registration for its own overlay session when it can find the binary, so you do not need to manually edit `.mcp.json` just for `prodex super`.
-
-</details>
-
-<details>
-<summary>Install Codebase Memory MCP</summary>
-
-Codebase Memory MCP is used by Super mode when the `codebase-memory-mcp` binary is available on `PATH` or under a managed optimizer checkout. Prodex auto-registers it as `codebase-memory-mcp` for `prodex s` / `prodex super` overlay sessions and routes its cache under `PRODEX_HOME`.
-
-Install the upstream binary:
+Codebase Memory MCP:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash -s -- --skip-config
-```
-
-Or use a managed checkout:
-
-```bash
-git clone https://github.com/DeusData/codebase-memory-mcp.git ~/.local/share/prodex-optimizers/codebase-memory-mcp
-cd ~/.local/share/prodex-optimizers/codebase-memory-mcp
-scripts/build.sh
-```
-
-Verify:
-
-```bash
 codebase-memory-mcp --help
-prodex s doctor
 ```
 
-Enable its own startup indexing if you want Codebase Memory to index automatically when the MCP server starts:
+Ponytail:
 
 ```bash
-CBM_CACHE_DIR="${PRODEX_HOME:-$HOME/.prodex}/optimizer-state/codebase-memory/cache" codebase-memory-mcp config set auto_index true
+git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail
+prodex ponytail
 ```
 
-</details>
+Prodex installs Ponytail only into the temporary overlay for that session. The base Codex profile remains unchanged.
 
-<details>
-<summary>Install claw-compactor</summary>
-
-claw-compactor is used by `prodex clawcompactor` and by Super mode as a deterministic/local context compaction aid. When discoverable, Super installs `prodex-claw-compactor` and `prodex-claw-compactor-auto` wrappers plus a trusted one-shot SessionStart probe wrapper. The startup probe is disabled by default so Codex launch is not delayed; opt in with `PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS=<seconds>` when you want it to run `claw-compactor benchmark <workspace> --json` through Prodex's compatibility wrapper. It uses a marker under `CODEX_HOME` to avoid replay after Codex conversation restarts. If the workspace has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a synthetic `MEMORY.md` summary instead of writing into the original directory.
-
-Recommended source install:
+Presidio English services:
 
 ```bash
-git clone https://github.com/aeromomo/claw-compactor.git ~/.local/share/claw-compactor
-python3 -m venv ~/.local/claw-compactor-venv
-~/.local/claw-compactor-venv/bin/pip install -e "$HOME/.local/share/claw-compactor[accurate]"
-```
-
-If you only need exact token counting for the scripts:
-
-```bash
-~/.local/claw-compactor-venv/bin/pip install tiktoken
-```
-
-Expose the checkout to Prodex's managed optimizer discovery:
-
-```bash
-mkdir -p ~/.local/share/prodex-optimizers
-ln -sfn ~/.local/share/claw-compactor ~/.local/share/prodex-optimizers/claw-compactor
-```
-
-Quick non-destructive benchmark:
-
-```bash
-python3 ~/.local/share/claw-compactor/scripts/mem_compress.py /path/to/workspace benchmark
-```
-
-</details>
-
-<details>
-<summary>Install Presidio</summary>
-
-Presidio is used by `prodex presidio` and by the optional Super-mode privacy prompt. It runs as local Analyzer and Anonymizer HTTP services.
-
-### English-only quick install
-
-Use Microsoft's published images when you only need English (`en`):
-
-```bash
-docker pull mcr.microsoft.com/presidio-analyzer
-docker pull mcr.microsoft.com/presidio-anonymizer
-
 docker run -d --name presidio-analyzer -p 5002:3000 mcr.microsoft.com/presidio-analyzer:latest
 docker run -d --name presidio-anonymizer -p 5001:3000 mcr.microsoft.com/presidio-anonymizer:latest
-```
-
-<details>
-<summary>English + Indonesian install (advanced)</summary>
-
-Prodex can route requests with `--language-mode auto --languages en,id`, but Indonesian (`id`) detection only works if the Analyzer supports Indonesian NLP configuration and recognizers. The default Microsoft Analyzer image is usually English-only, so build a custom Analyzer and keep the standard Anonymizer.
-
-Minimal local Analyzer example:
-
-```bash
-mkdir -p ~/.local/share/presidio-id-analyzer
-cd ~/.local/share/presidio-id-analyzer
-
-cat > Dockerfile <<'EOF'
-FROM python:3.11-slim
-RUN pip install --no-cache-dir flask gunicorn presidio-analyzer spacy \
- && python -m spacy download en_core_web_sm \
- && python -m spacy download xx_ent_wiki_sm
-WORKDIR /app
-COPY app.py /app/app.py
-CMD ["gunicorn", "-b", "0.0.0.0:3000", "app:app"]
-EOF
-
-cat > app.py <<'EOF'
-from flask import Flask, jsonify, request
-from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerRegistry
-from presidio_analyzer.nlp_engine import NlpEngineProvider
-from presidio_analyzer.predefined_recognizers import EmailRecognizer, UrlRecognizer
-
-nlp_config = {
-    "nlp_engine_name": "spacy",
-    "models": [
-        {"lang_code": "en", "model_name": "en_core_web_sm"},
-        {"lang_code": "id", "model_name": "xx_ent_wiki_sm"},
-    ],
-}
-nlp_engine = NlpEngineProvider(nlp_configuration=nlp_config).create_engine()
-registry = RecognizerRegistry(supported_languages=["en", "id"])
-registry.load_predefined_recognizers(nlp_engine=nlp_engine, languages=["en", "id"])
-registry.add_recognizer(EmailRecognizer(supported_language="id"))
-registry.add_recognizer(UrlRecognizer(supported_language="id"))
-
-registry.add_recognizer(PatternRecognizer(
-    supported_entity="PHONE_NUMBER",
-    language="id",
-    patterns=[Pattern("id mobile phone", r"(?<!\d)(?:\+62|62|0)8[1-9][\d\s.-]{7,13}\d(?!\d)", 0.75)],
-    context=["telepon", "nomor", "hp", "ponsel"],
-))
-registry.add_recognizer(PatternRecognizer(
-    supported_entity="ID_INDONESIA_NIK",
-    language="id",
-    patterns=[Pattern("nik", r"(?<!\d)\d{16}(?!\d)", 0.75)],
-    context=["nik", "ktp"],
-))
-registry.add_recognizer(PatternRecognizer(
-    supported_entity="ID_INDONESIA_NPWP",
-    language="id",
-    patterns=[Pattern("npwp", r"(?<!\d)\d{2}\.?\d{3}\.?\d{3}\.?\d[-.]?\d{3}\.?\d{3}(?!\d)", 0.75)],
-    context=["npwp", "pajak"],
-))
-registry.add_recognizer(PatternRecognizer(
-    supported_entity="PERSON",
-    language="id",
-    patterns=[Pattern("nama saya", r"(?i)\b(?:nama saya|saya bernama|nama)\s+[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3}", 0.85)],
-    context=["nama", "saya", "bernama"],
-))
-
-analyzer = AnalyzerEngine(
-    nlp_engine=nlp_engine,
-    registry=registry,
-    supported_languages=["en", "id"],
-)
-app = Flask(__name__)
-
-@app.get("/health")
-def health():
-    return jsonify({"status": "ok"})
-
-@app.post("/analyze")
-def analyze():
-    body = request.get_json(force=True)
-    results = analyzer.analyze(
-        text=body["text"],
-        language=body.get("language", "en"),
-        entities=body.get("entities"),
-        score_threshold=body.get("score_threshold", 0),
-    )
-    return jsonify([result.to_dict() for result in results])
-EOF
-
-docker build -t prodex-presidio-analyzer-id:latest .
-docker rm -f presidio-analyzer presidio-anonymizer 2>/dev/null || true
-docker run -d --name presidio-analyzer -p 5002:3000 prodex-presidio-analyzer-id:latest
-docker run -d --name presidio-anonymizer -p 5001:3000 mcr.microsoft.com/presidio-anonymizer:latest
-
-prodex presidio enable --language-mode auto --languages en,id
-```
-
-This example keeps built-in recognizers such as `EMAIL_ADDRESS` and `URL`, adds Indonesian phone numbers, NIK, NPWP, and context-based `PERSON` detection for text like `Nama saya Budi`.
-
-</details>
-
-### Verify
-
-```bash
+prodex presidio enable --language-mode fixed --languages en
 prodex presidio doctor --json
-prodex presidio redact --language en --text "My name is John Smith and my phone is 212-555-1234."
-prodex presidio redact --language id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."
-prodex presidio redact --language id --text "NIK saya 3171010101900001 dan email saya budi@example.com."
 ```
 
-English should redact `PERSON` and `PHONE_NUMBER`. Indonesian should redact `PERSON`, `PHONE_NUMBER`, `ID_INDONESIA_NIK`, and `EMAIL_ADDRESS`. If `id` misses names or identifiers, the Analyzer container is not using the custom Indonesian config/recognizers.
+The standard Analyzer image is English-only. Indonesian detection requires an Analyzer configured with Indonesian NLP models and recognizers before enabling `--language-mode auto --languages en,id`.
 
-### Use with `prodex s`
-
-Once `prodex presidio enable --language-mode auto --languages en,id` is configured and the custom Analyzer plus Anonymizer containers are healthy, run `prodex s` and answer `y` to the Presidio prompt. That is enough to enable runtime request-body and WebSocket text-frame redaction for the session. Use `--presidio` to enable it non-interactively or `--no-presidio` to skip it.
-
-If the endpoints are unhealthy, Prodex may auto-start the default Microsoft containers. Those are English-only unless your custom Analyzer image/container is already configured and running. Set `PRODEX_PRESIDIO_AUTO_START=0` to disable best-effort auto-start and only use configured endpoints.
-
-<details>
-<summary>Docker Desktop context note</summary>
-
-If the containers do not appear in Docker Desktop, check the active Docker context. Docker Desktop usually uses `desktop-linux`.
+Verify the complete stack:
 
 ```bash
-docker context show
-docker context ls
-docker --context desktop-linux ps -a --filter name=presidio
+prodex s doctor --presidio --strict
+prodex s
 ```
 
 </details>
-</details>
-
 ## Quick start
 
 <details>
@@ -748,100 +302,36 @@ This reads the installed Kiro CLI state from the local auth database, snapshots 
 
 ## Daily command: `prodex s`
 
-<details>
-<summary>Runs Codex with Caveman, RTK, and local optimizer guidance</summary>
+`prodex s` is the daily alias for `prodex super`. It enables:
 
-For daily work, I use:
+- Caveman and Ponytail.
+- RTK shell-output guidance.
+- Codebase Memory MCP when installed.
+- Smart Context Autopilot.
+- launch-time full access.
+- optional Presidio redaction.
+
+The effective launch is:
 
 ```bash
-prodex s
+prodex caveman rtk ponytail --full-access
 ```
 
-`prodex s` is an alias for:
-
-```bash
-prodex super
-```
-
-This is the mode I tune and use myself every day.
-
-It combines:
-
-- Caveman mode
-- RTK shell-command guidance
-- full-access launch mode
-- Smart Context Autopilot in the runtime proxy
-- deterministic/local accommodation for `sqz`, `token-savior`, and `claw-compactor` low-token workflows
+Answer `y` at the Presidio prompt, or pass `--presidio`, to add runtime PII redaction. Use `--no-presidio` for non-interactive launches. Full access maps to Codex's sandbox bypass and trusts only the launch directory for that session.
 
 ```bash
 prodex s
 prodex s exec "review this repo"
+prodex s doctor --strict
+prodex s doctor --presidio --strict
 prodex s expose
 ```
 
-`prodex super` expands to:
+`prodex s expose` starts a token-protected browser terminal and uses a Cloudflare quick tunnel when `cloudflared` is available. Add `--no-tunnel` for loopback-only access.
 
-```bash
-prodex caveman rtk sqz tokensavior clawcompactor ponytail --full-access
-```
+Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
-<details>
-<summary>Prompts, Presidio, memory, and expose (advanced)</summary>
-
-Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps the expansion above. If you answer `y`, it is equivalent to:
-
-```bash
-prodex caveman rtk sqz tokensavior clawcompactor ponytail presidio --full-access
-```
-
-Use `prodex super --presidio` to enable Presidio without prompting, or `prodex super --no-presidio` to skip the prompt and keep Presidio disabled. Presidio enables runtime request-body and WebSocket text redaction through local Presidio for the session when services are healthy; service failures follow `fail_mode`. The runtime uses `presidio.toml` endpoints when configured, falls back to `http://localhost:5002` and `http://localhost:5001`, and honors `fail_mode = "open"` or `"closed"`.
-
-After the Presidio prompt, Super asks whether to enable prodex-memory through managed Mem0 Docker. Empty input or `n` leaves `prodex-memory` disabled, so Codex will not wait for that MCP server. Answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server, route its OpenAI-compatible calls through a session-local Prodex gateway, and inject the local Mem0 API key into the temporary Codex MCP config. Use `--no-mem0` to skip the prompt. Use the `mem` optimizer prefix for local SQLite memory. This path does not use Mem0 Cloud or `MEM0_API_KEY`; Docker Compose is required, and Prodex falls back to local embeddings when no upstream provider API key is available.
-
-Super prints prelaunch progress for runtime proxy setup, Presidio auto-start/checks, and managed Mem0 Docker startup. The output happens before Codex starts; runtime notices still go to logs once the TUI is running.
-
-Full access maps to Codex's sandbox-bypass launch flag. Super also marks its launch directory as trusted for that session, so Codex does not show a separate directory-trust prompt. Use it only when you intentionally want Codex to run without the normal approval and sandbox protections.
-
-Use `prodex s doctor` to inspect the Super optimizer stack without launching Codex. Add `--json` for machine-readable output, `--strict` to exit non-zero when any optimizer check is unavailable, and `--presidio` to include local Presidio Analyzer/Anonymizer health checks. `prodex s --dry-run` also prints the same optimizer matrix for the launch preview.
-
-Use `prodex s expose` when you need to reach the live Super terminal from a browser. Prodex starts a local PTY bridge protected by a high-entropy access token, launches `cloudflared tunnel --protocol http2 --url ...` when `cloudflared` is available, and prints both the loopback and Cloudflare quick-tunnel URLs. The browser tab can close without stopping the session; reopening the same token URL reconnects to the existing PTY and replays recent scrollback. Add `--no-tunnel` for local-only access, `--max-clients N` to cap simultaneous browsers, or `--command 'prodex s --no-presidio'` to choose the initial terminal command.
-
-</details>
-
-<details>
-<summary>Super optimizer internals (advanced)</summary>
-
-Super's built-in optimization stack is deliberately local and deterministic. It preloads Caveman, exposes a Prodex overlay `rtk` PATH wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, auto-registers built-in `prodex-inspect` plus discovered `sqz-mcp`, `token-savior`, and `codebase-memory-mcp` MCP servers, exposes `sqz` and `claw-compactor` wrapper commands when those commands/checkouts are discoverable, installs a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe wrapper when Claw-Compactor is available, then uses Smart Context Autopilot through a dedicated runtime proxy for lower-token request shaping. The claw startup probe is disabled by default so Codex launch is not delayed; opt in with `PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS=<seconds>`. When enabled, it delegates to `prodex-claw-compactor-auto "$(pwd)"`, uses a marker under `CODEX_HOME` so Codex conversation restarts do not replay it, and falls back to a temporary shadow `MEMORY.md` when the workspace has no Markdown memory files. Presidio redaction and prodex-memory are added only when you opt in. Prodex routes optional-tool state under `PRODEX_HOME` (default `~/.prodex`), including SQZ XDG state, token-savior cache/stats, Codebase Memory cache/config, claw-compactor HOME/XDG state, RTK analytics paths, and local memory, so compatible optimizer metadata stays out of worktrees.
-
-Smart Context treats protocol and continuation metadata as exact control-plane data while allowing independent context payload segments to remain eligible for deterministic lossless or artifact-backed rewriting. Explicit exact mode still makes the complete request pass through. Missing artifact references are handled as segment-local rehydration failures: the dependent reference is preserved and recorded, budgets tighten, and unrelated payload segments may still be optimized when validation proves continuation identifiers, tool-call structure, critical signals, and JSON integrity are intact.
-
-Smart Context budgeting is model-relative: it calculates pressure from effective used tokens against the usable context window after output reserve, records pressure bands and estimator confidence, and tightens behavior when runtime token accounting is uncertain. Context window selection prefers explicit launch config, then a versioned provider/model registry, then observed runtime accounting and conservative fallback behavior.
-
-Smart Context rollout controls are local environment flags. `PRODEX_SMART_CONTEXT_CANARY_PERCENT=N` deterministically applies rewriting only for the selected percentage of requests, while canary-out requests pass through unchanged and log `rollout_canary_out`. `PRODEX_SMART_CONTEXT_SHADOW=1` computes Smart Context diagnostics and telemetry while returning the original request upstream. Explicit exact mode still bypasses rollout and remains full pass-through.
-
-Smart Context replay evaluation is modeled in the runtime proxy so saved JSON corpora can be scored deterministically against the rollout gate: median token reduction, long-session coverage, success regression, continuation/tool/critical-signal integrity, unresolved mandatory artifact references, JSON corruption, rewrite overhead, and full-request fallback rate.
-
-See [`docs/smart-context.md`](docs/smart-context.md) for the safety model, telemetry fields, rollout flags, migration note, and current replay benchmark report.
-
-Super instructs Codex to use the available local optimizer stack where it fits the task, not just RTK:
-
-- RTK works upstream/input-side. Use visible `rtk <cmd>` for noisy terminal commands before their output enters the model context, such as `git diff`, `cargo test`, `npm test`, build logs, and package-manager output. Prodex also auto-wraps common noisy commands as a fallback when RTK is installed, but that fallback does not make the TUI show an `rtk` prefix.
-- SQZ works downstream/context-side through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available. Use it for repeated workspace reads, large text blobs, long command outputs that need reuse, and long-session context compression instead of emitting the same full content again.
-- token-savior handles symbol lookup, caller/context navigation, duplicate/dead-code checks, and API-impact searches before broad source reads when token-savior is available.
-- codebase-memory-mcp handles structural codebase graph queries such as architecture, call chains, impact analysis, dead-code lookup, and cross-service links when the binary is available.
-- prodex-inspect provides read-only MCP diagnostics for Prodex status, profiles, and latest runtime log tail.
-- claw-compactor handles workspace-level summary or benchmark requests through `prodex-claw-compactor` / `prodex-claw-compactor-auto` when available; treat its output as overview context and reread exact source before edits.
-- Ponytail loads the local `DietrichGebert/ponytail` Codex plugin into the temporary overlay when the checkout exists under a managed optimizer root, adding smallest-correct-implementation pressure without changing the base Codex profile.
-- prodex-memory provides local Mem0-style memory through the `mem` prefix with SQLite, or through managed Mem0 OSS Docker when you opt in with the Super prompt or `--mem0`; neither path uses Mem0 Cloud auth or `MEM0_API_KEY`.
-- Presidio stays optional and only runs when you opt in with the Super prompt or `--presidio`.
-
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Put Ponytail at `~/.local/share/prodex-optimizers/ponytail` with `git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail`.
-The generated `SUPER_OPTIMIZERS.md` overlay includes an `Available Now` section so the model can see which MCP servers and wrappers were actually discovered for that session.
-
-</details>
-
-</details>
-
+Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 ## Commands
 
 <details>
@@ -1035,11 +525,7 @@ prodex exec "review this repo"
 ```bash
 prodex caveman
 prodex rtk
-prodex sqz
-prodex tokensavior
-prodex clawcompactor
 prodex ponytail
-prodex mem
 prodex caveman --dry-run
 prodex s doctor
 prodex s doctor --json --strict
@@ -1050,7 +536,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex caveman` runs Codex with Caveman mode active in a temporary Prodex overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
-Add optimizer prefixes before Codex args when you want Prodex to enable a specific session tool in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `ponytail`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex ponytail`, and `prodex mem` map to `prodex caveman <prefix>`.
+Add `rtk`, `ponytail`, or `presidio` before Codex args to enable that session surface. The `prodex rtk` and `prodex ponytail` shortcuts map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
@@ -1183,13 +669,11 @@ Run `npm run test:gemini-schema` after changing Gemini request, response, SSE, s
 </details>
 
 <details>
-<summary>Presidio, memory, and optimizer internals (advanced)</summary>
+<summary>Presidio internals (advanced)</summary>
 
-Before launch, Super asks whether to add Presidio redaction. Empty input or `n` keeps Presidio disabled; answer `y` or pass `--presidio` to add the `presidio` prefix. Use `--no-presidio` to make the disabled choice explicit for non-interactive use. Super then asks whether to enable prodex-memory through managed Mem0 Docker. Empty input or `n` leaves prodex-memory disabled; answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server and route its OpenAI-compatible calls through Prodex gateway. Use `--no-mem0` to skip that prompt, or the `mem` prefix for local SQLite memory.
+Super asks once whether to enable Presidio. Empty input or `n` keeps it disabled; use `--presidio` or `--no-presidio` for non-interactive launches.
 
-Prodex now supports multi-language Presidio redaction, including automatic detection and multi-language merging. The runtime uses `presidio.toml` endpoints and language configuration when available, falling back to `http://localhost:5002` and `http://localhost:5001` for Analyzer/Anonymizer URLs, and English (`en`) for language if not specified. It honors `fail_mode = "open"` or `"closed"`.
-
-Example `presidio.toml` with multi-language support (English and Indonesian):
+The runtime reads Analyzer, Anonymizer, language, and `fail_mode` settings from `presidio.toml`:
 
 ```toml
 enabled = true
@@ -1200,15 +684,7 @@ languages = ["en", "id"]
 fail_mode = "open"
 ```
 
-Note that the default Microsoft Presidio Docker images typically only support English (`en`). To support other languages like Indonesian (`id`), you must use a custom Presidio Analyzer image with the necessary language models and recognizers installed. Prodex routing and configuration support the languages, but the actual detection quality depends on your Analyzer.
-
-It keeps exact pass-through for continuation-sensitive requests. When safe, it uses adaptive token budgeting, artifact-backed large tool outputs, duplicate suppression, blob/noise detection, stable cache-friendly context framing, and critical-signal self-checks to reduce token load without dropping failure details.
-
-The Super optimization stack is meant to stay deterministic and local by default. It auto-registers `sqz-mcp`, `token-savior`, and `codebase-memory-mcp` MCP servers when those binaries are already on `PATH` or in a managed `prodex-optimizers` checkout, loads Ponytail from a managed checkout when available, exposes `sqz` and `claw-compactor` wrappers when discoverable, routes compatible optimizer cache/state under `PRODEX_HOME` instead of the workspace, and uses a dedicated runtime proxy for local compaction, stable references, and lower-token context shaping rather than hidden remote summarization.
-
-RTK handles upstream/input command output before it enters the context window, using visible `rtk <cmd>` commands and overlay auto-wrappers when available. Auto-wrappers are only a backstop; write `rtk <cmd>` explicitly when you want the TUI/transcript to show RTK usage. SQZ handles downstream/context reuse after content is already in the session, using `prodex-sqz` when the MCP server is available.
-
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`; Ponytail is expected at `ponytail/` inside one of those roots.
+The standard Microsoft Analyzer image is English-only. Indonesian detection requires an Analyzer with Indonesian models and recognizers. Presidio quality depends on that service configuration.
 
 </details>
 

@@ -45,7 +45,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
 
     let run = run_prodex_with_pty_prompt_answer(
         &fixture,
-        &["super", "--skip-quota-check", "--no-mem0", "exec", "hello"],
+        &["super", "--skip-quota-check", "exec", "hello"],
         &[
             ("TEST_CODEX_ARGS_LOG", args_log.as_str()),
             ("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str()),

@@ -58,7 +58,6 @@ fn s_session_tail_super_launch_flags_are_prodex_flags() {
         "--base-url",
         "https://chatgpt.test/backend-api",
         "--no-presidio",
-        "--no-mem0",
         "--no-auto-rotate",
         "--auto-rotate",
     ])
@@ -76,7 +75,6 @@ fn s_session_tail_super_launch_flags_are_prodex_flags() {
         Some("https://chatgpt.test/backend-api")
     );
     assert!(args.no_presidio);
-    assert!(args.no_mem0);
     assert!(args.auto_rotate);
     assert!(!args.no_auto_rotate);
     assert_eq!(

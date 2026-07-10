@@ -8,12 +8,12 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "When tests pass",
     "When tests fail",
     "When the user writes in Indonesian",
+    "Use visible `rtk <cmd>` for noisy shell output",
+    "Use `codebase-memory-mcp` for architecture",
+    "Follow Ponytail's smallest-correct-implementation pressure",
+    "Missing optional tools must not block the session",
     "No \"Saya sudah menyelesaikan",
     "If a compression tool or optimizer wrapper crashes",
-    "If `rtk`, `sqz-mcp`, `token-savior`, or `claw-compactor` fails",
-    "If `rtk`, `sqz`, `token-savior`, `claw-compactor`, or `presidio` fails",
-    "If `rtk`, `sqz`, or `token-savior` is completely unusable",
-    "If `rtk`, `sqz-mcp`, or `claw-compactor` fails",
     "If a token optimization tool fails",
     "If a token optimizer fails",
     "If an optimizer MCP server crashes",
@@ -25,14 +25,11 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "If an optimizer breaks or stalls",
     "If an optimizer breaks output layout",
     "If a `rtk` command drops",
-    "If a `token-savior` edit corrupts",
     "For critical signals",
     "Do not apply these tools to configuration",
     "If you are unsure if compression removes relevant detail",
     "If the user asks you to stop using optimizers",
     "If the model loses context",
-    "If `prodex-token-savior` or `prodex-sqz` commands are not found",
-    "If `claw-compactor` fails",
     "If a token-optimizer proxy breaks",
     "Missing MCP servers, disabled tools",
     "Do not install optimizers during a run unless",
@@ -73,7 +70,6 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "If you need a tool result byte-for-byte exact",
     "Presidio redaction replaces sensitive PII",
     "Redacted text must be manually re-assembled",
-    "Do not use `token-savior` `apply_patch`",
     "If you find `PRODEX_GEMINI_LIVE_EXTENDED`",
     "These optimizers are active only when",
     "Caveman communication style stays active",
@@ -128,7 +124,6 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "Never rehydrate cached optimizer state",
     "Do not substitute synthetic `MEMORY.md` summaries",
     "If the user changes their instructions",
-    "If the `sqz-mcp`",
     "Do not download `.whl` packages",
     "When the `prodex` runtime proxy is diagnosing itself",
     "For diagnostics, the runtime provides `prodex super check-optimizers`",
@@ -136,7 +131,6 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES: &[&str] = &[
     "When reviewing diffs of files managed by Prodex Super",
     "Prodex manages its own documentation",
     "For queries related to `presidio`",
-    "Only use `prodex-sqz` or `token-savior` tools",
     "The `rtk proxy` fallback allows you",
     "Use these capabilities only as directed",
     "If reads or basic config debugging",
@@ -197,7 +191,6 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS: &[&str] = &[
     "If the user requests an exact string",
     "If the user requests exact text",
     "bypass all optimizers",
-    "RTK, SQZ, and Token Savior",
     "native Codex MCP",
     "answer-only output",
     "command output only",
@@ -223,9 +216,6 @@ const GEMINI_INTERNAL_INSTRUCTION_LEAK_MARKERS: &[&str] = &[
     "token savings",
     "active profile path",
     "PRODEX_SUPER_OAI_DEBUG",
-    "PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS",
-    "XDG_CACHE_HOME/prodex-sqz",
-    "XDG_CACHE_HOME/prodex-token-savior",
     "optimizer <name> unavailable",
     "optimizer <name> failed",
     "prodex super --metrics",
@@ -266,9 +256,8 @@ pub(in super::super::super) fn runtime_gemini_internal_instruction_leak_text(tex
 fn runtime_gemini_optimizer_instruction_leak_text(lower: &str) -> bool {
     let mentions_optimizer_surface = lower.contains("optimizer")
         || lower.contains("rtk")
-        || lower.contains("prodex-sqz")
-        || lower.contains("token-savior")
-        || lower.contains("claw-compactor")
+        || lower.contains("codebase-memory")
+        || lower.contains("ponytail")
         || lower.contains("mcp server");
     let imperative_or_internal = lower.contains("do not ")
         || lower.contains("never ")

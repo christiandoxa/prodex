@@ -35,10 +35,6 @@ use anyhow::Result;
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-
-const RUNTIME_LOCAL_EMBEDDING_DIMENSIONS: usize = 1536;
 
 pub(super) struct RuntimeLocalRewriteUpstreamResult {
     pub(super) response: RuntimeLocalRewriteUpstreamResponse,
@@ -331,18 +327,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 copilot_context: None,
             })
         }
-        RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { embedding_model } => {
-            let parts = if path_without_query(&request.path_and_query).ends_with("/embeddings") {
-                runtime_local_embeddings_response_parts(request, embedding_model)
-            } else {
-                runtime_local_embeddings_only_rejection_parts()
-            };
-            Ok(RuntimeLocalRewriteUpstreamResult {
-                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                gemini_context: None,
-                copilot_context: None,
-            })
-        }
         RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys, .. } => {
             send_runtime_deepseek_upstream_request(request_id, request, shared, body, api_keys)
         }
@@ -352,144 +336,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         RuntimeLocalRewriteProviderOptions::Kiro { auth } => {
             send_runtime_kiro_upstream_request(request_id, request, shared, body, auth)
         }
-    }
-}
-
-fn runtime_local_embeddings_response_parts(
-    request: &RuntimeProxyRequest,
-    model: &str,
-) -> RuntimeHeapTrimmedBufferedResponseParts {
-    let body = match serde_json::from_slice::<Value>(&request.body)
-        .map_err(|err| format!("invalid JSON body: {err}"))
-        .and_then(|value| runtime_local_embedding_inputs(&value))
-    {
-        Ok(inputs) => {
-            let prompt_tokens = inputs
-                .iter()
-                .map(|input| input.split_whitespace().count() as u64)
-                .sum::<u64>();
-            let data = inputs
-                .iter()
-                .enumerate()
-                .map(|(index, input)| {
-                    json!({
-                        "object": "embedding",
-                        "index": index,
-                        "embedding": runtime_local_embedding_vector(input),
-                    })
-                })
-                .collect::<Vec<_>>();
-            json!({
-                "object": "list",
-                "data": data,
-                "model": model,
-                "usage": {
-                    "prompt_tokens": prompt_tokens,
-                    "total_tokens": prompt_tokens,
-                },
-            })
-        }
-        Err(message) => {
-            return runtime_local_rewrite_json_parts(
-                400,
-                json!({
-                    "error": {
-                        "message": message,
-                        "type": "invalid_request_error",
-                        "code": "invalid_request",
-                    }
-                }),
-            );
-        }
-    };
-    runtime_local_rewrite_json_parts(200, body)
-}
-
-fn runtime_local_embedding_inputs(body: &Value) -> std::result::Result<Vec<String>, String> {
-    let input = body
-        .get("input")
-        .ok_or_else(|| "missing required field: input".to_string())?;
-    let inputs = match input {
-        Value::String(value) => vec![value.clone()],
-        Value::Array(values) => {
-            if values.is_empty() {
-                return Err("input array cannot be empty".to_string());
-            }
-            values
-                .iter()
-                .map(|value| match value {
-                    Value::String(text) => Ok(text.clone()),
-                    Value::Array(tokens) => Ok(tokens
-                        .iter()
-                        .filter_map(|token| token.as_i64())
-                        .map(|token| token.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")),
-                    _ => Err("input array must contain strings or token arrays".to_string()),
-                })
-                .collect::<std::result::Result<Vec<_>, _>>()?
-        }
-        _ => return Err("input must be a string or array".to_string()),
-    };
-    if inputs.iter().any(|input| input.trim().is_empty()) {
-        return Err("input cannot contain empty strings".to_string());
-    }
-    Ok(inputs)
-}
-
-fn runtime_local_embedding_vector(input: &str) -> Vec<f32> {
-    let mut vector = vec![0.0_f32; RUNTIME_LOCAL_EMBEDDING_DIMENSIONS];
-    let mut token_count = 0_u32;
-    for token in input.split_whitespace() {
-        runtime_local_embedding_accumulate_token(token, &mut vector);
-        token_count += 1;
-    }
-    if token_count == 0 {
-        runtime_local_embedding_accumulate_token(input, &mut vector);
-    }
-    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
-    if norm > 0.0 {
-        for value in &mut vector {
-            *value /= norm;
-        }
-    }
-    vector
-}
-
-fn runtime_local_embedding_accumulate_token(token: &str, vector: &mut [f32]) {
-    let digest = Sha256::digest(token.as_bytes());
-    let mut index_bytes = [0_u8; 8];
-    index_bytes.copy_from_slice(&digest[0..8]);
-    let index = (u64::from_le_bytes(index_bytes) as usize) % vector.len();
-    let sign = if digest[8] & 1 == 0 { 1.0 } else { -1.0 };
-    vector[index] += sign;
-}
-
-fn runtime_local_embeddings_only_rejection_parts() -> RuntimeHeapTrimmedBufferedResponseParts {
-    runtime_local_rewrite_json_parts(
-        503,
-        json!({
-            "error": {
-                "message": "managed Mem0 memory is using Prodex local embeddings because no upstream API key was available; generation endpoints are disabled for this internal gateway",
-                "type": "service_unavailable",
-                "code": "local_embeddings_only",
-            }
-        }),
-    )
-}
-
-fn runtime_local_rewrite_json_parts(
-    status: u16,
-    body: Value,
-) -> RuntimeHeapTrimmedBufferedResponseParts {
-    let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
-    RuntimeHeapTrimmedBufferedResponseParts {
-        status,
-        headers: vec![(
-            "content-type".to_string(),
-            b"application/json; charset=utf-8".to_vec(),
-        )],
-        body: body.into(),
     }
 }
 

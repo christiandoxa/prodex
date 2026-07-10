@@ -112,16 +112,6 @@ pub(super) fn extract_provider_overrides_from_codex_args(args: &mut SuperArgs) {
                 args.presidio = false;
                 (1, true)
             }
-            "--mem0" => {
-                args.mem0 = true;
-                args.no_mem0 = false;
-                (1, true)
-            }
-            "--no-mem0" => {
-                args.no_mem0 = true;
-                args.mem0 = false;
-                (1, true)
-            }
             "--base-url" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
                 Some(val) => {
                     args.base_url = Some(val.to_string());

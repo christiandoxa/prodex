@@ -530,7 +530,7 @@ mod tests {
         let value = serde_json::json!({
             "tools": [{
                 "type": "mcp_tool",
-                "name": "mcp__prodex_sqz__compress",
+                "name": "mcp__codebase_memory_mcp__search_graph",
                 "parametersJsonSchema": {
                     "type": "object",
                     "properties": {
@@ -544,7 +544,10 @@ mod tests {
         let tools = runtime_provider_chat_tools_from_responses_request(&value).unwrap();
 
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["function"]["name"], "mcp__prodex_sqz__compress");
+        assert_eq!(
+            tools[0]["function"]["name"],
+            "mcp__codebase_memory_mcp__search_graph"
+        );
         assert_eq!(tools[0]["function"]["parameters"]["required"][0], "text");
     }
 
@@ -579,12 +582,12 @@ mod tests {
         let value = serde_json::json!({
             "tools": [{
                 "type": "namespace",
-                "name": "mcp__prodex_sqz",
-                "description": "SQZ tools",
+                "name": "mcp__codebase_memory_mcp",
+                "description": "Codebase graph tools",
                 "tools": [{
                     "type": "function",
-                    "name": "sqz_read_file",
-                    "description": "Read a file through SQZ.",
+                    "name": "get_code_snippet",
+                    "description": "Read an indexed code symbol.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -601,7 +604,7 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(
             tools[0]["function"]["name"],
-            "mcp__prodex_sqz__sqz_read_file"
+            "mcp__codebase_memory_mcp__get_code_snippet"
         );
         assert_eq!(tools[0]["function"]["parameters"]["required"][0], "path");
     }
@@ -693,11 +696,12 @@ mod tests {
 
     #[test]
     fn provider_tools_split_flat_mcp_namespace_names() {
-        let (namespace, name) =
-            runtime_provider_split_flat_namespace_tool_name("mcp__prodex_sqz__sqz_read_file");
+        let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(
+            "mcp__codebase_memory_mcp__get_code_snippet",
+        );
 
-        assert_eq!(namespace.as_deref(), Some("mcp__prodex_sqz"));
-        assert_eq!(name, "sqz_read_file");
+        assert_eq!(namespace.as_deref(), Some("mcp__codebase_memory_mcp"));
+        assert_eq!(name, "get_code_snippet");
         assert_eq!(
             runtime_provider_split_flat_namespace_tool_name("shell"),
             (None, "shell".to_string())
@@ -745,14 +749,17 @@ mod tests {
         let value = serde_json::json!({
             "tool_choice": {
                 "type": "mcp",
-                "server_label": "prodex_sqz",
-                "name": "sqz_read_file"
+                "server_label": "codebase_memory_mcp",
+                "name": "get_code_snippet"
             }
         });
 
         let choice = runtime_provider_chat_tool_choice_from_responses_request(&value, false)
             .expect("tool choice should translate");
 
-        assert_eq!(choice["function"]["name"], "mcp__prodex_sqz__sqz_read_file");
+        assert_eq!(
+            choice["function"]["name"],
+            "mcp__codebase_memory_mcp__get_code_snippet"
+        );
     }
 }

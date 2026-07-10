@@ -32,9 +32,9 @@ pub(in super::super) fn runtime_gemini_tool_intent_without_call(
         "exec_command",
         "write_stdin",
         "apply_patch",
-        "sqz_grep",
-        "sqz_read_file",
-        "sqz_list_dir",
+        "search_graph",
+        "get_code_snippet",
+        "trace_path",
         "read_mcp_resource",
         "list_mcp_resources",
         "tool_search",
@@ -124,17 +124,9 @@ pub(in super::super) fn runtime_gemini_unverified_success_claim(
 fn runtime_gemini_tool_text_has_version_lines(text: &str) -> bool {
     text.lines().any(|line| {
         let lower = line.trim().to_ascii_lowercase();
-        let starts_with_tool = [
-            "rtk ",
-            "sqz ",
-            "sqz-mcp ",
-            "token-savior ",
-            "claw-compactor ",
-            "prodex ",
-            "codex ",
-        ]
-        .iter()
-        .any(|prefix| lower.starts_with(prefix));
+        let starts_with_tool = ["rtk ", "codebase-memory-mcp ", "prodex ", "codex "]
+            .iter()
+            .any(|prefix| lower.starts_with(prefix));
         starts_with_tool && lower.chars().any(|ch| ch.is_ascii_digit())
     })
 }

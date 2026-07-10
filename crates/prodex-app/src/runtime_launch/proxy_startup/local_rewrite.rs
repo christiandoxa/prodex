@@ -745,7 +745,6 @@ pub(super) fn runtime_local_rewrite_remote_compact_unsupported_message(
         RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
         RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
         RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => "OpenAI",
-        RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => "Prodex local embeddings",
         RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
         RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => "DeepSeek",
         RuntimeLocalRewriteProviderOptions::Kiro { .. } => "Kiro",

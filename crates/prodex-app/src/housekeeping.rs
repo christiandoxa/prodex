@@ -105,11 +105,7 @@ pub(crate) use prodex_housekeeping::cleanup_runtime_proxy_latest_pointer;
 pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool {
     !matches!(
         command,
-        Commands::Cleanup(_)
-            | Commands::RuntimeBroker(_)
-            | Commands::Update(_)
-            | Commands::MemoryMcp(_)
-            | Commands::InspectMcp(_)
+        Commands::Cleanup(_) | Commands::RuntimeBroker(_) | Commands::Update(_)
     )
 }
 

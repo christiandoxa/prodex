@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[path = "runtime_args/super_tail_extract.rs"]
 mod super_tail_extract;
 
-pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "ponytail"];
+pub const SUPER_OPTIMIZER_PREFIXES: [&str; 1] = ["ponytail"];
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -113,9 +113,6 @@ pub struct CavemanArgs {
     /// External provider API key supplied by a higher-level launch shortcut.
     #[arg(skip)]
     pub external_provider_api_key: Option<String>,
-    /// Local memory backend selected by a higher-level launch shortcut.
-    #[arg(skip)]
-    pub memory_backend: SuperMemoryBackend,
     #[command(flatten)]
     pub codex_features: CodexRuntimeFeatureArgs,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
@@ -160,12 +157,6 @@ pub struct SuperArgs {
     /// Disable Presidio redaction and skip the interactive opt-in prompt.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
-    /// Enable prodex-memory with the managed Mem0 OSS Docker backend.
-    #[arg(long, conflicts_with = "no_mem0")]
-    pub mem0: bool,
-    /// Skip the Mem0 prompt and leave prodex-memory disabled for Super.
-    #[arg(long, conflicts_with = "mem0")]
-    pub no_mem0: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
     #[arg(
         long,
@@ -214,13 +205,6 @@ pub struct SuperArgs {
     pub codex_args: Vec<OsString>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SuperMemoryBackend {
-    #[default]
-    Sqlite,
-    Mem0,
-}
-
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperCliAgent {
     Codex,
@@ -235,16 +219,6 @@ pub struct GeminiCompatRefreshArgs {
     #[arg(long, value_name = "PATH")]
     pub codex_home: PathBuf,
 }
-
-#[derive(Args, Debug)]
-pub struct MemoryMcpArgs {
-    /// SQLite store path for local Prodex memory.
-    #[arg(long, value_name = "PATH")]
-    pub store: Option<PathBuf>,
-}
-
-#[derive(Args, Debug)]
-pub struct InspectMcpArgs {}
 
 #[derive(Args, Debug)]
 pub struct McpJsonlBridgeArgs {
@@ -361,26 +335,12 @@ impl SuperArgs {
         }
     }
 
-    pub fn mem0_preference(&self) -> Option<bool> {
-        if self.mem0 {
-            Some(true)
-        } else if self.no_mem0 {
-            Some(false)
-        } else {
-            None
-        }
-    }
-
     pub fn into_caveman_args(self) -> CavemanArgs {
-        self.into_caveman_args_with_choices(false, false)
+        self.into_caveman_args_with_presidio(false)
     }
 
     pub fn into_caveman_args_with_presidio(self, presidio: bool) -> CavemanArgs {
-        self.into_caveman_args_with_choices(presidio, false)
-    }
-
-    pub fn into_caveman_args_with_choices(self, presidio: bool, mem0: bool) -> CavemanArgs {
-        let (prefixed_presidio, prefixed_memory, passthrough_codex_args) =
+        let (prefixed_presidio, passthrough_codex_args) =
             extract_super_leading_launch_prefixes(self.codex_args);
         let presidio = presidio || prefixed_presidio;
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
@@ -421,9 +381,6 @@ impl SuperArgs {
         let mut codex_args = Vec::new();
         codex_args.push(OsString::from("rtk"));
         codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
-        if mem0 || prefixed_memory {
-            codex_args.push(OsString::from("mem"));
-        }
         if presidio {
             codex_args.push(OsString::from("presidio"));
         }
@@ -448,35 +405,27 @@ impl SuperArgs {
             super_optimizer_overlay: true,
             external_provider: self.provider,
             external_provider_api_key: self.api_key,
-            memory_backend: if mem0 {
-                SuperMemoryBackend::Mem0
-            } else {
-                SuperMemoryBackend::Sqlite
-            },
             codex_features: CodexRuntimeFeatureArgs::default(),
             codex_args,
         }
     }
 }
 
-fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, bool, Vec<OsString>) {
+fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, Vec<OsString>) {
     let mut presidio = false;
-    let mut memory = false;
     let mut consumed = 0;
     for arg in &args {
         let Some(prefix) = arg.to_str() else {
             break;
         };
         match prefix {
-            "rtk" | "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor"
-            | "ponytail" => {}
-            "mem" | "memory" => memory = true,
+            "rtk" | "ponytail" => {}
             "presidio" => presidio = true,
             _ => break,
         }
         consumed += 1;
     }
-    (presidio, memory, args.into_iter().skip(consumed).collect())
+    (presidio, args.into_iter().skip(consumed).collect())
 }
 
 impl RunArgs {
@@ -858,8 +807,6 @@ mod tests {
             no_proxy: false,
             presidio: false,
             no_presidio: false,
-            mem0: false,
-            no_mem0: false,
             url: None,
             cli: None,
             local_context_window: None,

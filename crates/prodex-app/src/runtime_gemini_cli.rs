@@ -243,8 +243,6 @@ mod tests {
             no_proxy: false,
             presidio: false,
             no_presidio: false,
-            mem0: false,
-            no_mem0: false,
             url: None,
             provider: None,
             cli: None,

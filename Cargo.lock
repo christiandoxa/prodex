@@ -2198,7 +2198,6 @@ dependencies = [
  "prodex-core",
  "prodex-housekeeping",
  "prodex-mcp-stdio",
- "prodex-memory",
  "prodex-presidio",
  "prodex-profile-export",
  "prodex-profile-identity",
@@ -2337,18 +2336,6 @@ version = "0.270.0"
 dependencies = [
  "anyhow",
  "serde_json",
-]
-
-[[package]]
-name = "prodex-memory"
-version = "0.270.0"
-dependencies = [
- "anyhow",
- "prodex-mcp-stdio",
- "reqwest",
- "rusqlite",
- "serde_json",
- "tiny_http",
 ]
 
 [[package]]

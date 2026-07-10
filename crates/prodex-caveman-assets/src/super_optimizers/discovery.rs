@@ -36,26 +36,14 @@ pub(super) fn managed_optimizer_roots() -> Vec<PathBuf> {
 pub(super) fn managed_optimizer_command_candidates(root: &Path, command: &str) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     push_command_candidate(&mut candidates, root.join(command));
-    match command {
-        "sqz-mcp" | "sqz" => {
-            push_sqz_workspace_candidates(&mut candidates, root, command);
-        }
-        "token-savior" => {
-            push_python_tool_candidates(&mut candidates, root, "token-savior", command);
-        }
-        "claw-compactor" => {
-            push_python_tool_candidates(&mut candidates, root, "claw-compactor", command);
-        }
-        "codebase-memory-mcp" => {
-            let checkout = root.join("codebase-memory-mcp");
-            push_command_candidate(&mut candidates, checkout.join(command));
-            push_command_candidate(
-                &mut candidates,
-                checkout.join("build").join("c").join(command),
-            );
-            push_command_candidate(&mut candidates, checkout.join("bin").join(command));
-        }
-        _ => {}
+    if command == "codebase-memory-mcp" {
+        let checkout = root.join("codebase-memory-mcp");
+        push_command_candidate(&mut candidates, checkout.join(command));
+        push_command_candidate(
+            &mut candidates,
+            checkout.join("build").join("c").join(command),
+        );
+        push_command_candidate(&mut candidates, checkout.join("bin").join(command));
     }
     candidates
 }
@@ -70,32 +58,6 @@ fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
     if !paths.iter().any(|existing| existing == &path) {
         paths.push(path);
     }
-}
-
-fn push_sqz_workspace_candidates(candidates: &mut Vec<PathBuf>, root: &Path, command: &str) {
-    let checkout = root.join("sqz");
-    push_command_candidate(candidates, checkout.join(command));
-    push_command_candidate(
-        candidates,
-        checkout.join("target").join("release").join(command),
-    );
-    push_command_candidate(
-        candidates,
-        checkout.join("target").join("debug").join(command),
-    );
-}
-
-fn push_python_tool_candidates(
-    candidates: &mut Vec<PathBuf>,
-    root: &Path,
-    checkout_name: &str,
-    command: &str,
-) {
-    let checkout = root.join(checkout_name);
-    push_command_candidate(candidates, checkout.join(".venv").join("bin").join(command));
-    push_command_candidate(candidates, checkout.join("venv").join("bin").join(command));
-    push_command_candidate(candidates, checkout.join("bin").join(command));
-    push_command_candidate(candidates, checkout.join(command));
 }
 
 fn push_command_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {

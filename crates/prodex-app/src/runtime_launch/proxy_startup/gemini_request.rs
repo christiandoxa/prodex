@@ -83,7 +83,7 @@ If a publish workflow fails while waiting for CI success, read that step log, fo
 pub(super) const PRODEX_GEMINI_TOOL_DISCIPLINE_INSTRUCTION: &str = "\
 Tool discipline for Codex parity: do not install, upgrade, curl, clone, or browse for tooling unless the user explicitly asked for that action or local evidence proves it is required. \
 When updating local tools, first inspect the actual executable path and local checkout/config, then use the installer or package manager that owns that path. \
-For optional-tool update workflows, inspect OWNER/install files with normal shell or file tools; do not use SQZ, Token Savior, Claw Compactor, or other optimizer MCP/tools for local file reads unless the user explicitly asks for optimizer diagnostics. \
+For optional-tool update workflows, inspect OWNER/install files with normal shell or file tools; do not use optimizer MCP tools for local file reads unless the user explicitly asks for optimizer diagnostics. \
 If two commands fail for the same install/update target, stop trying random package names or URLs and switch to local source/config inspection. \
 Do not narrate repeated wait/poll steps; if a command is still running, wait for it with the follow-up tool and report only new information. \
 Final success, latest-version, up-to-date, or no-blocker claims must be backed by an explicit verification command result observed after the relevant action; otherwise report the unresolved uncertainty.";
