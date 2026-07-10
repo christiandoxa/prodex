@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.271.0 - 2026-07-10
+
+### Runtime
+
+- Harden gateway and proxy boundaries (`1fc05d4`)
+
+### CLI
+
+- Simplify optimizer candidate lookup (`11ebc21`)
+
 ## 0.270.0 - 2026-07-10
 
 ### CLI
@@ -75,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Rotate deactivated workspace profiles (`6a4d2be`)
-
-## 0.259.0 - 2026-07-08
-
-### Runtime
-
-- Honor cached model context windows (`4064c8f`)

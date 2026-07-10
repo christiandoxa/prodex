@@ -1,6 +1,6 @@
 {
   "name": "@christiandoxa/prodex",
-  "version": "0.270.0",
+  "version": "0.271.0",
   "description": "Multi-provider Codex wrapper with OpenAI quota-aware routing and Claude Code support",
   "license": "Apache-2.0",
   "bin": {
@@ -13,12 +13,12 @@
     "@openai/codex": "latest"
   },
   "optionalDependencies": {
-    "@christiandoxa/prodex-linux-x64": "0.270.0",
-    "@christiandoxa/prodex-linux-arm64": "0.270.0",
-    "@christiandoxa/prodex-darwin-x64": "0.270.0",
-    "@christiandoxa/prodex-darwin-arm64": "0.270.0",
-    "@christiandoxa/prodex-win32-x64": "0.270.0",
-    "@christiandoxa/prodex-win32-arm64": "0.270.0",
+    "@christiandoxa/prodex-linux-x64": "0.271.0",
+    "@christiandoxa/prodex-linux-arm64": "0.271.0",
+    "@christiandoxa/prodex-darwin-x64": "0.271.0",
+    "@christiandoxa/prodex-darwin-arm64": "0.271.0",
+    "@christiandoxa/prodex-win32-x64": "0.271.0",
+    "@christiandoxa/prodex-win32-arm64": "0.271.0",
     "@openai/codex-linux-x64": "npm:@openai/codex@linux-x64",
     "@openai/codex-linux-arm64": "npm:@openai/codex@linux-arm64",
     "@openai/codex-darwin-x64": "npm:@openai/codex@darwin-x64",
