@@ -21,6 +21,10 @@ Add deployment-level configuration for the accounting concurrency gate:
 - `PRODEX_GATEWAY_REDIS_URL` is provided through ExternalSecret alongside the
   PostgreSQL URL.
 
+These topology environment values are exact runtime inputs. Replica count and
+gate booleans must be non-empty and whitespace-free; see
+`docs/adr/1032-gateway-accounting-topology-env-exact-boundary.md`.
+
 The Kubernetes baseline enables the gate with three gateway replicas. The local
 Compose environment example keeps the gate disabled by default and documents
 that enabling it requires shared PostgreSQL, Redis, and at least two replicas.

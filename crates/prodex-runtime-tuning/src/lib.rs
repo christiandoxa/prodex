@@ -14,10 +14,7 @@ pub fn timeout_override_ms_with_policy(
     policy_value: Option<u64>,
     default_ms: u64,
 ) -> u64 {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
+    env_positive_u64(env_key)
         .or(policy_value.filter(|value| *value > 0))
         .unwrap_or(default_ms)
 }
@@ -27,10 +24,7 @@ pub fn percent_override_with_policy(
     policy_value: Option<i64>,
     default_value: i64,
 ) -> i64 {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.parse::<i64>().ok())
-        .filter(|value| *value > 0)
+    env_positive_i64(env_key)
         .or(policy_value.filter(|value| *value > 0))
         .unwrap_or(default_value)
 }
@@ -40,10 +34,7 @@ pub fn usize_override_with_policy(
     policy_value: Option<usize>,
     default_value: usize,
 ) -> usize {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .filter(|value| *value > 0)
+    env_usize(env_key, false)
         .or(policy_value.filter(|value| *value > 0))
         .unwrap_or(default_value)
 }
@@ -53,11 +44,60 @@ pub fn usize_override_with_policy_allow_zero(
     policy_value: Option<usize>,
     default_value: usize,
 ) -> usize {
-    env::var(env_key)
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
+    env_usize(env_key, true)
         .or(policy_value)
         .unwrap_or(default_value)
+}
+
+fn env_positive_u64(env_key: &str) -> Option<u64> {
+    let value = env::var(env_key).ok()?;
+    if value.is_empty() {
+        panic!("{env_key} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        panic!("{env_key} must not contain whitespace");
+    }
+    let parsed = value
+        .parse::<u64>()
+        .unwrap_or_else(|_| panic!("{env_key} must be an unsigned integer"));
+    if parsed == 0 {
+        panic!("{env_key} must be greater than zero");
+    }
+    Some(parsed)
+}
+
+fn env_positive_i64(env_key: &str) -> Option<i64> {
+    let value = env::var(env_key).ok()?;
+    if value.is_empty() {
+        panic!("{env_key} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        panic!("{env_key} must not contain whitespace");
+    }
+    let parsed = value
+        .parse::<i64>()
+        .unwrap_or_else(|_| panic!("{env_key} must be a positive integer"));
+    if parsed <= 0 {
+        panic!("{env_key} must be greater than zero");
+    }
+    Some(parsed)
+}
+
+fn env_usize(env_key: &str, allow_zero: bool) -> Option<usize> {
+    let value = env::var(env_key).ok()?;
+    if value.is_empty() {
+        panic!("{env_key} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        panic!("{env_key} must not contain whitespace");
+    }
+    let parsed = value
+        .parse::<usize>()
+        .unwrap_or_else(|_| panic!("{env_key} must be an unsigned integer"));
+    if !allow_zero && parsed == 0 {
+        panic!("{env_key} must be greater than zero");
+    }
+    Some(parsed)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

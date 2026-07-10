@@ -29,9 +29,10 @@ Add `prodex-storage-redis` as a client-free planning crate. It owns:
 - helpers/tests asserting scripts avoid JSON, `LRANGE`, `LSET`, `RPUSH`,
   `DEL`, and whole-list rewrite patterns.
 
-Add `scripts/ci/storage-redis-boundary-guard.mjs` and include it in preflight.
-The guard forbids Redis clients, HTTP/runtime/storage drivers, `serde_json`, and
-whole-list rewrite commands inside the boundary crate.
+Add `scripts/ci/storage-redis-boundary-guard.mjs` and include its self-test plus
+workspace scan in preflight. The guard forbids Redis clients,
+HTTP/runtime/storage drivers, `serde_json`, and whole-list rewrite commands
+inside the boundary crate.
 
 ## Consequences
 

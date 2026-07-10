@@ -26,8 +26,9 @@ introducing a concrete async server adapter. It owns:
 - preservation of Codex metadata headers;
 - stripping of hop-by-hop and selected-profile auth headers.
 
-Add `scripts/ci/gateway-http-boundary-guard.mjs` and wire it into preflight. The
-guard keeps this crate free of Axum, Hyper, Tower, Tokio, reqwest, storage
+Add `scripts/ci/gateway-http-boundary-guard.mjs` and wire its self-test plus
+workspace scan into preflight. The guard keeps this crate free of Axum, Hyper,
+Tower, Tokio, reqwest, storage
 drivers, provider SDKs, filesystem/network/process access, and transport
 implementations. Concrete async adapters can depend on this crate later.
 

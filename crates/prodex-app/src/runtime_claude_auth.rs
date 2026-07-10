@@ -3,6 +3,7 @@ use anyhow::{Context, Result, bail};
 use dirs::home_dir;
 use serde::Deserialize;
 use std::env;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
 const CLAUDE_OAUTH_EXPIRY_SKEW_MS: i64 = 60_000;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ClaudeOAuthSecret {
     pub(crate) access_token: String,
     pub(crate) expires_at: Option<i64>,
@@ -18,14 +19,41 @@ pub(crate) struct ClaudeOAuthSecret {
     pub(crate) auth_method: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+impl fmt::Debug for ClaudeOAuthSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClaudeOAuthSecret")
+            .field("access_token", &"<redacted>")
+            .field("expires_at", &self.expires_at.map(|_| "<redacted>"))
+            .field("account", &self.account.as_ref().map(|_| "<redacted>"))
+            .field(
+                "auth_method",
+                &self.auth_method.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct ClaudeAuthStatus {
     pub(crate) logged_in: bool,
     pub(crate) auth_method: Option<String>,
     pub(crate) account: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+impl fmt::Debug for ClaudeAuthStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClaudeAuthStatus")
+            .field("logged_in", &self.logged_in)
+            .field(
+                "auth_method",
+                &self.auth_method.as_ref().map(|_| "<redacted>"),
+            )
+            .field("account", &self.account.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+#[derive(Deserialize)]
 struct ClaudeCredentialsFile {
     #[serde(rename = "claudeAiOauth")]
     claude_ai_oauth: Option<ClaudeCredentialsToken>,
@@ -39,7 +67,28 @@ struct ClaudeCredentialsFile {
     email: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl fmt::Debug for ClaudeCredentialsFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClaudeCredentialsFile")
+            .field(
+                "claude_ai_oauth",
+                &self.claude_ai_oauth.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("expires_at", &self.expires_at.map(|_| "<redacted>"))
+            .field(
+                "subscription_type",
+                &self.subscription_type.as_ref().map(|_| "<redacted>"),
+            )
+            .field("email", &self.email.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize)]
 struct ClaudeCredentialsToken {
     #[serde(rename = "accessToken")]
     access_token: String,
@@ -49,6 +98,20 @@ struct ClaudeCredentialsToken {
     subscription_type: Option<String>,
     #[serde(default)]
     email: Option<String>,
+}
+
+impl fmt::Debug for ClaudeCredentialsToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClaudeCredentialsToken")
+            .field("access_token", &"<redacted>")
+            .field("expires_at", &self.expires_at.map(|_| "<redacted>"))
+            .field(
+                "subscription_type",
+                &self.subscription_type.as_ref().map(|_| "<redacted>"),
+            )
+            .field("email", &self.email.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 pub(crate) fn claude_config_dir_from_env_or_default() -> Result<PathBuf> {
@@ -318,6 +381,61 @@ mod tests {
         assert!(err.to_string().contains("failed to read"));
         assert!(format!("{err:#}").contains("regular secret file"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn claude_oauth_debug_output_redacts_sensitive_fields() {
+        let secret = ClaudeOAuthSecret {
+            access_token: "claude-access-token-secret".to_string(),
+            expires_at: Some(1_900_000_000_000),
+            account: Some("alice@example.test".to_string()),
+            auth_method: Some("claude-ai-oauth:max-secret".to_string()),
+        };
+        let status = ClaudeAuthStatus {
+            logged_in: true,
+            auth_method: Some("claude-ai-oauth:pro-secret".to_string()),
+            account: Some("bob@example.test".to_string()),
+        };
+        let token = ClaudeCredentialsToken {
+            access_token: "claude-nested-token-secret".to_string(),
+            expires_at: Some(1_900_000_000_001),
+            subscription_type: Some("max-secret".to_string()),
+            email: Some("carol@example.test".to_string()),
+        };
+        let credentials = ClaudeCredentialsFile {
+            claude_ai_oauth: Some(token.clone()),
+            access_token: Some("claude-top-token-secret".to_string()),
+            expires_at: Some(1_900_000_000_002),
+            subscription_type: Some("team-secret".to_string()),
+            email: Some("dave@example.test".to_string()),
+        };
+
+        for rendered in [
+            format!("{secret:?}"),
+            format!("{status:?}"),
+            format!("{token:?}"),
+            format!("{credentials:?}"),
+        ] {
+            assert!(rendered.contains("<redacted>"), "{rendered}");
+            for raw in [
+                "claude-access-token-secret",
+                "1900000000000",
+                "alice@example.test",
+                "claude-ai-oauth:max-secret",
+                "claude-ai-oauth:pro-secret",
+                "bob@example.test",
+                "claude-nested-token-secret",
+                "1900000000001",
+                "max-secret",
+                "carol@example.test",
+                "claude-top-token-secret",
+                "1900000000002",
+                "team-secret",
+                "dave@example.test",
+            ] {
+                assert!(!rendered.contains(raw), "{rendered}");
+            }
+        }
     }
 
     #[test]

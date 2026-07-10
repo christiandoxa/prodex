@@ -51,16 +51,44 @@ while moving legacy adapter code behind enterprise boundaries.
   SCIM users exactly instead of trim-normalizing into a provisioned identity.
   Gateway OIDC issuer and JWKS URLs are exact HTTPS configuration boundaries
   instead of trim-normalized identity-provider endpoints, and OIDC audience
-  values are exact identity-provider audience selectors.
+  values are exact identity-provider audience selectors. Malformed or partial
+  direct OIDC launch settings now fail closed instead of silently disabling OIDC
+  or dropping configured JWKS metadata. When gateway OIDC is configured, OIDC
+  cache/refresh runtime env overrides now reject empty, whitespace-bearing,
+  non-integer, or disallowed zero values during launch instead of silently using
+  default cache timing.
   Gateway SSO header names and OIDC claim names are exact identity selectors
-  instead of trim-normalized principal, role, tenant, or scope sources.
+  instead of trim-normalized principal, role, tenant, or scope sources, and
+  malformed configured selectors fail closed during runtime launch instead of
+  falling back to defaults.
   The gateway admin dashboard preserves exact key,
   SCIM principal, model, and scope identifier inputs so the server-side
   validation boundary is not hidden by client-side trimming. The OpenAPI
   contract also advertises the exact identifier schema for key, model, SCIM
-  principal, key-prefix, and scope fields. Redis key-store loading also treats
+  principal, key-prefix, and scope fields. Stored virtual-key token hashes and
+  names loaded from compatibility key stores now also use exact validation
+  instead of trim-normalizing corrupt persisted credential/key fields into
+  active runtime keys. Stored virtual-key governance scope identifiers and model
+  allow-list entries loaded from compatibility key stores also fail closed when
+  null or whitespace-bearing instead of becoming active tenant, team, project,
+  user, budget, or model scopes. Persisted SCIM
+  users used for SSO/OIDC authorization now also require exact principal, role,
+  governance, and key-prefix scope fields before contributing auth state, and
+  active SCIM store loads omit malformed persisted authorization rows before
+  exposing admin state. Redis key-store loading also treats
   persisted key, model, SCIM principal, key-prefix, role, and scope identifiers
-  exactly instead of trim-normalizing hash fields into active runtime state.
+  exactly instead of trim-normalizing hash fields into active runtime state, and
+  present file, SQL, and Redis key-store budget, rate-limit, and timestamp
+  numeric fields now fail closed when malformed or negative instead of
+  disappearing as `None` or `0`. Present file key-store `disabled` fields now
+  fail closed unless they are exact JSON booleans, and SQLite/Redis key-store
+  boolean fields such as `disabled` and `active` also fail closed unless they
+  are exact `0` or `1`, so malformed disabled flags cannot silently re-enable a
+  virtual key.
+  Present SQL and Redis
+  key-store JSON arrays for model allow-lists and SCIM/admin key-prefix scopes
+  now also fail closed when malformed instead of silently becoming unrestricted
+  empty policy.
   SQL and Redis key-store loaders share an exact parser for persisted model and
   key-prefix identifier arrays. Configured gateway admin tokens now fail
   closed: missing roles resolve to Viewer and unknown roles are rejected instead
@@ -73,40 +101,88 @@ while moving legacy adapter code behind enterprise boundaries.
   Gateway virtual-key and guardrail model allow-list entries are exact
   non-empty model IDs instead of trim-normalized policy values. Gateway route
   alias names, model IDs, per-model metric IDs, and route strategy names are
-  also exact routing policy inputs. Gateway provider selectors are exact
-  routing policy inputs instead of trim-normalized adapter names. Gateway base
-  URLs are exact upstream routing endpoints instead of trim-normalized HTTP
-  targets. Gateway listen addresses are exact bind-address inputs instead of
-  trim-normalized network exposure settings. Configured gateway admin token
-  names and virtual key names also match exactly instead of being
-  trim-normalized into credential identifiers. Gateway
+  also exact fail-closed routing policy inputs; malformed direct launch route
+  aliases no longer become empty aliases or silently lose target models and
+  metric rows. Gateway provider selectors are exact
+  fail-closed routing policy inputs instead of trim-normalized adapter names or
+  unsupported names that silently fall back to the OpenAI-compatible default.
+  Gateway base URLs are exact upstream routing endpoints instead of
+  trim-normalized HTTP targets, and explicitly empty direct inputs fail closed
+  instead of falling back to provider or OpenAI defaults. Gateway listen
+  addresses are exact bind-address inputs instead of trim-normalized network
+  exposure settings. Configured gateway admin token
+  names and virtual key names also fail closed as exact identifiers instead of
+  being trim-normalized or mapped to empty credential identifiers. Gateway
   credential environment references are exact secret-reference inputs instead of
-  trim-normalized env var names, including SSO proxy-token and guardrail webhook
-  bearer-token references plus the observability HTTP sink bearer-token
-  reference. Gateway guardrail webhook phases are exact trigger selectors
-  instead of trim-normalized request/response phase values, and guardrail
-  keyword text is preserved exactly instead of trim-normalized before matching.
+  trim-normalized env var names, including admin-token, SSO proxy-token,
+  guardrail webhook bearer-token, and observability HTTP sink bearer-token
+  references; malformed, missing, or empty configured admin-token env references
+  now fail closed during runtime launch instead of silently dropping a
+  configured control-plane credential. Malformed configured SSO proxy-token env
+  references also fail closed during runtime launch, and malformed, missing, or
+  empty observability bearer env references no longer silently disable
+  configured HTTP sink authentication. Configured gateway bearer secret values
+  now also reject empty or whitespace-bearing admin-token, virtual-key, SSO
+  proxy-token, observability HTTP bearer-token, and guardrail webhook
+  bearer-token values instead of trim-normalizing them. Gateway root-token
+  values now reject explicit empty or whitespace-bearing `--auth-token` and
+  `PRODEX_GATEWAY_TOKEN` inputs instead of trim-normalizing bearer secrets.
+  Gateway state URL values now reject explicit empty or whitespace-bearing
+  PostgreSQL/Redis connection URLs instead of trim-normalizing them or treating
+  blank shared Redis coordination as absent. OpenAI-compatible provider API-key
+  inputs also fail closed when explicitly empty, and singular key inputs reject
+  whitespace-bearing values instead of trim-normalizing upstream credentials;
+  the Mem0 memory gateway now applies the same boundary to OpenAI env keys and
+  selected-profile `auth.json` keys.
+  Anthropic, Copilot, DeepSeek, and Gemini provider API-key inputs now use the
+  same fail-closed empty-value boundary for CLI keys, plural env vars, and
+  single-key env vars, and singular external provider key values now reject
+  whitespace-bearing credentials instead of trim-normalizing them. DeepSeek beta
+  base URL overrides are exact upstream routing endpoints and now reject empty,
+  whitespace-bearing, or non-http(s) direct values instead of trim-normalizing
+  them or falling back to the default beta endpoint silently. DeepSeek web
+  search mode overrides are exact feature-mode selectors and now reject empty,
+  whitespace-bearing, or unsupported configured values instead of silently
+  falling back to the default mode. DeepSeek strict-tools overrides are exact
+  boolean selectors and now reject empty, whitespace-bearing, unsupported, or
+  non-boolean configured values instead of silently disabling strict tool
+  handling. Local, DeepSeek, Gemini, Anthropic, and Copilot provider catalog
+  numeric overrides now reject empty, whitespace-bearing, non-numeric, zero, or
+  one values instead of silently falling back to default capability metadata.
+  Gateway guardrail webhook phases are exact trigger selectors instead of
+  trim-normalized request/response phase values, and guardrail keyword text is
+  preserved exactly instead of trim-normalized before matching.
   Gateway guardrail webhook URLs are exact external security-service routing
-  targets instead of trim-normalized URL values.
-  Gateway observability HTTP schema names are exact telemetry format selectors
-  instead of trim-normalized schema values, and observability sink names are
-  exact exporter selectors instead of trim-normalized sink labels. Gateway
-  observability call-id header names are exact propagation header selectors.
+  targets instead of trim-normalized URL values, and runtime launch enforces
+  that boundary even when policy settings were constructed outside the file
+  validator.
+  Gateway observability HTTP schema names are exact fail-closed telemetry
+  format selectors instead of trim-normalized or unsupported schema values, and
+  observability sink names are exact fail-closed exporter selectors instead of
+  trim-normalized or silently dropped sink labels. Gateway observability call-id
+  header names are exact propagation header selectors.
   Gateway observability HTTP endpoint URLs are also exact telemetry routing
-  targets instead of trim-normalized export endpoints. Gateway observability
-  JSONL paths are preserved as exact filesystem paths rather than
-  trim-normalized export file names.
+  targets instead of trim-normalized export endpoints, and runtime launch now
+  enforces the same no-whitespace, host-present, no-userinfo boundary used by
+  policy validation. Gateway observability JSONL paths are preserved as exact
+  filesystem paths rather than trim-normalized export file names, and blank-only
+  direct settings now fail closed instead of disabling the JSONL sink silently.
   Gateway state backend URL environment references are also exact non-empty
   values instead of trim-normalized PostgreSQL or Redis URL refs. Gateway
   SQLite state paths are preserved as exact filesystem paths instead of
-  trim-normalized state database names. Runtime policy path values, including
-  `runtime.log_dir`, are also preserved as exact filesystem paths. Domain
+  trim-normalized state database names, and blank-only direct settings now fail
+  closed instead of falling back to the default SQLite state file silently.
+  Runtime policy path values, including `runtime.log_dir`, are also preserved
+  as exact filesystem paths. Domain
   security debug output redacts principal and tenant identifiers while
   preserving authorization shape. Role-mapper debug output redacts configured
   identity-provider claim mappings. Legacy gateway admin composition now also
   delegates `Idempotency-Key` and `If-Match` parsing to the shared
   `prodex-gateway-http` boundary, so duplicate governance headers fail closed
-  instead of the adapter selecting one value ad hoc.
+  instead of the adapter selecting one value ad hoc. The mounted admin adapter
+  now also routes non-empty idempotency and precondition header validation
+  through the shared `prodex-application` control-plane HTTP planners before the
+  legacy execution branches run.
 - **ADRs:** `docs/adr/0002-gateway-admin-auth-boundary.md`,
   `docs/adr/0081-authn-boundary-crate.md`,
   `docs/adr/0082-auth-boundary-guard.md`,
@@ -129,11 +205,23 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0682-gateway-route-alias-model-identifiers-exact.md`,
   `docs/adr/0683-gateway-route-alias-names-exact.md`,
   `docs/adr/0684-gateway-configured-credential-names-exact.md`,
+  `docs/adr/1044-stored-virtual-key-name-exact-load.md`,
+  `docs/adr/1045-stored-virtual-key-scope-exact-load.md`,
+  `docs/adr/1046-stored-scim-authz-fields-exact-load.md`,
+  `docs/adr/1049-active-scim-store-exact-load.md`,
+  `docs/adr/1050-stored-virtual-key-model-scope-exact-load.md`,
+  `docs/adr/1051-stored-virtual-key-token-hash-exact-load.md`,
+  `docs/adr/1052-file-key-store-disabled-null-fail-closed.md`,
+  `docs/adr/1053-file-key-store-numeric-null-fail-closed.md`,
+  `docs/adr/1054-file-key-store-scope-null-fail-closed.md`,
   `docs/adr/0685-gateway-credential-env-refs-exact.md`,
   `docs/adr/0686-gateway-sso-proxy-token-env-ref-exact.md`,
   `docs/adr/0687-gateway-guardrail-webhook-env-ref-exact.md`,
   `docs/adr/0688-gateway-observability-env-ref-exact.md`,
   `docs/adr/0689-gateway-state-url-env-refs-exact.md`,
+  `docs/adr/1031-gateway-state-url-values-exact-boundary.md`,
+  `docs/adr/1032-gateway-accounting-topology-env-exact-boundary.md`,
+  `docs/adr/1033-gateway-configured-secret-values-exact-boundary.md`,
   `docs/adr/0697-gateway-route-strategy-exact-boundary.md`,
   `docs/adr/0698-guardrail-webhook-phase-exact-boundary.md`,
   `docs/adr/0699-observability-http-schema-exact-boundary.md`,
@@ -150,16 +238,113 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0710-gateway-base-url-exact-boundary.md`, and
   `docs/adr/0711-gateway-listen-addr-exact-boundary.md`,
   `docs/adr/0712-runtime-policy-path-exact-boundary.md`, and
+  `docs/adr/1038-redis-key-store-numeric-field-fail-closed.md`, and
+  `docs/adr/1039-redis-key-store-boolean-field-fail-closed.md`, and
+  `docs/adr/1040-redis-key-store-json-array-fail-closed.md`, and
+  `docs/adr/1041-sql-key-store-json-array-fail-closed.md`, and
+  `docs/adr/1042-sqlite-key-store-boolean-field-fail-closed.md`, and
+  `docs/adr/1043-sql-key-store-numeric-field-fail-closed.md`, and
   `docs/adr/0822-domain-security-principal-debug-redaction.md`, and
   `docs/adr/0823-domain-security-role-mapper-debug-redaction.md`.
 - **Remaining gap:** Replace the remaining hand-written legacy admin execution
   branches with application/control-plane use-case calls before enabling
   multi-tenant production mode. The dedicated `prodex-control-plane` binary can
-  now exercise control-plane HTTP route and idempotency planning for those
+  now exercise control-plane HTTP route, audit, audit-correlation, audit span, idempotency, precondition, and page-request planning for those
   paths through the shared application and gateway-http boundaries instead of
-  duplicating that logic in ad hoc scripts. Legacy mounted gateway admin ledger
-  reads now also delegate pagination query validation to the shared
-  `prodex-gateway-http` boundary, shrinking one more adapter-local branch.
+  duplicating that logic in ad hoc scripts. The dedicated
+  `prodex-control-plane` binary now also carries focused one-shot route-planning
+  coverage for mounted SCIM read/create/update/delete control-plane HTTP paths, so
+  those lifecycle routes stay pinned to the shared HTTP planner alongside the
+  compatibility adapter regressions, and SCIM wrong-method plus missing-idempotency
+  failures now also stay pinned to the shared stable error envelopes while the
+  remaining SCIM user-lifecycle selectors now also carry exact `scim_user_*`
+  operation names. The dedicated `prodex-control-plane`
+  binary now also pins role-binding grant/revoke route planning through the
+  same shared HTTP/application boundaries, and role-binding wrong-method plus
+  missing-idempotency failures now also stay pinned to the shared stable error
+  envelopes. The dedicated `prodex-control-plane`
+  binary also pins service-identity create and provider-credential rotate route
+  planning through those same shared boundaries, and service-identity plus provider-credential
+  wrong-method plus missing-idempotency failures now also stay pinned to the
+  shared stable error envelopes while those remaining shared selectors now also
+  carry operation-specific names and exact failure names, including explicit
+  missing-idempotency-key helpers. The dedicated `prodex-control-plane` binary
+  also pins tenant create/update and user-invite
+  route planning through the same shared boundaries, and tenant wrong-method
+  plus missing-idempotency failures now also stay pinned to the shared stable
+  error envelopes while those remaining shared selectors now also carry
+  operation-specific names and exact failure names, and user-invite wrong-method plus missing-idempotency
+  failures now also stay pinned there while those helper selectors now also
+  carry exact failure names. The dedicated
+  `prodex-control-plane` binary now also pins policy-publish route planning
+  through the same shared boundaries, and policy-publish wrong-method plus
+  missing-idempotency failures now also stay pinned to the shared stable error
+  envelopes while those helper selectors now also carry exact failure names.
+  The dedicated `prodex-control-plane` binary now also pins
+  audit-retention-purge route planning plus wrong-method and missing-idempotency
+  failures to those same shared stable envelopes while those helper selectors
+  now also carry exact failure names. The dedicated `prodex-control-plane`
+  binary now also pins audit-export route planning and wrong-method route
+  rejection to those same shared boundaries while those helper selectors now
+  also carry exact failure names. The dedicated
+  `prodex-control-plane` binary now also pins virtual-key read route planning
+  and wrong-method rejection alongside the existing create/rotate-secret
+  coverage, and virtual-key delete now also stays pinned with its stable
+  missing-idempotency envelope. The dedicated `prodex-control-plane` binary
+  now also pins gateway-admin read route planning and wrong-method rejection to
+  those same shared boundaries. The dedicated `prodex-control-plane` binary now
+  also pins budget-update route planning and wrong-method rejection in a
+  dedicated one-shot family instead of relying only on the shared generic
+  audit/idempotency/precondition boundary tests, and the remaining
+  budget-update shared helpers now also carry exact audit-required,
+  trace-context, and wrong-method failure names.
+  The dedicated
+  `prodex-control-plane` binary now also pins billing-read route planning and
+  wrong-method rejection in a dedicated one-shot family instead of relying only
+  on the shared page-request boundary tests, and the remaining billing-read
+  shared page-request selectors now also carry exact query/cursor names while
+  the billing-read wrong-method helper now also carries the exact failure name. The dedicated
+  `prodex-control-plane` binary now also names configuration-publish route
+  planning, wrong-method rejection, and missing-idempotency failure as their
+  own dedicated one-shot family instead of leaving that evidence under generic
+  test wrappers, and the wrong-method helper now also carries the exact
+  failure name. The dedicated
+  `prodex-control-plane` binary now also pins virtual-key update route
+  planning and wrong-method rejection in a dedicated one-shot family instead of
+  relying only on the shared precondition boundary tests, and the remaining
+  budget-update / virtual-key-update / virtual-key-create shared boundary
+  selectors now also carry operation-specific names instead of generic
+  wrappers while the virtual-key-update helpers now also carry exact
+  precondition/entity-tag/route-invalid names. The dedicated
+  `prodex-control-plane` binary also carries focused one-shot route-planning
+  coverage for mounted virtual-key create and rotate-secret control-plane HTTP
+  paths, and virtual-key wrong-method plus missing-idempotency failures now
+  also stay pinned to the shared stable error envelopes even before the
+  long-lived admin adapter is fully retired. The dedicated
+  `prodex-control-plane` binary now also uses the shared
+  `prodex-application` route-error response planner for one-shot HTTP planning
+  failures instead of adapting `prodex-gateway-http` route errors directly at
+  the composition root. Mounted admin route rejection now also uses the shared
+  `prodex-application` route-error response planner rather than adapting
+  `prodex-gateway-http` errors directly in the compatibility adapter. Legacy
+  mounted gateway admin write-role rejection now also delegates allow/deny
+  planning through `plan_application_control_plane` instead of branching on
+  `RuntimeGatewayAdminRole::can_write()` in the adapter directly. Legacy
+  mounted gateway admin virtual-key create and rotate-secret paths now also
+  preflight through `plan_application_virtual_key_lifecycle` on
+  SQLite/Postgres compatibility backends before mutating local state, while
+  file/Redis compatibility behavior remains unchanged. Focused compatibility
+  regressions now pin both SQLite and Postgres rotate-secret behavior for that
+  mounted admin path. Legacy
+  mounted gateway SCIM create/update/delete paths now also preflight through
+  `plan_application_user_lifecycle` on SQLite/Postgres compatibility backends
+  before mutating local state, and focused compatibility regressions now pin
+  the mounted SCIM create/update/delete shapes on both SQLite and Postgres
+  backends, so one actual admin mutation family now reuses the shared
+  lifecycle planner without changing file/Redis compatibility behavior. Legacy mounted gateway admin ledger reads now also delegate pagination query
+  validation through the shared `prodex-application` control-plane page-request
+  planner instead of parsing query state in the adapter directly, shrinking one
+  more adapter-local branch.
 
 ### 2. Root Token Must Not Bypass Data-Plane Authorization
 
@@ -303,9 +488,9 @@ while moving legacy adapter code behind enterprise boundaries.
   `gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint` for
   gateway ledger UUID/scope JSON, CSV, and summary output.
 - **Local verification:** `cargo test -q -p prodex-domain ids -- --test-threads=1`
-  plus `node scripts/ci/enterprise-id-boundary-guard.mjs` verify typed UUIDv7
-  domain IDs and the guard that keeps enterprise crates from reintroducing
-  process-local counter identities.
+  plus `npm run ci:enterprise-id-boundary-guard` run the guard self-test plus
+  workspace scan to verify typed UUIDv7 domain IDs and keep enterprise crates
+  from reintroducing process-local counter identities.
 - **Implemented fix or boundary:** Enterprise domain use cases expose typed,
   globally unique identifiers and keep ID generation independent from HTTP,
   storage, and provider adapters; enterprise boundary crates are guarded
@@ -322,7 +507,15 @@ while moving legacy adapter code behind enterprise boundaries.
   schemas also include admission-time tenant and governance scope snapshots so
   billing summaries do not depend on mutable key configuration for historical
   rows. Scoped admin ledger reads now authorize from those row snapshots before
-  falling back to the current key store for legacy rows. Anthropic
+  falling back to the current key store for legacy rows. Gateway compatibility
+  key stores now also persist canonical typed `virtual_key_id` values for
+  admin-managed keys across file, SQLite, PostgreSQL, and Redis backends so
+  durable reservation wiring can target tenant-owned key identity instead of
+  display-name-only compatibility state. Newly created gateway SCIM user
+  resource IDs now use typed UUIDv7 `PrincipalId` values instead of virtual-key
+  token-shaped compatibility strings, and SCIM create defaults an omitted target
+  `user_id` to that generated typed resource ID when no narrower admin user
+  scope is present. Anthropic
   compatibility runtime tokens now use UUIDv7 values instead of process ID,
   nanoseconds, and `AtomicU64` sequence material. Runtime proxy internal `u64`
   request IDs now derive their high bits from fresh UUIDv7 `RequestId` entropy
@@ -339,12 +532,16 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0547-spend-request-id-from-admission.md`, and
   `docs/adr/0586-anthropic-runtime-token-uuidv7.md`, and
   `docs/adr/0587-sql-ledger-request-scope-snapshot.md`, and
-  `docs/adr/0713-runtime-request-id-per-request-entropy.md`.
-- **Remaining gap:** Continue replacing legacy compatibility IDs in
-  `prodex-app` with typed domain IDs where that does not alter upstream
-  compatibility. Existing SQL-backed ledger deployments still need a versioned
-  migration before old schemas can expose typed `request_id` and scope
-  snapshots.
+  `docs/adr/0713-runtime-request-id-per-request-entropy.md`, and
+  `docs/adr/0980-gateway-compatibility-virtual-key-id.md`, and
+  `docs/adr/1047-scim-resource-id-principal-id.md`, and
+  `docs/adr/1048-scim-create-target-principal-default.md`, and
+  `docs/adr/0978-gateway-compatibility-schema-versioned-migrations.md`.
+- **Remaining gap:** The legacy numeric `request` / `legacy_request_sequence`
+  field still remains in compatibility payloads and logs where upstream or
+  existing operator workflows consume it. Typed UUIDv7 IDs are now the primary
+  cross-process identifiers, but the numeric compatibility field cannot be
+  removed until those external consumers are retired or versioned.
 
 ### 4. Ledger Uniqueness Must Survive Multi-Replica Writes
 
@@ -357,14 +554,23 @@ while moving legacy adapter code behind enterprise boundaries.
 - **Regression coverage:** `crates/prodex-domain/tests/accounting.rs`,
   `crates/prodex-storage/tests/storage_contract.rs`,
   `crates/prodex-storage-postgres/tests/postgres_storage.rs`,
-  `crates/prodex-storage-sqlite/tests/sqlite_storage.rs`, and
+  `crates/prodex-storage-sqlite/tests/sqlite_storage.rs`,
+  `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs`,
+  and
+  `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs`, and
   `scripts/ci/storage-boundary-guard.mjs`.
 - **Local verification:** `cargo test -q -p prodex-storage multi_replica_accounting -- --test-threads=1`
   exercises the concurrency-evidence gate,
   `cargo test -q -p prodex-storage atomic_reservation -- --test-threads=1`
-  exercises tenant-qualified reservation idempotency, and
-  `npm run ci:storage-boundary-guard` keeps the storage-boundary coverage wired
-  into local CI.
+  exercises tenant-qualified reservation idempotency,
+  `PRODEX_TEST_POSTGRES_URL=postgres://... cargo test -q -p prodex-storage-postgres postgres_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope -- --test-threads=1`
+  exercises the concrete Postgres adapter against a real database, and
+  `PRODEX_TEST_POSTGRES_URL=postgres://... npm run ci:storage-boundary-guard`
+  runs the guard self-test plus workspace scan and keeps that optional Postgres
+  execution proof wired into the storage boundary guard when a local database
+  URL is available, and
+  `npm run ci:storage-postgres-proof` provisions a temporary local Postgres
+  fixture automatically when Docker and `psql` are available.
 - **Implemented fix or boundary:** Ledger events are tenant-scoped and use
   reservation or call identifiers as idempotency keys; storage plans include
   tenant-qualified uniqueness. Multi-replica accounting evidence must now prove
@@ -378,7 +584,12 @@ while moving legacy adapter code behind enterprise boundaries.
   JSONL file into memory before applying a limit. File-backed response
   reconciliation also streams JSONL into a temporary file and renames only when
   a matching `call_id` row changes. This matches SQL and Redis idempotency
-  semantics without changing the JSONL format. Billing ledger range validation
+  semantics without changing the JSONL format. SQLite execution coverage now
+  also proves that one durable reservation wins and one is rejected under a
+  shared budget scope at both the storage-plan boundary and the gateway adapter
+  boundary. Postgres execution coverage now proves the same winner/loser budget
+  race against a real Postgres database through the adapter's atomic
+  reservation statement and RLS tenant-context setup. Billing ledger range validation
   now keeps query timestamps out of storage planner error strings while
   preserving structured enum fields for internal diagnostics. Billing ledger
   page-limit validation also keeps rejected limit values out of planner error
@@ -392,8 +603,9 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0714-storage-billing-ledger-range-error-redaction.md`, and
   `docs/adr/0715-storage-billing-ledger-limit-error-redaction.md`, and
   `docs/adr/0905-storage-billing-ledger-limit-display-redaction.md`.
-- **Remaining gap:** Execute database-backed multi-replica concurrency tests
-  when the concrete Postgres adapter is wired to the storage contract.
+- **Remaining gap:** Replace the single-node temporary Postgres fixture with a
+  repeatable shared-topology CI/readiness fixture so the same proof covers the
+  full multi-replica enterprise readiness gate.
 
 ### 5. Read-Modify-Write Budget Updates Can Lose Usage
 
@@ -410,8 +622,8 @@ while moving legacy adapter code behind enterprise boundaries.
   exercises atomic reservation planning,
   `cargo test -q -p prodex-domain accounting -- --test-threads=1` exercises
   reservation/reconciliation invariants, and
-  `npm run ci:storage-boundary-guard` keeps the storage boundary wired into
-  local CI.
+  `npm run ci:storage-boundary-guard` runs the guard self-test plus workspace
+  scan to keep the storage boundary wired into local CI.
 - **Implemented fix or boundary:** Reservation, commit, release, and expiry
   are planned as atomic operations with explicit idempotency. Redis limiter Lua
   results are normalized by `plan_redis_rate_limit_result` so adapters share one
@@ -540,10 +752,13 @@ while moving legacy adapter code behind enterprise boundaries.
   `scripts/ci/gateway-core-boundary-guard.mjs`.
 - **Local verification:** `cargo test -q -p prodex-gateway-core admission -- --test-threads=1`
   exercises gateway admission planning,
+  `cargo test -q -p prodex-application application_atomic_reservation -- --test-threads=1`
+  exercises durable reservation storage selection through the application
+  boundary,
   `cargo test -q -p prodex-application application_data_plane -- --test-threads=1`
   exercises application-level admission composition, and
-  `npm run ci:gateway-core-boundary-guard` keeps the gateway-core boundary
-  wired into local CI.
+  `npm run ci:gateway-core-boundary-guard` runs the guard self-test plus
+  workspace scan to keep the gateway-core boundary wired into local CI.
 - **Implemented fix or boundary:** The gateway core requires an
   `AtomicReservationCommand` before provider invocation can proceed. The legacy
   compatibility gate now checks budget groups, checks per-key admission, and
@@ -553,6 +768,22 @@ while moving legacy adapter code behind enterprise boundaries.
   scope, so same-name budgets in different tenants do not deny each other.
   Budget group IDs are matched exactly instead of being trim-normalized, so a
   padded budget scope cannot merge into a canonical compatibility group.
+  `prodex-application` now exposes `plan_application_atomic_reservation` so
+  composition roots can select PostgreSQL or SQLite durable reservation DML
+  through one application boundary instead of branching on storage adapters in
+  `prodex-app`.
+  Legacy `prodex gateway` startup now also fails closed when
+  `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`: runtime topology
+  planning still runs, and the composition root now emits the shared
+  `runtime_accounting_verification_invalid` application-level failure envelope
+  before refusing to claim multi-replica readiness while request admission
+  remains on the local compatibility path instead of the durable reservation
+  backend. Accounting topology env values are now exact runtime inputs, so
+  padded replica-count or accounting-gate values fail closed instead of being
+  trim-normalized into active topology intent. Runtime proxy tuning env values
+  now use the same exact numeric boundary for local worker counts, queue
+  capacities, active-request caps, lane caps, timeouts, and pressure budgets, so
+  malformed explicit hot-path tuning cannot silently fall back to defaults.
   Storage atomic reservation debug output redacts request, accounting, and
   timing fields while preserving typed planner fields; see
   `docs/adr/0923-storage-atomic-reservation-debug-redaction.md`.
@@ -561,10 +792,12 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0165-rate-limit-stable-error-responses.md`, and
   `docs/adr/0535-local-gateway-admission-critical-section.md`, and
   `docs/adr/0540-budget-group-tenant-scope.md`, and
+  `docs/adr/0979-application-atomic-reservation-storage-boundary.md`, and
   `docs/adr/0672-budget-group-id-exact-boundary.md`.
 - **Remaining gap:** The legacy `prodex-app` local usage path still remains an
-  adapter migration target; multi-replica enforcement must use the durable
-  reservation backend.
+  adapter migration target; request-serving admission still needs to execute
+  the durable reservation backend through the new application boundary instead
+  of mutating local compatibility usage state.
 
 ### 7. Tenant ID Must Be Mandatory and Keyed
 
@@ -606,8 +839,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0876-domain-resource-authorization-display-redaction.md`, and
   `docs/adr/0666-gateway-key-identifier-model-exact-boundary.md`, and
   `docs/adr/0719-domain-tenant-access-error-redaction.md`.
-- **Remaining gap:** Legacy optional tenant columns must remain compatibility
-  only and be phased out through the migration guide.
+- **Remaining gap:** The migration guide now defines explicit
+  expand/backfill/contract choreography for legacy optional tenant columns.
+  Production cutovers still need to execute that guide before any compatibility
+  table or nullable tenant shape can be removed.
 
 ### 8. DDL Must Not Run While Opening Request-Serving Backends
 
@@ -627,15 +862,26 @@ while moving legacy adapter code behind enterprise boundaries.
   exercises Postgres migration/open-readiness planning,
   `cargo test -q -p prodex-storage-sqlite sqlite_migration -- --test-threads=1`
   exercises the SQLite migration boundary, and
-  `npm run ci:storage-postgres-boundary-guard` keeps the Postgres storage
-  boundary wired into local CI.
+  `npm run ci:storage-postgres-boundary-guard` runs the guard self-test plus
+  workspace scan to keep production Postgres storage plans driver-free while
+  allowing the test-only `postgres` execution proof, and
+  `npm run ci:storage-sqlite-boundary-guard` runs the guard self-test plus
+  workspace scan to keep production SQLite storage plans driver-free while
+  allowing the test-only `rusqlite` execution coverage.
 - **Implemented fix or boundary:** Enterprise storage plans require versioned
   migrations run by external migrators, not by request-serving gateway opens.
   Backend-open readiness planners now require a known current schema version for
   gateway startup/request paths and report zero DDL-eligible migrations there.
-  The legacy SQL open helper now requires explicit
-  `PRODEX_GATEWAY_ALLOW_REQUEST_PATH_SCHEMA_BOOTSTRAP` opt-in before it creates
-  compatibility tables. The production Kubernetes migration Job now runs
+  The legacy SQL open helper now rejects fresh SQLite/Postgres compatibility
+  state in every build mode unless it was migrated first. `prodex-gateway
+  migrate` now ensures both the enterprise storage schema and the legacy
+  gateway compatibility schema so the request path no longer needs a bootstrap
+  escape hatch. Gateway compatibility tests also prepare migrated SQLite
+  fixtures explicitly instead of relying on implicit or explicit request-path
+  bootstrap. The compatibility schema itself now advances through explicit
+  versioned external migrations instead of one current-state bootstrap blob, so
+  future schema growth stays on the same migrator boundary as the enterprise
+  storage plan. The production Kubernetes migration Job now runs
   `prodex-gateway migrate --backend postgres --url-env PRODEX_GATEWAY_POSTGRES_URL`
   with migration-only credentials instead of a placeholder shell command.
   Domain migration plan debug output redacts descriptions, lock owners, and
@@ -649,9 +895,14 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0157-migration-stable-error-responses.md`,
   `docs/adr/0241-storage-backend-open-readiness-plan.md`, and
   `docs/adr/0532-gateway-open-schema-bootstrap-escape-hatch.md`, and
-  `docs/adr/0588-gateway-external-migrator-command.md`.
-- **Remaining gap:** Remove the local/test bootstrap escape hatch after legacy
-  SQL state is fully migrated to the external migrator path.
+  `docs/adr/0588-gateway-external-migrator-command.md`, and
+  `docs/adr/0976-gateway-test-schema-bootstrap-explicit.md`, and
+  `docs/adr/0978-gateway-compatibility-schema-versioned-migrations.md`, and
+  `docs/adr/0982-gateway-compatibility-contract-choreography.md`.
+- **Remaining gap:** Compatibility-schema contract choreography is now
+  documented. Future destructive migrations still need to execute that
+  choreography with release-specific evidence before legacy gateway tables or
+  columns can actually be removed.
 
 ### 9. Redis Must Not Store Whole-Map Durable Billing JSON
 
@@ -666,8 +917,8 @@ while moving legacy adapter code behind enterprise boundaries.
   and `scripts/ci/storage-redis-boundary-guard.mjs`.
 - **Local verification:** `cargo test -q -p prodex-storage-redis redis_storage_use -- --test-threads=1`
   exercises the durable-state prohibition boundary, and
-  `npm run ci:storage-redis-boundary-guard` keeps the Redis storage boundary
-  wired into local CI.
+  `npm run ci:storage-redis-boundary-guard` runs the guard self-test plus
+  workspace scan to keep the Redis storage boundary wired into local CI.
 - **Implemented fix or boundary:** Redis is limited to distributed rate
   limiting, short-lived cache, and coordination primitives that can be rebuilt
   from durable storage; durable tenant-owned state is rejected by the Redis
@@ -675,10 +926,13 @@ while moving legacy adapter code behind enterprise boundaries.
   decisions rather than adapter-specific tuple handling. Gateway Redis key-store
   and usage data are record/hash based, and the Redis ledger writes entry-scoped
   payloads with atomic `SETNX` dedupe instead of replacing the full ledger list
-  under a global lock.
+  under a global lock. Redis usage hash counters now fail closed when present
+  fields are malformed or whitespace-bearing instead of silently loading request,
+  token, or spend counters as zero.
 - **ADRs:** `docs/adr/0093-redis-storage-rate-limit-boundary.md`,
   `docs/adr/0227-redis-durable-state-prohibition-plan.md`, and
-  `docs/adr/0236-redis-rate-limit-result-contract.md`.
+  `docs/adr/0236-redis-rate-limit-result-contract.md`, and
+  `docs/adr/1037-redis-usage-hash-counter-fail-closed.md`.
 - **Remaining gap:** Keep migrating production deployments toward
   Postgres-backed durable accounting plus Redis limiter/cache usage; legacy
   Redis whole-list ledger payloads remain read-only compatibility data.
@@ -692,25 +946,46 @@ while moving legacy adapter code behind enterprise boundaries.
   outage coupling, stale-failure ambiguity, and request-path SSRF exposure.
 - **Regression coverage:** `crates/prodex-domain/tests/identity.rs`,
   `crates/prodex-authn/tests/oidc.rs`, and
-  `scripts/ci/auth-boundary-guard.mjs`.
+  `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs`,
+  and `scripts/ci/auth-boundary-guard.mjs`.
 - **Local verification:** `cargo test -q -p prodex-authn -- --test-threads=1`
   plus `cargo test -q -p prodex-domain identity -- --test-threads=1` cover the
-  cached-key, issuer/audience, and request-path JWKS boundary decisions.
+  cached-key, issuer/audience, and request-path JWKS boundary decisions, and
+  `npm run ci:auth-boundary-guard` runs the auth guard self-test plus workspace
+  scan for forbidden runtime/JWT/OIDC dependencies.
 - **Implemented fix or boundary:** Authentication is network-free; stale JWKS
   and unknown key IDs fail closed according to cached snapshot policy. OIDC
   discovery/JWKS fetch targets are rejected in gateway request-path mode and
   emitted only by a background refresh plan. The legacy gateway admin OIDC path
   also reads discovery/JWKS from the startup cache only during request
   authentication and fails closed when startup prefetch did not populate cache.
+  Legacy runtime startup now moves that initial OIDC discovery/JWKS prefetch to
+  a bounded background worker so proxy launch no longer blocks on the IdP;
+  request authentication waits only for that bounded local prefetch attempt to
+  finish and still does not perform discovery/JWKS network I/O itself.
   Configured JWKS refresh URLs must use HTTPS; plaintext HTTP, local files,
   empty, non-printable, non-ASCII, over-2048-byte, and whitespace-containing
   values are rejected before any transport adapter can fetch keys. Legacy
   startup OIDC discovery/JWKS prefetches now use an explicit bounded request
   timeout via `PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS`.
+  The legacy gateway now also runs a bounded background discovery/JWKS refresh
+  loop after startup and revalidates cached OIDC metadata based on upstream
+  `Cache-Control: max-age` metadata, falling back to
+  `PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS`, while keeping request-path
+  authentication network-free and fail-closed. Expired discovery/JWKS cache
+  entries remain usable only inside a bounded last-known-good window from
+  upstream `Cache-Control: stale-while-revalidate` metadata or
+  `PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS`. Failed refresh attempts retry
+  after bounded backoff via `PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS`.
+  That legacy loop now also emits refresh success/failure/backoff and cached
+  JWKS age metric events with the existing low-cardinality observability
+  planners, without logging issuer URLs, JWKS URLs, key IDs, tenants, or users
+  as metric labels.
   Background discovery/JWKS refresh plans also require a non-empty HTTPS host
   before a transport adapter can fetch keys, and OIDC issuer configuration
   rejects non-HTTPS, hostless, whitespace-bearing, or userinfo-bearing issuer
-  values before discovery URLs can be derived. OIDC audience configuration also
+  values before discovery URLs can be derived. Configured JWKS URLs now use the
+  same no-userinfo HTTPS host boundary. OIDC audience configuration also
   rejects whitespace, control characters, and non-ASCII values before claim
   validation policy is built. Issuer, audience, and configured JWKS URL values
   are validated without trimming. Configured JWKS URLs must also use the same
@@ -741,9 +1016,11 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0628-domain-oidc-issuer-host-shape-guard.md`, and
   `docs/adr/0629-domain-oidc-audience-character-guard.md`, and
   `docs/adr/0654-oidc-issuer-audience-exact-boundary.md`, and
-  `docs/adr/0659-authn-exact-jwks-url-and-key-id-boundary.md`.
-- **Remaining gap:** Legacy startup OIDC prefetch must be moved to a bounded
-  background control-plane refresh path before production multi-tenant mode.
+  `docs/adr/0659-authn-exact-jwks-url-and-key-id-boundary.md`, and
+  `docs/adr/0975-gateway-oidc-background-refresh-loop.md`.
+- **Remaining gap:** Move refresh ownership, revisioning, and last-known-good
+  rollover from the legacy gateway worker into a dedicated control-plane
+  refresh service before production multi-tenant mode.
 
 ### 11. Blocking HTTP, Worker Threads, and Mutex Hot Paths Must Be Bounded
 
@@ -770,8 +1047,10 @@ while moving legacy adapter code behind enterprise boundaries.
   exercises graceful-drain bounds,
   `cargo test -q -p prodex-gateway-http timeout -- --test-threads=1`
   exercises timeout-budget bounds, and
-  `npm run ci:gateway-http-boundary-guard` keeps the HTTP boundary wired into
-  local CI.
+  `npm run ci:runtime-hotpath-guard` pins the hot-path guard parser,
+  `#[cfg(test)]` exclusions, allowlist-overuse detection, and workspace scan,
+  and `npm run ci:gateway-http-boundary-guard` runs the guard self-test plus
+  workspace scan to keep the HTTP boundary wired into local CI.
 - **Implemented fix or boundary:** The enterprise HTTP boundary records the
   async adapter contract and deployment drain timing contract before a concrete
   Axum/Hyper/Tower composition root is wired. The legacy gateway JSONL
@@ -783,7 +1062,9 @@ while moving legacy adapter code behind enterprise boundaries.
   endpoint/error text before logging export failures. Gateway admin ledger CSV
   and summary exports now use an explicit bounded ledger load limit instead of
   `usize::MAX`, and Redis ledger compatibility reads cap accidental unbounded
-  loads before issuing `LRANGE`.
+  loads before issuing `LRANGE`. Runtime proxy request body limit env overrides
+  now reject empty, whitespace-bearing, non-numeric, or zero values instead of
+  silently falling back to the default capture limit.
 - **ADRs:** `docs/adr/0095-gateway-http-policy-boundary.md`,
   `docs/adr/0229-gateway-http-execution-plan.md`,
   `docs/adr/0238-gateway-http-timeout-ordering.md`,
@@ -793,9 +1074,14 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0549-gateway-http-observability-blocking-pool.md`, and
   `docs/adr/0550-gateway-http-observability-failure-redaction.md`, and
   `docs/adr/0551-gateway-jsonl-observability-failure-redaction.md`, and
-  `docs/adr/0664-gateway-admin-ledger-export-limit.md`.
-- **Remaining gap:** The legacy `tiny_http` and mutex-backed compatibility
-  paths in `prodex-app` remain migration targets.
+  `docs/adr/0664-gateway-admin-ledger-export-limit.md`, and
+  `docs/adr/0010-runtime-request-body-limit.md`.
+- **Remaining gap:** The remaining `tiny_http` and mutex-backed
+  compatibility paths in `prodex-app` are now staged behind an explicit async
+  serve migration contract (`docs/adr/0983-async-serve-composition-root-staging.md`),
+  but the actual gateway/control-plane serve adapters and the separate
+  loopback-only `dashboard` / `expose` migrations still need to land before the
+  legacy compatibility code can be removed.
 
 ### 12. Dependency Inversion Must Keep Domain and Shared Logic Clean
 
@@ -809,10 +1095,14 @@ while moving legacy adapter code behind enterprise boundaries.
 - **Regression coverage:** `scripts/ci/domain-boundary-guard.mjs`,
   `scripts/ci/application-boundary-guard.mjs`, and the per-boundary crate
   tests.
-- **Local verification:** `npm run ci:domain-boundary-guard` exercises the
-  domain dependency boundary, and
-  `npm run ci:application-boundary-guard` exercises the application use-case
-  boundary.
+- **Local verification:** `npm run ci:domain-boundary-guard` runs the domain
+  guard self-test plus workspace scan for the dependency boundary, and
+  `npm run ci:application-boundary-guard` runs the application guard self-test
+  plus workspace scan for the use-case boundary, and
+  `npm run ci:control-plane-boundary-guard` runs the control-plane guard
+  self-test plus workspace scan for the admin planning boundary, and
+  `npm run ci:provider-spi-boundary-guard` runs the provider SPI guard self-test
+  plus workspace scan for the provider dependency boundary.
 - **Implemented fix or boundary:** Domain and application use-case crates are
   side-effect-free and adapter-neutral; `prodex-app` is being reduced toward a
   composition root.
@@ -838,8 +1128,8 @@ while moving legacy adapter code behind enterprise boundaries.
   exercises domain telemetry label boundaries,
   `cargo test -q -p prodex-observability trace_context -- --test-threads=1`
   exercises W3C trace parsing/propagation, and
-  `npm run ci:observability-boundary-guard` keeps the observability boundary
-  wired into local CI.
+  `npm run ci:observability-boundary-guard` runs the guard self-test plus
+  workspace scan to keep the observability boundary wired into local CI.
 - **Implemented fix or boundary:** Trace context, metric label guardrails, and
   span planning are first-class boundary types; outbound propagation uses a
   shared plan for canonical `traceparent`, validated optional `tracestate`, and
@@ -856,6 +1146,108 @@ while moving legacy adapter code behind enterprise boundaries.
   without trimming before the low-cardinality and secret-like denylist checks.
   Domain observability debug output redacts telemetry values, attribute lists,
   span names, and rejected lengths while preserving span and validation shape.
+  Legacy gateway operational probes expose public `/livez`, `/readyz`, and
+  `/startupz` `gateway.health` JSON plus bodyless `HEAD` responses and stable
+  `405` method denial, and the health payload includes active local-overload,
+  draining, request-limit, active-request, and policy-version fields without
+  requiring admin credentials or prompt/user identifiers as metric labels.
+  Focused health coverage now also proves `/readyz` returns `503` during local
+  overload or draining while `HEAD /readyz` stays bodyless and `/livez` plus
+  `/startupz` remain passing for orchestrator liveness/startup checks.
+  The dedicated `prodex-control-plane` and `prodex-gateway` binaries now also
+  emit concrete OTLP/HTTP log records for their live control-plane planning,
+  config-publication publish/delivery, external gateway migration, and
+  gateway-side replicated consumption workflows when standard OpenTelemetry
+  endpoint env vars are configured, so the composition root no longer stops at
+  planning-only telemetry for those shipped enterprise commands. Dedicated
+  `enterprise_binaries` coverage now also pins the positive `"otlp_log_export":
+  "exported"` path for shipped `prodex-control-plane plan-http-control-plane`,
+  `prodex-control-plane plan-config-publication`,
+  `prodex-gateway migrate`,
+  `prodex-control-plane publish-config-publication`,
+  `prodex-control-plane compact-config-publication`,
+  `prodex-control-plane deliver-config-publication`, and
+  `prodex-gateway consume-config-publication` binary flows against a local
+  OTLP/HTTP capture server. That same `enterprise_binaries` coverage now also
+  pins exported-path denial telemetry for `prodex-control-plane
+  plan-config-publication`, and denied publication planning now also pins the
+  `"otlp_log_export": "failed"` fallback when the configured OTLP/HTTP
+  endpoint is unreachable, and
+  pins exported-path planner failures for the shared control-plane HTTP route,
+  trace-context, idempotency, precondition, and page-request envelopes against
+  the same local capture server. Gateway-migrate, control-plane plan,
+  denied publication planning, control-plane HTTP plan, control-plane HTTP
+  trace-context failure, control-plane HTTP route failure, control-plane HTTP
+  idempotency failure, control-plane HTTP precondition failure,
+  control-plane HTTP page-request failure, control-plane publish,
+  control-plane compact, delivery, and gateway-consume coverage now also pin the
+  `"otlp_log_export": "failed"` fallback when the configured OTLP/HTTP
+  endpoint is unreachable, so every current OTLP-enabled one-shot enterprise
+  binary path under `enterprise_binaries` now reports exporter failure without
+  turning that transport problem into a command failure. The shared
+  `src/enterprise_observability.rs` helper now also has direct unit coverage
+  for OTLP endpoint fallback, logs-endpoint precedence, header parsing,
+  disabled `Ok(false)` behavior, configured `Ok(true)` export behavior,
+  shared `"exported" | "disabled" | "failed"` status mapping behavior,
+  invalid header name/value rejection, invalid env-driven header name/value
+  rejection, malformed env-driven header-entry rejection, configured
+  transport-failure handling on the public helper, OTLP timeout-env parsing,
+  OTLP timeout failure handling, invalid OTLP timeout-env rejection, and non-200 upstream OTLP failure handling.
+  `enterprise_binaries` now also pins
+  malformed-header failure reporting on both dedicated binaries plus the
+  `OTEL_EXPORTER_OTLP_ENDPOINT -> /v1/logs` fallback path for every
+  current OTLP-enabled one-shot enterprise binary path at the composition-root
+  boundary instead of covering that fallback only in the shared helper unit
+  tests, and that composition-root fallback matrix now also includes the blank
+  `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` compatibility case for every current
+  one-shot enterprise binary path. Gateway migrate and control-plane delivery
+  now also pin OTLP timeout failure reporting at the composition root when the
+  collector accepts the connection but does not respond before the configured
+  timeout, including the generic `OTEL_EXPORTER_OTLP_TIMEOUT` fallback path
+  when logs-specific timeout config is unset, and those same dedicated binaries
+  now also pin invalid timeout-env failure reporting, including the generic
+  timeout fallback path. The shared helper now also treats blank
+  `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` the same as unset so the generic OTLP
+  endpoint fallback still applies. Successful control-plane HTTP planning OTLP
+  records now also carry the validated request, call, trace, tenant, and
+  audit-event correlation identifiers from the shared audit-correlation planner, and
+  `enterprise_binaries` pins those fields against the local OTLP/HTTP capture
+  server. The shared OTLP helper now also promotes a valid `trace_id` attribute
+  into native OTLP log-record `traceId`, with direct helper coverage, so
+  collectors can correlate one-shot logs with traces without parsing
+  attributes, and `enterprise_binaries` pins that native field at the
+  control-plane HTTP planning composition-root boundary. The shared helper now
+  also promotes a valid `span_id` attribute into native OTLP log-record
+  `spanId`, with direct helper coverage, and control-plane HTTP planning now
+  derives that `span_id` from the already-validated `traceparent` header with
+  `enterprise_binaries` coverage, so one-shot workflow logs can attach to the
+  exact upstream span without adding a second exporter path. The shared helper
+  also promotes W3C `trace_flags` into native OTLP log-record `flags`, and
+  control-plane HTTP planning derives those flags from the already-validated
+  `traceparent` header with direct and composition-root coverage. Control-plane
+  HTTP planning failures now also copy valid incoming `traceparent` trace IDs,
+  span IDs, and flags into OTLP records, with `enterprise_binaries`
+  route-failure, idempotency-failure, precondition-failure, and
+  page-request-failure coverage, so collector correlation survives before audit
+  correlation exists.
+  The shared OTLP helper now also stamps every log record with
+  `timeUnixNano` and `observedTimeUnixNano`, with direct helper coverage, so
+  one-shot binary logs have collector-sortable event time instead of
+  timestamp-less payloads. The shared helper also emits standard OTLP
+  `severityNumber: 9` next to `severityText: "INFO"` with helper coverage, so
+  collectors receive a numeric INFO severity instead of relying on text-only
+  inference. The shared helper also mirrors the log body into low-cardinality
+  `event.name` with helper coverage, so collectors can query one-shot workflow
+  outcomes without parsing body text, and `enterprise_binaries` pins that field
+  at the control-plane HTTP planning composition root. The shared helper now
+  also emits `service.version` alongside
+  `service.name`, with helper coverage, so one-shot gateway/control-plane
+  telemetry can be grouped by deployed Prodex binary version, and
+  `enterprise_binaries` pins that resource version at the control-plane HTTP
+  planning composition-root boundary. It also sets the instrumentation scope
+  `version` from that same package version, with helper coverage, so downstream
+  collectors can distinguish event schema versions, and `enterprise_binaries`
+  pins that scope version at the same boundary.
 - **ADRs:** `docs/adr/0062-gateway-trace-context-propagation.md`,
   `docs/adr/0087-observability-boundary-crate.md`,
   `docs/adr/0088-observability-boundary-guard.md`, and
@@ -864,10 +1256,24 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0318-tenant-trace-attribute-boundary.md`,
   `docs/adr/0536-runtime-baggage-propagation.md`, and
   `docs/adr/0592-gateway-http-trace-propagation-metric-plan.md`, and
+  `docs/adr/0011-gateway-operational-health-endpoints.md`, and
+  `docs/adr/0160-health-probe-stable-responses.md`, and
+  `docs/adr/0492-gateway-health-policy-version.md`, and
+  `docs/adr/0499-health-probe-method-contract.md`, and
+  `docs/adr/0502-application-readiness-draining.md`, and
   `docs/adr/0829-domain-observability-debug-redaction.md`, and
-  `docs/adr/0847-domain-observability-span-name-debug-redaction.md`.
-- **Remaining gap:** Wire the concrete OpenTelemetry exporter in the async
-  gateway/control-plane composition root.
+  `docs/adr/0847-domain-observability-span-name-debug-redaction.md`, and
+  `docs/adr/0981-enterprise-binaries-otlp-http-log-export.md`.
+- **Local verification:** `cargo test -q enterprise_observability::tests:: -- --test-threads=1`
+  exercises the shared OTLP helper paths directly,
+  `cargo test -q -p prodex-app runtime_launch::proxy_startup::local_rewrite_tests::gateway_health -- --test-threads=1`
+  exercises the public gateway health probes, and
+  `cargo test -q --test enterprise_binaries -- --test-threads=1`
+  exercises the current dedicated binary OTLP export/fallback matrix end to
+  end.
+- **Remaining gap:** Carry the same OTLP exporter path into the future async
+  `serve` composition root so long-lived gateway/control-plane traffic emits the
+  same native telemetry without relying on one-shot command wiring.
 
 ### 14. Config and Policy Cache Need Revision and Last-Known-Good Semantics
 
@@ -883,8 +1289,8 @@ while moving legacy adapter code behind enterprise boundaries.
   exercises policy revision and cache semantics,
   `cargo test -q -p prodex-config config_refresh -- --test-threads=1`
   exercises config refresh/last-known-good behavior, and
-  `npm run ci:config-boundary-guard` keeps the config boundary wired into local
-  CI.
+  `npm run ci:config-boundary-guard` runs the guard self-test plus workspace
+  scan to keep the config boundary wired into local CI.
 - **Implemented fix or boundary:** Published config is revisioned, validated,
   invalidated deliberately through `plan_config_invalidation`, activated through
   a shared cache-state transition, routed through an application-level
@@ -926,7 +1332,11 @@ while moving legacy adapter code behind enterprise boundaries.
   source debug output redacts provider, name, and version metadata at the config
   boundary; see `docs/adr/0917-config-secret-source-debug-redaction.md`. Config secret
   reference plan debug output redacts tenant and reference metadata; see
-  `docs/adr/0908-config-secret-reference-plan-debug-redaction.md`. Domain secret provider
+  `docs/adr/0908-config-secret-reference-plan-debug-redaction.md`. The
+  config boundary guard now pins the `ConfigSecretSource`,
+  `plan_config_secret_reference`, malformed-reference, and raw-secret rejection
+  contracts so publication cannot drift back to raw secret material; see
+  `docs/adr/0086-config-boundary-guard.md`. Domain secret provider
   debug output redacts provider names while preserving provider kind and
   rotation support; see
   `docs/adr/0832-domain-secret-provider-debug-redaction.md`. Secret rotation
@@ -945,8 +1355,141 @@ while moving legacy adapter code behind enterprise boundaries.
   accounts must also be non-empty at the secret-store boundary; see
   `docs/adr/0693-keyring-location-account-nonempty.md`. File secret locations
   must also have a non-empty path before filesystem access; see
-  `docs/adr/0694-file-secret-path-nonempty.md`. Runtime proxy preset names
-  reject whitespace padding before policy activation; see
+  `docs/adr/0694-file-secret-path-nonempty.md`. Secret-store debug output
+  redacts locations, values, keyring backend selections, refresh-lease payloads,
+  secret revision metadata, paths, accounts, and backend reasons while
+  preserving variant names; see
+  `docs/adr/0985-secret-store-debug-redaction.md`. Gateway runtime launch
+  config debug output redacts admin-token hashes, SSO/OIDC metadata, state-store
+  URLs, local paths, observability bearer tokens, and guardrail webhook tokens
+  while preserving backend and feature shape; see
+  `docs/adr/0986-gateway-runtime-config-debug-redaction.md`. Gateway billing
+  ledger and summary debug output redacts key names, tenant and identity
+  selectors, request/call identifiers, model names, token/cost/byte counters,
+  and timestamps while preserving DTO shape; see
+  `docs/adr/0987-gateway-billing-debug-redaction.md`. Gateway virtual-key store
+  and governance-scope debug output redacts token hashes, key names, SCIM user
+  identifiers, tenant and identity selectors, model allow-lists, budgets, rate
+  limits, and timestamps while preserving store shape; see
+  `docs/adr/0988-gateway-store-debug-redaction.md`. Provider spend-event debug
+  output redacts key names, tenant selectors, request/call identifiers, paths,
+  model names, token and byte counts, latency, and costs while preserving
+  event/status shape; see `docs/adr/0989-provider-spend-debug-redaction.md`.
+  Gemini OAuth profile debug output redacts profile names, Codex home paths,
+  account emails, access tokens, and project IDs while preserving DTO shape; see
+  `docs/adr/0990-gemini-oauth-profile-debug-redaction.md`. Anthropic OAuth
+  profile debug output redacts profile names and access tokens while preserving
+  DTO shape; see `docs/adr/0991-anthropic-oauth-profile-debug-redaction.md`.
+  Gemini OAuth pool debug output redacts profile lists, affinity bindings, quota
+  headers, model cooldowns, model-unavailable markers, model preferences, and
+  timing data while preserving pool shape; see
+  `docs/adr/0992-gemini-oauth-pool-debug-redaction.md`. DeepSeek request DTO
+  debug output redacts prompt messages, translated request bodies, and response
+  metadata while preserving DTO shape; see
+  `docs/adr/0993-deepseek-request-debug-redaction.md`. DeepSeek SSE debug
+  output redacts response IDs, model names, streamed text, reasoning, tool
+  payloads, usage, logprobs, fingerprints, response metadata, and conversation
+  messages while preserving stream state shape; see
+  `docs/adr/0994-deepseek-sse-debug-redaction.md`. Gateway usage-delta debug
+  output redacts request/call identifiers, key names, tenant and identity
+  selectors, model names, token counters, cost estimates, and timestamps while
+  preserving accounting DTO shape; see
+  `docs/adr/0995-gateway-usage-delta-debug-redaction.md`. Copilot profile and
+  OAuth pool debug output redacts profile names, API keys, API URLs, model
+  catalogs, rotation cursors, and response/profile affinity bindings while
+  preserving provider DTO shape; see
+  `docs/adr/0996-copilot-profile-debug-redaction.md`. Gemini OAuth secret,
+  token-response, and user-info debug output redacts persisted and freshly
+  exchanged tokens, token metadata, expiry timing, account emails, project IDs,
+  and auth-mode strings while preserving OAuth DTO shape; see
+  `docs/adr/0997-gemini-oauth-secret-debug-redaction.md`. Claude OAuth secret,
+  credentials-file, nested token, and auth-status debug output redacts tokens,
+  expiry timing, subscription/auth method labels, and account identifiers while
+  preserving auth DTO shape; see
+  `docs/adr/0998-claude-oauth-debug-redaction.md`. Copilot profile import and
+  runtime API auth debug output redacts GitHub hosts, account logins,
+  OAuth/import tokens, runtime API keys, and model catalogs while preserving auth
+  DTO shape; see `docs/adr/0999-copilot-import-auth-debug-redaction.md`.
+  Managed Mem0 secrets debug output redacts PostgreSQL passwords, admin API
+  keys, and JWT secrets while preserving secret bundle shape; see
+  `docs/adr/1000-mem0-secrets-debug-redaction.md`. Kiro import/auth debug
+  output redacts auth keys, auth kinds, raw auth JSON, identity metadata, AWS
+  profile selectors, start URLs, and regions while preserving auth DTO shape;
+  see `docs/adr/1001-kiro-auth-debug-redaction.md`. Gateway root/data-plane
+  bearer tokens no longer authenticate admin endpoints; admin routes require
+  explicit admin tokens, trusted-proxy SSO, or OIDC identities and report
+  `admin_auth_not_configured` when no control-plane credential source exists;
+  see `docs/adr/1002-gateway-root-token-control-plane-denial.md`. Explicitly
+  empty root/data-plane gateway bearer-token inputs now fail closed during
+  launch instead of silently disabling the configured credential; see
+  `docs/adr/1024-gateway-root-token-empty-fail-closed.md`. File and Redis
+  billing ledger de-duplication now uses the exact, length-prefixed `(call_id,
+  key_name, phase)` identity so case-distinct key names and delimiter-bearing
+  fields cannot collide; see
+  `docs/adr/1003-gateway-ledger-entry-identity.md`. Durable SQLite/PostgreSQL
+  per-key cost reservations now take precedence over stale local spend for
+  admin-managed keys with valid tenant and virtual-key IDs while preserving
+  local request-count, RPM/TPM, model, and grouped-budget checks; see
+  `docs/adr/1004-durable-budget-admission-precedence.md`. Durable
+  SQLite/PostgreSQL admin key lifecycle planning now rejects missing or
+  malformed key tenant IDs instead of synthesizing a random tenant; see
+  `docs/adr/1005-durable-key-lifecycle-tenant-fail-closed.md`. Durable
+  SQLite/PostgreSQL admin key lifecycle planning also rejects missing or
+  malformed virtual-key IDs instead of synthesizing a random key identity; see
+  `docs/adr/1006-durable-key-lifecycle-virtual-key-id-fail-closed.md`. Durable
+  SQLite/PostgreSQL SCIM lifecycle planning now rejects missing or malformed
+  SCIM tenant IDs instead of synthesizing a random tenant; see
+  `docs/adr/1007-durable-scim-lifecycle-tenant-fail-closed.md`. Durable
+  SQLite/PostgreSQL SCIM lifecycle planning also rejects missing or malformed
+  target user IDs instead of synthesizing a random principal; see
+  `docs/adr/1008-durable-scim-lifecycle-principal-id-fail-closed.md`. Durable
+  SQLite/PostgreSQL SCIM lifecycle planning now derives a stable compatibility
+  actor principal from admin name and tenant instead of generating a random
+  actor principal per request; see
+  `docs/adr/1009-durable-scim-lifecycle-actor-principal.md`. Durable
+  SQLite/PostgreSQL virtual-key lifecycle planning now derives the same kind of
+  stable compatibility actor principal for create and rotate-secret operations;
+  see `docs/adr/1010-durable-key-lifecycle-actor-principal.md`. Mounted gateway
+  admin route/idempotency/precondition planning now also uses stable
+  compatibility tenant and principal IDs instead of fresh random IDs; see
+  `docs/adr/1011-admin-control-plane-compat-principal.md`. SSO and OIDC admin
+  authentication now use SCIM role and key-prefix metadata only when an explicit
+  tenant claim matches the SCIM tenant, preventing cross-tenant role reuse by
+  username; see `docs/adr/1012-sso-scim-tenant-claim-isolation.md`. Explicit
+  SSO/OIDC role claims now also fail closed to Viewer when unknown, malformed,
+  or non-string instead of falling through to SCIM Admin metadata; see
+  `docs/adr/1013-sso-unknown-role-claim-fail-closed.md`. Trusted-proxy SSO
+  admin authentication now rejects missing user identity headers instead of
+  synthesizing `sso-admin`; see
+  `docs/adr/1014-sso-missing-user-claim-fail-closed.md`. OIDC admin identity
+  derivation now rejects malformed explicit user identity claims instead of
+  silently falling back to another principal claim; see
+  `docs/adr/1015-oidc-configured-user-claim-fail-closed.md`. Admin token
+  `allowed_key_prefixes` now fail closed on malformed values instead of dropping
+  invalid prefixes and widening scope to all keys; see
+  `docs/adr/1016-admin-token-key-prefix-fail-closed.md`. Admin token governance
+  scopes now also fail closed on malformed tenant/team/project/user/budget
+  values instead of dropping them and widening control-plane access; see
+  `docs/adr/1017-admin-token-governance-scope-fail-closed.md`. Configured
+  virtual-key governance scopes now use the same fail-closed behavior so
+  malformed scope values cannot widen data-plane access or accounting scope; see
+  `docs/adr/1018-virtual-key-governance-scope-fail-closed.md`. Configured
+  virtual-key model scopes now also fail closed so malformed `allowed_models`
+  cannot be dropped into unrestricted model access; see
+  `docs/adr/1019-virtual-key-model-scope-fail-closed.md`. Global guardrail
+  model scopes now fail closed for the same reason, preventing malformed
+  `allowed_models` entries from disabling the configured allowlist; see
+  `docs/adr/1020-guardrail-model-scope-fail-closed.md`. Guardrail webhook
+  phase configuration now also fails closed so malformed phase values cannot
+  silently skip intended request or response checks; see
+  `docs/adr/1021-guardrail-webhook-phase-fail-closed.md`. Guardrail keyword
+  blank entries now fail closed instead of being dropped from the active
+  security policy; see
+  `docs/adr/1030-guardrail-keyword-blank-fail-closed.md`. Guardrail webhook
+  bearer secret references now fail closed when malformed, missing, or empty so
+  configured webhook auth is not silently disabled; see
+  `docs/adr/1022-guardrail-webhook-bearer-secret-fail-closed.md`. Runtime proxy
+  preset names reject whitespace padding before policy activation; see
   `docs/adr/0695-runtime-proxy-preset-exact-boundary.md`. Gateway state backend
   names also reject whitespace padding before activating storage selection; see
   `docs/adr/0696-gateway-state-backend-exact-boundary.md`. Policy snapshot
@@ -994,10 +1537,14 @@ while moving legacy adapter code behind enterprise boundaries.
   metric plans for gateway cache refresh and runtime policy reload so delivery
   outcomes can be observed without tenant, revision, root, or payload labels.
   The dedicated `prodex-control-plane` binary now exposes one-shot
-  `plan-config-publication` and `deliver-config-publication` commands so
-  operators can exercise the control-plane publication decision and local
-  gateway delivery paths without wiring the long-lived control-plane server
-  early.
+  `plan-config-publication`, `deliver-config-publication`, and
+  `publish-config-publication`, and `compact-config-publication` commands,
+  while `prodex-gateway` exposes `consume-config-publication`. That shared file
+  transport writes one hashed event record into a transport outbox, lets each
+  gateway replica advance independently through per-replica acknowledgements,
+  and now provides one-shot retention compaction for fully acknowledged records,
+  so separated control-plane and gateway processes no longer require manual
+  per-replica fan-out or indefinite shared-storage growth for this path.
 - **ADRs:** `docs/adr/0068-domain-policy-cache-refresh.md`,
   `docs/adr/0085-config-boundary-crate.md`,
   `docs/adr/0086-config-boundary-guard.md`,
@@ -1017,10 +1564,13 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0605-config-invalidated-lkg-refresh-guard.md`, and
   `docs/adr/0618-config-secret-ref-shape-guard.md`, and
   `docs/adr/0633-policy-metadata-character-guard.md`, and
-  `docs/adr/0634-policy-issued-at-zero-guard.md`.
-- **Remaining gap:** Replace the current one-shot control-plane publication
-  delivery command with a replicated event transport so a separated control
-  plane can fan out the same event to every gateway replica automatically.
+  `docs/adr/0634-policy-issued-at-zero-guard.md`, and
+  `docs/adr/0977-config-publication-replicated-file-transport.md`, and
+  `docs/adr/0984-config-publication-broker-transport-staging.md`.
+- **Remaining gap:** Non-shared-storage publication transport is now staged
+  behind an explicit broker-backed outbox/watch contract, but the actual broker
+  composition-root adapter still needs to land before this path is fully
+  topology-neutral.
 
 ## Cross-Cutting Release Gates
 
@@ -1057,9 +1607,9 @@ while moving legacy adapter code behind enterprise boundaries.
 - Keep boundary guards in CI so new crates do not import HTTP frameworks,
   database drivers, provider SDKs, filesystem operations, or CLI/reporting
   modules into domain/application logic.
-- Keep the GitHub Actions `process-guard` job running the enterprise docs,
-  binaries, boundary, storage, gateway, and deployment security guards so local
-  preflight and CI enforce the same modular-monolith contracts.
+- Keep the GitHub Actions `process-guard` job running the self-tested enterprise
+  docs, binaries, boundary, storage, gateway, and deployment security guards so
+  local preflight and CI enforce the same modular-monolith contracts.
 - Persist every `ControlPlaneAuditWritePlan` in append-only hash-chain mode
   before treating a security-sensitive control-plane action as durably
   completed.
@@ -1482,7 +2032,11 @@ while moving legacy adapter code behind enterprise boundaries.
 - Keep deployment manifests and environment examples aligned with the runtime
   accounting gate by setting `PRODEX_GATEWAY_REPLICA_COUNT`,
   `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS`, and shared PostgreSQL/Redis
-  connection secrets deliberately.
+  connection secrets deliberately. The legacy `prodex gateway` launch path now
+  derives the same prelaunch gate from those deployment env vars, validates the
+  production posture through `plan_production_deployment_readiness` first, and
+  still fails closed until the durable reservation backend replaces local
+  admission.
 - Use `plan_production_deployment_readiness` before claiming production
   horizontal readiness so replica count, accounting gate intent, and shared
   PostgreSQL/Redis dependencies are validated by one domain contract.
@@ -1540,8 +2094,9 @@ while moving legacy adapter code behind enterprise boundaries.
   with the HTTP connection-drain budget so rolling updates do not sever
   streaming requests immediately.
 - Keep Kubernetes image references pinned by 64-character `sha256` digest and
-  reject malformed, all-zero, or repeated-character placeholders so manifests
-  cannot appear immutable while still carrying an unreplaced sample digest.
+  reject malformed, all-zero, repeated-character, or repeated-pattern
+  placeholders so manifests cannot appear immutable while still carrying an
+  unreplaced sample digest.
 - Keep the Kubernetes migration Job behind a dedicated egress-only NetworkPolicy
   so external migrators can reach DNS/PostgreSQL without inheriting gateway
   ingress, Redis, or provider egress.
@@ -1554,7 +2109,8 @@ while moving legacy adapter code behind enterprise boundaries.
   control-plane workload.
 - Keep control-plane Kubernetes egress limited to DNS and data-store namespaces;
   only gateway data-plane pods should have public provider HTTPS egress.
-- Keep `scripts/ci/deployment-security-guard.mjs --self-test` green so
+- Keep `npm run ci:deployment-security-guard` green so the guard self-test plus
+  workspace scan continue proving
   credential defaults, default ServiceAccounts, missing workload bindings,
   enabled service-account token automount, missing or weakened namespace Pod
   Security Admission labels, missing namespace default-deny, non-global or

@@ -23,7 +23,9 @@ uses in-memory fixtures to prove that:
 - `change-me` credentials fail;
 - missing gateway service-account bindings fail;
 - the default Kubernetes service account fails; and
-- enabled service-account token automount fails.
+- enabled service-account token automount fails; and
+- missing per-workload hardening on the gateway, control-plane, or migration
+  workload fails even if the same marker exists elsewhere in the manifest.
 
 ## Consequences
 
@@ -31,3 +33,6 @@ The guard remains usable in CI exactly as before, while its own security
 assumptions can be validated without mutating repository files. Future
 deployment-hardening checks should add both the production marker and a negative
 self-test fixture.
+The npm script and local preflight run the self-test before the workspace scan,
+so guard parser or fixture regressions fail before production artifacts are
+accepted.

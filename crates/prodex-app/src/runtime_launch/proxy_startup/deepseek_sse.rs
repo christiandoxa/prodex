@@ -15,11 +15,11 @@ use prodex_provider_core::{
     deepseek_provider_core_stream_text_delta_source, provider_core_chat_compatible_created_at,
 };
 use std::collections::BTreeMap;
+use std::fmt;
 
 mod completion;
 mod tool_calls;
 
-#[derive(Debug)]
 pub(super) struct RuntimeDeepSeekSseState {
     provider_kind: RuntimeProviderBridgeKind,
     request_id: u64,
@@ -46,7 +46,6 @@ pub(super) struct RuntimeDeepSeekSseState {
     conversations: RuntimeDeepSeekConversationStore,
 }
 
-#[derive(Debug)]
 struct RuntimeDeepSeekToolCall {
     call_id: Option<String>,
     name: Option<String>,
@@ -54,6 +53,68 @@ struct RuntimeDeepSeekToolCall {
     thought_signature: Option<String>,
     added: bool,
     done: bool,
+}
+
+impl fmt::Debug for RuntimeDeepSeekSseState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeDeepSeekSseState")
+            .field("provider_kind", &self.provider_kind)
+            .field("request_id", &"<redacted>")
+            .field("response_id", &"<redacted>")
+            .field("created_at", &"<redacted>")
+            .field("sequence_number", &"<redacted>")
+            .field("created", &self.created)
+            .field("completed", &self.completed)
+            .field("eof", &self.eof)
+            .field("output_text_item_added", &self.output_text_item_added)
+            .field("output_text_item_done", &self.output_text_item_done)
+            .field("model", &self.model.as_ref().map(|_| "<redacted>"))
+            .field("output_text", &"<redacted>")
+            .field("reasoning_content", &"<redacted>")
+            .field("refusal", &"<redacted>")
+            .field("tool_calls", &redacted_len(self.tool_calls.len()))
+            .field("usage", &self.usage.as_ref().map(|_| "<redacted>"))
+            .field("logprobs", &self.logprobs.as_ref().map(|_| "<redacted>"))
+            .field("annotations", &redacted_len(self.annotations.len()))
+            .field(
+                "finish_reason",
+                &self.finish_reason.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "system_fingerprint",
+                &self.system_fingerprint.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "response_metadata",
+                &self.response_metadata.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "conversation_messages",
+                &redacted_len(self.conversation_messages.len()),
+            )
+            .field("conversations", &"<redacted>")
+            .finish()
+    }
+}
+
+impl fmt::Debug for RuntimeDeepSeekToolCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeDeepSeekToolCall")
+            .field("call_id", &self.call_id.as_ref().map(|_| "<redacted>"))
+            .field("name", &self.name.as_ref().map(|_| "<redacted>"))
+            .field("arguments", &"<redacted>")
+            .field(
+                "thought_signature",
+                &self.thought_signature.as_ref().map(|_| "<redacted>"),
+            )
+            .field("added", &self.added)
+            .field("done", &self.done)
+            .finish()
+    }
+}
+
+fn redacted_len(len: usize) -> String {
+    format!("<redacted:{len}>")
 }
 
 impl Default for RuntimeDeepSeekToolCall {

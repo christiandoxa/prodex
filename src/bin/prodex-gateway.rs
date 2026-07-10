@@ -2,9 +2,15 @@
 //!
 //! Serving remains gated while async HTTP/storage/provider adapters are migrated
 //! behind boundary crates. The external migrator subcommand is wired now so DDL
-//! has a production entrypoint outside request-serving gateway opens.
+//! has a production entrypoint outside request-serving gateway opens. Shared
+//! config-publication transport consumption is also exposed as an operational
+//! gateway-side command.
 
-use prodex::{GatewayMigrationTarget, run_gateway_migrate};
+use prodex::{
+    GatewayMigrationTarget, OtlpLogAttribute,
+    deliver_pending_config_publication_events_to_gateway_runtime, exit_staged_serve_gate,
+    otlp_http_log_export_status, run_gateway_migrate,
+};
 use std::path::PathBuf;
 
 const HELP: &str = "prodex-gateway
@@ -16,6 +22,7 @@ USAGE:
     prodex-gateway --version
     prodex-gateway migrate --backend sqlite --path <PATH>
     prodex-gateway migrate --backend postgres --url-env <ENV>
+    prodex-gateway consume-config-publication --transport <PATH> --replica <ID> --root <PATH>
 
 STATUS:
     The enterprise gateway binary is present as a dedicated composition root.
@@ -23,10 +30,81 @@ STATUS:
     prodex-application, prodex-gateway-http, and prodex-gateway-core.
 ";
 
+const GATEWAY_SERVICE_NAME: &str = "prodex-gateway";
+const GATEWAY_SCOPE_NAME: &str = "prodex.gateway";
+const GATEWAY_MIGRATE_EVENT_NAME: &str = "gateway.migrate";
+const GATEWAY_CONFIG_PUBLICATION_CONSUME_EVENT_NAME: &str = "config_publication.consume";
+
 #[derive(Debug, PartialEq, Eq)]
 enum MigrationTarget {
     Sqlite { path: PathBuf },
     Postgres { url_env: String },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ConfigPublicationConsumptionTarget {
+    transport: PathBuf,
+    replica: String,
+    root: PathBuf,
+}
+
+fn encode_config_publication_consumption_summary(
+    delivery: &prodex::ConfigPublicationTransportDeliveryPlan,
+) -> Result<String, String> {
+    let otlp_log_export = otlp_http_log_export_status(
+        GATEWAY_SERVICE_NAME,
+        GATEWAY_SCOPE_NAME,
+        GATEWAY_CONFIG_PUBLICATION_CONSUME_EVENT_NAME,
+        {
+            let mut attributes = vec![OtlpLogAttribute::u64(
+                "delivered_event_count",
+                delivery.delivered_event_count as u64,
+            )];
+            if let Some(version) = delivery.runtime_policy_version {
+                attributes.push(OtlpLogAttribute::u64(
+                    "runtime_policy_version",
+                    version as u64,
+                ));
+            }
+            attributes
+        },
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "transport_root": delivery.transport_root,
+        "replica": delivery.replica,
+        "root": delivery.root,
+        "delivered_event_count": delivery.delivered_event_count,
+        "runtime_policy_version": delivery.runtime_policy_version,
+        "otlp_log_export": otlp_log_export,
+        "delivery_metrics": delivery.delivery_metrics.iter().map(|metric| {
+            serde_json::json!({
+                "metric_name": metric.metric_name,
+                "target": metric.target_label.as_metric_label().map(|(_, value)| value).unwrap_or("invalid"),
+                "result": metric.result_label.as_metric_label().map(|(_, value)| value).unwrap_or("invalid"),
+                "increment": metric.increment,
+            })
+        }).collect::<Vec<_>>(),
+    }))
+    .map_err(|err| format!("failed to encode config publication consumption summary: {err}"))
+}
+
+fn encode_gateway_migration_summary(backend: &str, message: &str) -> Result<String, String> {
+    let otlp_log_export = otlp_http_log_export_status(
+        GATEWAY_SERVICE_NAME,
+        GATEWAY_SCOPE_NAME,
+        GATEWAY_MIGRATE_EVENT_NAME,
+        vec![
+            OtlpLogAttribute::bool("migrated", true),
+            OtlpLogAttribute::string("backend", backend),
+        ],
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "migrated": true,
+        "backend": backend,
+        "message": message,
+        "otlp_log_export": otlp_log_export,
+    }))
+    .map_err(|err| format!("failed to encode gateway migration summary: {err}"))
 }
 
 fn main() {
@@ -39,13 +117,18 @@ fn main() {
             println!("prodex-gateway {}", env!("CARGO_PKG_VERSION"));
         }
         Some("serve") => {
-            eprintln!(
-                "prodex-gateway serve is not wired yet; use the legacy `prodex gateway` path until the async adapter migration is complete"
+            exit_staged_serve_gate(
+                "prodex-gateway serve is not wired yet; use the legacy `prodex gateway` path until the async adapter migration is complete",
             );
-            std::process::exit(2);
         }
         Some("migrate") => {
             if let Err(err) = run_migrate(parse_migrate_args(args)) {
+                eprintln!("{err}");
+                std::process::exit(2);
+            }
+        }
+        Some("consume-config-publication") => {
+            if let Err(err) = run_consume_config_publication(parse_config_publication_args(args)) {
                 eprintln!("{err}");
                 std::process::exit(2);
             }
@@ -58,15 +141,33 @@ fn main() {
 }
 
 fn run_migrate(target: Result<MigrationTarget, String>) -> Result<(), String> {
-    let message = match target? {
-        MigrationTarget::Sqlite { path } => {
-            run_gateway_migrate(GatewayMigrationTarget::Sqlite { path })?
-        }
-        MigrationTarget::Postgres { url_env } => {
-            run_gateway_migrate(GatewayMigrationTarget::Postgres { url_env })?
-        }
+    let (message, backend) = match target? {
+        MigrationTarget::Sqlite { path } => (
+            run_gateway_migrate(GatewayMigrationTarget::Sqlite { path })?,
+            "sqlite",
+        ),
+        MigrationTarget::Postgres { url_env } => (
+            run_gateway_migrate(GatewayMigrationTarget::Postgres { url_env })?,
+            "postgres",
+        ),
     };
-    println!("{message}");
+    let output = encode_gateway_migration_summary(backend, &message)?;
+    println!("{output}");
+    Ok(())
+}
+
+fn run_consume_config_publication(
+    target: Result<ConfigPublicationConsumptionTarget, String>,
+) -> Result<(), String> {
+    let target = target?;
+    let delivery = deliver_pending_config_publication_events_to_gateway_runtime(
+        &target.transport,
+        &target.replica,
+        &target.root,
+    )
+    .map_err(|err| err.to_string())?;
+    let output = encode_config_publication_consumption_summary(&delivery)?;
+    println!("{output}");
     Ok(())
 }
 
@@ -97,6 +198,37 @@ where
         Some(other) => Err(format!("unsupported migration backend: {other}")),
         None => Err("migration requires --backend sqlite|postgres".to_string()),
     }
+}
+
+fn parse_config_publication_args<I>(args: I) -> Result<ConfigPublicationConsumptionTarget, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut transport = None;
+    let mut replica = None;
+    let mut root = None;
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--transport" => transport = args.next().map(PathBuf::from),
+            "--replica" => replica = args.next(),
+            "--root" => root = args.next().map(PathBuf::from),
+            "--help" | "-h" => return Err(HELP.to_string()),
+            other => {
+                return Err(format!(
+                    "unknown consume-config-publication argument: {other}\n\n{HELP}"
+                ));
+            }
+        }
+    }
+    Ok(ConfigPublicationConsumptionTarget {
+        transport: transport
+            .ok_or_else(|| "consume-config-publication requires --transport <PATH>".to_string())?,
+        replica: replica
+            .ok_or_else(|| "consume-config-publication requires --replica <ID>".to_string())?,
+        root: root
+            .ok_or_else(|| "consume-config-publication requires --root <PATH>".to_string())?,
+    })
 }
 
 #[cfg(test)]
@@ -143,6 +275,30 @@ mod tests {
         assert_eq!(
             parse_migrate_args(std::iter::empty()).unwrap_err(),
             "migration requires --backend sqlite|postgres"
+        );
+    }
+
+    #[test]
+    fn parses_config_publication_consumption_target() {
+        assert_eq!(
+            parse_config_publication_args(
+                [
+                    "--transport",
+                    "/tmp/transport",
+                    "--replica",
+                    "gateway-a",
+                    "--root",
+                    "/tmp/root"
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
+            .unwrap(),
+            ConfigPublicationConsumptionTarget {
+                transport: PathBuf::from("/tmp/transport"),
+                replica: "gateway-a".to_string(),
+                root: PathBuf::from("/tmp/root"),
+            }
         );
     }
 }

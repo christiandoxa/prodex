@@ -133,6 +133,7 @@ mod tests {
         RuntimeGatewayStoredVirtualKey {
             name: "team-a".to_string(),
             token_hash_base64: "hash".to_string(),
+            virtual_key_id: None,
             tenant_id: Some("tenant-a".to_string()),
             team_id: None,
             project_id: None,

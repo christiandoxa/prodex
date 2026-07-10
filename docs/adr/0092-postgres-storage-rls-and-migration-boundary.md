@@ -30,10 +30,12 @@ Add `prodex-storage-postgres` as a driver-free SQL planning crate. It owns:
   counters with conflict-safe arithmetic, inserts idempotent reservations, and
   appends ledger events with tenant-scoped uniqueness.
 
-Add `scripts/ci/storage-postgres-boundary-guard.mjs` to keep the crate free from
-PostgreSQL drivers, async runtimes, HTTP frameworks, filesystem/network/process
-access, and other storage implementations. Adapter crates can execute these
-plans later.
+Add `scripts/ci/storage-postgres-boundary-guard.mjs` and wire its self-test plus
+workspace scan into local CI to keep the crate free from PostgreSQL drivers,
+async runtimes, HTTP frameworks, filesystem/network/process access, and other
+storage implementations in production dependencies and source. The guard permits
+only the test-only `postgres` dev-dependency used by the optional execution
+proof. Adapter crates can execute these plans later.
 
 ## Consequences
 

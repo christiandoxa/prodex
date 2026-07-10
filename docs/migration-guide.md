@@ -77,6 +77,51 @@ required for security.
 6. Add PostgreSQL Row-Level Security policies using tenant context as defense in
    depth.
 
+### Legacy optional tenant-column contraction
+
+Legacy compatibility tables may still carry nullable `tenant_id` columns while
+older adapters and imported data are being phased out. Treat those nullable
+shapes as compatibility-only and contract them with explicit expand/backfill/
+contract rollout:
+
+1. **Expand first**
+   - keep the legacy nullable column shape readable;
+   - route every new write through canonical tenant resolution;
+   - ensure new rows and rewritten rows persist a concrete tenant ID.
+2. **Backfill before enforcement**
+   - scan for `tenant_id IS NULL` in every tenant-owned compatibility table;
+   - resolve each null row through the control-plane source of truth or the
+     scoped resource metadata already attached to that record;
+   - fail the rollout if any row cannot be assigned an unambiguous tenant.
+3. **Enforce in reads and writes**
+   - require `tenant_id` in every predicate, uniqueness key, foreign key, and
+     audit projection touching the migrated table;
+   - reject adapter writes that still try to create tenant-null rows.
+4. **Contract only after clean reads**
+   - verify staging and production no longer depend on tenant-null rows;
+   - then add `NOT NULL`, tighten indexes/constraints, or remove the legacy
+     compatibility column shape in a later release boundary.
+
+Do not combine backfill and destructive contract steps in one rollout. Keep one
+release where the data is fully backfilled and only the stricter read/write
+behavior changes.
+
+### Legacy gateway compatibility schema contraction
+
+Legacy gateway compatibility tables and columns follow the same rule, but need
+one extra release-safety check because rollback targets may still read the old
+shape:
+
+1. add the new canonical shape through `prodex-gateway migrate`;
+2. backfill the compatibility rows deterministically;
+3. keep one release boundary where rollback-compatible deployments can still
+   read the legacy compatibility shape;
+4. drop the old table or column only after staging and production evidence show
+   no supported rollback path still depends on it.
+
+Document that choreography for every destructive compatibility migration before
+shipping the contract step.
+
 ## Phase 5: Reservation-Based Accounting
 
 1. Reserve estimated usage atomically before upstream provider calls.
@@ -117,7 +162,8 @@ required for security.
 1. Run legacy and new adapters side by side in staging.
 2. Replay compatibility fixtures for CLI workflows, gateway API responses,
    provider behavior, streaming, cancellation, and errors.
-3. Migrate tenants with expand/backfill/contract migrations.
+3. Migrate tenants with expand/backfill/contract migrations, including the
+   legacy optional `tenant_id` cleanup described above.
 4. Use feature flags or config switches for adapter rollout.
 5. Roll back by returning traffic to the legacy adapter without schema downgrade
    while expand-compatible migrations are active.

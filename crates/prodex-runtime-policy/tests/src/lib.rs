@@ -822,6 +822,28 @@ provider = " gemini "
 }
 
 #[test]
+fn load_runtime_policy_from_root_rejects_unknown_gateway_provider() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-unknown-provider");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway]
+provider = "unknown-provider"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(err.to_string().contains("gateway.provider"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn load_runtime_policy_from_root_rejects_padded_gateway_base_url() {
     clear_runtime_policy_cache();
     let root = temp_root("gateway-padded-base-url");
@@ -1528,6 +1550,33 @@ oidc_jwks_url = "http://idp.example/.well-known/jwks.json"
 }
 
 #[test]
+fn load_runtime_policy_from_root_rejects_userinfo_oidc_jwks_url() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-userinfo-jwks");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = "https://idp.example"
+oidc_audience = "prodex-gateway"
+oidc_jwks_url = "https://user@idp.example/.well-known/jwks.json"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.oidc_jwks_url"),
+        "{err:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn load_runtime_policy_from_root_rejects_padded_oidc_jwks_url() {
     clear_runtime_policy_cache();
     let root = temp_root("gateway-oidc-padded-jwks");
@@ -1573,6 +1622,32 @@ oidc_audience = "prodex-gateway"
 
     let err = load_runtime_policy_from_root(&root).unwrap_err();
     assert!(err.to_string().contains("must be an https URL"), "{err:#}");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_userinfo_oidc_issuer() {
+    clear_runtime_policy_cache();
+    let root = temp_root("gateway-oidc-userinfo-issuer");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[gateway.sso]
+oidc_issuer = "https://user@idp.example"
+oidc_audience = "prodex-gateway"
+"#,
+    )
+    .unwrap();
+
+    let err = load_runtime_policy_from_root(&root).unwrap_err();
+    assert!(
+        err.to_string().contains("gateway.sso.oidc_issuer"),
+        "{err:#}"
+    );
 
     let _ = fs::remove_dir_all(root);
 }

@@ -1556,6 +1556,14 @@ impl fmt::Debug for AuditRetentionDecisionError {
 impl fmt::Display for AuditRetentionDecisionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Retention(AuditRetentionPlanError::Timestamp(
+                AuditTimestampError::TooFarFuture { .. },
+            ))
+            | Self::Hold(AuditRetentionHoldError::Timestamp(AuditTimestampError::TooFarFuture {
+                ..
+            })) => {
+                write!(f, "audit timestamp is too far in the future")
+            }
             Self::Retention(error) => error.fmt(f),
             Self::Hold(error) => error.fmt(f),
         }

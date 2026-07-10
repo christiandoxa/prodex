@@ -24,6 +24,9 @@ the explicit break-glass boundary must require `CredentialScope::BreakGlass`,
 data-plane/control-plane resolvers must reject other scopes, and boundary
 authorization must compare the principal scope to the exact boundary
 requirement.
+The npm script and local preflight run the guard self-test before the workspace
+scan so forbidden-dependency, unsafe-forbid, plaintext-JWKS, and scope-separation
+checks cannot silently rot.
 
 ## Consequences
 Auth boundary crates remain deterministic and reusable from gateway and

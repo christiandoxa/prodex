@@ -165,7 +165,7 @@ spec:
               app.kubernetes.io/name: prodex-gateway
       containers:
         - name: prodex-gateway
-          image: ghcr.io/christiandoxa/prodex@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+          image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
           imagePullPolicy: IfNotPresent
           args: ["gateway", "--listen", "0.0.0.0:4000"]
           ports:
@@ -391,7 +391,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migration
-          image: ghcr.io/christiandoxa/prodex@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+          image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
           command: ["prodex-gateway", "migrate"]
           args:
             - "--backend"
@@ -484,7 +484,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: prodex-control-plane
-          image: ghcr.io/christiandoxa/prodex@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+          image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/prodex-control-plane"]
           args: ["serve"]

@@ -26,9 +26,11 @@ Add `prodex-storage-sqlite` as a SQL planning boundary. It owns:
 - rejection of migration DDL from `GatewayRequestPath`;
 - local atomic reservation DML wrapped by `BEGIN IMMEDIATE` and `COMMIT`.
 
-Add `scripts/ci/storage-sqlite-boundary-guard.mjs` and include it in preflight.
-The guard forbids SQLite drivers, HTTP/runtime/network/filesystem dependencies,
-JSON persistence dependencies, and other storage drivers inside this boundary.
+Add `scripts/ci/storage-sqlite-boundary-guard.mjs` and include its self-test plus
+workspace scan in preflight. The guard forbids SQLite drivers,
+HTTP/runtime/network/filesystem dependencies, JSON persistence dependencies, and
+other storage drivers in production dependencies and source. It permits only the
+test-only `rusqlite` dev-dependency used by SQLite execution coverage.
 
 ## Consequences
 

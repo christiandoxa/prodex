@@ -6,6 +6,7 @@ use crate::{
     fetch_gemini_quota_with_code_assist_endpoint, gemini_code_assist_endpoint,
     runtime_proxy_log_to_path, spawn_runtime_background_worker_or_log,
 };
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::path::PathBuf;
 
@@ -65,7 +66,12 @@ impl RuntimeGeminiOAuthPool {
                                             "profile",
                                             profile.profile_name.as_str(),
                                         ),
-                                        runtime_proxy_log_field("error", err.to_string()),
+                                        runtime_proxy_log_field(
+                                            "error",
+                                            runtime_gemini_oauth_pool_error_log_value(
+                                                &err.to_string(),
+                                            ),
+                                        ),
                                     ],
                                 ),
                             );
@@ -96,5 +102,27 @@ impl RuntimeGeminiOAuthPool {
                 .quota_headers
                 .insert(profile_name.to_string(), headers);
         }
+    }
+}
+
+fn runtime_gemini_oauth_pool_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error).replace('\n', " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_oauth_pool_error_log_value_redacts_secret_like_material() {
+        let message = runtime_gemini_oauth_pool_error_log_value(
+            "quota probe failed\nAuthorization: Bearer gemini-pool-token\napi_key=gemini-pool-key",
+        );
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("gemini-pool-token"));
+        assert!(!message.contains("gemini-pool-key"));
     }
 }

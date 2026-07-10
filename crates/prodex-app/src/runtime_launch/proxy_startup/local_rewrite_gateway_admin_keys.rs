@@ -1,4 +1,6 @@
-use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite::{
+    RuntimeLocalRewriteProxyShared, runtime_gateway_virtual_key_store_load,
+};
 use super::local_rewrite_gateway_admin_audit::{
     runtime_gateway_audit_admin_authorization_denied_event, runtime_gateway_audit_admin_key_event,
     runtime_gateway_audit_admin_key_mutation_denied_event,
@@ -25,9 +27,33 @@ use super::local_rewrite_gateway_util::{
     runtime_gateway_generate_virtual_key_token, runtime_gateway_unix_epoch_seconds,
 };
 use super::*;
+use prodex_application::{
+    ApplicationVirtualKeyLifecycleErrorStatus, ApplicationVirtualKeyLifecycleRequest,
+    plan_application_virtual_key_lifecycle, plan_application_virtual_key_lifecycle_error_response,
+};
+use prodex_control_plane::{
+    ControlPlaneActionRequest, ControlPlaneOperation, ControlPlaneResourceRef,
+};
+use prodex_domain::{
+    AuditDigest, CredentialScope, Principal, PrincipalId, PrincipalKind, ResourceKind, Role,
+    SecretRef, TenantId, VirtualKeyId,
+};
+use prodex_storage::{
+    DurableStoreKind, TenantStorageKey, VirtualKeySecretReferenceCommand,
+    VirtualKeySecretReferenceKind,
+};
+use sha2::{Digest, Sha256};
 
 const RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE: &str =
     "gateway key token could not be generated";
+const RUNTIME_GATEWAY_KEY_TENANT_REQUIRED_MESSAGE: &str =
+    "gateway virtual key tenant_id is required for durable key storage";
+const RUNTIME_GATEWAY_KEY_TENANT_INVALID_MESSAGE: &str =
+    "gateway virtual key tenant_id must be a valid tenant identifier";
+const RUNTIME_GATEWAY_KEY_ID_REQUIRED_MESSAGE: &str =
+    "gateway virtual key id is required for durable key storage";
+const RUNTIME_GATEWAY_KEY_ID_INVALID_MESSAGE: &str =
+    "gateway virtual key id must be a valid virtual key identifier";
 
 fn runtime_gateway_admin_key_generation_failed_error() -> RuntimeGatewayAdminError {
     RuntimeGatewayAdminError::new(
@@ -178,6 +204,7 @@ pub(super) fn runtime_gateway_admin_create_key_response(
     let mut record = RuntimeGatewayStoredVirtualKey {
         name: name.clone(),
         tenant_id: requested_tenant_id,
+        virtual_key_id: Some(prodex_domain::VirtualKeyId::new().to_string()),
         team_id: None,
         project_id: None,
         user_id: None,
@@ -212,6 +239,14 @@ pub(super) fn runtime_gateway_admin_create_key_response(
     }
     if body.get("budget_id").is_none() && record.budget_id.is_none() {
         record.budget_id = admin_auth.budget_id.clone();
+    }
+    if let Some(response) = runtime_gateway_admin_virtual_key_lifecycle_response(
+        shared,
+        admin_auth,
+        &record,
+        VirtualKeySecretReferenceKind::Create,
+    ) {
+        return response;
     }
     match runtime_gateway_mutate_admin_key_store(shared, |store| {
         if store
@@ -349,6 +384,37 @@ pub(super) fn runtime_gateway_admin_update_key_response(
         .get("rotate")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
+    if rotate {
+        let store = runtime_gateway_virtual_key_store_load(
+            &shared.gateway_state_store,
+            &shared.runtime_shared.log_path,
+        );
+        let Some(mut planned_record) = store
+            .keys
+            .iter()
+            .find(|record| record.name.eq_ignore_ascii_case(name))
+            .cloned()
+        else {
+            return build_runtime_proxy_json_error_response(
+                404,
+                "gateway_key_not_found",
+                "gateway virtual key was not found",
+            );
+        };
+        if let Err(err) = runtime_gateway_apply_virtual_key_patch(&mut planned_record, &body, true)
+        {
+            return err.into_response();
+        }
+        planned_record.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
+        if let Some(response) = runtime_gateway_admin_virtual_key_lifecycle_response(
+            shared,
+            admin_auth,
+            &planned_record,
+            VirtualKeySecretReferenceKind::Rotate,
+        ) {
+            return response;
+        }
+    }
     let mut rotated_token = None;
     let update_result = runtime_gateway_mutate_admin_key_store(shared, |store| {
         let Some(record) = store
@@ -511,6 +577,157 @@ fn runtime_gateway_admin_request_tenant_id(
     runtime_gateway_admin_body_tenant_id(body).unwrap_or_else(|| admin_auth.tenant_id.clone())
 }
 
+fn runtime_gateway_admin_virtual_key_lifecycle_response(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    record: &RuntimeGatewayStoredVirtualKey,
+    kind: VirtualKeySecretReferenceKind,
+) -> Option<tiny_http::ResponseBox> {
+    let durable_store = match &shared.gateway_state_store {
+        RuntimeGatewayStateStore::Postgres { .. } => DurableStoreKind::Postgres,
+        RuntimeGatewayStateStore::Sqlite { .. } => DurableStoreKind::Sqlite,
+        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
+            return None;
+        }
+    };
+    let tenant_id = match runtime_gateway_admin_durable_key_tenant_id(record) {
+        Ok(tenant_id) => tenant_id,
+        Err(err) => return Some(err.into_response()),
+    };
+    let virtual_key_id = match runtime_gateway_admin_durable_key_virtual_key_id(record) {
+        Ok(virtual_key_id) => virtual_key_id,
+        Err(err) => return Some(err.into_response()),
+    };
+    let principal_id = runtime_gateway_admin_key_actor_principal_id(admin_auth, tenant_id);
+    let occurred_at_unix_ms = record.updated_at_epoch.saturating_mul(1000);
+    let request = ApplicationVirtualKeyLifecycleRequest {
+        durable_store,
+        action: ControlPlaneActionRequest {
+            principal: Principal::new(
+                principal_id,
+                Some(tenant_id),
+                PrincipalKind::User,
+                runtime_gateway_admin_key_domain_role(admin_auth.role),
+                CredentialScope::ControlPlane,
+            ),
+            operation: match kind {
+                VirtualKeySecretReferenceKind::Create => ControlPlaneOperation::VirtualKeyCreate,
+                VirtualKeySecretReferenceKind::Rotate => {
+                    ControlPlaneOperation::VirtualKeyRotateSecret
+                }
+            },
+            resource: ControlPlaneResourceRef::new(
+                tenant_id,
+                ResourceKind::VirtualKey,
+                Some(record.name.clone()),
+            ),
+            occurred_at_unix_ms,
+        },
+        reference: VirtualKeySecretReferenceCommand {
+            storage_key: TenantStorageKey::virtual_key(tenant_id, virtual_key_id),
+            tenant_id,
+            virtual_key_id,
+            principal_id,
+            display_name: record.name.clone(),
+            secret_ref: SecretRef::new(
+                "gateway-admin",
+                format!("virtual-keys/{}", record.name),
+                Some("compat"),
+            ),
+            kind,
+            occurred_at_unix_ms,
+        },
+        previous_digest: None,
+        event_digest: AuditDigest::new(match kind {
+            VirtualKeySecretReferenceKind::Create => "sha256:gateway-virtual-key-create",
+            VirtualKeySecretReferenceKind::Rotate => "sha256:gateway-virtual-key-rotate",
+        })
+        .expect("static virtual-key lifecycle audit digest should be valid"),
+    };
+    match plan_application_virtual_key_lifecycle(request) {
+        Ok(_) => None,
+        Err(error) => {
+            let response = plan_application_virtual_key_lifecycle_error_response(&error);
+            Some(build_runtime_proxy_json_error_response(
+                runtime_gateway_application_virtual_key_lifecycle_status_code(response.status),
+                response.code,
+                response.message,
+            ))
+        }
+    }
+}
+
+fn runtime_gateway_admin_key_actor_principal_id(
+    admin_auth: &RuntimeGatewayAdminAuth,
+    tenant_id: TenantId,
+) -> PrincipalId {
+    let mut hasher = Sha256::new();
+    hasher.update(b"prodex:gateway-admin-key-actor:v1");
+    hasher.update(tenant_id.to_string().as_bytes());
+    hasher.update([0]);
+    hasher.update(admin_auth.name.as_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    PrincipalId::from_uuid(uuid::Uuid::from_bytes(bytes))
+}
+
+fn runtime_gateway_admin_durable_key_tenant_id(
+    record: &RuntimeGatewayStoredVirtualKey,
+) -> Result<TenantId, RuntimeGatewayAdminError> {
+    let Some(tenant_id) = record.tenant_id.as_deref() else {
+        return Err(RuntimeGatewayAdminError::new(
+            400,
+            "gateway_key_tenant_required",
+            RUNTIME_GATEWAY_KEY_TENANT_REQUIRED_MESSAGE,
+        ));
+    };
+    tenant_id.parse::<TenantId>().map_err(|_| {
+        RuntimeGatewayAdminError::new(
+            400,
+            "gateway_key_tenant_invalid",
+            RUNTIME_GATEWAY_KEY_TENANT_INVALID_MESSAGE,
+        )
+    })
+}
+
+fn runtime_gateway_admin_durable_key_virtual_key_id(
+    record: &RuntimeGatewayStoredVirtualKey,
+) -> Result<VirtualKeyId, RuntimeGatewayAdminError> {
+    let Some(virtual_key_id) = record.virtual_key_id.as_deref() else {
+        return Err(RuntimeGatewayAdminError::new(
+            400,
+            "gateway_key_id_required",
+            RUNTIME_GATEWAY_KEY_ID_REQUIRED_MESSAGE,
+        ));
+    };
+    virtual_key_id.parse::<VirtualKeyId>().map_err(|_| {
+        RuntimeGatewayAdminError::new(
+            400,
+            "gateway_key_id_invalid",
+            RUNTIME_GATEWAY_KEY_ID_INVALID_MESSAGE,
+        )
+    })
+}
+
+fn runtime_gateway_admin_key_domain_role(role: RuntimeGatewayAdminRole) -> Role {
+    match role {
+        RuntimeGatewayAdminRole::Admin => Role::Admin,
+        RuntimeGatewayAdminRole::Viewer => Role::Viewer,
+    }
+}
+
+fn runtime_gateway_application_virtual_key_lifecycle_status_code(
+    status: ApplicationVirtualKeyLifecycleErrorStatus,
+) -> u16 {
+    match status {
+        ApplicationVirtualKeyLifecycleErrorStatus::BadRequest => 400,
+        ApplicationVirtualKeyLifecycleErrorStatus::ServiceUnavailable => 503,
+    }
+}
+
 pub(super) fn runtime_gateway_admin_key_etag(updated_at_epoch: Option<u64>) -> String {
     format!("\"gateway-key-{}\"", updated_at_epoch.unwrap_or_default())
 }
@@ -554,5 +771,144 @@ mod tests {
             !err.test_message()
                 .contains("failed to generate gateway virtual key")
         );
+    }
+
+    fn stored_key_with_tenant(tenant_id: Option<String>) -> RuntimeGatewayStoredVirtualKey {
+        stored_key_with_ids(tenant_id, Some(VirtualKeyId::new().to_string()))
+    }
+
+    fn stored_key_with_ids(
+        tenant_id: Option<String>,
+        virtual_key_id: Option<String>,
+    ) -> RuntimeGatewayStoredVirtualKey {
+        RuntimeGatewayStoredVirtualKey {
+            name: "alpha".to_string(),
+            tenant_id,
+            virtual_key_id,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash_base64: "hash".to_string(),
+            allowed_models: Vec::new(),
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: None,
+            disabled: Some(false),
+            created_at_epoch: 1,
+            updated_at_epoch: 2,
+        }
+    }
+
+    fn admin_auth_named(name: &str) -> RuntimeGatewayAdminAuth {
+        RuntimeGatewayAdminAuth {
+            name: name.to_string(),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn durable_key_lifecycle_rejects_missing_or_invalid_tenant_id() {
+        let missing = runtime_gateway_admin_durable_key_tenant_id(&stored_key_with_tenant(None))
+            .expect_err("missing tenant should fail closed");
+        assert_eq!(missing.test_status(), 400);
+        assert_eq!(missing.test_code(), "gateway_key_tenant_required");
+        assert_eq!(
+            missing.test_message(),
+            RUNTIME_GATEWAY_KEY_TENANT_REQUIRED_MESSAGE
+        );
+
+        let invalid = runtime_gateway_admin_durable_key_tenant_id(&stored_key_with_tenant(Some(
+            "tenant-a".to_string(),
+        )))
+        .expect_err("non-UUID tenant should fail closed");
+        assert_eq!(invalid.test_status(), 400);
+        assert_eq!(invalid.test_code(), "gateway_key_tenant_invalid");
+        assert_eq!(
+            invalid.test_message(),
+            RUNTIME_GATEWAY_KEY_TENANT_INVALID_MESSAGE
+        );
+
+        let tenant_id = TenantId::new();
+        let parsed = runtime_gateway_admin_durable_key_tenant_id(&stored_key_with_tenant(Some(
+            tenant_id.to_string(),
+        )));
+        assert!(matches!(parsed, Ok(parsed) if parsed == tenant_id));
+    }
+
+    #[test]
+    fn durable_key_lifecycle_rejects_missing_or_invalid_virtual_key_id() {
+        let tenant_id = Some(TenantId::new().to_string());
+        let missing = runtime_gateway_admin_durable_key_virtual_key_id(&stored_key_with_ids(
+            tenant_id.clone(),
+            None,
+        ))
+        .expect_err("missing virtual-key id should fail closed");
+        assert_eq!(missing.test_status(), 400);
+        assert_eq!(missing.test_code(), "gateway_key_id_required");
+        assert_eq!(
+            missing.test_message(),
+            RUNTIME_GATEWAY_KEY_ID_REQUIRED_MESSAGE
+        );
+
+        let invalid = runtime_gateway_admin_durable_key_virtual_key_id(&stored_key_with_ids(
+            tenant_id,
+            Some("key-a".to_string()),
+        ))
+        .expect_err("non-UUID virtual-key id should fail closed");
+        assert_eq!(invalid.test_status(), 400);
+        assert_eq!(invalid.test_code(), "gateway_key_id_invalid");
+        assert_eq!(
+            invalid.test_message(),
+            RUNTIME_GATEWAY_KEY_ID_INVALID_MESSAGE
+        );
+
+        let virtual_key_id = VirtualKeyId::new();
+        let parsed = runtime_gateway_admin_durable_key_virtual_key_id(&stored_key_with_ids(
+            Some(TenantId::new().to_string()),
+            Some(virtual_key_id.to_string()),
+        ));
+        assert!(matches!(parsed, Ok(parsed) if parsed == virtual_key_id));
+    }
+
+    #[test]
+    fn durable_key_lifecycle_actor_principal_id_is_stable_per_admin_and_tenant() {
+        let tenant_id = TenantId::new();
+        let admin = admin_auth_named("admin-token");
+
+        assert_eq!(
+            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id),
+            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id)
+        );
+        assert_ne!(
+            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id),
+            runtime_gateway_admin_key_actor_principal_id(
+                &admin_auth_named("other-admin"),
+                tenant_id
+            )
+        );
+        assert_ne!(
+            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id),
+            runtime_gateway_admin_key_actor_principal_id(&admin, TenantId::new())
+        );
+    }
+
+    #[test]
+    fn durable_key_lifecycle_does_not_synthesize_tenant_virtual_key_or_actor_ids() {
+        let source = include_str!("local_rewrite_gateway_admin_keys.rs");
+        for fallback in [
+            ["unwrap_or_else", "(TenantId::new"].join(""),
+            ["unwrap_or_else", "(VirtualKeyId::new"].join(""),
+            ["PrincipalId", "::new()"].join(""),
+        ] {
+            assert!(!source.contains(&fallback));
+        }
     }
 }

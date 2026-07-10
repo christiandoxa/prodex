@@ -10,7 +10,7 @@ const MANIFEST = "crates/prodex-storage-sqlite/Cargo.toml";
 const SRC_DIR = "crates/prodex-storage-sqlite/src";
 const LIB = "crates/prodex-storage-sqlite/src/lib.rs";
 const ALLOWED_DEPENDENCIES = new Set(["prodex_domain", "prodex_storage"]);
-const ALLOWED_DEV_DEPENDENCIES = new Set([]);
+const ALLOWED_DEV_DEPENDENCIES = new Set(["rusqlite"]);
 const FORBIDDEN_DEPENDENCIES = new Set([
   "anyhow",
   "axum",
@@ -100,10 +100,7 @@ export function validateManifest(tomlText, manifestPath = MANIFEST) {
   }
   for (const dep of devDependencies) {
     if (!ALLOWED_DEV_DEPENDENCIES.has(dep)) {
-      errors.push(`${manifestPath}: [dev-dependencies] must stay empty; unexpected dependency '${dep}'`);
-    }
-    if (FORBIDDEN_DEPENDENCIES.has(dep)) {
-      errors.push(`${manifestPath}: prodex-storage-sqlite tests cannot depend on forbidden driver/runtime/framework crate '${dep}'`);
+      errors.push(`${manifestPath}: [dev-dependencies] allow only optional execution-proof drivers; unexpected dependency '${dep}'`);
     }
   }
   for (const sectionName of sorted(sections.keys())) {
@@ -164,6 +161,10 @@ prodex_domain = { workspace = true }
 prodex_storage = { workspace = true }
 `;
   assertSelfTest(validateManifest(valid, "valid/Cargo.toml").length === 0, "valid manifest rejected");
+  assertSelfTest(
+    validateManifest(`${valid}\n[dev-dependencies]\nrusqlite = { workspace = true }\n`, "valid-dev/Cargo.toml").length === 0,
+    "test-only rusqlite execution proof dependency rejected",
+  );
   assertSelfTest(
     validateManifest(`${valid}\nrusqlite = "0.40"\n`, "invalid/Cargo.toml").some((error) => error.includes("rusqlite")),
     "rusqlite dependency accepted",

@@ -1,3 +1,8 @@
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
+
 use super::{
     AppState, RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
@@ -62,6 +67,7 @@ fn gateway_operational_health_endpoints_are_public_and_machine_readable() {
         assert_eq!(body["status"], "ok");
         assert_eq!(body["ready"], true);
         assert_eq!(body["local_overload"], false);
+        assert_eq!(body["draining"], false);
         assert!(body["active_request_limit"].as_u64().is_some());
 
         let head = client
@@ -137,4 +143,211 @@ fn gateway_operational_health_exposes_active_policy_version() {
         .expect("health response should be json");
     assert_eq!(body["policy_version"], 1);
     prodex_runtime_policy::clear_runtime_policy_cache();
+}
+
+#[test]
+fn gateway_readyz_fails_while_draining_without_failing_livez_or_startupz() {
+    let _workers = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "4");
+    let root = temp_root("gateway-health-draining");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    proxy
+        .shutdown
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let client = reqwest::blocking::Client::new();
+    let readyz = client
+        .get(format!("http://{}/readyz", proxy.listen_addr))
+        .send()
+        .expect("readyz should be sent");
+    assert_eq!(readyz.status().as_u16(), 503);
+    let readyz: serde_json::Value = readyz.json().expect("readyz response should be json");
+    assert_eq!(readyz["status"], "draining");
+    assert_eq!(readyz["ready"], false);
+    assert_eq!(readyz["local_overload"], false);
+    assert_eq!(readyz["draining"], true);
+
+    let readyz_head = client
+        .head(format!("http://{}/readyz", proxy.listen_addr))
+        .send()
+        .expect("readyz HEAD should be sent");
+    assert_eq!(readyz_head.status().as_u16(), 503);
+    assert!(
+        readyz_head
+            .bytes()
+            .expect("readyz HEAD response body should be readable")
+            .is_empty()
+    );
+
+    for path in ["/livez", "/startupz"] {
+        let response = client
+            .get(format!("http://{}{}", proxy.listen_addr, path))
+            .send()
+            .expect("liveness/startup probe should be sent");
+        assert_eq!(response.status().as_u16(), 200);
+        let body: serde_json::Value = response.json().expect("probe response should be json");
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["ready"], true);
+        assert_eq!(body["draining"], true);
+    }
+}
+
+#[test]
+fn gateway_readyz_fails_during_local_overload_while_livez_and_startupz_stay_up() {
+    let _limit_guard =
+        crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT", "4");
+    let root = temp_root("gateway-health-overload");
+    let paths = app_paths_for_root(root);
+    let server = TinyServer::http("127.0.0.1:0").expect("held upstream should bind");
+    let upstream_addr = server
+        .server_addr()
+        .to_ip()
+        .expect("held upstream should expose TCP addr");
+    let (seen_tx, seen_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let upstream = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for _ in 0..4 {
+            let mut request = server.recv().expect("held upstream should receive request");
+            let mut body = Vec::new();
+            request
+                .as_reader()
+                .read_to_end(&mut body)
+                .expect("held upstream should read request body");
+            seen_tx
+                .send(())
+                .expect("held upstream should signal receipt");
+            requests.push(request);
+        }
+        release_rx.recv().expect("held upstream should be released");
+        for request in requests {
+            let mut response = TinyResponse::from_string(
+                r#"{"id":"resp_test","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#,
+            )
+            .with_status_code(200);
+            response
+                .add_header(TinyHeader::from_bytes("content-type", "application/json").unwrap());
+            let _ = request.respond(response);
+        }
+    });
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{upstream_addr}/v1"),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let first_addr = proxy.listen_addr;
+    let held_requests = (0..4)
+        .map(|index| {
+            thread::spawn(move || {
+                reqwest::blocking::Client::new()
+                    .post(format!("http://{first_addr}/v1/responses"))
+                    .json(
+                        &serde_json::json!({"model": "gpt-5.4", "input": format!("hold-{index}")}),
+                    )
+                    .send()
+                    .expect("held request should be sent")
+                    .status()
+                    .as_u16()
+            })
+        })
+        .collect::<Vec<_>>();
+    for _ in 0..4 {
+        seen_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("held upstream should receive held request");
+    }
+
+    let client = reqwest::blocking::Client::new();
+    let overloaded = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .json(&serde_json::json!({"model": "gpt-5.4", "input": "overload"}))
+        .send()
+        .expect("overload request should be sent");
+    assert_eq!(overloaded.status().as_u16(), 503);
+
+    let readyz = client
+        .get(format!("http://{}/readyz", proxy.listen_addr))
+        .send()
+        .expect("readyz should be sent");
+    assert_eq!(readyz.status().as_u16(), 503);
+    let readyz: serde_json::Value = readyz.json().expect("readyz response should be json");
+    assert_eq!(readyz["status"], "overloaded");
+    assert_eq!(readyz["ready"], false);
+    assert_eq!(readyz["local_overload"], true);
+    assert_eq!(readyz["draining"], false);
+
+    let readyz_head = client
+        .head(format!("http://{}/readyz", proxy.listen_addr))
+        .send()
+        .expect("readyz HEAD should be sent");
+    assert_eq!(readyz_head.status().as_u16(), 503);
+    assert!(
+        readyz_head
+            .bytes()
+            .expect("readyz HEAD response body should be readable")
+            .is_empty()
+    );
+
+    for path in ["/livez", "/startupz"] {
+        let response = client
+            .get(format!("http://{}{}", proxy.listen_addr, path))
+            .send()
+            .expect("liveness/startup probe should be sent");
+        assert_eq!(response.status().as_u16(), 200);
+        let body: serde_json::Value = response.json().expect("probe response should be json");
+        assert_eq!(body["ready"], true);
+        assert_eq!(body["local_overload"], true);
+        assert_eq!(body["draining"], false);
+    }
+
+    release_tx.send(()).expect("held upstream should release");
+    for request in held_requests {
+        assert_eq!(request.join().expect("held request should finish"), 200);
+    }
+    upstream.join().expect("held upstream should finish");
 }

@@ -205,6 +205,7 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
             key_name: delta.key_name.clone(),
             model: None,
             input_tokens: delta.input_tokens,
+            reserved_tokens: delta.reserved_tokens,
             estimated_cost_microusd: delta.estimated_cost_microusd,
         };
         runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(
@@ -251,6 +252,7 @@ mod tests {
             model: "gpt-5.4".to_string(),
             minute_epoch: 1,
             input_tokens: 1,
+            reserved_tokens: 1,
             estimated_cost_microusd: Some(1),
             created_at_epoch: 1,
         };

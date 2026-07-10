@@ -1,8 +1,9 @@
 use crate::{
     SecretBackend, SecretError, SecretLocation, SecretRevision, SecretRevisionBackend, SecretValue,
 };
+use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct KeyringSecretBackend {
     service: String,
 }
@@ -28,6 +29,14 @@ impl KeyringSecretBackend {
 
     pub fn unsupported_reason(&self) -> &'static str {
         "keyring secret backend is not implemented in this build; use backend=file"
+    }
+}
+
+impl fmt::Debug for KeyringSecretBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KeyringSecretBackend")
+            .field("service", &"<redacted>")
+            .finish()
     }
 }
 

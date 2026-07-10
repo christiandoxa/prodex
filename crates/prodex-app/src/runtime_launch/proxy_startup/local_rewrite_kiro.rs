@@ -43,7 +43,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime as TokioRuntime;
 
@@ -1219,9 +1218,10 @@ fn runtime_kiro_streaming_reader(
         .unwrap_or_else(|| PathBuf::from(default_command));
     let profile_name = auth.profile_name.clone();
     let conversations = shared.deepseek_conversations.clone();
+    let async_runtime = shared.runtime_shared.async_runtime.clone();
     let (sender, receiver) = mpsc::channel();
     let error_sender = sender.clone();
-    thread::spawn(move || {
+    drop(async_runtime.spawn_blocking(move || {
         let result = runtime_kiro_streaming_worker(
             sender,
             request_id,
@@ -1241,7 +1241,7 @@ fn runtime_kiro_streaming_reader(
                 err.to_string(),
             )));
         }
-    });
+    }));
     Ok(RuntimeKiroStreamingReader {
         receiver,
         pending: Cursor::new(Vec::new()),

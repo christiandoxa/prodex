@@ -31,7 +31,8 @@ pub(super) use gateway_observability_config::gateway_observability_config;
 pub(super) use gateway_provider_config::resolve_gateway_provider_config;
 #[cfg(test)]
 pub(super) use gateway_provider_config::{
-    gateway_openai_api_keys, gateway_upstream_base_url, resolve_gateway_provider_config,
+    gateway_normalize_upstream_base_url, gateway_openai_api_keys, gateway_upstream_base_url,
+    resolve_gateway_provider_config,
 };
 #[cfg(test)]
 pub(super) use gateway_provider_config::{gateway_policy_provider, gateway_provider_options};
@@ -43,6 +44,7 @@ pub(super) use gateway_route_alias_config::{
 };
 pub(super) use gateway_sso_config::gateway_sso_config;
 pub(super) use gateway_state_store_config::gateway_state_store_config;
+use gateway_state_store_config::gateway_validate_runtime_topology;
 
 pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) provider_name: Option<&'static str>,
@@ -91,9 +93,11 @@ pub(super) fn resolve_gateway_launch_config(
     };
     gateway_validate_listen_auth(&listen_addr, auth.auth_required)?;
 
-    let route_aliases = gateway_route_aliases_config(policy, provider.provider);
-    let guardrail = resolve_gateway_guardrail_config(args, policy);
+    let route_aliases = gateway_route_aliases_config(policy, provider.provider)?;
+    let guardrail = resolve_gateway_guardrail_config(args, policy)?;
     let call_id_header = gateway_call_id_header_config(policy)?;
+    let state_store = gateway_state_store_config(paths, policy)?;
+    gateway_validate_runtime_topology(&state_store)?;
 
     Ok(ResolvedGatewayLaunchConfig {
         provider_name: provider.provider.map(SuperExternalProvider::as_str),
@@ -104,7 +108,7 @@ pub(super) fn resolve_gateway_launch_config(
         listen_addr,
         admin_tokens: auth.admin_tokens,
         sso: gateway_sso_config(policy)?,
-        state_store: gateway_state_store_config(paths, policy)?,
+        state_store,
         virtual_keys: auth.virtual_keys,
         route_aliases,
         guardrails: guardrail.guardrails,
@@ -120,12 +124,14 @@ fn gateway_validate_upstream_base_url_input(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<()> {
     let configured = args.base_url.as_deref().or(policy.base_url.as_deref());
-    let provider = args.provider.or_else(|| {
-        policy
+    let provider = match args.provider {
+        Some(provider) => Some(provider),
+        None => policy
             .provider
             .as_deref()
-            .and_then(gateway_provider_config::gateway_policy_provider)
-    });
+            .map(gateway_provider_config::gateway_policy_provider)
+            .transpose()?,
+    };
     let selected = configured
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -191,8 +197,23 @@ mod tests {
     #[test]
     fn gateway_policy_provider_accepts_kiro() {
         assert_eq!(
-            gateway_policy_provider("kiro"),
-            Some(SuperExternalProvider::Kiro)
+            gateway_policy_provider("kiro").unwrap(),
+            SuperExternalProvider::Kiro
+        );
+    }
+
+    #[test]
+    fn gateway_openai_api_keys_rejects_empty_explicit_inputs() {
+        let err = gateway_openai_api_keys(Some("")).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("gateway --api-key cannot be empty")
+        );
+
+        let err = gateway_openai_api_keys(Some(" sk-test ")).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("gateway --api-key must not contain whitespace")
         );
     }
 
@@ -247,7 +268,8 @@ mod tests {
             Some(prodex_provider_core::ProviderId::Kiro),
             &[String::from("gpt-5.4")],
             &[],
-        );
+        )
+        .unwrap();
         assert!(metrics.is_empty());
     }
 }

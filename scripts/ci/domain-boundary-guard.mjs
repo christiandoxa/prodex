@@ -10,6 +10,7 @@ const DOMAIN_MANIFEST = "crates/prodex-domain/Cargo.toml";
 const DOMAIN_SRC_DIR = "crates/prodex-domain/src";
 const DOMAIN_OBSERVABILITY = "crates/prodex-domain/src/observability.rs";
 const DOMAIN_HEALTH = "crates/prodex-domain/src/health.rs";
+const DOMAIN_SECRETS = "crates/prodex-domain/src/secrets.rs";
 const DOMAIN_LIB = "crates/prodex-domain/src/lib.rs";
 const ALLOWED_DEPENDENCIES = new Set(["serde", "uuid"]);
 const ALLOWED_DEV_DEPENDENCIES = new Set(["serde_json"]);
@@ -45,6 +46,12 @@ const REQUIRED_OBSERVABILITY_SNIPPETS = Object.freeze([
 const REQUIRED_HEALTH_SNIPPETS = Object.freeze([
   "pub active_policy_revision: Option<PolicyRevisionId>",
   "active_policy_revision: snapshot.active_policy_revision",
+]);
+const REQUIRED_SECRET_SNIPPETS = Object.freeze([
+  "pub struct SecretRef",
+  "pub fn is_well_formed(&self) -> bool",
+  "fn secret_ref_part_is_well_formed(value: &str) -> bool",
+  'f.write_str("<redacted-secret-ref>")',
 ]);
 const REQUIRED_LIB_SNIPPETS = Object.freeze(["#![forbid(unsafe_code)]", "tenant_trace_attribute"]);
 
@@ -147,6 +154,8 @@ export function validateDomainRequiredContracts(sourceText, sourcePath = "source
     ? REQUIRED_OBSERVABILITY_SNIPPETS
     : sourcePath === DOMAIN_HEALTH
       ? REQUIRED_HEALTH_SNIPPETS
+    : sourcePath === DOMAIN_SECRETS
+      ? REQUIRED_SECRET_SNIPPETS
     : sourcePath === DOMAIN_LIB
       ? REQUIRED_LIB_SNIPPETS
       : [];
@@ -264,6 +273,30 @@ pub fn plan_health_probe_response(snapshot: HealthSnapshot) -> HealthProbeRespon
       error.includes("active_policy_revision"),
     ),
     "missing health active policy revision contract accepted",
+  );
+  assertSelfTest(
+    validateDomainRequiredContracts(
+      `
+pub struct SecretRef {}
+impl SecretRef {
+    pub fn is_well_formed(&self) -> bool { true }
+}
+fn secret_ref_part_is_well_formed(value: &str) -> bool { !value.is_empty() }
+impl fmt::Display for SecretRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<redacted-secret-ref>")
+    }
+}
+`,
+      DOMAIN_SECRETS,
+    ).length === 0,
+    "secret reference contract rejected",
+  );
+  assertSelfTest(
+    validateDomainRequiredContracts("pub struct SecretRef {}", DOMAIN_SECRETS).some((error) =>
+      error.includes("redacted-secret-ref"),
+    ),
+    "missing secret reference redaction contract accepted",
   );
   assertSelfTest(
     validateDomainRequiredContracts(

@@ -10,7 +10,7 @@ Gateway health probes return a stable `gateway.health` JSON object with a string
 
 ## Decision
 
-The `GatewayHealth` OpenAPI schema now requires `status` and documents the current `ok` and `overloaded` values. The stale `ok` property was removed from the schema. The schema also requires nullable `policy_version`, matching the runtime probe payload that always includes the active policy version slot.
+The `GatewayHealth` OpenAPI schema now requires `status` and documents the current `ok`, `overloaded`, and `draining` values. The stale `ok` property was removed from the schema. The schema also requires nullable `policy_version` and the `draining` boolean, matching the runtime probe payload that always includes the active policy version and drain-state slots.
 
 ## Consequences
 

@@ -5,6 +5,7 @@ use redaction::redaction_redact_secret_like_text;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::env;
+use std::fmt;
 use std::process::{Command, Stdio};
 use tiny_http::{Response as TinyResponse, Server as TinyServer};
 
@@ -17,7 +18,7 @@ const GEMINI_OAUTH_SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/userinfo.profile",
 ];
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub(super) struct GeminiTokenResponse {
     pub(super) access_token: String,
     #[serde(default)]
@@ -30,9 +31,35 @@ pub(super) struct GeminiTokenResponse {
     pub(super) expires_in: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+impl fmt::Debug for GeminiTokenResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GeminiTokenResponse")
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "token_type",
+                &self.token_type.as_ref().map(|_| "<redacted>"),
+            )
+            .field("scope", &self.scope.as_ref().map(|_| "<redacted>"))
+            .field("expires_in", &self.expires_in.map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+#[derive(Deserialize)]
 struct GeminiUserInfoResponse {
     email: String,
+}
+
+impl fmt::Debug for GeminiUserInfoResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GeminiUserInfoResponse")
+            .field("email", &"<redacted>")
+            .finish()
+    }
 }
 
 pub(super) fn gemini_oauth_authorize_url(redirect_uri: &str, state: &str) -> Result<String> {
@@ -317,6 +344,39 @@ mod tests {
         assert!(url.contains("state=state-test"));
         assert!(url.contains("access_type=offline"));
         assert!(url.contains("cloud-platform"));
+    }
+
+    #[test]
+    fn gemini_oauth_response_debug_output_redacts_sensitive_fields() {
+        let token = GeminiTokenResponse {
+            access_token: "google-access-token-secret".to_string(),
+            refresh_token: Some("google-refresh-token-secret".to_string()),
+            token_type: Some("Bearer-secret".to_string()),
+            scope: Some("secret-scope".to_string()),
+            expires_in: Some(3600),
+        };
+        let rendered = format!("{token:?}");
+
+        assert!(rendered.contains("GeminiTokenResponse"));
+        assert!(rendered.contains("<redacted>"));
+        for raw in [
+            "google-access-token-secret",
+            "google-refresh-token-secret",
+            "Bearer-secret",
+            "secret-scope",
+            "3600",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
+
+        let user = GeminiUserInfoResponse {
+            email: "alice@example.test".to_string(),
+        };
+        let rendered = format!("{user:?}");
+
+        assert!(rendered.contains("GeminiUserInfoResponse"));
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("alice@example.test"), "{rendered}");
     }
 
     #[test]

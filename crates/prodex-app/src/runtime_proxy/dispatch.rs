@@ -381,7 +381,7 @@ pub(crate) fn respond_runtime_responses_reply(
 pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
 ) -> Result<RuntimeProxyRequest> {
-    let max_body_bytes = runtime_proxy_max_request_body_bytes();
+    let max_body_bytes = runtime_proxy_max_request_body_bytes()?;
     if let Some(content_length) = runtime_proxy_request_content_length(request)
         && content_length > max_body_bytes
     {
@@ -414,12 +414,23 @@ pub(crate) fn capture_runtime_proxy_request(
     })
 }
 
-fn runtime_proxy_max_request_body_bytes() -> u64 {
-    env::var("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES)
+fn runtime_proxy_max_request_body_bytes() -> Result<u64> {
+    let Ok(value) = env::var("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES") else {
+        return Ok(RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES);
+    };
+    if value.is_empty() {
+        bail!("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        bail!("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must not contain whitespace");
+    }
+    let parsed = value
+        .parse::<u64>()
+        .context("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must be an unsigned integer")?;
+    if parsed == 0 {
+        bail!("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must be greater than zero");
+    }
+    Ok(parsed)
 }
 
 fn runtime_proxy_request_content_length(request: &tiny_http::Request) -> Option<u64> {
@@ -565,6 +576,47 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_proxy_max_request_body_bytes_rejects_invalid_env_values() {
+        for (value, message) in [
+            (
+                "",
+                "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES cannot be empty",
+            ),
+            (
+                " 64 ",
+                "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must not contain whitespace",
+            ),
+            (
+                "not-a-number",
+                "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must be an unsigned integer",
+            ),
+            (
+                "0",
+                "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must be greater than zero",
+            ),
+        ] {
+            let _guard = crate::test_support::TestEnvVarGuard::set(
+                "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES",
+                value,
+            );
+
+            let err = runtime_proxy_max_request_body_bytes().unwrap_err();
+
+            assert!(err.to_string().contains(message));
+        }
+    }
+
+    #[test]
+    fn runtime_proxy_max_request_body_bytes_accepts_exact_env_value() {
+        let _guard = crate::test_support::TestEnvVarGuard::set(
+            "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES",
+            "64",
+        );
+
+        assert_eq!(runtime_proxy_max_request_body_bytes().unwrap(), 64);
+    }
 
     #[test]
     fn dispatch_local_error_messages_are_stable_and_redacted() {

@@ -208,7 +208,10 @@ function validateEnterprisePackageAliasCommands(
 }
 
 function enterpriseGuardScriptPath(scriptCommand) {
-  const match = scriptCommand.match(/^node\s+(scripts\/ci\/[^\s]+\.mjs)$/u);
+  if (typeof scriptCommand !== "string") return null;
+  const match = scriptCommand.match(
+    /^node\s+(scripts\/ci\/[^\s]+\.mjs)(?:\s+--self-test)?(?:\s+&&\s+node\s+\1)?$/u,
+  );
   return match?.[1] ?? null;
 }
 
@@ -351,6 +354,18 @@ function runSelfTest() {
     ).length !== 0
   ) {
     throw new Error("self-test failed: matching enterprise package aliases rejected");
+  }
+
+  const validSelfTestPackage = JSON.stringify({
+    scripts: Object.fromEntries(
+      REQUIRED_ENTERPRISE_NPM_SCRIPTS.map((scriptName) => [
+        scriptName,
+        "node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs",
+      ]),
+    ),
+  });
+  if (validateEnterpriseGuardSelfTests(validSelfTestPackage, "package.json").length !== 0) {
+    throw new Error("self-test failed: explicit guard self-test command rejected");
   }
 
   const invalidSelfTestPackage = JSON.stringify({

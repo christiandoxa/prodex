@@ -16,9 +16,11 @@ HTTP body before dispatching to the runtime proxy.
 Runtime HTTP request capture enforces a default 32 MiB body limit before a body is
 buffered. Operators may override the limit with
 `PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES` for compatibility or constrained
-deployments. Requests with a declared `Content-Length` above the limit, or a body
-that exceeds the limit while streaming into the capture buffer, are rejected with
-`413` before any provider request is attempted.
+deployments. The override is an exact positive integer: empty,
+whitespace-bearing, non-numeric, or zero values fail closed instead of falling
+back to the default. Requests with a declared `Content-Length` above the limit,
+or a body that exceeds the limit while streaming into the capture buffer, are
+rejected with `413` before any provider request is attempted.
 
 ## Consequences
 

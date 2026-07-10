@@ -4,7 +4,7 @@ use redis::Commands;
 use super::local_rewrite_gateway_backend_connection::runtime_gateway_redis_connection;
 use super::local_rewrite_gateway_ledger_types::{
     RuntimeGatewayBillingLedgerEntry, runtime_gateway_apply_response_to_ledger_entry,
-    runtime_gateway_billing_ledger_entry_from_delta,
+    runtime_gateway_billing_ledger_entry_from_delta, runtime_gateway_billing_ledger_entry_identity,
 };
 use super::local_rewrite_gateway_usage_backend::RuntimeGatewayVirtualKeyUsageDelta;
 use super::provider_bridge::RuntimeProviderGatewaySpendEvent;
@@ -167,12 +167,7 @@ fn runtime_gateway_redis_ledger_entry_key(ledger_key: &str, entry_id: &str) -> S
 }
 
 fn runtime_gateway_redis_ledger_entry_id(entry: &RuntimeGatewayBillingLedgerEntry) -> String {
-    format!(
-        "{}:{}:{}",
-        entry.call_id,
-        entry.key_name.to_ascii_lowercase(),
-        entry.phase
-    )
+    runtime_gateway_billing_ledger_entry_identity(entry)
 }
 
 fn runtime_gateway_redis_ledger_load_limit(limit: usize) -> usize {
@@ -197,6 +192,7 @@ mod tests {
             model: "gpt-5".to_string(),
             minute_epoch: 10,
             input_tokens: 100,
+            reserved_tokens: 100,
             estimated_cost_microusd: Some(250_000),
             created_at_epoch: 20,
         })
@@ -207,9 +203,8 @@ mod tests {
         let entry = ledger_entry();
         let entry_id = runtime_gateway_redis_ledger_entry_id(&entry);
         let mut duplicate = entry.clone();
-        duplicate.key_name = "team-a".to_string();
+        duplicate.input_tokens = 200;
 
-        assert!(entry_id.ends_with(":team-a:request"));
         assert_eq!(entry_id, runtime_gateway_redis_ledger_entry_id(&duplicate));
         assert_eq!(
             runtime_gateway_redis_ledger_index_key("prodex:gateway:billing_ledger"),
@@ -226,6 +221,21 @@ mod tests {
             ),
             format!("prodex:gateway:billing_ledger:call:{}", entry.call_id)
         );
+    }
+
+    #[test]
+    fn redis_ledger_entry_ids_do_not_fold_case_or_delimiters() {
+        let mut entry = ledger_entry();
+        entry.call_id = "call:with-delimiter".to_string();
+        entry.key_name = "Team-A".to_string();
+        let entry_id = runtime_gateway_redis_ledger_entry_id(&entry);
+
+        entry.key_name = "team-a".to_string();
+        assert_ne!(entry_id, runtime_gateway_redis_ledger_entry_id(&entry));
+
+        entry.call_id = "call".to_string();
+        entry.key_name = "with-delimiter:Team-A".to_string();
+        assert_ne!(entry_id, runtime_gateway_redis_ledger_entry_id(&entry));
     }
 
     #[test]

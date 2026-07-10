@@ -97,6 +97,10 @@ pub(crate) use local_rewrite::{
     start_runtime_gateway_rewrite_proxy, start_runtime_local_rewrite_proxy,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
+pub(crate) use local_rewrite_gateway_backend_connection::{
+    runtime_gateway_postgres_migrate_compatibility_state,
+    runtime_gateway_sqlite_migrate_compatibility_state,
+};
 pub(crate) use local_rewrite_kiro::RuntimeKiroProfileAuth;
 use workers::spawn_runtime_rotation_proxy_workers;
 

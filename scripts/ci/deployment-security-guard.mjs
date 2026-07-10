@@ -101,6 +101,19 @@ function requireIncludes(checks, text, needle, path, description) {
   }
 }
 
+function requireWorkloadHardening(checks, document, path, workload) {
+  if (!document) return;
+  for (const [needle, description] of [
+    ["runAsNonRoot: true", "non-root pod security context"],
+    ["type: RuntimeDefault", "RuntimeDefault seccomp profile"],
+    ["allowPrivilegeEscalation: false", "disabled privilege escalation"],
+    ["readOnlyRootFilesystem: true", "read-only container filesystem"],
+    ['drop: ["ALL"]', "dropped Linux capabilities"],
+  ]) {
+    requireIncludes(checks, document, needle, path, `${workload} ${description}`);
+  }
+}
+
 function kubernetesDocumentByKindAndName(kubernetes, kind, name) {
   return kubernetesDocumentsByKindAndName(kubernetes, kind, name)[0];
 }
@@ -255,6 +268,7 @@ export function validateDeploymentSecurity(inputs) {
   if (!gatewayDeployment) {
     checks.push(`${kubernetesPath}: missing gateway Deployment`);
   } else {
+    requireWorkloadHardening(checks, gatewayDeployment, kubernetesPath, "gateway Deployment");
     if (!/^\s*serviceAccountName:\s*prodex-gateway\s*$/mu.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Deployment must use prodex-gateway service account`);
     }
@@ -275,6 +289,7 @@ export function validateDeploymentSecurity(inputs) {
   if (!controlPlaneDeployment) {
     checks.push(`${kubernetesPath}: missing control-plane Deployment`);
   } else {
+    requireWorkloadHardening(checks, controlPlaneDeployment, kubernetesPath, "control-plane Deployment");
     if (!/^\s*serviceAccountName:\s*prodex-control-plane\s*$/mu.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must use prodex-control-plane service account`);
     }
@@ -289,6 +304,7 @@ export function validateDeploymentSecurity(inputs) {
   if (!migrationJob) {
     checks.push(`${kubernetesPath}: missing migration Job`);
   } else {
+    requireWorkloadHardening(checks, migrationJob, kubernetesPath, "migration Job");
     if (!/^\s*serviceAccountName:\s*prodex-gateway-migration\s*$/mu.test(migrationJob)) {
       checks.push(`${kubernetesPath}: migration Job must use prodex-gateway-migration service account`);
     }
@@ -357,6 +373,8 @@ export function validateDeploymentSecurity(inputs) {
   }
   if (/@sha256:([0-9a-f])\1{63}\b/iu.test(kubernetes)) {
     checks.push(`${kubernetesPath}: image digest must not use a repeated-character placeholder`);
+  } else if (/@sha256:([0-9a-f]{16})\1{3}\b/iu.test(kubernetes)) {
+    checks.push(`${kubernetesPath}: image digest must not use a repeated-pattern placeholder`);
   }
   if (/@sha256:(?![0-9a-f]{64}\b)[^\s"']+/iu.test(kubernetes)) {
     checks.push(`${kubernetesPath}: image digest must be a 64-character sha256 hex value`);
@@ -425,6 +443,17 @@ spec:
   template:
     spec:
       serviceAccountName: prodex-gateway
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prodex-gateway
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       envFrom:
         - secretRef:
             name: prodex-gateway-secrets
@@ -445,6 +474,17 @@ spec:
   template:
     spec:
       serviceAccountName: prodex-control-plane
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prodex-control-plane
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       envFrom:
         - secretRef:
             name: prodex-control-plane-secrets
@@ -534,6 +574,17 @@ spec:
   template:
     spec:
       serviceAccountName: prodex-gateway-migration
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migration
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
 ---
 kind: ServiceAccount
 kind: Service
@@ -570,7 +621,7 @@ whenUnsatisfiable: DoNotSchedule
 terminationGracePeriodSeconds: 45
 preStop:
 command: ["sh", "-c", "sleep 15"]
-image: repo/prodex@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
+image: repo/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
 command: ["prodex-gateway", "migrate"]
 "--backend"
 "postgres"
@@ -844,6 +895,13 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
+      kubernetes: `${valid.kubernetes}\nimage: repo/prodex@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\n`,
+    }).some((error) => error.includes("repeated-pattern placeholder")),
+    "repeated-pattern image digest accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
       kubernetes: `${valid.kubernetes}\nimage: repo/prodex@sha256:abc\n`,
     }).some((error) => error.includes("64-character sha256 hex")),
     "short image digest accepted",
@@ -872,9 +930,16 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("seccompProfile:\n  type: RuntimeDefault\n", ""),
-    }).some((error) => error.includes("explicit seccomp profile")),
+      kubernetes: valid.kubernetes.replace("seccompProfile:\n          type: RuntimeDefault\n", ""),
+    }).some((error) => error.includes("RuntimeDefault seccomp profile")),
     "missing seccomp profile accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace("readOnlyRootFilesystem: true", "readOnlyRootFilesystem: false"),
+    }).some((error) => error.includes("gateway Deployment read-only container filesystem")),
+    "unhardened gateway workload accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({

@@ -8,6 +8,7 @@ use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use serde::Serialize;
+use std::fmt;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn runtime_provider_gateway_spend_event(
@@ -27,11 +28,16 @@ pub(super) fn runtime_provider_gateway_spend_event(
         .unwrap_or("unknown")
         .to_string();
     let input_tokens = Some(estimate_request_input_tokens(request_body));
-    let cost_usd = calculate_cost_microusd(input_tokens, None, cost).map(microusd_to_usd);
+    let reserved_tokens = runtime_proxy_crate::runtime_gateway_estimated_tokens(request_body);
+    let output_tokens =
+        input_tokens.map(|input_tokens| reserved_tokens.saturating_sub(input_tokens));
+    let cost_usd = calculate_cost_microusd(input_tokens, output_tokens, cost).map(microusd_to_usd);
     RuntimeProviderGatewaySpendEvent {
         event: "gateway_spend",
         phase: "request",
         request: request_id,
+        key_name: None,
+        tenant_id: None,
         request_id: runtime_provider_gateway_spend_request_id(),
         legacy_request_sequence: request_id,
         call_id: runtime_provider_gateway_spend_call_id(),
@@ -43,7 +49,7 @@ pub(super) fn runtime_provider_gateway_spend_event(
         request_bytes,
         response_bytes: None,
         input_tokens,
-        output_tokens: None,
+        output_tokens,
         cost_usd,
         sink: "runtime-log".to_string(),
     }
@@ -108,6 +114,8 @@ pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(
         event: "gateway_spend",
         phase: "response",
         request: request_id,
+        key_name: None,
+        tenant_id: None,
         request_id: runtime_provider_gateway_spend_request_id(),
         legacy_request_sequence: request_id,
         call_id: runtime_provider_gateway_spend_call_id(),
@@ -125,12 +133,16 @@ pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub(super) struct RuntimeProviderGatewaySpendEvent {
     pub(super) event: &'static str,
     pub(super) phase: &'static str,
     #[serde(skip)]
     pub(super) request: u64,
+    #[serde(skip)]
+    pub(super) key_name: Option<String>,
+    #[serde(skip)]
+    pub(super) tenant_id: Option<String>,
     pub(super) request_id: String,
     pub(super) legacy_request_sequence: u64,
     pub(super) call_id: String,
@@ -145,6 +157,36 @@ pub(super) struct RuntimeProviderGatewaySpendEvent {
     pub(super) output_tokens: Option<u64>,
     pub(super) cost_usd: Option<f64>,
     pub(super) sink: String,
+}
+
+impl fmt::Debug for RuntimeProviderGatewaySpendEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeProviderGatewaySpendEvent")
+            .field("event", &self.event)
+            .field("phase", &self.phase)
+            .field("request", &"<redacted>")
+            .field("key_name", &redacted_option(&self.key_name))
+            .field("tenant_id", &redacted_option(&self.tenant_id))
+            .field("request_id", &"<redacted>")
+            .field("legacy_request_sequence", &"<redacted>")
+            .field("call_id", &"<redacted>")
+            .field("provider", &self.provider)
+            .field("path", &"<redacted>")
+            .field("model", &"<redacted>")
+            .field("status", &self.status)
+            .field("elapsed_ms", &"<redacted>")
+            .field("request_bytes", &"<redacted>")
+            .field("response_bytes", &redacted_option(&self.response_bytes))
+            .field("input_tokens", &redacted_option(&self.input_tokens))
+            .field("output_tokens", &redacted_option(&self.output_tokens))
+            .field("cost_usd", &redacted_option(&self.cost_usd))
+            .field("sink", &self.sink)
+            .finish()
+    }
+}
+
+fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
+    value.as_ref().map(|_| "<redacted>")
 }
 
 impl RuntimeProviderGatewaySpendEvent {
@@ -200,6 +242,19 @@ pub(super) fn runtime_provider_gateway_spend_apply_admission_ids(
     }
 }
 
+pub(super) fn runtime_provider_gateway_spend_apply_ledger_scope(
+    event: &mut RuntimeProviderGatewaySpendEvent,
+    key_name: Option<&str>,
+    tenant_id: Option<&str>,
+) {
+    if let Some(key_name) = key_name {
+        event.key_name = Some(key_name.to_string());
+    }
+    if let Some(tenant_id) = tenant_id {
+        event.tenant_id = Some(tenant_id.to_string());
+    }
+}
+
 fn optional_u64_label(value: Option<u64>) -> String {
     value
         .map(|value| value.to_string())
@@ -210,4 +265,52 @@ fn optional_f64_label(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.8}"))
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_gateway_spend_event_debug_output_redacts_sensitive_fields() {
+        let event = RuntimeProviderGatewaySpendEvent {
+            event: "gateway_spend",
+            phase: "response",
+            request: 42,
+            key_name: Some("sk-provider-secret".to_string()),
+            tenant_id: Some("tenant-provider-secret".to_string()),
+            request_id: "prodex-request-provider-secret".to_string(),
+            legacy_request_sequence: 42,
+            call_id: "prodex-call-provider-secret".to_string(),
+            provider: "openai-compatible".to_string(),
+            path: "/v1/responses?api_key=secret".to_string(),
+            model: "gpt-provider-secret".to_string(),
+            status: 200,
+            elapsed_ms: 1_234,
+            request_bytes: 5_678,
+            response_bytes: Some(9_012),
+            input_tokens: Some(345),
+            output_tokens: Some(678),
+            cost_usd: Some(0.12345678),
+            sink: "runtime-log".to_string(),
+        };
+        let rendered = format!("{event:?}");
+
+        assert!(rendered.contains("RuntimeProviderGatewaySpendEvent"));
+        assert!(rendered.contains("provider: \"openai-compatible\""));
+        assert!(rendered.contains("status: 200"));
+        assert!(rendered.contains("<redacted>"));
+        for raw in [
+            "sk-provider-secret",
+            "tenant-provider-secret",
+            "prodex-request-provider-secret",
+            "prodex-call-provider-secret",
+            "/v1/responses",
+            "api_key=secret",
+            "gpt-provider-secret",
+            "0.12345678",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
+    }
 }

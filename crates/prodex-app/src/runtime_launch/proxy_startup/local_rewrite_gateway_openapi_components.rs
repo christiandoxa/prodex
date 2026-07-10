@@ -113,13 +113,14 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                 },
                 "GatewayHealth": {
                     "type": "object",
-                    "required": ["object", "probe", "status", "ready", "local_overload", "policy_version", "active_requests", "active_request_limit"],
+                    "required": ["object", "probe", "status", "ready", "local_overload", "draining", "policy_version", "active_requests", "active_request_limit"],
                     "properties": {
                         "object": {"type": "string", "const": "gateway.health"},
                         "probe": {"type": "string", "enum": ["livez", "readyz", "startupz"]},
-                        "status": {"type": "string", "enum": ["ok", "overloaded", "method_not_allowed"]},
+                        "status": {"type": "string", "enum": ["ok", "overloaded", "draining", "method_not_allowed"]},
                         "ready": {"type": "boolean"},
                         "local_overload": {"type": "boolean"},
+                        "draining": {"type": "boolean"},
                         "policy_version": {"type": ["integer", "null"], "minimum": 0},
                         "active_requests": {"type": "integer", "minimum": 0},
                         "active_request_limit": {"type": "integer", "minimum": 0}

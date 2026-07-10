@@ -1,10 +1,28 @@
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+use std::fmt;
+
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct RuntimeGatewayGovernanceScope {
     pub(super) tenant_id: Option<String>,
     pub(super) team_id: Option<String>,
     pub(super) project_id: Option<String>,
     pub(super) user_id: Option<String>,
     pub(super) budget_id: Option<String>,
+}
+
+impl fmt::Debug for RuntimeGatewayGovernanceScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGatewayGovernanceScope")
+            .field("tenant_id", &redacted_option(&self.tenant_id))
+            .field("team_id", &redacted_option(&self.team_id))
+            .field("project_id", &redacted_option(&self.project_id))
+            .field("user_id", &redacted_option(&self.user_id))
+            .field("budget_id", &redacted_option(&self.budget_id))
+            .finish()
+    }
+}
+
+fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
+    value.as_ref().map(|_| "<redacted>")
 }
 
 impl RuntimeGatewayGovernanceScope {
@@ -120,5 +138,29 @@ mod tests {
             Some("alice"),
             None,
         ));
+    }
+
+    #[test]
+    fn governance_scope_debug_output_redacts_sensitive_fields() {
+        let scope = RuntimeGatewayGovernanceScope::new(
+            Some("tenant-scope-secret".to_string()),
+            Some("team-scope-secret".to_string()),
+            Some("project-scope-secret".to_string()),
+            Some("user-scope-secret".to_string()),
+            Some("budget-scope-secret".to_string()),
+        );
+        let rendered = format!("{scope:?}");
+
+        assert!(rendered.contains("RuntimeGatewayGovernanceScope"));
+        assert!(rendered.contains("<redacted>"));
+        for raw in [
+            "tenant-scope-secret",
+            "team-scope-secret",
+            "project-scope-secret",
+            "user-scope-secret",
+            "budget-scope-secret",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
     }
 }

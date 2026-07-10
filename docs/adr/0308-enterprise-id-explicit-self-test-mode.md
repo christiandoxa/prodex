@@ -15,7 +15,9 @@ guard wiring contract.
 
 `scripts/ci/enterprise-id-boundary-guard.mjs` now accepts `--self-test`, runs
 only its negative/positive guard fixtures, and exits before workspace scanning.
-The normal guard path still runs those self-tests before scanning.
+The normal guard path still runs those self-tests before scanning, and npm
+scripts plus local preflight run the explicit self-test before the workspace
+scan.
 
 ## Consequences
 

@@ -11,6 +11,8 @@ Back up all durable tenant-owned gateway state before upgrades, schema changes,
 provider credential rotation, or disaster-recovery drills:
 
 - `policy.toml` and non-secret gateway configuration.
+- config-publication transport outbox/ack state when the shared filesystem
+  transport is active.
 - virtual-key store.
 - usage counters.
 - append-only billing ledger.
@@ -25,6 +27,14 @@ ConfigMaps or Git.
 The file backend stores state under `PRODEX_HOME` and audit/runtime logs under
 their configured directories.
 
+If the same deployment also uses the shared config-publication transport,
+snapshot that shared transport root in the same maintenance window as gateway
+state and compact fully acknowledged records after successful drills with:
+
+```bash
+prodex-control-plane compact-config-publication --transport <shared-path> --retain 10
+```
+
 Backup:
 
 ```bash
@@ -34,6 +44,7 @@ prodex quota --all --once >/dev/null # optional health read before snapshot
 tar --numeric-owner -C "$PRODEX_HOME" -czf "backups/prodex-home-$stamp.tgz" .
 tar --numeric-owner -C "${PRODEX_AUDIT_LOG_DIR:-$PRODEX_HOME}" -czf "backups/prodex-audit-$stamp.tgz" . || true
 tar --numeric-owner -C "${PRODEX_RUNTIME_LOG_DIR:-/tmp}" -czf "backups/prodex-runtime-logs-$stamp.tgz" . || true
+tar --numeric-owner -C "${PRODEX_CONFIG_PUBLICATION_TRANSPORT_ROOT:-$PRODEX_HOME}" -czf "backups/prodex-config-publication-$stamp.tgz" config-publication || true
 ```
 
 Restore:
@@ -50,6 +61,8 @@ Drill acceptance:
 - `/readyz` is healthy after restore.
 - admin key list returns expected tenant/key metadata.
 - ledger query returns the latest known billing rows.
+- if shared config-publication transport is enabled, intended gateway replicas
+  can still consume or recognize restored publication records correctly.
 
 ## SQLite backend
 

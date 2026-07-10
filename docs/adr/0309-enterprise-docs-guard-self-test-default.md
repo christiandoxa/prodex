@@ -16,12 +16,14 @@ explicit mode separately.
 
 `scripts/ci/enterprise-docs-guard.mjs` now runs its self-tests before normal
 workspace validation. The explicit `--self-test` mode remains available for
-focused guard development and exits before scanning repository files.
+focused guard development and exits before scanning repository files. The npm
+script and preflight also run that explicit mode first, matching the other
+enterprise guards.
 
 ## Consequences
 
 - The standard `npm run ci:enterprise-docs-guard` path exercises the guard's own
   negative fixtures.
-- CI and local preflight validate both the guard implementation and the current
-  repository state with one command.
+- CI and local preflight validate the guard implementation before scanning the
+  current repository state.
 - This remains static CI validation only.

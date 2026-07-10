@@ -26,6 +26,8 @@ delegate to existing boundary crates.
 Add `scripts/ci/enterprise-binaries-guard.mjs` to ensure the two entrypoints
 exist and remain thin. The guard rejects direct coupling to legacy runtime
 modules, HTTP framework implementations, database drivers, and provider SDKs.
+The npm and preflight paths run its explicit self-test before scanning the
+workspace.
 
 ## Consequences
 
@@ -36,4 +38,5 @@ keeping the legacy `prodex` CLI path compatible until cutover. In the meantime,
 the enterprise binaries can host small one-shot operational entrypoints such as
 gateway schema migration, control-plane configuration publication planning or
 delivery, and control-plane HTTP route/idempotency planning without pulling
-legacy runtime code into the new boundaries.
+legacy runtime code into the new boundaries. The guard self-test pins the
+forbidden thin-entrypoint pattern before repository files are scanned.

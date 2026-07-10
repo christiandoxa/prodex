@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +49,18 @@ const REQUIRED_SOURCE_SNIPPETS = Object.freeze([
   "actual: evidence.topology",
   "topology: evidence.topology",
 ]);
+const OPTIONAL_POSTGRES_EVIDENCE_TEST = Object.freeze({
+  command: "cargo",
+  args: [
+    "test",
+    "-q",
+    "-p",
+    "prodex-storage-postgres",
+    "postgres_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope",
+    "--",
+    "--test-threads=1",
+  ],
+});
 
 function stripComment(line) {
   let inString = false;
@@ -184,6 +197,28 @@ function assertSelfTest(condition, message) {
   if (!condition) throw new Error(`self-test failed: ${message}`);
 }
 
+function runCommand(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: { ...process.env, ...(options.env ?? {}) },
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`${command} ${args.join(" ")} exited from signal ${signal}`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(`${command} ${args.join(" ")} exited with code ${code}`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 function runSelfTest() {
   const valid = `
 [package]
@@ -262,7 +297,25 @@ async function main() {
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);
     process.exitCode = 1;
+    return;
   }
+
+  const postgresUrl = process.env.PRODEX_TEST_POSTGRES_URL;
+  if (!postgresUrl) {
+    process.stdout.write(
+      "storage-boundary-guard: skipping optional Postgres execution proof; set PRODEX_TEST_POSTGRES_URL to enable it\n",
+    );
+    return;
+  }
+
+  process.stdout.write(
+    "storage-boundary-guard: running optional Postgres execution proof\n",
+  );
+  await runCommand(
+    OPTIONAL_POSTGRES_EVIDENCE_TEST.command,
+    OPTIONAL_POSTGRES_EVIDENCE_TEST.args,
+    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+  );
 }
 
 main().catch((error) => {

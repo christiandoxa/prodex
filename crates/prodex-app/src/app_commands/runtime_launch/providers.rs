@@ -39,7 +39,10 @@ pub(super) fn runtime_launch_should_use_profileless_gemini(
     external_provider_api_key: Option<&str>,
 ) -> bool {
     gemini_external_provider
-        && runtime_gemini_api_keys_from_request_or_env(external_provider_api_key).is_some()
+        && runtime_gemini_api_keys_from_request_or_env(external_provider_api_key)
+            .ok()
+            .flatten()
+            .is_some()
         && !state
             .profiles
             .values()
@@ -112,7 +115,7 @@ pub(super) fn runtime_local_rewrite_provider_options(
                 || provider.eq_ignore_ascii_case("claude") =>
         {
             if let Some(api_keys) =
-                runtime_anthropic_api_keys_from_request_or_env(request.external_provider_api_key)
+                runtime_anthropic_api_keys_from_request_or_env(request.external_provider_api_key)?
             {
                 return Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
                     auth: RuntimeAnthropicProviderAuth::ApiKeys { api_keys },
@@ -135,7 +138,7 @@ pub(super) fn runtime_local_rewrite_provider_options(
                 || provider.eq_ignore_ascii_case("github_copilot") =>
         {
             if let Some(api_keys) =
-                runtime_copilot_api_keys_from_request_or_env(request.external_provider_api_key)
+                runtime_copilot_api_keys_from_request_or_env(request.external_provider_api_key)?
             {
                 return Ok(RuntimeLocalRewriteProviderOptions::Copilot {
                     auth: RuntimeCopilotProviderAuth::ApiKeys { api_keys },
@@ -154,15 +157,15 @@ pub(super) fn runtime_local_rewrite_provider_options(
         Some(provider) if provider.eq_ignore_ascii_case("deepseek") => {
             let api_keys = runtime_deepseek_api_keys_from_request_or_env(
                 request.external_provider_api_key,
-            )
+            )?
             .context(
                 "DeepSeek provider requires --api-key or DEEPSEEK_API_KEY(S) in the environment",
             )?;
             Ok(RuntimeLocalRewriteProviderOptions::DeepSeek {
                 api_keys,
-                strict_tools: runtime_deepseek_strict_tools_enabled(&selection.codex_home),
-                beta_base_url: runtime_deepseek_beta_base_url(&selection.codex_home),
-                web_search_mode: runtime_deepseek_web_search_mode(&selection.codex_home),
+                strict_tools: runtime_deepseek_strict_tools_enabled(&selection.codex_home)?,
+                beta_base_url: runtime_deepseek_beta_base_url(&selection.codex_home)?,
+                web_search_mode: runtime_deepseek_web_search_mode(&selection.codex_home)?,
             })
         }
         Some(provider)
@@ -174,7 +177,7 @@ pub(super) fn runtime_local_rewrite_provider_options(
             let model_resolution = RuntimeGeminiModelResolution::from_current_settings();
             if !provider.eq_ignore_ascii_case("gemini-oauth")
                 && let Some(api_keys) =
-                    runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)
+                    runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)?
             {
                 return Ok(RuntimeLocalRewriteProviderOptions::Gemini {
                     auth: RuntimeGeminiProviderAuth::ApiKeys { api_keys },

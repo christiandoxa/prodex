@@ -15,11 +15,13 @@ access.
 ## Decision
 
 Gateway admin token config resolution now defaults missing roles to Viewer and
-rejects unknown roles. Legacy `--auth-token`/`PRODEX_GATEWAY_TOKEN` keeps its
-existing `default-admin` compatibility path.
+rejects unknown roles. ADR 1002 removes the legacy `--auth-token`/
+`PRODEX_GATEWAY_TOKEN` `default-admin` compatibility path so data-plane bearer
+tokens do not become control-plane credentials.
 
 ## Consequences
 
 Configured admin tokens need an explicit `role = "admin"` to receive write
 access. Missing roles can still read admin resources, while malformed roles fail
-closed during gateway launch configuration.
+closed during gateway launch configuration. Legacy gateway/root tokens only
+protect data-plane bridge routes.

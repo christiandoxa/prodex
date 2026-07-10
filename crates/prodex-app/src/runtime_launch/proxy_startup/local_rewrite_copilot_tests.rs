@@ -35,6 +35,56 @@ fn conversation_store() -> RuntimeDeepSeekConversationStore {
     RuntimeDeepSeekConversationStore::default()
 }
 
+#[test]
+fn copilot_profile_pool_debug_output_redacts_sensitive_fields() {
+    let profile = RuntimeCopilotProfileAuth {
+        profile_name: "copilot-profile-secret".to_string(),
+        api_key: "copilot-api-key-secret".to_string(),
+        api_url: "https://api.copilot-secret.example".to_string(),
+        model_catalog: vec![serde_json::json!({
+            "id": "copilot-model-secret",
+            "name": "Copilot Secret Model"
+        })],
+    };
+    let rendered = format!("{profile:?}");
+
+    assert!(rendered.contains("RuntimeCopilotProfileAuth"));
+    assert!(rendered.contains("<redacted>"));
+    assert!(rendered.contains("<redacted:1>"));
+    for raw in [
+        "copilot-profile-secret",
+        "copilot-api-key-secret",
+        "https://api.copilot-secret.example",
+        "copilot-model-secret",
+        "Copilot Secret Model",
+    ] {
+        assert!(!rendered.contains(raw), "{rendered}");
+    }
+
+    let mut response_profile_bindings = BTreeMap::new();
+    response_profile_bindings.insert(
+        "response-secret".to_string(),
+        "copilot-profile-secret".to_string(),
+    );
+    let state = RuntimeCopilotOAuthPoolState {
+        profiles: vec![profile],
+        next_index: 7,
+        response_profile_bindings,
+    };
+    let rendered = format!("{state:?}");
+
+    assert!(rendered.contains("RuntimeCopilotOAuthPoolState"));
+    assert!(rendered.contains("<redacted>"));
+    assert!(rendered.matches("<redacted:1>").count() >= 2);
+    for raw in [
+        "copilot-profile-secret",
+        "copilot-api-key-secret",
+        "response-secret",
+    ] {
+        assert!(!rendered.contains(raw), "{rendered}");
+    }
+}
+
 fn temp_copilot_instruction_root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
         "prodex-copilot-instructions-{name}-{}",

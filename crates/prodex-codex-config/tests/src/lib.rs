@@ -43,6 +43,57 @@ fn parses_nested_toml_table_string_value() {
 }
 
 #[test]
+fn exact_config_value_preserves_empty_and_whitespace_strings() {
+    let root = temp_dir("exact-config-values");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("config.toml"),
+        "empty = ''\nspaced = ' 128000 '\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        codex_config_exact_value(&root, "empty").as_deref(),
+        Some("")
+    );
+    assert_eq!(
+        codex_config_exact_value(&root, "spaced").as_deref(),
+        Some(" 128000 ")
+    );
+    assert_eq!(codex_config_value(&root, "empty"), None);
+}
+
+#[test]
+fn exact_cli_override_preserves_empty_and_quoted_whitespace() {
+    assert_eq!(
+        codex_cli_config_override_exact_value(
+            &[OsString::from("--config=model_context_window=''")],
+            "model_context_window",
+        )
+        .as_deref(),
+        Some("")
+    );
+    assert_eq!(
+        codex_cli_config_override_exact_value(
+            &[
+                OsString::from("-c"),
+                OsString::from("model_context_window=' 128000 '"),
+            ],
+            "model_context_window",
+        )
+        .as_deref(),
+        Some(" 128000 ")
+    );
+    assert_eq!(
+        codex_cli_config_override_value(
+            &[OsString::from("--config=model_context_window=''")],
+            "model_context_window",
+        ),
+        None
+    );
+}
+
+#[test]
 fn cli_override_takes_precedence_over_config_file() {
     let root = temp_dir("cli-override-precedence");
     fs::create_dir_all(&root).unwrap();

@@ -11,8 +11,9 @@ future adapter crates such as `prodex-storage-postgres`, `prodex-storage-redis`,
 and `prodex-storage-sqlite`.
 
 ## Decision
-Add `scripts/ci/storage-boundary-guard.mjs` and wire it into npm scripts and
-local preflight. The guard requires `prodex-storage` to depend only on
+Add `scripts/ci/storage-boundary-guard.mjs` and wire its self-test plus
+workspace scan into npm scripts and local preflight. The guard requires
+`prodex-storage` to depend only on
 `prodex-domain`, forbids dev-dependencies and target-specific dependency
 sections, and scans source files for forbidden filesystem, environment, process,
 network, HTTP, database, transport, and async-runtime imports.

@@ -27,6 +27,8 @@ The crate intentionally depends only on boundary contracts and remains free of
 CLI, filesystem, network, HTTP framework, async runtime, database driver, and
 provider SDK dependencies. Add `scripts/ci/application-boundary-guard.mjs` and
 include it in preflight to keep that invariant explicit.
+The npm script and local preflight run the guard self-test before the workspace
+scan so required-contract and forbidden-dependency checks cannot silently rot.
 
 ## Consequences
 

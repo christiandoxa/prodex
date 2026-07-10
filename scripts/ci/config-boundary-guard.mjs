@@ -45,6 +45,18 @@ const REQUIRED_SOURCE_SNIPPETS = Object.freeze([
   "pub enum ConfigRefreshError",
   "pub enum ConfigRefreshErrorStatus",
   "pub struct ConfigRefreshErrorResponsePlan",
+  "pub enum ConfigSecretSource",
+  "Reference(SecretRef)",
+  "RawSecretMaterial",
+  "pub struct ConfigSecretReferencePlan",
+  "pub enum ConfigSecretReferenceError",
+  "pub fn plan_config_secret_reference_error_response(",
+  "pub fn plan_config_secret_reference(",
+  "ConfigSecretSource::Reference(reference)",
+  "ConfigSecretSource::RawSecretMaterial =>",
+  "if !reference.is_well_formed()",
+  "Err(ConfigSecretReferenceError::RawSecretMaterialRejected)",
+  "message: \"configuration secrets must use secret references\"",
   "pub fn config_refresh_error_for_decision(",
   "pub fn plan_config_refresh_error_response(",
   "ConfigRefreshDecision::RefreshRequired => Some(ConfigRefreshError::RefreshRequired)",
@@ -222,6 +234,16 @@ prodex_domain = { workspace = true }
 pub enum ConfigRefreshError {}
 pub enum ConfigRefreshErrorStatus {}
 pub struct ConfigRefreshErrorResponsePlan {}
+pub enum ConfigSecretSource { Reference(SecretRef), RawSecretMaterial }
+pub struct ConfigSecretReferencePlan {}
+pub enum ConfigSecretReferenceError {}
+pub fn plan_config_secret_reference_error_response() {}
+pub fn plan_config_secret_reference() {}
+ConfigSecretSource::Reference(reference)
+ConfigSecretSource::RawSecretMaterial =>
+if !reference.is_well_formed()
+Err(ConfigSecretReferenceError::RawSecretMaterialRejected)
+message: "configuration secrets must use secret references"
 pub fn config_refresh_error_for_decision() {}
 pub fn plan_config_refresh_error_response() {}
 ConfigRefreshDecision::RefreshRequired => Some(ConfigRefreshError::RefreshRequired)
@@ -243,9 +265,46 @@ message: "configuration is not currently available"
   assertSelfTest(
     validateConfigRequiredContracts(
       `
+#![forbid(unsafe_code)]
 pub enum ConfigRefreshError {}
 pub enum ConfigRefreshErrorStatus {}
 pub struct ConfigRefreshErrorResponsePlan {}
+pub enum ConfigSecretSource { Reference(SecretRef) }
+pub struct ConfigSecretReferencePlan {}
+pub enum ConfigSecretReferenceError {}
+pub fn plan_config_secret_reference_error_response() {}
+pub fn plan_config_secret_reference() {}
+ConfigSecretSource::Reference(reference)
+if !reference.is_well_formed()
+message: "configuration secrets must use secret references"
+pub fn config_refresh_error_for_decision() {}
+pub fn plan_config_refresh_error_response() {}
+ConfigRefreshDecision::RefreshRequired => Some(ConfigRefreshError::RefreshRequired)
+ConfigRefreshDecision::RejectedInvalidated =>
+code: "configuration_refresh_required"
+code: "configuration_revision_unavailable"
+message: "configuration is not currently available"
+`,
+      "bad-secret.rs",
+    ).some((error) => error.includes("RawSecretMaterial")),
+    "missing raw-secret rejection contract accepted",
+  );
+  assertSelfTest(
+    validateConfigRequiredContracts(
+      `
+pub enum ConfigRefreshError {}
+pub enum ConfigRefreshErrorStatus {}
+pub struct ConfigRefreshErrorResponsePlan {}
+pub enum ConfigSecretSource { Reference(SecretRef), RawSecretMaterial }
+pub struct ConfigSecretReferencePlan {}
+pub enum ConfigSecretReferenceError {}
+pub fn plan_config_secret_reference_error_response() {}
+pub fn plan_config_secret_reference() {}
+ConfigSecretSource::Reference(reference)
+ConfigSecretSource::RawSecretMaterial =>
+if !reference.is_well_formed()
+Err(ConfigSecretReferenceError::RawSecretMaterialRejected)
+message: "configuration secrets must use secret references"
 pub fn config_refresh_error_for_decision() {}
 pub fn plan_config_refresh_error_response() {}
 ConfigRefreshDecision::RefreshRequired => Some(ConfigRefreshError::RefreshRequired)

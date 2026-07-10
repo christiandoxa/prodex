@@ -67,6 +67,7 @@ use prodex_provider_core::{
     gemini_provider_core_simple_request, gemini_provider_core_unsupported_tool_fallback_body,
 };
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
+use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::path_without_query;
 use std::thread;
 use std::time::Duration;
@@ -363,7 +364,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                                         shared,
                                         request_id,
                                         selected.profile_name.as_str(),
-                                        err,
+                                        runtime_gemini_error_log_value(&err.to_string()),
                                     );
                                 }
                             }
@@ -496,4 +497,26 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
     }
 
     bail!("no Gemini auth attempts were available")
+}
+
+fn runtime_gemini_error_log_value(error: &str) -> String {
+    redaction_redact_secret_like_text(error).replace('\n', " ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_error_log_value_redacts_secret_like_material() {
+        let message = runtime_gemini_error_log_value(
+            "Gemini auth refresh failed\nAuthorization: Bearer gemini-token\napi_key=gemini-key",
+        );
+
+        assert!(!message.contains('\n'));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("api_key=<redacted>"));
+        assert!(!message.contains("gemini-token"));
+        assert!(!message.contains("gemini-key"));
+    }
 }

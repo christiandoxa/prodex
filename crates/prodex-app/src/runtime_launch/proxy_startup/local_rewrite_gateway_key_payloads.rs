@@ -74,6 +74,7 @@ pub(super) fn runtime_gateway_admin_key_json(
 ) -> serde_json::Value {
     let usage = usage.unwrap_or_default();
     serde_json::json!({
+        "virtual_key_id": entry.virtual_key_id.map(|id| id.to_string()),
         "name": entry.key.name,
         "tenant_id": entry.tenant_id,
         "team_id": entry.key.team_id,
@@ -106,6 +107,7 @@ pub(super) fn runtime_gateway_admin_stored_key_json(
     record: &RuntimeGatewayStoredVirtualKey,
 ) -> serde_json::Value {
     serde_json::json!({
+        "virtual_key_id": record.virtual_key_id,
         "name": record.name,
         "tenant_id": record.tenant_id,
         "team_id": record.team_id,

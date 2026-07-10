@@ -75,9 +75,9 @@ use prodex_provider_spi::{
     plan_provider_circuit_breaker, plan_provider_circuit_breaker_event, plan_provider_retry,
 };
 use prodex_storage::{
-    AppendOnlyAuditCommand, AuditExportQueryCommand, AuditRetentionPurgeCommand,
-    BillingLedgerQueryCommand, BudgetPolicyUpdateCommand, DurableStoreKind,
-    IdempotencyCompletedRecordCommand, IdempotencyPendingRecordCommand,
+    AppendOnlyAuditCommand, AtomicReservationCommand, AuditExportQueryCommand,
+    AuditRetentionPurgeCommand, BillingLedgerQueryCommand, BudgetPolicyUpdateCommand,
+    DurableStoreKind, IdempotencyCompletedRecordCommand, IdempotencyPendingRecordCommand,
     IdempotencyRecordLookupCommand, IdempotencyRecordLookupRow, IdempotencyRecordLookupRowError,
     MultiReplicaAccountingConcurrencySpec, MultiReplicaAccountingEvidence,
     MultiReplicaAccountingVerificationPlan, ProviderCredentialReferenceCommand,
@@ -91,15 +91,16 @@ use prodex_storage::{
     plan_multi_replica_accounting_verification, plan_storage_topology_error_response,
 };
 use prodex_storage_postgres::{
-    PostgresAppendOnlyAuditSqlPlan, PostgresAuditExportQuerySqlPlan,
-    PostgresAuditRetentionPurgeSqlPlan, PostgresBillingLedgerQuerySqlPlan,
-    PostgresBudgetPolicyUpdateSqlPlan, PostgresExpiredReservationRecoverySqlPlan,
-    PostgresIdempotencyCompletedRecordSqlPlan, PostgresIdempotencyPendingRecordSqlPlan,
-    PostgresIdempotencyRecordLookupSqlPlan, PostgresProviderCredentialReferenceSqlPlan,
-    PostgresRoleBindingMutationSqlPlan, PostgresRuntimeMode, PostgresServiceIdentityCreateSqlPlan,
-    PostgresStorageErrorResponsePlan, PostgresStorageErrorStatus, PostgresTenantLifecycleSqlPlan,
-    PostgresUsageReconciliationSqlPlan, PostgresUserLifecycleSqlPlan,
-    PostgresVirtualKeySecretReferenceSqlPlan, plan_postgres_append_only_audit,
+    PostgresAppendOnlyAuditSqlPlan, PostgresAtomicReservationSqlPlan,
+    PostgresAuditExportQuerySqlPlan, PostgresAuditRetentionPurgeSqlPlan,
+    PostgresBillingLedgerQuerySqlPlan, PostgresBudgetPolicyUpdateSqlPlan,
+    PostgresExpiredReservationRecoverySqlPlan, PostgresIdempotencyCompletedRecordSqlPlan,
+    PostgresIdempotencyPendingRecordSqlPlan, PostgresIdempotencyRecordLookupSqlPlan,
+    PostgresProviderCredentialReferenceSqlPlan, PostgresRoleBindingMutationSqlPlan,
+    PostgresRuntimeMode, PostgresServiceIdentityCreateSqlPlan, PostgresStorageErrorResponsePlan,
+    PostgresStorageErrorStatus, PostgresTenantLifecycleSqlPlan, PostgresUsageReconciliationSqlPlan,
+    PostgresUserLifecycleSqlPlan, PostgresVirtualKeySecretReferenceSqlPlan,
+    plan_postgres_append_only_audit, plan_postgres_atomic_reservation,
     plan_postgres_audit_export_query, plan_postgres_audit_retention_purge,
     plan_postgres_billing_ledger_query, plan_postgres_budget_policy_update,
     plan_postgres_expired_reservation_recovery, plan_postgres_idempotency_completed_record,
@@ -117,22 +118,23 @@ use prodex_storage_redis::{
     plan_redis_error_response,
 };
 use prodex_storage_sqlite::{
-    SqliteAppendOnlyAuditSqlPlan, SqliteAuditExportQuerySqlPlan, SqliteAuditRetentionPurgeSqlPlan,
-    SqliteBillingLedgerQuerySqlPlan, SqliteBudgetPolicyUpdateSqlPlan,
-    SqliteExpiredReservationRecoverySqlPlan, SqliteIdempotencyCompletedRecordSqlPlan,
-    SqliteIdempotencyPendingRecordSqlPlan, SqliteIdempotencyRecordLookupSqlPlan,
-    SqliteProviderCredentialReferenceSqlPlan, SqliteRoleBindingMutationSqlPlan, SqliteRuntimeMode,
-    SqliteServiceIdentityCreateSqlPlan, SqliteStorageErrorResponsePlan, SqliteStorageErrorStatus,
-    SqliteTenantLifecycleSqlPlan, SqliteUsageReconciliationSqlPlan, SqliteUserLifecycleSqlPlan,
+    SqliteAppendOnlyAuditSqlPlan, SqliteAtomicReservationSqlPlan, SqliteAuditExportQuerySqlPlan,
+    SqliteAuditRetentionPurgeSqlPlan, SqliteBillingLedgerQuerySqlPlan,
+    SqliteBudgetPolicyUpdateSqlPlan, SqliteExpiredReservationRecoverySqlPlan,
+    SqliteIdempotencyCompletedRecordSqlPlan, SqliteIdempotencyPendingRecordSqlPlan,
+    SqliteIdempotencyRecordLookupSqlPlan, SqliteProviderCredentialReferenceSqlPlan,
+    SqliteRoleBindingMutationSqlPlan, SqliteRuntimeMode, SqliteServiceIdentityCreateSqlPlan,
+    SqliteStorageErrorResponsePlan, SqliteStorageErrorStatus, SqliteTenantLifecycleSqlPlan,
+    SqliteUsageReconciliationSqlPlan, SqliteUserLifecycleSqlPlan,
     SqliteVirtualKeySecretReferenceSqlPlan, plan_sqlite_append_only_audit,
-    plan_sqlite_audit_export_query, plan_sqlite_audit_retention_purge,
-    plan_sqlite_billing_ledger_query, plan_sqlite_budget_policy_update,
-    plan_sqlite_expired_reservation_recovery, plan_sqlite_idempotency_completed_record,
-    plan_sqlite_idempotency_pending_record, plan_sqlite_idempotency_record_lookup,
-    plan_sqlite_migrations, plan_sqlite_provider_credential_reference,
-    plan_sqlite_role_binding_mutation, plan_sqlite_service_identity_create,
-    plan_sqlite_storage_error_response, plan_sqlite_tenant_lifecycle,
-    plan_sqlite_usage_reconciliation, plan_sqlite_user_lifecycle,
+    plan_sqlite_atomic_reservation, plan_sqlite_audit_export_query,
+    plan_sqlite_audit_retention_purge, plan_sqlite_billing_ledger_query,
+    plan_sqlite_budget_policy_update, plan_sqlite_expired_reservation_recovery,
+    plan_sqlite_idempotency_completed_record, plan_sqlite_idempotency_pending_record,
+    plan_sqlite_idempotency_record_lookup, plan_sqlite_migrations,
+    plan_sqlite_provider_credential_reference, plan_sqlite_role_binding_mutation,
+    plan_sqlite_service_identity_create, plan_sqlite_storage_error_response,
+    plan_sqlite_tenant_lifecycle, plan_sqlite_usage_reconciliation, plan_sqlite_user_lifecycle,
     plan_sqlite_virtual_key_secret_reference,
 };
 
@@ -558,6 +560,113 @@ where
     let admission = plan_data_plane_admission(request.admission)
         .map_err(ApplicationDataPlaneError::Admission)?;
     Ok(ApplicationDataPlanePlan { http, admission })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationAtomicReservationRequest {
+    pub durable_store: DurableStoreKind,
+    pub reservation: AtomicReservationCommand,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApplicationAtomicReservationStoragePlan {
+    Postgres(PostgresAtomicReservationSqlPlan),
+    Sqlite(SqliteAtomicReservationSqlPlan),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationAtomicReservationPlan {
+    pub storage: ApplicationAtomicReservationStoragePlan,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApplicationAtomicReservationError {
+    Postgres(prodex_storage_postgres::PostgresStoragePlanError),
+    Sqlite(prodex_storage_sqlite::SqliteStoragePlanError),
+}
+
+impl fmt::Display for ApplicationAtomicReservationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Postgres(err) => err.fmt(f),
+            Self::Sqlite(err) => err.fmt(f),
+        }
+    }
+}
+
+impl Error for ApplicationAtomicReservationError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicationAtomicReservationErrorStatus {
+    ServiceUnavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationAtomicReservationErrorResponsePlan {
+    pub status: ApplicationAtomicReservationErrorStatus,
+    pub code: &'static str,
+    pub message: &'static str,
+}
+
+pub fn plan_application_atomic_reservation_error_response(
+    error: &ApplicationAtomicReservationError,
+) -> ApplicationAtomicReservationErrorResponsePlan {
+    match error {
+        ApplicationAtomicReservationError::Postgres(error) => {
+            application_atomic_reservation_response_from_postgres(
+                plan_postgres_storage_error_response(error),
+            )
+        }
+        ApplicationAtomicReservationError::Sqlite(error) => {
+            application_atomic_reservation_response_from_sqlite(plan_sqlite_storage_error_response(
+                error,
+            ))
+        }
+    }
+}
+
+fn application_atomic_reservation_response_from_postgres(
+    response: PostgresStorageErrorResponsePlan,
+) -> ApplicationAtomicReservationErrorResponsePlan {
+    ApplicationAtomicReservationErrorResponsePlan {
+        status: match response.status {
+            PostgresStorageErrorStatus::ServiceUnavailable => {
+                ApplicationAtomicReservationErrorStatus::ServiceUnavailable
+            }
+        },
+        code: "atomic_reservation_storage_unavailable",
+        message: "atomic reservation storage is temporarily unavailable",
+    }
+}
+
+fn application_atomic_reservation_response_from_sqlite(
+    response: SqliteStorageErrorResponsePlan,
+) -> ApplicationAtomicReservationErrorResponsePlan {
+    ApplicationAtomicReservationErrorResponsePlan {
+        status: match response.status {
+            SqliteStorageErrorStatus::ServiceUnavailable => {
+                ApplicationAtomicReservationErrorStatus::ServiceUnavailable
+            }
+        },
+        code: "atomic_reservation_storage_unavailable",
+        message: "atomic reservation storage is temporarily unavailable",
+    }
+}
+
+pub fn plan_application_atomic_reservation(
+    request: ApplicationAtomicReservationRequest,
+) -> Result<ApplicationAtomicReservationPlan, ApplicationAtomicReservationError> {
+    let storage = match request.durable_store {
+        DurableStoreKind::Postgres => ApplicationAtomicReservationStoragePlan::Postgres(
+            plan_postgres_atomic_reservation(request.reservation)
+                .map_err(ApplicationAtomicReservationError::Postgres)?,
+        ),
+        DurableStoreKind::Sqlite => ApplicationAtomicReservationStoragePlan::Sqlite(
+            plan_sqlite_atomic_reservation(request.reservation)
+                .map_err(ApplicationAtomicReservationError::Sqlite)?,
+        ),
+    };
+    Ok(ApplicationAtomicReservationPlan { storage })
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -1681,6 +1790,19 @@ pub enum ApplicationControlPlaneHttpRouteError {
     Route(GatewayControlPlaneRouteError),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicationControlPlaneHttpRouteErrorStatus {
+    BadRequest,
+    MethodNotAllowed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationControlPlaneHttpRouteErrorResponsePlan {
+    pub status: ApplicationControlPlaneHttpRouteErrorStatus,
+    pub code: &'static str,
+    pub message: &'static str,
+}
+
 impl fmt::Display for ApplicationControlPlaneHttpRouteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -2069,6 +2191,28 @@ pub fn plan_application_control_plane_http_route(
         operation: control_plane_operation_from_gateway_route(route.operation),
         http: route,
     })
+}
+
+pub fn plan_application_control_plane_http_route_error_response(
+    error: &ApplicationControlPlaneHttpRouteError,
+) -> ApplicationControlPlaneHttpRouteErrorResponsePlan {
+    let response = match error {
+        ApplicationControlPlaneHttpRouteError::Route(error) => {
+            plan_gateway_control_plane_route_error_response(error)
+        }
+    };
+    ApplicationControlPlaneHttpRouteErrorResponsePlan {
+        status: match response.status {
+            GatewayControlPlaneRouteErrorStatus::BadRequest => {
+                ApplicationControlPlaneHttpRouteErrorStatus::BadRequest
+            }
+            GatewayControlPlaneRouteErrorStatus::MethodNotAllowed => {
+                ApplicationControlPlaneHttpRouteErrorStatus::MethodNotAllowed
+            }
+        },
+        code: response.code,
+        message: response.message,
+    }
 }
 
 pub fn plan_application_control_plane_idempotency_from_http(
@@ -6123,6 +6267,15 @@ pub fn plan_application_runtime_accounting_verification_error_response(
                 "runtime accounting verification is invalid",
             )
         }
+    }
+}
+
+pub fn plan_application_runtime_accounting_verification_required_response()
+-> ApplicationRuntimePlanErrorResponsePlan {
+    ApplicationRuntimePlanErrorResponsePlan {
+        status: ApplicationRuntimePlanErrorStatus::InvalidConfiguration,
+        code: "runtime_accounting_verification_invalid",
+        message: "runtime accounting verification is invalid",
     }
 }
 

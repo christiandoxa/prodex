@@ -1,10 +1,11 @@
 use prodex_provider_core::microusd_to_usd;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 use super::local_rewrite_gateway_usage_backend::RuntimeGatewayVirtualKeyUsageDelta;
 use super::provider_bridge::RuntimeProviderGatewaySpendEvent;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(super) struct RuntimeGatewayBillingLedgerEntry {
     pub(super) object: String,
     pub(super) phase: String,
@@ -43,6 +44,52 @@ pub(super) struct RuntimeGatewayBillingLedgerEntry {
     pub(super) reconciled_at_epoch: Option<u64>,
 }
 
+impl fmt::Debug for RuntimeGatewayBillingLedgerEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGatewayBillingLedgerEntry")
+            .field("object", &self.object)
+            .field("phase", &self.phase)
+            .field("request_id", &redacted_option(&self.request_id))
+            .field("request", &"<redacted>")
+            .field("call_id", &"<redacted>")
+            .field("key_name", &"<redacted>")
+            .field("tenant_id", &redacted_option(&self.tenant_id))
+            .field("team_id", &redacted_option(&self.team_id))
+            .field("project_id", &redacted_option(&self.project_id))
+            .field("user_id", &redacted_option(&self.user_id))
+            .field("budget_id", &redacted_option(&self.budget_id))
+            .field("model", &"<redacted>")
+            .field("minute_epoch", &"<redacted>")
+            .field("input_tokens", &"<redacted>")
+            .field(
+                "estimated_cost_microusd",
+                &redacted_option(&self.estimated_cost_microusd),
+            )
+            .field(
+                "estimated_cost_usd",
+                &redacted_option(&self.estimated_cost_usd),
+            )
+            .field("created_at_epoch", &"<redacted>")
+            .field("response_status", &self.response_status)
+            .field("response_bytes", &redacted_option(&self.response_bytes))
+            .field("output_tokens", &redacted_option(&self.output_tokens))
+            .field(
+                "final_cost_microusd",
+                &redacted_option(&self.final_cost_microusd),
+            )
+            .field("final_cost_usd", &redacted_option(&self.final_cost_usd))
+            .field(
+                "reconciled_at_epoch",
+                &redacted_option(&self.reconciled_at_epoch),
+            )
+            .finish()
+    }
+}
+
+fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
+    value.as_ref().map(|_| "<redacted>")
+}
+
 pub(super) fn runtime_gateway_billing_ledger_entry_from_delta(
     delta: &RuntimeGatewayVirtualKeyUsageDelta,
 ) -> RuntimeGatewayBillingLedgerEntry {
@@ -71,6 +118,20 @@ pub(super) fn runtime_gateway_billing_ledger_entry_from_delta(
         final_cost_usd: None,
         reconciled_at_epoch: None,
     }
+}
+
+pub(super) fn runtime_gateway_billing_ledger_entry_identity(
+    entry: &RuntimeGatewayBillingLedgerEntry,
+) -> String {
+    format!(
+        "{}:{}{}:{}{}:{}",
+        entry.call_id.len(),
+        entry.call_id,
+        entry.key_name.len(),
+        entry.key_name,
+        entry.phase.len(),
+        entry.phase
+    )
 }
 
 pub(super) fn runtime_gateway_apply_response_to_ledger_entry(
@@ -116,6 +177,7 @@ mod tests {
                 model: "gpt-5".to_string(),
                 minute_epoch: 10,
                 input_tokens: 100,
+                reserved_tokens: 100,
                 estimated_cost_microusd: Some(250_000),
                 created_at_epoch: 20,
             });
@@ -141,6 +203,87 @@ mod tests {
         assert_eq!(entry.team_id.as_deref(), Some("platform"));
         assert_eq!(entry.budget_id.as_deref(), Some("budget-a"));
         assert_eq!(entry.estimated_cost_usd, Some(0.25));
+    }
+
+    #[test]
+    fn ledger_entry_identity_uses_exact_collision_safe_fields() {
+        let mut entry =
+            runtime_gateway_billing_ledger_entry_from_delta(&RuntimeGatewayVirtualKeyUsageDelta {
+                request_id: 42,
+                typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+                call_id: "prodex-call:with-delimiter".to_string(),
+                key_name: "Alpha".to_string(),
+                tenant_id: None,
+                team_id: None,
+                project_id: None,
+                user_id: None,
+                budget_id: None,
+                model: "gpt-5".to_string(),
+                minute_epoch: 10,
+                input_tokens: 100,
+                reserved_tokens: 100,
+                estimated_cost_microusd: Some(250_000),
+                created_at_epoch: 20,
+            });
+        let base = runtime_gateway_billing_ledger_entry_identity(&entry);
+
+        entry.key_name = "alpha".to_string();
+        assert_ne!(base, runtime_gateway_billing_ledger_entry_identity(&entry));
+
+        entry.call_id = "prodex-call".to_string();
+        entry.key_name = "with-delimiter:Alpha".to_string();
+        assert_ne!(base, runtime_gateway_billing_ledger_entry_identity(&entry));
+    }
+
+    #[test]
+    fn billing_ledger_entry_debug_output_redacts_sensitive_fields() {
+        let entry = RuntimeGatewayBillingLedgerEntry {
+            object: "gateway.billing_ledger_entry".to_string(),
+            phase: "request".to_string(),
+            request_id: Some("prodex-request-secret".to_string()),
+            request: 42,
+            call_id: "prodex-call-secret".to_string(),
+            key_name: "sk-tenant-secret".to_string(),
+            tenant_id: Some("tenant-secret".to_string()),
+            team_id: Some("team-secret".to_string()),
+            project_id: Some("project-secret".to_string()),
+            user_id: Some("user-secret".to_string()),
+            budget_id: Some("budget-secret".to_string()),
+            model: "gpt-secret".to_string(),
+            minute_epoch: 1_700_000_000,
+            input_tokens: 123,
+            estimated_cost_microusd: Some(456),
+            estimated_cost_usd: Some(0.000456),
+            created_at_epoch: 1_700_000_001,
+            response_status: Some(200),
+            response_bytes: Some(789),
+            output_tokens: Some(321),
+            final_cost_microusd: Some(654),
+            final_cost_usd: Some(0.000654),
+            reconciled_at_epoch: Some(1_700_000_002),
+        };
+        let rendered = format!("{entry:?}");
+
+        assert!(rendered.contains("RuntimeGatewayBillingLedgerEntry"));
+        assert!(rendered.contains("response_status: Some(200)"));
+        assert!(rendered.contains("<redacted>"));
+        for raw in [
+            "prodex-request-secret",
+            "prodex-call-secret",
+            "sk-tenant-secret",
+            "tenant-secret",
+            "team-secret",
+            "project-secret",
+            "user-secret",
+            "budget-secret",
+            "gpt-secret",
+            "1700000000",
+            "123",
+            "456",
+            "789",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
     }
 
     #[test]

@@ -16,6 +16,7 @@ use prodex_provider_core::{
     gemini_provider_core_response_terminal_without_history,
     gemini_provider_core_runtime_responses_value_with_fallback_ids,
 };
+use std::fmt;
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -72,13 +73,28 @@ pub(crate) enum RuntimeGeminiProviderAuth {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct RuntimeGeminiOAuthProfileAuth {
     pub(crate) profile_name: String,
     pub(crate) codex_home: PathBuf,
     pub(crate) email: Option<String>,
     pub(crate) access_token: String,
     pub(crate) project_id: Option<String>,
+}
+
+impl fmt::Debug for RuntimeGeminiOAuthProfileAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGeminiOAuthProfileAuth")
+            .field("profile_name", &"<redacted>")
+            .field("codex_home", &"<redacted>")
+            .field("email", &self.email.as_ref().map(|_| "<redacted>"))
+            .field("access_token", &"<redacted>")
+            .field(
+                "project_id",
+                &self.project_id.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 impl RuntimeGeminiOAuthProfileAuth {

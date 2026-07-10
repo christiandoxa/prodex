@@ -2,7 +2,7 @@ use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAut
 use super::gemini_rewrite::RuntimeGeminiAuth;
 use super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, runtime_gateway_try_reserve_background_task,
-    schedule_runtime_gateway_billing_ledger_reconcile,
+    schedule_runtime_gateway_billing_ledger_reconcile, schedule_runtime_gateway_durable_reconcile,
 };
 use super::local_rewrite_transport_copilot::{
     runtime_copilot_initiator_header, runtime_copilot_request_has_vision_input,
@@ -10,8 +10,9 @@ use super::local_rewrite_transport_copilot::{
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderGatewaySpendEvent, RuntimeProviderWireFormat,
     runtime_provider_gateway_cost_for_request, runtime_provider_gateway_spend_apply_admission_ids,
-    runtime_provider_gateway_spend_event, runtime_provider_label, runtime_provider_model_from_body,
-    runtime_provider_openai_contract, runtime_provider_request_ledger_message,
+    runtime_provider_gateway_spend_apply_ledger_scope, runtime_provider_gateway_spend_event,
+    runtime_provider_label, runtime_provider_model_from_body, runtime_provider_openai_contract,
+    runtime_provider_request_ledger_message,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
@@ -301,12 +302,26 @@ pub(super) fn emit_runtime_gateway_spend_event(
         .lock()
         .ok()
         .and_then(|call_ids| call_ids.get(&event.request).cloned());
+    let ledger_scope = shared
+        .gateway_usage
+        .ledger_scopes
+        .lock()
+        .ok()
+        .and_then(|ledger_scopes| ledger_scopes.get(&event.request).cloned());
     runtime_provider_gateway_spend_apply_admission_ids(
         &mut event,
         typed_request_id.as_deref(),
         call_id.as_deref(),
     );
+    runtime_provider_gateway_spend_apply_ledger_scope(
+        &mut event,
+        ledger_scope.as_ref().map(|scope| scope.key_name.as_str()),
+        ledger_scope
+            .as_ref()
+            .and_then(|scope| scope.tenant_id.as_deref()),
+    );
     runtime_proxy_log(&shared.runtime_shared, event.log_message());
+    schedule_runtime_gateway_durable_reconcile(shared, event.clone());
     schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
     if !shared.gateway_observability.sink_enabled("jsonl")
         && !shared.gateway_observability.sink_enabled("http")

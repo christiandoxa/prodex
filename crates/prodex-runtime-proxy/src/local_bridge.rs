@@ -338,7 +338,7 @@ impl LocalBridgeBearerTokenHash {
     }
 
     pub fn from_hash_base64(value: &str) -> Option<Self> {
-        let bytes = STANDARD.decode(value.trim()).ok()?;
+        let bytes = STANDARD.decode(value).ok()?;
         let hash: [u8; 32] = bytes.try_into().ok()?;
         Some(Self {
             algorithm: "sha256",
@@ -356,6 +356,20 @@ impl LocalBridgeBearerTokenHash {
     pub fn verify_authorization_header(&self, authorization: &str) -> bool {
         local_bridge_authorization_bearer_token(authorization)
             .is_some_and(|token| self.verify_bearer_token(token))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LocalBridgeBearerTokenHash;
+
+    #[test]
+    fn bearer_token_hash_base64_decode_is_exact() {
+        let encoded = LocalBridgeBearerTokenHash::from_token("secret").hash_base64();
+
+        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&encoded).is_some());
+        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&format!(" {encoded}")).is_none());
+        assert!(LocalBridgeBearerTokenHash::from_hash_base64(&format!("{encoded}\n")).is_none());
     }
 }
 

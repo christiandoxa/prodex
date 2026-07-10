@@ -14,7 +14,7 @@ const DEFAULT_RESULT_TTL: Duration = Duration::from_secs(300);
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const REFRESH_LEASE_RESULT_MAX_BYTES: u64 = 1024 * 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RefreshLeaseCoordinator {
     root: PathBuf,
     namespace: String,
@@ -120,7 +120,20 @@ impl RefreshLeaseCoordinator {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl fmt::Debug for RefreshLeaseCoordinator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RefreshLeaseCoordinator")
+            .field("root", &"<redacted>")
+            .field("namespace", &"<redacted>")
+            .field("lease_ttl", &"<redacted>")
+            .field("wait_timeout", &"<redacted>")
+            .field("result_ttl", &"<redacted>")
+            .field("poll_interval", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct RefreshLeasePaths {
     digest: String,
     lock_path: PathBuf,
@@ -141,6 +154,16 @@ impl RefreshLeasePaths {
     }
 }
 
+impl fmt::Debug for RefreshLeasePaths {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RefreshLeasePaths")
+            .field("digest", &"<redacted>")
+            .field("lock_path", &"<redacted>")
+            .field("result_path", &"<redacted>")
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefreshLeaseRole {
     Owner,
@@ -148,7 +171,6 @@ pub enum RefreshLeaseRole {
     Bypass,
 }
 
-#[derive(Debug)]
 pub enum RefreshLeaseDecision {
     Owner(RefreshLeaseOwner),
     Follower { result_json: String },
@@ -165,12 +187,24 @@ impl RefreshLeaseDecision {
     }
 }
 
+impl fmt::Debug for RefreshLeaseDecision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Owner(owner) => f.debug_tuple("Owner").field(owner).finish(),
+            Self::Follower { .. } => f
+                .debug_struct("Follower")
+                .field("result_json", &"<redacted>")
+                .finish(),
+            Self::Bypass { reason } => f.debug_struct("Bypass").field("reason", reason).finish(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefreshLeaseBypassReason {
     WaitTimeout,
 }
 
-#[derive(Debug)]
 pub struct RefreshLeaseOwner {
     lock_path: PathBuf,
     result_path: PathBuf,
@@ -211,13 +245,23 @@ impl RefreshLeaseOwner {
     }
 }
 
+impl fmt::Debug for RefreshLeaseOwner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RefreshLeaseOwner")
+            .field("lock_path", &"<redacted>")
+            .field("result_path", &"<redacted>")
+            .field("released", &self.released)
+            .finish()
+    }
+}
+
 impl Drop for RefreshLeaseOwner {
     fn drop(&mut self) {
         let _ = self.release();
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum RefreshLeaseError {
     Io { path: PathBuf, reason: String },
 }
@@ -227,6 +271,18 @@ impl RefreshLeaseError {
         Self::Io {
             path: path.into(),
             reason: error.to_string(),
+        }
+    }
+}
+
+impl fmt::Debug for RefreshLeaseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { .. } => f
+                .debug_struct("Io")
+                .field("path", &"<redacted>")
+                .field("reason", &"<redacted>")
+                .finish(),
         }
     }
 }

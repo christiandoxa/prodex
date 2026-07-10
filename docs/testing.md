@@ -69,6 +69,7 @@ npm run ci:control-plane-boundary-guard
 npm run ci:observability-boundary-guard
 npm run ci:provider-spi-boundary-guard
 npm run ci:storage-boundary-guard
+npm run ci:storage-postgres-proof
 npm run ci:storage-postgres-boundary-guard
 npm run ci:storage-redis-boundary-guard
 npm run ci:storage-sqlite-boundary-guard
@@ -98,6 +99,15 @@ npm run ci:runtime-load-smoke
 node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
 cargo test -q --workspace --all-features -- --test-threads=1
 ```
+
+`npm run ci:storage-postgres-proof` is the repeatable local helper for the
+database-backed storage race proof. It first verifies its branch-selection
+logic without starting Docker, then uses `PRODEX_TEST_POSTGRES_URL` when
+provided, or starts a temporary local Postgres container when Docker and `psql`
+are available.
+Add `-- --storage-postgres-proof` to `npm run ci:preflight` (or set
+`PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF=1`) when you want that proof included
+in the standard local preflight run.
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 
@@ -167,7 +177,7 @@ Use `npm run ci:release-metadata-guard` for the focused metadata-only check. By 
 
 Use `npm run ci:runtime-hotpath-guard` after proxy hot-path work. It strips `#[cfg(test)]` Rust items, scans runtime proxy hot-path targets for blocking `std::fs`/`fs::` disk operations, file opens, `spawn_blocking`, and OS `thread::spawn`, skips local rewrite test-fixture modules during the default production scan, then permits only narrow allowlisted existing cases with rationale.
 
-Use `npm run ci:crate-boundary` after adding workspace dependencies. It parses Cargo manifests and fails on direct dependency edges from focused/helper crates into app orchestration, terminal rendering, or runtime-proxy-incompatible layers.
+Use `npm run ci:crate-boundary` after adding workspace dependencies. It runs the guard self-test, then parses Cargo manifests and fails on direct dependency edges from focused/helper crates into app orchestration, terminal rendering, or runtime-proxy-incompatible layers.
 
 Use `npm run ci:size-guard` after Rust module reshaping. Besides per-file line caps, it fails when one production directory accumulates too many near-limit sibling modules and when the global near-limit Rust file budget grows beyond the checked-in ratchet. Lower `PRODEX_SIZE_GUARD_NEAR_LIMIT_FILES` or `--near-limit-files` after successful splits; the goal is domain ownership, not threshold-only file splits. Use `npm run ci:size-guard-fixtures` after changing the guard itself.
 

@@ -3,6 +3,7 @@
 use super::super::local_rewrite::RuntimeLocalRewriteProviderOptions;
 use super::super::local_rewrite_copilot_bindings::RuntimeCopilotBindingRecorder;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -15,7 +16,7 @@ pub(crate) enum RuntimeCopilotProviderAuth {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct RuntimeCopilotProfileAuth {
     pub(crate) profile_name: String,
     pub(crate) api_key: String,
@@ -23,16 +24,43 @@ pub(crate) struct RuntimeCopilotProfileAuth {
     pub(crate) model_catalog: Vec<serde_json::Value>,
 }
 
+impl fmt::Debug for RuntimeCopilotProfileAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeCopilotProfileAuth")
+            .field("profile_name", &"<redacted>")
+            .field("api_key", &"<redacted>")
+            .field("api_url", &"<redacted>")
+            .field("model_catalog", &redacted_len(self.model_catalog.len()))
+            .finish()
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::runtime_launch::proxy_startup) struct RuntimeCopilotOAuthPool {
     pub(super) state: Arc<Mutex<RuntimeCopilotOAuthPoolState>>,
 }
 
-#[derive(Debug)]
 pub(super) struct RuntimeCopilotOAuthPoolState {
     pub(super) profiles: Vec<RuntimeCopilotProfileAuth>,
     pub(super) next_index: usize,
     pub(super) response_profile_bindings: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for RuntimeCopilotOAuthPoolState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeCopilotOAuthPoolState")
+            .field("profiles", &redacted_len(self.profiles.len()))
+            .field("next_index", &"<redacted>")
+            .field(
+                "response_profile_bindings",
+                &redacted_len(self.response_profile_bindings.len()),
+            )
+            .finish()
+    }
+}
+
+fn redacted_len(len: usize) -> String {
+    format!("<redacted:{len}>")
 }
 
 #[derive(Clone)]

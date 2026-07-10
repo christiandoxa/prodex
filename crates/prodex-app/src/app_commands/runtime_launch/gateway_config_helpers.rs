@@ -1,16 +1,5 @@
 use anyhow::{Result, bail};
 
-pub(super) fn gateway_optional_policy_string(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-pub(super) fn gateway_budget_usd_to_microusd(value: f64) -> u64 {
-    (value * 1_000_000.0).round().clamp(1.0, u64::MAX as f64) as u64
-}
-
 pub(crate) fn gateway_api_keys_from_list(value: &str) -> Option<Vec<String>> {
     let keys = value
         .split([',', ';', '\n'])
@@ -37,4 +26,8 @@ pub(super) fn gateway_validate_listen_auth(listen_addr: &str, auth_required: boo
         );
     }
     Ok(())
+}
+
+pub(super) fn gateway_budget_usd_to_microusd(value: f64) -> u64 {
+    (value * 1_000_000.0).round().clamp(1.0, u64::MAX as f64) as u64
 }

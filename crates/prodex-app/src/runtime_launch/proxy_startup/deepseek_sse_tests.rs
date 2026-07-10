@@ -1,10 +1,55 @@
 use super::super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
-use super::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekSseState};
+use super::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekSseState, RuntimeDeepSeekToolCall};
 use std::collections::BTreeSet;
 use std::io::{self, Read};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
     RuntimeDeepSeekConversationStore::default()
+}
+
+#[test]
+fn deepseek_sse_state_debug_output_redacts_stream_payloads() {
+    let conversations = conversation_store();
+    let mut state = RuntimeDeepSeekSseState::new(
+        7,
+        vec![serde_json::json!({"content": "conversation prompt secret"})],
+        Some(serde_json::json!({"secret": "response metadata secret"})),
+        conversations,
+    );
+    state.observe_chat_chunk(&serde_json::json!({
+        "id": "chatcmpl-secret",
+        "model": "deepseek-model-secret",
+        "choices": [{
+            "delta": {
+                "reasoning_content": "reasoning stream secret",
+                "content": "assistant stream secret"
+            }
+        }]
+    }));
+    let tool_call = RuntimeDeepSeekToolCall {
+        call_id: Some("direct-call-secret".to_string()),
+        name: Some("direct-tool-secret".to_string()),
+        arguments: "direct secret".to_string(),
+        thought_signature: Some("thought-signature-secret".to_string()),
+        added: true,
+        done: false,
+    };
+    let rendered = format!("{state:?}\n{tool_call:?}");
+
+    for raw in [
+        "conversation prompt secret",
+        "response metadata secret",
+        "chatcmpl-secret",
+        "deepseek-model-secret",
+        "reasoning stream secret",
+        "assistant stream secret",
+        "direct-call-secret",
+        "direct-tool-secret",
+        "direct secret",
+        "thought-signature-secret",
+    ] {
+        assert!(!rendered.contains(raw), "{rendered}");
+    }
 }
 
 #[test]

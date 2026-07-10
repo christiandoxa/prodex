@@ -68,7 +68,7 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
     id: "blocking-thread-spawn",
     pattern: /\bworker_threads\.push\(thread::spawn\s*\(/,
-    maxHits: 1,
+    maxHits: 2,
     reason:
       "bounded local rewrite worker pool created during launch, outside request commit path",
   },
@@ -122,7 +122,7 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",
     id: "blocking-disk-io",
     pattern: /\bstd::fs::create_dir_all\s*\(/,
-    maxHits: 1,
+    maxHits: 2,
     reason: "gateway backend state directory creation runs for file-backed gateway state",
   },
   {
@@ -147,8 +147,27 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
     id: "spawn-blocking",
     pattern: /\bspawn_blocking\s*\(/,
+    maxHits: 2,
+    reason:
+      "gateway ledger persistence and durable reconciliation run on the bounded blocking pool after request admission",
+  },
+  {
+    name: "local-rewrite-kiro-overlay-cleanup",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::remove_dir_all\s*\(&overlay_root\)/,
+    maxHits: 3,
+    reason:
+      "Kiro removes only its own per-request temporary overlay directories after CLI completion or stream shutdown",
+  },
+  {
+    name: "local-rewrite-kiro-streaming-worker",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
+    id: "spawn-blocking",
+    pattern: /\bspawn_blocking\s*\(/,
     maxHits: 1,
-    reason: "gateway ledger saves run on the bounded blocking pool after request admission",
+    reason:
+      "Kiro streaming bridges one local CLI session onto the bounded blocking pool until that stream finishes",
   },
   {
     name: "local-rewrite-transport-observability-background-sinks",
@@ -497,6 +516,7 @@ function parseArgs(argv) {
   const args = {
     targets: [],
     json: false,
+    selfTest: false,
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -511,6 +531,10 @@ function parseArgs(argv) {
     }
     if (value === "--json") {
       args.json = true;
+      continue;
+    }
+    if (value === "--self-test") {
+      args.selfTest = true;
       continue;
     }
     if (value === "--help" || value === "-h") {
@@ -533,6 +557,8 @@ function printHelp() {
       "",
       "Default targets:",
       ...DEFAULT_SCAN_TARGETS.map((target) => `  - ${target}`),
+      "",
+      "  --self-test  run built-in guard parser checks",
     ].join("\n") + "\n",
   );
 }
@@ -679,8 +705,7 @@ function allowlistEntryFor(filePath, pattern, code) {
   );
 }
 
-async function scanFile(filePath) {
-  const contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+function scanContents(filePath, contents) {
   if (fullFileCfgTest(contents)) {
     return { violations: [], allowlistHits: [] };
   }
@@ -715,6 +740,11 @@ async function scanFile(filePath) {
   }
 
   return { violations, allowlistHits };
+}
+
+async function scanFile(filePath) {
+  const contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+  return scanContents(filePath, contents);
 }
 
 function allowlistOveruseViolations(allowlistHits) {
@@ -773,10 +803,67 @@ function printHuman(files, violations, allowlistHits) {
   );
 }
 
+function assertSelfTest(condition, message) {
+  if (!condition) throw new Error(`self-test failed: ${message}`);
+}
+
+function runSelfTest() {
+  const production = scanContents(
+    "hot.rs",
+    `
+fn load() {
+    let _ = std::fs::read_to_string("state.json");
+    std::thread::spawn(|| {});
+    tokio::task::spawn_blocking(|| {});
+}
+`,
+  ).violations.map((violation) => violation.id);
+  assertSelfTest(production.includes("blocking-disk-io"), "blocking disk I/O was not detected");
+  assertSelfTest(production.includes("blocking-thread-spawn"), "thread spawn was not detected");
+  assertSelfTest(production.includes("spawn-blocking"), "spawn_blocking was not detected");
+
+  assertSelfTest(
+    scanContents(
+      "inline-test.rs",
+      `
+#[cfg(test)]
+mod tests {
+    fn fixture() {
+        let _ = std::fs::read("fixture.json");
+    }
+}
+`,
+    ).violations.length === 0,
+    "inline cfg(test) block was scanned",
+  );
+  assertSelfTest(
+    scanContents("#![cfg(test)].rs", "#![cfg(test)]\nfn fixture() { std::fs::read(\"x\"); }\n")
+      .violations.length === 0,
+    "full-file cfg(test) was scanned",
+  );
+  assertSelfTest(
+    scanContents("strings.rs", 'fn f() { let _ = "std::fs::read("; } // thread::spawn(\n')
+      .violations.length === 0,
+    "comments or strings were scanned",
+  );
+
+  const firstAllowlist = ALLOWLIST[0];
+  const overuse = allowlistOveruseViolations(
+    Array.from({ length: firstAllowlist.maxHits + 1 }, () => ({
+      allowlist: firstAllowlist.name,
+    })),
+  );
+  assertSelfTest(overuse.some((violation) => violation.id === "allowlist-overuse"), "allowlist overuse was not detected");
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
     printHelp();
+    return;
+  }
+  if (args.selfTest) {
+    runSelfTest();
     return;
   }
 

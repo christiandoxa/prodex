@@ -15,12 +15,15 @@ accepted identity-provider endpoints or audience selectors.
 ## Decision
 
 Treat gateway OIDC URL and audience fields as exact configuration boundaries.
-They must be non-empty, contain no whitespace, and URL fields must use HTTPS.
-Validation and runtime launch check the configured value directly instead of
-trimming it first.
+They must be non-empty, contain no whitespace, and URL fields must use HTTPS
+with a host and no userinfo. Validation and runtime launch check the configured
+value directly instead of trimming it first. Runtime launch also fails closed
+when only part of the OIDC issuer/audience/JWKS configuration is supplied
+instead of silently disabling OIDC.
 
 ## Consequences
 
 Operators must fix padded OIDC URL or audience values in `policy.toml`. Gateway
 identity configuration remains auditable and fails closed instead of accepting
-hidden normalization at the authentication boundary.
+hidden normalization or fallback-disable behavior at the authentication
+boundary.

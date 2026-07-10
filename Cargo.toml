@@ -178,9 +178,11 @@ prodex_config = { workspace = true }
 prodex_control_plane = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_gateway_http = { workspace = true }
+prodex_storage = { workspace = true }
 prodex_storage_postgres = { workspace = true }
 prodex_storage_sqlite = { workspace = true }
 rusqlite = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "rustls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

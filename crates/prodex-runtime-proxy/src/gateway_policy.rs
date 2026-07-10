@@ -145,6 +145,7 @@ pub struct RuntimeGatewayVirtualKeyAdmission {
     pub key_name: String,
     pub model: Option<String>,
     pub input_tokens: u64,
+    pub reserved_tokens: u64,
     pub estimated_cost_microusd: Option<u64>,
 }
 
@@ -220,7 +221,8 @@ pub fn runtime_gateway_virtual_key_admission(
         return Err(RuntimeGatewayVirtualKeyRejection::ModelNotAllowed);
     }
 
-    let input_tokens = runtime_gateway_estimated_tokens(body);
+    let input_tokens = prodex_provider_core::estimate_request_input_tokens(body);
+    let reserved_tokens = runtime_gateway_estimated_tokens(body);
     let usage = usage.cloned().unwrap_or_default();
     let same_minute = usage.minute_epoch == minute_epoch;
     let requests_this_minute = if same_minute {
@@ -250,7 +252,7 @@ pub fn runtime_gateway_virtual_key_admission(
         return Err(RuntimeGatewayVirtualKeyRejection::RpmLimitExceeded);
     }
     if let Some(limit) = key.tpm_limit
-        && tokens_this_minute.saturating_add(input_tokens) > limit
+        && tokens_this_minute.saturating_add(reserved_tokens) > limit
     {
         return Err(RuntimeGatewayVirtualKeyRejection::TpmLimitExceeded);
     }
@@ -259,6 +261,7 @@ pub fn runtime_gateway_virtual_key_admission(
         key_name: key.name.clone(),
         model,
         input_tokens,
+        reserved_tokens,
         estimated_cost_microusd,
     })
 }
@@ -276,7 +279,7 @@ pub fn runtime_gateway_record_virtual_key_usage(
     usage.requests_this_minute = usage.requests_this_minute.saturating_add(1);
     usage.tokens_this_minute = usage
         .tokens_this_minute
-        .saturating_add(admission.input_tokens);
+        .saturating_add(admission.reserved_tokens);
     usage.requests_total = usage.requests_total.saturating_add(1);
     if let Some(cost) = admission.estimated_cost_microusd {
         usage.spend_microusd = usage.spend_microusd.saturating_add(cost);
@@ -431,8 +434,24 @@ fn runtime_gateway_route_selected_model(
     })
 }
 
-fn runtime_gateway_estimated_tokens(body: &[u8]) -> u64 {
-    prodex_provider_core::estimate_request_input_tokens(body)
+pub fn runtime_gateway_estimated_tokens(body: &[u8]) -> u64 {
+    let input_tokens = prodex_provider_core::estimate_request_input_tokens(body);
+    input_tokens.saturating_add(runtime_gateway_requested_output_tokens(body, input_tokens))
+}
+
+fn runtime_gateway_requested_output_tokens(body: &[u8], input_tokens: u64) -> u64 {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return input_tokens;
+    };
+    let Some(object) = value.as_object() else {
+        return input_tokens;
+    };
+    ["max_output_tokens", "max_tokens", "max_completion_tokens"]
+        .iter()
+        .find_map(|field| object.get(*field).and_then(serde_json::Value::as_u64))
+        // ponytail: uncapped requests reserve one extra input-sized output budget; replace with
+        // model-aware output estimation when clamp logs show it is still too loose.
+        .unwrap_or(input_tokens)
 }
 
 #[cfg(test)]
@@ -640,10 +659,105 @@ mod tests {
         .expect("admission");
         runtime_gateway_record_virtual_key_usage(&mut usage, &admission, 10);
 
+        assert_eq!(admission.input_tokens, 5);
+        assert_eq!(admission.reserved_tokens, 10);
         assert_eq!(usage.minute_epoch, 10);
         assert_eq!(usage.requests_this_minute, 1);
+        assert_eq!(usage.tokens_this_minute, 10);
         assert_eq!(usage.requests_total, 1);
         assert_eq!(usage.spend_microusd, 500);
+    }
+
+    #[test]
+    fn virtual_key_uncapped_requests_reserve_input_sized_output_fallback() {
+        let key = RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: LocalBridgeBearerTokenHash::from_token("secret"),
+            allowed_models: vec!["prodex-fast".to_string()],
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: Some(10),
+        };
+
+        let admission = runtime_gateway_virtual_key_admission(
+            &key,
+            None,
+            br#"{"model":"prodex-fast","input":"hello from prodex"}"#,
+            None,
+            10,
+        )
+        .expect("admission");
+        assert_eq!(admission.input_tokens, 5);
+        assert_eq!(admission.reserved_tokens, 10);
+
+        let rejected = runtime_gateway_virtual_key_admission(
+            &key,
+            Some(&RuntimeGatewayVirtualKeyUsage {
+                minute_epoch: 10,
+                tokens_this_minute: 1,
+                ..RuntimeGatewayVirtualKeyUsage::default()
+            }),
+            br#"{"model":"prodex-fast","input":"hello from prodex"}"#,
+            None,
+            10,
+        )
+        .unwrap_err();
+        assert_eq!(
+            rejected,
+            RuntimeGatewayVirtualKeyRejection::TpmLimitExceeded
+        );
+    }
+
+    #[test]
+    fn virtual_key_tpm_uses_requested_output_tokens_in_reservation_estimate() {
+        let key = RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: LocalBridgeBearerTokenHash::from_token("secret"),
+            allowed_models: vec!["prodex-fast".to_string()],
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: Some(25),
+        };
+        let admission = runtime_gateway_virtual_key_admission(
+            &key,
+            None,
+            br#"{"model":"prodex-fast","input":"hello from prodex","max_output_tokens":17}"#,
+            None,
+            10,
+        )
+        .expect("admission");
+
+        assert_eq!(admission.input_tokens, 5);
+        assert_eq!(admission.reserved_tokens, 22);
+
+        let rejected = runtime_gateway_virtual_key_admission(
+            &key,
+            Some(&RuntimeGatewayVirtualKeyUsage {
+                minute_epoch: 10,
+                tokens_this_minute: 1,
+                ..RuntimeGatewayVirtualKeyUsage::default()
+            }),
+            br#"{"model":"prodex-fast","input":"hello from prodex","max_output_tokens":20}"#,
+            None,
+            10,
+        )
+        .unwrap_err();
+        assert_eq!(
+            rejected,
+            RuntimeGatewayVirtualKeyRejection::TpmLimitExceeded
+        );
     }
 
     #[test]

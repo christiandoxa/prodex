@@ -108,6 +108,25 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_gateway_cost_fo
     body: &[u8],
     model: &str,
 ) -> ProviderModelCost {
+    let model = model.trim();
+    let direct_metric_model = model
+        .strip_prefix("combo:")
+        .and_then(|combo| {
+            combo
+                .split(',')
+                .map(str::trim)
+                .find(|part| !part.is_empty())
+        })
+        .unwrap_or(model);
+    if let Some(metrics) = aliases
+        .iter()
+        .find_map(|alias| alias.model_metrics.get(direct_metric_model))
+    {
+        return ProviderModelCost {
+            input_cost_per_million_microusd: metrics.input_cost_per_million_microusd,
+            output_cost_per_million_microusd: metrics.output_cost_per_million_microusd,
+        };
+    }
     if let Some(rewrite) = runtime_proxy_crate::runtime_gateway_rewrite_route_alias_with_state(
         body,
         aliases,

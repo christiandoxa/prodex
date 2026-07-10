@@ -136,9 +136,20 @@ use runtime_local_provider_config::*;
 use runtime_persistence::*;
 use runtime_policy::*;
 pub use runtime_policy::{
-    RuntimePolicyPublicationDeliveryPlan, clear_runtime_policy_cache,
+    ConfigPublicationTransportCompactionPlan, ConfigPublicationTransportDeliveryPlan,
+    ConfigPublicationTransportPublishPlan, RuntimePolicyPublicationDeliveryPlan,
+    clear_runtime_policy_cache, compact_config_publication_transport,
     deliver_config_publication_event_to_gateway_runtime,
+    deliver_pending_config_publication_events_to_gateway_runtime,
+    publish_config_publication_event_to_gateway_transport,
 };
+pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result<()> {
+    runtime_launch::runtime_gateway_sqlite_migrate_compatibility_state(path)
+}
+
+pub fn migrate_gateway_compatibility_state_postgres(url: &str) -> anyhow::Result<()> {
+    runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url)
+}
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;

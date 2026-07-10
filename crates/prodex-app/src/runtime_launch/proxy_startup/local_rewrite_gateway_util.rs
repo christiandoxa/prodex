@@ -16,3 +16,10 @@ pub(super) fn runtime_gateway_unix_epoch_seconds() -> u64 {
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
 }
+
+pub(super) fn runtime_gateway_unix_epoch_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or_default()
+}

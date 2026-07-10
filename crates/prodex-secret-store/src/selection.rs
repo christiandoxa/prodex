@@ -2,8 +2,9 @@ use crate::{
     FileSecretBackend, KeyringSecretBackend, SecretBackend, SecretBackendKind, SecretError,
     SecretLocation, SecretManager, SecretRevision, SecretRevisionBackend, SecretValue,
 };
+use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum SecretBackendSelection {
     File(FileSecretBackend),
     Keyring(KeyringSecretBackend),
@@ -50,6 +51,21 @@ impl SecretBackendSelection {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn into_manager(self) -> SecretManager<Self> {
         SecretManager::new(self)
+    }
+}
+
+impl fmt::Debug for SecretBackendSelection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::File(_) => f
+                .debug_tuple("File")
+                .field(&FileSecretBackend::new())
+                .finish(),
+            Self::Keyring(_) => f
+                .debug_tuple("Keyring")
+                .field(&"<redacted-keyring-backend>")
+                .finish(),
+        }
     }
 }
 

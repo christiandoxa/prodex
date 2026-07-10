@@ -35,6 +35,8 @@ Add `scripts/ci/control-plane-boundary-guard.mjs` and include it in preflight so
 this crate cannot depend on HTTP frameworks, async runtimes, database drivers,
 network clients, filesystem/environment/process access, transports, or provider
 SDKs.
+The npm script and local preflight run the guard self-test before the workspace
+scan so forbidden-dependency/source and unsafe-forbid checks cannot silently rot.
 
 ## Consequences
 

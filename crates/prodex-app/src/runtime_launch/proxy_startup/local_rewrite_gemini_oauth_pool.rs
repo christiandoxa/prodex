@@ -17,6 +17,7 @@ use crate::{RuntimeProxyRequest, gemini_code_assist_endpoint};
 use anyhow::{Context, Result, bail};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,7 +34,6 @@ pub(in super::super) struct RuntimeGeminiOAuthPool {
     pub(in super::super) state: Arc<Mutex<RuntimeGeminiOAuthPoolState>>,
 }
 
-#[derive(Debug)]
 pub(in super::super) struct RuntimeGeminiOAuthPoolState {
     pub(in super::super) profiles: Vec<RuntimeGeminiOAuthProfileAuth>,
     pub(in super::super) next_index: usize,
@@ -49,10 +49,69 @@ pub(in super::super) struct RuntimeGeminiOAuthPoolState {
     pub(in super::super) selected_model_preferences: BTreeMap<String, RuntimeGeminiModelPreference>,
 }
 
-#[derive(Clone, Debug)]
+impl fmt::Debug for RuntimeGeminiOAuthPoolState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGeminiOAuthPoolState")
+            .field("profiles", &redacted_len(self.profiles.len()))
+            .field("next_index", &"<redacted>")
+            .field(
+                "response_profile_bindings",
+                &redacted_len(self.response_profile_bindings.len()),
+            )
+            .field(
+                "tool_call_profile_bindings",
+                &redacted_len(self.tool_call_profile_bindings.len()),
+            )
+            .field(
+                "session_profile_bindings",
+                &redacted_len(self.session_profile_bindings.len()),
+            )
+            .field(
+                "response_model_scope_bindings",
+                &redacted_len(self.response_model_scope_bindings.len()),
+            )
+            .field(
+                "tool_call_model_scope_bindings",
+                &redacted_len(self.tool_call_model_scope_bindings.len()),
+            )
+            .field("quota_headers", &redacted_len(self.quota_headers.len()))
+            .field(
+                "model_cooldowns_until",
+                &redacted_len(self.model_cooldowns_until.len()),
+            )
+            .field(
+                "model_unavailable_until",
+                &redacted_len(self.model_unavailable_until.len()),
+            )
+            .field(
+                "model_preferences",
+                &redacted_len(self.model_preferences.len()),
+            )
+            .field(
+                "selected_model_preferences",
+                &redacted_len(self.selected_model_preferences.len()),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub(in super::super) struct RuntimeGeminiModelPreference {
     model: String,
     until_ms: u64,
+}
+
+impl fmt::Debug for RuntimeGeminiModelPreference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGeminiModelPreference")
+            .field("model", &"<redacted>")
+            .field("until_ms", &"<redacted>")
+            .finish()
+    }
+}
+
+fn redacted_len(len: usize) -> String {
+    format!("<redacted:{len}>")
 }
 
 #[derive(Clone)]

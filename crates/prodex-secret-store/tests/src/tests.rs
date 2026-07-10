@@ -273,6 +273,37 @@ fn secret_error_response_is_stable_and_redacted() {
 }
 
 #[test]
+fn secret_store_debug_output_is_stable_and_redacted() {
+    let location = SecretLocation::keyring("prodex-secret-service", "auth-json:/tmp/codex-home");
+    let value = SecretValue::text("super-secret-token");
+    let error = SecretError::Io {
+        path: PathBuf::from("/tmp/prodex/auth.json"),
+        reason: "permission denied for super-secret-token".to_string(),
+    };
+    let keyring_backend = KeyringSecretBackend::new("prodex-secret-service").unwrap();
+    let selection = SecretBackendSelection::keyring("prodex-secret-service").unwrap();
+
+    let rendered = format!("{location:?} {value:?} {error:?} {keyring_backend:?} {selection:?}");
+
+    for sensitive in [
+        "prodex-secret-service",
+        "auth-json:/tmp/codex-home",
+        "/tmp/prodex/auth.json",
+        "super-secret-token",
+        "permission denied",
+    ] {
+        assert!(
+            !rendered.contains(sensitive),
+            "secret-store debug output leaked sensitive token {sensitive}: {rendered}"
+        );
+    }
+    assert!(rendered.contains("Keyring"));
+    assert!(rendered.contains("Text"));
+    assert!(rendered.contains("Io"));
+    assert!(rendered.contains("KeyringSecretBackend"));
+}
+
+#[test]
 fn refresh_lease_error_response_is_stable_and_redacted() {
     let error = RefreshLeaseError::Io {
         path: PathBuf::from("/tmp/prodex/refresh-token-secret.lock"),
@@ -296,6 +327,54 @@ fn refresh_lease_error_response_is_stable_and_redacted() {
 }
 
 #[test]
+fn refresh_lease_debug_output_is_stable_and_redacted() {
+    let root = temp_dir("refresh-lease-debug-secret");
+    let coordinator = RefreshLeaseCoordinator::new(&root)
+        .with_namespace("secret-refresh-namespace")
+        .with_lease_ttl(Duration::from_secs(42))
+        .with_wait_timeout(Duration::from_secs(7))
+        .with_result_ttl(Duration::from_secs(99))
+        .with_poll_interval(Duration::from_millis(5));
+    let sensitive_key = "super-refresh-secret";
+    let paths = coordinator.paths_for_key(sensitive_key);
+    let owner = match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner,
+        other => panic!("expected owner, got {other:?}"),
+    };
+    let follower = RefreshLeaseDecision::Follower {
+        result_json: "{\"access_token\":\"super-refresh-secret\"}".to_string(),
+    };
+    let error = RefreshLeaseError::Io {
+        path: root.join("refresh-token-secret.lock"),
+        reason: "permission denied for super-refresh-secret".to_string(),
+    };
+
+    let rendered = format!("{coordinator:?} {paths:?} {owner:?} {follower:?} {error:?}");
+
+    for sensitive in [
+        root.display().to_string(),
+        paths.digest().to_string(),
+        "refresh-lease-debug-secret".to_string(),
+        "secret-refresh-namespace".to_string(),
+        "super-refresh-secret".to_string(),
+        "access_token".to_string(),
+        "permission denied".to_string(),
+    ] {
+        assert!(
+            !rendered.contains(&sensitive),
+            "refresh lease debug output leaked sensitive token {sensitive}: {rendered}"
+        );
+    }
+    assert!(rendered.contains("RefreshLeaseCoordinator"));
+    assert!(rendered.contains("RefreshLeasePaths"));
+    assert!(rendered.contains("RefreshLeaseOwner"));
+    assert!(rendered.contains("Follower"));
+    assert!(rendered.contains("Io"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn file_backend_probe_revision_tracks_metadata() {
     let root = temp_dir("revision");
     let path = root.join("secret.bin");
@@ -314,6 +393,12 @@ fn file_backend_probe_revision_tracks_metadata() {
         revision.as_ref().and_then(SecretRevision::modified_at),
         metadata.modified().ok()
     );
+    let rendered = format!("{:?}", revision.as_ref().unwrap());
+    assert!(!rendered.contains("3"));
+    assert!(!rendered.contains("SystemTime"));
+    assert!(rendered.contains("SecretRevision"));
+    assert!(rendered.contains("size_bytes: \"<redacted>\""));
+    assert!(rendered.contains("modified_at: Some(\"<redacted>\")"));
 
     store
         .write(&location, SecretValue::bytes(vec![0xff, 0x00, 0x41, 0x42]))

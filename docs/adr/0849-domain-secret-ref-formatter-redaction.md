@@ -12,7 +12,9 @@ provider part of the reference.
 
 Keep structured accessors for trusted secret-provider lookup, but redact the
 provider in `Debug` output and render `Display` as a generic secret-reference
-placeholder.
+placeholder. The domain boundary guard pins the `SecretRef` type, its
+`is_well_formed` shape check, and the redacted display placeholder so future
+domain refactors cannot drop those contracts silently.
 
 ## Consequences
 

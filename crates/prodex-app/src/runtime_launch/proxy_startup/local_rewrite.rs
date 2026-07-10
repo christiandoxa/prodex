@@ -5,7 +5,7 @@ use super::local_rewrite_copilot::{
     runtime_copilot_oauth_pool_from_provider,
 };
 use super::local_rewrite_gateway_admin_auth::runtime_gateway_admin_auth;
-use super::local_rewrite_gateway_admin_auth::runtime_gateway_prefetch_oidc_cache;
+use super::local_rewrite_gateway_admin_auth::runtime_gateway_run_oidc_background_refresh_loop;
 use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_admin_response, runtime_gateway_request_path_is_admin,
     runtime_gateway_request_path_requires_admin_auth,
@@ -17,13 +17,14 @@ pub(crate) use super::local_rewrite_gateway_config::{
 };
 pub(super) use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_guardrail_webhook_block;
 pub(super) use super::local_rewrite_gateway_keys::{
-    runtime_gateway_request_header_rejection, runtime_gateway_virtual_key_admission,
-    runtime_gateway_virtual_key_entries_from_sources, runtime_gateway_virtual_key_entries_is_empty,
-    runtime_gateway_virtual_key_store_load, runtime_gateway_virtual_key_store_load_strict,
-    runtime_local_rewrite_request_is_authorized,
+    RuntimeGatewayDurableReservationState, runtime_gateway_request_header_rejection,
+    runtime_gateway_virtual_key_admission, runtime_gateway_virtual_key_entries_from_sources,
+    runtime_gateway_virtual_key_entries_is_empty, runtime_gateway_virtual_key_store_load,
+    runtime_gateway_virtual_key_store_load_strict, runtime_local_rewrite_request_is_authorized,
 };
 pub(super) use super::local_rewrite_gateway_ledger::{
     runtime_gateway_billing_ledger_load, schedule_runtime_gateway_billing_ledger_reconcile,
+    schedule_runtime_gateway_durable_reconcile,
 };
 use super::local_rewrite_gateway_route_load::RuntimeGatewayRouteLoadGuard;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
@@ -111,7 +112,9 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) model_memory: RuntimeLocalRewriteModelMemory,
     pub(super) api_key_cursor: Arc<AtomicUsize>,
     pub(super) client: reqwest::blocking::Client,
-    pub(super) gateway_oidc_http_cache: Arc<Mutex<BTreeMap<String, (std::time::Instant, String)>>>,
+    pub(super) gateway_oidc_prefetch_in_flight: Arc<AtomicBool>,
+    pub(super) gateway_oidc_http_cache:
+        Arc<Mutex<BTreeMap<String, RuntimeGatewayOidcHttpCacheEntry>>>,
     pub(super) gateway_admin_idempotency_keys: Arc<Mutex<BTreeSet<String>>>,
     pub(super) gateway_auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(super) gateway_admin_tokens: Vec<RuntimeGatewayAdminToken>,
@@ -130,6 +133,7 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_observability_slots: Arc<tokio::sync::Semaphore>,
     pub(super) gateway_reconcile_slots: Arc<tokio::sync::Semaphore>,
     pub(super) allow_local_file_access: bool,
+    pub(super) gateway_draining: Arc<AtomicBool>,
 }
 
 #[allow(dead_code)]
@@ -173,6 +177,14 @@ pub(super) type RuntimeGatewayRouteLoadState =
     Arc<Mutex<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelState>>>;
 
 #[derive(Clone)]
+pub(super) struct RuntimeGatewayOidcHttpCacheEntry {
+    pub(super) fetched_at: std::time::Instant,
+    pub(super) payload: String,
+    pub(super) max_age: Option<std::time::Duration>,
+    pub(super) stale_while_revalidate: Option<std::time::Duration>,
+}
+
+#[derive(Clone)]
 pub(super) struct RuntimeGatewayVirtualKeyUsageState {
     pub(super) usage:
         Arc<Mutex<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>>>,
@@ -183,6 +195,15 @@ pub(super) struct RuntimeGatewayVirtualKeyUsageState {
     pub(super) request_ids: Arc<Mutex<BTreeSet<u64>>>,
     pub(super) typed_request_ids: Arc<Mutex<BTreeMap<u64, String>>>,
     pub(super) call_ids: Arc<Mutex<BTreeMap<u64, String>>>,
+    pub(super) ledger_scopes: Arc<Mutex<BTreeMap<u64, RuntimeGatewayLedgerScope>>>,
+    pub(super) durable_reservations:
+        Arc<Mutex<BTreeMap<u64, RuntimeGatewayDurableReservationState>>>,
+}
+
+#[derive(Clone)]
+pub(super) struct RuntimeGatewayLedgerScope {
+    pub(super) key_name: String,
+    pub(super) tenant_id: Option<String>,
 }
 
 pub(super) fn runtime_gateway_try_reserve_background_task(
@@ -371,6 +392,7 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
     ) {
         runtime_copilot_init_current_workspace_custom_instructions();
     }
+    let shutdown = Arc::new(AtomicBool::new(false));
     let shared = RuntimeLocalRewriteProxyShared {
         runtime_shared: runtime_shared.clone(),
         upstream_base_url,
@@ -384,6 +406,7 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
         model_memory: Arc::new(Mutex::new(RuntimeLocalRewriteModelMemoryState::default())),
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client()?,
+        gateway_oidc_prefetch_in_flight: Arc::new(AtomicBool::new(gateway_sso.oidc.is_some())),
         gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
         gateway_admin_idempotency_keys: Arc::new(Mutex::new(BTreeSet::new())),
         gateway_auth_token_hash,
@@ -405,6 +428,8 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
             request_ids: Arc::new(Mutex::new(BTreeSet::new())),
             typed_request_ids: Arc::new(Mutex::new(BTreeMap::new())),
             call_ids: Arc::new(Mutex::new(BTreeMap::new())),
+            ledger_scopes: Arc::new(Mutex::new(BTreeMap::new())),
+            durable_reservations: Arc::new(Mutex::new(BTreeMap::new())),
         },
         gateway_route_aliases,
         gateway_route_load: Arc::new(Mutex::new(BTreeMap::new())),
@@ -419,26 +444,19 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
             RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT,
         )),
         allow_local_file_access,
+        gateway_draining: Arc::clone(&shutdown),
     };
-    if shared.gateway_sso.oidc.is_some()
-        && let Err(_err) = runtime_gateway_prefetch_oidc_cache(&shared)
-    {
-        runtime_proxy_log_to_path(
-            &shared.runtime_shared.log_path,
-            &runtime_proxy_structured_log_message(
-                "gateway_oidc_prefetch_failed",
-                [runtime_proxy_log_field(
-                    "error_kind",
-                    "gateway_oidc_prefetch_failed",
-                )],
-            ),
-        );
-    }
     if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
         pool.spawn_quota_refresh(shared.runtime_shared.log_path.clone());
     }
-    let shutdown = Arc::new(AtomicBool::new(false));
     let mut worker_threads = Vec::new();
+    if shared.gateway_sso.oidc.is_some() {
+        let shared = shared.clone();
+        let shutdown = Arc::clone(&shutdown);
+        worker_threads.push(thread::spawn(move || {
+            runtime_gateway_run_oidc_background_refresh_loop(shared, shutdown);
+        }));
+    }
     let gemini_live_sidecar_addr = if matches!(
         &shared.provider,
         RuntimeLocalRewriteProviderOptions::Gemini { .. }
@@ -719,8 +737,7 @@ fn handle_runtime_local_rewrite_proxy_request(
         if runtime_gateway_request_path_requires_admin_auth(&request_path, shared) {
             let header_request = capture_runtime_proxy_websocket_request(&request);
             let Some(admin_auth) = runtime_gateway_admin_auth(&header_request, shared) else {
-                let auth_configured = shared.gateway_auth_token_hash.is_some()
-                    || !shared.gateway_admin_tokens.is_empty()
+                let auth_configured = !shared.gateway_admin_tokens.is_empty()
                     || shared.gateway_sso.proxy_token_hash.is_some()
                     || shared.gateway_sso.oidc.is_some();
                 runtime_proxy_log(
@@ -1298,15 +1315,23 @@ fn runtime_gateway_operational_probe_response(
     }
 
     let overloaded = runtime_proxy_local_overload_pressure_active(&shared.runtime_shared);
-    let ready = probe != "readyz" || !overloaded;
+    let draining = shared.gateway_draining.load(Ordering::SeqCst);
+    let ready = probe != "readyz" || (!overloaded && !draining);
     let status = if ready { 200 } else { 503 };
-    let state = if ready { "ok" } else { "overloaded" };
+    let state = if ready {
+        "ok"
+    } else if draining {
+        "draining"
+    } else {
+        "overloaded"
+    };
     let body = serde_json::json!({
         "object": "gateway.health",
         "probe": probe,
         "status": state,
         "ready": ready,
         "local_overload": overloaded,
+        "draining": draining,
         "policy_version": shared.gateway_policy_version,
         "active_requests": shared.runtime_shared.active_request_count.load(Ordering::SeqCst),
         "active_request_limit": shared.runtime_shared.active_request_limit,

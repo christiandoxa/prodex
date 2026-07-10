@@ -14,8 +14,8 @@ spaces.
 ## Decision
 
 Preserve non-blank `gateway.state.sqlite_path` values exactly at runtime.
-Blank-only values remain invalid through policy validation and fall back to the
-default only inside the runtime helper.
+Blank-only values fail closed through both policy validation and direct runtime
+configuration resolution.
 
 ## Consequences
 

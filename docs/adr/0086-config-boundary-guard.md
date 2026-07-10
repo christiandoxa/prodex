@@ -15,9 +15,16 @@ local preflight. The guard requires `prodex-config` to depend only on
 `prodex-domain`, forbids dev-dependencies and target-specific dependency
 sections, and scans source files for forbidden filesystem, environment, process,
 network, HTTP, database, transport, parser/watcher, and async-runtime imports.
+It also pins the public revision refresh and secret-reference contracts so
+configuration publication keeps accepting only `SecretRef` values and rejecting
+raw secret material at the boundary.
+The npm script and local preflight run the guard's built-in self-test before
+the workspace scan so parser and required-contract checks cannot silently rot.
 
 ## Consequences
 The config boundary remains deterministic and reusable from gateway and
 control-plane code. Concrete parsers, file watchers, and storage-backed
 configuration distribution must be introduced in separate crates that feed
 validated revisions into this boundary contract.
+Secret providers remain adapter concerns; the boundary crate may plan and
+validate references, but must not carry raw secret values.

@@ -1,4 +1,7 @@
-use crate::{codex_cli_config_override_value, codex_config_value};
+use crate::{
+    codex_cli_config_override_exact_value, codex_cli_config_override_value,
+    codex_config_exact_value, codex_config_value,
+};
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_GEMINI_PROVIDER_ID;
 use prodex_runtime_gemini::{
@@ -258,13 +261,13 @@ fn gemini_provider_codex_args(
         user_args,
         "model_context_window",
         GEMINI_DEFAULT_CONTEXT_WINDOW as u64,
-    );
+    )?;
     let auto_compact_token_limit = gemini_u64_config_for_launch(
         codex_home,
         user_args,
         "model_auto_compact_token_limit",
         GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as u64,
-    )
+    )?
     .min(context_window.saturating_sub(1));
 
     let catalog_path = codex_home.join(GEMINI_MODEL_CATALOG_FILE);
@@ -308,12 +311,29 @@ fn gemini_u64_config_for_launch(
     user_args: &[OsString],
     key: &str,
     default_value: u64,
-) -> u64 {
-    codex_cli_config_override_value(user_args, key)
-        .or_else(|| codex_config_value(codex_home, key))
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 1)
-        .unwrap_or(default_value)
+) -> Result<u64> {
+    let Some(value) = codex_cli_config_override_exact_value(user_args, key)
+        .or_else(|| codex_config_exact_value(codex_home, key))
+    else {
+        return Ok(default_value);
+    };
+    runtime_catalog_u64_config_value("Gemini", key, &value)
+}
+
+fn runtime_catalog_u64_config_value(provider: &str, key: &str, value: &str) -> Result<u64> {
+    if value.is_empty() {
+        anyhow::bail!("{provider} {key} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        anyhow::bail!("{provider} {key} must not contain whitespace");
+    }
+    let parsed = value
+        .parse::<u64>()
+        .with_context(|| format!("{provider} {key} must be an unsigned integer"))?;
+    if parsed <= 1 {
+        anyhow::bail!("{provider} {key} must be greater than 1");
+    }
+    Ok(parsed)
 }
 
 fn write_gemini_model_catalog(
@@ -769,5 +789,37 @@ mod tests {
                 .is_symlink()
         );
         let _ = fs::remove_dir_all(codex_home);
+    }
+
+    #[test]
+    fn gemini_provider_codex_args_rejects_invalid_numeric_catalog_overrides() {
+        for (value, message) in [
+            ("", "Gemini model_context_window cannot be empty"),
+            (
+                " 128000 ",
+                "Gemini model_context_window must not contain whitespace",
+            ),
+            (
+                "not-a-number",
+                "Gemini model_context_window must be an unsigned integer",
+            ),
+            ("1", "Gemini model_context_window must be greater than 1"),
+        ] {
+            let codex_home = temp_codex_home("invalid-numeric");
+            let user_args = vec![
+                OsString::from("-c"),
+                OsString::from("model_provider=\"prodex-gemini\""),
+                OsString::from("-c"),
+                OsString::from(format!(
+                    "model_context_window={}",
+                    toml_string_literal(value)
+                )),
+            ];
+
+            let err = prepare_gemini_provider_codex_args(&codex_home, &user_args).unwrap_err();
+
+            assert!(err.to_string().contains(message));
+            let _ = fs::remove_dir_all(codex_home);
+        }
     }
 }

@@ -10,7 +10,7 @@ Accepted
 
 ## Decision
 
-Add `prodex-provider-core` to the low-level crate set enforced by `crate-boundary-guard`. The guard self-test now proves that a provider-core dependency on `prodex-app` is rejected.
+Add `prodex-provider-core` to the low-level crate set enforced by `crate-boundary-guard`. The guard self-test now proves that a provider-core dependency on `prodex-app` is rejected, and npm/preflight run that self-test before scanning workspace Cargo manifests.
 
 ## Consequences
 

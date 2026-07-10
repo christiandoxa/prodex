@@ -15,8 +15,9 @@ padded URL silently become a different accepted endpoint.
 
 Treat `gateway.observability.http_endpoint` as an exact configuration boundary.
 The value must be non-empty, contain no whitespace, and parse as an HTTP(S) URL
-with a host. Runtime launch preserves the accepted value instead of normalizing
-it.
+with a host and no userinfo. Runtime launch preserves the accepted value instead
+of normalizing it and applies the same validation when handed already-built
+policy settings.
 
 ## Consequences
 

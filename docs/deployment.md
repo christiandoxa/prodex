@@ -50,7 +50,7 @@ Recent billing ledger records are available at `/v1/prodex/gateway/ledger`, aggr
 
 ## Operational Limits
 
-The gateway supports file-backed state by default, SQLite-backed state with automatic schema bootstrap, and Postgres-backed shared gateway state:
+The gateway supports file-backed state by default, SQLite-backed state after explicit external migration, and Postgres-backed shared gateway state:
 
 ```toml
 [gateway.state]
@@ -92,7 +92,10 @@ PostgreSQL as the durable source of truth, Redis as the rebuildable coordination
 backend, and at least two gateway replicas. In that mode
 `PRODEX_GATEWAY_REPLICA_COUNT` must match the intended gateway replica count so
 the application runtime can select the multi-replica accounting concurrency
-spec before adapters start.
+spec before adapters start. The legacy `prodex gateway` launch path now enforces
+that prelaunch gate and rejects invalid multi-replica claims before the proxy
+binds a port. Valid multi-replica declarations still fail closed until the
+durable reservation backend replaces the legacy local admission path.
 
 Use `gateway.state.backend = "postgres"` with `postgres_url_env` for shared database-backed admin keys, usage counters, and billing ledger rows:
 
@@ -180,10 +183,31 @@ the gateway workload.
 
 The gateway ConfigMap sets `PRODEX_GATEWAY_REPLICA_COUNT=3` and
 `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`, and the gateway
-`ExternalSecret` includes both PostgreSQL and Redis URLs. This makes the
-Kubernetes baseline production-shaped for the accounting concurrency gate:
+`ExternalSecret` includes both PostgreSQL and Redis URLs. This declares the
+intended production accounting-concurrency topology, but the current legacy
+gateway launch path still rejects startup in that mode until durable
+reservation admission is wired:
 PostgreSQL remains the durable ledger/counter source of truth while Redis is
 only used for rate limiting, cache, and coordination primitives.
+
+If the deployment also uses the current replicated file transport for
+configuration publication, mount one shared durable filesystem path that is
+visible to the control-plane publisher and every gateway replica. The current
+one-shot operational flow is:
+
+```bash
+prodex-control-plane publish-config-publication --event <path> --transport <shared-path>
+prodex-gateway consume-config-publication --transport <shared-path> --replica <gateway-id> --root <prodex-home>
+prodex-control-plane compact-config-publication --transport <shared-path> --retain 10
+```
+
+`compact-config-publication` only removes records that every known replica has
+already acknowledged and can retain the newest acknowledged records for
+inspection. Shared-storage deployments should run that command periodically so
+transport outbox/ack files do not grow without bound. Non-shared-storage
+topologies still need the broker-backed publication transport staged in
+`docs/adr/0984-config-publication-broker-transport-staging.md`; separate
+node-local or cluster-local transport roots are not equivalent.
 
 The namespace default-deny policy has no allow rules. The gateway and
 placeholder control-plane NetworkPolicies intentionally avoid unbounded

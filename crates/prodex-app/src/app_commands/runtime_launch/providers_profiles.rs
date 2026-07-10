@@ -10,6 +10,7 @@ use crate::{
     resolve_copilot_runtime_api_auth, resolve_profile_name, write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
+use redaction::redaction_redact_secret_like_text;
 use std::collections::BTreeSet;
 
 pub(crate) fn resolve_gemini_runtime_launch_profile_name(
@@ -115,7 +116,7 @@ pub(crate) fn runtime_anthropic_oauth_profiles_for_provider(
                 });
             }
             Err(err) => {
-                errors.push(format!("{profile_name}: {err:#}"));
+                errors.push(runtime_provider_profile_error(&profile_name, &err));
             }
         }
     }
@@ -177,7 +178,7 @@ pub(crate) fn runtime_copilot_profiles_for_provider(
                 api_url: api_url.clone(),
                 model_catalog: auth.model_catalog,
             }),
-            Err(err) => errors.push(format!("{profile_name}: {err:#}")),
+            Err(err) => errors.push(runtime_provider_profile_error(&profile_name, &err)),
         }
     }
 
@@ -246,7 +247,7 @@ pub(crate) fn runtime_gemini_oauth_profiles_for_provider(
                 });
             }
             Err(err) => {
-                errors.push(format!("{profile_name}: {err:#}"));
+                errors.push(runtime_provider_profile_error(&profile_name, &err));
             }
         }
     }
@@ -372,4 +373,29 @@ fn runtime_kiro_profile_auth(
         model_catalog,
         command: None,
     })
+}
+
+fn runtime_provider_profile_error(profile_name: &str, err: &anyhow::Error) -> String {
+    format!(
+        "{}: {}",
+        profile_name,
+        redaction_redact_secret_like_text(&format!("{err:#}"))
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_provider_profile_error_redacts_secret_like_chain() {
+        let err = anyhow::anyhow!("failed: Authorization: Bearer provider-profile-token")
+            .context("provider profile refresh failed");
+
+        let message = runtime_provider_profile_error("main", &err);
+
+        assert!(message.contains("main: provider profile refresh failed"));
+        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(!message.contains("provider-profile-token"));
+    }
 }

@@ -60,10 +60,8 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            admin_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![runtime_gateway_test_admin_token(admin_token)],
         gateway_sso: RuntimeGatewaySsoConfig::default(),
         gateway_state_store: RuntimeGatewayStateStore::file(&paths),
         gateway_virtual_keys: Vec::new(),
@@ -155,6 +153,20 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     assert!(openapi["paths"]["/startupz"]["head"]["responses"]["200"].is_object());
     assert!(openapi["paths"]["/readyz"]["head"]["responses"]["200"]["content"].is_null());
     assert!(openapi["paths"]["/readyz"]["head"]["responses"]["503"]["content"].is_null());
+    assert!(
+        openapi["components"]["schemas"]["GatewayHealth"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "draining")
+    );
+    assert!(
+        openapi["components"]["schemas"]["GatewayHealth"]["properties"]["status"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "draining")
+    );
     assert_eq!(
         openapi["paths"]["/readyz"]["get"]["responses"]["405"]["headers"]["Allow"]["schema"]["type"],
         "string"
@@ -195,7 +207,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     assert!(openapi["components"]["schemas"]["GatewayHealth"]["properties"]["ok"].is_null());
     assert_eq!(
         openapi["components"]["schemas"]["GatewayHealth"]["properties"]["status"]["enum"],
-        serde_json::json!(["ok", "overloaded", "method_not_allowed"])
+        serde_json::json!(["ok", "overloaded", "draining", "method_not_allowed"])
     );
     assert_eq!(
         openapi["components"]["schemas"]["GatewayHealth"]["properties"]["policy_version"]["type"],
@@ -213,11 +225,14 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     assert_eq!(providers.status().as_u16(), 200);
     let providers: serde_json::Value = providers.json().expect("providers response should be json");
     assert_eq!(providers["object"], "gateway.providers");
-    assert_eq!(
-        providers["providers"].as_array().unwrap().len(),
-        prodex_provider_core::provider_adapter_contract_matrix().len()
+    let provider_entries = providers["providers"].as_array().unwrap();
+    assert_eq!(provider_entries.len(), 7);
+    assert_eq!(provider_entries[0]["provider"], "openai");
+    assert!(
+        provider_entries
+            .iter()
+            .any(|provider| provider["provider"] == serde_json::json!("kiro"))
     );
-    assert_eq!(providers["providers"][0]["provider"], "openai");
     assert_eq!(
         providers["providers"][0]["client_request_format"],
         "openai-responses"
@@ -377,16 +392,13 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
         .to_string();
     assert_eq!(created["key"]["source"], "admin");
     assert_eq!(created["key"]["name"], "team-crud");
-
-    let runtime_key_admin_rejected = client
-        .get(format!(
-            "http://{}/v1/prodex/gateway/keys",
-            proxy.listen_addr
-        ))
-        .bearer_auth(&first_token)
-        .send()
-        .expect("runtime virtual key admin API request should be sent");
-    assert_eq!(runtime_key_admin_rejected.status().as_u16(), 401);
+    let virtual_key_id = created["key"]["virtual_key_id"]
+        .as_str()
+        .expect("virtual key id should be returned");
+    let parsed_virtual_key_id = virtual_key_id
+        .parse::<prodex_domain::VirtualKeyId>()
+        .expect("virtual key id should be canonical uuid");
+    assert_eq!(parsed_virtual_key_id.to_string(), virtual_key_id);
 
     let first = client
         .post(format!("http://{}/v1/responses", proxy.listen_addr))

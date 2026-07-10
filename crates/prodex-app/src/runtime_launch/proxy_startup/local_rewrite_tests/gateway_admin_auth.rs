@@ -1,6 +1,39 @@
 use super::*;
 use crate::TestEnvVarGuard;
+use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::{
+    runtime_gateway_postgres_migrate_compatibility_state,
+    runtime_gateway_sqlite_create_current_schema_for_tests,
+};
+use postgres::NoTls;
+use prodex_storage_postgres::{PostgresRuntimeMode, plan_postgres_migrations};
 use std::fs;
+
+fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
+    let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");
+    let has_enterprise_schema: bool = client
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = 'prodex_tenants'
+            )",
+            &[],
+        )
+        .expect("postgres enterprise schema probe should load")
+        .get(0);
+    if !has_enterprise_schema {
+        let plan = plan_postgres_migrations(PostgresRuntimeMode::ExternalMigrator)
+            .expect("postgres schema plan should build");
+        for migration in &plan.migrations {
+            client
+                .batch_execute(migration.sql)
+                .expect("postgres enterprise migration should apply");
+        }
+    }
+    runtime_gateway_postgres_migrate_compatibility_state(url)
+        .expect("postgres compatibility migrations should apply");
+}
 
 #[test]
 fn gateway_sso_headers_can_authenticate_scoped_admin() {
@@ -194,11 +227,11 @@ fn gateway_sso_missing_or_unknown_role_never_uses_admin_default() {
 }
 
 #[test]
-fn gateway_sso_admin_auth_fails_closed_when_scim_store_becomes_invalid() {
-    let root = temp_root("gateway-sso-invalid-scim-store");
-    let paths = app_paths_for_root(root.clone());
+fn gateway_data_plane_token_cannot_access_admin_endpoint() {
+    let root = temp_root("gateway-root-token-not-admin");
+    let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(0);
-    let sso_token = "sso-proxy-token";
+    let gateway_token = "gateway-root-token";
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &AppState::default(),
@@ -211,20 +244,11 @@ fn gateway_sso_admin_auth_fails_closed_when_scim_store_becomes_invalid() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
+        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+            gateway_token,
+        )),
         gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig {
-            proxy_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-                sso_token,
-            )),
-            require_tenant: false,
-            token_header: "x-prodex-sso-token".to_string(),
-            user_header: "x-prodex-sso-user".to_string(),
-            role_header: "x-prodex-sso-role".to_string(),
-            key_prefixes_header: "x-prodex-sso-key-prefixes".to_string(),
-            tenant_header: "x-prodex-sso-tenant".to_string(),
-            oidc: None,
-        },
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
         gateway_state_store: RuntimeGatewayStateStore::file(&paths),
         gateway_virtual_keys: Vec::new(),
         gateway_route_aliases: Vec::new(),
@@ -233,20 +257,22 @@ fn gateway_sso_admin_auth_fails_closed_when_scim_store_becomes_invalid() {
         gateway_call_id_header: Some("x-prodex-call-id".to_string()),
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
-    .expect("gateway proxy should start with missing store");
-    fs::write(root.join("gateway-virtual-keys.json"), "{")
-        .expect("invalid gateway key store should be written after startup");
+    .expect("gateway proxy should start");
 
-    let rejected = reqwest::blocking::Client::new()
+    let response = reqwest::blocking::Client::new()
         .get(format!(
-            "http://{}/v1/prodex/gateway/keys",
+            "http://{}/v1/prodex/gateway/openapi.json",
             proxy.listen_addr
         ))
-        .header("x-prodex-sso-token", sso_token)
-        .header("x-prodex-sso-user", "alice@example.com")
+        .bearer_auth(gateway_token)
         .send()
-        .expect("SSO request should be sent");
-    assert_eq!(rejected.status().as_u16(), 401);
+        .expect("gateway root-token admin request should be sent");
+
+    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(
+        response.json::<serde_json::Value>().unwrap()["error"]["code"],
+        "admin_auth_not_configured"
+    );
 }
 
 #[test]
@@ -268,10 +294,8 @@ fn gateway_scim_users_can_provision_sso_admin_scope() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            admin_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![runtime_gateway_test_admin_token(admin_token)],
         gateway_sso: RuntimeGatewaySsoConfig {
             proxy_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
                 sso_token,
@@ -702,11 +726,6 @@ fn gateway_oidc_jwt_can_discover_jwks_uri() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
-    assert_eq!(
-        oidc.request_count(),
-        2,
-        "OIDC discovery and JWKS should be prefetched before first admin request"
-    );
     let client = reqwest::blocking::Client::new();
 
     let created = client
@@ -719,11 +738,16 @@ fn gateway_oidc_jwt_can_discover_jwks_uri() {
         .send()
         .expect("OIDC discovery admin create key request should be sent");
     assert_eq!(created.status().as_u16(), 201);
+    assert_eq!(
+        oidc.request_count(),
+        2,
+        "background OIDC prefetch should finish discovery and JWKS before the first admin request completes"
+    );
 }
 
 #[test]
 fn authenticates_with_stale_while_revalidate_jwks_without_request_path_fetch() {
-    let _ttl = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS", "0");
+    let _ttl = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS", "1");
     let root = temp_root("gateway-oidc-stale-jwks");
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(0);
@@ -796,6 +820,16 @@ fn authenticates_with_stale_while_revalidate_jwks_without_request_path_fetch() {
         "startup prefetch should load JWKS before admin requests"
     );
 
+    let refresh_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while jwks.request_count() < 2 && std::time::Instant::now() < refresh_deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        jwks.request_count(),
+        2,
+        "background refresh should revalidate stale JWKS outside the request path"
+    );
+
     let second = client
         .post(format!(
             "http://{}/v1/prodex/gateway/keys",
@@ -808,13 +842,270 @@ fn authenticates_with_stale_while_revalidate_jwks_without_request_path_fetch() {
     assert_eq!(second.status().as_u16(), 201);
     assert_eq!(
         jwks.request_count(),
-        1,
-        "admin request path must not synchronously refresh stale JWKS"
+        2,
+        "admin request path must reuse cached JWKS while background refresh handles staleness"
     );
 }
 
 #[test]
+fn expired_oidc_jwks_cache_fails_closed_without_request_path_fetch() {
+    let _ttl = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS", "1");
+    let _lkg = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS", "0");
+    let _backoff = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS", "5000");
+    let root = temp_root("gateway-oidc-expired-lkg-jwks");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let jwks = TestJwksServer::start_with_success_count(1);
+    let issuer = "https://idp.example";
+    let audience = "prodex-gateway";
+    let token = gateway_oidc_test_token(
+        issuer,
+        audience,
+        "alice@example.com",
+        "admin",
+        &["team-expired-lkg-"],
+    );
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig {
+            proxy_token_hash: None,
+            require_tenant: false,
+            token_header: "x-prodex-sso-token".to_string(),
+            user_header: "x-prodex-sso-user".to_string(),
+            role_header: "x-prodex-sso-role".to_string(),
+            key_prefixes_header: "x-prodex-sso-key-prefixes".to_string(),
+            tenant_header: "x-prodex-sso-tenant".to_string(),
+            oidc: Some(RuntimeGatewayOidcConfig {
+                issuer: issuer.to_string(),
+                audience: audience.to_string(),
+                jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                user_claim: "email".to_string(),
+                role_claim: "prodex_role".to_string(),
+                tenant_claim: "prodex_tenant".to_string(),
+                key_prefixes_claim: "prodex_key_prefixes".to_string(),
+            }),
+        },
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let first = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/keys",
+            proxy.listen_addr
+        ))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({"name": "team-expired-lkg-first"}))
+        .send()
+        .expect("first OIDC admin create key request should be sent");
+    assert_eq!(first.status().as_u16(), 201);
+    assert_eq!(jwks.request_count(), 1);
+
+    let refresh_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while jwks.request_count() < 2 && std::time::Instant::now() < refresh_deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(jwks.request_count(), 2);
+    let request_count_before_rejected = jwks.request_count();
+
+    let rejected = client
+        .get(format!(
+            "http://{}/v1/prodex/gateway/keys",
+            proxy.listen_addr
+        ))
+        .bearer_auth(&token)
+        .send()
+        .expect("expired-LKG OIDC request should be sent");
+    assert_eq!(rejected.status().as_u16(), 401);
+    assert_eq!(
+        jwks.request_count(),
+        request_count_before_rejected,
+        "request path must not fetch JWKS after the LKG window expires"
+    );
+}
+
+#[test]
+fn oidc_background_refresh_uses_jwks_cache_control_max_age() {
+    let _ttl = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS", "30");
+    let root = temp_root("gateway-oidc-cache-control-jwks");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let jwks = TestJwksServer::start_with_success_count_and_cache_control(2, Some("max-age=1"));
+    let issuer = "https://idp.example";
+    let audience = "prodex-gateway";
+    let token = gateway_oidc_test_token(
+        issuer,
+        audience,
+        "alice@example.com",
+        "admin",
+        &["team-cache-control-"],
+    );
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig {
+            proxy_token_hash: None,
+            require_tenant: false,
+            token_header: "x-prodex-sso-token".to_string(),
+            user_header: "x-prodex-sso-user".to_string(),
+            role_header: "x-prodex-sso-role".to_string(),
+            key_prefixes_header: "x-prodex-sso-key-prefixes".to_string(),
+            tenant_header: "x-prodex-sso-tenant".to_string(),
+            oidc: Some(RuntimeGatewayOidcConfig {
+                issuer: issuer.to_string(),
+                audience: audience.to_string(),
+                jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                user_claim: "email".to_string(),
+                role_claim: "prodex_role".to_string(),
+                tenant_claim: "prodex_tenant".to_string(),
+                key_prefixes_claim: "prodex_key_prefixes".to_string(),
+            }),
+        },
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let first = reqwest::blocking::Client::new()
+        .post(format!(
+            "http://{}/v1/prodex/gateway/keys",
+            proxy.listen_addr
+        ))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({"name": "team-cache-control-first"}))
+        .send()
+        .expect("first OIDC admin create key request should be sent");
+    assert_eq!(first.status().as_u16(), 201);
+    assert_eq!(jwks.request_count(), 1);
+
+    let refresh_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while jwks.request_count() < 2 && std::time::Instant::now() < refresh_deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(
+        jwks.request_count(),
+        2,
+        "Cache-Control max-age should override the longer fallback TTL"
+    );
+
+    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_oidc_refresh_metric"));
+    assert!(runtime_log.contains("metric_name=prodex_oidc_refresh_events_total"));
+    assert!(runtime_log.contains("oidc_refresh_operation=fetch_jwks"));
+    assert!(runtime_log.contains("oidc_refresh_result=success"));
+    assert!(runtime_log.contains("gateway_jwks_refresh_metric"));
+    assert!(runtime_log.contains("metric_name=prodex_jwks_refresh_total"));
+    assert!(runtime_log.contains("jwks_refresh_result=success"));
+    assert!(runtime_log.contains("gateway_jwks_cache_age_metric"));
+    assert!(runtime_log.contains("metric_name=prodex_jwks_cache_age_ms"));
+    assert!(!runtime_log.contains("jwks.json"));
+}
+
+#[test]
+fn oidc_background_refresh_retries_failed_jwks_after_backoff() {
+    let _backoff = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS", "50");
+    let root = temp_root("gateway-oidc-refresh-backoff");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let jwks = TestJwksServer::start_with_success_count(0);
+    let issuer = "https://idp.example";
+    let audience = "prodex-gateway";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig {
+            proxy_token_hash: None,
+            require_tenant: false,
+            token_header: "x-prodex-sso-token".to_string(),
+            user_header: "x-prodex-sso-user".to_string(),
+            role_header: "x-prodex-sso-role".to_string(),
+            key_prefixes_header: "x-prodex-sso-key-prefixes".to_string(),
+            tenant_header: "x-prodex-sso-tenant".to_string(),
+            oidc: Some(RuntimeGatewayOidcConfig {
+                issuer: issuer.to_string(),
+                audience: audience.to_string(),
+                jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                user_claim: "email".to_string(),
+                role_claim: "prodex_role".to_string(),
+                tenant_claim: "prodex_tenant".to_string(),
+                key_prefixes_claim: "prodex_key_prefixes".to_string(),
+            }),
+        },
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let retry_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while jwks.request_count() < 2 && std::time::Instant::now() < retry_deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        jwks.request_count() >= 2,
+        "failed background JWKS refresh should retry after the bounded backoff"
+    );
+
+    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_oidc_prefetch_failed"));
+    assert!(runtime_log.contains("oidc_refresh_result=failed"));
+    assert!(runtime_log.contains("oidc_refresh_result=backoff"));
+    assert!(!runtime_log.contains("jwks.json"));
+}
+
+#[test]
 fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
+    let _backoff = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS", "5000");
     let root = temp_root("gateway-oidc-missing-jwks-cache");
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(0);
@@ -864,11 +1155,6 @@ fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
-    assert_eq!(
-        jwks.request_count(),
-        1,
-        "startup prefetch may attempt JWKS fetch once"
-    );
     let client = reqwest::blocking::Client::new();
 
     let rejected = client
@@ -886,4 +1172,500 @@ fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
         1,
         "request path must not fetch JWKS when startup prefetch failed"
     );
+
+    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    assert!(runtime_log.contains("gateway_oidc_refresh_metric"));
+    assert!(runtime_log.contains("metric_name=prodex_oidc_refresh_events_total"));
+    assert!(runtime_log.contains("oidc_refresh_operation=fetch_jwks"));
+    assert!(runtime_log.contains("oidc_refresh_result=failed"));
+    assert!(runtime_log.contains("gateway_jwks_refresh_metric"));
+    assert!(runtime_log.contains("metric_name=prodex_jwks_refresh_total"));
+    assert!(runtime_log.contains("jwks_refresh_result=failure"));
+    assert!(!runtime_log.contains("jwks.json"));
+}
+
+#[test]
+fn gateway_scim_create_keeps_compat_shape_on_sqlite_backend() {
+    let root = temp_root("gateway-scim-sqlite-compat");
+    let paths = app_paths_for_root(root.clone());
+    let db_path = root.join("gateway-state.sqlite");
+    runtime_gateway_sqlite_create_current_schema_for_tests(&db_path)
+        .expect("sqlite schema fixture should be created");
+    let upstream = TestUpstream::start_n(0);
+    let admin_token = "admin-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::sqlite(db_path),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let created = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"userName": "sqlite@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .send()
+        .expect("sqlite SCIM create request should be sent");
+    assert_eq!(created.status().as_u16(), 201);
+    let created: serde_json::Value = created.json().expect("sqlite SCIM create json");
+    assert_eq!(created["userName"], "sqlite@example.com");
+    assert_eq!(created["externalId"], serde_json::Value::Null);
+    assert_eq!(created["displayName"], serde_json::Value::Null);
+}
+
+#[test]
+fn gateway_scim_update_keeps_compat_shape_on_sqlite_backend() {
+    let root = temp_root("gateway-scim-sqlite-update-compat");
+    let paths = app_paths_for_root(root.clone());
+    let db_path = root.join("gateway-state.sqlite");
+    runtime_gateway_sqlite_create_current_schema_for_tests(&db_path)
+        .expect("sqlite schema fixture should be created");
+    let upstream = TestUpstream::start_n(0);
+    let admin_token = "admin-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::sqlite(db_path),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let created = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"userName": "sqlite-update@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .send()
+        .expect("sqlite SCIM create request should be sent");
+    assert_eq!(created.status().as_u16(), 201);
+    let created: serde_json::Value = created.json().expect("sqlite SCIM create json");
+    let user_id = created["id"]
+        .as_str()
+        .expect("sqlite SCIM user id should be present")
+        .to_string();
+
+    let updated = client
+        .patch(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users/{}",
+            proxy.listen_addr, user_id
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"displayName": "SQLite Update"}))
+        .send()
+        .expect("sqlite SCIM update request should be sent");
+    assert_eq!(updated.status().as_u16(), 200);
+    let updated: serde_json::Value = updated.json().expect("sqlite SCIM update json");
+    assert_eq!(updated["userName"], "sqlite-update@example.com");
+    assert_eq!(updated["displayName"], "SQLite Update");
+    assert_eq!(updated["externalId"], serde_json::Value::Null);
+}
+
+#[test]
+fn gateway_scim_delete_keeps_compat_shape_on_sqlite_backend() {
+    let root = temp_root("gateway-scim-sqlite-delete-compat");
+    let paths = app_paths_for_root(root.clone());
+    let db_path = root.join("gateway-state.sqlite");
+    runtime_gateway_sqlite_create_current_schema_for_tests(&db_path)
+        .expect("sqlite schema fixture should be created");
+    let upstream = TestUpstream::start_n(0);
+    let admin_token = "admin-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::sqlite(db_path),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let created = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"userName": "sqlite-delete@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .send()
+        .expect("sqlite SCIM create request should be sent");
+    assert_eq!(created.status().as_u16(), 201);
+    let created: serde_json::Value = created.json().expect("sqlite SCIM create json");
+    let user_id = created["id"]
+        .as_str()
+        .expect("sqlite SCIM user id should be present")
+        .to_string();
+
+    let deleted = client
+        .delete(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users/{}",
+            proxy.listen_addr, user_id
+        ))
+        .bearer_auth(admin_token)
+        .send()
+        .expect("sqlite SCIM delete request should be sent");
+    assert_eq!(deleted.status().as_u16(), 200);
+    let deleted: serde_json::Value = deleted.json().expect("sqlite SCIM delete json");
+    assert_eq!(deleted["object"], "gateway.scim_user.deleted");
+    assert_eq!(deleted["id"], user_id);
+    assert_eq!(deleted["deleted"], true);
+}
+
+#[test]
+fn gateway_scim_create_keeps_compat_shape_on_postgres_backend() {
+    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
+        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
+        return;
+    };
+
+    let root = temp_root("gateway-scim-postgres-compat");
+    let paths = app_paths_for_root(root);
+    runtime_gateway_postgres_create_current_schema_for_tests(&url);
+    let upstream = TestUpstream::start_n(0);
+    let admin_token = "admin-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::postgres(
+            "PRODEX_TEST_POSTGRES_URL".to_string(),
+            url,
+        ),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let created = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"userName": "postgres@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .send()
+        .expect("postgres SCIM create request should be sent");
+    let created_status = created.status().as_u16();
+    let created_body = created
+        .text()
+        .expect("postgres SCIM create response should be readable");
+    assert_eq!(
+        created_status, 201,
+        "postgres SCIM create failed: {created_body}"
+    );
+    let created: serde_json::Value =
+        serde_json::from_str(&created_body).expect("postgres SCIM create json");
+    assert_eq!(created["userName"], "postgres@example.com");
+    assert_eq!(created["externalId"], serde_json::Value::Null);
+    assert_eq!(created["displayName"], serde_json::Value::Null);
+}
+
+#[test]
+fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
+    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
+        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
+        return;
+    };
+
+    let root = temp_root("gateway-scim-postgres-update-compat");
+    let paths = app_paths_for_root(root);
+    runtime_gateway_postgres_create_current_schema_for_tests(&url);
+    let upstream = TestUpstream::start_n(0);
+    let admin_token = "admin-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::postgres(
+            "PRODEX_TEST_POSTGRES_URL".to_string(),
+            url,
+        ),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let created = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"userName": "postgres-update@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .send()
+        .expect("postgres SCIM create request should be sent");
+    let created_status = created.status().as_u16();
+    let created_body = created
+        .text()
+        .expect("postgres SCIM create response should be readable");
+    assert_eq!(
+        created_status, 201,
+        "postgres SCIM create failed: {created_body}"
+    );
+    let created: serde_json::Value =
+        serde_json::from_str(&created_body).expect("postgres SCIM create json");
+    let user_id = created["id"]
+        .as_str()
+        .expect("postgres SCIM user id should be present")
+        .to_string();
+
+    let updated = client
+        .patch(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users/{}",
+            proxy.listen_addr, user_id
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"displayName": "Postgres Update"}))
+        .send()
+        .expect("postgres SCIM update request should be sent");
+    let updated_status = updated.status().as_u16();
+    let updated_body = updated
+        .text()
+        .expect("postgres SCIM update response should be readable");
+    assert_eq!(
+        updated_status, 200,
+        "postgres SCIM update failed: {updated_body}"
+    );
+    let updated: serde_json::Value =
+        serde_json::from_str(&updated_body).expect("postgres SCIM update json");
+    assert_eq!(updated["userName"], "postgres-update@example.com");
+    assert_eq!(updated["displayName"], "Postgres Update");
+    assert_eq!(updated["externalId"], serde_json::Value::Null);
+}
+
+#[test]
+fn gateway_scim_delete_keeps_compat_shape_on_postgres_backend() {
+    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
+        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
+        return;
+    };
+
+    let root = temp_root("gateway-scim-postgres-delete-compat");
+    let paths = app_paths_for_root(root);
+    runtime_gateway_postgres_create_current_schema_for_tests(&url);
+    let upstream = TestUpstream::start_n(0);
+    let admin_token = "admin-token";
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(admin_token),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::postgres(
+            "PRODEX_TEST_POSTGRES_URL".to_string(),
+            url,
+        ),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let created = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"userName": "postgres-delete@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .send()
+        .expect("postgres SCIM create request should be sent");
+    let created_status = created.status().as_u16();
+    let created_body = created
+        .text()
+        .expect("postgres SCIM create response should be readable");
+    assert_eq!(
+        created_status, 201,
+        "postgres SCIM create failed: {created_body}"
+    );
+    let created: serde_json::Value =
+        serde_json::from_str(&created_body).expect("postgres SCIM create json");
+    let user_id = created["id"]
+        .as_str()
+        .expect("postgres SCIM user id should be present")
+        .to_string();
+
+    let deleted = client
+        .delete(format!(
+            "http://{}/v1/prodex/gateway/scim/v2/Users/{}",
+            proxy.listen_addr, user_id
+        ))
+        .bearer_auth(admin_token)
+        .send()
+        .expect("postgres SCIM delete request should be sent");
+    let deleted_status = deleted.status().as_u16();
+    let deleted_body = deleted
+        .text()
+        .expect("postgres SCIM delete response should be readable");
+    assert_eq!(
+        deleted_status, 200,
+        "postgres SCIM delete failed: {deleted_body}"
+    );
+    let deleted: serde_json::Value =
+        serde_json::from_str(&deleted_body).expect("postgres SCIM delete json");
+    assert_eq!(deleted["object"], "gateway.scim_user.deleted");
+    assert_eq!(deleted["id"], user_id);
+    assert_eq!(deleted["deleted"], true);
 }

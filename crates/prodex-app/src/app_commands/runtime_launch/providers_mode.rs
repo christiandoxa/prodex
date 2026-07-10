@@ -53,15 +53,23 @@ pub(crate) fn runtime_provider_mode_uses_single_api_key(
 ) -> bool {
     external_provider.is_some_and(|provider| {
         ((provider.eq_ignore_ascii_case("anthropic") || provider.eq_ignore_ascii_case("claude"))
-            && runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key).is_some())
+            && runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key)
+                .ok()
+                .flatten()
+                .is_some())
             || provider.eq_ignore_ascii_case("deepseek")
             || ((provider.eq_ignore_ascii_case("copilot")
                 || provider.eq_ignore_ascii_case("github-copilot")
                 || provider.eq_ignore_ascii_case("github_copilot"))
                 && runtime_copilot_api_keys_from_request_or_env(external_provider_api_key)
+                    .ok()
+                    .flatten()
                     .is_some())
             || (provider.eq_ignore_ascii_case("gemini")
-                && runtime_gemini_api_keys_from_request_or_env(external_provider_api_key).is_some())
+                && runtime_gemini_api_keys_from_request_or_env(external_provider_api_key)
+                    .ok()
+                    .flatten()
+                    .is_some())
             || provider.eq_ignore_ascii_case("kiro")
     })
 }
@@ -132,10 +140,14 @@ fn runtime_external_provider_api_key_count(
         || external_provider.eq_ignore_ascii_case("claude")
     {
         return runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key)
+            .ok()
+            .flatten()
             .map(|keys| keys.len());
     }
     if external_provider.eq_ignore_ascii_case("deepseek") {
         return runtime_deepseek_api_keys_from_request_or_env(external_provider_api_key)
+            .ok()
+            .flatten()
             .map(|keys| keys.len());
     }
     if external_provider.eq_ignore_ascii_case("copilot")
@@ -143,10 +155,14 @@ fn runtime_external_provider_api_key_count(
         || external_provider.eq_ignore_ascii_case("github_copilot")
     {
         return runtime_copilot_api_keys_from_request_or_env(external_provider_api_key)
+            .ok()
+            .flatten()
             .map(|keys| keys.len());
     }
     if external_provider.eq_ignore_ascii_case("gemini") {
         return runtime_gemini_api_keys_from_request_or_env(external_provider_api_key)
+            .ok()
+            .flatten()
             .map(|keys| keys.len());
     }
     None

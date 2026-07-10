@@ -5,7 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum SecretLocation {
     File(PathBuf),
     #[cfg_attr(not(test), allow(dead_code))]
@@ -37,7 +37,20 @@ impl SecretLocation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl fmt::Debug for SecretLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::File(_) => f.debug_tuple("File").field(&"<redacted>").finish(),
+            Self::Keyring { .. } => f
+                .debug_struct("Keyring")
+                .field("service", &"<redacted>")
+                .field("account", &"<redacted>")
+                .finish(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub enum SecretValue {
     Text(String),
     Bytes(Vec<u8>),
@@ -68,7 +81,16 @@ impl SecretValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl fmt::Debug for SecretValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(_) => f.debug_tuple("Text").field(&"<redacted>").finish(),
+            Self::Bytes(_) => f.debug_tuple("Bytes").field(&"<redacted>").finish(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub enum SecretError {
     UnsupportedLocation { location: String },
     InvalidLocation { reason: String },
@@ -92,6 +114,26 @@ impl SecretError {
         Self::Io {
             path: path.into(),
             reason: error.to_string(),
+        }
+    }
+}
+
+impl fmt::Debug for SecretError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedLocation { .. } => f
+                .debug_struct("UnsupportedLocation")
+                .field("location", &"<redacted>")
+                .finish(),
+            Self::InvalidLocation { .. } => f
+                .debug_struct("InvalidLocation")
+                .field("reason", &"<redacted>")
+                .finish(),
+            Self::Io { .. } => f
+                .debug_struct("Io")
+                .field("path", &"<redacted>")
+                .field("reason", &"<redacted>")
+                .finish(),
         }
     }
 }
@@ -179,7 +221,7 @@ impl std::str::FromStr for SecretBackendKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SecretRevision {
     size_bytes: u64,
     modified_at: Option<SystemTime>,
@@ -205,6 +247,15 @@ impl SecretRevision {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn modified_at(&self) -> Option<SystemTime> {
         self.modified_at
+    }
+}
+
+impl fmt::Debug for SecretRevision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SecretRevision")
+            .field("size_bytes", &"<redacted>")
+            .field("modified_at", &self.modified_at.map(|_| "<redacted>"))
+            .finish()
     }
 }
 

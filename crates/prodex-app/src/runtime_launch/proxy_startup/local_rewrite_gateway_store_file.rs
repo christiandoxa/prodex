@@ -137,6 +137,7 @@ fn open_gateway_temp_file(path: &Path) -> io::Result<File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime_launch::proxy_startup::local_rewrite_gateway_store_types::RuntimeGatewayStoredVirtualKey;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -219,6 +220,164 @@ mod tests {
             .expect_err("gateway store symlink should be rejected");
 
         assert!(err.to_string().contains("symlink"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn load_store_rejects_null_virtual_key_disabled_field() {
+        let root = temp_dir("disabled-null");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("gateway-virtual-keys.json");
+        std::fs::write(
+            &path,
+            r#"{"version":1,"keys":[{"name":"alpha","token_hash_base64":"hash","created_at_epoch":1,"updated_at_epoch":2}]}"#,
+        )
+        .unwrap();
+        let store =
+            runtime_gateway_virtual_key_store_file_load(&path).expect("missing disabled is legacy");
+        assert_eq!(store.keys[0].disabled, None);
+
+        std::fs::write(
+            &path,
+            r#"{"version":1,"keys":[{"name":"alpha","token_hash_base64":"hash","disabled":null,"created_at_epoch":1,"updated_at_epoch":2}]}"#,
+        )
+        .unwrap();
+        let err = runtime_gateway_virtual_key_store_file_load(&path)
+            .expect_err("null disabled should fail closed");
+        assert!(matches!(err, RuntimeGatewayStoreFileLoadError::Invalid(_)));
+        assert!(err.to_string().contains("disabled must be a boolean"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn load_store_rejects_null_virtual_key_numeric_fields() {
+        let root = temp_dir("numeric-null");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("gateway-virtual-keys.json");
+        std::fs::write(
+            &path,
+            r#"{"version":1,"keys":[{"name":"alpha","token_hash_base64":"hash","created_at_epoch":1,"updated_at_epoch":2}]}"#,
+        )
+        .unwrap();
+        let store =
+            runtime_gateway_virtual_key_store_file_load(&path).expect("missing numbers are legacy");
+        assert_eq!(store.keys[0].budget_microusd, None);
+        assert_eq!(store.keys[0].request_budget, None);
+        assert_eq!(store.keys[0].rpm_limit, None);
+        assert_eq!(store.keys[0].tpm_limit, None);
+
+        for field in [
+            "budget_microusd",
+            "request_budget",
+            "rpm_limit",
+            "tpm_limit",
+        ] {
+            std::fs::write(
+                &path,
+                format!(
+                    r#"{{"version":1,"keys":[{{"name":"alpha","token_hash_base64":"hash","{field}":null,"created_at_epoch":1,"updated_at_epoch":2}}]}}"#
+                ),
+            )
+            .unwrap();
+            let err = runtime_gateway_virtual_key_store_file_load(&path)
+                .expect_err("null numeric field should fail closed");
+            assert!(matches!(err, RuntimeGatewayStoreFileLoadError::Invalid(_)));
+            assert!(
+                err.to_string()
+                    .contains(&format!("{field} must be an unsigned integer")),
+                "{err}"
+            );
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn load_store_rejects_null_virtual_key_scope_fields() {
+        let root = temp_dir("scope-null");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("gateway-virtual-keys.json");
+
+        for field in [
+            "virtual_key_id",
+            "tenant_id",
+            "team_id",
+            "project_id",
+            "user_id",
+            "budget_id",
+        ] {
+            std::fs::write(
+                &path,
+                format!(
+                    r#"{{"version":1,"keys":[{{"name":"alpha","token_hash_base64":"hash","{field}":null,"created_at_epoch":1,"updated_at_epoch":2}}]}}"#
+                ),
+            )
+            .unwrap();
+            let err = runtime_gateway_virtual_key_store_file_load(&path)
+                .expect_err("null scope field should fail closed");
+            assert!(matches!(err, RuntimeGatewayStoreFileLoadError::Invalid(_)));
+            assert!(
+                err.to_string()
+                    .contains("optional string field must be a string"),
+                "{err}"
+            );
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn saved_store_omits_absent_present_only_key_fields() {
+        let root = temp_dir("save-omits-null");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("gateway-virtual-keys.json");
+        let store = RuntimeGatewayVirtualKeyStoreFile {
+            version: 1,
+            keys: vec![RuntimeGatewayStoredVirtualKey {
+                name: "alpha".to_string(),
+                token_hash_base64: "hash".to_string(),
+                virtual_key_id: None,
+                tenant_id: None,
+                team_id: None,
+                project_id: None,
+                user_id: None,
+                budget_id: None,
+                allowed_models: Vec::new(),
+                budget_microusd: None,
+                request_budget: None,
+                rpm_limit: None,
+                tpm_limit: None,
+                disabled: None,
+                created_at_epoch: 1,
+                updated_at_epoch: 2,
+            }],
+            scim_users: Vec::new(),
+        };
+
+        runtime_gateway_virtual_key_store_file_save(&path, &store).unwrap();
+        let payload = std::fs::read_to_string(&path).unwrap();
+        for field in [
+            "virtual_key_id",
+            "tenant_id",
+            "team_id",
+            "project_id",
+            "user_id",
+            "budget_id",
+            "budget_microusd",
+            "request_budget",
+            "rpm_limit",
+            "tpm_limit",
+            "disabled",
+        ] {
+            assert!(!payload.contains(&format!(r#""{field}": null"#)));
+        }
+        let loaded = runtime_gateway_virtual_key_store_file_load(&path)
+            .expect("saved store should load after omitting absent fields");
+        assert_eq!(loaded.keys.len(), 1);
+        assert_eq!(loaded.keys[0].budget_microusd, None);
+        assert_eq!(loaded.keys[0].disabled, None);
+
         std::fs::remove_dir_all(root).unwrap();
     }
 }

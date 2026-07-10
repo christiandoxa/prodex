@@ -50,6 +50,15 @@ test("classifies docs and npm release tooling as lightweight", () => {
   assert.deepEqual(result.unknownPaths, []);
 });
 
+test("classifies storage postgres proof helper as lightweight", () => {
+  const result = classifyChangedPaths(["scripts/ci/storage-postgres-proof.mjs"]);
+
+  assert.equal(result.heavy, false);
+  assert.equal(result.reason, "only lightweight docs/npm/release metadata paths changed");
+  assert.deepEqual(result.lightPaths, ["scripts/ci/storage-postgres-proof.mjs"]);
+  assert.deepEqual(result.unknownPaths, []);
+});
+
 test("ci-impact uses canonical manifest impact groups", () => {
   assert.equal(CI_IMPACT_GROUPS.heavy, PATH_GROUP_NAMES.ciImpactHeavy);
   assert.equal(CI_IMPACT_GROUPS.light, PATH_GROUP_NAMES.ciImpactLight);
@@ -176,6 +185,15 @@ test("changed-tests runs enterprise docs guard for workflow and package drift", 
   assert.ok(labels.includes("enterprise-docs-guard"));
 });
 
+test("changed-tests runs enterprise docs guard for storage postgres proof helper and docs testing", async () => {
+  const labels = (await buildSteps([
+    "scripts/ci/storage-postgres-proof.mjs",
+    "docs/testing.md",
+  ])).map((step) => step.label);
+
+  assert.ok(labels.includes("enterprise-docs-guard"));
+});
+
 test("changed-tests package alias check covers enterprise guard scripts", async () => {
   const steps = await buildSteps(["package.json"]);
   const packageAliasStep = steps.find((step) => step.label === "package:changed-aliases");
@@ -184,11 +202,11 @@ test("changed-tests package alias check covers enterprise guard scripts", async 
 
   assert.equal(
     expectedAliases["ci:deployment-security-guard"],
-    "node scripts/ci/deployment-security-guard.mjs",
+    "node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs",
   );
   assert.equal(
     expectedAliases["ci:gateway-http-boundary-guard"],
-    "node scripts/ci/gateway-http-boundary-guard.mjs",
+    "node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs",
   );
 });
 

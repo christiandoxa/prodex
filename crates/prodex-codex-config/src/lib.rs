@@ -102,6 +102,16 @@ pub fn codex_config_value(codex_home: &Path, key: &str) -> Option<String> {
     codex_config_file_value(&codex_home.join("config.toml"), key)
 }
 
+fn codex_config_file_exact_value(config_path: &Path, key: &str) -> Option<String> {
+    let contents = fs::read_to_string(config_path).ok()?;
+    parse_toml_document_string_value(&contents, key)
+        .or_else(|| parse_toml_string_assignment(&contents, key))
+}
+
+pub fn codex_config_exact_value(codex_home: &Path, key: &str) -> Option<String> {
+    codex_config_file_exact_value(&codex_home.join("config.toml"), key)
+}
+
 pub fn is_valid_codex_profile_v2_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -201,6 +211,33 @@ pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<S
     None
 }
 
+pub fn codex_cli_config_override_exact_value(args: &[OsString], key: &str) -> Option<String> {
+    let mut index = 0;
+    while index < args.len() {
+        let Some(arg) = args[index].to_str() else {
+            index += 1;
+            continue;
+        };
+        let assignment = if matches!(arg, "-c" | "--config") {
+            index += 1;
+            args.get(index)?.to_str()
+        } else if let Some(value) = arg.strip_prefix("--config=") {
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("-c") {
+            (!value.is_empty() && value.contains('=')).then_some(value)
+        } else {
+            None
+        };
+        if let Some(value) =
+            assignment.and_then(|value| parse_config_override_exact_string(value, key))
+        {
+            return Some(value);
+        }
+        index += 1;
+    }
+    None
+}
+
 pub fn codex_non_openai_model_provider(
     codex_home: &Path,
     model_provider_override: Option<&str>,
@@ -265,6 +302,18 @@ fn parse_config_override_string(assignment: &str, expected_key: &str) -> Option<
         return None;
     }
     normalize_model_provider_value(raw_value)
+}
+
+fn parse_config_override_exact_string(assignment: &str, expected_key: &str) -> Option<String> {
+    let (key, raw_value) = assignment.split_once('=')?;
+    if key.trim() != expected_key {
+        return None;
+    }
+    let raw_value = raw_value.trim();
+    Some(
+        parse_toml_string_assignment(&format!("{expected_key} = {raw_value}"), expected_key)
+            .unwrap_or_else(|| raw_value.to_string()),
+    )
 }
 
 fn normalize_model_provider_value(raw_value: &str) -> Option<String> {

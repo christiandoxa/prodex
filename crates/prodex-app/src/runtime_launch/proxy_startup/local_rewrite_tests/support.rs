@@ -1,4 +1,7 @@
 use crate::AppPaths;
+use crate::runtime_launch::proxy_startup::local_rewrite::{
+    RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
+};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use std::fs;
 use std::net::SocketAddr;
@@ -7,6 +10,20 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
+
+pub(super) fn runtime_gateway_test_admin_token(token: &str) -> RuntimeGatewayAdminToken {
+    RuntimeGatewayAdminToken {
+        name: "test-admin".to_string(),
+        token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(token),
+        role: RuntimeGatewayAdminRole::Admin,
+        tenant_id: None,
+        team_id: None,
+        project_id: None,
+        user_id: None,
+        budget_id: None,
+        allowed_key_prefixes: Vec::new(),
+    }
+}
 
 pub(super) struct TestUpstream {
     pub(super) addr: SocketAddr,
@@ -102,6 +119,13 @@ impl TestJwksServer {
     }
 
     pub(super) fn start_with_success_count(success_count: usize) -> Self {
+        Self::start_with_success_count_and_cache_control(success_count, None)
+    }
+
+    pub(super) fn start_with_success_count_and_cache_control(
+        success_count: usize,
+        cache_control: Option<&'static str>,
+    ) -> Self {
         let server = TinyServer::http("127.0.0.1:0").expect("test JWKS server should bind");
         let addr = server
             .server_addr()
@@ -123,6 +147,11 @@ impl TestJwksServer {
                 response.add_header(
                     TinyHeader::from_bytes("content-type", "application/json").unwrap(),
                 );
+                if let Some(cache_control) = cache_control {
+                    response.add_header(
+                        TinyHeader::from_bytes("cache-control", cache_control).unwrap(),
+                    );
+                }
                 let _ = request.respond(response);
             }
         });

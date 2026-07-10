@@ -14,8 +14,8 @@ building the active guardrail config, changing the configured pattern text.
 ## Decision
 
 Guardrail keyword values are preserved exactly. Blank-only keyword entries are
-still ignored or rejected, but non-blank values are no longer trim-normalized
-before runtime guardrail matching.
+rejected, and non-blank values are no longer trim-normalized before runtime
+guardrail matching.
 
 ## Consequences
 

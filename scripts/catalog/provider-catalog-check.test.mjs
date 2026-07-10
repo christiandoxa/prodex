@@ -20,21 +20,22 @@ test("provider catalog reports non-zero model and provider counts", () => {
   const result = run(["--json"]);
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(result.stdout);
-  assert.ok(summary.sources.some((source) => source.endsWith("models.rs")));
+  assert.ok(summary.sources.some((source) => source.endsWith("models.json")));
   assert.ok(summary.model_count > 0);
   assert.ok(summary.provider_count > 0);
   assert.ok(summary.providers.OpenAi > 0);
+  assert.ok(summary.providers.Kiro > 0);
 });
 
 test("empty catalog fixture fails", () => {
   const dir = mkdtempSync(join(tmpdir(), "prodex-provider-catalog-"));
-  const fixture = join(dir, "empty.rs");
-  writeFileSync(fixture, "pub const OPENAI_ENDPOINTS: &str = \"unused\";\n");
+  const fixture = join(dir, "empty.json");
+  writeFileSync(fixture, "[]\n");
 
   const result = run([`--source=${fixture}`, "--json"]);
   assert.notEqual(result.status, 0);
   const summary = JSON.parse(result.stdout);
   assert.equal(summary.model_count, 0);
   assert.match(summary.issues.join("\n"), /model_count is 0/);
-  assert.match(summary.issues.join("\n"), /required provider missing: OpenAi/);
+  assert.match(summary.issues.join("\n"), /required provider missing: openai/);
 });

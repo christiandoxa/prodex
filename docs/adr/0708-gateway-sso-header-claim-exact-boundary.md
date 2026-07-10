@@ -15,10 +15,11 @@ validation only rejected blank-after-trim values.
 
 Treat `gateway.sso.*_header` and `gateway.sso.oidc_*_claim` names as exact
 configuration boundaries. Policy validation rejects empty or whitespace-bearing
-names, and runtime launch ignores invalid names instead of trimming them into
-active identity selectors.
+names, and runtime launch fails closed on invalid names instead of trimming or
+defaulting them into active identity selectors.
 
 ## Consequences
 
 Operators must correct padded SSO header and OIDC claim names in `policy.toml`.
-The gateway no longer hides identity-boundary padding through runtime cleanup.
+The gateway no longer hides identity-boundary padding through runtime cleanup or
+implicit fallback selectors.

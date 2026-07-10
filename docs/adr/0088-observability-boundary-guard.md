@@ -11,8 +11,9 @@ frameworks, storage, filesystem logging, or async runtimes. Those belong in
 adapter/composition crates.
 
 ## Decision
-Add `scripts/ci/observability-boundary-guard.mjs` and wire it into npm scripts
-and local preflight. The guard requires `prodex-observability` to depend only on
+Add `scripts/ci/observability-boundary-guard.mjs` and wire its self-test plus
+workspace scan into npm scripts and local preflight. The guard requires
+`prodex-observability` to depend only on
 `prodex-domain`, forbids dev-dependencies and target-specific dependencies, and
 scans source files for forbidden filesystem, environment, process, network,
 HTTP, database, transport, OpenTelemetry SDK, Prometheus, tracing backend, and

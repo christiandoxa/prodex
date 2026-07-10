@@ -4,6 +4,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 use std::env;
 use std::ffi::OsString;
+use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -29,7 +30,6 @@ const KIRO_AUTH_KEY_PRIORITY: &[&str] = &[
     "codewhisperer:odic:token",
 ];
 
-#[derive(Debug)]
 struct KiroImportContext {
     auth_key: String,
     auth_kind: String,
@@ -41,7 +41,28 @@ struct KiroImportContext {
     region: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+impl fmt::Debug for KiroImportContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KiroImportContext")
+            .field("auth_key", &"<redacted>")
+            .field("auth_kind", &"<redacted>")
+            .field("raw_auth_json", &"<redacted>")
+            .field("email", &self.email.as_ref().map(|_| "<redacted>"))
+            .field(
+                "profile_arn",
+                &self.profile_arn.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "profile_name",
+                &self.profile_name.as_ref().map(|_| "<redacted>"),
+            )
+            .field("start_url", &self.start_url.as_ref().map(|_| "<redacted>"))
+            .field("region", &self.region.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub(crate) struct KiroAuthSecret {
     pub(crate) auth_key: String,
     pub(crate) auth_kind: String,
@@ -56,6 +77,27 @@ pub(crate) struct KiroAuthSecret {
     pub(crate) start_url: Option<String>,
     #[serde(default)]
     pub(crate) region: Option<String>,
+}
+
+impl fmt::Debug for KiroAuthSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KiroAuthSecret")
+            .field("auth_key", &"<redacted>")
+            .field("auth_kind", &"<redacted>")
+            .field("auth_json", &"<redacted>")
+            .field("email", &self.email.as_ref().map(|_| "<redacted>"))
+            .field(
+                "profile_arn",
+                &self.profile_arn.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "profile_name",
+                &self.profile_name.as_ref().map(|_| "<redacted>"),
+            )
+            .field("start_url", &self.start_url.as_ref().map(|_| "<redacted>"))
+            .field("region", &self.region.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 pub(super) fn is_kiro_import_source(path: &Path) -> bool {
@@ -827,6 +869,53 @@ mod tests {
             match self.previous.take() {
                 Some(value) => unsafe { env::set_var("PRODEX_KIRO_BIN", value) },
                 None => unsafe { env::remove_var("PRODEX_KIRO_BIN") },
+            }
+        }
+    }
+
+    #[test]
+    fn kiro_auth_debug_output_redacts_sensitive_fields() {
+        let secret = KiroAuthSecret {
+            auth_key: "codewhisperer:secret-token-key".to_string(),
+            auth_kind: "builder-id-secret".to_string(),
+            auth_json: serde_json::json!({
+                "access_token": "kiro-access-token-secret",
+                "refresh_token": "kiro-refresh-token-secret"
+            })
+            .to_string(),
+            email: Some("kiro-user@example.test".to_string()),
+            profile_arn: Some(
+                "arn:aws:codewhisperer:us-east-1:123456789012:profile/secret".to_string(),
+            ),
+            profile_name: Some("builder-profile-secret".to_string()),
+            start_url: Some("https://view.awsapps.com/start-secret".to_string()),
+            region: Some("us-east-1-secret".to_string()),
+        };
+        let context = KiroImportContext {
+            auth_key: secret.auth_key.clone(),
+            auth_kind: secret.auth_kind.clone(),
+            raw_auth_json: secret.auth_json.clone(),
+            email: secret.email.clone(),
+            profile_arn: secret.profile_arn.clone(),
+            profile_name: secret.profile_name.clone(),
+            start_url: secret.start_url.clone(),
+            region: secret.region.clone(),
+        };
+
+        for rendered in [format!("{secret:?}"), format!("{context:?}")] {
+            assert!(rendered.contains("<redacted>"), "{rendered}");
+            for raw in [
+                "codewhisperer:secret-token-key",
+                "builder-id-secret",
+                "kiro-access-token-secret",
+                "kiro-refresh-token-secret",
+                "kiro-user@example.test",
+                "arn:aws:codewhisperer:us-east-1:123456789012:profile/secret",
+                "builder-profile-secret",
+                "https://view.awsapps.com/start-secret",
+                "us-east-1-secret",
+            ] {
+                assert!(!rendered.contains(raw), "{rendered}");
             }
         }
     }

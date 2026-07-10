@@ -15,10 +15,11 @@ IDs, so padded values could be normalized into active routing state.
 
 Route alias model IDs and route metric model IDs must now be exact non-empty
 values without whitespace. Metric rows must match one configured route alias
-model exactly.
+model exactly. Runtime launch applies the same checks when handed already-built
+policy settings.
 
 ## Consequences
 
 Canonical route alias model IDs are unchanged. Padded or whitespace-bearing
-model IDs fail closed in policy files and are no longer trim-normalized into
-active routing policy.
+model IDs fail closed in policy files and direct launch settings, and are no
+longer trim-normalized or silently dropped from active routing policy.

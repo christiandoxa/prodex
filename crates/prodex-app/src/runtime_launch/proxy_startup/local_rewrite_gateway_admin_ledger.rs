@@ -6,6 +6,9 @@ use super::local_rewrite_gateway_admin_auth::{
 use super::local_rewrite_gateway_admin_response::{
     runtime_gateway_admin_csv_response, runtime_gateway_admin_json_response,
 };
+use super::local_rewrite_gateway_admin_router::{
+    runtime_gateway_admin_control_plane_action, runtime_gateway_http_request_meta,
+};
 use super::local_rewrite_gateway_billing_csv::{
     runtime_gateway_billing_ledger_csv, runtime_gateway_billing_summary_csv,
 };
@@ -16,9 +19,10 @@ use super::local_rewrite_gateway_billing_summary::{
 use super::local_rewrite_gateway_ledger_types::RuntimeGatewayBillingLedgerEntry;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 use super::*;
-use prodex_gateway_http::{
-    GatewayHttpPaginationQueryErrorStatus, page_request_from_query,
-    plan_gateway_http_pagination_query_error_response,
+use prodex_application::{
+    ApplicationControlPlanePageRequestErrorStatus,
+    plan_application_control_plane_page_request_error_response,
+    plan_application_control_plane_page_request_from_http_query,
 };
 
 const RUNTIME_GATEWAY_ADMIN_LEDGER_EXPORT_LIMIT: usize = 100_000;
@@ -33,23 +37,43 @@ pub(super) fn runtime_gateway_admin_ledger_response(
         .split_once('?')
         .map(|(_, query)| query)
         .unwrap_or_default();
-    let page_request = match page_request_from_query(query) {
-        Ok(page_request) => page_request,
-        Err(error) => {
-            let response = plan_gateway_http_pagination_query_error_response(&error);
+    let path = path_without_query(path_and_query);
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: path_and_query.to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let http = runtime_gateway_http_request_meta(&request, path);
+    let action = match runtime_gateway_admin_control_plane_action(&http, admin_auth) {
+        Some(action) => action,
+        None => {
             return build_runtime_proxy_json_error_response(
-                match response.status {
-                    GatewayHttpPaginationQueryErrorStatus::BadRequest => 400,
-                },
-                response.code,
-                response.message,
+                400,
+                "control_plane_route_invalid",
+                "control-plane route is invalid",
             );
         }
     };
+    let page_request =
+        match plan_application_control_plane_page_request_from_http_query(action, &http, query) {
+            Ok(page_request) => page_request,
+            Err(error) => {
+                let response = plan_application_control_plane_page_request_error_response(&error);
+                return build_runtime_proxy_json_error_response(
+                    match response.status {
+                        ApplicationControlPlanePageRequestErrorStatus::BadRequest => 400,
+                        ApplicationControlPlanePageRequestErrorStatus::MethodNotAllowed => 405,
+                    },
+                    response.code,
+                    response.message,
+                );
+            }
+        };
     let limit = if query.is_empty() {
         RUNTIME_GATEWAY_ADMIN_LEDGER_DEFAULT_LIMIT
     } else {
-        usize::from(page_request.limit)
+        usize::from(page_request.page_request.limit)
     };
     match runtime_gateway_billing_ledger_load(&shared.gateway_state_store, limit) {
         Ok(records) => {

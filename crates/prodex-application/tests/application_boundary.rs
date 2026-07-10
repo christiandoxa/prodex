@@ -1,4 +1,6 @@
 use prodex_application::{
+    ApplicationAtomicReservationError, ApplicationAtomicReservationErrorStatus,
+    ApplicationAtomicReservationRequest, ApplicationAtomicReservationStoragePlan,
     ApplicationAuditExportError, ApplicationAuditExportErrorStatus,
     ApplicationAuditExportQueryStoragePlan, ApplicationAuditExportRequest,
     ApplicationAuditRetentionPurgeError, ApplicationAuditRetentionPurgeErrorStatus,
@@ -20,8 +22,8 @@ use prodex_application::{
     ApplicationControlPlaneAuditErrorStatus,
     ApplicationControlPlaneAuditPersistenceSpanErrorStatus,
     ApplicationControlPlaneAuditPersistenceSpanRequest, ApplicationControlPlaneAuditRequest,
-    ApplicationControlPlaneAuditStoragePlan, ApplicationControlPlaneHttpRoutePlan,
-    ApplicationControlPlaneIdempotencyCompletedStoragePlan,
+    ApplicationControlPlaneAuditStoragePlan, ApplicationControlPlaneHttpRouteErrorStatus,
+    ApplicationControlPlaneHttpRoutePlan, ApplicationControlPlaneIdempotencyCompletedStoragePlan,
     ApplicationControlPlaneIdempotencyError, ApplicationControlPlaneIdempotencyErrorStatus,
     ApplicationControlPlaneIdempotencyLookupStoragePlan,
     ApplicationControlPlaneIdempotencyPendingStoragePlan,
@@ -66,6 +68,7 @@ use prodex_application::{
     ApplicationVirtualKeyLifecycleErrorStatus, ApplicationVirtualKeyLifecycleRequest,
     ApplicationVirtualKeySecretReferenceError, ApplicationVirtualKeySecretReferenceErrorStatus,
     ApplicationVirtualKeySecretReferenceRequest, ApplicationVirtualKeySecretReferenceStoragePlan,
+    plan_application_atomic_reservation, plan_application_atomic_reservation_error_response,
     plan_application_audit_export, plan_application_audit_export_error_response,
     plan_application_audit_retention_purge, plan_application_audit_retention_purge_error_response,
     plan_application_billing_read, plan_application_billing_read_error_response,
@@ -85,7 +88,9 @@ use prodex_application::{
     plan_application_control_plane_audit_error_response,
     plan_application_control_plane_audit_persistence_span,
     plan_application_control_plane_audit_persistence_span_error_response,
-    plan_application_control_plane_http_route, plan_application_control_plane_idempotency,
+    plan_application_control_plane_http_route,
+    plan_application_control_plane_http_route_error_response,
+    plan_application_control_plane_idempotency,
     plan_application_control_plane_idempotency_error_response,
     plan_application_control_plane_idempotency_from_http,
     plan_application_control_plane_idempotency_from_http_digest,
@@ -118,6 +123,7 @@ use prodex_application::{
     plan_application_role_binding_mutation_error_response, plan_application_runtime,
     plan_application_runtime_accounting_verification,
     plan_application_runtime_accounting_verification_error_response,
+    plan_application_runtime_accounting_verification_required_response,
     plan_application_runtime_error_response, plan_application_service_identity_create,
     plan_application_service_identity_create_error_response,
     plan_application_service_identity_lifecycle,
@@ -337,6 +343,16 @@ fn data_plane_request(tenant_id: TenantId) -> ApplicationDataPlaneRequest<Resour
             )
             .unwrap(),
         },
+    }
+}
+
+fn atomic_reservation_request(
+    durable_store: DurableStoreKind,
+    tenant_id: TenantId,
+) -> ApplicationAtomicReservationRequest {
+    ApplicationAtomicReservationRequest {
+        durable_store,
+        reservation: data_plane_request(tenant_id).admission.reservation,
     }
 }
 
@@ -1310,6 +1326,78 @@ fn application_data_plane_error_response_exposes_stable_http_and_admission_error
     assert!(!http.message.contains("ControlPlane"));
     assert!(!http.message.contains("/admin"));
     assert_eq!(response.admission, None);
+}
+
+#[test]
+fn application_atomic_reservation_selects_postgres_storage_plan() {
+    let tenant_id = TenantId::new();
+    let plan = plan_application_atomic_reservation(atomic_reservation_request(
+        DurableStoreKind::Postgres,
+        tenant_id,
+    ))
+    .unwrap();
+
+    let ApplicationAtomicReservationStoragePlan::Postgres(storage) = plan.storage else {
+        panic!("expected Postgres atomic reservation storage plan");
+    };
+    assert_eq!(storage.tenant_id, tenant_id);
+    assert_eq!(storage.statements[0].name, "set_tenant_context");
+    assert_eq!(storage.statements[1].name, "reserve_usage_atomically");
+}
+
+#[test]
+fn application_atomic_reservation_selects_sqlite_storage_plan() {
+    let tenant_id = TenantId::new();
+    let plan = plan_application_atomic_reservation(atomic_reservation_request(
+        DurableStoreKind::Sqlite,
+        tenant_id,
+    ))
+    .unwrap();
+
+    let ApplicationAtomicReservationStoragePlan::Sqlite(storage) = plan.storage else {
+        panic!("expected SQLite atomic reservation storage plan");
+    };
+    assert_eq!(storage.tenant_id, tenant_id);
+    assert_eq!(storage.statements[0].name, "begin_immediate_reservation");
+    assert_eq!(storage.statements[1].name, "reserve_usage_locally");
+}
+
+#[test]
+fn application_atomic_reservation_rejects_invalid_storage_inputs() {
+    let tenant_id = TenantId::new();
+    let mut request = atomic_reservation_request(DurableStoreKind::Postgres, tenant_id);
+    request.reservation.storage_key = TenantStorageKey::tenant(TenantId::new());
+
+    assert!(matches!(
+        plan_application_atomic_reservation(request),
+        Err(ApplicationAtomicReservationError::Postgres(_))
+    ));
+}
+
+#[test]
+fn application_atomic_reservation_error_responses_are_stable_and_redacted() {
+    let tenant_id = TenantId::new();
+    let other_tenant = TenantId::new();
+
+    let error = ApplicationAtomicReservationError::Postgres(
+        prodex_storage_postgres::PostgresStoragePlanError::TenantMismatch {
+            key_tenant: tenant_id,
+            request_tenant: other_tenant,
+        },
+    );
+    let response = plan_application_atomic_reservation_error_response(&error);
+    assert_eq!(
+        response.status,
+        ApplicationAtomicReservationErrorStatus::ServiceUnavailable
+    );
+    assert_eq!(response.code, "atomic_reservation_storage_unavailable");
+    assert_eq!(
+        response.message,
+        "atomic reservation storage is temporarily unavailable"
+    );
+    assert!(!response.message.contains("PostgreSQL"));
+    assert!(!response.message.contains(&tenant_id.to_string()));
+    assert!(!response.message.contains(&other_tenant.to_string()));
 }
 
 #[test]
@@ -2439,6 +2527,25 @@ fn application_control_plane_http_route_maps_to_canonical_operation() {
     );
     assert!(scim_delete.http.requires_idempotency);
     assert!(scim_delete.http.requires_audit);
+}
+
+#[test]
+fn application_control_plane_http_route_error_response_preserves_shared_method_rejection() {
+    let mut http = control_plane_http_request("/admin/keys");
+    http.method = GatewayHttpMethod::Delete;
+
+    let error = plan_application_control_plane_http_route(&http).unwrap_err();
+    let response = plan_application_control_plane_http_route_error_response(&error);
+
+    assert_eq!(
+        response.status,
+        ApplicationControlPlaneHttpRouteErrorStatus::MethodNotAllowed
+    );
+    assert_eq!(response.code, "control_plane_method_not_allowed");
+    assert_eq!(
+        response.message,
+        "HTTP method is not allowed for this control-plane route"
+    );
 }
 
 #[test]
@@ -5989,6 +6096,20 @@ fn application_runtime_accounting_verification_rejects_missing_or_weak_evidence(
     assert!(!weak_response.message.contains("replica"));
     assert!(!weak_response.message.contains("PostgreSQL"));
     assert!(!weak_response.message.contains("Redis"));
+}
+
+#[test]
+fn application_runtime_accounting_verification_required_response_is_stable() {
+    let response = plan_application_runtime_accounting_verification_required_response();
+    assert_eq!(
+        response.status,
+        ApplicationRuntimePlanErrorStatus::InvalidConfiguration
+    );
+    assert_eq!(response.code, "runtime_accounting_verification_invalid");
+    assert_eq!(
+        response.message,
+        "runtime accounting verification is invalid"
+    );
 }
 
 #[test]

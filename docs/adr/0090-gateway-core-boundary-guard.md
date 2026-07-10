@@ -18,9 +18,10 @@ before later gateway HTTP and storage adapter crates are introduced.
 
 ## Decision
 
-Add `scripts/ci/gateway-core-boundary-guard.mjs` and wire it into `npm run
-ci:preflight` through the `gateway-core-boundary-guard` step. The guard allows
-only boundary dependencies required for admission planning:
+Add `scripts/ci/gateway-core-boundary-guard.mjs` and wire its self-test plus
+workspace scan into `npm run ci:preflight` through the
+`gateway-core-boundary-guard` step. The guard allows only boundary dependencies
+required for admission planning:
 
 - `prodex_authz`
 - `prodex_domain`

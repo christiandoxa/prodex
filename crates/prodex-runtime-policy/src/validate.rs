@@ -72,6 +72,14 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     }
     if let Some(provider) = policy.gateway.provider.as_deref() {
         validate_gateway_exact_identifier(provider, path, "gateway.provider")?;
+        match provider.to_ascii_lowercase().as_str() {
+            "anthropic" | "claude" | "copilot" | "github-copilot" | "github_copilot"
+            | "deepseek" | "gemini" | "kiro" => {}
+            _ => bail!(
+                "gateway.provider in {} must be a supported provider preset",
+                path.display()
+            ),
+        }
     }
     if let Some(base_url) = policy.gateway.base_url.as_deref() {
         if base_url.is_empty() {
@@ -483,9 +491,11 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
                     path.display()
                 );
             }
-            if !issuer.starts_with("https://") {
+            if !issuer.starts_with("https://")
+                || !gateway_observability_http_endpoint_has_http_host(issuer)
+            {
                 bail!(
-                    "gateway.sso.oidc_issuer in {} must be an https URL",
+                    "gateway.sso.oidc_issuer in {} must be an https URL with host",
                     path.display()
                 );
             }
@@ -497,9 +507,11 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
                     path.display()
                 );
             }
-            if !jwks_url.starts_with("https://") {
+            if !jwks_url.starts_with("https://")
+                || !gateway_observability_http_endpoint_has_http_host(jwks_url)
+            {
                 bail!(
-                    "gateway.sso.oidc_jwks_url in {} must be an https URL",
+                    "gateway.sso.oidc_jwks_url in {} must be an https URL with host",
                     path.display()
                 );
             }

@@ -67,6 +67,81 @@ fn gemini_oauth_pool_initial_index_is_bounded() {
 }
 
 #[test]
+fn gemini_oauth_pool_state_debug_output_redacts_sensitive_fields() {
+    let mut state = RuntimeGeminiOAuthPoolState {
+        profiles: vec![gemini_profile("profile-secret")],
+        next_index: 7,
+        response_profile_bindings: BTreeMap::new(),
+        tool_call_profile_bindings: BTreeMap::new(),
+        session_profile_bindings: BTreeMap::new(),
+        response_model_scope_bindings: BTreeMap::new(),
+        tool_call_model_scope_bindings: BTreeMap::new(),
+        quota_headers: BTreeMap::new(),
+        model_cooldowns_until: BTreeMap::new(),
+        model_unavailable_until: BTreeMap::new(),
+        model_preferences: BTreeMap::new(),
+        selected_model_preferences: BTreeMap::new(),
+    };
+    state
+        .response_profile_bindings
+        .insert("resp-secret".to_string(), "profile-secret".to_string());
+    state
+        .tool_call_profile_bindings
+        .insert("call-secret".to_string(), "profile-secret".to_string());
+    state
+        .session_profile_bindings
+        .insert("session-secret".to_string(), "profile-secret".to_string());
+    state
+        .response_model_scope_bindings
+        .insert("resp-model-secret".to_string(), "scope-secret".to_string());
+    state
+        .tool_call_model_scope_bindings
+        .insert("call-model-secret".to_string(), "scope-secret".to_string());
+    state.quota_headers.insert(
+        "profile-secret".to_string(),
+        vec![(
+            "x-quota-secret".to_string(),
+            "quota-value-secret".to_string(),
+        )],
+    );
+    state
+        .model_cooldowns_until
+        .insert("model-cooldown-secret".to_string(), 123);
+    state
+        .model_unavailable_until
+        .insert("model-unavailable-secret".to_string(), 456);
+    state.remember_model_preference_until(
+        "scope-pref-secret",
+        "profile-secret",
+        "requested-model-secret",
+        "model-pref-secret",
+        runtime_gemini_now_ms().saturating_add(60_000),
+    );
+
+    let rendered = format!("{state:?}");
+    assert!(rendered.contains("RuntimeGeminiOAuthPoolState"));
+    assert!(rendered.contains("<redacted"));
+    for raw in [
+        "profile-secret",
+        "resp-secret",
+        "call-secret",
+        "session-secret",
+        "resp-model-secret",
+        "call-model-secret",
+        "scope-secret",
+        "x-quota-secret",
+        "quota-value-secret",
+        "model-cooldown-secret",
+        "model-unavailable-secret",
+        "scope-pref-secret",
+        "requested-model-secret",
+        "model-pref-secret",
+    ] {
+        assert!(!rendered.contains(raw), "{rendered}");
+    }
+}
+
+#[test]
 fn gemini_oauth_pool_preserves_previous_response_affinity() {
     let pool = gemini_pool(&["alpha", "beta"]);
     pool.state

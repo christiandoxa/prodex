@@ -15,10 +15,11 @@ before deciding which exporters were active.
 
 Observability sink names must be exact non-empty values without whitespace.
 Policy validation rejects whitespace-bearing sink names, and direct runtime
-config resolution no longer trim-normalizes padded sink selectors.
+config resolution fails closed instead of trim-normalizing or silently dropping
+padded sink selectors.
 
 ## Consequences
 
 Canonical sink names remain valid, and automatic `runtime-log`, `jsonl`, and
-`http` enablement still works. Padded sink names no longer silently activate an
-observability exporter.
+`http` enablement still works. Padded sink names no longer silently activate,
+disable, or alter observability exporters.

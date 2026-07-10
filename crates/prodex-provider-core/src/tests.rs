@@ -52,15 +52,23 @@ fn catalog_covers_gateway_providers() {
             ProviderEndpoint::Embeddings,
         ]
     );
-    assert!(
-        provider_supported_endpoints(ProviderId::Copilot)
-            .contains(&ProviderEndpoint::ResponsesCompact)
-    );
     for provider in [ProviderId::Anthropic, ProviderId::DeepSeek] {
         assert_eq!(
             provider_supported_endpoints(provider),
             [
                 ProviderEndpoint::Responses,
+                ProviderEndpoint::ChatCompletions,
+                ProviderEndpoint::Messages,
+                ProviderEndpoint::Models,
+            ]
+        );
+    }
+    for provider in [ProviderId::Copilot, ProviderId::Kiro] {
+        assert_eq!(
+            provider_supported_endpoints(provider),
+            [
+                ProviderEndpoint::Responses,
+                ProviderEndpoint::ResponsesCompact,
                 ProviderEndpoint::ChatCompletions,
                 ProviderEndpoint::Messages,
                 ProviderEndpoint::Models,

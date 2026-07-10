@@ -289,10 +289,8 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            admin_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![runtime_gateway_test_admin_token(admin_token)],
         gateway_sso: RuntimeGatewaySsoConfig::default(),
         gateway_state_store: RuntimeGatewayStateStore::file(&paths),
         gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {
@@ -541,10 +539,8 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
         presidio_redaction_enabled: false,
         model_context_window_tokens: None,
         preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            admin_token,
-        )),
-        gateway_admin_tokens: Vec::new(),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![runtime_gateway_test_admin_token(admin_token)],
         gateway_sso: RuntimeGatewaySsoConfig::default(),
         gateway_state_store: RuntimeGatewayStateStore::file(&paths),
         gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {

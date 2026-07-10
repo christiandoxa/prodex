@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -16,7 +17,7 @@ use super::local_rewrite_gateway_sqlite_utils::{
     runtime_gateway_sqlite_optional_u64_to_i64, runtime_gateway_sqlite_u64_to_i64,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(super) struct RuntimeGatewayVirtualKeyUsageDelta {
     pub(super) request_id: u64,
     pub(super) typed_request_id: String,
@@ -30,8 +31,38 @@ pub(super) struct RuntimeGatewayVirtualKeyUsageDelta {
     pub(super) model: String,
     pub(super) minute_epoch: u64,
     pub(super) input_tokens: u64,
+    pub(super) reserved_tokens: u64,
     pub(super) estimated_cost_microusd: Option<u64>,
     pub(super) created_at_epoch: u64,
+}
+
+impl fmt::Debug for RuntimeGatewayVirtualKeyUsageDelta {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGatewayVirtualKeyUsageDelta")
+            .field("request_id", &"<redacted>")
+            .field("typed_request_id", &"<redacted>")
+            .field("call_id", &"<redacted>")
+            .field("key_name", &"<redacted>")
+            .field("tenant_id", &redacted_option(&self.tenant_id))
+            .field("team_id", &redacted_option(&self.team_id))
+            .field("project_id", &redacted_option(&self.project_id))
+            .field("user_id", &redacted_option(&self.user_id))
+            .field("budget_id", &redacted_option(&self.budget_id))
+            .field("model", &"<redacted>")
+            .field("minute_epoch", &"<redacted>")
+            .field("input_tokens", &"<redacted>")
+            .field("reserved_tokens", &"<redacted>")
+            .field(
+                "estimated_cost_microusd",
+                &redacted_option(&self.estimated_cost_microusd),
+            )
+            .field("created_at_epoch", &"<redacted>")
+            .finish()
+    }
+}
+
+fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
+    value.as_ref().map(|_| "<redacted>")
 }
 
 pub(super) fn runtime_gateway_sqlite_usage_load(
@@ -111,7 +142,7 @@ pub(super) fn runtime_gateway_redis_usage_load(
         if fields.is_empty() {
             continue;
         }
-        usage.insert(name, runtime_gateway_redis_usage_from_hash(&fields));
+        usage.insert(name, runtime_gateway_redis_usage_from_hash(&fields)?);
     }
     Ok(usage)
 }
@@ -126,21 +157,29 @@ fn runtime_gateway_redis_usage_hash_key(redis_key: &str, key_name: &str) -> Stri
 
 fn runtime_gateway_redis_usage_from_hash(
     fields: &BTreeMap<String, String>,
-) -> runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
-    runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
-        minute_epoch: runtime_gateway_redis_hash_u64(fields, "minute_epoch"),
-        requests_this_minute: runtime_gateway_redis_hash_u64(fields, "requests_this_minute"),
-        tokens_this_minute: runtime_gateway_redis_hash_u64(fields, "tokens_this_minute"),
-        requests_total: runtime_gateway_redis_hash_u64(fields, "requests_total"),
-        spend_microusd: runtime_gateway_redis_hash_u64(fields, "spend_microusd"),
-    }
+) -> Result<runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage> {
+    Ok(runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
+        minute_epoch: runtime_gateway_redis_hash_u64(fields, "minute_epoch")?,
+        requests_this_minute: runtime_gateway_redis_hash_u64(fields, "requests_this_minute")?,
+        tokens_this_minute: runtime_gateway_redis_hash_u64(fields, "tokens_this_minute")?,
+        requests_total: runtime_gateway_redis_hash_u64(fields, "requests_total")?,
+        spend_microusd: runtime_gateway_redis_hash_u64(fields, "spend_microusd")?,
+    })
 }
 
-fn runtime_gateway_redis_hash_u64(fields: &BTreeMap<String, String>, name: &str) -> u64 {
-    fields
-        .get(name)
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or_default()
+fn runtime_gateway_redis_hash_u64(fields: &BTreeMap<String, String>, name: &str) -> Result<u64> {
+    let Some(value) = fields.get(name) else {
+        return Ok(0);
+    };
+    if value.is_empty() {
+        return Ok(0);
+    }
+    if value.chars().any(char::is_whitespace) {
+        anyhow::bail!("gateway redis usage field {name} must not contain whitespace");
+    }
+    value
+        .parse::<u64>()
+        .with_context(|| format!("gateway redis usage field {name} must be an unsigned integer"))
 }
 
 pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
@@ -148,13 +187,11 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
     deltas: &[RuntimeGatewayVirtualKeyUsageDelta],
 ) -> Result<()> {
     let mut conn = runtime_gateway_sqlite_open(path)?;
-    let ledger_has_scope_columns = runtime_gateway_sqlite_ledger_has_scope_columns(&conn)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     for delta in deltas {
         let ledger = runtime_gateway_billing_ledger_entry_from_delta(delta);
-        let inserted = if ledger_has_scope_columns {
-            tx.execute(
-                r#"
+        let inserted = tx.execute(
+            r#"
                 INSERT OR IGNORE INTO prodex_gateway_billing_ledger (
                     phase, request_id, typed_request_id, call_id, key_name,
                     tenant_id, team_id, project_id, user_id, budget_id, model, minute_epoch,
@@ -162,46 +199,24 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
                 )
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                 "#,
-                params![
-                    ledger.phase,
-                    runtime_gateway_sqlite_u64_to_i64(ledger.request),
-                    ledger.request_id,
-                    ledger.call_id,
-                    ledger.key_name,
-                    ledger.tenant_id,
-                    ledger.team_id,
-                    ledger.project_id,
-                    ledger.user_id,
-                    ledger.budget_id,
-                    ledger.model,
-                    runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
-                    runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
-                    runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
-                    runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
-                ],
-            )?
-        } else {
-            tx.execute(
-                r#"
-                INSERT OR IGNORE INTO prodex_gateway_billing_ledger (
-                    phase, request_id, call_id, key_name, model, minute_epoch,
-                    input_tokens, estimated_cost_microusd, created_at_epoch
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                "#,
-                params![
-                    ledger.phase,
-                    runtime_gateway_sqlite_u64_to_i64(ledger.request),
-                    ledger.call_id,
-                    ledger.key_name,
-                    ledger.model,
-                    runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
-                    runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
-                    runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
-                    runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
-                ],
-            )?
-        };
+            params![
+                ledger.phase,
+                runtime_gateway_sqlite_u64_to_i64(ledger.request),
+                ledger.request_id,
+                ledger.call_id,
+                ledger.key_name,
+                ledger.tenant_id,
+                ledger.team_id,
+                ledger.project_id,
+                ledger.user_id,
+                ledger.budget_id,
+                ledger.model,
+                runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
+                runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
+                runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
+                runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
+            ],
+        )?;
         if inserted == 0 {
             continue;
         }
@@ -222,6 +237,7 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
             key_name: delta.key_name.clone(),
             model: None,
             input_tokens: delta.input_tokens,
+            reserved_tokens: delta.reserved_tokens,
             estimated_cost_microusd: delta.estimated_cost_microusd,
         };
         runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(
@@ -262,47 +278,29 @@ pub(super) fn runtime_gateway_postgres_usage_apply_deltas(
     deltas: &[RuntimeGatewayVirtualKeyUsageDelta],
 ) -> Result<()> {
     let mut client = runtime_gateway_postgres_open(url)?;
-    let ledger_has_scope_columns = runtime_gateway_postgres_ledger_has_scope_columns(&mut client)?;
     let mut tx = client.transaction()?;
     for delta in deltas {
         let ledger = runtime_gateway_billing_ledger_entry_from_delta(delta);
-        let inserted = if ledger_has_scope_columns {
-            tx.execute(
-                RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL,
-                &[
-                    &ledger.phase,
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.request),
-                    &ledger.request_id,
-                    &ledger.call_id,
-                    &ledger.key_name,
-                    &ledger.tenant_id,
-                    &ledger.team_id,
-                    &ledger.project_id,
-                    &ledger.user_id,
-                    &ledger.budget_id,
-                    &ledger.model,
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
-                    &runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
-                ],
-            )?
-        } else {
-            tx.execute(
-                RUNTIME_GATEWAY_POSTGRES_LEGACY_LEDGER_INSERT_SQL,
-                &[
-                    &ledger.phase,
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.request),
-                    &ledger.call_id,
-                    &ledger.key_name,
-                    &ledger.model,
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
-                    &runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
-                    &runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
-                ],
-            )?
-        };
+        let inserted = tx.execute(
+            RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL,
+            &[
+                &ledger.phase,
+                &runtime_gateway_sqlite_u64_to_i64(ledger.request),
+                &ledger.request_id,
+                &ledger.call_id,
+                &ledger.key_name,
+                &ledger.tenant_id,
+                &ledger.team_id,
+                &ledger.project_id,
+                &ledger.user_id,
+                &ledger.budget_id,
+                &ledger.model,
+                &runtime_gateway_sqlite_u64_to_i64(ledger.minute_epoch),
+                &runtime_gateway_sqlite_u64_to_i64(ledger.input_tokens),
+                &runtime_gateway_sqlite_optional_u64_to_i64(ledger.estimated_cost_microusd),
+                &runtime_gateway_sqlite_u64_to_i64(ledger.created_at_epoch),
+            ],
+        )?;
         if inserted == 0 {
             continue;
         }
@@ -351,49 +349,6 @@ const RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL: &str = r#"
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             ON CONFLICT(call_id, key_name, phase) DO NOTHING
             "#;
-
-const RUNTIME_GATEWAY_POSTGRES_LEGACY_LEDGER_INSERT_SQL: &str = r#"
-            INSERT INTO prodex_gateway_billing_ledger (
-                phase, request_id, call_id, key_name, model, minute_epoch,
-                input_tokens, estimated_cost_microusd, created_at_epoch
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT(call_id, key_name, phase) DO NOTHING
-            "#;
-
-fn runtime_gateway_sqlite_ledger_has_scope_columns(conn: &Connection) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        r#"
-        SELECT COUNT(*)
-        FROM pragma_table_info('prodex_gateway_billing_ledger')
-        WHERE name IN (
-            'typed_request_id', 'tenant_id', 'team_id', 'project_id', 'user_id', 'budget_id'
-        )
-        "#,
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(count == 6)
-}
-
-fn runtime_gateway_postgres_ledger_has_scope_columns(
-    client: &mut postgres::Client,
-) -> Result<bool> {
-    let count: i64 = client
-        .query_one(
-            r#"
-            SELECT COUNT(*)::BIGINT
-            FROM information_schema.columns
-            WHERE table_name = 'prodex_gateway_billing_ledger'
-              AND column_name IN (
-                  'typed_request_id', 'tenant_id', 'team_id', 'project_id', 'user_id', 'budget_id'
-              )
-            "#,
-            &[],
-        )?
-        .get(0);
-    Ok(count == 6)
-}
 
 pub(super) fn runtime_gateway_redis_usage_apply_deltas<G>(
     url: &str,
@@ -502,6 +457,7 @@ fn runtime_gateway_postgres_usage_u64(row: &postgres::Row, index: usize) -> Resu
 
 #[cfg(test)]
 mod tests {
+    use super::super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
     use super::super::local_rewrite_gateway_sqlite_utils::runtime_gateway_sqlite_u64_to_i64;
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -519,6 +475,7 @@ mod tests {
         let root = temp_dir("sqlite");
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("state.sqlite");
+        runtime_gateway_sqlite_create_current_schema_for_tests(&path).unwrap();
         let conn = runtime_gateway_sqlite_open(&path).unwrap();
         conn.execute(
             r#"
@@ -555,13 +512,83 @@ mod tests {
         fields.insert("requests_total".to_string(), "9".to_string());
         fields.insert("spend_microusd".to_string(), "1700".to_string());
 
-        let usage = runtime_gateway_redis_usage_from_hash(&fields);
+        let usage = runtime_gateway_redis_usage_from_hash(&fields).unwrap();
 
         assert_eq!(usage.minute_epoch, 42);
         assert_eq!(usage.requests_this_minute, 3);
         assert_eq!(usage.tokens_this_minute, 144);
         assert_eq!(usage.requests_total, 9);
         assert_eq!(usage.spend_microusd, 1700);
+    }
+
+    #[test]
+    fn redis_usage_hash_rejects_malformed_counter_fields() {
+        for (field, value, message) in [
+            (
+                "requests_total",
+                "not-a-number",
+                "gateway redis usage field requests_total must be an unsigned integer",
+            ),
+            (
+                "spend_microusd",
+                " 1700 ",
+                "gateway redis usage field spend_microusd must not contain whitespace",
+            ),
+        ] {
+            let mut fields = BTreeMap::new();
+            fields.insert("minute_epoch".to_string(), "42".to_string());
+            fields.insert("requests_this_minute".to_string(), "3".to_string());
+            fields.insert("tokens_this_minute".to_string(), "144".to_string());
+            fields.insert("requests_total".to_string(), "9".to_string());
+            fields.insert("spend_microusd".to_string(), "1700".to_string());
+            fields.insert(field.to_string(), value.to_string());
+
+            let err = runtime_gateway_redis_usage_from_hash(&fields).unwrap_err();
+
+            assert!(err.to_string().contains(message), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn usage_delta_debug_output_redacts_accounting_fields() {
+        let delta = RuntimeGatewayVirtualKeyUsageDelta {
+            request_id: 42,
+            typed_request_id: "prodex-request-delta-secret".to_string(),
+            call_id: "prodex-call-delta-secret".to_string(),
+            key_name: "sk-delta-secret".to_string(),
+            tenant_id: Some("tenant-delta-secret".to_string()),
+            team_id: Some("team-delta-secret".to_string()),
+            project_id: Some("project-delta-secret".to_string()),
+            user_id: Some("user-delta-secret".to_string()),
+            budget_id: Some("budget-delta-secret".to_string()),
+            model: "gpt-delta-secret".to_string(),
+            minute_epoch: 1_700_000_000,
+            input_tokens: 123,
+            reserved_tokens: 456,
+            estimated_cost_microusd: Some(789),
+            created_at_epoch: 1_700_000_001,
+        };
+        let rendered = format!("{delta:?}");
+
+        assert!(rendered.contains("RuntimeGatewayVirtualKeyUsageDelta"));
+        assert!(rendered.contains("<redacted>"));
+        for raw in [
+            "prodex-request-delta-secret",
+            "prodex-call-delta-secret",
+            "sk-delta-secret",
+            "tenant-delta-secret",
+            "team-delta-secret",
+            "project-delta-secret",
+            "user-delta-secret",
+            "budget-delta-secret",
+            "gpt-delta-secret",
+            "1700000000",
+            "123",
+            "456",
+            "789",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
     }
 
     #[test]
@@ -626,6 +653,7 @@ mod tests {
         let root = temp_dir("sqlite-negative");
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("state.sqlite");
+        runtime_gateway_sqlite_create_current_schema_for_tests(&path).unwrap();
         let conn = runtime_gateway_sqlite_open(&path).unwrap();
         conn.execute(
             r#"

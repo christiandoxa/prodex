@@ -11,9 +11,10 @@ be usable as an inference or quota bypass.
 
 The local rewrite gateway supports virtual keys for data-plane budget and usage
 accounting. It also supports a gateway/root bearer token for legacy local bridge
-access and admin endpoints. When virtual keys were configured, presenting the
-gateway/root token to `/v1/responses` skipped virtual-key validation and
-accounting.
+access. Earlier revisions also accepted that token on admin endpoints; ADR 1002
+removes that control-plane fallback. When virtual keys were configured,
+presenting the gateway/root token to `/v1/responses` skipped virtual-key
+validation and accounting.
 
 ## Decision
 

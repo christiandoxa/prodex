@@ -126,3 +126,6 @@ boundaries are being introduced. Those paths must be migrated behind
 `prodex-application`, `prodex-gateway-http`, `prodex-control-plane`, and storage
 adapter crates with characterization tests for transport transparency,
 continuation affinity, upstream error compatibility, and CLI compatibility.
+Non-shared-storage config-publication deployments also remain dependent on the
+broker-backed transport staging captured in ADR 0984 until a real outbox/watch
+adapter replaces the shared-filesystem composition-root path.

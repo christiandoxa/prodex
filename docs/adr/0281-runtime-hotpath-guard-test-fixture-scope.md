@@ -25,6 +25,9 @@ Exclude `proxy_startup/local_rewrite_tests.rs` and
 Explicit `--target` scans still honor the requested path, including test fixture
 paths. Inline `#[cfg(test)]` stripping remains in place for test helpers
 embedded in production files.
+Add a `--self-test` mode for the guard so CI can pin production detection,
+inline/full-file test exclusion, string/comment stripping, and allowlist overuse
+checks without relying on the current repository contents.
 
 ## Consequences
 
@@ -34,3 +37,5 @@ embedded in production files.
   behavior after proxy requests complete.
 - Maintainers can still inspect fixture files deliberately by passing
   `--target`.
+- Local preflight runs the guard self-test before scanning the workspace, so a
+  parser regression fails before allowlist counts hide it.

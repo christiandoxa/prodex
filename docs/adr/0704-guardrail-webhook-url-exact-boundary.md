@@ -15,7 +15,8 @@ therefore be silently normalized into a different accepted target.
 
 Treat `gateway.guardrails.webhook_url` as an exact configuration boundary. The
 value must be non-empty, contain no whitespace, and parse as an HTTP(S) URL with
-a host. Runtime launch preserves accepted values instead of normalizing them.
+a host. Runtime launch preserves accepted values instead of normalizing them and
+applies the same validation when handed already-built policy settings.
 
 ## Consequences
 

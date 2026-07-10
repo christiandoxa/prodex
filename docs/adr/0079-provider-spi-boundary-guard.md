@@ -12,8 +12,9 @@ That would violate the target architecture and make the interface difficult to
 reuse from gateway, control-plane, and storage composition roots.
 
 ## Decision
-Add `scripts/ci/provider-spi-boundary-guard.mjs` and wire it into npm scripts and
-local preflight. The guard enforces that `prodex-provider-spi` depends only on
+Add `scripts/ci/provider-spi-boundary-guard.mjs` and wire its self-test plus
+workspace scan into npm scripts and local preflight. The guard enforces that
+`prodex-provider-spi` depends only on
 `prodex-domain` and `prodex-provider-core`, forbids target-specific dependency
 sections, and scans source files for forbidden boundary imports such as
 filesystem, network, HTTP, database, transport, async-runtime, and provider SDK

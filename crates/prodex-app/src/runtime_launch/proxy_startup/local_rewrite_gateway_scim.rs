@@ -1,6 +1,6 @@
 use super::local_rewrite::{
     RUNTIME_GATEWAY_SCIM_PRODEX_SCHEMA, RUNTIME_GATEWAY_SCIM_USER_SCHEMA,
-    RuntimeLocalRewriteProxyShared, runtime_gateway_generate_virtual_key_token,
+    RuntimeLocalRewriteProxyShared,
 };
 use super::local_rewrite_gateway_admin_response::RuntimeGatewayAdminError;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayScimUser;
@@ -44,8 +44,7 @@ pub(super) fn runtime_gateway_scim_user_json(
 }
 
 pub(super) fn runtime_gateway_generate_scim_user_id() -> Result<String> {
-    let token = runtime_gateway_generate_virtual_key_token()?;
-    Ok(format!("user_{}", token.trim_start_matches("pk-")))
+    Ok(prodex_domain::PrincipalId::new().to_string())
 }
 
 pub(super) fn runtime_gateway_apply_scim_user_patch(
@@ -402,6 +401,14 @@ mod tests {
             created_at_epoch: 1,
             updated_at_epoch: 1,
         }
+    }
+
+    #[test]
+    fn generated_scim_user_id_is_typed_principal_id() {
+        let generated = runtime_gateway_generate_scim_user_id().unwrap();
+        let parsed = generated.parse::<prodex_domain::PrincipalId>().unwrap();
+
+        assert_eq!(generated, parsed.to_string());
     }
 
     #[test]

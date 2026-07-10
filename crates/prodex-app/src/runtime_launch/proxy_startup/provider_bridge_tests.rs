@@ -544,6 +544,28 @@ fn gateway_spend_message_includes_stable_call_fields() {
 }
 
 #[test]
+fn gateway_request_spend_uses_reserved_output_estimate_for_cost() {
+    let event = runtime_provider_gateway_spend_event(
+        42,
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        "/v1/responses",
+        Some("gpt-5.4"),
+        200,
+        123,
+        456,
+        br#"{"model":"gpt-5.4","input":"hello","max_output_tokens":17}"#,
+        ProviderModelCost {
+            input_cost_per_million_microusd: Some(1_000_000),
+            output_cost_per_million_microusd: Some(2_000_000),
+        },
+    );
+
+    assert_eq!(event.input_tokens, Some(2));
+    assert_eq!(event.output_tokens, Some(17));
+    assert_eq!(event.cost_usd, Some(0.000036));
+}
+
+#[test]
 fn gateway_response_spend_uses_response_usage_and_total_cost() {
     let response_body =
         br#"{"id":"resp","usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18}}"#;
@@ -579,6 +601,68 @@ fn gateway_response_spend_uses_response_usage_and_total_cost() {
     assert_eq!(event.input_tokens, Some(7));
     assert_eq!(event.output_tokens, Some(11));
     assert_eq!(event.cost_usd, Some(0.000029));
+}
+
+#[test]
+fn gateway_cost_lookup_accepts_selected_model_after_alias_rewrite() {
+    let aliases = vec![runtime_proxy_crate::RuntimeGatewayRouteAlias {
+        alias: "prodex-costly".to_string(),
+        models: vec!["gpt-costly".to_string()],
+        strategy: runtime_proxy_crate::RuntimeGatewayRouteStrategy::Fallback,
+        model_metrics: std::collections::BTreeMap::from([(
+            "gpt-costly".to_string(),
+            runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
+                input_cost_per_million_microusd: Some(1_000_000),
+                output_cost_per_million_microusd: Some(2_000_000),
+                latency_ms: None,
+                rpm_limit: None,
+                tpm_limit: None,
+            },
+        )]),
+    }];
+
+    let cost = runtime_provider_gateway_cost_for_request(
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        &aliases,
+        &std::collections::BTreeMap::new(),
+        1,
+        br#"{"model":"gpt-costly","input":"hello"}"#,
+        "gpt-costly",
+    );
+
+    assert_eq!(cost.input_cost_per_million_microusd, Some(1_000_000));
+    assert_eq!(cost.output_cost_per_million_microusd, Some(2_000_000));
+}
+
+#[test]
+fn gateway_cost_lookup_accepts_combo_chain_after_fallback_rewrite() {
+    let aliases = vec![runtime_proxy_crate::RuntimeGatewayRouteAlias {
+        alias: "prodex-costly".to_string(),
+        models: vec!["gpt-costly".to_string()],
+        strategy: runtime_proxy_crate::RuntimeGatewayRouteStrategy::Fallback,
+        model_metrics: std::collections::BTreeMap::from([(
+            "gpt-costly".to_string(),
+            runtime_proxy_crate::RuntimeGatewayRouteModelMetrics {
+                input_cost_per_million_microusd: Some(1_000_000),
+                output_cost_per_million_microusd: Some(2_000_000),
+                latency_ms: None,
+                rpm_limit: None,
+                tpm_limit: None,
+            },
+        )]),
+    }];
+
+    let cost = runtime_provider_gateway_cost_for_request(
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        &aliases,
+        &std::collections::BTreeMap::new(),
+        1,
+        br#"{"model":"combo:gpt-costly","input":"hello"}"#,
+        "combo:gpt-costly",
+    );
+
+    assert_eq!(cost.input_cost_per_million_microusd, Some(1_000_000));
+    assert_eq!(cost.output_cost_per_million_microusd, Some(2_000_000));
 }
 
 #[test]

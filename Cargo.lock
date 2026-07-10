@@ -2124,6 +2124,7 @@ dependencies = [
  "bytes",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
+ "uuid",
 ]
 
 [[package]]
@@ -2173,8 +2174,10 @@ dependencies = [
  "prodex-control-plane",
  "prodex-domain",
  "prodex-gateway-http",
+ "prodex-storage",
  "prodex-storage-postgres",
  "prodex-storage-sqlite",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2198,6 +2201,7 @@ dependencies = [
  "portable-pty",
  "postgres",
  "prodex-app-reports",
+ "prodex-application",
  "prodex-audit-log",
  "prodex-bench-support",
  "prodex-caveman-assets",
@@ -2205,6 +2209,7 @@ dependencies = [
  "prodex-codex-config",
  "prodex-config",
  "prodex-context",
+ "prodex-control-plane",
  "prodex-core",
  "prodex-domain",
  "prodex-gateway-http",
@@ -2241,6 +2246,9 @@ dependencies = [
  "prodex-shared-codex-fs",
  "prodex-shared-types",
  "prodex-state",
+ "prodex-storage",
+ "prodex-storage-postgres",
+ "prodex-storage-sqlite",
  "prodex-terminal-ui",
  "prodex-update-notice",
  "ratatui",
@@ -2255,6 +2263,7 @@ dependencies = [
  "tokio",
  "toml",
  "tungstenite",
+ "uuid",
 ]
 
 [[package]]
@@ -2753,6 +2762,7 @@ dependencies = [
 name = "prodex-storage-postgres"
 version = "0.273.0"
 dependencies = [
+ "postgres",
  "prodex-domain",
  "prodex-storage",
 ]
@@ -2771,6 +2781,7 @@ version = "0.273.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
+ "rusqlite",
 ]
 
 [[package]]
@@ -3421,9 +3432,9 @@ dependencies = [
 
 [[package]]
 name = "sha1"
-version = "0.10.6"
+version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
@@ -4094,9 +4105,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.23.3"
+version = "1.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "144d6b123cef80b301b8f72a9e2ca4370ddec21950d0a103dd22c437006d2db7"
+checksum = "bf80a72845275afea99e7f2b434723d3bc7e38470fcd1c7ed39a599c73319a53"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",

@@ -8,18 +8,18 @@ Accepted
 
 Production Kubernetes manifests must pin container images by immutable digest.
 The deployment guard already rejected missing, malformed, and all-zero sha256
-digests, but a repeated-character hex placeholder such as `aaaaaaaa...` still
-looked valid to the regex.
+digests, but repeated-pattern hex placeholders such as `aaaaaaaa...` or
+`1234567890abcdef` repeated four times still looked valid to the regex.
 
 ## Decision
 
-Reject repeated-character sha256 digest placeholders in the deployment security
-guard and update the baseline Kubernetes manifest/guard fixture to use a
-non-repeated example digest.
+Reject repeated-character and repeated-pattern sha256 digest placeholders in the
+deployment security guard and update the baseline Kubernetes manifest/guard
+fixture to use a non-repeated example digest.
 
 ## Consequences
 
 - Deployment examples can no longer pass the security guard with obvious
-  repeated-character image digest placeholders.
+  repeated-character or repeated-pattern image digest placeholders.
 - The guard still validates manifest shape only; release automation must supply
   the actual published image digest.

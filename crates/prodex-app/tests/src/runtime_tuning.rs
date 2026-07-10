@@ -66,7 +66,7 @@ profile_inflight_hard_limit = 11
 }
 
 #[test]
-fn profile_inflight_limits_ignore_zero_env_values() {
+fn profile_inflight_limits_reject_zero_env_values() {
     let policy_dir = with_test_policy_dir(
         r#"
 version = 1
@@ -85,6 +85,8 @@ profile_inflight_hard_limit = 11
     let _hard_env_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT", "0");
 
-    assert_eq!(runtime_proxy_profile_inflight_soft_limit(), 7);
-    assert_eq!(runtime_proxy_profile_inflight_hard_limit(), 11);
+    let result = std::panic::catch_unwind(runtime_proxy_profile_inflight_soft_limit);
+    assert!(result.is_err(), "zero soft limit should fail closed");
+    let result = std::panic::catch_unwind(runtime_proxy_profile_inflight_hard_limit);
+    assert!(result.is_err(), "zero hard limit should fail closed");
 }

@@ -15,7 +15,10 @@ silently normalized into a different accepted upstream target.
 
 Treat `gateway.base_url` as an exact configuration boundary. Policy validation
 rejects empty or whitespace-bearing values, and runtime launch parses the
-configured URL directly. Existing trailing-slash normalization remains.
+configured URL directly. CLI `--base-url`, `gateway.base_url`, and
+`OPENAI_BASE_URL` values that are explicitly empty fail closed instead of
+falling back to provider or OpenAI defaults. Existing trailing-slash
+normalization remains.
 
 ## Consequences
 

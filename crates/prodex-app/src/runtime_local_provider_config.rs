@@ -1,4 +1,7 @@
-use crate::{codex_cli_config_override_value, codex_config_value};
+use crate::{
+    codex_cli_config_override_exact_value, codex_cli_config_override_value,
+    codex_config_exact_value, codex_config_value,
+};
 use anyhow::{Context, Result};
 use prodex_cli::{
     SUPER_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_DEFAULT_CONTEXT_WINDOW, SUPER_DEFAULT_LOCAL_MODEL,
@@ -55,13 +58,13 @@ fn local_provider_catalog_codex_args(
         user_args,
         "model_context_window",
         SUPER_DEFAULT_CONTEXT_WINDOW as u64,
-    );
+    )?;
     let auto_compact_token_limit = local_u64_config_for_launch(
         codex_home,
         user_args,
         "model_auto_compact_token_limit",
         SUPER_DEFAULT_AUTO_COMPACT_LIMIT as u64,
-    )
+    )?
     .min(context_window.saturating_sub(1));
     let catalog_path = codex_home.join(LOCAL_MODEL_CATALOG_FILE);
     if write_catalog {
@@ -102,12 +105,29 @@ fn local_u64_config_for_launch(
     user_args: &[OsString],
     key: &str,
     default_value: u64,
-) -> u64 {
-    codex_cli_config_override_value(user_args, key)
-        .or_else(|| codex_config_value(codex_home, key))
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .filter(|value| *value > 1)
-        .unwrap_or(default_value)
+) -> Result<u64> {
+    let Some(value) = codex_cli_config_override_exact_value(user_args, key)
+        .or_else(|| codex_config_exact_value(codex_home, key))
+    else {
+        return Ok(default_value);
+    };
+    runtime_catalog_u64_config_value("local provider", key, &value)
+}
+
+fn runtime_catalog_u64_config_value(provider: &str, key: &str, value: &str) -> Result<u64> {
+    if value.is_empty() {
+        anyhow::bail!("{provider} {key} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        anyhow::bail!("{provider} {key} must not contain whitespace");
+    }
+    let parsed = value
+        .parse::<u64>()
+        .with_context(|| format!("{provider} {key} must be an unsigned integer"))?;
+    if parsed <= 1 {
+        anyhow::bail!("{provider} {key} must be greater than 1");
+    }
+    Ok(parsed)
 }
 
 fn write_local_model_catalog(
@@ -334,5 +354,41 @@ mod tests {
                 .is_symlink()
         );
         let _ = fs::remove_dir_all(codex_home);
+    }
+
+    #[test]
+    fn local_provider_catalog_args_rejects_invalid_numeric_overrides() {
+        for (value, message) in [
+            ("", "local provider model_context_window cannot be empty"),
+            (
+                " 128000 ",
+                "local provider model_context_window must not contain whitespace",
+            ),
+            (
+                "not-a-number",
+                "local provider model_context_window must be an unsigned integer",
+            ),
+            (
+                "1",
+                "local provider model_context_window must be greater than 1",
+            ),
+        ] {
+            let codex_home = temp_codex_home("invalid-numeric");
+            let user_args = vec![
+                OsString::from("-c"),
+                OsString::from("model_provider=\"prodex-local\""),
+                OsString::from("-c"),
+                OsString::from(format!(
+                    "model_context_window={}",
+                    toml_string_literal(value)
+                )),
+            ];
+
+            let err = prepare_local_provider_catalog_codex_args(&codex_home, &user_args)
+                .expect_err("invalid local catalog override should fail");
+
+            assert!(err.to_string().contains(message));
+            let _ = fs::remove_dir_all(codex_home);
+        }
     }
 }

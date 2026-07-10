@@ -20,6 +20,7 @@ pub(crate) use quota::{
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::Server as TinyServer;
@@ -27,7 +28,7 @@ use tiny_http::Server as TinyServer;
 pub(crate) const GEMINI_OAUTH_SECRET_FILE: &str = "gemini_oauth.json";
 const GEMINI_OAUTH_EXPIRY_SKEW_MS: i64 = 60_000;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct GeminiOAuthSecret {
     pub(crate) auth_mode: String,
     pub(crate) access_token: String,
@@ -42,6 +43,30 @@ pub(crate) struct GeminiOAuthSecret {
     pub(crate) email: String,
     #[serde(default)]
     pub(crate) project_id: Option<String>,
+}
+
+impl fmt::Debug for GeminiOAuthSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GeminiOAuthSecret")
+            .field("auth_mode", &"<redacted>")
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "token_type",
+                &self.token_type.as_ref().map(|_| "<redacted>"),
+            )
+            .field("scope", &self.scope.as_ref().map(|_| "<redacted>"))
+            .field("expiry_date", &self.expiry_date.map(|_| "<redacted>"))
+            .field("email", &"<redacted>")
+            .field(
+                "project_id",
+                &self.project_id.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 pub(crate) fn gemini_oauth_secret_path(codex_home: &Path) -> PathBuf {
@@ -264,6 +289,36 @@ mod tests {
         assert!(err.to_string().contains("failed to read"));
         assert!(format!("{err:#}").contains("regular secret file"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn gemini_oauth_secret_debug_output_redacts_sensitive_fields() {
+        let secret = GeminiOAuthSecret {
+            auth_mode: "gemini-oauth-secret-mode".to_string(),
+            access_token: "gemini-access-token-secret".to_string(),
+            refresh_token: Some("gemini-refresh-token-secret".to_string()),
+            token_type: Some("Bearer-secret".to_string()),
+            scope: Some("secret-scope".to_string()),
+            expiry_date: Some(123_456_789),
+            email: "alice@example.test".to_string(),
+            project_id: Some("gemini-project-secret".to_string()),
+        };
+        let rendered = format!("{secret:?}");
+
+        assert!(rendered.contains("GeminiOAuthSecret"));
+        assert!(rendered.contains("<redacted>"));
+        for raw in [
+            "gemini-oauth-secret-mode",
+            "gemini-access-token-secret",
+            "gemini-refresh-token-secret",
+            "Bearer-secret",
+            "secret-scope",
+            "123456789",
+            "alice@example.test",
+            "gemini-project-secret",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
     }
 
     #[test]

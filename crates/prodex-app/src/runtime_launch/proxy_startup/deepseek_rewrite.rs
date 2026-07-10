@@ -43,6 +43,7 @@ use super::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 mod conversation_store;
@@ -55,17 +56,45 @@ pub(super) use conversation_store::RuntimeDeepSeekConversationStore;
 pub(super) type RuntimeDeepSeekPendingMessages =
     Arc<Mutex<BTreeMap<u64, RuntimeDeepSeekPendingRequest>>>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(super) struct RuntimeDeepSeekPendingRequest {
     pub(super) messages: Vec<serde_json::Value>,
     pub(super) response_metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug)]
 pub(crate) struct RuntimeDeepSeekTranslatedRequest {
     pub(crate) body: Vec<u8>,
     pub(crate) messages: Vec<serde_json::Value>,
     pub(crate) response_metadata: Option<serde_json::Value>,
+}
+
+impl fmt::Debug for RuntimeDeepSeekPendingRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeDeepSeekPendingRequest")
+            .field("messages", &redacted_len(self.messages.len()))
+            .field(
+                "response_metadata",
+                &self.response_metadata.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+impl fmt::Debug for RuntimeDeepSeekTranslatedRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeDeepSeekTranslatedRequest")
+            .field("body", &"<redacted>")
+            .field("messages", &redacted_len(self.messages.len()))
+            .field(
+                "response_metadata",
+                &self.response_metadata.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+fn redacted_len(len: usize) -> String {
+    format!("<redacted:{len}>")
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -126,3 +155,32 @@ mod deepseek_rewrite_rtk_tests;
 #[cfg(test)]
 #[path = "deepseek_rewrite_tests.rs"]
 mod deepseek_rewrite_tests;
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    #[test]
+    fn deepseek_request_debug_output_redacts_payloads() {
+        let pending = RuntimeDeepSeekPendingRequest {
+            messages: vec![serde_json::json!({"content": "pending prompt secret"})],
+            response_metadata: Some(serde_json::json!({"secret": "pending metadata secret"})),
+        };
+        let translated = RuntimeDeepSeekTranslatedRequest {
+            body: br#"{"content":"translated body secret"}"#.to_vec(),
+            messages: vec![serde_json::json!({"content": "translated prompt secret"})],
+            response_metadata: Some(serde_json::json!({"secret": "translated metadata secret"})),
+        };
+        let rendered = format!("{pending:?}\n{translated:?}");
+
+        for raw in [
+            "pending prompt secret",
+            "pending metadata secret",
+            "translated body secret",
+            "translated prompt secret",
+            "translated metadata secret",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
+    }
+}

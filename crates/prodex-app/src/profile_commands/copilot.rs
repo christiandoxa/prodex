@@ -3,6 +3,7 @@ use dirs::home_dir;
 use reqwest::blocking::Client;
 use std::collections::BTreeSet;
 use std::env;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -33,17 +34,39 @@ const COPILOT_RUNTIME_USER_AGENT: &str = "copilot/1.0.65 (client/github/cli)";
 mod keychain;
 use keychain::{read_copilot_keychain_token, read_copilot_libsecret_token};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct CopilotRuntimeApiAuth {
     pub(crate) api_key: String,
     pub(crate) model_catalog: Vec<serde_json::Value>,
 }
 
-#[derive(Debug)]
+impl fmt::Debug for CopilotRuntimeApiAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CopilotRuntimeApiAuth")
+            .field("api_key", &"<redacted>")
+            .field("model_catalog", &redacted_len(self.model_catalog.len()))
+            .finish()
+    }
+}
+
 struct CopilotImportContext {
     host: String,
     login: String,
     token: String,
+}
+
+impl fmt::Debug for CopilotImportContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CopilotImportContext")
+            .field("host", &"<redacted>")
+            .field("login", &"<redacted>")
+            .field("token", &"<redacted>")
+            .finish()
+    }
+}
+
+fn redacted_len(len: usize) -> String {
+    format!("<redacted:{len}>")
 }
 
 pub(super) fn is_copilot_import_source(path: &Path) -> bool {
@@ -714,6 +737,46 @@ mod tests {
             let (header, value) = line.split_once(':')?;
             header.eq_ignore_ascii_case(name).then(|| value.trim())
         })
+    }
+
+    #[test]
+    fn copilot_auth_debug_output_redacts_sensitive_fields() {
+        let auth = CopilotRuntimeApiAuth {
+            api_key: "copilot-runtime-key-secret".to_string(),
+            model_catalog: vec![serde_json::json!({
+                "id": "copilot-model-secret",
+                "name": "Copilot Secret Model"
+            })],
+        };
+        let rendered = format!("{auth:?}");
+
+        assert!(rendered.contains("CopilotRuntimeApiAuth"));
+        assert!(rendered.contains("<redacted>"));
+        assert!(rendered.contains("<redacted:1>"));
+        for raw in [
+            "copilot-runtime-key-secret",
+            "copilot-model-secret",
+            "Copilot Secret Model",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
+
+        let context = CopilotImportContext {
+            host: "https://github.enterprise-secret.test".to_string(),
+            login: "alice-secret".to_string(),
+            token: "copilot-import-token-secret".to_string(),
+        };
+        let rendered = format!("{context:?}");
+
+        assert!(rendered.contains("CopilotImportContext"));
+        assert!(rendered.contains("<redacted>"));
+        for raw in [
+            "https://github.enterprise-secret.test",
+            "alice-secret",
+            "copilot-import-token-secret",
+        ] {
+            assert!(!rendered.contains(raw), "{rendered}");
+        }
     }
 
     #[test]

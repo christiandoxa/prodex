@@ -14,10 +14,12 @@ selector could therefore be silently normalized into an active provider.
 ## Decision
 
 Treat `gateway.provider` as an exact configuration boundary. Policy validation
-rejects empty or whitespace-bearing provider selectors, and runtime provider
-alias parsing refuses invalid selectors instead of trimming them.
+rejects empty, whitespace-bearing, or unsupported provider selectors, and
+runtime provider alias parsing refuses invalid selectors instead of trimming or
+falling back to the OpenAI-compatible default.
 
 ## Consequences
 
 Operators must fix padded provider selectors in `policy.toml`. Gateway provider
-routing remains auditable and no longer depends on hidden launch-time cleanup.
+routing remains auditable and no longer depends on hidden launch-time cleanup or
+default-provider fallback.

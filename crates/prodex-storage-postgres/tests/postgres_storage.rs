@@ -1,3 +1,4 @@
+use postgres::NoTls;
 use prodex_domain::{
     AuditAction, AuditDigest, AuditExportFormat, AuditExportPlan, AuditOutcome, AuditPageLimit,
     AuditQueryPlan, AuditQueryScope, AuditResource, AuditRetentionBatchLimit,
@@ -42,6 +43,7 @@ use prodex_storage_postgres::{
     plan_postgres_user_lifecycle, plan_postgres_virtual_key_secret_reference,
     statement_contains_ddl,
 };
+use std::sync::{Arc, Barrier};
 
 fn command(tenant_id: TenantId) -> AtomicReservationCommand {
     let call_id = CallId::new();
@@ -60,6 +62,52 @@ fn command(tenant_id: TenantId) -> AtomicReservationCommand {
         created_at_unix_ms: 1_000,
         ttl_ms: 60_000,
     }
+}
+
+fn execute_postgres_batch(url: &str, sql: &str) {
+    let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");
+    client
+        .batch_execute(sql)
+        .expect("postgres batch should execute");
+}
+
+fn execute_postgres_atomic_reservation(
+    url: &str,
+    command: &AtomicReservationCommand,
+) -> Result<bool, postgres::Error> {
+    let plan = plan_postgres_atomic_reservation(command.clone())
+        .expect("postgres reservation plan should build");
+    let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");
+    let mut tx = client.transaction()?;
+    tx.execute(SET_TENANT_STATEMENT.sql, &[&plan.tenant_id.to_string()])?;
+    let storage_scope = command
+        .storage_key
+        .virtual_key_id
+        .map(|id| format!("virtual_key:{id}"))
+        .unwrap_or_else(|| "tenant-default".to_string());
+    let reserved = command.request.estimate;
+    let updated = command.created_at_unix_ms as i64;
+    let expires_at = command.created_at_unix_ms.saturating_add(command.ttl_ms) as i64;
+    let row = tx.query_opt(
+        ATOMIC_RESERVATION_STATEMENT.sql,
+        &[
+            &plan.tenant_id.as_uuid(),
+            &command.idempotency_key.as_str(),
+            &storage_scope,
+            &command.storage_key.virtual_key_id.map(|id| id.as_uuid()),
+            &(reserved.tokens as i64),
+            &(reserved.cost_micros as i64),
+            &updated,
+            &(command.limit.max.tokens as i64),
+            &(command.limit.max.cost_micros as i64),
+            &command.request.reservation_id.as_uuid(),
+            &command.request.call_id.as_uuid(),
+            &expires_at,
+            &prodex_domain::RequestId::new().as_uuid(),
+        ],
+    )?;
+    tx.commit()?;
+    Ok(row.is_some())
 }
 
 #[test]
@@ -641,6 +689,101 @@ fn atomic_reservation_rejects_cross_tenant_and_over_limit_inputs() {
         plan_postgres_atomic_reservation(over_limit),
         Err(PostgresStoragePlanError::ReservationExceedsLimit { .. })
     ));
+}
+
+#[test]
+fn postgres_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope() {
+    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
+        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
+        return;
+    };
+    execute_postgres_batch(&url, "DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
+    execute_postgres_batch(&url, INITIAL_TENANT_ACCOUNTING_MIGRATION.sql);
+
+    let tenant_id = TenantId::new();
+    let virtual_key_id = VirtualKeyId::new();
+    let mut client = postgres::Client::connect(&url, NoTls).expect("postgres should connect");
+    client
+        .execute(
+            "INSERT INTO prodex_tenants (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms)
+             VALUES ($1, $2, $3, $4)",
+            &[&tenant_id.as_uuid(), &"tenant", &1_i64, &1_i64],
+        )
+        .expect("tenant row should insert");
+
+    let make_command = move || {
+        let call_id = CallId::new();
+        let reservation_id = ReservationId::new();
+        AtomicReservationCommand {
+            storage_key: TenantStorageKey::virtual_key(tenant_id, virtual_key_id),
+            idempotency_key: IdempotencyKey::from_call_reservation(call_id, reservation_id),
+            snapshot: BudgetSnapshot::default(),
+            limit: BudgetLimit::new(u64::MAX, 42),
+            request: ReservationRequest {
+                tenant_id,
+                call_id,
+                reservation_id,
+                estimate: UsageAmount::new(22, 42),
+            },
+            created_at_unix_ms: 1_000,
+            ttl_ms: 60_000,
+        }
+    };
+    let barrier = Arc::new(Barrier::new(2));
+    let run = |barrier: Arc<Barrier>| {
+        let url = url.clone();
+        let make_command = make_command.clone();
+        std::thread::spawn(move || {
+            let command = make_command();
+            barrier.wait();
+            execute_postgres_atomic_reservation(&url, &command)
+        })
+    };
+
+    let first = run(Arc::clone(&barrier));
+    let second = run(barrier);
+    let results = [
+        first.join().expect("first thread should finish"),
+        second.join().expect("second thread should finish"),
+    ];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(true)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(false)))
+            .count(),
+        1
+    );
+
+    let reservation_rows: i64 = client
+        .query_one("SELECT COUNT(*) FROM prodex_reservations", &[])
+        .expect("reservation count should load")
+        .get(0);
+    let reserved_rows: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM prodex_usage_ledger WHERE event_kind = 'reserved'",
+            &[],
+        )
+        .expect("reserved ledger count should load")
+        .get(0);
+    let counter_row = client
+        .query_one(
+            "SELECT reserved_tokens, reserved_cost_micros FROM prodex_budget_counters",
+            &[],
+        )
+        .expect("budget counters should load");
+    let reserved_tokens: i64 = counter_row.get(0);
+    let reserved_cost_micros: i64 = counter_row.get(1);
+    assert_eq!(reservation_rows, 1);
+    assert_eq!(reserved_rows, 1);
+    assert_eq!(reserved_tokens, 22);
+    assert_eq!(reserved_cost_micros, 42);
 }
 
 #[test]

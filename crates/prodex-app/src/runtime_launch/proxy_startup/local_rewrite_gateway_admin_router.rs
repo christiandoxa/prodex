@@ -31,12 +31,24 @@ use super::local_rewrite_gateway_dashboard::runtime_gateway_admin_dashboard_resp
 use super::local_rewrite_gateway_key_payloads::runtime_gateway_admin_keys_payload;
 use super::local_rewrite_gateway_metrics::runtime_gateway_prometheus_response;
 use super::*;
-use prodex_gateway_http::{
-    GatewayControlPlaneRouteErrorStatus, GatewayHttpHeader, GatewayHttpMethod,
-    GatewayHttpRequestMeta, entity_tag_from_if_match_headers, idempotency_key_from_headers,
-    plan_control_plane_route, plan_gateway_control_plane_route_error_response,
-    plan_gateway_http_entity_tag_error_response, plan_gateway_http_idempotency_key_error_response,
+use prodex_application::{
+    ApplicationControlPlaneHttpRouteErrorStatus, ApplicationControlPlaneIdempotencyErrorStatus,
+    ApplicationControlPlanePreconditionErrorStatus, plan_application_control_plane,
+    plan_application_control_plane_http_route,
+    plan_application_control_plane_http_route_error_response,
+    plan_application_control_plane_idempotency_error_response,
+    plan_application_control_plane_idempotency_from_http_digest,
+    plan_application_control_plane_precondition_error_response,
+    plan_application_control_plane_precondition_from_http,
 };
+use prodex_control_plane::{
+    ControlPlaneActionRequest, ControlPlaneDecision, ControlPlaneResourceRef,
+};
+use prodex_domain::{CredentialScope, Principal, PrincipalId, PrincipalKind, Role, TenantId};
+use prodex_gateway_http::{
+    GatewayHttpHeader, GatewayHttpMethod, GatewayHttpRequestMeta, idempotency_key_from_headers,
+};
+use sha2::{Digest, Sha256};
 
 pub(super) fn runtime_gateway_request_path_is_admin(
     request_path: &str,
@@ -122,8 +134,7 @@ pub(super) fn runtime_gateway_admin_response(
     }
     let Some(admin_auth) = preauthorized.or_else(|| runtime_gateway_admin_auth(captured, shared))
     else {
-        if shared.gateway_auth_token_hash.is_none()
-            && shared.gateway_admin_tokens.is_empty()
+        if shared.gateway_admin_tokens.is_empty()
             && shared.gateway_sso.proxy_token_hash.is_none()
             && shared.gateway_sso.oidc.is_none()
         {
@@ -189,7 +200,12 @@ pub(super) fn runtime_gateway_admin_response(
         || (key_name.is_some() && matches!(admin_method.as_str(), "PATCH" | "DELETE"))
         || (path == scim_users_path && admin_method == "POST")
         || (scim_user_id.is_some() && matches!(admin_method.as_str(), "PATCH" | "PUT" | "DELETE"));
-    if admin_write && !admin_auth.role.can_write() {
+    if admin_write
+        && !runtime_gateway_admin_write_authorized(
+            &runtime_gateway_http_request_meta(captured, path),
+            &admin_auth,
+        )
+    {
         runtime_gateway_audit_admin_role_denied_event(
             shared,
             &admin_auth.name,
@@ -468,11 +484,11 @@ fn runtime_gateway_admin_boundary_response(
             .map(|(name, value)| GatewayHttpHeader::new(name, value))
             .collect(),
     };
-    let error = plan_control_plane_route(&http).err()?;
-    let response = plan_gateway_control_plane_route_error_response(&error);
+    let error = plan_application_control_plane_http_route(&http).err()?;
+    let response = plan_application_control_plane_http_route_error_response(&error);
     let status = match response.status {
-        GatewayControlPlaneRouteErrorStatus::BadRequest => 400,
-        GatewayControlPlaneRouteErrorStatus::MethodNotAllowed => 405,
+        ApplicationControlPlaneHttpRouteErrorStatus::BadRequest => 400,
+        ApplicationControlPlaneHttpRouteErrorStatus::MethodNotAllowed => 405,
     };
     Some(build_runtime_proxy_json_error_response(
         status,
@@ -499,43 +515,43 @@ fn runtime_gateway_admin_idempotency_response(
     method: &str,
     path: &str,
 ) -> Option<tiny_http::ResponseBox> {
-    let idempotency_key =
-        match idempotency_key_from_headers(&runtime_gateway_http_headers(captured)) {
-            Ok(Some(key)) => key,
-            Ok(None) => return None,
-            Err(error) => {
-                let response = plan_gateway_http_idempotency_key_error_response(&error);
-                runtime_gateway_audit_admin_request_denied_event(
-                    shared,
-                    &admin_auth.name,
-                    admin_auth.role.as_str(),
-                    "invalid_idempotency_key",
-                    method,
-                    path,
-                );
-                return Some(build_runtime_proxy_json_error_response(
-                    400,
-                    response.code,
-                    response.message,
-                ));
-            }
-        };
-    let idempotency_key = idempotency_key.as_str();
-    if idempotency_key.is_empty() {
-        runtime_gateway_audit_admin_request_denied_event(
-            shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            "invalid_idempotency_key",
-            method,
-            path,
-        );
-        return Some(build_runtime_proxy_json_error_response(
-            400,
-            "invalid_idempotency_key",
-            "admin Idempotency-Key must be non-empty printable ASCII and at most 200 bytes",
-        ));
+    let http = runtime_gateway_http_request_meta(captured, path);
+    match idempotency_key_from_headers(&http.headers) {
+        Ok(None) => return None,
+        Ok(Some(_)) => {}
+        Err(_) => {}
     }
+    let action = match runtime_gateway_admin_control_plane_action(&http, admin_auth) {
+        Some(action) => action,
+        None => return None,
+    };
+    let idempotency_key = match plan_application_control_plane_idempotency_from_http_digest(
+        action,
+        &http,
+        runtime_gateway_request_body_sha256(&captured.body),
+    ) {
+        Ok(plan) => match plan.operation {
+            Some(operation) => operation.key,
+            None => return None,
+        },
+        Err(error) => {
+            let response = plan_application_control_plane_idempotency_error_response(&error);
+            runtime_gateway_audit_admin_request_denied_event(
+                shared,
+                &admin_auth.name,
+                admin_auth.role.as_str(),
+                response.code,
+                method,
+                path,
+            );
+            return Some(build_runtime_proxy_json_error_response(
+                runtime_gateway_application_idempotency_status_code(response.status),
+                response.code,
+                response.message,
+            ));
+        }
+    };
+    let idempotency_key = idempotency_key.as_str();
 
     let cache_key = format!(
         "{} {method} {path} {idempotency_key}",
@@ -585,27 +601,34 @@ fn runtime_gateway_admin_if_match_response(
     method: &str,
     path: &str,
 ) -> Option<tiny_http::ResponseBox> {
-    let expected_match =
-        match entity_tag_from_if_match_headers(&runtime_gateway_http_headers(captured)) {
-            Ok(Some(tag)) => tag,
-            Ok(None) => return None,
-            Err(error) => {
-                let response = plan_gateway_http_entity_tag_error_response(&error);
-                runtime_gateway_audit_admin_request_denied_event(
-                    shared,
-                    &admin_auth.name,
-                    admin_auth.role.as_str(),
-                    response.code,
-                    method,
-                    path,
-                );
-                return Some(build_runtime_proxy_json_error_response(
-                    400,
-                    response.code,
-                    response.message,
-                ));
-            }
-        };
+    let http = runtime_gateway_http_request_meta(captured, path);
+    let action = match runtime_gateway_admin_control_plane_action(&http, admin_auth) {
+        Some(action) => action,
+        None => return None,
+    };
+    let expected_match = match plan_application_control_plane_precondition_from_http(action, &http)
+    {
+        Ok(plan) => match plan.entity_tag {
+            Some(tag) => tag,
+            None => return None,
+        },
+        Err(error) => {
+            let response = plan_application_control_plane_precondition_error_response(&error);
+            runtime_gateway_audit_admin_request_denied_event(
+                shared,
+                &admin_auth.name,
+                admin_auth.role.as_str(),
+                response.code,
+                method,
+                path,
+            );
+            return Some(build_runtime_proxy_json_error_response(
+                runtime_gateway_application_precondition_status_code(response.status),
+                response.code,
+                response.message,
+            ));
+        }
+    };
     if expected_match.as_str() == "*" {
         return None;
     }
@@ -647,6 +670,127 @@ fn runtime_gateway_http_headers(captured: &RuntimeProxyRequest) -> Vec<GatewayHt
         .collect()
 }
 
+pub(super) fn runtime_gateway_http_request_meta(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+) -> GatewayHttpRequestMeta {
+    GatewayHttpRequestMeta {
+        method: gateway_http_method(&captured.method),
+        path: path.to_string(),
+        body_len: captured.body.len(),
+        headers: runtime_gateway_http_headers(captured),
+    }
+}
+
+pub(super) fn runtime_gateway_admin_control_plane_action(
+    http: &GatewayHttpRequestMeta,
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> Option<ControlPlaneActionRequest> {
+    let route = plan_application_control_plane_http_route(http).ok()?;
+    let tenant_id = runtime_gateway_admin_control_plane_tenant_id(admin_auth);
+    Some(ControlPlaneActionRequest {
+        principal: Principal::new(
+            runtime_gateway_admin_control_plane_principal_id(admin_auth, tenant_id),
+            Some(tenant_id),
+            PrincipalKind::User,
+            runtime_gateway_admin_domain_role(admin_auth.role),
+            CredentialScope::ControlPlane,
+        ),
+        operation: route.operation,
+        resource: ControlPlaneResourceRef::new(
+            tenant_id,
+            route.operation.requirement().resource,
+            None::<String>,
+        ),
+        occurred_at_unix_ms: 0,
+    })
+}
+
+fn runtime_gateway_admin_control_plane_tenant_id(admin_auth: &RuntimeGatewayAdminAuth) -> TenantId {
+    if let Some(tenant_id) = admin_auth
+        .tenant_id
+        .as_deref()
+        .and_then(|value| value.parse::<TenantId>().ok())
+    {
+        return tenant_id;
+    }
+    TenantId::from_uuid(runtime_gateway_admin_stable_id(
+        "prodex:gateway-admin-control-plane-tenant:v1",
+        &[admin_auth.name.as_bytes()],
+    ))
+}
+
+fn runtime_gateway_admin_control_plane_principal_id(
+    admin_auth: &RuntimeGatewayAdminAuth,
+    tenant_id: TenantId,
+) -> PrincipalId {
+    let tenant_text = tenant_id.to_string();
+    PrincipalId::from_uuid(runtime_gateway_admin_stable_id(
+        "prodex:gateway-admin-control-plane-principal:v1",
+        &[tenant_text.as_bytes(), admin_auth.name.as_bytes()],
+    ))
+}
+
+fn runtime_gateway_admin_stable_id(namespace: &str, parts: &[&[u8]]) -> uuid::Uuid {
+    let mut hasher = Sha256::new();
+    hasher.update(namespace.as_bytes());
+    for part in parts {
+        hasher.update([0]);
+        hasher.update(part);
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes)
+}
+
+fn runtime_gateway_admin_domain_role(role: RuntimeGatewayAdminRole) -> Role {
+    match role {
+        RuntimeGatewayAdminRole::Admin => Role::Admin,
+        RuntimeGatewayAdminRole::Viewer => Role::Viewer,
+    }
+}
+
+fn runtime_gateway_admin_write_authorized(
+    http: &GatewayHttpRequestMeta,
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> bool {
+    runtime_gateway_admin_control_plane_action(http, admin_auth).is_some_and(|action| {
+        matches!(
+            plan_application_control_plane(action).decision,
+            ControlPlaneDecision::Authorized(_)
+        )
+    })
+}
+
+fn runtime_gateway_request_body_sha256(body: &[u8]) -> String {
+    let digest = Sha256::digest(body);
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("sha256:{hex}")
+}
+
+fn runtime_gateway_application_idempotency_status_code(
+    status: ApplicationControlPlaneIdempotencyErrorStatus,
+) -> u16 {
+    match status {
+        ApplicationControlPlaneIdempotencyErrorStatus::BadRequest => 400,
+        ApplicationControlPlaneIdempotencyErrorStatus::Conflict => 409,
+        ApplicationControlPlaneIdempotencyErrorStatus::MethodNotAllowed => 405,
+        ApplicationControlPlaneIdempotencyErrorStatus::ServiceUnavailable => 503,
+    }
+}
+
+fn runtime_gateway_application_precondition_status_code(
+    status: ApplicationControlPlanePreconditionErrorStatus,
+) -> u16 {
+    match status {
+        ApplicationControlPlanePreconditionErrorStatus::BadRequest => 400,
+        ApplicationControlPlanePreconditionErrorStatus::MethodNotAllowed => 405,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,5 +813,98 @@ mod tests {
         assert_eq!(headers[0].value, "idem-1");
         assert_eq!(headers[1].name, "If-Match");
         assert_eq!(headers[1].value, "\"gateway-key-1\"");
+    }
+
+    #[test]
+    fn runtime_gateway_admin_write_authorization_uses_shared_control_plane_decision() {
+        let http = GatewayHttpRequestMeta {
+            method: GatewayHttpMethod::Post,
+            path: "/v1/prodex/gateway/keys".to_string(),
+            body_len: 0,
+            headers: Vec::new(),
+        };
+        let viewer = RuntimeGatewayAdminAuth {
+            name: "viewer".to_string(),
+            role: RuntimeGatewayAdminRole::Viewer,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        };
+        let admin = RuntimeGatewayAdminAuth {
+            name: "admin".to_string(),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        };
+
+        assert!(!runtime_gateway_admin_write_authorized(&http, &viewer));
+        assert!(runtime_gateway_admin_write_authorized(&http, &admin));
+    }
+
+    fn admin_auth_named(name: &str, tenant_id: Option<String>) -> RuntimeGatewayAdminAuth {
+        RuntimeGatewayAdminAuth {
+            name: name.to_string(),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn admin_control_plane_action_uses_stable_admin_identity() {
+        let http = GatewayHttpRequestMeta {
+            method: GatewayHttpMethod::Post,
+            path: "/v1/prodex/gateway/keys".to_string(),
+            body_len: 0,
+            headers: Vec::new(),
+        };
+        let admin = admin_auth_named("admin", None);
+        let first = runtime_gateway_admin_control_plane_action(&http, &admin)
+            .expect("admin action should plan");
+        let second = runtime_gateway_admin_control_plane_action(&http, &admin)
+            .expect("admin action should plan");
+        assert_eq!(first.principal, second.principal);
+        assert_eq!(first.resource.tenant_id, second.resource.tenant_id);
+
+        let other = runtime_gateway_admin_control_plane_action(
+            &http,
+            &admin_auth_named("other-admin", None),
+        )
+        .expect("other admin action should plan");
+        assert_ne!(first.principal, other.principal);
+        assert_ne!(first.resource.tenant_id, other.resource.tenant_id);
+    }
+
+    #[test]
+    fn admin_control_plane_action_prefers_typed_tenant_scope() {
+        let valid_tenant_id = TenantId::new();
+        let admin = admin_auth_named("tenant-admin", Some(valid_tenant_id.to_string()));
+
+        assert_eq!(
+            runtime_gateway_admin_control_plane_tenant_id(&admin),
+            valid_tenant_id
+        );
+    }
+
+    #[test]
+    fn admin_control_plane_action_does_not_synthesize_random_ids() {
+        let source = include_str!("local_rewrite_gateway_admin_router.rs");
+        for fallback in [
+            ["let tenant_id = ", "TenantId::new();"].join(""),
+            ["PrincipalId", "::new()"].join(""),
+        ] {
+            assert!(!source.contains(&fallback));
+        }
     }
 }
