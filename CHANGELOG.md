@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.273.0 - 2026-07-10
+
+### CLI
+
+- Skip workspace trust prompt (`0c2e464`)
+
 ## 0.272.0 - 2026-07-10
 
 ### Runtime
@@ -79,9 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add dashboard local control plane (`5b5ac65`)
-
-## 0.260.0 - 2026-07-08
-
-### Runtime
-
-- Rotate deactivated workspace profiles (`6a4d2be`)
