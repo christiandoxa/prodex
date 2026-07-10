@@ -1,5 +1,18 @@
 [
   {
+    "id": "clippy-gate-remediation-0.273.0",
+    "requiredSubjects": [
+      "fix(ci): satisfy churn and clippy gates"
+    ],
+    "caps": {
+      "maxFiles": 52,
+      "maxBehaviorFiles": 52,
+      "maxLines": 383,
+      "maxFileLines": 50
+    },
+    "reason": "Reviewed compiler-driven lint remediation across provider-core and app/runtime compatibility modules after the 0.273.0 integration; changes are test scoping, equivalent lint rewrites, and narrow compatibility allowances, verified by the full all-features suite and the CI clippy command."
+  },
+  {
     "id": "provider-gateway-control-plane-integration-0.273.0",
     "requiredSubjects": [
       "feat: mature provider gateway and control plane"
