@@ -13,6 +13,32 @@
     "reason": "Reviewed integration of the preserved local enterprise gateway series with upstream main using multi-agent conflict audits, the full all-features local test matrix, focused gateway regressions, formatting, and exact size ratchets."
   },
   {
+    "id": "enterprise-readiness-checkpoint-20260710",
+    "requiredSubjects": [
+      "feat: checkpoint enterprise readiness refactor"
+    ],
+    "caps": {
+      "maxFiles": 1248,
+      "maxBehaviorFiles": 243,
+      "maxLines": 117227,
+      "maxFileLines": 6148
+    },
+    "reason": "Reviewed preserved enterprise readiness checkpoint with the full all-features local test matrix and exact per-file size ratchets before upstream integration."
+  },
+  {
+    "id": "upstream-main-merge-20260710",
+    "requiredSubjects": [
+      "chore: merge origin/main"
+    ],
+    "caps": {
+      "maxFiles": 726,
+      "maxBehaviorFiles": 707,
+      "maxLines": 134083,
+      "maxFileLines": 6750
+    },
+    "reason": "Reviewed merge of the latest upstream main through multi-agent conflict audits, focused runtime regressions, formatting, and the full all-features local test matrix."
+  },
+  {
     "id": "clippy-gate-remediation-0.273.0",
     "requiredSubjects": [
       "fix(ci): satisfy churn and clippy gates"
