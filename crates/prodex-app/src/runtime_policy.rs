@@ -99,9 +99,8 @@ pub fn deliver_config_publication_event_to_gateway_runtime(
         bail!("configuration publication event is missing runtime policy reload target");
     }
 
-    let runtime_policy_invalidation =
-        prodex_runtime_policy::plan_runtime_policy_cache_invalidation(root);
-    let runtime_policy = prodex_runtime_policy::load_runtime_policy_cached(root)?;
+    let (runtime_policy_invalidation, runtime_policy) =
+        prodex_runtime_policy::reload_runtime_policy_cached_with_invalidation(root)?;
     let delivery_metrics = [
         plan_config_publication_delivery_metric(
             ConfigPublicationDeliveryTarget::GatewayCacheRefresh,
@@ -797,3 +796,7 @@ worker_count = {worker_count}
         assert!(publish.event_path.exists());
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/src/runtime_policy_last_known_good.rs"]
+mod runtime_policy_last_known_good_tests;

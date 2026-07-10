@@ -11,6 +11,7 @@ pub use self::cache::{
 };
 pub use self::load::{
     load_runtime_policy_cached, load_runtime_policy_from_root, reload_runtime_policy_cached,
+    reload_runtime_policy_cached_with_invalidation,
 };
 pub use self::paths::{resolve_runtime_policy_path, runtime_policy_path};
 pub use self::types::{
@@ -115,6 +116,9 @@ fn runtime_policy_enabled_for_current_process() -> bool {
     true
 }
 
+#[cfg(test)]
+#[path = "../tests/src/reload.rs"]
+mod reload_tests;
 #[cfg(test)]
 #[path = "../tests/src/lib.rs"]
 mod tests;

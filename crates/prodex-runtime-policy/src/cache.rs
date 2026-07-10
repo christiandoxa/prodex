@@ -68,6 +68,19 @@ pub(crate) fn store_cached_policy(root: &Path, policy: Option<RuntimePolicyConfi
     });
 }
 
+pub(crate) fn replace_cached_policy(
+    root: &Path,
+    policy: Option<RuntimePolicyConfig>,
+) -> RuntimePolicyCacheInvalidationPlan {
+    let root = runtime_policy_cache_key(root);
+    let replaced = runtime_policy_cache_with(|cache| cache.insert(root.clone(), policy));
+    RuntimePolicyCacheInvalidationPlan {
+        root,
+        had_cached_entry: replaced.is_some(),
+        cached_policy_version: replaced.flatten().map(|policy| policy.version),
+    }
+}
+
 fn runtime_policy_cache_key(root: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in root.components() {

@@ -25,6 +25,9 @@ required for security.
    - upstream error pass-through.
 3. Keep `prodex-app` as the binary composition root while boundary crates are
    introduced.
+4. Characterize runtime-policy publication failure: malformed reloads preserve
+   cached policy or cached absence, remain unacknowledged, and install the
+   corrected replacement on retry.
 
 ## Phase 1: Domain and Security Boundaries
 
@@ -178,6 +181,8 @@ Before declaring the enterprise target complete, verify:
 - PostgreSQL migrations are external and RLS is enabled.
 - Redis is not used as durable whole-map billing state.
 - OIDC/JWKS network fetches are off request paths.
+- Runtime-policy reload failure preserves the previous cache entry, returns an
+  error without acknowledgement, and a corrected retry replaces it once.
 - Full test suite and focused runtime proxy tests pass.
 - Architecture docs, ADRs, threat model, migration guide, deployment docs, and
   backup/restore docs are current.

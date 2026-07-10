@@ -1,8 +1,8 @@
 use super::{
-    RuntimeLogFormat, clear_runtime_policy_cache, invalidate_runtime_policy_cache_for,
-    load_runtime_policy_cached, load_runtime_policy_from_root,
-    plan_runtime_policy_cache_invalidation, reload_runtime_policy_cached,
-    resolve_runtime_policy_path, runtime_policy_path, runtime_policy_proxy,
+    RuntimeLogFormat, clear_runtime_policy_cache, load_runtime_policy_cached,
+    load_runtime_policy_from_root, plan_runtime_policy_cache_invalidation,
+    reload_runtime_policy_cached_with_invalidation, resolve_runtime_policy_path,
+    runtime_policy_path, runtime_policy_proxy,
 };
 use secret_store::SecretBackendKind;
 use std::ffi::OsString;
@@ -204,7 +204,7 @@ log_dir = "   "
 }
 
 #[test]
-fn reload_runtime_policy_cached_invalidates_root_entry_before_reading() {
+fn reload_runtime_policy_cached_atomically_replaces_and_reports_previous_entry() {
     clear_runtime_policy_cache();
     let root = temp_root("reload");
     let path = runtime_policy_path(&root);
@@ -221,12 +221,6 @@ worker_count = 2
 
     let cached = load_runtime_policy_cached(&root).unwrap().unwrap();
     assert_eq!(cached.runtime_proxy.worker_count, Some(2));
-    let invalidated = invalidate_runtime_policy_cache_for(&root)
-        .expect("expected root cache entry to be invalidated")
-        .expect("expected cached policy value");
-    assert_eq!(invalidated.runtime_proxy.worker_count, Some(2));
-    assert!(invalidate_runtime_policy_cache_for(&root).is_none());
-
     fs::write(
         &path,
         r#"
@@ -238,7 +232,11 @@ worker_count = 7
     )
     .unwrap();
 
-    let reloaded = reload_runtime_policy_cached(&root).unwrap().unwrap();
+    let (invalidation, reloaded) = reload_runtime_policy_cached_with_invalidation(&root).unwrap();
+    assert_eq!(invalidation.root, root);
+    assert!(invalidation.had_cached_entry);
+    assert_eq!(invalidation.cached_policy_version, Some(1));
+    let reloaded = reloaded.unwrap();
     assert_eq!(reloaded.runtime_proxy.worker_count, Some(7));
     let cached_after_reload = load_runtime_policy_cached(&root).unwrap().unwrap();
     assert_eq!(cached_after_reload.runtime_proxy.worker_count, Some(7));

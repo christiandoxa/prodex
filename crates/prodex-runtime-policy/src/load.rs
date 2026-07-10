@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-use crate::cache::{cached_policy_for, invalidate_runtime_policy_cache_for, store_cached_policy};
+use crate::cache::{
+    RuntimePolicyCacheInvalidationPlan, cached_policy_for, replace_cached_policy,
+    store_cached_policy,
+};
 use crate::paths::{resolve_runtime_policy_path, runtime_policy_path};
 use crate::types::{
     RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyRuntimeSettings,
@@ -20,8 +23,18 @@ pub fn load_runtime_policy_cached(root: &Path) -> Result<Option<RuntimePolicyCon
 }
 
 pub fn reload_runtime_policy_cached(root: &Path) -> Result<Option<RuntimePolicyConfig>> {
-    invalidate_runtime_policy_cache_for(root);
-    load_runtime_policy_cached(root)
+    reload_runtime_policy_cached_with_invalidation(root).map(|(_, policy)| policy)
+}
+
+pub fn reload_runtime_policy_cached_with_invalidation(
+    root: &Path,
+) -> Result<(
+    RuntimePolicyCacheInvalidationPlan,
+    Option<RuntimePolicyConfig>,
+)> {
+    let loaded = load_runtime_policy_from_root(root)?;
+    let invalidation = replace_cached_policy(root, loaded.clone());
+    Ok((invalidation, loaded))
 }
 
 pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicyConfig>> {

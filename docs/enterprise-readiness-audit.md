@@ -1280,15 +1280,21 @@ while moving legacy adapter code behind enterprise boundaries.
 - **Evidence:** `crates/prodex-domain/src/policy.rs` and
   `crates/prodex-config/src/lib.rs` model revisioned policy/config cache
   refresh, invalidation, publication validation, and last-known-good fallback.
+  `crates/prodex-runtime-policy/src/load.rs` validates replacement policy before
+  atomically replacing the normalized per-root cache entry.
 - **Risk:** Unrevisioned caches can serve stale policy, fail open, or produce
   inconsistent decisions across replicas.
 - **Regression coverage:** `crates/prodex-domain/tests/policy.rs`,
-  `crates/prodex-config/tests/config_boundary.rs`, and
+  `crates/prodex-config/tests/config_boundary.rs`,
+  `crates/prodex-runtime-policy/tests/src/lib.rs`,
+  `crates/prodex-app/src/runtime_policy.rs`, and
   `scripts/ci/config-boundary-guard.mjs`.
 - **Local verification:** `cargo test -q -p prodex-domain policy -- --test-threads=1`
   exercises policy revision and cache semantics,
   `cargo test -q -p prodex-config config_refresh -- --test-threads=1`
   exercises config refresh/last-known-good behavior, and
+  `cargo test -q -p prodex-runtime-policy -- --test-threads=1` exercises atomic
+  replacement plus failed-reload cache preservation, while
   `npm run ci:config-boundary-guard` runs the guard self-test plus workspace
   scan to keep the config boundary wired into local CI.
 - **Implemented fix or boundary:** Published config is revisioned, validated,
@@ -1513,9 +1519,11 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0828-domain-policy-cache-debug-redaction.md`.
   Successful activations now also produce a required
   publication event for gateway cache refresh and runtime policy reload; the runtime policy
-  cache exposes per-root invalidation, redacted invalidation plans, and explicit
-  reload so event consumers do not keep serving stale local policy or log full
-  policy material. Runtime policy cache keys are normalized across equivalent
+  cache exposes per-root invalidation, redacted replacement plans, and explicit
+  reload. Reload validates the candidate before atomically replacing cached
+  state; failure leaves cached policy or cached absence untouched, returns the
+  error, and leaves publication delivery unacknowledged for retry. Runtime
+  policy cache keys are normalized across equivalent
   `.` root aliases before lookup or invalidation. Configuration activation does
   not promote an invalidated active revision into last-known-good fallback, and
   clears invalidated fallback state instead of resurrecting withdrawn config.
@@ -1531,9 +1539,9 @@ while moving legacy adapter code behind enterprise boundaries.
   redacted responses. The legacy production composition root now consumes
   publication events through
   `deliver_config_publication_event_to_gateway_runtime`, refreshes the local
-  gateway cache target, invalidates the runtime policy cache for the configured
-  root, and reloads runtime policy before subsequent reads can reuse stale
-  cached state. That adapter also returns low-cardinality publication delivery
+  gateway cache target, and atomically replaces runtime policy only after the
+  candidate loads successfully. A failed delivery preserves last-known-good
+  state and is retried without an acknowledgement. That adapter also returns low-cardinality publication delivery
   metric plans for gateway cache refresh and runtime policy reload so delivery
   outcomes can be observed without tenant, revision, root, or payload labels.
   The dedicated `prodex-control-plane` binary now exposes one-shot
@@ -1566,7 +1574,8 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0633-policy-metadata-character-guard.md`, and
   `docs/adr/0634-policy-issued-at-zero-guard.md`, and
   `docs/adr/0977-config-publication-replicated-file-transport.md`, and
-  `docs/adr/0984-config-publication-broker-transport-staging.md`.
+  `docs/adr/0984-config-publication-broker-transport-staging.md`, and
+  `docs/adr/1055-runtime-policy-reload-atomic-cache-replacement.md`.
 - **Remaining gap:** Non-shared-storage publication transport is now staged
   behind an explicit broker-backed outbox/watch contract, but the actual broker
   composition-root adapter still needs to land before this path is fully
@@ -1968,8 +1977,9 @@ while moving legacy adapter code behind enterprise boundaries.
   after accepted configuration revisions so gateway cache refresh and runtime
   policy reload are both scheduled explicitly.
 - Use `reload_runtime_policy_cached` only from publication-event consumers or
-  other bounded background paths so runtime policy refresh invalidates the
-  affected root without turning request handlers into filesystem reloaders.
+  other bounded background paths. Reload failure must preserve the previous
+  cache entry, propagate the error without acknowledging publication, and allow
+  a corrected retry to replace the entry exactly once.
 - Use `plan_expired_reservation_recovery` for abandoned reservation cleanup so
   expired reserved capacity is released with tenant-scoped idempotent ledger
   events.

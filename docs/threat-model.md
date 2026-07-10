@@ -91,6 +91,7 @@ paths.
 | Upstream provider error rewriting | Compatibility breakage and debugging loss | Pass-through upstream status/body/stream after upstream response exists |
 | Mid-stream rotation | Broken transport semantics and affinity | Rotation only pre-commit; continuation bindings preserved |
 | High-cardinality telemetry labels | Metrics cardinality explosion | Telemetry attribute validation and bounded labels |
+| Failed runtime-policy reload evicts usable policy | Availability loss or hidden partial configuration | Validate before atomic cache replacement, propagate failure, withhold publication acknowledgement, and retry delivery |
 
 ## Required Negative Tests
 
@@ -108,6 +109,7 @@ is considered enterprise-ready:
 - Cancellation or stream interruption reconciles reserved usage.
 - Request path cannot plan or execute DDL.
 - Redis plans avoid whole-map JSON or whole-list rewrite patterns.
+- Malformed runtime-policy reload preserves cached policy or cached absence, returns an error, remains unacknowledged, and installs the corrected replacement on retry.
 
 ## Audit Requirements
 
@@ -129,3 +131,6 @@ continuation affinity, upstream error compatibility, and CLI compatibility.
 Non-shared-storage config-publication deployments also remain dependent on the
 broker-backed transport staging captured in ADR 0984 until a real outbox/watch
 adapter replaces the shared-filesystem composition-root path.
+Last-known-good runtime policy can delay an intended policy update until retry
+succeeds. Reload failures must remain observable, and urgent revocation must use
+an explicit fail-closed invalidation path.

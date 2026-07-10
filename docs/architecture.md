@@ -51,13 +51,14 @@ Hot path invariants:
 - Pass through upstream status/body/stream payloads unless the proxy failed before any upstream response existed.
 - Keep request and stream commit paths non-blocking. Avoid disk I/O, broad reads, unbounded thread spawn, and terminal output while Codex TUI runs.
 - Keep endpoint health scoped where possible: `responses`, `/responses/compact`, websocket, and other lanes should not poison each other without a deliberate reason.
+- Reload runtime policy only from publication consumers or other bounded background paths. Validate the candidate before atomically replacing the normalized per-root cache entry; failed reloads leave the previous entry untouched.
 
 Runtime proxy edit points:
 
 - Live orchestration: `crates/prodex-app/src/runtime_proxy`.
 - Side-effect-free proxy helpers and tests: `crates/prodex-runtime-proxy`.
 - Launch planning: `crates/prodex-app/src/runtime_launch`, `prodex-runtime-launch`, `prodex-runtime-claude`, `prodex-runtime-anthropic`.
-- Policy and tuning: `prodex-runtime-policy`, `prodex-runtime-tuning`, `crates/prodex-app/src/runtime_policy.rs`.
+- Policy and tuning: `prodex-runtime-policy`, `prodex-runtime-tuning`, `crates/prodex-app/src/runtime_policy.rs`, and ADR 1055.
 - Benchmark support: `prodex-bench-support`, root `benches/`.
 
 ## State And Persistence

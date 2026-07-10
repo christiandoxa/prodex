@@ -206,7 +206,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
-    "maxLines": 2174,
+    "maxLines": 2172,
     "reason": "Runtime policy compatibility coverage is capped while versioned policy, cache, and gateway settings tests are split."
   },
   {
