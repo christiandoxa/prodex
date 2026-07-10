@@ -1,5 +1,18 @@
 [
   {
+    "id": "remove-redundant-super-integrations",
+    "requiredSubjects": [
+      "refactor(super): remove redundant optimizer integrations"
+    ],
+    "caps": {
+      "maxFiles": 44,
+      "maxBehaviorFiles": 39,
+      "maxLines": 3323,
+      "maxFileLines": 752
+    },
+    "reason": "Reviewed atomic removal of SQZ, token-savior, Claw Compactor, inspect MCP, and managed memory/Mem0 wiring with the full local test suite, workspace check, format check, CLI smoke test, documentation lint, and production-reference audit."
+  },
+  {
     "id": "runtime-goal-resume-and-log-stream-0.244.0",
     "requiredSubjects": [
       "fix(runtime): resume unfinished goals after usage limits"
