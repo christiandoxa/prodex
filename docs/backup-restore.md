@@ -1,9 +1,9 @@
 # Prodex Gateway Backup and Restore Runbook
 
-This runbook covers the current gateway state backends. It is production
-operations guidance, not a replacement for application-level migration tests.
-Run these commands from an operator workstation or maintenance pod with access to
-the same secrets and storage as the gateway.
+This runbook covers the current gateway state backends. Run production commands
+from an operator workstation or maintenance pod with access to the same secrets
+and storage as the gateway. The repository also runs a synthetic PostgreSQL
+restore drill; it complements but does not replace environment-specific drills.
 
 ## Scope
 
@@ -132,6 +132,26 @@ Drill acceptance:
 - usage totals match ledger summary for sampled tenants.
 - cross-tenant admin reads still fail safely.
 
+### Automated PostgreSQL drill
+
+Run the same recovery gate used by CI:
+
+```bash
+PRODEX_BACKUP_DRILL_MAX_RPO_SECONDS=60 \
+PRODEX_BACKUP_DRILL_MAX_RTO_SECONDS=300 \
+npm run ci:backup-restore-drill
+```
+
+The command starts disposable PostgreSQL source and restore databases, invokes
+the external migrator, seeds synthetic tenant/accounting records, dumps and
+restores them, and verifies all twelve RLS-protected tables. It also proves that
+a write made after the backup is absent from the restored recovery point.
+
+Redacted evidence is written atomically to
+`target/backup-restore-drill/evidence.json`. Archive that JSON in the regulated
+environment's evidence store. Database URLs, credentials, container IDs, dump
+contents, and synthetic tenant identifiers are intentionally excluded.
+
 ## Redis backend
 
 Redis is suitable for distributed rate limiting, short-lived cache, and
@@ -171,6 +191,7 @@ For every backup or restore drill, record:
 - `/readyz` result.
 - sampled tenant/key/usage/ledger validation results.
 - any data loss window or rejected requests during cutover.
+- measured RPO and RTO against the deployment's approved thresholds.
 
 Keep drill evidence in the regulated environment's audit store. Do not commit
 secrets, raw tokens, or tenant data into this repository.

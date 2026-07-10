@@ -86,6 +86,9 @@ Persistence rules:
 - Cross-process saves must remain merge-safe for active profile, last-run timestamps, response bindings, and session bindings.
 - Runtime state saves must not block request/stream commit paths.
 - Add merge/persistence regression tests when changing state shape or save behavior.
+- PostgreSQL recovery must pass the Docker-backed dump/restore gate for RPO,
+  RTO, tenant-table completeness, accounting consistency, point-in-time
+  exclusion, and non-owner RLS isolation; see ADR 1057.
 
 ## Quota, Doctor, Observability
 

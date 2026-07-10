@@ -1626,6 +1626,10 @@ while moving legacy adapter code behind enterprise boundaries.
 - Keep the GitHub Actions `process-guard` job running the self-tested enterprise
   docs, binaries, boundary, storage, gateway, and deployment security guards so
   local preflight and CI enforce the same modular-monolith contracts.
+- Keep the Docker-backed `backup-restore-drill` job on every heavy CI run. Its
+  redacted evidence must prove the dump checksum, RPO/RTO thresholds, all twelve
+  tenant-table fingerprints, accounting/ledger consistency, point-in-time
+  exclusion, and non-owner RLS read/write denial; see ADR 1057.
 - Persist every `ControlPlaneAuditWritePlan` in append-only hash-chain mode
   before treating a security-sensitive control-plane action as durably
   completed.

@@ -93,6 +93,10 @@ const REQUIRED_BACKUP_MARKERS = Object.freeze([
   ["## Audit and evidence", "audit evidence section"],
   ["/readyz", "restore readiness check"],
   ["cross-tenant", "tenant-isolation restore acceptance"],
+  ["npm run ci:backup-restore-drill", "automated PostgreSQL restore drill"],
+  ["target/backup-restore-drill/evidence.json", "redacted drill evidence path"],
+  ["RPO", "recovery-point objective gate"],
+  ["RTO", "recovery-time objective gate"],
 ]);
 
 function requireIncludes(checks, text, needle, path, description) {
@@ -659,6 +663,10 @@ port: 4100
 ## Audit and evidence
 /readyz
 cross-tenant
+npm run ci:backup-restore-drill
+target/backup-restore-drill/evidence.json
+RPO
+RTO
 `,
   };
 }

@@ -92,6 +92,7 @@ paths.
 | Mid-stream rotation | Broken transport semantics and affinity | Rotation only pre-commit; continuation bindings preserved |
 | High-cardinality telemetry labels | Metrics cardinality explosion | Telemetry attribute validation and bounded labels |
 | Failed runtime-policy reload evicts usable policy | Availability loss or hidden partial configuration | Validate before atomic cache replacement, propagate failure, withhold publication acknowledgement, and retry delivery |
+| Backup exists but cannot restore tenant/accounting state | Extended outage, billing loss, or isolation regression | Automated PostgreSQL dump/restore drill, checksum, RPO/RTO gates, full tenant-table fingerprint, ledger uniqueness, and `NOBYPASSRLS` negative checks |
 
 ## Required Negative Tests
 
@@ -110,6 +111,7 @@ is considered enterprise-ready:
 - Request path cannot plan or execute DDL.
 - Redis plans avoid whole-map JSON or whole-list rewrite patterns.
 - Malformed runtime-policy reload preserves cached policy or cached absence, returns an error, remains unacknowledged, and installs the corrected replacement on retry.
+- Restored PostgreSQL state preserves all tenant/accounting rows, excludes post-backup writes, and denies cross-tenant reads and writes under a non-owner role.
 
 ## Audit Requirements
 

@@ -69,6 +69,7 @@ npm run ci:control-plane-boundary-guard
 npm run ci:observability-boundary-guard
 npm run ci:provider-spi-boundary-guard
 npm run ci:storage-boundary-guard
+npm run ci:backup-restore-drill
 npm run ci:storage-postgres-proof
 npm run ci:storage-postgres-boundary-guard
 npm run ci:storage-redis-boundary-guard
@@ -108,6 +109,12 @@ are available.
 Add `-- --storage-postgres-proof` to `npm run ci:preflight` (or set
 `PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF=1`) when you want that proof included
 in the standard local preflight run.
+
+`npm run ci:backup-restore-drill` runs the PostgreSQL recovery gate used by
+heavy CI jobs. It requires Docker, applies the external migrator, performs a
+real `pg_dump`/`pg_restore`, gates RPO/RTO, verifies tenant and accounting
+fingerprints, and writes redacted evidence to
+`target/backup-restore-drill/evidence.json`.
 
 Use `npm run test:fast -- --jobs 4` for local safe lanes that can run as independent child processes. Use `npm run test:serial -- --suite all` for global-env, runtime, continuation, and quarantine lanes that must stay serialized with `--test-threads=1`.
 

@@ -252,6 +252,45 @@ jobs:
       - name: Check CI duration telemetry
         run: node --test scripts/ci/github-job-durations.test.mjs
 
+  backup-restore-drill:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run PostgreSQL backup and restore drill
+        run: npm run ci:backup-restore-drill
+
+      - name: Upload redacted backup and restore evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backup-restore-drill-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/backup-restore-drill/evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
   compat-replay-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10

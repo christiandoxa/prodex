@@ -292,6 +292,8 @@ function isEnterpriseDocsGuardRelevantPath(filePath) {
     filePath === ".github/workflows/ci.yml" ||
     filePath === "scripts/ci/changed-tests.mjs" ||
     filePath === "scripts/ci/enterprise-docs-guard.mjs" ||
+    filePath === "scripts/ci/backup-restore-drill.mjs" ||
+    filePath === "scripts/ci/backup-restore-drill.test.mjs" ||
     filePath === "scripts/ci/storage-postgres-proof.mjs" ||
     filePath === "scripts/ci/test-impact-manifest.json" ||
     filePath === "docs/enterprise-readiness-audit.md" ||

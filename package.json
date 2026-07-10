@@ -99,6 +99,7 @@
     "ci:observability-boundary-guard": "node scripts/ci/observability-boundary-guard.mjs --self-test && node scripts/ci/observability-boundary-guard.mjs",
     "ci:provider-spi-boundary-guard": "node scripts/ci/provider-spi-boundary-guard.mjs --self-test && node scripts/ci/provider-spi-boundary-guard.mjs",
     "ci:storage-boundary-guard": "node scripts/ci/storage-boundary-guard.mjs --self-test && node scripts/ci/storage-boundary-guard.mjs",
+    "ci:backup-restore-drill": "node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs",
     "ci:storage-postgres-proof": "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs",
     "ci:storage-postgres-boundary-guard": "node scripts/ci/storage-postgres-boundary-guard.mjs --self-test && node scripts/ci/storage-postgres-boundary-guard.mjs",
     "ci:storage-redis-boundary-guard": "node scripts/ci/storage-redis-boundary-guard.mjs --self-test && node scripts/ci/storage-redis-boundary-guard.mjs",

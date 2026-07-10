@@ -76,6 +76,7 @@ const REQUIRED_ENTERPRISE_WORKFLOW_COMMANDS = [
   "npm run ci:observability-boundary-guard",
   "npm run ci:provider-spi-boundary-guard",
   "npm run ci:storage-boundary-guard",
+  "npm run ci:backup-restore-drill",
   "npm run ci:storage-postgres-boundary-guard",
   "npm run ci:storage-redis-boundary-guard",
   "npm run ci:storage-sqlite-boundary-guard",
