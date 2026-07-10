@@ -480,19 +480,19 @@ fn resolve_upstream_schema_node<'a>(
     schema: &'a serde_json::Value,
     root_schema: &'a serde_json::Value,
 ) -> &'a serde_json::Value {
-    if let Some(reference) = schema.get("$ref").and_then(serde_json::Value::as_str) {
-        if let Some(definition) = reference.strip_prefix("#/definitions/") {
-            return root_schema
-                .get("definitions")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|definitions| definitions.get(definition))
-                .unwrap_or_else(|| panic!("missing definition `{definition}`"));
-        }
+    if let Some(reference) = schema.get("$ref").and_then(serde_json::Value::as_str)
+        && let Some(definition) = reference.strip_prefix("#/definitions/")
+    {
+        return root_schema
+            .get("definitions")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|definitions| definitions.get(definition))
+            .unwrap_or_else(|| panic!("missing definition `{definition}`"));
     }
-    if let Some(all_of) = schema.get("allOf").and_then(serde_json::Value::as_array) {
-        if let Some(first) = all_of.first() {
-            return resolve_upstream_schema_node(first, root_schema);
-        }
+    if let Some(all_of) = schema.get("allOf").and_then(serde_json::Value::as_array)
+        && let Some(first) = all_of.first()
+    {
+        return resolve_upstream_schema_node(first, root_schema);
     }
     schema
 }
@@ -551,10 +551,10 @@ fn validate_upstream_schema_subset(
             return Err(format!("{context}: expected `{expected_type}`, got `{value}`"));
         }
     }
-    if let Some(const_value) = schema.get("const") {
-        if const_value != value {
-            return Err(format!("{context}: expected const `{const_value}`, got `{value}`"));
-        }
+    if let Some(const_value) = schema.get("const")
+        && const_value != value
+    {
+        return Err(format!("{context}: expected const `{const_value}`, got `{value}`"));
     }
     if let Some(items_schema) = schema.get("items") {
         let array = value
@@ -621,15 +621,15 @@ fn assert_upstream_schema_object_subset(
         .as_object()
         .unwrap_or_else(|| panic!("{context}: object expected"));
     assert_upstream_schema_subset(value, schema, root_schema, context);
-    if let Some(additional_properties) = schema.get("additionalProperties") {
-        if additional_properties == &serde_json::Value::Bool(false) {
-            let properties = schema
-                .get("properties")
-                .and_then(serde_json::Value::as_object)
-                .unwrap_or_else(|| panic!("{context}: schema properties should be an object"));
-            for field in object.keys() {
-                assert!(properties.contains_key(field), "{context}: unexpected `{field}`");
-            }
+    if let Some(additional_properties) = schema.get("additionalProperties")
+        && additional_properties == &serde_json::Value::Bool(false)
+    {
+        let properties = schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .unwrap_or_else(|| panic!("{context}: schema properties should be an object"));
+        for field in object.keys() {
+            assert!(properties.contains_key(field), "{context}: unexpected `{field}`");
         }
     }
 }

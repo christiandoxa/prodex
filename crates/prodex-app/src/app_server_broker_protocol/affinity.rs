@@ -206,6 +206,7 @@ pub(crate) fn app_server_broker_policy_hint(value: &Value) -> AppServerBrokerPol
     }
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_allows_provider_switch(
     value: &Value,
     explicit_override: bool,

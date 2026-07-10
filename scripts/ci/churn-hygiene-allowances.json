@@ -1,5 +1,18 @@
 [
   {
+    "id": "provider-gateway-control-plane-integration-0.273.0",
+    "requiredSubjects": [
+      "feat: mature provider gateway and control plane"
+    ],
+    "caps": {
+      "maxFiles": 498,
+      "maxBehaviorFiles": 491,
+      "maxLines": 113528,
+      "maxFileLines": 6750
+    },
+    "reason": "Reviewed integration of provider-core conformance, app-server diagnostics, gateway/runtime modularization, and the local control plane after merging upstream 0.273.0, with the full local all-features test matrix, formatting, focused runtime/provider tests, and merge conflict audits."
+  },
+  {
     "id": "remove-redundant-super-integrations",
     "requiredSubjects": [
       "refactor(super): remove redundant optimizer integrations"

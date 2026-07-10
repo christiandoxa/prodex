@@ -8,6 +8,7 @@ use super::{
     gemini_responses_usage, gemini_text_from_special_part, gemini_web_search_call_from_grounding,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn gemini_build_response_value(
     value: &Value,
     response_id: &str,

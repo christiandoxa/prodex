@@ -156,6 +156,7 @@ pub fn kiro_provider_core_acp_session_info(title: Option<&str>, updated_at: Opti
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn kiro_provider_core_acp_metadata(
     reasoning_text: &str,
     usage_update: Option<Value>,

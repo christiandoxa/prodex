@@ -192,6 +192,7 @@ pub fn kiro_provider_core_stream_tool_call_item(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn kiro_provider_core_acp_responses_tool_call_item(
     tool_call_id: &str,
     title: Option<&str>,

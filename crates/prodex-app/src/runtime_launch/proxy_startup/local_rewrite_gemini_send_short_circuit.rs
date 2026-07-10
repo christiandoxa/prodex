@@ -14,7 +14,6 @@ use anyhow::{Context, Result};
 use prodex_provider_core::gemini_provider_core_exact_output_sse_stream;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::Read;
-use std::sync::Arc;
 
 pub(super) fn runtime_gemini_exact_output_short_circuit(
     request_id: u64,

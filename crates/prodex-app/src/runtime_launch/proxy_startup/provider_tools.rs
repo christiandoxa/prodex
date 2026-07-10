@@ -31,6 +31,7 @@ pub(super) fn runtime_provider_chat_tool_choice_from_responses_request(
     provider_core_chat_tool_choice_from_responses_request(value, thinking_enabled)
 }
 
+#[allow(dead_code)]
 pub(super) fn runtime_provider_flatten_namespace_tool_name(namespace: &str, name: &str) -> String {
     provider_core_flatten_namespace_tool_name(namespace, name)
 }

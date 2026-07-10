@@ -1,8 +1,9 @@
+#[path = "local_rewrite_deepseek_send.rs"]
+mod local_rewrite_deepseek_send;
+#[cfg(test)]
 use super::deepseek_rewrite::{
     RuntimeDeepSeekRewriteOptions, runtime_deepseek_chat_request_body_with_options,
 };
-#[path = "local_rewrite_deepseek_send.rs"]
-mod local_rewrite_deepseek_send;
 pub(super) use local_rewrite_deepseek_send::send_runtime_deepseek_upstream_request;
 
 #[cfg(test)]

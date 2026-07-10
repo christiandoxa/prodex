@@ -52,7 +52,7 @@ impl RuntimeGeminiSseState {
             &self.media_content_items,
             self.citation_text.as_deref(),
             &tool_calls,
-            |name, args| runtime_gemini_blocked_tool_call_message(name, args),
+            runtime_gemini_blocked_tool_call_message,
         )
     }
 

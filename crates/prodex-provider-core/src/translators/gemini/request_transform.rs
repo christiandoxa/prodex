@@ -88,16 +88,16 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
     if let Some(thinking_config) = gemini_thinking_config_from_request(obj, &model) {
         generation_config.insert("thinkingConfig".to_string(), thinking_config);
     }
-    if let Some(response_format) = obj.get("response_format") {
-        if let Err(reason) = gemini_apply_response_format(response_format, &mut generation_config) {
-            return ProviderTransformResult::rejected(
-                ProviderId::Gemini,
-                input.endpoint,
-                ProviderWireFormat::OpenAiResponses,
-                ProviderWireFormat::GeminiGenerateContent,
-                reason,
-            );
-        }
+    if let Some(response_format) = obj.get("response_format")
+        && let Err(reason) = gemini_apply_response_format(response_format, &mut generation_config)
+    {
+        return ProviderTransformResult::rejected(
+            ProviderId::Gemini,
+            input.endpoint,
+            ProviderWireFormat::OpenAiResponses,
+            ProviderWireFormat::GeminiGenerateContent,
+            reason,
+        );
     }
     if !generation_config.is_empty() {
         request.insert(

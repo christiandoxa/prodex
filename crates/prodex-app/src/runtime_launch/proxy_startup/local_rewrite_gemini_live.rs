@@ -1,4 +1,3 @@
-use super::gemini_rewrite::RuntimeGeminiAuth;
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_gemini::runtime_gemini_live_auth_attempts;
 use crate::{

@@ -78,7 +78,7 @@ pub(crate) fn gemini_runtime_responses_value_from_generate_value(
         false,
         false,
         true,
-        |part| crate::gemini_bridge::gemini_provider_core_visible_text_from_part(part),
+        crate::gemini_bridge::gemini_provider_core_visible_text_from_part,
         |part, function_call, index| {
             let call_id = gemini_function_call_id(function_call, request_id, index);
             crate::gemini_bridge::gemini_provider_core_response_tool_call_item(

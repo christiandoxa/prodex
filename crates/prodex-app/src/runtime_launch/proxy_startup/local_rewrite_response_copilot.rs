@@ -16,6 +16,7 @@ use crate::{
 use std::io::Read;
 use std::time::Instant;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn respond_runtime_copilot_rewrite(
     request_id: u64,
     request: tiny_http::Request,

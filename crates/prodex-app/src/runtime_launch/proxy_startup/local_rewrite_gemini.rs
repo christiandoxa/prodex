@@ -1,22 +1,16 @@
 use super::gemini_rewrite::RuntimeGeminiOAuthProfileAuth;
+#[cfg(test)]
 pub(super) use super::gemini_rewrite::runtime_gemini_generate_request_body;
 #[cfg(test)]
 use super::gemini_sse::RuntimeGeminiBindingRecorder;
-use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 pub(super) use super::local_rewrite_gemini_bindings::runtime_gemini_remember_bindings_from_responses_body;
-use anyhow::Result;
-use prodex_provider_core::gemini_provider_core_should_rotate_after_quota_response as runtime_gemini_should_rotate_after_quota_response;
 
 #[path = "local_rewrite_gemini_auth.rs"]
 mod local_rewrite_gemini_auth;
 #[path = "local_rewrite_gemini_oauth_pool.rs"]
 mod local_rewrite_gemini_oauth_pool;
+use local_rewrite_gemini_oauth_pool::RuntimeGeminiSelectedAuth;
 pub(super) use local_rewrite_gemini_oauth_pool::runtime_gemini_live_auth_attempts;
-use local_rewrite_gemini_oauth_pool::{
-    RUNTIME_GEMINI_MODEL_PREFERENCE_TTL_MS, RuntimeGeminiSelectedAuth,
-    runtime_gemini_auth_attempts, runtime_gemini_binding_recorder,
-    runtime_gemini_model_cache_endpoint,
-};
 pub(super) use local_rewrite_gemini_oauth_pool::{
     RuntimeGeminiOAuthPool, RuntimeGeminiRequestContext, runtime_gemini_oauth_pool_from_provider,
 };
@@ -26,17 +20,12 @@ use local_rewrite_gemini_oauth_pool::{
 };
 #[path = "local_rewrite_gemini_openai.rs"]
 mod local_rewrite_gemini_openai;
-use local_rewrite_gemini_openai::send_runtime_gemini_openai_compatible_request;
 #[path = "local_rewrite_gemini_precommit.rs"]
 mod local_rewrite_gemini_precommit;
 #[cfg(test)]
 use local_rewrite_gemini_precommit::{
     RuntimeGeminiPrecommitDecision, RuntimeGeminiPrecommitProbe,
     runtime_gemini_precommit_decision_for_data_lines,
-};
-use local_rewrite_gemini_precommit::{
-    RuntimeGeminiPrecommitPeek, runtime_gemini_peek_stream_for_retry,
-    runtime_gemini_response_is_sse,
 };
 #[path = "local_rewrite_gemini_send.rs"]
 mod local_rewrite_gemini_send;

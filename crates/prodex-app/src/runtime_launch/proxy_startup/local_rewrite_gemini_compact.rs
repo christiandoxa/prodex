@@ -8,15 +8,17 @@ use super::local_rewrite_response::runtime_local_rewrite_response_with_call_id;
 use super::*;
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result, bail};
+#[cfg(test)]
+use prodex_provider_core::GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX;
 use prodex_provider_core::{
-    GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX, gemini_provider_core_compact_response_body,
-    gemini_provider_core_local_compact_summary,
+    gemini_provider_core_compact_response_body, gemini_provider_core_local_compact_summary,
     gemini_provider_core_semantic_compact_continuation_summary,
     gemini_provider_core_semantic_compact_request_body,
     gemini_provider_core_semantic_compact_summary,
 };
 use std::io::Read;
 
+#[cfg(test)]
 const GEMINI_LOCAL_COMPACT_MAX_SUMMARY_BYTES: usize = 24 * 1024;
 
 pub(super) fn respond_runtime_gemini_compact_request(

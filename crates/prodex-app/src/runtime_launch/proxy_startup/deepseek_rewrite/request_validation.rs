@@ -1,9 +1,10 @@
-use super::{RuntimeDeepSeekRewriteOptions, RuntimeDeepSeekWebSearchMode};
+#![allow(dead_code)]
+
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;
 use prodex_provider_core::{
     deepseek_provider_core_ensure_json_prompt_instruction,
-    deepseek_provider_core_insert_primitive_request_fields, deepseek_provider_core_json_string,
+    deepseek_provider_core_insert_primitive_request_fields,
     deepseek_provider_core_note_thinking_tool_choice_omission,
     deepseek_provider_core_reject_beta_completion_fields,
     deepseek_provider_core_reject_unsupported_request_fields,
@@ -17,11 +18,13 @@ use prodex_provider_core::{
 mod request_validation_tools;
 pub(in crate::runtime_launch::proxy_startup) use self::request_validation_tools::{
     runtime_deepseek_apply_web_search_mode, runtime_deepseek_dedup_and_validate_function_tools,
+};
+#[cfg(test)]
+pub(in crate::runtime_launch::proxy_startup) use self::request_validation_tools::{
     runtime_deepseek_function_tool_name, runtime_deepseek_validate_tool_choice_name,
     runtime_deepseek_validate_tool_choice_shape, runtime_deepseek_validate_tool_choice_target,
     runtime_deepseek_validate_tools_shape,
 };
-use std::collections::BTreeMap;
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_stop_from_responses_request(
     value: &serde_json::Value,

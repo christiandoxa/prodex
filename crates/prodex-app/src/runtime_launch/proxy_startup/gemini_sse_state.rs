@@ -32,7 +32,6 @@ use prodex_provider_core::{
     gemini_provider_core_stream_error as runtime_gemini_stream_error,
     gemini_provider_core_stream_fallback_response_id, gemini_provider_core_stream_media_item_id,
     gemini_provider_core_stream_message_item, gemini_provider_core_stream_output_items,
-    gemini_provider_core_stream_output_message_item,
     gemini_provider_core_stream_output_text_content,
     gemini_provider_core_stream_output_text_item_id,
     gemini_provider_core_stream_part_function_call,

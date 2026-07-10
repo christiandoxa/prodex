@@ -1,8 +1,8 @@
 //! Gemini Live websocket session pumps and translated event forwarding.
 
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::GEMINI_LIVE_IDLE_SLEEP;
 use super::local_rewrite_gemini_live_translation::RuntimeGeminiLiveState;
-use super::{GEMINI_LIVE_IDLE_SLEEP, GEMINI_LIVE_PUMP_TIMEOUT};
 use crate::{
     RuntimeUpstreamWebSocket, WsMessage, WsSocket, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_structured_log_message, runtime_set_upstream_websocket_io_timeout,

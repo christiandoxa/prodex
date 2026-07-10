@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;
 use prodex_provider_core::{

@@ -47,6 +47,7 @@ pub(crate) fn app_server_broker_preview_line(line: &str) -> Value {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_preview_lines(input: &str) -> Vec<Value> {
     let mut request_response = AppServerBrokerRequestResponseValidation::default();
     let mut previews = Vec::new();
@@ -68,14 +69,17 @@ pub(crate) fn app_server_broker_preview_lines(input: &str) -> Vec<Value> {
     previews
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_preview_report(input: &str) -> Value {
     app_server_broker_preview_report_from_previews(app_server_broker_preview_lines(input))
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_preview_report_json(input: &str) -> Value {
     app_server_broker_preview_report_json_from_previews(app_server_broker_preview_lines(input))
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_write_stdio_preview_stream<R: BufRead, W: Write>(
     reader: R,
     writer: W,
@@ -132,6 +136,7 @@ pub(crate) fn app_server_broker_write_stdio_validate_stream<R: BufRead, W: Write
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn app_server_broker_write_stdio_validate_diagnostic_stream<R: BufRead, W: Write>(
     mut reader: R,
     mut diagnostics_writer: W,
@@ -212,9 +217,9 @@ pub(crate) fn app_server_broker_write_stdio_validate_passthrough_stream<
     W: Write,
     D: Write,
 >(
-    mut reader: R,
-    mut passthrough_writer: W,
-    mut diagnostics_writer: D,
+    reader: R,
+    passthrough_writer: W,
+    diagnostics_writer: D,
 ) -> anyhow::Result<()> {
     app_server_broker_write_stdio_validate_passthrough_stream_with_mode(
         reader,
@@ -256,6 +261,7 @@ pub(crate) fn app_server_broker_write_stdio_live_stream<R: BufRead, W: Write, D:
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn app_server_broker_write_stdio_live_validate_stream<R: BufRead, D: Write>(
     mut reader: R,
     passthrough_buffer: &mut Vec<u8>,
@@ -472,13 +478,13 @@ impl AppServerBrokerLifecyclePayloadValidation {
             "thread_started_notification"
             | "thread_resume_request"
             | "thread_fork_request"
-            | "turn_start_request" => {
-                if app_server_broker_preview_thread_id(preview).is_none() {
-                    return Some(app_server_broker_lifecycle_payload_failure(
-                        preview,
-                        "lifecycle_missing_thread_id",
-                    ));
-                }
+            | "turn_start_request"
+                if app_server_broker_preview_thread_id(preview).is_none() =>
+            {
+                return Some(app_server_broker_lifecycle_payload_failure(
+                    preview,
+                    "lifecycle_missing_thread_id",
+                ));
             }
             _ => {}
         }
@@ -1216,6 +1222,7 @@ pub(crate) fn app_server_broker_render_output(json: bool) -> anyhow::Result<Stri
     }
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_render_stdio_preview(input: &str) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(
         &app_server_broker_preview_report_json(input),

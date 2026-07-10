@@ -17,7 +17,6 @@ use super::super::provider_bridge::{
     runtime_provider_stream_event_conformance_result,
 };
 use super::runtime_local_rewrite_append_call_id_header;
-use super::runtime_local_rewrite_buffered_response_parts;
 use super::runtime_local_rewrite_response_with_call_id;
 use crate::{
     RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_text_response,

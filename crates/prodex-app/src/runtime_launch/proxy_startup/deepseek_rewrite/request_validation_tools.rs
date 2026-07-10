@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::super::{RuntimeDeepSeekRewriteOptions, RuntimeDeepSeekWebSearchMode};
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;

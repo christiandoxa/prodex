@@ -370,8 +370,10 @@ fn resolve_gateway_auth_config_requires_non_empty_virtual_key_env_when_policy_de
         presidio: false,
         no_presidio: false,
     };
-    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
-    policy.require_auth = Some(true);
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings {
+        require_auth: Some(true),
+        ..Default::default()
+    };
     policy
         .virtual_keys
         .push(prodex_runtime_policy::RuntimePolicyGatewayVirtualKey {

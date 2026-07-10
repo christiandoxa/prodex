@@ -12,6 +12,7 @@ use crate::{
 };
 use std::time::Instant;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn respond_runtime_passthrough_rewrite(
     request_id: u64,
     request: tiny_http::Request,

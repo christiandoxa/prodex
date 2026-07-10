@@ -1934,10 +1934,9 @@ mod tests {
     use super::*;
     use crate::runtime_anthropic::translate_runtime_anthropic_messages_request;
     use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
-    use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
         let script = root.join("fake-kiro-compact");

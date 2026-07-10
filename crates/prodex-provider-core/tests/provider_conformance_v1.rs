@@ -287,9 +287,8 @@ fn anthropic_and_copilot_responses_translators_publish_chat_compat_surface() {
             expected_upstream,
             "{provider:?} {endpoint:?}"
         );
-        assert_eq!(
+        assert!(
             translator.supported_params(endpoint, model).supported,
-            true,
             "{provider:?} {endpoint:?}"
         );
     }

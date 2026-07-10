@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 #[path = "request/params.rs"]
 mod params;
 
+type DeepSeekRequestBody = (Vec<u8>, Option<BTreeMap<String, Value>>);
+
 pub(super) fn deepseek_tool_choice_from_request(value: &Value) -> Option<Value> {
     let choice = value.get("tool_choice")?;
     if let Some(choice) = choice.as_str() {
@@ -44,7 +46,7 @@ pub(super) fn deepseek_tool_choice_from_request(value: &Value) -> Option<Value> 
 pub(super) fn deepseek_request_body_from_responses(
     obj: &serde_json::Map<String, Value>,
     value: &Value,
-) -> Result<(Vec<u8>, Option<BTreeMap<String, Value>>), String> {
+) -> Result<DeepSeekRequestBody, String> {
     let mut request = serde_json::Map::new();
     request.insert(
         "model".to_string(),

@@ -61,6 +61,7 @@ pub(crate) fn app_server_broker_request_summary_json(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_response_summary_json(value: &Value) -> serde_json::Value {
     let summary = app_server_broker_diagnostic_summary(value);
     let object = value.as_object();

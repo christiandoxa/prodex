@@ -18,18 +18,21 @@ use self::items::{
     runtime_smart_context_static_context_chunk_dup_marker,
     runtime_smart_context_static_context_dup_marker,
 };
+#[cfg(test)]
+#[allow(unused_imports)]
 pub(super) use self::sections::{
-    RuntimeSmartContextStaticHeadingSection, RuntimeSmartContextStaticSectionFingerprint,
-    runtime_smart_context_apply_static_context_delta,
+    RuntimeSmartContextStaticHeadingSection, runtime_smart_context_static_context_heading_sections,
+    runtime_smart_context_static_heading_section_body,
+    runtime_smart_context_static_section_fingerprints_from_value,
+};
+pub(super) use self::sections::{
+    RuntimeSmartContextStaticSectionFingerprint, runtime_smart_context_apply_static_context_delta,
     runtime_smart_context_apply_static_context_persistent_section_dedupe,
     runtime_smart_context_apply_static_context_section_dedupe,
     runtime_smart_context_fingerprint_change_is_substantive,
     runtime_smart_context_merge_persisted_static_section_fingerprints,
-    runtime_smart_context_static_context_heading_sections,
-    runtime_smart_context_static_heading_section_body,
     runtime_smart_context_static_prompt_cache_key_from_body,
     runtime_smart_context_static_section_fingerprint_state_from_persisted,
-    runtime_smart_context_static_section_fingerprints_from_value,
     runtime_smart_context_substantive_static_context_changed_item_ids,
 };
 

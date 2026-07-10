@@ -117,6 +117,7 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) allow_local_file_access: bool,
 }
 
+#[allow(dead_code)]
 impl RuntimeLocalRewriteProxyShared {
     fn conversation_store_for_request(
         &self,

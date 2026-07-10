@@ -2,9 +2,11 @@ use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
+#[cfg(test)]
+use prodex_provider_core::gemini_provider_core_body_has_terminal_quota;
 use prodex_provider_core::{
-    gemini_provider_core_body_has_terminal_quota, gemini_provider_core_google_quota_message,
-    gemini_provider_core_normalized_error_body, gemini_provider_core_response_retryable_quota,
+    gemini_provider_core_google_quota_message, gemini_provider_core_normalized_error_body,
+    gemini_provider_core_response_retryable_quota,
 };
 use runtime_proxy_crate::extract_runtime_proxy_quota_message;
 

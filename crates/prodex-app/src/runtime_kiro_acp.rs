@@ -1,15 +1,17 @@
+#[cfg(test)]
+pub(crate) use self::process::runtime_kiro_acp_bootstrap_with_command;
 pub(crate) use self::process::{
-    RuntimeKiroAcpBootstrapResult, RuntimeKiroAcpPromptTurnResult, runtime_kiro_acp_bootstrap,
-    runtime_kiro_acp_bootstrap_with_command, runtime_kiro_acp_prompt_turn,
+    RuntimeKiroAcpPromptTurnResult, runtime_kiro_acp_bootstrap,
     runtime_kiro_acp_prompt_turn_with_command,
 };
+#[cfg(test)]
 pub(crate) use self::protocol::{
-    RuntimeKiroAcpAgentCapabilities, RuntimeKiroAcpAgentInfo, RuntimeKiroAcpAuthMethod,
-    RuntimeKiroAcpCost, RuntimeKiroAcpEnvelope, RuntimeKiroAcpError,
-    RuntimeKiroAcpInitializeResult, RuntimeKiroAcpMcpCapabilities, RuntimeKiroAcpMode,
-    RuntimeKiroAcpModeState, RuntimeKiroAcpModelInfo, RuntimeKiroAcpModelState,
-    RuntimeKiroAcpNewSessionResult, RuntimeKiroAcpPlanEntry, RuntimeKiroAcpPromptCapabilities,
-    RuntimeKiroAcpPromptResponse, RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate,
+    RuntimeKiroAcpAgentCapabilities, RuntimeKiroAcpAgentInfo, RuntimeKiroAcpMcpCapabilities,
+    RuntimeKiroAcpModelInfo, RuntimeKiroAcpModelState, RuntimeKiroAcpPromptCapabilities,
+};
+pub(crate) use self::protocol::{
+    RuntimeKiroAcpCost, RuntimeKiroAcpEnvelope, RuntimeKiroAcpInitializeResult,
+    RuntimeKiroAcpNewSessionResult, RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate,
 };
 pub(crate) use self::request::{
     RuntimeKiroAcpClientInfo, runtime_kiro_acp_initialize_request,

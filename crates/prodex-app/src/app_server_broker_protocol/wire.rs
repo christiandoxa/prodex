@@ -34,11 +34,11 @@ pub(crate) fn app_server_broker_frame_kind(value: &Value) -> AppServerBrokerFram
     let has_id = object.contains_key("id");
     let has_result = object.contains_key("result");
     let has_error = object.contains_key("error");
-    if has_result && has_error {
-        AppServerBrokerFrameKind::Invalid
-    } else if has_method && (has_result || has_error) {
-        AppServerBrokerFrameKind::Invalid
-    } else if !has_method && (has_result || has_error) && !has_id {
+    let has_response_payload = has_result || has_error;
+    if (has_result && has_error)
+        || (has_method && has_response_payload)
+        || (!has_method && has_response_payload && !has_id)
+    {
         AppServerBrokerFrameKind::Invalid
     } else if has_method && has_id {
         AppServerBrokerFrameKind::Request

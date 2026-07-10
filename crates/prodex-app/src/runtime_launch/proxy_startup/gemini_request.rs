@@ -17,13 +17,11 @@ use super::gemini_request_session::{
     runtime_gemini_export_checkpoint, runtime_gemini_imported_session_contents,
 };
 use prodex_provider_core::{
-    gemini_provider_core_collect_path_values as runtime_gemini_collect_path_values,
     gemini_provider_core_contextual_user_instruction_text as runtime_gemini_contextual_user_instruction_text,
     gemini_provider_core_generation_config_from_request as runtime_gemini_generation_config,
     gemini_provider_core_harden_contents as runtime_gemini_harden_contents,
     gemini_provider_core_media_part_from_data as runtime_gemini_media_part_from_data,
     gemini_provider_core_media_part_from_uri_or_data_url as runtime_gemini_media_part_from_uri_or_data_url,
-    gemini_provider_core_request_body_without_tool as runtime_gemini_request_body_without_tool,
     gemini_provider_core_structured_command_tool_response as runtime_gemini_structured_command_tool_response,
     gemini_provider_core_tool_config_from_request as runtime_gemini_tool_config_from_chat,
 };
@@ -48,7 +46,6 @@ use gemini_request_memory::runtime_gemini_memory_files_enabled;
 pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message;
 use gemini_request_tools::runtime_gemini_tools_from_requests;
 pub(super) use gemini_request_util::{runtime_gemini_config_dir, runtime_gemini_home_dir};
-pub(in super::super) use prodex_provider_core::gemini_provider_core_collect_string_values as runtime_gemini_collect_string_values;
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 #[cfg(test)]

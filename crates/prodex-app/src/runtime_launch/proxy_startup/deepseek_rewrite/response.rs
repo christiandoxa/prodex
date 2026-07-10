@@ -17,6 +17,7 @@ use prodex_provider_core::{
 };
 use std::io::Read;
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(
     provider_kind: RuntimeProviderBridgeKind,
     status: u16,

@@ -1,6 +1,10 @@
 pub(super) use self::input_items::runtime_deepseek_messages_from_responses_request;
 pub(super) use self::request_validation::{
     runtime_deepseek_apply_web_search_mode, runtime_deepseek_dedup_and_validate_function_tools,
+};
+#[cfg(test)]
+#[allow(unused_imports)]
+pub(super) use self::request_validation::{
     runtime_deepseek_ensure_json_prompt_instruction, runtime_deepseek_function_tool_name,
     runtime_deepseek_insert_primitive_request_fields,
     runtime_deepseek_note_thinking_tool_choice_omission,
@@ -16,19 +20,24 @@ pub(super) use self::request_validation::{
 };
 #[cfg(test)]
 pub(in crate::runtime_launch::proxy_startup) use self::response::runtime_deepseek_chat_assistant_messages_from_response_value;
+#[cfg(test)]
+pub(in crate::runtime_launch::proxy_startup) use self::response::runtime_deepseek_merge_response_metadata;
 pub(in crate::runtime_launch::proxy_startup) use self::response::{
-    runtime_deepseek_chat_buffered_response_parts, runtime_deepseek_merge_response_metadata,
-    runtime_deepseek_store_conversation, runtime_deepseek_take_pending_messages,
+    runtime_deepseek_chat_buffered_response_parts, runtime_deepseek_store_conversation,
+    runtime_deepseek_take_pending_messages,
 };
 pub(super) use self::tools::{
     runtime_deepseek_tool_choice_from_responses_request,
     runtime_deepseek_tools_from_responses_request,
     runtime_deepseek_web_search_options_from_responses_request,
 };
+#[cfg(test)]
+#[allow(unused_imports)]
 pub(super) use super::deepseek_reasoning::{
     runtime_deepseek_apply_reasoning_from_responses_request, runtime_deepseek_thinking_enabled,
     runtime_deepseek_validate_reasoning_shape_for_provider,
 };
+#[cfg(test)]
 pub(super) use super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;

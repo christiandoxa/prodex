@@ -23,12 +23,13 @@ pub(super) use self::provider_bridge_error_policy::{
     runtime_provider_should_retry_with_next_model,
     runtime_provider_should_rotate_auth_after_response,
 };
+#[cfg(test)]
+pub(super) use self::provider_bridge_routing::runtime_provider_native_passthrough;
 pub(super) use self::provider_bridge_routing::{
     RuntimeProviderRouteKind, runtime_provider_canonical_model,
     runtime_provider_gateway_cost_for_request, runtime_provider_model_fallback_chain,
-    runtime_provider_models_buffered_response, runtime_provider_native_passthrough,
-    runtime_provider_request_body_with_model, runtime_provider_request_ledger_message,
-    runtime_provider_route_kind,
+    runtime_provider_models_buffered_response, runtime_provider_request_body_with_model,
+    runtime_provider_request_ledger_message, runtime_provider_route_kind,
 };
 pub(super) use super::provider_bridge_spend::{
     RuntimeProviderGatewaySpendEvent, runtime_provider_gateway_response_spend_event,

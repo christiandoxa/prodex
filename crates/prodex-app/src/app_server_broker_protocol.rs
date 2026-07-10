@@ -13,21 +13,26 @@ mod report;
 mod wire;
 
 pub(crate) use affinity::{
-    app_server_broker_affinity_keys, app_server_broker_allows_provider_switch,
-    app_server_broker_continuation_affinity_summary_json, app_server_broker_continuation_decision,
-    app_server_broker_lifecycle_binding, app_server_broker_policy_hint,
-    app_server_broker_policy_hint_json,
+    app_server_broker_affinity_keys, app_server_broker_continuation_affinity_summary_json,
+    app_server_broker_continuation_decision, app_server_broker_policy_hint_json,
 };
+#[cfg(test)]
+pub(crate) use affinity::{
+    app_server_broker_allows_provider_switch, app_server_broker_lifecycle_binding,
+    app_server_broker_policy_hint,
+};
+#[cfg(test)]
+pub(crate) use lifecycle::AppServerBrokerMethod;
 pub(crate) use lifecycle::{
-    AppServerBrokerLifecycleStage, AppServerBrokerMethod, app_server_broker_is_lifecycle_method,
+    AppServerBrokerLifecycleStage, app_server_broker_is_lifecycle_method,
     app_server_broker_lifecycle_methods, app_server_broker_lifecycle_response_schema_file,
     app_server_broker_lifecycle_schema_file, app_server_broker_lifecycle_stage,
 };
 pub(crate) use metadata::{AppServerBrokerMetadata, app_server_broker_metadata_from_value};
+pub(crate) use report::app_server_broker_diagnostic_summary_json;
 #[cfg(test)]
-pub(crate) use report::app_server_broker_request_summary_json;
 pub(crate) use report::{
-    app_server_broker_diagnostic_summary_json, app_server_broker_response_summary_json,
+    app_server_broker_request_summary_json, app_server_broker_response_summary_json,
 };
 use wire::app_server_broker_has_valid_wire_jsonrpc;
 pub(crate) use wire::{app_server_broker_frame_kind, app_server_broker_invalid_reason};

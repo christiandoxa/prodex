@@ -21,10 +21,17 @@ pub(super) use gateway_config_helpers::gateway_api_keys_from_list;
 use gateway_config_helpers::gateway_validate_listen_auth;
 pub(super) use gateway_guardrail_config::resolve_gateway_guardrail_config;
 pub(super) use gateway_observability_config::gateway_observability_config;
+#[cfg(not(test))]
+pub(super) use gateway_provider_config::resolve_gateway_provider_config;
+#[cfg(test)]
 pub(super) use gateway_provider_config::{
-    gateway_openai_api_keys, gateway_policy_provider, gateway_provider_options,
-    gateway_upstream_base_url, resolve_gateway_provider_config,
+    gateway_openai_api_keys, gateway_upstream_base_url, resolve_gateway_provider_config,
 };
+#[cfg(test)]
+pub(super) use gateway_provider_config::{gateway_policy_provider, gateway_provider_options};
+#[cfg(not(test))]
+pub(super) use gateway_route_alias_config::gateway_route_aliases_config;
+#[cfg(test)]
 pub(super) use gateway_route_alias_config::{
     gateway_route_alias_model_metrics, gateway_route_aliases_config,
 };

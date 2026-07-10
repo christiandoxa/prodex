@@ -34,6 +34,7 @@ pub(super) use gemini_request::{
     runtime_gemini_blocked_tool_call_message, runtime_gemini_generate_request_body,
 };
 
+#[allow(dead_code)]
 pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
     value: &serde_json::Value,
     request_id: u64,
@@ -43,7 +44,7 @@ pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
         request_id,
         prodex_provider_core::provider_core_chat_compatible_created_at(),
         prodex_runtime_gemini::GEMINI_DEFAULT_MODEL,
-        |name, args| runtime_gemini_blocked_tool_call_message(name, args),
+        runtime_gemini_blocked_tool_call_message,
     )
 }
 
@@ -125,7 +126,7 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
         value.as_ref(),
         request_id,
         translated.as_ref(),
-        |name, args| runtime_gemini_blocked_tool_call_message(name, args),
+        runtime_gemini_blocked_tool_call_message,
     );
     if !gemini_provider_core_response_terminal_without_history(&response)
         && let Some(response_id) = response.get("id").and_then(serde_json::Value::as_str)

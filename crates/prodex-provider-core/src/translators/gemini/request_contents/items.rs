@@ -61,19 +61,18 @@ fn gemini_content_parts_from_message_content(message: &Value) -> Vec<Value> {
                 .get("text")
                 .or_else(|| object.get("content"))
                 .and_then(Value::as_str)
+                .filter(|text| !text.trim().is_empty())
             {
-                if !text.trim().is_empty() {
-                    parts.push(json!({"text": text}));
-                }
+                parts.push(json!({"text": text}));
             }
         }
         _ => {}
     }
 
-    if parts.is_empty() {
-        if let Some(text) = gemini_message_text(message).filter(|text| !text.trim().is_empty()) {
-            parts.push(json!({"text": text}));
-        }
+    if parts.is_empty()
+        && let Some(text) = gemini_message_text(message).filter(|text| !text.trim().is_empty())
+    {
+        parts.push(json!({"text": text}));
     }
 
     parts

@@ -4,9 +4,9 @@ use super::super::gemini_rewrite::{
     runtime_gemini_project_id, runtime_gemini_request_upstream_url,
 };
 use super::super::local_rewrite::{
-    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
-    RuntimeLocalRewriteUpstreamResult, runtime_local_rewrite_model_selection,
+    RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    runtime_local_rewrite_model_selection,
 };
 use super::super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::super::local_rewrite_transport::{
@@ -40,7 +40,7 @@ use super::{
         runtime_gemini_response_is_sse,
     },
 };
-use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest};
+use crate::RuntimeProxyRequest;
 use anyhow::{Result, bail};
 use local_rewrite_gemini_send_logs::{
     runtime_gemini_log_builtin_tool_fallback, runtime_gemini_log_invalid_stream_model_fallback,

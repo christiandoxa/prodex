@@ -63,15 +63,14 @@ impl RuntimeDeepSeekSseState {
             }
             (call_id, name, should_add)
         };
-        if should_add {
-            if let Some(item) = deepseek_provider_core_stream_tool_call_added_item(&call_id, &name)
-            {
-                let sequence_number = self.next_sequence_number();
-                events.push(self.event(
-                    "response.output_item.added",
-                    deepseek_provider_core_output_item_added_event(sequence_number, &item),
-                ));
-            }
+        if should_add
+            && let Some(item) = deepseek_provider_core_stream_tool_call_added_item(&call_id, &name)
+        {
+            let sequence_number = self.next_sequence_number();
+            events.push(self.event(
+                "response.output_item.added",
+                deepseek_provider_core_output_item_added_event(sequence_number, &item),
+            ));
         }
         events
     }

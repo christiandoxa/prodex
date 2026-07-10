@@ -3,10 +3,12 @@ use super::*;
 mod prompt_cache;
 
 #[cfg(test)]
+pub(crate) use prompt_cache::RuntimePromptCacheProfileObservation;
+#[cfg(test)]
 pub(crate) use prompt_cache::clear_runtime_prompt_cache_profile_bindings;
 pub(crate) use prompt_cache::{
-    RuntimePromptCacheProfileObservation, observe_runtime_prompt_cache_profile_hit,
-    remember_runtime_prompt_cache_profile, runtime_prompt_cache_bound_profile,
+    observe_runtime_prompt_cache_profile_hit, remember_runtime_prompt_cache_profile,
+    runtime_prompt_cache_bound_profile,
 };
 #[cfg(test)]
 use prompt_cache::{

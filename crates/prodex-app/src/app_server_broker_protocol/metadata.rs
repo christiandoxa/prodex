@@ -12,6 +12,7 @@ pub(crate) struct AppServerBrokerMetadata {
 }
 
 impl AppServerBrokerMetadata {
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.session_id.is_none()
             && self.thread_id.is_none()

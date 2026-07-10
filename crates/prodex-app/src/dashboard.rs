@@ -896,7 +896,7 @@ mod tests {
             );
 
             assert!(value["commands"]["setup"].is_array());
-            assert!(value["commands"]["setup"].as_array().unwrap().len() > 0);
+            assert!(!value["commands"]["setup"].as_array().unwrap().is_empty());
             assert!(value["commands"]["launch"].as_str().is_some_and(|value| {
                 value.starts_with("prodex s") || value.starts_with("prodex super")
             }));
@@ -906,7 +906,7 @@ mod tests {
             .as_array()
             .expect("contracts should be array");
         assert!(
-            contracts.len() > 0,
+            !contracts.is_empty(),
             "provider contract matrix should be present"
         );
     }
