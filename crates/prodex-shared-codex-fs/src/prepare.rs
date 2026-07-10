@@ -83,6 +83,10 @@ fn ensure_managed_codex_home_is_not_symlink(codex_home: &Path) -> Result<()> {
 }
 
 pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
+    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
+    else {
+        return Ok(());
+    };
     let cache_path = paths.root.join(SESSION_MAINTENANCE_CACHE_FILE);
     let previous = load_session_maintenance_cache(&cache_path);
     let mut next = SessionMaintenanceCache {
@@ -156,7 +160,10 @@ fn maintain_codex_sessions_in_dir(
             continue;
         }
 
-        let contents = persist_codex_session_file_image_attachments(codex_home, &path)?;
+        let Some(contents) = persist_codex_session_file_image_attachments(codex_home, &path)?
+        else {
+            continue;
+        };
         restore_codex_session_file_modified_time(&path, &contents)?;
         if codex_session_image_attachments_are_stable(codex_home, &contents) {
             next.files.insert(key, session_file_fingerprint(&path)?);

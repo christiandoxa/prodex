@@ -62,6 +62,37 @@ const SHARED_CODEX_FILE_NAMES: &[&str] = &[
 const SHARED_CODEX_SQLITE_PREFIXES: &[&str] = &["state_", "logs_", "goals_", "memories_"];
 const SHARED_CODEX_SQLITE_SUFFIXES: &[&str] = &[".sqlite", ".sqlite-shm", ".sqlite-wal"];
 const SHARED_CODEX_PROFILE_V2_CONFIG_SUFFIX: &str = ".config.toml";
+const CODEX_SESSION_MAINTENANCE_LOCK_FILE: &str = ".prodex-maintenance.lock";
+
+fn open_codex_session_maintenance_lock(codex_home: &Path) -> Result<fs::File> {
+    let sessions_dir = codex_home.join("sessions");
+    fs::create_dir_all(&sessions_dir)
+        .with_context(|| format!("failed to create {}", sessions_dir.display()))?;
+    let lock_path = sessions_dir.join(CODEX_SESSION_MAINTENANCE_LOCK_FILE);
+    fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open {}", lock_path.display()))
+}
+
+pub fn lock_codex_sessions_for_child(codex_home: &Path) -> Result<fs::File> {
+    let lock = open_codex_session_maintenance_lock(codex_home)?;
+    lock.lock_shared()
+        .with_context(|| "failed to lock Codex sessions for child process")?;
+    Ok(lock)
+}
+
+fn try_lock_codex_session_maintenance(codex_home: &Path) -> Result<Option<fs::File>> {
+    let lock = open_codex_session_maintenance_lock(codex_home)?;
+    match lock.try_lock() {
+        Ok(()) => Ok(Some(lock)),
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(err) => Err(err).context("failed to lock Codex sessions for maintenance"),
+    }
+}
 
 fn same_path(left: &Path, right: &Path) -> bool {
     normalize_path_for_compare(left) == normalize_path_for_compare(right)

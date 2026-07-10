@@ -40,6 +40,7 @@ pub(crate) fn run_child_plan(
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<ExitStatus> {
     cleanup_codex_arg0_temp_dirs_best_effort(&plan.codex_home);
+    let _session_lock = prodex_shared_codex_fs::lock_codex_sessions_for_child(&plan.codex_home)?;
     let mut command = Command::new(&plan.binary);
     command.args(&plan.args).env("CODEX_HOME", &plan.codex_home);
     for key in &plan.removed_env {

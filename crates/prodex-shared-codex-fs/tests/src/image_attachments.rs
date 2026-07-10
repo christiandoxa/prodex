@@ -69,7 +69,7 @@ fn persist_codex_session_image_attachments_rewrites_escaped_session_path() {
 }
 
 #[test]
-fn persist_codex_session_image_attachments_rejects_oversized_session_file() {
+fn persist_codex_session_image_attachments_skips_oversized_session_file() {
     let temp_dir = ImageAttachmentTestDir::new("oversized-session-file");
     let codex_home = temp_dir.path.join("codex-home");
     let sessions_dir = codex_home.join("sessions/2026/06/10");
@@ -81,10 +81,74 @@ fn persist_codex_session_image_attachments_rejects_oversized_session_file() {
         .set_len(CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES + 1)
         .expect("session size should be set");
 
-    let err = persist_codex_session_image_attachments(&codex_home)
-        .expect_err("oversized session should be rejected");
+    persist_codex_session_image_attachments(&codex_home)
+        .expect("oversized session should not block attachment maintenance");
 
-    assert!(format!("{err:#}").contains("exceeds safe size limit"));
+    assert_eq!(
+        fs::metadata(&session_file)
+            .expect("session metadata should remain readable")
+            .len(),
+        CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES + 1
+    );
+}
+
+#[test]
+fn persist_codex_session_image_attachments_preserves_source_text_with_image_prefix() {
+    let temp_dir = ImageAttachmentTestDir::new("source-image-prefix");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/07/10");
+    let session_file = sessions_dir.join("rollout.jsonl");
+    let contents = concat!(
+        r#"{"timestamp":"2026-07-10T00:00:00Z","type":"session_meta","payload":{"id":"test"}}"#,
+        "\n",
+        r#"{"type":"response_item","payload":{"text":"const PREFIX: &str = \"<image \"; value > 0;"}}"#,
+        "\n"
+    );
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::write(&session_file, contents).expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("maintenance should succeed");
+
+    assert_eq!(
+        fs::read_to_string(&session_file).expect("session should be readable"),
+        contents
+    );
+}
+
+#[test]
+fn persist_codex_session_image_attachments_skips_active_session_tree() {
+    let temp_dir = ImageAttachmentTestDir::new("active-session-tree");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/07/10");
+    let image_source = temp_dir.path.join("codex-clipboard-active.png");
+    let stable = codex_home.join("image_attachments/codex-clipboard-active.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+    let contents = format!(
+        r#"{{"payload":{{"text":"<image path=\"{}\">"}}}}"#,
+        image_source.display()
+    );
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::write(&image_source, b"active png").expect("source image should write");
+    fs::write(&session_file, &contents).expect("session should write");
+    let active_lock =
+        lock_codex_sessions_for_child(&codex_home).expect("active session lock should succeed");
+
+    persist_codex_session_image_attachments(&codex_home).expect("maintenance should defer");
+
+    assert_eq!(
+        fs::read_to_string(&session_file).expect("session should be readable"),
+        contents
+    );
+    assert!(!stable.exists());
+
+    drop(active_lock);
+    persist_codex_session_image_attachments(&codex_home).expect("maintenance should run");
+    assert_eq!(
+        fs::read(&stable).expect("stable image should be readable"),
+        b"active png"
+    );
 }
 
 #[test]

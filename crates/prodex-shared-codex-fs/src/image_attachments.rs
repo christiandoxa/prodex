@@ -17,6 +17,9 @@ const CODEX_IMAGE_PATH_ESCAPED_QUOTE: &str = r#"\""#;
 const CODEX_CLIPBOARD_PREFIX: &str = "codex-clipboard-";
 
 pub fn persist_codex_session_image_attachments(codex_home: &Path) -> Result<()> {
+    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(codex_home)? else {
+        return Ok(());
+    };
     persist_codex_session_image_attachments_in_dir(codex_home, &codex_home.join("sessions"))?;
     persist_codex_session_image_attachments_in_dir(
         codex_home,
@@ -58,16 +61,21 @@ fn persist_codex_session_image_attachments_in_dir(
 pub(crate) fn persist_codex_session_file_image_attachments(
     codex_home: &Path,
     session_file: &Path,
-) -> Result<String> {
-    let contents = read_codex_session_attachment_file(session_file)?;
+) -> Result<Option<String>> {
+    let Some(contents) = read_codex_session_attachment_file(session_file)? else {
+        return Ok(None);
+    };
     let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &contents)?;
+    if rewritten.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        return Ok(None);
+    }
     if rewritten != contents {
         write_codex_session_attachment_file(session_file, &rewritten)?;
     }
-    Ok(rewritten)
+    Ok(Some(rewritten))
 }
 
-fn read_codex_session_attachment_file(path: &Path) -> Result<String> {
+fn read_codex_session_attachment_file(path: &Path) -> Result<Option<String>> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("failed to inspect {}", path.display()))?;
     if metadata.file_type().is_symlink() {
@@ -80,11 +88,7 @@ fn read_codex_session_attachment_file(path: &Path) -> Result<String> {
         bail!("session path {} is not a file", path.display());
     }
     if metadata.len() > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
-        bail!(
-            "session {} exceeds safe size limit ({} bytes)",
-            path.display(),
-            CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES
-        );
+        return Ok(None);
     }
     let file =
         fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -96,13 +100,11 @@ fn read_codex_session_attachment_file(path: &Path) -> Result<String> {
         .read_to_end(&mut bytes)
         .with_context(|| format!("failed to read {}", path.display()))?;
     if bytes.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
-        bail!(
-            "session {} exceeds safe size limit ({} bytes)",
-            path.display(),
-            CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES
-        );
+        return Ok(None);
     }
-    String::from_utf8(bytes).with_context(|| format!("failed to decode {}", path.display()))
+    String::from_utf8(bytes)
+        .map(Some)
+        .with_context(|| format!("failed to decode {}", path.display()))
 }
 
 fn write_codex_session_attachment_file(path: &Path, contents: &str) -> Result<()> {
@@ -226,11 +228,13 @@ fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Resul
         let tag_end = tag_start + relative_tag_end;
         let tag = &contents[tag_start..tag_end];
         let Some((relative_path_start, path_prefix, path_quote)) = image_tag_path_attr(tag) else {
+            output.push_str(&contents[cursor..tag_end]);
             cursor = tag_end;
             continue;
         };
         let path_start = tag_start + relative_path_start + path_prefix.len();
         let Some(relative_path_end) = contents[path_start..tag_end].find(path_quote) else {
+            output.push_str(&contents[cursor..tag_end]);
             cursor = tag_end;
             continue;
         };
