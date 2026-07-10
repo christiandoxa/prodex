@@ -1,5 +1,18 @@
 [
   {
+    "id": "enterprise-gateway-integration-20260710",
+    "requiredSubjects": [
+      "feat: harden enterprise gateway runtime"
+    ],
+    "caps": {
+      "maxFiles": 1394,
+      "maxBehaviorFiles": 309,
+      "maxLines": 147903,
+      "maxFileLines": 8398
+    },
+    "reason": "Reviewed integration of the preserved local enterprise gateway series with upstream main using multi-agent conflict audits, the full all-features local test matrix, focused gateway regressions, formatting, and exact size ratchets."
+  },
+  {
     "id": "clippy-gate-remediation-0.273.0",
     "requiredSubjects": [
       "fix(ci): satisfy churn and clippy gates"

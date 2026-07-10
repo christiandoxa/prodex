@@ -284,9 +284,10 @@ fn otlp_any_value(value: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::thread;
 
     fn env_lock() -> &'static Mutex<()> {
@@ -294,26 +295,45 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        previous: Vec<(String, Option<OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn set(updates: &[(&str, Option<&str>)]) -> Self {
+            let lock = env_lock().lock().expect("env lock");
+            let previous = updates
+                .iter()
+                .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
+                .collect();
+            for (key, value) in updates {
+                match value {
+                    Some(value) => unsafe { std::env::set_var(key, value) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+            Self {
+                _lock: lock,
+                previous,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                match value {
+                    Some(value) => unsafe { std::env::set_var(&key, value) },
+                    None => unsafe { std::env::remove_var(&key) },
+                }
+            }
+        }
+    }
+
     fn with_env_vars<T>(updates: &[(&str, Option<&str>)], f: impl FnOnce() -> T) -> T {
-        let _guard = env_lock().lock().expect("env lock");
-        let previous = updates
-            .iter()
-            .map(|(key, _)| ((*key).to_string(), std::env::var(key).ok()))
-            .collect::<Vec<_>>();
-        for (key, value) in updates {
-            match value {
-                Some(value) => unsafe { std::env::set_var(key, value) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-        let result = f();
-        for (key, value) in previous {
-            match value {
-                Some(value) => unsafe { std::env::set_var(&key, value) },
-                None => unsafe { std::env::remove_var(&key) },
-            }
-        }
-        result
+        let _guard = EnvGuard::set(updates);
+        f()
     }
 
     #[test]

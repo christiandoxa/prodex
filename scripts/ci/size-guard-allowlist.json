@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 937,
+    "maxLines": 939,
     "reason": "Runtime launch command routing, provider selection, proxy wiring, and session/runtime entry planning remain capped after wiring the provider-aware gateway configuration boundary."
   },
   {
@@ -21,22 +21,22 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/copilot.rs",
-    "maxLines": 923,
+    "maxLines": 986,
     "reason": "Copilot profile import, direct runtime API auth, model catalog refresh, legacy token fallback, and bounded HTTP response reads remain capped while auth refresh is split from profile import ownership."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 966,
+    "maxLines": 1069,
     "reason": "Kiro profile import now includes stricter private temp-home handling for copied credentials; capped at current size until provider import helpers are split from command orchestration."
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1103,
+    "maxLines": 1110,
     "reason": "Live quota snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped after native TUI rendering helpers moved to a sibling module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 960,
+    "maxLines": 1401,
     "reason": "Local rewrite and gateway request orchestration now performs header-first admin and virtual-key authentication, tenant conversation scoping, and bounded background-task admission; capped until request admission is split from proxy startup."
   },
   {
@@ -46,7 +46,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3083,
+    "maxLines": 3798,
     "reason": "Local rewrite cross-provider regression coverage remains capped while provider-specific cases are split from shared harness coverage."
   },
   {
@@ -56,17 +56,17 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_usage.rs",
-    "maxLines": 923,
+    "maxLines": 1716,
     "reason": "Gateway usage regressions now cover atomic budget admission, header-first virtual-key rejection, bounded persistence queues, and request-id cleanup; capped until admission and persistence fixtures are split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_tests.rs",
-    "maxLines": 1479,
+    "maxLines": 1565,
     "reason": "Provider bridge regression coverage includes translated compact routing, provider conformance outcomes, gateway accounting, and continuation metadata parity; capped until tests split by provider."
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 1073,
+    "maxLines": 2296,
     "reason": "Runtime launch command tests cover provider-aware gateway configuration, authentication, routing aliases, and process planning; capped until gateway cases move to focused fixtures."
   },
   {
@@ -116,7 +116,7 @@
   },
   {
     "file": "crates/prodex-provider-core/src/gemini_bridge/tests.rs",
-    "maxLines": 2091,
+    "maxLines": 2126,
     "reason": "Gemini bridge request, response, streaming, tool-call, multimodal, usage, and error conformance regressions remain colocated until split by fixture family."
   },
   {
@@ -131,27 +131,27 @@
   },
   {
     "file": "crates/prodex-session-store/src/lib.rs",
-    "maxLines": 993,
+    "maxLines": 1023,
     "reason": "Session report resolution, resume repair with slim threshold change; recapped at current size."
   },
   {
     "file": "crates/prodex-session-store/tests/src/lib.rs",
-    "maxLines": 994,
+    "maxLines": 1032,
     "reason": "Resume-repair and session-store regression coverage remain capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
-    "maxLines": 1175,
+    "maxLines": 1187,
     "reason": "Gateway admin CRUD compatibility coverage remains capped while tenant, key, SCIM, and audit fixtures are split by resource."
   },
   {
     "file": "crates/prodex-application/src/lib.rs",
-    "maxLines": 6148,
+    "maxLines": 6301,
     "reason": "Application orchestration boundary is a Phase 1 mechanical extraction cap; split use-case groups as ports stabilize."
   },
   {
     "file": "crates/prodex-application/tests/application_boundary.rs",
-    "maxLines": 6082,
+    "maxLines": 6203,
     "reason": "Application boundary characterization matrix is capped while security, accounting, and policy cases move to focused modules."
   },
   {
@@ -171,7 +171,7 @@
   },
   {
     "file": "crates/prodex-domain/src/audit.rs",
-    "maxLines": 2411,
+    "maxLines": 2431,
     "reason": "Domain audit value objects, query planning, retention, and digest chaining remain capped until audit submodules are split by responsibility."
   },
   {
@@ -206,7 +206,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
-    "maxLines": 2099,
+    "maxLines": 2174,
     "reason": "Runtime policy compatibility coverage is capped while versioned policy, cache, and gateway settings tests are split."
   },
   {
@@ -226,7 +226,7 @@
   },
   {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
-    "maxLines": 1526,
+    "maxLines": 1669,
     "reason": "PostgreSQL storage characterization is capped while migration, tenant isolation, and accounting tests are split."
   },
   {
@@ -236,12 +236,87 @@
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
-    "maxLines": 1400,
+    "maxLines": 1610,
     "reason": "SQLite storage characterization is capped while migration, tenant isolation, and accounting tests are split."
   },
   {
     "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",
     "maxLines": 1018,
     "reason": "Shared Codex home prepare regression coverage now includes bounded history and attachment race cases; capped until history and attachment fixtures split by domain."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_external_provider_config.rs",
+    "maxLines": 905,
+    "reason": "External provider parsing and exact secret/config validation are capped after the reviewed enterprise gateway integration."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
+    "maxLines": 874,
+    "reason": "Gemini request translation remains capped while multimodal and tool request fixtures are split by protocol concern."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth.rs",
+    "maxLines": 1503,
+    "reason": "Gateway admin token, SSO, OIDC cache, refresh, and fail-closed SCIM authorization remain capped after the reviewed enterprise integration."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_keys.rs",
+    "maxLines": 914,
+    "reason": "Gateway key lifecycle, durable tenant identity, rotation, and authorization remain capped until lifecycle storage is split from HTTP responses."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_router.rs",
+    "maxLines": 910,
+    "reason": "Gateway admin routing and control-plane authorization remain capped until route dispatch is split by resource family."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",
+    "maxLines": 981,
+    "reason": "Gateway SQLite, PostgreSQL, and Redis compatibility migration handling remains capped while backend-specific connections are split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_key_store_backend.rs",
+    "maxLines": 1507,
+    "reason": "Gateway key-store compatibility, exact decoding, and backend persistence remain capped until backend implementations are split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
+    "maxLines": 1043,
+    "reason": "Virtual-key admission and durable reservation accounting remain capped after atomic fail-closed integration."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
+    "maxLines": 893,
+    "reason": "Gateway ledger loading, reconciliation, and durable reservation settlement remain capped until backend reconciliation is split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
+    "maxLines": 1671,
+    "reason": "Gateway admin auth coverage remains capped while token, SSO, OIDC, and SCIM scenarios are split into focused fixtures."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
+    "maxLines": 1276,
+    "reason": "Gateway durable state and cross-proxy reservation coverage remains capped while backend scenarios are split."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
+    "maxLines": 946,
+    "reason": "Local rewrite transport and bounded response handling remain capped until transport phases are split."
+  },
+  {
+    "file": "src/bin/prodex-control-plane.rs",
+    "maxLines": 1301,
+    "reason": "Enterprise control-plane composition, storage setup, publication, and observability remain capped while service wiring is split."
+  },
+  {
+    "file": "src/enterprise_observability.rs",
+    "maxLines": 1058,
+    "reason": "Enterprise OTLP log export and redaction integration remain capped while transport and serialization are split."
+  },
+  {
+    "file": "tests/enterprise_binaries.rs",
+    "maxLines": 8398,
+    "reason": "Enterprise binary characterization remains capped while control-plane, gateway, migration, and observability fixtures are split."
   }
 ]
