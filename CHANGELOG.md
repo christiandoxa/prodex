@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.270.0 - 2026-07-10
+
+### CLI
+
+- Trust launch directory in yolo mode (`436bce1`)
+
 ## 0.269.0 - 2026-07-10
 
 ### Misc
@@ -75,9 +81,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Honor cached model context windows (`4064c8f`)
-
-## 0.258.0 - 2026-07-07
-
-### Runtime
-
-- Retry ready profiles after workspace credit depletion (`c9bb063`)
