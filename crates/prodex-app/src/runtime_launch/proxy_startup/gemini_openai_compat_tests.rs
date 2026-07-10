@@ -3,11 +3,9 @@ use super::deepseek_rewrite::{
     runtime_chat_compatible_request_body, runtime_deepseek_responses_value_from_chat_value,
 };
 use super::provider_bridge::RuntimeProviderBridgeKind;
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 #[test]

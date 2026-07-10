@@ -102,6 +102,7 @@ pub(crate) fn attempt_runtime_websocket_request(
     let mut committed_response_ids = BTreeSet::new();
     let mut previous_response_owner_recorded = false;
     let mut precommit_hold_count = 0usize;
+    let mut precommit_hold_bytes = 0usize;
     let mut precommit_hold_promotion_event_seen = false;
     loop {
         match upstream_socket.read() {
@@ -189,6 +190,7 @@ pub(crate) fn attempt_runtime_websocket_request(
                             text: &text,
                             buffered_precommit_text_frames: &mut buffered_precommit_text_frames,
                             precommit_hold_count: &mut precommit_hold_count,
+                            precommit_hold_bytes: &mut precommit_hold_bytes,
                             precommit_hold_promotion_event_seen:
                                 &mut precommit_hold_promotion_event_seen,
                         },

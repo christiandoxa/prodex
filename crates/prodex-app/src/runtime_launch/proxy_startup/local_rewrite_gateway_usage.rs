@@ -26,6 +26,18 @@ use std::sync::atomic::Ordering;
 
 const RUNTIME_GATEWAY_REDIS_USAGE_KEY: &str = "prodex:gateway:virtual_key_usage";
 const RUNTIME_GATEWAY_REDIS_USAGE_LOCK: &str = "prodex:gateway:virtual_key_usage:lock";
+const RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT: usize = 4_096;
+
+fn runtime_gateway_enqueue_usage_delta(
+    pending: &mut Vec<RuntimeGatewayVirtualKeyUsageDelta>,
+    delta: RuntimeGatewayVirtualKeyUsageDelta,
+) -> bool {
+    if pending.len() >= RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT {
+        return false;
+    }
+    pending.push(delta);
+    true
+}
 
 pub(super) fn runtime_gateway_virtual_key_usage_load_strict(
     state_store: &RuntimeGatewayStateStore,
@@ -65,7 +77,21 @@ pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
 ) {
     let state_store = shared.gateway_state_store.clone();
     if let Ok(mut pending) = shared.gateway_usage.pending_deltas.lock() {
-        pending.push(delta);
+        if !runtime_gateway_enqueue_usage_delta(&mut pending, delta.clone()) {
+            // ponytail: persistence is best effort; use synchronous admission if durable backpressure is required.
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_virtual_key_usage_delta_dropped",
+                    [
+                        runtime_proxy_log_field("request", delta.request_id.to_string()),
+                        runtime_proxy_log_field("key", delta.key_name.as_str()),
+                        runtime_proxy_log_field("reason", "queue_limit"),
+                    ],
+                ),
+            );
+            return;
+        }
     } else {
         return;
     }
@@ -205,5 +231,32 @@ fn runtime_gateway_virtual_key_usage_file_load_strict(
         >(&bytes)
         .map_err(std::io::Error::other),
         None => Ok(BTreeMap::new()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_usage_delta_queue_is_bounded() {
+        let delta = RuntimeGatewayVirtualKeyUsageDelta {
+            request_id: 1,
+            key_name: "team-a".to_string(),
+            model: "gpt-5.4".to_string(),
+            minute_epoch: 1,
+            input_tokens: 1,
+            estimated_cost_microusd: Some(1),
+            created_at_epoch: 1,
+        };
+        let mut pending = Vec::new();
+        for _ in 0..RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT {
+            assert!(runtime_gateway_enqueue_usage_delta(
+                &mut pending,
+                delta.clone()
+            ));
+        }
+
+        assert!(!runtime_gateway_enqueue_usage_delta(&mut pending, delta));
     }
 }

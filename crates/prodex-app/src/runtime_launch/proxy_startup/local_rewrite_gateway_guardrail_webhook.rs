@@ -2,8 +2,10 @@ use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_transport::runtime_local_rewrite_log_url;
 use super::*;
 use base64::Engine;
+use std::time::Duration;
 
 const RUNTIME_GATEWAY_GUARDRAIL_WEBHOOK_MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const RUNTIME_GATEWAY_GUARDRAIL_WEBHOOK_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) struct RuntimeGatewayGuardrailWebhookBlock {
     pub(super) reason: String,
@@ -26,7 +28,11 @@ pub(super) fn runtime_gateway_guardrail_webhook_block(
         "call_id": format!("prodex-{request_id}"),
         "body_base64": base64::engine::general_purpose::STANDARD.encode(body),
     });
-    let mut request = shared.client.post(url).json(&payload);
+    let mut request = shared
+        .client
+        .post(url)
+        .timeout(RUNTIME_GATEWAY_GUARDRAIL_WEBHOOK_TIMEOUT)
+        .json(&payload);
     if let Some(token) = shared.gateway_guardrail_webhook.bearer_token.as_deref() {
         request = request.bearer_auth(token);
     }

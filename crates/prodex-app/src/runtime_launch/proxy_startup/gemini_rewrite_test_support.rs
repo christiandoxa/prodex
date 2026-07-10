@@ -1,9 +1,7 @@
 use super::RuntimeDeepSeekConversationStore;
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
 
 pub(super) fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 pub(super) fn gemini_test_function_call<'a>(

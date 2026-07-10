@@ -6,25 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
-const requestSourcePath = path.join(
+const sourceDir = path.join(
   repoRoot,
-  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-);
-const sseSourcePath = path.join(
-  repoRoot,
-  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs",
-);
-const responseSourcePath = path.join(
-  repoRoot,
-  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_response.rs",
-);
-const liveSourcePath = path.join(
-  repoRoot,
-  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",
-);
-const compactSourcePath = path.join(
-  repoRoot,
-  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup",
 );
 
 const PARITY = Object.freeze([
@@ -184,6 +168,22 @@ function validateSnippetSet(source, label, snippets) {
     .map((snippet) => `${label}: missing schema snippet ${JSON.stringify(snippet)}`);
 }
 
+function readSourceFamily(prefix, extraFiles = []) {
+  const files = fs
+    .readdirSync(sourceDir)
+    .filter(
+      (name) =>
+        name.endsWith(".rs") &&
+        (name === `${prefix}.rs` || name.startsWith(`${prefix}_`)) &&
+        !name.includes("test"),
+    )
+    .concat(extraFiles);
+  return [...new Set(files)]
+    .sort()
+    .map((name) => fs.readFileSync(path.join(sourceDir, name), "utf8"))
+    .join("\n");
+}
+
 function validate(requestSource, responseSource, sseSource, liveSource, compactSource) {
   const failures = [];
   for (const item of PARITY) {
@@ -234,11 +234,14 @@ function main() {
     );
     return;
   }
-  const requestSource = fs.readFileSync(requestSourcePath, "utf8");
-  const responseSource = fs.readFileSync(responseSourcePath, "utf8");
-  const sseSource = fs.readFileSync(sseSourcePath, "utf8");
-  const liveSource = fs.readFileSync(liveSourcePath, "utf8");
-  const compactSource = fs.readFileSync(compactSourcePath, "utf8");
+  const requestSource = readSourceFamily("gemini_request", ["gemini_rewrite.rs"]);
+  const responseSource = readSourceFamily("gemini_response");
+  const sseSource = readSourceFamily("gemini_sse", [
+    "provider_sse_events.rs",
+    "provider_sse_reader.rs",
+  ]);
+  const liveSource = readSourceFamily("local_rewrite_gemini_live");
+  const compactSource = readSourceFamily("local_rewrite_gemini_compact");
   const failures = validate(requestSource, responseSource, sseSource, liveSource, compactSource);
   if (failures.length > 0) {
     for (const failure of failures) {

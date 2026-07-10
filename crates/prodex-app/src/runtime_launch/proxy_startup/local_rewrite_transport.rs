@@ -1,7 +1,9 @@
 use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAuth};
 use super::gemini_rewrite::RuntimeGeminiAuth;
-use super::local_rewrite::RuntimeLocalRewriteProxyShared;
-use super::local_rewrite::schedule_runtime_gateway_billing_ledger_reconcile;
+use super::local_rewrite::{
+    RuntimeLocalRewriteProxyShared, runtime_gateway_try_reserve_background_task,
+    schedule_runtime_gateway_billing_ledger_reconcile,
+};
 use super::local_rewrite_transport_copilot::{
     runtime_copilot_initiator_header, runtime_copilot_request_has_vision_input,
 };
@@ -19,7 +21,9 @@ use runtime_proxy_crate::{
 };
 use std::io::Write;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
     Anthropic { auth: &'a RuntimeAnthropicAuth },
@@ -281,6 +285,43 @@ pub(super) fn emit_runtime_gateway_spend_event(
 ) {
     runtime_proxy_log(&shared.runtime_shared, event.log_message());
     schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
+    if !shared.gateway_observability.sink_enabled("jsonl")
+        && !shared.gateway_observability.sink_enabled("http")
+    {
+        return;
+    }
+    let Some(permit) =
+        runtime_gateway_try_reserve_background_task(&shared.gateway_observability_slots)
+    else {
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_observability_dropped",
+                [
+                    runtime_proxy_log_field("request", event.request.to_string()),
+                    runtime_proxy_log_field("reason", "task_limit"),
+                ],
+            ),
+        );
+        return;
+    };
+    let shared = shared.clone();
+    drop(
+        shared
+            .runtime_shared
+            .async_runtime
+            .clone()
+            .spawn_blocking(move || {
+                let _permit = permit;
+                emit_runtime_gateway_observability_sinks(&shared, &event);
+            }),
+    );
+}
+
+fn emit_runtime_gateway_observability_sinks(
+    shared: &RuntimeLocalRewriteProxyShared,
+    event: &RuntimeProviderGatewaySpendEvent,
+) {
     if shared.gateway_observability.sink_enabled("jsonl")
         && let Some(path) = shared.gateway_observability.jsonl_path.as_ref()
     {
@@ -314,10 +355,14 @@ pub(super) fn emit_runtime_gateway_spend_event(
         && let Some(endpoint) = shared.gateway_observability.http_endpoint.as_deref()
     {
         let payload = runtime_gateway_observability_http_payload(
-            &event,
+            event,
             shared.gateway_observability.http_schema.as_str(),
         );
-        let mut request = shared.client.post(endpoint).json(&payload);
+        let mut request = shared
+            .client
+            .post(endpoint)
+            .timeout(RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT)
+            .json(&payload);
         if let Some(token) = shared.gateway_observability.http_bearer_token.as_deref() {
             request = request.bearer_auth(token);
         }

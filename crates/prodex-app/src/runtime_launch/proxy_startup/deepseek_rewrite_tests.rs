@@ -1,11 +1,34 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
 
     fn conversation_store() -> RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(BTreeMap::new()))
+        RuntimeDeepSeekConversationStore::default()
+    }
+
+    #[test]
+    fn provider_conversation_store_isolates_gateway_namespaces() {
+        let conversations = conversation_store();
+        let tenant_a = conversations.scoped("tenant-a");
+        let tenant_b = conversations.scoped("tenant-b");
+        let history = vec![serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{"id": "call-shared"}],
+        })];
+
+        tenant_a.insert_bounded("resp-shared", history.clone(), 32);
+
+        assert_eq!(tenant_a.history("resp-shared"), Some(history));
+        assert!(tenant_b.history("resp-shared").is_none());
+        assert!(
+            tenant_b
+                .find_history(|messages| runtime_deepseek_history_has_tool_call(
+                    messages,
+                    "call-shared"
+                ))
+                .is_none()
+        );
+        assert_eq!(conversations.lock().unwrap().len(), 1);
     }
 
     #[test]

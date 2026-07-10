@@ -1,11 +1,9 @@
 use super::super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
 use super::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekSseState};
-use std::collections::BTreeMap;
 use std::io::{self, Read};
-use std::sync::{Arc, Mutex};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 #[test]
@@ -27,7 +25,7 @@ fn deepseek_sse_reader_stores_reasoning_content_for_tool_call_replay() {
             "content": "read package metadata"
         })],
         None,
-        Arc::clone(&conversations),
+        conversations.clone(),
     );
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();
@@ -52,7 +50,7 @@ fn deepseek_sse_state_stores_tool_call_snapshot_before_done_event() {
             "content": "read recent commits"
         })],
         None,
-        Arc::clone(&conversations),
+        conversations.clone(),
     );
 
     state.observe_chat_chunk(&serde_json::json!({
@@ -148,7 +146,7 @@ fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
             "content": "run focused tests"
         })],
         None,
-        Arc::clone(&conversations),
+        conversations.clone(),
     );
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();

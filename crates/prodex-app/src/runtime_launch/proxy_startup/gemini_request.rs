@@ -93,12 +93,31 @@ pub(super) const RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT: usize = 64;
 pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD: usize = 50_000;
 pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_PREVIEW_CHARS: usize = 1_000;
 
+#[cfg(test)]
 pub(in super::super) fn runtime_gemini_generate_request_body(
     body: &[u8],
     conversations: &RuntimeDeepSeekConversationStore,
     code_assist: bool,
     project_id: Option<&str>,
     thinking_budget_tokens: Option<u64>,
+) -> Result<RuntimeGeminiTranslatedRequest> {
+    runtime_gemini_generate_request_body_with_local_file_access(
+        body,
+        conversations,
+        code_assist,
+        project_id,
+        thinking_budget_tokens,
+        true,
+    )
+}
+
+pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_access(
+    body: &[u8],
+    conversations: &RuntimeDeepSeekConversationStore,
+    code_assist: bool,
+    project_id: Option<&str>,
+    thinking_budget_tokens: Option<u64>,
+    allow_local_file_access: bool,
 ) -> Result<RuntimeGeminiTranslatedRequest> {
     let original: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
@@ -123,12 +142,18 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
         .unwrap_or(false);
 
     let mut request = serde_json::Map::new();
-    if let Some(system_instruction) = runtime_gemini_system_instruction(&chat_value, &original) {
+    if let Some(system_instruction) =
+        runtime_gemini_system_instruction(&chat_value, &original, allow_local_file_access)
+    {
         request.insert("systemInstruction".to_string(), system_instruction);
     }
     request.insert(
         "contents".to_string(),
-        serde_json::Value::Array(runtime_gemini_contents_from_chat(&chat_value, &original)),
+        serde_json::Value::Array(runtime_gemini_contents_from_chat(
+            &chat_value,
+            &original,
+            allow_local_file_access,
+        )),
     );
     if let Some(tools) = runtime_gemini_tools_from_requests(&original, &chat_value, &model) {
         request.insert("tools".to_string(), tools);
@@ -156,8 +181,10 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
     if let Some(labels) = original.get("labels").filter(|value| !value.is_null()) {
         request.insert("labels".to_string(), labels.clone());
     }
-    runtime_gemini_export_checkpoint(&original, &request)
-        .context("failed to export Gemini session checkpoint")?;
+    if allow_local_file_access {
+        runtime_gemini_export_checkpoint(&original, &request)
+            .context("failed to export Gemini session checkpoint")?;
+    }
 
     let body_value = if code_assist {
         serde_json::json!({
@@ -181,8 +208,9 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
 fn runtime_gemini_contents_from_chat(
     chat: &serde_json::Value,
     original: &serde_json::Value,
+    allow_local_file_access: bool,
 ) -> Vec<serde_json::Value> {
-    let mut contents = runtime_gemini_imported_session_contents(original);
+    let mut contents = runtime_gemini_imported_session_contents(original, allow_local_file_access);
     let mut tool_names_by_call_id = BTreeMap::new();
     let Some(messages) = chat.get("messages").and_then(serde_json::Value::as_array) else {
         return contents;
@@ -274,6 +302,7 @@ fn runtime_gemini_contents_from_chat(
                         "functionResponse": runtime_gemini_function_response_from_tool_message(
                             &messages[index],
                             &tool_names_by_call_id,
+                            allow_local_file_access,
                         ),
                     }));
                     index += 1;
@@ -303,7 +332,7 @@ fn runtime_gemini_contents_from_chat(
             "parts": [{ "text": "" }],
         }));
     }
-    let extra_parts = runtime_gemini_input_extra_parts(original);
+    let extra_parts = runtime_gemini_input_extra_parts(original, allow_local_file_access);
     if !extra_parts.is_empty() {
         runtime_gemini_append_media_parts_to_last_user_content(&mut contents, extra_parts);
     }
@@ -332,35 +361,43 @@ fn runtime_gemini_append_media_parts_to_last_user_content(
     }));
 }
 
-fn runtime_gemini_input_extra_parts(original: &serde_json::Value) -> Vec<serde_json::Value> {
+fn runtime_gemini_input_extra_parts(
+    original: &serde_json::Value,
+    allow_local_file_access: bool,
+) -> Vec<serde_json::Value> {
     let mut parts = Vec::new();
     if let Some(input) = original.get("input").and_then(serde_json::Value::as_array) {
         for item in input {
-            runtime_gemini_collect_media_parts(item, &mut parts);
+            runtime_gemini_collect_media_parts(item, &mut parts, allow_local_file_access);
         }
     }
-    let mut budget = RuntimeGeminiFileReadBudget::default();
-    runtime_gemini_collect_explicit_file_parts(original, &mut parts, &mut budget);
-    runtime_gemini_collect_at_path_parts(original, &mut parts, &mut budget);
+    if allow_local_file_access {
+        let mut budget = RuntimeGeminiFileReadBudget::default();
+        runtime_gemini_collect_explicit_file_parts(original, &mut parts, &mut budget);
+        runtime_gemini_collect_at_path_parts(original, &mut parts, &mut budget);
+    }
     parts
 }
 
 fn runtime_gemini_collect_media_parts(
     value: &serde_json::Value,
     parts: &mut Vec<serde_json::Value>,
+    allow_local_file_access: bool,
 ) {
     match value {
         serde_json::Value::Array(values) => {
             for value in values {
-                runtime_gemini_collect_media_parts(value, parts);
+                runtime_gemini_collect_media_parts(value, parts, allow_local_file_access);
             }
         }
         serde_json::Value::Object(object) => {
-            if let Some(part) = runtime_gemini_media_part_from_content_object(object) {
+            if let Some(part) =
+                runtime_gemini_media_part_from_content_object(object, allow_local_file_access)
+            {
                 parts.push(part);
             }
             if let Some(content) = object.get("content") {
-                runtime_gemini_collect_media_parts(content, parts);
+                runtime_gemini_collect_media_parts(content, parts, allow_local_file_access);
             }
         }
         _ => {}
@@ -369,6 +406,7 @@ fn runtime_gemini_collect_media_parts(
 
 fn runtime_gemini_media_part_from_content_object(
     object: &serde_json::Map<String, serde_json::Value>,
+    allow_local_file_access: bool,
 ) -> Option<serde_json::Value> {
     let kind = object
         .get("type")
@@ -383,7 +421,7 @@ fn runtime_gemini_media_part_from_content_object(
             runtime_gemini_media_part_from_uri_or_data_url(image_url, None)
         }
         "input_file" | "file" | "media" | "input_audio" | "input_video" => {
-            runtime_gemini_media_part_from_generic_content_object(object)
+            runtime_gemini_media_part_from_generic_content_object(object, allow_local_file_access)
         }
         _ => None,
     }
@@ -400,6 +438,7 @@ pub(in super::super) fn runtime_gemini_image_url_value(value: &serde_json::Value
 
 fn runtime_gemini_media_part_from_generic_content_object(
     object: &serde_json::Map<String, serde_json::Value>,
+    allow_local_file_access: bool,
 ) -> Option<serde_json::Value> {
     let mime_type = object
         .get("mime_type")
@@ -428,6 +467,9 @@ fn runtime_gemini_media_part_from_generic_content_object(
     if let Some(uri) = uri {
         return runtime_gemini_media_part_from_uri_or_data_url(uri, mime_type);
     }
+    if !allow_local_file_access {
+        return None;
+    }
     let path = object
         .get("path")
         .or_else(|| object.get("file_path"))
@@ -440,6 +482,7 @@ fn runtime_gemini_media_part_from_generic_content_object(
 fn runtime_gemini_function_response_from_tool_message(
     message: &serde_json::Value,
     tool_names_by_call_id: &BTreeMap<String, String>,
+    persist_tool_output: bool,
 ) -> serde_json::Value {
     let call_id = message
         .get("tool_call_id")
@@ -459,7 +502,12 @@ fn runtime_gemini_function_response_from_tool_message(
                 "output": text
             })
         });
-    let response = runtime_gemini_mask_tool_response_for_history(&name, call_id, response);
+    let response = runtime_gemini_mask_tool_response_for_history(
+        &name,
+        call_id,
+        response,
+        persist_tool_output,
+    );
     runtime_gemini_function_response_part(call_id, &name, response)
 }
 
@@ -515,10 +563,9 @@ fn chat_message_text(message: &serde_json::Value) -> Option<String> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Arc, Mutex};
 
     fn test_conversation_store() -> RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(std::collections::BTreeMap::new()))
+        RuntimeDeepSeekConversationStore::default()
     }
 
     #[test]
@@ -696,6 +743,52 @@ mod tests {
         assert_eq!(
             exported["request"]["contents"][0]["parts"][0]["text"],
             "Persist this translated request"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gemini_gateway_translation_does_not_access_request_selected_local_files() {
+        let directory = std::env::temp_dir().join(format!(
+            "prodex-gemini-gateway-files-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let secret = directory.join("secret.txt");
+        let checkpoint = directory.join("checkpoint.json");
+        fs::write(&secret, "gateway-must-not-read-this-secret").unwrap();
+        let body = serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": format!("Review @\"{}\"", secret.display()),
+            "include_paths": [secret.clone()],
+            "gemini_memory_file": secret.clone(),
+            "gemini_session_file": secret.clone(),
+            "gemini_export_file": checkpoint.clone(),
+        });
+
+        let translated = runtime_gemini_generate_request_body_with_local_file_access(
+            &serde_json::to_vec(&body).unwrap(),
+            &test_conversation_store(),
+            false,
+            None,
+            None,
+            false,
+        )
+        .expect("gateway request should translate without host file access");
+
+        assert!(
+            !String::from_utf8_lossy(&translated.body)
+                .contains("gateway-must-not-read-this-secret")
+        );
+        assert!(!checkpoint.exists());
+        assert!(
+            runtime_gemini_input_extra_parts(
+                &serde_json::json!({
+                    "input": [{"type": "input_file", "path": secret}],
+                }),
+                false,
+            )
+            .is_empty()
         );
         fs::remove_dir_all(directory).unwrap();
     }

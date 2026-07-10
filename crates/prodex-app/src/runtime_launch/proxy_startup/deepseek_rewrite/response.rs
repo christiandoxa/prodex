@@ -17,6 +17,10 @@ use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
 use prodex_provider_core::ProviderTransformLoss;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const RUNTIME_PROVIDER_CONVERSATION_LIMIT: usize = 32;
+const RUNTIME_PROVIDER_CONVERSATION_MAX_BYTES: usize = 4 * 1024 * 1024;
+const RUNTIME_PROVIDER_PENDING_REQUEST_LIMIT: usize = 64;
+
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(
     status: u16,
     response: reqwest::blocking::Response,
@@ -90,6 +94,26 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_take_pending_me
         .unwrap_or_default()
 }
 
+pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_remember_pending_request(
+    pending: &RuntimeDeepSeekPendingMessages,
+    request_id: u64,
+    request: RuntimeDeepSeekPendingRequest,
+) {
+    if let Ok(mut pending) = pending.lock() {
+        pending.insert(request_id, request);
+        while pending.len() > RUNTIME_PROVIDER_PENDING_REQUEST_LIMIT {
+            let Some(stale_id) = pending
+                .keys()
+                .find(|candidate| **candidate != request_id)
+                .copied()
+            else {
+                break;
+            };
+            pending.remove(&stale_id);
+        }
+    }
+}
+
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_store_conversation(
     conversations: &RuntimeDeepSeekConversationStore,
     response_id: &str,
@@ -104,9 +128,13 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_store_conversat
             .into_iter()
             .map(runtime_deepseek_normalize_assistant_tool_call_content),
     );
-    if let Ok(mut conversations) = conversations.lock() {
-        conversations.insert(response_id.to_string(), messages);
+    let Ok(encoded) = serde_json::to_vec(&messages) else {
+        return;
+    };
+    if encoded.len() > RUNTIME_PROVIDER_CONVERSATION_MAX_BYTES {
+        return;
     }
+    conversations.insert_bounded(response_id, messages, RUNTIME_PROVIDER_CONVERSATION_LIMIT);
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_merge_response_metadata(
@@ -530,4 +558,62 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_created_at() ->
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn provider_conversation_store_is_bounded() {
+        let conversations = RuntimeDeepSeekConversationStore::default();
+        for index in 0..=RUNTIME_PROVIDER_CONVERSATION_LIMIT {
+            runtime_deepseek_store_conversation(
+                &conversations,
+                &format!("resp-{index:03}"),
+                vec![serde_json::json!({"role": "user", "content": index})],
+                Vec::new(),
+            );
+        }
+
+        let conversations = conversations.lock().unwrap();
+        assert_eq!(conversations.len(), RUNTIME_PROVIDER_CONVERSATION_LIMIT);
+        assert!(
+            conversations.contains_key(&format!("resp-{:03}", RUNTIME_PROVIDER_CONVERSATION_LIMIT))
+        );
+    }
+
+    #[test]
+    fn provider_conversation_store_rejects_oversized_history() {
+        let conversations = RuntimeDeepSeekConversationStore::default();
+        runtime_deepseek_store_conversation(
+            &conversations,
+            "resp-large",
+            vec![serde_json::json!({
+                "role": "user",
+                "content": "x".repeat(RUNTIME_PROVIDER_CONVERSATION_MAX_BYTES),
+            })],
+            Vec::new(),
+        );
+
+        assert!(conversations.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn provider_pending_request_store_is_bounded() {
+        let pending = Arc::new(Mutex::new(BTreeMap::new()));
+        for request_id in 0..=RUNTIME_PROVIDER_PENDING_REQUEST_LIMIT as u64 {
+            runtime_deepseek_remember_pending_request(
+                &pending,
+                request_id,
+                RuntimeDeepSeekPendingRequest::default(),
+            );
+        }
+
+        let pending = pending.lock().unwrap();
+        assert_eq!(pending.len(), RUNTIME_PROVIDER_PENDING_REQUEST_LIMIT);
+        assert!(pending.contains_key(&(RUNTIME_PROVIDER_PENDING_REQUEST_LIMIT as u64)));
+    }
 }

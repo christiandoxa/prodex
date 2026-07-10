@@ -1,6 +1,6 @@
 use super::local_rewrite::{
     RUNTIME_GATEWAY_REDIS_LEDGER_KEY, RUNTIME_GATEWAY_REDIS_LEDGER_LOCK,
-    RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteProxyShared, runtime_gateway_try_reserve_background_task,
 };
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
 use super::local_rewrite_gateway_file_ledger::{
@@ -58,10 +58,25 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
     if !should_reconcile {
         return;
     }
+    let Some(permit) = runtime_gateway_try_reserve_background_task(&shared.gateway_reconcile_slots)
+    else {
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_billing_ledger_reconcile_dropped",
+                [
+                    runtime_proxy_log_field("request", event.request.to_string()),
+                    runtime_proxy_log_field("reason", "task_limit"),
+                ],
+            ),
+        );
+        return;
+    };
     let state_store = shared.gateway_state_store.clone();
     let runtime_shared = shared.runtime_shared.clone();
     let request_ids = Arc::clone(&shared.gateway_usage.request_ids);
     shared.runtime_shared.async_runtime.spawn_blocking(move || {
+        let _permit = permit;
         let mut last_error = None;
         for attempt in 0..25 {
             match runtime_gateway_billing_ledger_reconcile_response(&state_store, &event) {

@@ -188,6 +188,14 @@ pub(super) fn start_runtime_websocket_upstream_session(
                         },
                     ));
                 }
+                Ok(RuntimeWebsocketConnectResult::Rejected(payload)) => {
+                    return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
+                        RuntimeWebsocketAttempt::Rejected {
+                            profile_name: profile_name.to_string(),
+                            payload,
+                        },
+                    ));
+                }
                 Err(_err) if precommit_transport_retry_allowed => {
                     return Ok(RuntimeWebsocketSessionStartDecision::Attempt(
                         RuntimeWebsocketAttempt::TransportFailed {

@@ -167,14 +167,23 @@ where
 }
 
 fn runtime_gateway_csv_cell(csv: &mut String, value: &str) {
+    let formula_like = value
+        .trim_start_matches([' ', '\t', '\r'])
+        .starts_with(['=', '+', '-', '@']);
     let needs_quote = value
         .bytes()
         .any(|byte| matches!(byte, b',' | b'"' | b'\n' | b'\r'));
     if !needs_quote {
+        if formula_like {
+            csv.push('\'');
+        }
         csv.push_str(value);
         return;
     }
     csv.push('"');
+    if formula_like {
+        csv.push('\'');
+    }
     for ch in value.chars() {
         if ch == '"' {
             csv.push('"');
@@ -218,6 +227,24 @@ mod tests {
         }]);
         assert!(csv.contains("prodex-1,\"team,\"\"a\"\"\",gpt-5.4"));
         assert!(csv.starts_with("call_id,key_name,model"));
+    }
+
+    #[test]
+    fn ledger_csv_neutralizes_spreadsheet_formulas() {
+        let csv = runtime_gateway_billing_ledger_csv(&[LedgerRecord {
+            call_id: "prodex-1".to_string(),
+            key_name: "team-a".to_string(),
+            model: "=HYPERLINK(\"https://example.test\")".to_string(),
+            phase: "request".to_string(),
+            request: 1,
+            created_at_epoch: 2,
+            minute_epoch: 3,
+            input_tokens: 4,
+            output_tokens: Some(5),
+            response_status: Some(200),
+        }]);
+
+        assert!(csv.contains("\"'=HYPERLINK(\"\"https://example.test\"\")\""));
     }
 
     #[test]

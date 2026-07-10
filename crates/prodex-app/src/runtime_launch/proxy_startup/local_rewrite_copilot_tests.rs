@@ -29,7 +29,7 @@ fn copilot_pool(profile_names: &[&str]) -> RuntimeCopilotOAuthPool {
 }
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 fn temp_copilot_instruction_root(name: &str) -> std::path::PathBuf {

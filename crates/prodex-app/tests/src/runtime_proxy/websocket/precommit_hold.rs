@@ -1,6 +1,99 @@
 use super::*;
 
 #[test]
+fn websocket_precommit_hold_commits_when_lookahead_budget_is_exhausted() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(
+                serde_json::json!({
+                    "type": "response.in_progress",
+                    "padding": "x".repeat(RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES),
+                })
+                .to_string()
+                .into(),
+            ))
+            .expect("upstream should send oversized precommit metadata");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.completed","response":{"id":"resp-budget"}}"#
+                    .to_string()
+                    .into(),
+            ))
+            .expect("upstream should send response.completed");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("precommit-hold-budget", upstream_addr);
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let attempt_shared = shared.clone();
+    let attempt = thread::spawn(move || {
+        let mut websocket_session = RuntimeWebsocketSessionState::default();
+        attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+            request_id: 41,
+            local_socket: &mut local_socket,
+            handshake_request: &handshake_request,
+            request_text: r#"{"type":"response.create"}"#,
+            request_previous_response_id: None,
+            request_prompt_cache_key: None,
+            request_session_id: None,
+            request_turn_state: None,
+            shared: &attempt_shared,
+            websocket_session: &mut websocket_session,
+            profile_name: "main",
+            turn_state_override: None,
+            promote_committed_profile: true,
+        })
+    });
+
+    let in_progress = client_socket
+        .read()
+        .expect("client should receive precommit metadata after the byte budget");
+    let completed = client_socket
+        .read()
+        .expect("client should receive response.completed");
+    assert!(in_progress.to_string().contains("response.in_progress"));
+    assert!(completed.to_string().contains("response.completed"));
+    assert!(matches!(
+        attempt
+            .join()
+            .expect("websocket attempt thread should finish")
+            .expect("websocket attempt should succeed"),
+        RuntimeWebsocketAttempt::Delivered
+    ));
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+
+    let log =
+        read_websocket_test_log_after_marker(&shared.log_path, "event=lookahead_budget_exhausted");
+    assert!(
+        log.contains("websocket_precommit_hold_promoted")
+            && log.contains("event=lookahead_budget_exhausted")
+            && log.contains("request=41 transport=websocket committed profile=main"),
+        "the byte budget should commit and release buffered frames: {log}"
+    );
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
 fn websocket_precommit_hold_response_created_commits_at_terminal_event() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")

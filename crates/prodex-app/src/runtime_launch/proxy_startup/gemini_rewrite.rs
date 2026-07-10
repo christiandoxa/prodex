@@ -42,8 +42,11 @@ mod gemini_response;
 #[path = "gemini_schema.rs"]
 mod gemini_schema;
 
+#[cfg(test)]
+pub(super) use gemini_request::runtime_gemini_generate_request_body;
 pub(super) use gemini_request::{
-    runtime_gemini_blocked_tool_call_message, runtime_gemini_generate_request_body,
+    runtime_gemini_blocked_tool_call_message,
+    runtime_gemini_generate_request_body_with_local_file_access,
     runtime_gemini_request_body_without_tool,
 };
 pub(super) use gemini_response::{

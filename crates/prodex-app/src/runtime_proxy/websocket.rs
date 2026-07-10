@@ -336,7 +336,16 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                         runtime_websocket_error_payload_from_http_body(&body),
                     ));
                 }
-                bail!("runtime websocket upstream rejected the handshake with HTTP {status}");
+                let payload = if body.is_empty() {
+                    RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+                        status,
+                        "upstream_rejected",
+                        &format!("Upstream rejected the WebSocket handshake with HTTP {status}."),
+                    ))
+                } else {
+                    runtime_websocket_error_payload_from_http_body(&body)
+                };
+                return Ok(RuntimeWebsocketConnectResult::Rejected(payload));
             }
             Err(err) => {
                 return Err(runtime_websocket_connect_transport_error(

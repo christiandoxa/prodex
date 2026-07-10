@@ -6,6 +6,8 @@ use super::provider_bridge::{
 use crate::RuntimeProxyRequest;
 use std::collections::BTreeMap;
 
+pub(super) const RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT: usize = 4096;
+
 #[derive(Debug, Default)]
 pub(super) struct RuntimeLocalRewriteModelMemoryState {
     selected_models: BTreeMap<String, String>,
@@ -82,6 +84,17 @@ impl RuntimeLocalRewriteModelMemoryState {
     pub(super) fn remember_selected_model(&mut self, scope: &str, model: &str) {
         self.selected_models
             .insert(scope.to_string(), model.trim().to_string());
+        while self.selected_models.len() > RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT {
+            let Some(stale_scope) = self
+                .selected_models
+                .keys()
+                .find(|candidate| candidate.as_str() != scope)
+                .cloned()
+            else {
+                break;
+            };
+            self.selected_models.remove(&stale_scope);
+        }
     }
 
     pub(super) fn selected_model(&self, scope: &str) -> Option<String> {

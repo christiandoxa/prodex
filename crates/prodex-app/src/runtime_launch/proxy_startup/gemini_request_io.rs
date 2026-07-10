@@ -14,10 +14,24 @@ pub(super) fn runtime_gemini_read_text_limited(path: &Path, limit: usize) -> Opt
         return None;
     }
     let file = fs::File::open(path).ok()?;
+    if !runtime_gemini_same_text_file(&metadata, &file.metadata().ok()?) {
+        return None;
+    }
     let mut reader = file.take(limit as u64);
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes).ok()?;
     Some(String::from_utf8_lossy(&bytes).to_string())
+}
+
+#[cfg(unix)]
+fn runtime_gemini_same_text_file(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_gemini_same_text_file(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
+    true
 }
 
 pub(super) fn runtime_gemini_path_has_symlink_component(path: &Path) -> bool {
@@ -62,10 +76,11 @@ pub(super) fn runtime_gemini_collect_path_values(
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn gemini_read_text_limited_rejects_symlink_components() {
         let root = std::env::temp_dir().join(format!(

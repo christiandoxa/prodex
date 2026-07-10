@@ -1,8 +1,11 @@
 use super::gemini_rewrite::RuntimeGeminiOAuthProfileAuth;
+#[cfg(test)]
+use super::gemini_rewrite::runtime_gemini_generate_request_body;
 use super::gemini_rewrite::{
     RuntimeGeminiAuth, RuntimeGeminiProviderAuth, RuntimeGeminiTranslatedRequest,
-    runtime_gemini_generate_request_body, runtime_gemini_native_request_body,
-    runtime_gemini_project_id, runtime_gemini_request_upstream_url,
+    runtime_gemini_generate_request_body_with_local_file_access,
+    runtime_gemini_native_request_body, runtime_gemini_project_id,
+    runtime_gemini_request_upstream_url,
 };
 #[cfg(test)]
 use super::gemini_sse::RuntimeGeminiBindingRecorder;
@@ -46,7 +49,6 @@ use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use std::io::Read;
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -189,6 +191,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 model_chain = available_chain;
             }
         }
+        let conversations = shared.gemini_conversations_for_request(request);
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = if responses_route {
                 runtime_provider_request_body_with_model(&base_body, model)
@@ -213,12 +216,13 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 );
             }
             let mut translated = if responses_route {
-                runtime_gemini_generate_request_body(
+                runtime_gemini_generate_request_body_with_local_file_access(
                     &model_body,
-                    &shared.gemini_conversations,
+                    &conversations,
                     matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }),
                     runtime_gemini_project_id(&selected.auth),
                     thinking_budget_tokens,
+                    shared.allow_local_file_access,
                 )?
             } else {
                 RuntimeGeminiTranslatedRequest {
@@ -247,6 +251,7 @@ pub(super) fn send_runtime_gemini_upstream_request(
                 shared,
                 &selected,
                 &translated,
+                &conversations,
             )? {
                 return Ok(result);
             }
@@ -901,11 +906,9 @@ mod tests {
         ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformLoss,
         ProviderTransformResult, ProviderWireFormat, provider_translator,
     };
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
 
     fn conversation_store() -> super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(BTreeMap::new()))
+        super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore::default()
     }
 
     #[test]
@@ -1158,6 +1161,7 @@ fn runtime_gemini_exact_output_short_circuit(
     shared: &RuntimeLocalRewriteProxyShared,
     selected: &RuntimeGeminiSelectedAuth,
     translated: &RuntimeGeminiTranslatedRequest,
+    conversations: &super::deepseek_rewrite::RuntimeDeepSeekConversationStore,
 ) -> Result<Option<RuntimeLocalRewriteUpstreamResult>> {
     if !translated.stream {
         return Ok(None);
@@ -1184,7 +1188,7 @@ fn runtime_gemini_exact_output_short_circuit(
         std::io::Cursor::new(fake_stream.into_bytes()),
         request_id,
         translated.messages.clone(),
-        Arc::clone(&shared.gemini_conversations),
+        conversations.clone(),
         binding_recorder,
     );
     let mut body = String::new();

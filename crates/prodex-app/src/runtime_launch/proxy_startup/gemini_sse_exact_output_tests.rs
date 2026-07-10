@@ -1,10 +1,8 @@
 use super::{RuntimeDeepSeekConversationStore, RuntimeGeminiGenerateSseReader};
-use std::collections::BTreeMap;
 use std::io::Read;
-use std::sync::{Arc, Mutex};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 #[test]

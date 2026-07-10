@@ -205,6 +205,7 @@ prodex s
 ```
 
 </details>
+
 ## Quick start
 
 <details>
@@ -311,14 +312,6 @@ This reads the installed Kiro CLI state from the local auth database, snapshots 
 - launch-time full access.
 - optional Presidio redaction.
 
-The effective launch is:
-
-```bash
-prodex caveman rtk ponytail --full-access
-```
-
-Answer `y` at the Presidio prompt, or pass `--presidio`, to add runtime PII redaction. Use `--no-presidio` for non-interactive launches. Full access maps to Codex's sandbox bypass and trusts only the launch directory for that session.
-
 ```bash
 prodex s
 prodex s exec "review this repo"
@@ -327,11 +320,25 @@ prodex s doctor --presidio --strict
 prodex s expose
 ```
 
+<details>
+<summary>Super launch details</summary>
+
+The effective launch is:
+
+```bash
+prodex caveman rtk ponytail --full-access
+```
+
+Answer `y` at the Presidio prompt, or pass `--presidio`, to add runtime PII redaction. Use `--no-presidio` for non-interactive launches. Full access maps to Codex's sandbox bypass and trusts only the launch directory for that session.
+
 `prodex s expose` starts a token-protected browser terminal and uses a Cloudflare quick tunnel when `cloudflared` is available. Add `--no-tunnel` for loopback-only access.
 
 Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
 Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
+
+</details>
+
 ## Commands
 
 <details>

@@ -1,6 +1,60 @@
 use super::*;
 
 #[test]
+fn websocket_upstream_handshake_rejection_preserves_status() {
+    let _guard = acquire_test_runtime_lock();
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("upstream listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream address should resolve");
+    let upstream = thread::spawn(move || {
+        let (mut stream, _) = listener
+            .accept()
+            .expect("upstream should accept connection");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 512];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).expect("handshake should read");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        let body = r#"{"error":{"code":"invalid_request_error","message":"unsupported beta"}}"#;
+        write!(
+            stream,
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("rejection should write");
+    });
+    let shared = websocket_test_shared_with_main_profile("handshake-rejected", upstream_addr);
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let result =
+        connect_runtime_proxy_upstream_websocket(36, &handshake_request, &shared, "main", None)
+            .expect("upstream HTTP rejection should remain a proxy result");
+
+    assert!(
+        matches!(
+            &result,
+            RuntimeWebsocketConnectResult::Rejected(RuntimeWebsocketErrorPayload::Text(body))
+                if body.contains("upstream_rejected") && body.contains("\"status\":400")
+        ),
+        "unexpected rejection: {result:?}"
+    );
+    upstream.join().expect("upstream thread should finish");
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
 fn websocket_fresh_connect_failure_returns_retryable_transport_attempt() {
     let _guard = acquire_test_runtime_lock();
     let _env_lock = TestEnvVarGuard::lock();

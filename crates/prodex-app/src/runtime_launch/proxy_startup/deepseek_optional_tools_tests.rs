@@ -1,11 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
 
     fn conversation_store() -> RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(BTreeMap::new()))
+        RuntimeDeepSeekConversationStore::default()
     }
 
     #[test]

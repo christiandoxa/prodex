@@ -364,7 +364,7 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     let state = AppState::load(&paths)?;
     let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
     let gateway = resolve_gateway_launch_config(&paths, &state, &args, &policy)?;
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+    let proxy = start_runtime_gateway_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &state,
         upstream_base_url: gateway.upstream_base_url,

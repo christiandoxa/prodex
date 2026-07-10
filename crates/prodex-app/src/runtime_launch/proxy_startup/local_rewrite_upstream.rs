@@ -1,6 +1,6 @@
 use super::deepseek_rewrite::{
     RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
-    runtime_chat_compatible_request_body,
+    runtime_chat_compatible_request_body, runtime_deepseek_remember_pending_request,
 };
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_copilot::{
@@ -86,6 +86,7 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )
     .into_owned();
+    let deepseek_conversations = shared.deepseek_conversations_for_request(request);
     match &shared.provider {
         RuntimeLocalRewriteProviderOptions::Anthropic { auth } => {
             let auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
@@ -117,21 +118,16 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             runtime_provider_request_body_with_model(&model_selection.body, model);
                         let translated = runtime_chat_compatible_request_body(
                             &model_body,
-                            &shared.deepseek_conversations,
+                            &deepseek_conversations,
                             RuntimeProviderBridgeKind::Anthropic,
                             prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
                             false,
                             RuntimeDeepSeekRewriteOptions::default(),
                         )?;
-                        if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                            pending.insert(
-                                request_id,
-                                RuntimeDeepSeekPendingRequest {
-                                    messages: translated.messages,
-                                    response_metadata: translated.response_metadata,
-                                },
-                            );
-                        }
+                        let pending_request = RuntimeDeepSeekPendingRequest {
+                            messages: translated.messages,
+                            response_metadata: translated.response_metadata,
+                        };
                         let send_result =
                             send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                                 RuntimeLocalRewriteSearchFallbackRequest {
@@ -150,6 +146,11 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             )?;
                         let (status, parts, class) = match send_result {
                             RuntimeLocalRewritePreparedSendResult::Live(response) => {
+                                runtime_deepseek_remember_pending_request(
+                                    &shared.deepseek_pending_messages,
+                                    request_id,
+                                    pending_request,
+                                );
                                 return Ok(RuntimeLocalRewriteUpstreamResult {
                                     response: RuntimeLocalRewriteUpstreamResponse::Live(
                                         RuntimeLocalRewriteLiveResponse::new(response),

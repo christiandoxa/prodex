@@ -1,6 +1,9 @@
 use super::super::gemini_rewrite::RuntimeGeminiProviderAuth;
 use super::*;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::thread;
+use std::time::Duration;
 use tiny_http::{Response as TinyResponse, Server as TinyServer};
 
 fn start_guardrail_webhook_response(body: &'static str) -> std::net::SocketAddr {
@@ -78,6 +81,127 @@ fn gateway_realtime_websocket_requires_virtual_key_auth() {
     assert_eq!(response.status().as_u16(), 401);
     let body: serde_json::Value = response.json().expect("error response should be json");
     assert_eq!(body["error"]["code"], "invalid_gateway_key");
+}
+
+#[test]
+fn gateway_virtual_key_auth_rejects_before_reading_request_body() {
+    let root = temp_root("gateway-header-auth");
+    let paths = app_paths_for_root(root);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "http://127.0.0.1:9/v1".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("team-a-token"),
+            allowed_models: Vec::new(),
+            budget_microusd: None,
+            request_budget: None,
+            rpm_limit: None,
+            tpm_limit: None,
+        }],
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let mut stream = TcpStream::connect(proxy.listen_addr).expect("gateway should accept TCP");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    write!(
+        stream,
+        "POST /v1/responses HTTP/1.1\r\nHost: {}\r\nContent-Length: 1048576\r\n\r\n",
+        proxy.listen_addr
+    )
+    .expect("request headers should write");
+    let mut response = [0_u8; 4096];
+    let read = stream
+        .read(&mut response)
+        .expect("gateway should reject without waiting for the declared body");
+    let response = String::from_utf8_lossy(&response[..read]);
+
+    assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+    assert!(response.contains("invalid_gateway_key"), "{response}");
+}
+
+#[test]
+fn gateway_admin_auth_rejects_before_reading_request_body() {
+    let root = temp_root("gateway-admin-header-auth");
+    let paths = app_paths_for_root(root);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "http://127.0.0.1:9/v1".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: vec![RuntimeGatewayAdminToken {
+            name: "admin".to_string(),
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("admin-token"),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        }],
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+
+    let mut stream = TcpStream::connect(proxy.listen_addr).expect("gateway should accept TCP");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    write!(
+        stream,
+        "POST /v1/prodex/gateway/keys HTTP/1.1\r\nHost: {}\r\nContent-Length: 1048576\r\n\r\n",
+        proxy.listen_addr
+    )
+    .expect("request headers should write");
+    let mut response = [0_u8; 4096];
+    let read = stream
+        .read(&mut response)
+        .expect("gateway should reject without waiting for the declared body");
+    let response = String::from_utf8_lossy(&response[..read]);
+
+    assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+    assert!(response.contains("invalid_admin_token"), "{response}");
 }
 
 #[test]

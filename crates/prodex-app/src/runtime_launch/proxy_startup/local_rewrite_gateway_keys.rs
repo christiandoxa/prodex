@@ -69,20 +69,38 @@ fn runtime_gateway_route_load_snapshot(
         .map_err(|_| runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)
 }
 
-fn runtime_gateway_usage_snapshot(
-    usage: std::sync::LockResult<
-        std::sync::MutexGuard<
-            '_,
-            BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>,
-        >,
-    >,
+fn runtime_gateway_admit_virtual_key(
+    usage: &std::sync::Mutex<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>>,
+    key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
+    active_keys: &[runtime_proxy_crate::RuntimeGatewayVirtualKey],
+    body: &[u8],
+    estimated_cost_microusd: Option<u64>,
+    minute_epoch: u64,
 ) -> Result<
-    BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>,
+    runtime_proxy_crate::RuntimeGatewayVirtualKeyAdmission,
     runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
 > {
-    usage
-        .map(|usage| usage.clone())
-        .map_err(|_| runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)
+    let mut usage = usage.lock().map_err(|_| {
+        runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+    })?;
+    if let Some(rejection) =
+        runtime_gateway_budget_group_rejection(key, active_keys, &usage, estimated_cost_microusd)
+    {
+        return Err(rejection);
+    }
+    let admission = runtime_proxy_crate::runtime_gateway_virtual_key_admission(
+        key,
+        usage.get(&key.name),
+        body,
+        estimated_cost_microusd,
+        minute_epoch,
+    )?;
+    runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(
+        usage.entry(admission.key_name.clone()).or_default(),
+        &admission,
+        minute_epoch,
+    );
+    Ok(admission)
 }
 
 pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
@@ -189,7 +207,7 @@ pub(super) fn runtime_gateway_virtual_key_store_load(
     runtime_gateway_virtual_key_store_load_strict(state_store, log_path).unwrap_or_default()
 }
 
-pub(super) fn runtime_gateway_websocket_rejection(
+pub(super) fn runtime_gateway_request_header_rejection(
     request_id: u64,
     request: &tiny_http::Request,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -230,14 +248,14 @@ pub(super) fn runtime_gateway_websocket_rejection(
         .err()
 }
 
-pub(super) fn runtime_gateway_virtual_key_rejection(
+pub(super) fn runtime_gateway_virtual_key_admission(
     request_id: u64,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> Option<runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection> {
+) -> Result<Option<String>, runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection> {
     if path_without_query(&captured.path_and_query) == runtime_proxy_crate::LOCAL_BRIDGE_HEALTH_PATH
     {
-        return None;
+        return Ok(None);
     }
     if let Some(auth_token_hash) = shared.gateway_auth_token_hash.as_ref()
         && captured.headers.iter().any(|(name, value)| {
@@ -245,7 +263,7 @@ pub(super) fn runtime_gateway_virtual_key_rejection(
                 && auth_token_hash.verify_authorization_header(value)
         })
     {
-        return None;
+        return Ok(None);
     }
     let snapshot = match runtime_gateway_virtual_key_snapshot(shared.gateway_virtual_keys.lock()) {
         Ok(snapshot) => snapshot,
@@ -257,20 +275,20 @@ pub(super) fn runtime_gateway_virtual_key_rejection(
                     [runtime_proxy_log_field("request", request_id.to_string())],
                 ),
             );
-            return Some(rejection);
+            return Err(rejection);
         }
     };
     let active_keys = snapshot.active_keys;
     if active_keys.is_empty() && snapshot.configured_count > 0 {
-        return Some(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken);
+        return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken);
     }
     let key = match runtime_proxy_crate::runtime_gateway_virtual_key_from_headers(
         &captured.headers,
         &active_keys,
     ) {
         Ok(Some(key)) => key,
-        Ok(None) => return None,
-        Err(rejection) => return Some(rejection),
+        Ok(None) => return Ok(None),
+        Err(rejection) => return Err(rejection),
     };
     let model = runtime_proxy_crate::runtime_gateway_request_model(&captured.body)
         .unwrap_or_else(|| "unknown".to_string());
@@ -285,7 +303,7 @@ pub(super) fn runtime_gateway_virtual_key_rejection(
                     [runtime_proxy_log_field("request", request_id.to_string())],
                 ),
             );
-            return Some(rejection);
+            return Err(rejection);
         }
     };
     let cost = runtime_provider_gateway_cost_for_request(
@@ -298,46 +316,30 @@ pub(super) fn runtime_gateway_virtual_key_rejection(
     );
     let estimated_cost_microusd = calculate_cost_microusd(Some(input_tokens), None, cost);
     let minute_epoch = runtime_proxy_crate::runtime_gateway_minute_epoch();
-    let usage_map = match runtime_gateway_usage_snapshot(shared.gateway_usage.usage.lock()) {
-        Ok(usage) => usage,
-        Err(rejection) => {
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_virtual_key_usage_state_unavailable",
-                    [runtime_proxy_log_field("request", request_id.to_string())],
-                ),
-            );
-            return Some(rejection);
-        }
-    };
-    if let Some(rejection) = runtime_gateway_budget_group_rejection(
+    let admission = match runtime_gateway_admit_virtual_key(
+        &shared.gateway_usage.usage,
         key,
         &active_keys,
-        &usage_map,
-        estimated_cost_microusd,
-    ) {
-        return Some(rejection);
-    }
-    let usage = usage_map.get(&key.name).cloned();
-    let admission = match runtime_proxy_crate::runtime_gateway_virtual_key_admission(
-        key,
-        usage.as_ref(),
         &captured.body,
         estimated_cost_microusd,
         minute_epoch,
     ) {
         Ok(admission) => admission,
-        Err(rejection) => return Some(rejection),
+        Err(rejection) => {
+            if rejection
+                == runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+            {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_virtual_key_usage_state_unavailable",
+                        [runtime_proxy_log_field("request", request_id.to_string())],
+                    ),
+                );
+            }
+            return Err(rejection);
+        }
     };
-    if let Ok(mut usage) = shared.gateway_usage.usage.lock() {
-        let entry = usage.entry(admission.key_name.clone()).or_default();
-        runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(
-            entry,
-            &admission,
-            minute_epoch,
-        );
-    }
     if let Ok(mut request_ids) = shared.gateway_usage.request_ids.lock() {
         request_ids.insert(request_id);
     }
@@ -372,7 +374,7 @@ pub(super) fn runtime_gateway_virtual_key_rejection(
             ],
         ),
     );
-    None
+    Ok(Some(admission.key_name))
 }
 
 pub(super) fn runtime_local_rewrite_request_is_authorized(
@@ -394,26 +396,32 @@ pub(super) fn runtime_local_rewrite_request_is_authorized(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Barrier, Mutex};
+
+    fn gateway_test_key(
+        request_budget: Option<u64>,
+    ) -> runtime_proxy_crate::RuntimeGatewayVirtualKey {
+        runtime_proxy_crate::RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("secret"),
+            allowed_models: Vec::new(),
+            budget_microusd: None,
+            request_budget,
+            rpm_limit: None,
+            tpm_limit: None,
+        }
+    }
 
     #[test]
     fn gateway_virtual_key_snapshot_rejects_poisoned_lock() {
         let entries = Arc::new(Mutex::new(vec![RuntimeGatewayVirtualKeyEntry {
             tenant_id: None,
-            key: runtime_proxy_crate::RuntimeGatewayVirtualKey {
-                name: "team-a".to_string(),
-                tenant_id: None,
-                team_id: None,
-                project_id: None,
-                user_id: None,
-                budget_id: None,
-                token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("secret"),
-                allowed_models: Vec::new(),
-                budget_microusd: None,
-                request_budget: None,
-                rpm_limit: None,
-                tpm_limit: None,
-            },
+            key: gateway_test_key(None),
             source: RuntimeGatewayVirtualKeySource::Policy,
             created_at_epoch: None,
             updated_at_epoch: None,
@@ -443,9 +451,55 @@ mod tests {
             panic!("poison gateway usage lock");
         });
 
-        assert!(matches!(
-            runtime_gateway_usage_snapshot(usage.lock()),
+        let key = gateway_test_key(None);
+        assert_eq!(
+            runtime_gateway_admit_virtual_key(
+                &usage,
+                &key,
+                std::slice::from_ref(&key),
+                b"{}",
+                None,
+                1,
+            ),
             Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)
-        ));
+        );
+    }
+
+    #[test]
+    fn gateway_budget_admission_is_atomic() {
+        let usage = Arc::new(Mutex::new(BTreeMap::new()));
+        let key = Arc::new(gateway_test_key(Some(1)));
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = (0..2)
+            .map(|_| {
+                let usage = Arc::clone(&usage);
+                let key = Arc::clone(&key);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    runtime_gateway_admit_virtual_key(
+                        &usage,
+                        &key,
+                        std::slice::from_ref(key.as_ref()),
+                        br#"{"model":"gpt-5.4","input":"hello"}"#,
+                        None,
+                        1,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::RequestBudgetExceeded)))
+                .count(),
+            1
+        );
     }
 }

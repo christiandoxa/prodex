@@ -7,6 +7,9 @@ use super::*;
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use std::collections::BTreeMap;
+use std::time::Duration;
+
+const RUNTIME_GATEWAY_OIDC_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) struct RuntimeGatewayAdminAuth {
     pub(super) name: String,
@@ -130,6 +133,7 @@ fn runtime_gateway_verify_oidc_token(
     let jwks_response = shared
         .client
         .get(&jwks_url)
+        .timeout(RUNTIME_GATEWAY_OIDC_HTTP_TIMEOUT)
         .send()
         .context("failed to fetch gateway OIDC JWKS")?
         .error_for_status()
@@ -177,6 +181,7 @@ fn runtime_gateway_oidc_jwks_url(
     let discovery_response = shared
         .client
         .get(&discovery_url)
+        .timeout(RUNTIME_GATEWAY_OIDC_HTTP_TIMEOUT)
         .send()
         .context("failed to fetch gateway OIDC discovery document")?
         .error_for_status()

@@ -7,6 +7,7 @@ use super::{
 pub(super) fn runtime_gemini_system_instruction(
     chat: &serde_json::Value,
     original: &serde_json::Value,
+    allow_local_file_access: bool,
 ) -> Option<serde_json::Value> {
     let messages = chat.get("messages")?.as_array()?;
     let mut system_text = messages
@@ -44,13 +45,16 @@ pub(super) fn runtime_gemini_system_instruction(
     }
     system_text.push_str("\n\n");
     system_text.push_str(PRODEX_GEMINI_TOOL_DISCIPLINE_INSTRUCTION);
-    if let Some(memory) = runtime_gemini_hierarchical_memory(original) {
-        system_text.push_str("\n\n# Gemini CLI Memory Compatibility\n");
-        system_text.push_str(&memory);
-    }
-    if let Some(policy) = RuntimeGeminiPolicyCompat::from_request_and_files(original).summary() {
-        system_text.push_str("\n\n# Gemini CLI Policy Compatibility\n");
-        system_text.push_str(&policy);
+    if allow_local_file_access {
+        if let Some(memory) = runtime_gemini_hierarchical_memory(original) {
+            system_text.push_str("\n\n# Gemini CLI Memory Compatibility\n");
+            system_text.push_str(&memory);
+        }
+        if let Some(policy) = RuntimeGeminiPolicyCompat::from_request_and_files(original).summary()
+        {
+            system_text.push_str("\n\n# Gemini CLI Policy Compatibility\n");
+            system_text.push_str(&policy);
+        }
     }
 
     (!system_text.trim().is_empty())

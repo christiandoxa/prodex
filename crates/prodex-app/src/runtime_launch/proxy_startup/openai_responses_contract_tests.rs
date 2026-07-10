@@ -6,12 +6,11 @@ use super::local_rewrite_copilot::{
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderWireFormat, runtime_provider_openai_contract,
 };
-use std::collections::BTreeMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 fn assert_openai_responses_sse_contract(provider: &str, output: &str) {

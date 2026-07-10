@@ -776,10 +776,14 @@ fn respond_status(
     content_type: &'static str,
     body: Vec<u8>,
 ) -> Result<()> {
+    let content_type = Header::from_bytes("content-type", content_type)
+        .map_err(|_| anyhow!("failed to build dashboard content-type header"))?;
+    let cache_control = Header::from_bytes("cache-control", "no-store")
+        .map_err(|_| anyhow!("failed to build dashboard cache-control header"))?;
     let response = Response::from_data(body)
         .with_status_code(status)
-        .with_header(Header::from_bytes("content-type", content_type).unwrap())
-        .with_header(Header::from_bytes("cache-control", "no-store").unwrap());
+        .with_header(content_type)
+        .with_header(cache_control);
     request
         .respond(response)
         .map_err(|err| anyhow!("failed to send dashboard response: {err}"))

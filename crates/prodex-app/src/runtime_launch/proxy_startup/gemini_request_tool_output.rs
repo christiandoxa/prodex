@@ -9,12 +9,14 @@ pub(super) fn runtime_gemini_mask_tool_response_for_history(
     tool_name: &str,
     call_id: &str,
     response: serde_json::Value,
+    persist_output: bool,
 ) -> serde_json::Value {
     runtime_gemini_mask_tool_response_for_history_with_threshold(
         tool_name,
         call_id,
         response,
         runtime_gemini_tool_output_mask_threshold(),
+        persist_output,
     )
 }
 
@@ -23,6 +25,7 @@ fn runtime_gemini_mask_tool_response_for_history_with_threshold(
     call_id: &str,
     response: serde_json::Value,
     threshold: usize,
+    persist_output: bool,
 ) -> serde_json::Value {
     if threshold == 0 {
         return response;
@@ -31,7 +34,9 @@ fn runtime_gemini_mask_tool_response_for_history_with_threshold(
     if output.len() <= threshold {
         return response;
     }
-    let saved_path = runtime_gemini_save_masked_tool_output(tool_name, call_id, &output);
+    let saved_path = persist_output
+        .then(|| runtime_gemini_save_masked_tool_output(tool_name, call_id, &output))
+        .flatten();
     let mask = runtime_gemini_masked_tool_output_text(&output, saved_path.as_deref());
     if let serde_json::Value::Object(mut object) = response {
         object.insert("output".to_string(), serde_json::Value::String(mask));
@@ -143,4 +148,23 @@ fn runtime_gemini_sanitize_file_component(value: &str) -> String {
         sanitized.push_str("unknown");
     }
     sanitized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn masked_gateway_tool_output_is_not_persisted() {
+        let masked = runtime_gemini_mask_tool_response_for_history_with_threshold(
+            "shell",
+            "call-1",
+            serde_json::json!({"output": "sensitive tenant output"}),
+            1,
+            false,
+        );
+
+        assert_eq!(masked["_prodex_masked"], true);
+        assert!(masked["output"].as_str().unwrap().contains("unavailable"));
+    }
 }

@@ -3,11 +3,9 @@ use super::{
     runtime_gemini_custom_tool_input_from_arguments, runtime_gemini_generate_request_body,
     runtime_gemini_responses_value_from_generate_value,
 };
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 #[test]

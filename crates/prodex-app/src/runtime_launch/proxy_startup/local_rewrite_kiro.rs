@@ -42,7 +42,7 @@ use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime as TokioRuntime;
 
@@ -193,9 +193,10 @@ pub(super) fn send_runtime_kiro_upstream_request(
             .unwrap_or(false)
     };
 
+    let conversations = shared.deepseek_conversations_for_request(request);
     let translated = runtime_chat_compatible_request_body(
         &body,
-        &shared.deepseek_conversations,
+        &conversations,
         super::provider_bridge::RuntimeProviderBridgeKind::Kiro,
         "",
         false,
@@ -238,7 +239,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
             && let Some(response_id) = response.get("id").and_then(Value::as_str)
         {
             runtime_deepseek_store_conversation(
-                &shared.deepseek_conversations,
+                &conversations,
                 response_id,
                 translated.messages,
                 runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(&turn),
@@ -257,12 +258,15 @@ pub(super) fn send_runtime_kiro_upstream_request(
                         prompt,
                         prompt_messages,
                         auth,
-                        value
-                            .get("model")
-                            .and_then(Value::as_str)
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string),
-                        chat_completions_route,
+                        (
+                            value
+                                .get("model")
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string),
+                            chat_completions_route,
+                            conversations.clone(),
+                        ),
                         shared,
                     )?),
                     profile_name: auth.profile_name.clone(),
@@ -1189,15 +1193,17 @@ fn runtime_kiro_anthropic_streaming_local_response(
     })
 }
 
+const RUNTIME_KIRO_STREAM_QUEUE_CAPACITY: usize = 32;
+
 fn runtime_kiro_streaming_reader(
     request_id: u64,
     prompt: String,
     prompt_messages: Vec<Value>,
     auth: &RuntimeKiroProfileAuth,
-    requested_model: Option<String>,
-    chat_completions_route: bool,
+    options: (Option<String>, bool, RuntimeDeepSeekConversationStore),
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeKiroStreamingReader> {
+    let (requested_model, chat_completions_route, conversations) = options;
     let secret = read_kiro_auth_secret(&auth.codex_home)?;
     let overlay_root = create_private_kiro_temp_root("runtime")?;
     let data_dir = overlay_root.join("kiro-data");
@@ -1218,8 +1224,7 @@ fn runtime_kiro_streaming_reader(
         .clone()
         .unwrap_or_else(|| PathBuf::from(default_command));
     let profile_name = auth.profile_name.clone();
-    let conversations = shared.deepseek_conversations.clone();
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(RUNTIME_KIRO_STREAM_QUEUE_CAPACITY);
     let error_sender = sender.clone();
     drop(shared.runtime_shared.async_runtime.spawn_blocking(move || {
         let result = runtime_kiro_streaming_worker(
@@ -1251,7 +1256,7 @@ fn runtime_kiro_streaming_reader(
 
 #[allow(clippy::too_many_arguments)]
 fn runtime_kiro_streaming_worker(
-    sender: Sender<RuntimeKiroStreamingChunk>,
+    sender: SyncSender<RuntimeKiroStreamingChunk>,
     request_id: u64,
     prompt: &str,
     prompt_messages: Vec<Value>,
@@ -1523,7 +1528,7 @@ fn runtime_kiro_streaming_worker(
 
 #[allow(clippy::too_many_arguments)]
 fn runtime_kiro_stream_notification(
-    sender: &Sender<RuntimeKiroStreamingChunk>,
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
     notification: &RuntimeKiroAcpSessionNotification,
     response_id: &str,
     chat_completion_id: &str,
@@ -1651,7 +1656,7 @@ fn runtime_kiro_stream_notification(
 
 #[allow(clippy::too_many_arguments)]
 fn runtime_kiro_stream_tool_call(
-    sender: &Sender<RuntimeKiroStreamingChunk>,
+    sender: &SyncSender<RuntimeKiroStreamingChunk>,
     response_id: &str,
     chat_completion_id: &str,
     stream_model: &str,
@@ -1936,10 +1941,9 @@ mod tests {
     use super::*;
     use crate::runtime_anthropic::translate_runtime_anthropic_messages_request;
     use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
-    use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
         let script = root.join("fake-kiro-compact");
@@ -2037,7 +2041,7 @@ print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), f
         };
         let translated_request =
             translate_runtime_anthropic_messages_request(&request).expect("anthropic request");
-        let conversations = Arc::new(Mutex::new(BTreeMap::new()));
+        let conversations = RuntimeDeepSeekConversationStore::default();
         let translated = runtime_chat_compatible_request_body(
             &translated_request.translated_request.body,
             &conversations,

@@ -1,6 +1,6 @@
 use super::deepseek_rewrite::{
     RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
-    runtime_deepseek_chat_request_body_with_options,
+    runtime_deepseek_chat_request_body_with_options, runtime_deepseek_remember_pending_request,
 };
 use super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
@@ -105,6 +105,7 @@ fn send_runtime_deepseek_responses_request(
         &shared.mount_path,
         &request.path_and_query,
     );
+    let conversations = shared.deepseek_conversations_for_request(request);
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
@@ -123,30 +124,23 @@ fn send_runtime_deepseek_responses_request(
             }
             let mut translated = runtime_deepseek_chat_request_body_with_options(
                 &model_body,
-                &shared.deepseek_conversations,
+                &conversations,
                 RuntimeDeepSeekRewriteOptions {
                     strict_tools,
                     web_search_mode,
                 },
             )?;
-            if runtime_deepseek_provider_core_simple_request(
-                &model_body,
-                &shared.deepseek_conversations,
-            ) && let Some(body) = conformance
-                .as_ref()
-                .and_then(runtime_deepseek_provider_core_request_body)
+            if runtime_deepseek_provider_core_simple_request(&model_body, &conversations)
+                && let Some(body) = conformance
+                    .as_ref()
+                    .and_then(runtime_deepseek_provider_core_request_body)
             {
                 translated.body = body;
             }
-            if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                pending.insert(
-                    request_id,
-                    RuntimeDeepSeekPendingRequest {
-                        messages: translated.messages,
-                        response_metadata: translated.response_metadata,
-                    },
-                );
-            }
+            let pending_request = RuntimeDeepSeekPendingRequest {
+                messages: translated.messages,
+                response_metadata: translated.response_metadata,
+            };
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                     RuntimeLocalRewriteSearchFallbackRequest {
@@ -163,6 +157,11 @@ fn send_runtime_deepseek_responses_request(
                 )?;
             let (status, parts, class) = match send_result {
                 RuntimeLocalRewritePreparedSendResult::Live(response) => {
+                    runtime_deepseek_remember_pending_request(
+                        &shared.deepseek_pending_messages,
+                        request_id,
+                        pending_request,
+                    );
                     return Ok(runtime_deepseek_live_result(response));
                 }
                 RuntimeLocalRewritePreparedSendResult::Error {
@@ -318,10 +317,7 @@ fn runtime_deepseek_provider_core_simple_request(
         .get("previous_response_id")
         .and_then(serde_json::Value::as_str)
         .filter(|id| !id.trim().is_empty())
-        && conversations
-            .lock()
-            .ok()
-            .is_some_and(|store| store.contains_key(previous_response_id))
+        && conversations.contains(previous_response_id)
     {
         return false;
     }
@@ -534,11 +530,9 @@ mod tests {
     use prodex_provider_core::{
         ProviderEndpoint, ProviderId, ProviderTransformInput, provider_translator,
     };
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
 
     fn conversation_store() -> super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(BTreeMap::new()))
+        super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore::default()
     }
 
     #[test]

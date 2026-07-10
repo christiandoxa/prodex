@@ -1,6 +1,6 @@
 use super::super::deepseek_rewrite::{
     RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
-    runtime_chat_compatible_request_body,
+    runtime_chat_compatible_request_body, runtime_deepseek_remember_pending_request,
 };
 use super::super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
@@ -78,23 +78,19 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
                     &result,
                 );
             }
+            let conversations = shared.deepseek_conversations_for_request(request);
             let translated = runtime_chat_compatible_request_body(
                 &model_body,
-                &shared.deepseek_conversations,
+                &conversations,
                 RuntimeProviderBridgeKind::Gemini,
                 GEMINI_DEFAULT_MODEL,
                 true,
                 RuntimeDeepSeekRewriteOptions::default(),
             )?;
-            if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                pending.insert(
-                    request_id,
-                    RuntimeDeepSeekPendingRequest {
-                        messages: translated.messages,
-                        response_metadata: translated.response_metadata,
-                    },
-                );
-            }
+            let pending_request = RuntimeDeepSeekPendingRequest {
+                messages: translated.messages,
+                response_metadata: translated.response_metadata,
+            };
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                     RuntimeLocalRewriteSearchFallbackRequest {
@@ -111,6 +107,11 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
                 )?;
             let (status, parts, class) = match send_result {
                 RuntimeLocalRewritePreparedSendResult::Live(response) => {
+                    runtime_deepseek_remember_pending_request(
+                        &shared.deepseek_pending_messages,
+                        request_id,
+                        pending_request,
+                    );
                     return Ok(RuntimeLocalRewriteUpstreamResult {
                         response: RuntimeLocalRewriteUpstreamResponse::Live(
                             RuntimeLocalRewriteLiveResponse::new(response),

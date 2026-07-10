@@ -1,5 +1,7 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
-use super::local_rewrite_gateway_admin_auth::runtime_gateway_admin_auth;
+use super::local_rewrite_gateway_admin_auth::{
+    RuntimeGatewayAdminAuth, runtime_gateway_admin_auth,
+};
 use super::local_rewrite_gateway_admin_keys::{
     runtime_gateway_admin_create_key_response, runtime_gateway_admin_delete_key_response,
     runtime_gateway_admin_get_key_response, runtime_gateway_admin_update_key_response,
@@ -48,10 +50,23 @@ pub(super) fn runtime_gateway_request_path_is_admin(
         || path.starts_with(&format!("{admin_prefix}/scim/v2/Users/"))
 }
 
+pub(super) fn runtime_gateway_request_path_requires_admin_auth(
+    request_path: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> bool {
+    if !runtime_gateway_request_path_is_admin(request_path, shared) {
+        return false;
+    }
+    let path = path_without_query(request_path);
+    let admin_prefix = format!("{}/prodex/gateway", shared.mount_path.trim_end_matches('/'));
+    path != format!("{admin_prefix}/admin")
+}
+
 pub(super) fn runtime_gateway_admin_response(
     request_id: u64,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
+    preauthorized: Option<RuntimeGatewayAdminAuth>,
 ) -> Option<tiny_http::ResponseBox> {
     let path = path_without_query(&captured.path_and_query);
     let admin_prefix = format!("{}/prodex/gateway", shared.mount_path.trim_end_matches('/'));
@@ -103,7 +118,8 @@ pub(super) fn runtime_gateway_admin_response(
     {
         return None;
     }
-    let Some(admin_auth) = runtime_gateway_admin_auth(captured, shared) else {
+    let Some(admin_auth) = preauthorized.or_else(|| runtime_gateway_admin_auth(captured, shared))
+    else {
         if shared.gateway_auth_token_hash.is_none()
             && shared.gateway_admin_tokens.is_empty()
             && shared.gateway_sso.proxy_token_hash.is_none()

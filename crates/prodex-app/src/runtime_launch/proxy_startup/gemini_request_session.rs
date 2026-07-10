@@ -67,15 +67,19 @@ fn runtime_gemini_export_checkpoint_path(original: &serde_json::Value) -> Option
 
 pub(super) fn runtime_gemini_imported_session_contents(
     original: &serde_json::Value,
+    allow_local_file_access: bool,
 ) -> Vec<serde_json::Value> {
     let mut contents = Vec::new();
-    for value in runtime_gemini_import_values(original) {
+    for value in runtime_gemini_import_values(original, allow_local_file_access) {
         contents.extend(runtime_gemini_import_contents_from_value(&value));
     }
     contents
 }
 
-fn runtime_gemini_import_values(original: &serde_json::Value) -> Vec<serde_json::Value> {
+fn runtime_gemini_import_values(
+    original: &serde_json::Value,
+    allow_local_file_access: bool,
+) -> Vec<serde_json::Value> {
     let mut values = Vec::new();
     for key in [
         "gemini_session",
@@ -88,6 +92,9 @@ fn runtime_gemini_import_values(original: &serde_json::Value) -> Vec<serde_json:
         if let Some(value) = original.get(key).filter(|value| !value.is_null()) {
             values.push(value.clone());
         }
+    }
+    if !allow_local_file_access {
+        return values;
     }
     let mut paths = Vec::new();
     for key in [

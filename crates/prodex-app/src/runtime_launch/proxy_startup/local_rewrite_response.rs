@@ -469,6 +469,7 @@ fn respond_runtime_chat_compatible_rewrite(
         runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
     let conversation_messages = pending_request.messages;
     let response_metadata = pending_request.response_metadata;
+    let conversations = shared.deepseek_conversations_for_request(captured);
     if content_type.contains("text/event-stream") {
         let writer = request.into_writer();
         let mut headers = vec![(
@@ -498,7 +499,7 @@ fn respond_runtime_chat_compatible_rewrite(
             request_id,
             conversation_messages,
             response_metadata,
-            Arc::clone(&shared.deepseek_conversations),
+            conversations.clone(),
             Some(observer),
         );
         let body: Box<dyn Read + Send> = if let Some(binding_recorder) = binding_recorder {
@@ -537,7 +538,7 @@ fn respond_runtime_chat_compatible_rewrite(
         request_id,
         conversation_messages,
         response_metadata,
-        &shared.deepseek_conversations,
+        &conversations,
         &shared.runtime_shared,
     )
     .map(|mut parts| {
@@ -588,6 +589,7 @@ fn respond_runtime_gemini_rewrite(
         .as_ref()
         .map(|pool| pool.quota_headers_for_profile(&profile_name))
         .unwrap_or_default();
+    let conversations = shared.gemini_conversations_for_request(captured);
     if rate_limit_headers.is_empty() {
         rate_limit_headers =
             runtime_openai_style_codex_rate_limit_headers(response.headers(), "gemini", "Gemini");
@@ -627,7 +629,7 @@ fn respond_runtime_gemini_rewrite(
                 body,
                 request_id,
                 conversation_messages,
-                Arc::clone(&shared.gemini_conversations),
+                conversations.clone(),
                 binding_recorder,
                 Some(observer),
             ));
@@ -658,7 +660,7 @@ fn respond_runtime_gemini_rewrite(
         response,
         request_id,
         conversation_messages,
-        &shared.gemini_conversations,
+        &conversations,
         &shared.runtime_shared,
     )
     .map(|mut parts| {

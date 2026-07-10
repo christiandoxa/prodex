@@ -8,7 +8,8 @@ pub(in crate::runtime_launch::proxy_startup) use self::response::{
     runtime_deepseek_chat_buffered_response_parts,
     runtime_deepseek_chat_tool_call_thought_signature, runtime_deepseek_created_at,
     runtime_deepseek_merge_response_metadata,
-    runtime_deepseek_normalize_assistant_tool_call_content, runtime_deepseek_responses_usage,
+    runtime_deepseek_normalize_assistant_tool_call_content,
+    runtime_deepseek_remember_pending_request, runtime_deepseek_responses_usage,
     runtime_deepseek_store_conversation, runtime_deepseek_take_pending_messages,
 };
 pub(super) use self::rtk::runtime_deepseek_rtk_wrapped_tool_arguments;
@@ -32,6 +33,7 @@ use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+mod conversation_store;
 mod json_helpers;
 mod response;
 mod rtk;
@@ -39,8 +41,7 @@ mod thinking;
 mod tool_adjacency;
 mod tools;
 
-pub(super) type RuntimeDeepSeekConversationStore =
-    Arc<Mutex<BTreeMap<String, Vec<serde_json::Value>>>>;
+pub(super) use conversation_store::RuntimeDeepSeekConversationStore;
 pub(super) type RuntimeDeepSeekPendingMessages =
     Arc<Mutex<BTreeMap<u64, RuntimeDeepSeekPendingRequest>>>;
 
@@ -294,10 +295,9 @@ fn runtime_deepseek_messages_from_responses_request(
     if let Some(previous_response_id) = value
         .get("previous_response_id")
         .and_then(serde_json::Value::as_str)
-        && let Ok(conversations) = conversations.lock()
-        && let Some(history) = conversations.get(previous_response_id)
+        && let Some(history) = conversations.history(previous_response_id)
     {
-        history_messages.extend(history.iter().cloned());
+        history_messages.extend(history);
         has_history = true;
     }
     if !has_history
@@ -587,12 +587,7 @@ fn runtime_deepseek_history_for_tool_call(
     conversations: &RuntimeDeepSeekConversationStore,
     call_id: &str,
 ) -> Option<Vec<serde_json::Value>> {
-    let conversations = conversations.lock().ok()?;
-    conversations
-        .values()
-        .rev()
-        .find(|history| runtime_deepseek_history_has_tool_call(history, call_id))
-        .cloned()
+    conversations.find_history(|history| runtime_deepseek_history_has_tool_call(history, call_id))
 }
 
 fn runtime_deepseek_history_has_tool_call(history: &[serde_json::Value], call_id: &str) -> bool {
