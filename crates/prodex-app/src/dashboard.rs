@@ -821,6 +821,9 @@ fn hex_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{BTreeSet, HashMap};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn dashboard_status_fields_contain_url_and_warning() {
@@ -837,10 +840,366 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_state_json_works_with_empty_state() {
+        let paths = dashboard_test_paths("state-json-empty-state");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let value = dashboard.state_json().expect("state json should build");
+        assert_eq!(value["activeProfile"], Value::Null);
+        assert_eq!(value["profileCount"], 0);
+        assert_eq!(
+            value["paths"]["stateFile"],
+            paths.state_file.display().to_string()
+        );
+        assert_eq!(
+            value["paths"]["managedProfilesRoot"],
+            paths.managed_profiles_root.display().to_string()
+        );
+
+        let commands = &value["commands"];
+        assert_eq!(commands["open"], "prodex dashboard");
+        assert!(commands["quota"].as_str().is_some());
+    }
+
+    #[test]
+    fn dashboard_provider_endpoints_cover_supported_providers() {
+        let paths = dashboard_test_paths("provider-endpoints");
+        let server = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        write_test_state(&paths, sample_dashboard_state(&paths));
+
+        let providers = server
+            .providers_json()
+            .expect("providers endpoint should build");
+        let preset_values = providers["providers"]
+            .as_array()
+            .expect("providers list should be array");
+        assert_eq!(preset_values.len(), DASHBOARD_PROVIDER_IDS.len());
+
+        let mut seen_ids = BTreeSet::new();
+        for value in preset_values {
+            let id = value["id"].as_str().expect("provider id should be present");
+            assert!(
+                DASHBOARD_PROVIDER_IDS
+                    .iter()
+                    .any(|provider| provider.label() == id)
+            );
+            assert!(
+                seen_ids.insert(id.to_string()),
+                "duplicate provider id in providers payload: {id}"
+            );
+
+            assert!(value["commands"]["setup"].is_array());
+            assert!(value["commands"]["setup"].as_array().unwrap().len() > 0);
+            assert!(value["commands"]["launch"].as_str().is_some_and(|value| {
+                value.starts_with("prodex s") || value.starts_with("prodex super")
+            }));
+        }
+
+        let contracts = providers["contracts"]
+            .as_array()
+            .expect("contracts should be array");
+        assert!(
+            contracts.len() > 0,
+            "provider contract matrix should be present"
+        );
+    }
+
+    #[test]
+    fn dashboard_models_json_exposes_recommended_and_launch_commands() {
+        let paths = dashboard_test_paths("models-endpoint");
+        let mut state = sample_dashboard_state(&paths);
+        state.active_profile = Some("main-openai".to_string());
+        write_test_state(&paths, state);
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let models = dashboard
+            .models_json()
+            .expect("models endpoint should build");
+        let model_values = models["models"].as_array().expect("models should be array");
+        assert!(!model_values.is_empty());
+
+        let mut by_provider = HashMap::new();
+        for value in model_values {
+            let provider_name = value["providerName"]
+                .as_str()
+                .expect("providerName should be present");
+            let by = by_provider
+                .entry(provider_name.to_string())
+                .or_insert(0usize);
+            *by += 1;
+
+            assert!(value["launchCommand"].as_str().is_some_and(|value| {
+                value.contains("prodex s") || value.contains("prodex super")
+            }));
+
+            let available_through = value["availableThrough"]
+                .as_array()
+                .expect("availableThrough should be array");
+            assert!(
+                !available_through.is_empty(),
+                "each model should expose routing availability"
+            );
+
+            if value["recommended"].as_bool().unwrap_or(false) {
+                assert!(value["default"].as_bool().unwrap_or(false));
+            }
+        }
+
+        for provider in DASHBOARD_PROVIDER_IDS {
+            let provider_name = provider_display_name(*provider);
+            let expected_default = provider_default_model(*provider);
+            let provider_models: Vec<&Value> = model_values
+                .iter()
+                .filter(|value| value["providerName"] == provider_name)
+                .collect();
+            if provider_models.is_empty() {
+                continue;
+            }
+
+            let has_default_model = provider_models.iter().any(|value| {
+                value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == expected_default)
+            });
+            if *provider != ProviderId::Local {
+                assert!(
+                    has_default_model,
+                    "provider default model should be present: {provider_name}"
+                );
+            }
+            assert_eq!(
+                by_provider.get(provider_name).copied(),
+                Some(provider_models.len())
+            );
+        }
+    }
+
+    #[test]
+    fn dashboard_usage_endpoint_empty_state_is_redacted() {
+        let paths = dashboard_test_paths("usage-empty-state");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let value = dashboard.usage_json().expect("usage endpoint should build");
+        let summary = &value["summary"];
+        assert_eq!(summary["total"], 0);
+        assert_eq!(summary["ready"], 0);
+
+        let rendered = serde_json::to_string(&value).expect("render json");
+        assert!(!rendered.contains("Bearer "));
+        assert!(!rendered.contains("Authorization:"));
+        assert!(!rendered.contains("api_key"));
+        assert!(!rendered.contains("secret"));
+    }
+
+    #[test]
+    fn dashboard_provider_presets_has_setup_and_launch_commands() {
+        let paths = dashboard_test_paths("provider-presets");
+        write_test_state(&paths, sample_dashboard_state(&paths));
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let presets = dashboard
+            .provider_presets_json()
+            .expect("provider presets endpoint should build");
+        let preset_values = presets["providers"]
+            .as_array()
+            .expect("provider presets should be array");
+        assert_eq!(preset_values.len(), DASHBOARD_PROVIDER_IDS.len());
+
+        for value in preset_values {
+            let commands = value["commands"]
+                .as_object()
+                .expect("commands should be object");
+            let setup = commands["setup"].as_array().expect("setup should be array");
+            assert!(!setup.is_empty(), "setup commands should exist");
+            for command in setup {
+                let value = command.as_str().expect("setup command should be string");
+                assert!(!contains_secret_marker(value));
+            }
+
+            let launch = commands["launch"]
+                .as_str()
+                .expect("launch should be string");
+            assert!(launch.contains("prodex s") || launch.contains("prodex super"));
+            assert!(!contains_secret_marker(launch));
+        }
+    }
+
+    #[test]
+    fn dashboard_runtime_status_payload_is_non_secret() {
+        let paths = dashboard_test_paths("runtime-status");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let status = dashboard
+            .runtime_status_json()
+            .expect("runtime status endpoint should build");
+
+        let gateway = &status["gateway"];
+        let runtime = &status["runtime"];
+        assert!(gateway["startCommand"].as_str().is_some());
+        assert!(gateway["providersCommand"].as_str().is_some());
+        assert!(runtime["logDir"].as_str().is_some());
+        assert!(runtime["latestLogPointer"].as_str().is_some());
+
+        assert!(!contains_secret_marker(
+            &serde_json::to_string(&status).expect("serialize status")
+        ));
+    }
+
+    #[test]
+    fn dashboard_models_payload_has_recommended_model_per_provider_where_available() {
+        let paths = dashboard_test_paths("provider-models");
+        let state = sample_dashboard_state(&paths);
+        write_test_state(&paths, state);
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let value = dashboard
+            .models_json()
+            .expect("models endpoint should build");
+        let models = value["models"].as_array().expect("models should be array");
+        let mut has_recommended = 0usize;
+
+        for model in models {
+            if model["recommended"].as_bool().unwrap_or(false) {
+                has_recommended += 1;
+            }
+            assert!(
+                model["availableThrough"]
+                    .as_array()
+                    .is_some_and(|paths| !paths.is_empty())
+            );
+            assert!(!contains_secret_marker(
+                &serde_json::to_string(model).expect("serialize model payload")
+            ));
+        }
+
+        assert!(
+            has_recommended > 0,
+            "recommended model markers should exist where model catalog exists"
+        );
+    }
+
+    #[test]
+    fn dashboard_handles_empty_state_endpoints() {
+        let paths = dashboard_test_paths("empty-endpoints");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        for value in [
+            dashboard.state_json().expect("state should render"),
+            dashboard.providers_json().expect("providers should render"),
+            dashboard
+                .provider_presets_json()
+                .expect("preset should render"),
+            dashboard.models_json().expect("models should render"),
+            dashboard.usage_json().expect("usage should render"),
+            dashboard
+                .runtime_status_json()
+                .expect("runtime status should render"),
+        ] {
+            assert!(!contains_secret_marker(
+                &serde_json::to_string(&value).expect("serialize value")
+            ));
+        }
+    }
+
+    #[test]
     fn dashboard_json_body_limit_rejects_limit_plus_one() {
         let err = read_dashboard_json_body_limited(std::io::Cursor::new(vec![b'a'; 5]), 4)
             .expect_err("body above limit should be rejected");
 
         assert_eq!(dashboard_json_body_error_status(&err), StatusCode(413));
+    }
+
+    fn contains_secret_marker(value: &str) -> bool {
+        const SECRET_MARKERS: [&str; 6] = [
+            "Bearer ",
+            "api_key",
+            "\"Authorization\"",
+            "access_token",
+            "refresh_token",
+            "\"refresh\"",
+        ];
+        SECRET_MARKERS.iter().any(|marker| value.contains(marker))
+    }
+
+    fn dashboard_test_paths(name: &str) -> AppPaths {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-dashboard-tests-{name}-{stamp}-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test root should be created");
+        fs::create_dir_all(root.join("profiles")).expect("profiles directory should be created");
+        AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy"),
+        }
+    }
+
+    fn sample_dashboard_state(paths: &AppPaths) -> AppState {
+        AppState {
+            active_profile: Some("main-openai".to_string()),
+            profiles: [
+                (
+                    "main-openai".to_string(),
+                    ProfileEntry {
+                        codex_home: paths.managed_profiles_root.join("main-openai"),
+                        managed: true,
+                        email: Some("openai@example".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "main-gemini".to_string(),
+                    ProfileEntry {
+                        codex_home: paths.managed_profiles_root.join("main-gemini"),
+                        managed: true,
+                        email: Some("gemini@example".to_string()),
+                        provider: ProfileProvider::Gemini {
+                            email: "gemini@example".to_string(),
+                            project_id: None,
+                        },
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn write_test_state(paths: &AppPaths, state: AppState) {
+        state.save(paths).expect("state should be written");
     }
 }

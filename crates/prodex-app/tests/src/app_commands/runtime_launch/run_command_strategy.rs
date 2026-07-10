@@ -25,6 +25,7 @@ fn assert_repaired_session_meta_line(line: &str, session_id: &str) {
 fn run_strategy_resolves_codex_delete_partial_selector_before_launch() {
     let root = temp_dir("delete-partial-selector");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _shared_env = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", "shared-codex-home");
     let paths = AppPaths::discover().unwrap();
     let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
     let sessions = paths.shared_codex_root.join("sessions/2026/06/05");

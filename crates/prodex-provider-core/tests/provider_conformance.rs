@@ -1,9 +1,9 @@
 use prodex_provider_core::{
     PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContract, ProviderCapabilityStatus,
     ProviderEndpoint, ProviderId, ProviderTransformPhase, ProviderWireFormat, extract_usage_tokens,
-    provider_adapter, provider_adapter_contract_matrix, provider_model_catalog,
-    provider_model_catalog_json, provider_model_fallback_chain, provider_replay_cases,
-    provider_translator,
+    provider_adapter, provider_adapter_contract_matrix, provider_capabilities_markdown,
+    provider_model_catalog, provider_model_catalog_json, provider_model_fallback_chain,
+    provider_replay_cases, provider_translator,
 };
 
 #[test]
@@ -140,6 +140,14 @@ fn provider_replay_cases_exercise_transform_usage_and_fallback_contracts() {
 }
 
 #[test]
+fn checked_in_provider_capabilities_doc_matches_generated_matrix() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/provider-capabilities.md");
+    let actual = std::fs::read_to_string(&path).expect("provider capabilities doc should exist");
+    assert_eq!(actual, provider_capabilities_markdown());
+}
+
+#[test]
 fn public_contract_matrix_is_machine_readable() {
     let matrix = provider_adapter_contract_matrix();
     assert_eq!(matrix.len(), PROVIDER_CONTRACT_PROVIDERS.len());
@@ -249,14 +257,118 @@ fn translated_responses_contract_surface_exposes_known_parameter_limitations() {
         gemini_responses
             .unsupported_params
             .iter()
-            .any(|field| field == "input[*].content[type!=text]")
-    );
-    assert!(
-        gemini_responses
-            .unsupported_params
-            .iter()
             .any(|field| field == "response_format.type")
     );
+
+    for provider in ["anthropic", "copilot"] {
+        let contract = matrix
+            .iter()
+            .find(|spec| spec.provider == provider)
+            .expect("provider contract");
+        let responses = contract
+            .endpoint_status
+            .iter()
+            .find(|endpoint| endpoint.endpoint == "responses")
+            .expect("responses endpoint");
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "input[*].content[type!=text]"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "response_format.type"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "reasoning"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "previous_response_id"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "tools[type!=function]"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "tool_choice[type!=function]"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "parallel_tool_calls=false"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "logprobs/top_logprobs"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "messages"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "metadata"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "safety_identifier"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "web_search_options"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "n>1"),
+            "{provider}"
+        );
+        assert!(
+            responses
+                .unsupported_params
+                .iter()
+                .any(|field| field == "stop_sequences"),
+            "{provider}"
+        );
+    }
 }
 
 #[test]
@@ -404,6 +516,45 @@ fn translator_supported_params_do_not_overclaim_unsupported_endpoints() {
                     "{provider:?} {endpoint:?} should explain unsupported status"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn capability_negotiation_uses_supported_endpoints_before_parameter_checks() {
+    for provider in PROVIDER_CONTRACT_PROVIDERS {
+        let adapter = provider_adapter(*provider);
+        let translator = provider_translator(*provider);
+
+        for endpoint in adapter.supported_endpoints() {
+            let support = translator.supported_params(*endpoint, "test-model");
+            assert!(
+                support.supported,
+                "{provider:?} {endpoint:?} should negotiate as supported once the endpoint is advertised"
+            );
+        }
+
+        for endpoint in [
+            ProviderEndpoint::Responses,
+            ProviderEndpoint::ResponsesCompact,
+            ProviderEndpoint::ChatCompletions,
+            ProviderEndpoint::Messages,
+            ProviderEndpoint::Models,
+            ProviderEndpoint::Embeddings,
+            ProviderEndpoint::Images,
+            ProviderEndpoint::Audio,
+            ProviderEndpoint::Batches,
+            ProviderEndpoint::Rerank,
+            ProviderEndpoint::A2a,
+        ] {
+            if adapter.supported_endpoints().contains(&endpoint) {
+                continue;
+            }
+            let support = translator.supported_params(endpoint, "test-model");
+            assert!(
+                !support.supported,
+                "{provider:?} {endpoint:?} should not negotiate as supported when the endpoint is not advertised"
+            );
         }
     }
 }

@@ -1,20 +1,13 @@
-use super::super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions,
-    runtime_chat_compatible_request_body,
+use super::super::chat_compatible_rewrite::{
+    RuntimeChatCompatibleConversationStore, RuntimeDeepSeekRewriteOptions,
+    runtime_provider_chat_compatible_request_body,
 };
 use super::super::provider_bridge::RuntimeProviderBridgeKind;
 use super::RuntimeGeminiTranslatedRequest;
-use super::gemini_command_output::runtime_gemini_structured_command_tool_response;
-use super::gemini_history_hardening::runtime_gemini_harden_contents;
 #[cfg(test)]
 use super::gemini_request_extensions::{
     runtime_gemini_active_extension_manifests_from_roots,
     runtime_gemini_extension_context_files_from_roots,
-};
-use super::gemini_request_generation::runtime_gemini_generation_config;
-use super::gemini_request_io::runtime_gemini_collect_path_values;
-use super::gemini_request_media::{
-    runtime_gemini_media_part_from_data, runtime_gemini_media_part_from_uri_or_data_url,
 };
 #[cfg(test)]
 use super::gemini_request_policy::RuntimeGeminiPolicyCompat;
@@ -22,6 +15,17 @@ use super::gemini_request_policy::RuntimeGeminiPolicyCompat;
 use super::gemini_request_policy::runtime_gemini_settings_paths_for;
 use super::gemini_request_session::{
     runtime_gemini_export_checkpoint, runtime_gemini_imported_session_contents,
+};
+use prodex_provider_core::{
+    gemini_provider_core_collect_path_values as runtime_gemini_collect_path_values,
+    gemini_provider_core_contextual_user_instruction_text as runtime_gemini_contextual_user_instruction_text,
+    gemini_provider_core_generation_config_from_request as runtime_gemini_generation_config,
+    gemini_provider_core_harden_contents as runtime_gemini_harden_contents,
+    gemini_provider_core_media_part_from_data as runtime_gemini_media_part_from_data,
+    gemini_provider_core_media_part_from_uri_or_data_url as runtime_gemini_media_part_from_uri_or_data_url,
+    gemini_provider_core_request_body_without_tool as runtime_gemini_request_body_without_tool,
+    gemini_provider_core_structured_command_tool_response as runtime_gemini_structured_command_tool_response,
+    gemini_provider_core_tool_config_from_request as runtime_gemini_tool_config_from_chat,
 };
 mod gemini_request_context;
 mod gemini_request_instruction;
@@ -31,26 +35,20 @@ mod gemini_request_tools;
 mod gemini_request_util;
 use super::gemini_request_tool_output::runtime_gemini_mask_tool_response_for_history;
 use anyhow::{Context, Result};
-pub(super) use gemini_request_context::runtime_gemini_collect_string_values;
 use gemini_request_context::{
     runtime_gemini_collect_at_path_parts, runtime_gemini_collect_explicit_file_parts,
 };
-use gemini_request_instruction::{
-    runtime_gemini_contextual_user_instruction_text, runtime_gemini_system_instruction,
-};
+use gemini_request_instruction::runtime_gemini_system_instruction;
 use gemini_request_local_context::{
     RuntimeGeminiFileReadBudget, runtime_gemini_part_from_local_path,
 };
 use gemini_request_memory::runtime_gemini_hierarchical_memory;
 #[cfg(test)]
 use gemini_request_memory::runtime_gemini_memory_files_enabled;
-pub(in super::super) use gemini_request_tools::{
-    runtime_gemini_blocked_tool_call_message, runtime_gemini_request_body_without_tool,
-};
-use gemini_request_tools::{
-    runtime_gemini_tool_config_from_chat, runtime_gemini_tools_from_requests,
-};
+pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message;
+use gemini_request_tools::runtime_gemini_tools_from_requests;
 pub(super) use gemini_request_util::{runtime_gemini_config_dir, runtime_gemini_home_dir};
+pub(in super::super) use prodex_provider_core::gemini_provider_core_collect_string_values as runtime_gemini_collect_string_values;
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 #[cfg(test)]
@@ -83,7 +81,7 @@ If a publish workflow fails while waiting for CI success, read that step log, fo
 pub(super) const PRODEX_GEMINI_TOOL_DISCIPLINE_INSTRUCTION: &str = "\
 Tool discipline for Codex parity: do not install, upgrade, curl, clone, or browse for tooling unless the user explicitly asked for that action or local evidence proves it is required. \
 When updating local tools, first inspect the actual executable path and local checkout/config, then use the installer or package manager that owns that path. \
-For optional-tool update workflows, inspect OWNER/install files with normal shell or file tools; do not use optimizer MCP tools for local file reads unless the user explicitly asks for optimizer diagnostics. \
+For optional-tool update workflows, inspect OWNER/install files with normal shell or file tools; do not use SQZ, Token Savior, Claw Compactor, or other optimizer MCP/tools for local file reads unless the user explicitly asks for optimizer diagnostics. \
 If two commands fail for the same install/update target, stop trying random package names or URLs and switch to local source/config inspection. \
 Do not narrate repeated wait/poll steps; if a command is still running, wait for it with the follow-up tool and report only new information. \
 Final success, latest-version, up-to-date, or no-blocker claims must be backed by an explicit verification command result observed after the relevant action; otherwise report the unresolved uncertainty.";
@@ -93,10 +91,9 @@ pub(super) const RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT: usize = 64;
 pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD: usize = 50_000;
 pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_PREVIEW_CHARS: usize = 1_000;
 
-#[cfg(test)]
 pub(in super::super) fn runtime_gemini_generate_request_body(
     body: &[u8],
-    conversations: &RuntimeDeepSeekConversationStore,
+    conversations: &RuntimeChatCompatibleConversationStore,
     code_assist: bool,
     project_id: Option<&str>,
     thinking_budget_tokens: Option<u64>,
@@ -113,7 +110,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
 
 pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_access(
     body: &[u8],
-    conversations: &RuntimeDeepSeekConversationStore,
+    conversations: &RuntimeChatCompatibleConversationStore,
     code_assist: bool,
     project_id: Option<&str>,
     thinking_budget_tokens: Option<u64>,
@@ -121,7 +118,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_acc
 ) -> Result<RuntimeGeminiTranslatedRequest> {
     let original: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
-    let chat = runtime_chat_compatible_request_body(
+    let chat = runtime_provider_chat_compatible_request_body(
         body,
         conversations,
         RuntimeProviderBridgeKind::Gemini,
@@ -210,7 +207,11 @@ fn runtime_gemini_contents_from_chat(
     original: &serde_json::Value,
     allow_local_file_access: bool,
 ) -> Vec<serde_json::Value> {
-    let mut contents = runtime_gemini_imported_session_contents(original, allow_local_file_access);
+    let mut contents = if allow_local_file_access {
+        runtime_gemini_imported_session_contents(original)
+    } else {
+        Vec::new()
+    };
     let mut tool_names_by_call_id = BTreeMap::new();
     let Some(messages) = chat.get("messages").and_then(serde_json::Value::as_array) else {
         return contents;
@@ -502,12 +503,16 @@ fn runtime_gemini_function_response_from_tool_message(
                 "output": text
             })
         });
-    let response = runtime_gemini_mask_tool_response_for_history(
-        &name,
-        call_id,
-        response,
-        persist_tool_output,
-    );
+    let response = if persist_tool_output {
+        runtime_gemini_mask_tool_response_for_history(&name, call_id, response)
+    } else {
+        prodex_provider_core::gemini_provider_core_mask_tool_response_for_history(
+            response,
+            RUNTIME_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD,
+            RUNTIME_GEMINI_TOOL_OUTPUT_PREVIEW_CHARS,
+            None,
+        )
+    };
     runtime_gemini_function_response_part(call_id, &name, response)
 }
 
@@ -564,8 +569,8 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn test_conversation_store() -> RuntimeDeepSeekConversationStore {
-        RuntimeDeepSeekConversationStore::default()
+    fn test_conversation_store() -> RuntimeChatCompatibleConversationStore {
+        RuntimeChatCompatibleConversationStore::default()
     }
 
     #[test]

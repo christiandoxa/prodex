@@ -129,6 +129,82 @@ fn usage_workspace_credits_error_rotates_to_ready_profile() {
 }
 
 #[test]
+fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
+        [RuntimeProxyBackendFaultStep::explicit_quota_429(
+            RuntimeProxyBackendFaultRoute::Responses,
+            "main-account",
+        )],
+    ));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":[]}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_responses_request(12, &request, harness.shared())
+        .expect("usage-limit 429 should rotate to the next ready profile");
+    let RuntimeResponsesReply::Streaming(mut streaming) = response else {
+        panic!("usage-limit rotation should finish with the healthy streaming response");
+    };
+    let status = streaming.status;
+    let mut body = String::new();
+    streaming
+        .body
+        .read_to_string(&mut body)
+        .expect("healthy streaming response body should read");
+
+    assert_eq!(status, 200);
+    assert!(!body.contains("usage limit"), "quota failure leaked: {body}");
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
+fn scripted_backend_fault_usage_limit_429_passes_through_without_rotation() {
+    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
+        [RuntimeProxyBackendFaultStep::usage_limit_429(
+            RuntimeProxyBackendFaultRoute::Responses,
+            "main-account",
+        )],
+    ));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":[]}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_responses_request(13, &request, harness.shared())
+        .expect("usage-limit text-only 429 should pass through");
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("text-only usage-limit 429 should be returned as a buffered upstream response");
+    };
+    let body = String::from_utf8(parts.body.into_vec()).expect("429 body should decode");
+
+    assert_eq!(parts.status, 429);
+    assert!(body.contains("usage limit"), "expected original 429 body: {body}");
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+}
+
+#[test]
 fn precommit_quota_gate_allows_weekly_exhausted_continuation_from_persisted_snapshot() {
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",

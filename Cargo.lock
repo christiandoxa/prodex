@@ -2378,6 +2378,7 @@ dependencies = [
 name = "prodex-provider-core"
 version = "0.273.0"
 dependencies = [
+ "base64",
  "serde",
  "serde_json",
 ]

@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
-const sourceDir = path.join(
+const geminiBridgeDir = path.join(repoRoot, "crates/prodex-provider-core/src/gemini_bridge");
+const geminiTranslatorDir = path.join(
+  repoRoot,
+  "crates/prodex-provider-core/src/translators/gemini",
+);
+const proxyStartupDir = path.join(
   repoRoot,
   "crates/prodex-app/src/runtime_launch/proxy_startup",
 );
@@ -120,18 +125,18 @@ const LIVE_CONTRACTS = Object.freeze([
 ]);
 
 const COMPACT_CONTRACTS = Object.freeze([
-  "GEMINI_SEMANTIC_COMPACT_INSTRUCTIONS",
+  "GEMINI_PROVIDER_CORE_SEMANTIC_COMPACT_INSTRUCTIONS",
   "prodex_gemini_compaction",
-  "runtime_gemini_semantic_compact_request_body",
+  "gemini_provider_core_semantic_compact_request_body",
   "runtime_gemini_semantic_compact_response_parts",
   "runtime_gemini_local_compact_response_parts",
 ]);
 
 const EXACT_OUTPUT_CONTRACTS = Object.freeze([
   "runtime_gemini_forced_command_output",
-  "runtime_gemini_requests_command_output_only",
-  "runtime_gemini_command_output_from_tool_message",
-  "runtime_gemini_collect_payload_text",
+  "gemini_provider_core_requests_command_output_only",
+  "gemini_provider_core_command_output_from_tool_message",
+  "gemini_provider_core_collect_payload_text",
   "skip(user_index + 1)",
 ]);
 
@@ -168,22 +173,6 @@ function validateSnippetSet(source, label, snippets) {
     .map((snippet) => `${label}: missing schema snippet ${JSON.stringify(snippet)}`);
 }
 
-function readSourceFamily(prefix, extraFiles = []) {
-  const files = fs
-    .readdirSync(sourceDir)
-    .filter(
-      (name) =>
-        name.endsWith(".rs") &&
-        (name === `${prefix}.rs` || name.startsWith(`${prefix}_`)) &&
-        !name.includes("test"),
-    )
-    .concat(extraFiles);
-  return [...new Set(files)]
-    .sort()
-    .map((name) => fs.readFileSync(path.join(sourceDir, name), "utf8"))
-    .join("\n");
-}
-
 function validate(requestSource, responseSource, sseSource, liveSource, compactSource) {
   const failures = [];
   for (const item of PARITY) {
@@ -207,6 +196,28 @@ function validate(requestSource, responseSource, sseSource, liveSource, compactS
   failures.push(...validateSnippetSet(compactSource, "compact", COMPACT_CONTRACTS));
   failures.push(...validateSnippetSet(sseSource, "exact-output", EXACT_OUTPUT_CONTRACTS));
   return failures;
+}
+
+function readRustFiles(dir, predicate = () => true) {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return readRustFiles(entryPath, predicate);
+      }
+      if (
+        !entry.isFile() ||
+        !entry.name.endsWith(".rs") ||
+        entry.name === "tests.rs" ||
+        entry.name.endsWith("_tests.rs") ||
+        !predicate(entryPath)
+      ) {
+        return [];
+      }
+      return [fs.readFileSync(entryPath, "utf8")];
+    })
+    .join("\n");
 }
 
 function main() {
@@ -234,14 +245,30 @@ function main() {
     );
     return;
   }
-  const requestSource = readSourceFamily("gemini_request", ["gemini_rewrite.rs"]);
-  const responseSource = readSourceFamily("gemini_response");
-  const sseSource = readSourceFamily("gemini_sse", [
-    "provider_sse_events.rs",
-    "provider_sse_reader.rs",
-  ]);
-  const liveSource = readSourceFamily("local_rewrite_gemini_live");
-  const compactSource = readSourceFamily("local_rewrite_gemini_compact");
+  const requestSource = [
+    readRustFiles(geminiBridgeDir),
+    readRustFiles(geminiTranslatorDir),
+    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("gemini_request")),
+  ].join("\n");
+  const responseSource = [
+    readRustFiles(geminiBridgeDir),
+    readRustFiles(geminiTranslatorDir),
+    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("gemini_sse")),
+  ].join("\n");
+  const sseSource = [
+    readRustFiles(geminiBridgeDir),
+    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("gemini_sse")),
+    fs.readFileSync(path.join(proxyStartupDir, "provider_sse_events.rs"), "utf8"),
+  ].join("\n");
+  const liveSource = [
+    readRustFiles(path.join(geminiBridgeDir, "live")),
+    fs.readFileSync(path.join(geminiBridgeDir, "live.rs"), "utf8"),
+    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("local_rewrite_gemini_live")),
+  ].join("\n");
+  const compactSource = [
+    fs.readFileSync(path.join(geminiBridgeDir, "compact.rs"), "utf8"),
+    fs.readFileSync(path.join(proxyStartupDir, "local_rewrite_gemini_compact.rs"), "utf8"),
+  ].join("\n");
   const failures = validate(requestSource, responseSource, sseSource, liveSource, compactSource);
   if (failures.length > 0) {
     for (const failure of failures) {

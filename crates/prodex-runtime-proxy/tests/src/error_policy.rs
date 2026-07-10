@@ -231,16 +231,12 @@ fn generic_429_passes_through_without_explicit_quota_code() {
 
 #[test]
 fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code() {
-    let bodies: [(&str, &[u8]); 8] = [
+    let bodies: [(&str, &[u8]); 7] = [
         ("empty", b"" as &[u8]),
         ("plain_too_many_requests", b"Too Many Requests" as &[u8]),
         (
             "json_too_many_requests",
             br#"{"error":{"message":"Too Many Requests"}}"# as &[u8],
-        ),
-        (
-            "json_usage_message_without_code",
-            br#"{"error":{"message":"The usage limit has been reached"}}"# as &[u8],
         ),
         (
             "json_rate_limit_type_without_exceeded_code",
@@ -280,6 +276,56 @@ fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code()
             assert_eq!(policy.rule, None, "{label} {phase:?}");
             assert_eq!(policy.message, None, "{label} {phase:?}");
         }
+    }
+}
+
+#[test]
+fn usage_limit_message_rotates_before_commit_only_for_non_429_quota_statuses() {
+    let body = br#"{"error":{"message":"The usage limit has been reached"}}"#;
+
+    for status in [402, 403] {
+        let precommit = runtime_http_error_policy(status, body, RuntimeHttpErrorPhase::PreCommit);
+        assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota, "{status}");
+        assert_eq!(
+            precommit.action,
+            RuntimeHttpErrorAction::RotateProfile,
+            "{status}"
+        );
+        assert_eq!(precommit.rule, Some("explicit_quota"), "{status}");
+        assert_eq!(
+            precommit.message.as_deref(),
+            Some("The usage limit has been reached"),
+            "{status}"
+        );
+
+        let committed = runtime_http_error_policy(status, body, RuntimeHttpErrorPhase::Committed);
+        assert_eq!(committed.class, RuntimeHttpErrorClass::Quota, "{status}");
+        assert_eq!(
+            committed.action,
+            RuntimeHttpErrorAction::PassThrough,
+            "{status}"
+        );
+        assert_eq!(committed.rule, Some("explicit_quota"), "{status}");
+        assert_eq!(
+            committed.message.as_deref(),
+            Some("The usage limit has been reached"),
+            "{status}"
+        );
+    }
+
+    for phase in [
+        RuntimeHttpErrorPhase::PreCommit,
+        RuntimeHttpErrorPhase::Committed,
+    ] {
+        let policy = runtime_http_error_policy(429, body, phase);
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{phase:?}");
+        assert_eq!(
+            policy.action,
+            RuntimeHttpErrorAction::PassThrough,
+            "{phase:?}"
+        );
+        assert_eq!(policy.rule, None, "{phase:?}");
+        assert_eq!(policy.message, None, "{phase:?}");
     }
 }
 

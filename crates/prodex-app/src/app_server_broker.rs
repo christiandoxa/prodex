@@ -1,99 +1,39 @@
+#[path = "app_server_broker_preview.rs"]
+mod app_server_broker_preview;
+#[path = "app_server_broker_protocol.rs"]
+mod app_server_broker_protocol;
+
+pub(crate) use self::app_server_broker_preview::{
+    APP_SERVER_BROKER_MAX_PREVIEW_LINE_BYTES, app_server_broker_contract_json,
+    app_server_broker_preview_line, app_server_broker_preview_lines,
+    app_server_broker_preview_report, app_server_broker_preview_report_json,
+    app_server_broker_render_output, app_server_broker_render_stdio_preview,
+    app_server_broker_status_line, app_server_broker_write_stdio_live_stream,
+    app_server_broker_write_stdio_passthrough_preview_stream,
+    app_server_broker_write_stdio_preview_stream,
+    app_server_broker_write_stdio_validate_passthrough_stream,
+    app_server_broker_write_stdio_validate_stream,
+};
+pub(crate) use self::app_server_broker_protocol::{
+    AppServerBrokerAffinityKey, AppServerBrokerAffinityKeyKind, AppServerBrokerCommitBoundary,
+    AppServerBrokerContinuationDecision, AppServerBrokerContinuationOwnerKind,
+    AppServerBrokerDiagnosticSummary, AppServerBrokerFrameKind, AppServerBrokerLifecycleBinding,
+    AppServerBrokerLifecycleStage, AppServerBrokerMetadata, AppServerBrokerMethod,
+    AppServerBrokerMethodKind, AppServerBrokerPolicyHint, AppServerBrokerPolicyHintMode,
+    AppServerBrokerRotationWindow, AppServerBrokerRoutingHint, app_server_broker_affinity_keys,
+    app_server_broker_allows_provider_switch, app_server_broker_commit_boundaries,
+    app_server_broker_continuation_affinity_summary_json, app_server_broker_continuation_decision,
+    app_server_broker_continuation_decision_kinds, app_server_broker_diagnostic_summary,
+    app_server_broker_diagnostic_summary_json, app_server_broker_frame_kind,
+    app_server_broker_invalid_reason, app_server_broker_is_lifecycle_method,
+    app_server_broker_lifecycle_binding, app_server_broker_lifecycle_methods,
+    app_server_broker_lifecycle_schema_file, app_server_broker_lifecycle_stage,
+    app_server_broker_metadata_from_value, app_server_broker_method_kind,
+    app_server_broker_policy_hint, app_server_broker_policy_modes,
+    app_server_broker_response_summary_json, app_server_broker_rotation_windows,
+    app_server_broker_routing_hints,
+};
 #[cfg(test)]
-use serde_json::Value;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AppServerBrokerMethod {
-    Initialize,
-    Initialized,
-    ThreadStart,
-    ThreadResume,
-    ThreadFork,
-    TurnStart,
-    TurnCancel,
-    #[cfg(test)]
-    Other,
-}
-
-impl AppServerBrokerMethod {
-    #[cfg(test)]
-    pub(crate) fn parse(method: &str) -> Self {
-        match method {
-            "initialize" => Self::Initialize,
-            "initialized" | "notifications/initialized" => Self::Initialized,
-            "thread/start" => Self::ThreadStart,
-            "thread/resume" => Self::ThreadResume,
-            "thread/fork" => Self::ThreadFork,
-            "turn/start" => Self::TurnStart,
-            "turn/cancel" => Self::TurnCancel,
-            _ => Self::Other,
-        }
-    }
-
-    pub(crate) const fn label(self) -> &'static str {
-        match self {
-            Self::Initialize => "initialize",
-            Self::Initialized => "initialized",
-            Self::ThreadStart => "thread/start",
-            Self::ThreadResume => "thread/resume",
-            Self::ThreadFork => "thread/fork",
-            Self::TurnStart => "turn/start",
-            Self::TurnCancel => "turn/cancel",
-            #[cfg(test)]
-            Self::Other => "other",
-        }
-    }
-}
-
-pub(crate) fn app_server_broker_lifecycle_methods() -> [&'static str; 7] {
-    [
-        AppServerBrokerMethod::Initialize.label(),
-        AppServerBrokerMethod::Initialized.label(),
-        AppServerBrokerMethod::ThreadStart.label(),
-        AppServerBrokerMethod::ThreadResume.label(),
-        AppServerBrokerMethod::ThreadFork.label(),
-        AppServerBrokerMethod::TurnStart.label(),
-        AppServerBrokerMethod::TurnCancel.label(),
-    ]
-}
-
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct AppServerBrokerRequest {
-    pub id: Option<Value>,
-    pub method: AppServerBrokerMethod,
-}
-
-#[cfg(test)]
-pub(crate) fn parse_app_server_broker_request(value: &Value) -> Option<AppServerBrokerRequest> {
-    let object = value.as_object()?;
-    if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return None;
-    }
-    let method = object.get("method").and_then(Value::as_str)?;
-    Some(AppServerBrokerRequest {
-        id: object.get("id").cloned(),
-        method: AppServerBrokerMethod::parse(method),
-    })
-}
-
-pub(crate) fn app_server_broker_contract_json() -> serde_json::Value {
-    serde_json::json!({
-        "object": "app_server_broker.contract",
-        "enabled_by_default": false,
-        "status": "skeleton",
-        "transport": ["stdio-planned"],
-        "jsonrpc": "2.0",
-        "default_mode": "direct-passthrough",
-        "lifecycle_methods": app_server_broker_lifecycle_methods(),
-        "affinity": {
-            "thread_session_owner_required": true,
-            "continuation_affinity_wins": true,
-            "rotate_only_before_turn_commit": true
-        },
-        "errors": {
-            "quota": "json-rpc-error-planned",
-            "rate_limit": "json-rpc-error-planned",
-            "overload": "json-rpc-error-planned"
-        }
-    })
-}
+pub(crate) use self::app_server_broker_protocol::{
+    AppServerBrokerRequest, app_server_broker_request_summary_json, parse_app_server_broker_request,
+};

@@ -10,7 +10,11 @@ mod selection;
 mod session_delete;
 use gateway_config::resolve_gateway_launch_config;
 #[cfg(test)]
-use gateway_config::{gateway_sso_config, gateway_state_store_config};
+use gateway_config::{
+    gateway_observability_config, gateway_openai_api_keys, gateway_route_alias_model_metrics,
+    gateway_route_aliases_config, gateway_sso_config, gateway_state_store_config,
+    gateway_upstream_base_url, resolve_gateway_auth_config, resolve_gateway_guardrail_config,
+};
 use gateway_status::print_gateway_status;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
 use rusqlite::OptionalExtension;
@@ -338,6 +342,8 @@ fn maintain_shared_codex_sessions_after_child_exit() {
         return;
     };
     let _ = maintain_managed_codex_sessions(&paths);
+    let _ =
+        prodex_shared_codex_fs::persist_codex_session_image_attachments(&paths.shared_codex_root);
 }
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {

@@ -68,6 +68,77 @@ fn provider_adapter_contract_matches_fixture() {
 }
 
 #[test]
+fn transform_result_exposes_explicit_status_outcome() {
+    let lossless = ProviderTransformResult::lossless(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        br#"{"ok":true}"#.to_vec(),
+    );
+    assert_eq!(lossless.status(), TransformStatus::Lossless);
+    assert_eq!(lossless.outcome().value, Some(br#"{"ok":true}"#.to_vec()));
+
+    let degraded = ProviderTransformResult::degraded(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        Vec::new(),
+        "dropped unsupported option",
+        Default::default(),
+    );
+    assert_eq!(
+        degraded.status(),
+        TransformStatus::Degraded {
+            reason: "dropped unsupported option".to_string()
+        }
+    );
+    assert_eq!(
+        degraded.status().reason(),
+        Some("dropped unsupported option")
+    );
+
+    let rejected = ProviderTransformResult::rejected(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        "bad request",
+    );
+    assert_eq!(
+        rejected.outcome(),
+        TransformOutcome {
+            status: TransformStatus::Rejected {
+                reason: "bad request".to_string()
+            },
+            value: None
+        }
+    );
+
+    let unsupported = ProviderTransformResult::unsupported(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        "stream event unsupported",
+    );
+    assert_eq!(
+        unsupported.status(),
+        TransformStatus::Unsupported {
+            reason: "stream event unsupported".to_string()
+        }
+    );
+    assert!(ProviderConformanceExpectedLoss::Unsupported.matches_status(&unsupported.status()));
+    assert!(ProviderConformanceExpectedLoss::Unsupported.requires_reason());
+    assert!(!ProviderConformanceExpectedLoss::Lossless.requires_reason());
+    assert_eq!(
+        ProviderConformanceExpectedLoss::Unsupported.label(),
+        "unsupported"
+    );
+}
+
+#[test]
 fn provider_contract_matrix_is_stable_and_complete() {
     let matrix = provider_adapter_contract_matrix();
     assert_eq!(matrix.len(), PROVIDER_CONTRACT_PROVIDERS.len());
@@ -121,5 +192,26 @@ fn fallback_chain_preserves_existing_gemini_aliases() {
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Copilot, "gpt-5.4"),
         vec!["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+    );
+}
+
+#[test]
+fn gemini_code_assist_model_filter_preserves_existing_runtime_behavior() {
+    let mut chain = vec![
+        "gemini-3-pro-preview".to_string(),
+        "gemini-3.1-pro-preview-customtools".to_string(),
+        "gemini-3.5-flash".to_string(),
+        "gemini-3-flash".to_string(),
+        "gemini-2.5-flash".to_string(),
+    ];
+
+    provider_gemini_retain_code_assist_models(&mut chain);
+
+    assert_eq!(
+        chain,
+        vec![
+            "gemini-3-pro-preview".to_string(),
+            "gemini-2.5-flash".to_string()
+        ]
     );
 }

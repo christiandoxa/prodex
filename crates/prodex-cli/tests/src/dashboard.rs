@@ -28,3 +28,15 @@ fn dashboard_parse_as_top_level_command() {
         "dashboard",
     ])));
 }
+
+#[test]
+fn dashboard_parse_defaults() {
+    let command = parse_cli_command_from(["prodex", "dashboard"]).expect("dashboard should parse");
+    let Commands::Dashboard(args) = command else {
+        panic!("expected dashboard command");
+    };
+
+    assert_eq!(args.host, "127.0.0.1");
+    assert_eq!(args.port, 8765);
+    assert!(args.base_url.is_none());
+}

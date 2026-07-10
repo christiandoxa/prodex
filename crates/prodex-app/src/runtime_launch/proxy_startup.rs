@@ -1,7 +1,8 @@
 use super::*;
 
 mod anthropic_rewrite;
-mod deepseek_content;
+mod chat_compatible_request;
+mod chat_compatible_rewrite;
 mod deepseek_reasoning;
 pub(super) mod deepseek_rewrite;
 mod deepseek_sse;
@@ -60,7 +61,6 @@ mod local_rewrite_gemini_compact;
 mod local_rewrite_gemini_live;
 mod local_rewrite_gemini_models;
 mod local_rewrite_gemini_quota;
-mod local_rewrite_gemini_retry;
 mod local_rewrite_gemini_thought_signatures;
 mod local_rewrite_kiro;
 mod local_rewrite_model_memory;
@@ -83,6 +83,7 @@ mod provider_models;
 mod provider_sse_events;
 mod provider_sse_reader;
 mod provider_tools;
+mod workers;
 pub(crate) use anthropic_rewrite::{
     RuntimeAnthropicOAuthProfileAuth, RuntimeAnthropicProviderAuth,
 };
@@ -97,6 +98,7 @@ pub(crate) use local_rewrite::{
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 pub(crate) use local_rewrite_kiro::RuntimeKiroProfileAuth;
+use workers::spawn_runtime_rotation_proxy_workers;
 
 #[cfg(test)]
 pub(crate) fn start_runtime_rotation_proxy(
@@ -449,10 +451,6 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         );
     }
     let shutdown = Arc::new(AtomicBool::new(false));
-    let mut worker_threads = Vec::new();
-    let (long_lived_sender, long_lived_receiver) =
-        mpsc::sync_channel::<tiny_http::Request>(long_lived_queue_capacity);
-    let long_lived_receiver = Arc::new(Mutex::new(long_lived_receiver));
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
@@ -463,121 +461,14 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
             lane_admission.limits.standard
         ),
     );
-
-    for _ in 0..long_lived_worker_count {
-        let shutdown = Arc::clone(&shutdown);
-        let shared = shared.clone();
-        let receiver = Arc::clone(&long_lived_receiver);
-        worker_threads.push(thread::spawn(move || {
-            loop {
-                let request = {
-                    let guard = receiver.lock();
-                    let Ok(receiver) = guard else {
-                        break;
-                    };
-                    receiver.recv()
-                };
-                match request {
-                    Ok(request) => {
-                        let (mutex, condvar) = &*shared.lane_admission.wait;
-                        let guard = mutex
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        condvar.notify_all();
-                        drop(guard);
-                        let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                            handle_runtime_rotation_proxy_request(request, &shared);
-                        });
-                        if let Err(panic) = result {
-                            runtime_proxy_log(
-                                &shared,
-                                format!(
-                                    "runtime_proxy_worker_panic lane=long_lived panic={}",
-                                    crate::runtime_panic::runtime_panic_payload_label(
-                                        panic.as_ref()
-                                    )
-                                ),
-                            );
-                        }
-                    }
-                    Err(_) => break,
-                }
-                if shutdown.load(Ordering::SeqCst) {
-                    break;
-                }
-            }
-        }));
-    }
-
-    for _ in 0..worker_count {
-        let server: Arc<TinyServer> = Arc::clone(&server);
-        let shutdown = Arc::clone(&shutdown);
-        let shared = shared.clone();
-        let long_lived_sender = long_lived_sender.clone();
-        worker_threads.push(thread::spawn(move || {
-            loop {
-                match server.recv() {
-                    Ok(request) => {
-                        let websocket = is_tiny_http_websocket_upgrade(&request);
-                        let long_lived =
-                            runtime_proxy_request_is_long_lived(request.url(), websocket);
-                        if long_lived {
-                            match enqueue_runtime_proxy_long_lived_request_with_wait(
-                                &long_lived_sender,
-                                request,
-                                &shared,
-                            ) {
-                                Ok(()) => {}
-                                Err((RuntimeProxyQueueRejection::Full, request)) => {
-                                    mark_runtime_proxy_local_overload(
-                                        &shared,
-                                        "long_lived_queue_full",
-                                    );
-                                    reject_runtime_proxy_overloaded_request(
-                                        request,
-                                        &shared,
-                                        "long_lived_queue_full",
-                                    );
-                                }
-                                Err((RuntimeProxyQueueRejection::Disconnected, request)) => {
-                                    mark_runtime_proxy_local_overload(
-                                        &shared,
-                                        "long_lived_queue_disconnected",
-                                    );
-                                    reject_runtime_proxy_overloaded_request(
-                                        request,
-                                        &shared,
-                                        "long_lived_queue_disconnected",
-                                    );
-                                }
-                            }
-                        } else {
-                            let result =
-                                crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                                    handle_runtime_rotation_proxy_request(request, &shared);
-                                });
-                            if let Err(panic) = result {
-                                runtime_proxy_log(
-                                    &shared,
-                                    format!(
-                                        "runtime_proxy_worker_panic lane=standard panic={}",
-                                        crate::runtime_panic::runtime_panic_payload_label(
-                                            panic.as_ref()
-                                        )
-                                    ),
-                                );
-                            }
-                        }
-                    }
-                    Err(_) if shutdown.load(Ordering::SeqCst) => break,
-                    Err(_) => {}
-                }
-                if shutdown.load(Ordering::SeqCst) {
-                    break;
-                }
-            }
-        }));
-    }
+    let worker_threads = spawn_runtime_rotation_proxy_workers(
+        &server,
+        &shutdown,
+        &shared,
+        worker_count,
+        long_lived_worker_count,
+        long_lived_queue_capacity,
+    );
 
     Ok(RuntimeRotationProxy {
         server,

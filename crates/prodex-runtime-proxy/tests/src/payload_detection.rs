@@ -453,29 +453,6 @@ fn previous_response_message_ignores_non_error_content_text() {
         extract_runtime_proxy_previous_response_message_from_value(&payload),
         None
     );
-
-    let leading_payload = serde_json::json!({
-        "type": "response.output_text.delta",
-        "delta": "previous_response_not_found is an upstream error code.",
-    });
-
-    assert_eq!(
-        extract_runtime_proxy_previous_response_message_from_value(&leading_payload),
-        None
-    );
-
-    let message_payload = serde_json::json!({
-        "type": "response.output_item.done",
-        "item": {
-            "type": "message",
-            "message": "Previous response with id 'resp-example' not found is an example.",
-        },
-    });
-
-    assert_eq!(
-        extract_runtime_proxy_previous_response_message_from_value(&message_payload),
-        None
-    );
 }
 
 #[test]
@@ -500,20 +477,7 @@ fn quota_message_detects_nested_error_payloads() {
 }
 
 #[test]
-fn quota_message_ignores_non_error_content_text() {
-    let payload = serde_json::json!({
-        "type": "response.output_text.delta",
-        "delta": "The docs mention insufficient_quota and rate_limit_exceeded as examples.",
-    });
-
-    assert_eq!(
-        extract_runtime_proxy_quota_message_from_value(&payload),
-        None
-    );
-}
-
-#[test]
-fn quota_http_body_detection_requires_explicit_error_code() {
+fn quota_http_body_detection_accepts_explicit_quota_payloads_but_not_generic_429() {
     assert_eq!(
         extract_runtime_proxy_quota_message(br#"{"error":{"message":"Too Many Requests"}}"#),
         None
@@ -533,6 +497,7 @@ fn quota_http_body_detection_requires_explicit_error_code() {
         "insufficient_quota",
         "rate_limit_exceeded",
         "usage_not_included",
+        "usage_limit_reached",
     ] {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {

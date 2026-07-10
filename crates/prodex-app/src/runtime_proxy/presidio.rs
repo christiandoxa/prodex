@@ -12,6 +12,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+mod analyzer;
+mod json_body;
+
+use analyzer::{detect_presidio_language, merge_presidio_analyzer_results};
+use json_body::{
+    collect_json_string_values, presidio_json_value_separator, replace_json_string_values,
+};
+
 const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const PRESIDIO_RESPONSE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
@@ -287,67 +295,6 @@ async fn runtime_presidio_redact_text(
     Ok(anonymized.text)
 }
 
-fn collect_json_string_values(
-    value: &serde_json::Value,
-    redact_string: bool,
-    values: &mut Vec<String>,
-) {
-    match value {
-        serde_json::Value::String(text) if redact_string => values.push(text.clone()),
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_json_string_values(item, redact_string, values);
-            }
-        }
-        serde_json::Value::Object(fields) => {
-            for (key, value) in fields {
-                collect_json_string_values(value, should_redact_json_string_field(key), values);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn replace_json_string_values<'a>(
-    value: &mut serde_json::Value,
-    redact_string: bool,
-    values: &mut impl Iterator<Item = &'a str>,
-) {
-    match value {
-        serde_json::Value::String(text) if redact_string => {
-            if let Some(redacted) = values.next() {
-                *text = redacted.to_string();
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                replace_json_string_values(item, redact_string, values);
-            }
-        }
-        serde_json::Value::Object(fields) => {
-            for (key, value) in fields {
-                replace_json_string_values(value, should_redact_json_string_field(key), values);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn should_redact_json_string_field(key: &str) -> bool {
-    matches!(
-        key,
-        "arguments" | "content" | "input" | "instructions" | "output" | "text"
-    )
-}
-
-fn presidio_json_value_separator(values: &[String]) -> String {
-    let mut separator = "\u{e000}PRODEX_PRESIDIO_VALUE\u{e001}".to_string();
-    while values.iter().any(|value| value.contains(&separator)) {
-        separator.push('\u{e002}');
-    }
-    separator
-}
-
 async fn presidio_analyze_async(
     client: &reqwest::Client,
     analyzer_url: &str,
@@ -378,101 +325,6 @@ async fn presidio_analyze_async(
 
 fn presidio_endpoint(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
-}
-
-fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String> {
-    if candidates.len() == 1 {
-        return Some(candidates[0].clone());
-    }
-
-    let id_keywords = [
-        "yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat",
-        "tanggal", "lahir", "dengan", "untuk",
-    ];
-    let en_keywords = [
-        "the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for",
-        "birth",
-    ];
-
-    let mut id_score = 0;
-    let mut en_score = 0;
-
-    let lower_text = text.to_lowercase();
-
-    for keyword in id_keywords.iter() {
-        if lower_text.contains(keyword) {
-            id_score += 1;
-        }
-    }
-    for keyword in en_keywords.iter() {
-        if lower_text.contains(keyword) {
-            en_score += 1;
-        }
-    }
-
-    if id_score > en_score && candidates.contains(&"id".to_string()) {
-        Some("id".to_string())
-    } else if en_score > id_score && candidates.contains(&"en".to_string()) {
-        Some("en".to_string())
-    } else {
-        candidates.first().cloned()
-    }
-}
-
-fn merge_presidio_analyzer_results(
-    mut results: Vec<PresidioAnalyzerResult>,
-) -> Vec<PresidioAnalyzerResult> {
-    results.sort_by(|a, b| {
-        a.start
-            .cmp(&b.start)
-            .then_with(|| a.end.cmp(&b.end))
-            .then_with(|| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .then_with(|| b.entity_type.cmp(&a.entity_type))
-    });
-
-    let mut merged: Vec<PresidioAnalyzerResult> = Vec::new();
-    for result in results {
-        if let Some(last) = merged.last_mut() {
-            if last.start == result.start
-                && last.end == result.end
-                && last.entity_type == result.entity_type
-            {
-                if result.score > last.score {
-                    *last = result;
-                }
-                continue;
-            }
-
-            let overlaps = result.start < last.end && result.end > last.start;
-            if overlaps
-                && (result.score > last.score
-                    || (result.score == last.score
-                        && (result.end - result.start) > (last.end - last.start)))
-            {
-                if (result.start >= last.start && result.end <= last.end)
-                    || (last.start >= result.start && last.end <= result.end)
-                {
-                    if result.score > last.score {
-                        *last = result;
-                    }
-                    continue;
-                } else if result.score > last.score {
-                    last.start = last.start.min(result.start);
-                    last.end = last.end.max(result.end);
-                    last.score = result.score;
-                    last.entity_type = result.entity_type;
-                    last.language = result.language;
-                    continue;
-                }
-            }
-        }
-        merged.push(result);
-    }
-    merged
 }
 
 #[cfg(test)]

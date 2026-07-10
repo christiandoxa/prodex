@@ -1,10 +1,9 @@
 use super::super::gemini_request_extensions::runtime_gemini_extension_context_files;
-use super::super::gemini_request_io::{
-    runtime_gemini_read_text_limited, runtime_gemini_truncate_to_bytes,
-};
+use super::super::gemini_request_io::runtime_gemini_read_text_limited;
 use super::gemini_request_util::{runtime_gemini_bool_value, runtime_gemini_env_bool};
-use super::{
-    RUNTIME_GEMINI_MEMORY_BYTE_LIMIT, runtime_gemini_collect_path_values, runtime_gemini_config_dir,
+use super::{RUNTIME_GEMINI_MEMORY_BYTE_LIMIT, runtime_gemini_config_dir};
+use prodex_provider_core::{
+    gemini_provider_core_collect_path_values, gemini_provider_core_truncate_to_bytes,
 };
 use std::env;
 use std::path::Path;
@@ -42,7 +41,7 @@ fn runtime_gemini_collect_inline_memory_sections(
         "geminiMemoryFiles",
     ] {
         let mut paths = Vec::new();
-        runtime_gemini_collect_path_values(original.get(key), &mut paths);
+        gemini_provider_core_collect_path_values(original.get(key), &mut paths);
         for path in paths {
             runtime_gemini_push_memory_file_section("Request File", &path, sections, budget);
         }
@@ -187,7 +186,7 @@ fn runtime_gemini_push_memory_section(
     if text.is_empty() {
         return;
     }
-    let text = runtime_gemini_truncate_to_bytes(text, *budget);
+    let text = gemini_provider_core_truncate_to_bytes(text, *budget);
     *budget = budget.saturating_sub(text.len());
     sections.push(format!("--- {title} ---\n{text}"));
 }

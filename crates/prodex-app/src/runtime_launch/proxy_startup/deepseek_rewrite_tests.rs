@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use prodex_provider_core::deepseek_provider_core_history_has_tool_call;
 
     fn conversation_store() -> RuntimeDeepSeekConversationStore {
         RuntimeDeepSeekConversationStore::default()
@@ -22,7 +23,7 @@ mod tests {
         assert!(tenant_b.history("resp-shared").is_none());
         assert!(
             tenant_b
-                .find_history(|messages| runtime_deepseek_history_has_tool_call(
+                .find_history(|messages| deepseek_provider_core_history_has_tool_call(
                     messages,
                     "call-shared"
                 ))

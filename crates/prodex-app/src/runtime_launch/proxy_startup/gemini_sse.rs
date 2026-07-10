@@ -1,18 +1,16 @@
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
-use super::gemini_rewrite::runtime_gemini_normalized_response_value;
 use super::provider_sse_reader::{
     RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState, RuntimeProviderSseObserver,
 };
+use prodex_provider_core::gemini_provider_core_normalized_response_value;
 use std::io::{self, Read};
 use std::sync::Arc;
 
-#[path = "gemini_sse_guardrails.rs"]
-mod gemini_sse_guardrails;
 #[path = "gemini_sse_state.rs"]
 mod gemini_sse_state;
 
-pub(super) use gemini_sse_guardrails::runtime_gemini_forced_command_output;
 use gemini_sse_state::RuntimeGeminiSseState;
+pub(super) use prodex_provider_core::gemini_provider_core_forced_command_output as runtime_gemini_forced_command_output;
 
 pub(super) type RuntimeGeminiBindingRecorder = Arc<dyn Fn(String, Vec<String>) + Send + Sync>;
 
@@ -71,7 +69,7 @@ impl RuntimeProviderSseJsonState for RuntimeGeminiSseState {
     }
 
     fn observe_value(&mut self, value: &serde_json::Value) -> Vec<String> {
-        let value = runtime_gemini_normalized_response_value(value);
+        let value = gemini_provider_core_normalized_response_value(value);
         self.observe_generate_chunk(&value)
     }
 

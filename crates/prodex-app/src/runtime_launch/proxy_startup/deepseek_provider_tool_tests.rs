@@ -1,9 +1,25 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
+    use prodex_provider_core::provider_core_chat_compatible_responses_value_from_chat_value;
 
     fn conversation_store() -> RuntimeDeepSeekConversationStore {
         RuntimeDeepSeekConversationStore::default()
+    }
+
+    fn runtime_deepseek_responses_value_from_chat_value(
+        value: &serde_json::Value,
+        request_id: u64,
+    ) -> serde_json::Value {
+        provider_core_chat_compatible_responses_value_from_chat_value(
+            value,
+            request_id,
+            "deepseek",
+            RuntimeProviderBridgeKind::DeepSeek.chat_compatible_adapter_label(),
+            SUPER_DEEPSEEK_DEFAULT_MODEL,
+            "resp_deepseek",
+        )
     }
 
     #[test]
@@ -331,7 +347,7 @@ mod tests {
         for (mode, expected) in [
             (
                 RuntimeDeepSeekWebSearchMode::Anthropic,
-                "requires the DeepSeek Anthropic adapter",
+                "requires an Anthropic-compatible adapter",
             ),
             (
                 RuntimeDeepSeekWebSearchMode::FunctionProxy,

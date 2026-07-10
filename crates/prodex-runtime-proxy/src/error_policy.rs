@@ -133,7 +133,11 @@ impl RuntimeHttpErrorRule {
             RuntimeHttpErrorSignal::ExplicitQuota => runtime_error_signal_message_from_body(
                 body,
                 RuntimeHttpErrorSignal::ExplicitQuota,
-                RuntimeQuotaMatchMode::ExplicitCode,
+                if status == 429 {
+                    RuntimeQuotaMatchMode::ExplicitCode
+                } else {
+                    RuntimeQuotaMatchMode::UsageMessage
+                },
             ),
             RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
                 runtime_error_signal_message_from_body(

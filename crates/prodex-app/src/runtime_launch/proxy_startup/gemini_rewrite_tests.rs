@@ -2,33 +2,9 @@
 
 use super::gemini_rewrite_test_support::conversation_store;
 use super::{
-    RuntimeGeminiAuth, runtime_gemini_generate_request_body, runtime_gemini_native_upstream_url,
-    runtime_gemini_request_body_without_tool, runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_generate_request_body, runtime_gemini_responses_value_from_generate_value,
 };
-
-#[test]
-fn gemini_native_upstream_url_neutralizes_dot_segments_before_url_parsing_can_escape_base() {
-    let auth = RuntimeGeminiAuth::ApiKey {
-        api_key: "key".to_string(),
-    };
-
-    assert_eq!(
-        runtime_gemini_native_upstream_url(
-            "https://generativelanguage.googleapis.com/v1beta",
-            &auth,
-            "/v1beta/../admin?x=1",
-        ),
-        "https://generativelanguage.googleapis.com/v1beta/%252e%252e/admin?x=1"
-    );
-    assert_eq!(
-        runtime_gemini_native_upstream_url(
-            "https://generativelanguage.googleapis.com/v1beta",
-            &auth,
-            "/v1beta/%2e%2e/admin",
-        ),
-        "https://generativelanguage.googleapis.com/v1beta/%252e%252e/admin"
-    );
-}
+use prodex_provider_core::gemini_provider_core_request_body_without_tool;
 
 #[test]
 fn gemini_request_translation_maps_tools_and_thinking() {
@@ -401,8 +377,9 @@ fn gemini_request_translation_strips_google_search_for_fallback() {
             None,
         )
         .expect("request should translate");
-        let stripped = runtime_gemini_request_body_without_tool(&translated.body, "googleSearch")
-            .expect("googleSearch should be stripped");
+        let stripped =
+            gemini_provider_core_request_body_without_tool(&translated.body, "googleSearch")
+                .expect("googleSearch should be stripped");
         let value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
         let request = value.get("request").unwrap_or(&value);
 
@@ -446,7 +423,7 @@ fn gemini_request_translation_maps_web_fetch_to_url_context() {
         "shell"
     );
 
-    let stripped = runtime_gemini_request_body_without_tool(&translated.body, "urlContext")
+    let stripped = gemini_provider_core_request_body_without_tool(&translated.body, "urlContext")
         .expect("urlContext should be stripped for fallback");
     let stripped_value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
     assert_eq!(

@@ -1,6 +1,10 @@
 use super::super::gemini_request_io::runtime_gemini_path_has_symlink_component;
-use super::super::gemini_request_media::runtime_gemini_mime_type_for_uri;
 use base64::Engine;
+use prodex_provider_core::{
+    gemini_provider_core_local_context_text_part, gemini_provider_core_media_part_from_data,
+    gemini_provider_core_mime_type_for_uri, gemini_provider_core_mime_type_is_text,
+    gemini_provider_core_skip_context_path_name, gemini_provider_core_text_part,
+};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read as _;
@@ -53,21 +57,20 @@ pub(super) fn runtime_gemini_part_from_local_path(
     budget.files = budget.files.saturating_add(1);
     budget.bytes = budget.bytes.saturating_add(data.len());
     budget.paths.insert(dedup_path);
-    let mime_type =
-        mime_type.unwrap_or_else(|| runtime_gemini_mime_type_for_uri(&path.to_string_lossy()));
-    if runtime_gemini_mime_type_is_text(mime_type)
+    let mime_type = mime_type
+        .unwrap_or_else(|| gemini_provider_core_mime_type_for_uri(&path.to_string_lossy()));
+    if gemini_provider_core_mime_type_is_text(mime_type)
         && let Ok(text) = String::from_utf8(data.clone())
     {
-        return Some(serde_json::json!({
-            "text": format!("Content from @{}:\n{}", path.display(), text),
-        }));
+        return Some(gemini_provider_core_local_context_text_part(
+            path.display(),
+            &text,
+        ));
     }
-    Some(serde_json::json!({
-        "inlineData": {
-            "mimeType": mime_type,
-            "data": base64::engine::general_purpose::STANDARD.encode(data),
-        }
-    }))
+    gemini_provider_core_media_part_from_data(
+        &base64::engine::general_purpose::STANDARD.encode(data),
+        Some(mime_type),
+    )
 }
 
 fn runtime_gemini_part_from_local_dir(
@@ -89,7 +92,7 @@ fn runtime_gemini_part_from_local_dir(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if runtime_gemini_skip_context_path_name(name) {
+        if gemini_provider_core_skip_context_path_name(name) {
             continue;
         }
         let Ok(metadata) = fs::symlink_metadata(&entry) else {
@@ -109,13 +112,13 @@ fn runtime_gemini_part_from_local_dir(
         }
     }
     (!parts.is_empty()).then(|| {
-        serde_json::json!({
-            "text": parts
+        gemini_provider_core_text_part(
+            parts
                 .iter()
                 .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
                 .collect::<Vec<_>>()
                 .join("\n\n"),
-        })
+        )
     })
 }
 
@@ -153,26 +156,6 @@ pub(super) fn runtime_gemini_resolve_local_path(path: &Path) -> Option<PathBuf> 
         return Some(path.to_path_buf());
     }
     std::env::current_dir().ok().map(|cwd| cwd.join(path))
-}
-
-fn runtime_gemini_mime_type_is_text(mime_type: &str) -> bool {
-    mime_type.starts_with("text/")
-        || matches!(
-            mime_type,
-            "application/json"
-                | "application/xml"
-                | "application/javascript"
-                | "application/typescript"
-                | "application/x-sh"
-                | "application/octet-stream"
-        )
-}
-
-pub(super) fn runtime_gemini_skip_context_path_name(name: &str) -> bool {
-    matches!(
-        name,
-        ".git" | "node_modules" | "target" | "dist" | "build" | "__pycache__" | "vendor"
-    )
 }
 
 #[cfg(test)]

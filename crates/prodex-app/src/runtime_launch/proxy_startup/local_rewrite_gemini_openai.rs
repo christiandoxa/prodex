@@ -1,7 +1,7 @@
-use super::super::deepseek_rewrite::{
-    RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
-    runtime_chat_compatible_request_body, runtime_deepseek_remember_pending_request,
+use super::super::chat_compatible_rewrite::{
+    RuntimeDeepSeekRewriteOptions, runtime_provider_chat_compatible_request_body,
 };
+use super::super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
@@ -13,7 +13,7 @@ use super::super::local_rewrite_search_fallback::{
 };
 use super::super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, runtime_gemini_openai_compatible_upstream_url,
-    runtime_local_rewrite_api_key_attempts, runtime_local_rewrite_log_url,
+    runtime_local_rewrite_api_key_attempts,
 };
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_request_conformance,
@@ -56,7 +56,7 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
             "local_rewrite_gemini_openai_compatible",
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("endpoint", runtime_local_rewrite_log_url(&upstream_url)),
+                runtime_proxy_log_field("endpoint", upstream_url.as_str()),
                 runtime_proxy_log_field("auth", "api-key"),
                 runtime_proxy_log_field("attempts", attempt_count.to_string()),
             ],
@@ -78,19 +78,23 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
                     &result,
                 );
             }
-            let conversations = shared.deepseek_conversations_for_request(request);
-            let translated = runtime_chat_compatible_request_body(
+            let translated = runtime_provider_chat_compatible_request_body(
                 &model_body,
-                &conversations,
+                &shared.deepseek_conversations,
                 RuntimeProviderBridgeKind::Gemini,
                 GEMINI_DEFAULT_MODEL,
                 true,
                 RuntimeDeepSeekRewriteOptions::default(),
             )?;
-            let pending_request = RuntimeDeepSeekPendingRequest {
-                messages: translated.messages,
-                response_metadata: translated.response_metadata,
-            };
+            if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                pending.insert(
+                    request_id,
+                    RuntimeDeepSeekPendingRequest {
+                        messages: translated.messages,
+                        response_metadata: translated.response_metadata,
+                    },
+                );
+            }
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                     RuntimeLocalRewriteSearchFallbackRequest {
@@ -107,11 +111,6 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
                 )?;
             let (status, parts, class) = match send_result {
                 RuntimeLocalRewritePreparedSendResult::Live(response) => {
-                    runtime_deepseek_remember_pending_request(
-                        &shared.deepseek_pending_messages,
-                        request_id,
-                        pending_request,
-                    );
                     return Ok(RuntimeLocalRewriteUpstreamResult {
                         response: RuntimeLocalRewriteUpstreamResponse::Live(
                             RuntimeLocalRewriteLiveResponse::new(response),

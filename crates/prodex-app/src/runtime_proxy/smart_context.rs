@@ -4,6 +4,7 @@ mod artifact_refs;
 mod body;
 mod budgeting;
 mod constants;
+mod cooldown;
 mod intent;
 mod panic_guard;
 mod proxy_state;
@@ -11,9 +12,11 @@ mod rehydration;
 mod repo_state;
 mod rewrite_telemetry;
 mod rewrite_validation;
+mod rollout;
 mod runtime_rehydrate;
 mod safety;
 mod static_context;
+mod static_observation;
 mod token_calibration;
 mod tool_outputs;
 mod types;
@@ -26,6 +29,7 @@ pub(crate) use budgeting::{
     runtime_smart_context_model_name_from_body, runtime_smart_context_normalized_model_name,
 };
 use constants::*;
+use cooldown::*;
 use intent::*;
 use panic_guard::*;
 pub(crate) use proxy_state::*;
@@ -33,11 +37,12 @@ use rehydration::*;
 use repo_state::*;
 use rewrite_telemetry::*;
 use rewrite_validation::*;
+use rollout::*;
 use runtime_rehydrate::*;
 use safety::*;
 use static_context::*;
+use static_observation::*;
 use std::borrow::Cow;
-use std::env;
 use std::path::PathBuf;
 use token_calibration::*;
 use tool_outputs::*;
@@ -46,28 +51,6 @@ use types::*;
 static RUNTIME_SMART_CONTEXT_PROXY_STATES: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimeSmartContextProxyState>>,
 > = OnceLock::new();
-const RUNTIME_SMART_CONTEXT_PANIC_COOLDOWN_SECS: u64 = 60;
-static RUNTIME_SMART_CONTEXT_DISABLED_UNTIL: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> =
-    OnceLock::new();
-
-fn runtime_smart_context_disabled_until_for(shared: &RuntimeRotationProxyShared) -> u64 {
-    let Some(disabled) = RUNTIME_SMART_CONTEXT_DISABLED_UNTIL.get() else {
-        return 0;
-    };
-    let Ok(disabled) = disabled.lock() else {
-        return 0;
-    };
-    disabled.get(&shared.log_path).copied().unwrap_or_default()
-}
-
-fn runtime_smart_context_disable_temporarily(shared: &RuntimeRotationProxyShared, now: u64) -> u64 {
-    let disabled_until = now.saturating_add(RUNTIME_SMART_CONTEXT_PANIC_COOLDOWN_SECS);
-    let disabled = RUNTIME_SMART_CONTEXT_DISABLED_UNTIL.get_or_init(|| Mutex::new(BTreeMap::new()));
-    if let Ok(mut disabled) = disabled.lock() {
-        disabled.insert(shared.log_path.clone(), disabled_until);
-    }
-    disabled_until
-}
 
 pub(crate) fn runtime_smart_context_effective_prompt_cache_key(
     request: &RuntimeProxyRequest,
@@ -396,55 +379,6 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     }
 }
 
-fn runtime_smart_context_rollout_decision(
-    request_id: u64,
-    request: &RuntimeProxyRequest,
-    shared: &RuntimeRotationProxyShared,
-    route_kind: RuntimeRouteKind,
-    transport: RuntimeSmartContextTransport,
-    profile_name: Option<&str>,
-) -> runtime_proxy_crate::SmartContextRolloutDecision {
-    runtime_proxy_crate::smart_context_rollout_decision(
-        runtime_proxy_crate::SmartContextRolloutDecisionInput {
-            enabled: true,
-            explicit_exact_mode: runtime_smart_context_exact_header(request),
-            shadow_mode: runtime_smart_context_env_flag("PRODEX_SMART_CONTEXT_SHADOW"),
-            canary_percent: runtime_smart_context_env_percent(
-                "PRODEX_SMART_CONTEXT_CANARY_PERCENT",
-                100,
-            ),
-            stable_key: format!(
-                "{}:{}:{}:{}:{}",
-                shared.log_path.display(),
-                profile_name.unwrap_or("-"),
-                runtime_route_kind_label(route_kind),
-                transport.label(),
-                request_id
-            ),
-        },
-    )
-}
-
-pub(super) fn runtime_smart_context_env_flag(name: &str) -> bool {
-    env::var(name)
-        .ok()
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
-}
-
-pub(super) fn runtime_smart_context_env_percent(name: &str, default: u8) -> u8 {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.trim().parse::<u8>().ok())
-        .map(|value| value.min(100))
-        .unwrap_or(default)
-}
-
 fn runtime_smart_context_websocket_generate_false_request(body: &[u8]) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return false;
@@ -463,103 +397,6 @@ fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
     states
         .get(&shared.log_path)
         .is_some_and(|state| state.enabled)
-}
-
-fn runtime_smart_context_observe_static_context(
-    shared: &RuntimeRotationProxyShared,
-    value: &serde_json::Value,
-) -> RuntimeSmartContextStaticContextObservation {
-    let cache = runtime_proxy_crate::smart_context_static_context_prompt_cache_fingerprint(
-        runtime_smart_context_static_context_items(value),
-    );
-    if cache.items.is_empty() {
-        return RuntimeSmartContextStaticContextObservation::default();
-    }
-
-    let current = cache
-        .items
-        .iter()
-        .map(|item| runtime_proxy_crate::SmartContextFingerprint {
-            id: item.id.clone(),
-            kind: runtime_proxy_crate::SmartContextFingerprintKind::StaticContext,
-            content_hash: item.content_hash.clone(),
-            byte_len: item.byte_len,
-        })
-        .collect::<Vec<_>>();
-
-    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
-        return RuntimeSmartContextStaticContextObservation {
-            seen_before: false,
-            changed: false,
-            item_count: current.len(),
-            delta_count: 0,
-            prompt_cache_hash: Some(cache.content_hash),
-            changed_item_ids: BTreeSet::new(),
-        };
-    };
-    let Ok(mut states) = states.lock() else {
-        return RuntimeSmartContextStaticContextObservation {
-            seen_before: false,
-            changed: false,
-            item_count: current.len(),
-            delta_count: 0,
-            prompt_cache_hash: Some(cache.content_hash),
-            changed_item_ids: BTreeSet::new(),
-        };
-    };
-    let Some(state) = states.get_mut(&shared.log_path) else {
-        return RuntimeSmartContextStaticContextObservation {
-            seen_before: false,
-            changed: false,
-            item_count: current.len(),
-            delta_count: 0,
-            prompt_cache_hash: Some(cache.content_hash),
-            changed_item_ids: BTreeSet::new(),
-        };
-    };
-
-    let seen_before = !state.last_static_context_fingerprints.is_empty();
-    let delta = if seen_before {
-        runtime_proxy_crate::smart_context_fingerprint_delta(
-            state.last_static_context_fingerprints.clone(),
-            current.clone(),
-        )
-    } else {
-        Vec::new()
-    };
-    let changed = delta
-        .iter()
-        .any(runtime_smart_context_fingerprint_change_is_substantive);
-    let changed_item_ids =
-        runtime_smart_context_substantive_static_context_changed_item_ids(&delta);
-    let observation = RuntimeSmartContextStaticContextObservation {
-        seen_before,
-        changed,
-        item_count: current.len(),
-        delta_count: delta.len(),
-        prompt_cache_hash: Some(cache.content_hash.clone()),
-        changed_item_ids,
-    };
-    state.last_static_context_fingerprints = current;
-    state.last_static_context_prompt_cache_hash = Some(cache.content_hash);
-    state.artifacts.set_static_context_fingerprints(
-        observation.prompt_cache_hash.clone(),
-        state.last_static_context_fingerprints.clone(),
-    );
-    let save_job = state
-        .artifact_path
-        .clone()
-        .map(|path| (path, state.artifacts.clone()));
-    drop(states);
-    if let Some((path, store)) = save_job {
-        schedule_runtime_smart_context_artifact_save(
-            shared,
-            path,
-            store,
-            "smart_context_static_fingerprints",
-        );
-    }
-    observation
 }
 
 fn with_runtime_smart_context_artifacts<R>(

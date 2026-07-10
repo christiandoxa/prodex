@@ -86,7 +86,6 @@ impl RuntimeDeepSeekConversationStore {
         }
     }
 
-    #[cfg(test)]
     pub(in crate::runtime_launch::proxy_startup) fn lock(
         &self,
     ) -> std::sync::LockResult<std::sync::MutexGuard<'_, BTreeMap<String, Vec<serde_json::Value>>>>

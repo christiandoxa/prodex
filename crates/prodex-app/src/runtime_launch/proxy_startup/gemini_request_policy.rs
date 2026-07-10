@@ -1,9 +1,16 @@
 use super::gemini_request::{
-    RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT,
-    runtime_gemini_collect_string_values, runtime_gemini_home_dir,
+    RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT, runtime_gemini_home_dir,
 };
 use super::gemini_request_extensions::runtime_gemini_active_extension_manifests;
 use super::gemini_request_io::runtime_gemini_read_text_limited;
+use prodex_provider_core::{
+    gemini_provider_core_collect_string_values,
+    gemini_provider_core_normalize_tool_name as runtime_gemini_normalize_tool_name,
+    gemini_provider_core_parse_command_specific_tool,
+    gemini_provider_core_tool_aliases as runtime_gemini_tool_aliases,
+    gemini_provider_core_tool_call_command_text as runtime_gemini_tool_call_command_text,
+    gemini_provider_core_tool_is_mutating as runtime_gemini_tool_is_mutating,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
@@ -50,17 +57,17 @@ impl RuntimeGeminiPolicyCompat {
             self.approval_mode = Some(mode.to_ascii_lowercase());
         }
         let mut excluded = Vec::new();
-        runtime_gemini_collect_string_values(value.pointer("/tools/exclude"), &mut excluded);
-        runtime_gemini_collect_string_values(value.get("excludeTools"), &mut excluded);
+        gemini_provider_core_collect_string_values(value.pointer("/tools/exclude"), &mut excluded);
+        gemini_provider_core_collect_string_values(value.get("excludeTools"), &mut excluded);
         for name in excluded {
             self.add_excluded_tool_or_command(&name);
         }
 
         let mut allowed = Vec::new();
-        runtime_gemini_collect_string_values(value.pointer("/tools/allowed"), &mut allowed);
-        runtime_gemini_collect_string_values(value.get("allowedTools"), &mut allowed);
-        runtime_gemini_collect_string_values(value.pointer("/tools/core"), &mut allowed);
-        runtime_gemini_collect_string_values(value.get("coreTools"), &mut allowed);
+        gemini_provider_core_collect_string_values(value.pointer("/tools/allowed"), &mut allowed);
+        gemini_provider_core_collect_string_values(value.get("allowedTools"), &mut allowed);
+        gemini_provider_core_collect_string_values(value.pointer("/tools/core"), &mut allowed);
+        gemini_provider_core_collect_string_values(value.get("coreTools"), &mut allowed);
         if !allowed.is_empty() {
             let allowed_tools = self.allowed_tools.get_or_insert_with(BTreeSet::new);
             for name in allowed {
@@ -118,7 +125,8 @@ impl RuntimeGeminiPolicyCompat {
     }
 
     fn add_excluded_tool_or_command(&mut self, value: &str) {
-        if let Some((tool_name, pattern)) = runtime_gemini_parse_command_specific_tool(value) {
+        if let Some((tool_name, pattern)) = gemini_provider_core_parse_command_specific_tool(value)
+        {
             self.command_specific_exclusions
                 .entry(runtime_gemini_normalize_tool_name(&tool_name))
                 .or_default()
@@ -227,47 +235,10 @@ impl RuntimeGeminiPolicyCompat {
     }
 }
 
-fn runtime_gemini_tool_call_command_text(args: &serde_json::Value) -> String {
-    if let Some(object) = args.as_object() {
-        for key in [
-            "command",
-            "cmd",
-            "shell_command",
-            "shellCommand",
-            "command_line",
-            "commandLine",
-            "script",
-        ] {
-            if let Some(value) = object.get(key).and_then(serde_json::Value::as_str) {
-                return value.to_string();
-            }
-        }
-    }
-    match args {
-        serde_json::Value::String(text) => text.to_string(),
-        _ => serde_json::to_string(args).unwrap_or_default(),
-    }
-}
-
 fn command_matches_policy_pattern(command: &str, pattern: &str) -> bool {
     let command = command.to_ascii_lowercase();
     let pattern = pattern.to_ascii_lowercase();
     command.contains(pattern.trim())
-}
-
-fn runtime_gemini_parse_command_specific_tool(value: &str) -> Option<(String, String)> {
-    let value = value.trim();
-    let open = value.find('(')?;
-    let close = value.rfind(')')?;
-    if close <= open {
-        return None;
-    }
-    let tool = value[..open].trim();
-    let pattern = value[open + 1..close].trim();
-    if tool.is_empty() || pattern.is_empty() {
-        return None;
-    }
-    Some((tool.to_string(), pattern.to_string()))
 }
 
 fn runtime_gemini_policy_command_pattern_from_rule(rule: &toml::Value) -> Option<String> {
@@ -303,62 +274,4 @@ pub(super) fn runtime_gemini_settings_paths_for(
         .into_iter()
         .map(|(_, path)| path)
         .collect()
-}
-
-fn runtime_gemini_normalize_tool_name(name: &str) -> String {
-    let mut name = name.trim().to_ascii_lowercase().replace('-', "_");
-    if let Some(suffix) = name.rsplit('.').next() {
-        name = suffix.to_string();
-    }
-    name
-}
-
-pub(super) fn runtime_gemini_tool_aliases(name: &str) -> BTreeSet<String> {
-    let mut aliases = BTreeSet::new();
-    let normalized = runtime_gemini_normalize_tool_name(name);
-    aliases.insert(normalized.clone());
-    if let Some(suffix) = normalized.rsplit("__").next() {
-        aliases.insert(suffix.to_string());
-    }
-    match normalized.as_str() {
-        "exec_command" | "run_shell_command" | "shell" | "bash" => {
-            aliases
-                .extend(["exec_command", "run_shell_command", "shell", "bash"].map(str::to_string));
-        }
-        "apply_patch" | "edit" | "replace" => {
-            aliases.extend(["apply_patch", "edit", "replace"].map(str::to_string));
-        }
-        "read_file" | "read" => {
-            aliases.extend(["read_file", "read"].map(str::to_string));
-        }
-        "read_many_files" | "glob" => {
-            aliases.extend(["read_many_files", "glob"].map(str::to_string));
-        }
-        "grep" | "rip_grep" | "rg" | "search" => {
-            aliases.extend(["grep", "rip_grep", "rg", "search"].map(str::to_string));
-        }
-        "write_file" | "write" => {
-            aliases.extend(["write_file", "write"].map(str::to_string));
-        }
-        _ => {}
-    }
-    aliases
-}
-
-fn runtime_gemini_tool_is_mutating(name: &str) -> bool {
-    let aliases = runtime_gemini_tool_aliases(name);
-    aliases.iter().any(|alias| {
-        matches!(
-            alias.as_str(),
-            "apply_patch"
-                | "edit"
-                | "replace"
-                | "write"
-                | "write_file"
-                | "exec_command"
-                | "run_shell_command"
-                | "shell"
-                | "bash"
-        )
-    })
 }

@@ -258,9 +258,60 @@ pub struct AppServerBrokerArgs {
     /// Print the broker capability contract as JSON.
     #[arg(long)]
     pub json: bool,
-    /// Reserved opt-in for future stdio brokering. Currently reports unsupported.
-    #[arg(long)]
+    /// Experimental live stdio broker that validates protocol frames and preserves input.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
+    pub experimental_stdio_live: bool,
+    /// Experimental line-by-line stdio preview that emits broker diagnostics as JSONL.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
     pub experimental_stdio: bool,
+    /// Experimental read-only stdio passthrough that mirrors input to stdout and emits diagnostics to stderr.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio",
+            "experimental_stdio_validate",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
+    pub experimental_stdio_passthrough_preview: bool,
+    /// Experimental fail-closed stdio validation that emits diagnostics and errors on malformed frames.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio",
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
+    pub experimental_stdio_validate: bool,
+    /// Experimental stdio passthrough that validates each frame before forwarding it.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio",
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate"
+        ]
+    )]
+    pub experimental_stdio_validate_passthrough: bool,
 }
 
 #[derive(Args, Debug)]

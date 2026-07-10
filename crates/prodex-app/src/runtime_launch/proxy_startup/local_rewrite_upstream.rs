@@ -1,7 +1,7 @@
-use super::deepseek_rewrite::{
-    RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
-    runtime_chat_compatible_request_body, runtime_deepseek_remember_pending_request,
+use super::chat_compatible_rewrite::{
+    RuntimeDeepSeekRewriteOptions, runtime_provider_chat_compatible_request_body,
 };
+use super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_copilot::{
     RuntimeCopilotRequestContext, send_runtime_copilot_upstream_request,
@@ -23,8 +23,11 @@ use super::local_rewrite_transport::{
     runtime_openai_standard_provider_upstream_url, send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_error_class, runtime_provider_model_fallback_chain,
-    runtime_provider_request_body_with_model, runtime_provider_should_retry_with_next_model,
+    RuntimeProviderBridgeKind, RuntimeProviderRouteKind, runtime_provider_error_class,
+    runtime_provider_label, runtime_provider_log_request_conformance,
+    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
+    runtime_provider_request_conformance_result, runtime_provider_route_kind,
+    runtime_provider_should_retry_with_next_model,
     runtime_provider_should_rotate_auth_after_response,
 };
 use crate::{
@@ -32,6 +35,8 @@ use crate::{
     prepare_runtime_smart_context_http_body, runtime_proxy_log, runtime_proxy_request_lane,
 };
 use anyhow::Result;
+use prodex_provider_core::provider_core_lossless_body;
+
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -86,7 +91,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )
     .into_owned();
-    let deepseek_conversations = shared.deepseek_conversations_for_request(request);
     match &shared.provider {
         RuntimeLocalRewriteProviderOptions::Anthropic { auth } => {
             let auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
@@ -94,7 +98,10 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 anyhow::bail!("Anthropic provider has no auth configured");
             }
             let auth_attempt_count = auth_attempts.len();
-            if path_without_query(&request.path_and_query).ends_with("/responses") {
+            if matches!(
+                runtime_provider_route_kind(path_without_query(&request.path_and_query)),
+                Some(RuntimeProviderRouteKind::Responses)
+            ) {
                 let model_selection = runtime_local_rewrite_model_selection(
                     shared,
                     RuntimeProviderBridgeKind::Anthropic,
@@ -116,18 +123,39 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                     for (model_index, model) in model_chain.iter().enumerate() {
                         let model_body =
                             runtime_provider_request_body_with_model(&model_selection.body, model);
-                        let translated = runtime_chat_compatible_request_body(
+                        let provider_core_result = runtime_provider_request_conformance_result(
+                            RuntimeProviderBridgeKind::Anthropic,
+                            request,
                             &model_body,
-                            &deepseek_conversations,
+                        );
+                        if let Some(result) = provider_core_result.as_ref() {
+                            runtime_provider_log_request_conformance(
+                                &shared.runtime_shared,
+                                request_id,
+                                RuntimeProviderBridgeKind::Anthropic,
+                                result,
+                            );
+                        }
+                        let translated = runtime_provider_chat_compatible_request_body(
+                            &model_body,
+                            &shared.deepseek_conversations,
                             RuntimeProviderBridgeKind::Anthropic,
                             prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
                             false,
                             RuntimeDeepSeekRewriteOptions::default(),
                         )?;
-                        let pending_request = RuntimeDeepSeekPendingRequest {
-                            messages: translated.messages,
-                            response_metadata: translated.response_metadata,
-                        };
+                        if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
+                            pending.insert(
+                                request_id,
+                                RuntimeDeepSeekPendingRequest {
+                                    messages: translated.messages,
+                                    response_metadata: translated.response_metadata,
+                                },
+                            );
+                        }
+                        let upstream_body =
+                            provider_core_lossless_body(provider_core_result.as_ref())
+                                .unwrap_or_else(|| translated.body.clone());
                         let send_result =
                             send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                                 RuntimeLocalRewriteSearchFallbackRequest {
@@ -135,7 +163,7 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                                     request,
                                     shared,
                                     upstream_url: &upstream_url,
-                                    body: translated.body,
+                                    body: upstream_body,
                                     provider_kind: RuntimeProviderBridgeKind::Anthropic,
                                     auth_label: selected_auth.label.as_str(),
                                     model,
@@ -146,11 +174,6 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             )?;
                         let (status, parts, class) = match send_result {
                             RuntimeLocalRewritePreparedSendResult::Live(response) => {
-                                runtime_deepseek_remember_pending_request(
-                                    &shared.deepseek_pending_messages,
-                                    request_id,
-                                    pending_request,
-                                );
                                 return Ok(RuntimeLocalRewriteUpstreamResult {
                                     response: RuntimeLocalRewriteUpstreamResponse::Live(
                                         RuntimeLocalRewriteLiveResponse::new(response),
@@ -174,7 +197,12 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                                     "local_rewrite_provider_model_fallback",
                                     [
                                         runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field("provider", "anthropic"),
+                                        runtime_proxy_log_field(
+                                            "provider",
+                                            runtime_provider_label(
+                                                RuntimeProviderBridgeKind::Anthropic,
+                                            ),
+                                        ),
                                         runtime_proxy_log_field(
                                             "auth",
                                             selected_auth.label.as_str(),
@@ -200,7 +228,12 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                                     "local_rewrite_provider_auth_rotate",
                                     [
                                         runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field("provider", "anthropic"),
+                                        runtime_proxy_log_field(
+                                            "provider",
+                                            runtime_provider_label(
+                                                RuntimeProviderBridgeKind::Anthropic,
+                                            ),
+                                        ),
                                         runtime_proxy_log_field(
                                             "auth",
                                             selected_auth.label.as_str(),
@@ -258,7 +291,12 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                                     "local_rewrite_provider_auth_rotate",
                                     [
                                         runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field("provider", "anthropic"),
+                                        runtime_proxy_log_field(
+                                            "provider",
+                                            runtime_provider_label(
+                                                RuntimeProviderBridgeKind::Anthropic,
+                                            ),
+                                        ),
                                         runtime_proxy_log_field(
                                             "auth",
                                             selected_auth.label.as_str(),
@@ -296,7 +334,10 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 &shared.mount_path,
                 &request.path_and_query,
             );
-            let body = if path_without_query(&request.path_and_query).ends_with("/responses") {
+            let body = if matches!(
+                runtime_provider_route_kind(path_without_query(&request.path_and_query)),
+                Some(RuntimeProviderRouteKind::Responses)
+            ) {
                 runtime_local_rewrite_model_selection(
                     shared,
                     RuntimeProviderBridgeKind::OpenAiResponses,
@@ -341,12 +382,40 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
 }
 
 fn runtime_local_rewrite_route_kind(path_and_query: &str) -> RuntimeRouteKind {
-    let path = path_without_query(path_and_query);
-    if path.ends_with("/responses") || path.ends_with("/chat/completions") {
-        RuntimeRouteKind::Responses
-    } else if path.ends_with("/responses/compact") {
-        RuntimeRouteKind::Compact
-    } else {
-        runtime_proxy_request_lane(path_and_query, false)
+    match runtime_provider_route_kind(path_without_query(path_and_query)) {
+        Some(RuntimeProviderRouteKind::Responses | RuntimeProviderRouteKind::ChatCompletions) => {
+            RuntimeRouteKind::Responses
+        }
+        Some(RuntimeProviderRouteKind::ResponsesCompact) => RuntimeRouteKind::Compact,
+        _ => runtime_proxy_request_lane(path_and_query, false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prodex_provider_core::{
+        ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformLoss,
+        provider_core_lossless_body, provider_translator,
+    };
+
+    #[test]
+    fn anthropic_provider_core_request_stays_lossless_for_simple_responses_history() {
+        let result = provider_translator(ProviderId::Anthropic).transform_request(
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&serde_json::json!({
+                    "model": "claude-sonnet-4-6",
+                    "stream": true,
+                    "input": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "hello"}]
+                    }]
+                }))
+                .unwrap(),
+            ),
+        );
+        assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+        assert!(provider_core_lossless_body(Some(&result)).is_some());
     }
 }

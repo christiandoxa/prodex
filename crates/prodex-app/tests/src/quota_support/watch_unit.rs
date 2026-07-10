@@ -472,12 +472,30 @@
             QuotaWatchCommandOutcome::Filter
         ));
         assert_eq!(QuotaProviderFilter::All.next(), QuotaProviderFilter::OpenAi);
-        assert_eq!(QuotaProviderFilter::OpenAi.next(), QuotaProviderFilter::Gemini);
-        assert_eq!(QuotaProviderFilter::Gemini.next(), QuotaProviderFilter::Anthropic);
-        assert_eq!(QuotaProviderFilter::Anthropic.next(), QuotaProviderFilter::Copilot);
-        assert_eq!(QuotaProviderFilter::Copilot.next(), QuotaProviderFilter::Kiro);
-        assert_eq!(QuotaProviderFilter::Kiro.next(), QuotaProviderFilter::DeepSeek);
-        assert_eq!(QuotaProviderFilter::DeepSeek.next(), QuotaProviderFilter::Local);
+        assert_eq!(
+            QuotaProviderFilter::OpenAi.next(),
+            QuotaProviderFilter::Gemini
+        );
+        assert_eq!(
+            QuotaProviderFilter::Gemini.next(),
+            QuotaProviderFilter::Anthropic
+        );
+        assert_eq!(
+            QuotaProviderFilter::Anthropic.next(),
+            QuotaProviderFilter::Copilot
+        );
+        assert_eq!(
+            QuotaProviderFilter::Copilot.next(),
+            QuotaProviderFilter::Kiro
+        );
+        assert_eq!(
+            QuotaProviderFilter::Kiro.next(),
+            QuotaProviderFilter::DeepSeek
+        );
+        assert_eq!(
+            QuotaProviderFilter::DeepSeek.next(),
+            QuotaProviderFilter::Local
+        );
         assert_eq!(
             QuotaProviderFilter::Local.next(),
             QuotaProviderFilter::Agy

@@ -1,8 +1,9 @@
 use super::gemini_request::{
     RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT,
-    runtime_gemini_collect_string_values, runtime_gemini_config_dir,
+    runtime_gemini_config_dir,
 };
 use super::gemini_request_io::runtime_gemini_read_text_limited;
+use prodex_provider_core::gemini_provider_core_collect_string_values;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -142,7 +143,7 @@ fn runtime_gemini_extension_context_file_names(manifest: &serde_json::Value) -> 
         return vec!["GEMINI.md".to_string()];
     };
     let mut names = Vec::new();
-    runtime_gemini_collect_string_values(Some(context), &mut names);
+    gemini_provider_core_collect_string_values(Some(context), &mut names);
     if names.is_empty() {
         names.push("GEMINI.md".to_string());
     }

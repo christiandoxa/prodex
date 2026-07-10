@@ -51,10 +51,7 @@ pub(super) fn runtime_local_rewrite_model_selection(
 }
 
 pub(super) fn runtime_local_rewrite_model_allows_session_memory(model: &str) -> bool {
-    matches!(
-        model.trim().to_ascii_lowercase().as_str(),
-        "" | "auto" | "default"
-    )
+    prodex_provider_core::provider_model_allows_session_memory(model)
 }
 
 pub(super) fn runtime_local_rewrite_model_scope(

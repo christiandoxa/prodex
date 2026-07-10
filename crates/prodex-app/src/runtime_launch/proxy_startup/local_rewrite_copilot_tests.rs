@@ -3,6 +3,9 @@
 use super::super::copilot_instructions::{
     RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_HEADER, runtime_copilot_workspace_custom_instructions,
 };
+use super::super::deepseek_rewrite::{
+    RuntimeDeepSeekConversationStore, RuntimeDeepSeekTranslatedRequest,
+};
 use super::*;
 use std::io::{Cursor, Read};
 

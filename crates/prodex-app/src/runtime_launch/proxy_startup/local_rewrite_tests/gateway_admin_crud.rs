@@ -129,7 +129,10 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     assert_eq!(providers.status().as_u16(), 200);
     let providers: serde_json::Value = providers.json().expect("providers response should be json");
     assert_eq!(providers["object"], "gateway.providers");
-    assert_eq!(providers["providers"].as_array().unwrap().len(), 7);
+    assert_eq!(
+        providers["providers"].as_array().unwrap().len(),
+        prodex_provider_core::provider_adapter_contract_matrix().len()
+    );
     assert_eq!(providers["providers"][0]["provider"], "openai");
     assert_eq!(
         providers["providers"][0]["client_request_format"],
@@ -243,6 +246,16 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
         .to_string();
     assert_eq!(created["key"]["source"], "admin");
     assert_eq!(created["key"]["name"], "team-crud");
+
+    let runtime_key_admin_rejected = client
+        .get(format!(
+            "http://{}/v1/prodex/gateway/keys",
+            proxy.listen_addr
+        ))
+        .bearer_auth(&first_token)
+        .send()
+        .expect("runtime virtual key admin API request should be sent");
+    assert_eq!(runtime_key_admin_rejected.status().as_u16(), 401);
 
     let first = client
         .post(format!("http://{}/v1/responses", proxy.listen_addr))

@@ -48,34 +48,6 @@ pub(super) fn runtime_gemini_path_has_symlink_component(path: &Path) -> bool {
     false
 }
 
-pub(super) fn runtime_gemini_truncate_to_bytes(text: &str, limit: usize) -> String {
-    if text.len() <= limit {
-        return text.to_string();
-    }
-    let mut end = limit.min(text.len());
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text[..end].to_string()
-}
-
-pub(super) fn runtime_gemini_collect_path_values(
-    value: Option<&serde_json::Value>,
-    paths: &mut Vec<PathBuf>,
-) {
-    match value {
-        Some(serde_json::Value::String(path)) if !path.trim().is_empty() => {
-            paths.push(PathBuf::from(path.trim()));
-        }
-        Some(serde_json::Value::Array(items)) => {
-            for item in items {
-                runtime_gemini_collect_path_values(Some(item), paths);
-            }
-        }
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +80,31 @@ mod tests {
             ),
             None
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gemini_same_text_file_rejects_replaced_inode() {
+        use std::os::unix::fs::MetadataExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gemini-same-text-file-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let path_a = root.join("a.txt");
+        let path_b = root.join("b.txt");
+
+        fs::write(&path_a, "first").unwrap();
+        fs::write(&path_b, "second").unwrap();
+        let before = fs::symlink_metadata(&path_a).unwrap();
+        let after = fs::symlink_metadata(&path_b).unwrap();
+        assert_eq!(before.dev(), after.dev());
+        assert_ne!(before.ino(), after.ino());
+        assert!(!runtime_gemini_same_text_file(&before, &after));
+
         fs::remove_dir_all(root).unwrap();
     }
 }

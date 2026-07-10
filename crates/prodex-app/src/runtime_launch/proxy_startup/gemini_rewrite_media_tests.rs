@@ -2,10 +2,20 @@
 
 use super::gemini_rewrite_test_support::conversation_store;
 use super::{
-    runtime_deepseek_store_conversation,
-    runtime_gemini_chat_assistant_messages_from_generate_value,
+    runtime_deepseek_store_conversation, runtime_gemini_blocked_tool_call_message,
     runtime_gemini_generate_request_body, runtime_gemini_responses_value_from_generate_value,
 };
+
+use prodex_provider_core::gemini_provider_core_chat_assistant_messages;
+
+fn gemini_chat_assistant_messages_from_generate_value(
+    value: &serde_json::Value,
+    request_id: u64,
+) -> Vec<serde_json::Value> {
+    gemini_provider_core_chat_assistant_messages(value, request_id, |name, args| {
+        runtime_gemini_blocked_tool_call_message(name, args)
+    })
+}
 
 #[test]
 fn gemini_response_translation_preserves_native_code_media_cache_and_metadata() {
@@ -105,7 +115,7 @@ fn gemini_response_translation_preserves_native_code_media_cache_and_metadata() 
                 .as_str()
                 .is_some_and(|text| text == "Citations:\n(Citation) https://citation.example")
     }));
-    let assistant = runtime_gemini_chat_assistant_messages_from_generate_value(&response, 7);
+    let assistant = gemini_chat_assistant_messages_from_generate_value(&response, 7);
     assert_eq!(
         assistant[0]["gemini_native_parts"][0]["videoMetadata"]["startOffset"],
         "1s"
@@ -129,7 +139,7 @@ fn gemini_response_keeps_non_image_media_in_followup_without_visible_base64_dump
     let visible_text = translated["output"][0]["content"][0]["text"]
         .as_str()
         .unwrap();
-    let assistant = runtime_gemini_chat_assistant_messages_from_generate_value(&response, 7);
+    let assistant = gemini_chat_assistant_messages_from_generate_value(&response, 7);
 
     assert!(visible_text.contains("audio/wav"));
     assert!(!visible_text.contains("UklGRg=="));

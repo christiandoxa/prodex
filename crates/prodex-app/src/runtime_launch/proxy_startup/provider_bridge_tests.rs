@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use super::*;
+use prodex_provider_core::ProviderModelCost;
 
 #[test]
 fn gemini_models_endpoint_exposes_catalog_from_gemini_cli() {
@@ -172,6 +173,42 @@ fn provider_bridge_contract_records_translation_boundary() {
 }
 
 #[test]
+fn provider_bridge_kind_exposes_stable_rate_limit_header_metadata() {
+    assert_eq!(
+        RuntimeProviderBridgeKind::DeepSeek.rate_limit_header_prefix(),
+        "deepseek"
+    );
+    assert_eq!(
+        RuntimeProviderBridgeKind::DeepSeek.rate_limit_header_label(),
+        "DeepSeek"
+    );
+    assert_eq!(
+        RuntimeProviderBridgeKind::Anthropic.rate_limit_header_prefix(),
+        "anthropic"
+    );
+    assert_eq!(
+        RuntimeProviderBridgeKind::Anthropic.rate_limit_header_label(),
+        "Anthropic"
+    );
+    assert_eq!(
+        RuntimeProviderBridgeKind::Gemini.rate_limit_header_prefix(),
+        "gemini"
+    );
+    assert_eq!(
+        RuntimeProviderBridgeKind::Gemini.rate_limit_header_label(),
+        "Google Gemini"
+    );
+    assert_eq!(
+        RuntimeProviderBridgeKind::Gemini.chat_compatible_adapter_label(),
+        "Gemini OpenAI-compatible"
+    );
+    assert_eq!(
+        RuntimeProviderBridgeKind::DeepSeek.chat_compatible_adapter_label(),
+        "DeepSeek"
+    );
+}
+
+#[test]
 fn provider_model_fallback_supports_aliases_and_combo() {
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "auto"),
@@ -244,36 +281,42 @@ fn provider_model_fallback_supports_aliases_and_combo() {
 }
 
 #[test]
-fn provider_error_rules_do_not_treat_generic_429_as_quota_or_rate_limit() {
+fn provider_route_kind_normalizes_bridge_surface_paths() {
+    assert_eq!(
+        runtime_provider_route_kind("/v1/responses?trace=1"),
+        Some(RuntimeProviderRouteKind::Responses)
+    );
+    assert_eq!(
+        runtime_provider_route_kind("/v1/responses/compact/"),
+        Some(RuntimeProviderRouteKind::ResponsesCompact)
+    );
+    assert_eq!(
+        runtime_provider_route_kind("/v1/chat/completions"),
+        Some(RuntimeProviderRouteKind::ChatCompletions)
+    );
+    assert_eq!(
+        runtime_provider_route_kind("/v1/messages"),
+        Some(RuntimeProviderRouteKind::Messages)
+    );
+    assert_eq!(
+        runtime_provider_route_kind("/v1/embeddings"),
+        Some(RuntimeProviderRouteKind::Embeddings)
+    );
+    assert_eq!(
+        runtime_provider_route_kind("/models/gpt-5.4"),
+        Some(RuntimeProviderRouteKind::ModelsSingle("gpt-5.4"))
+    );
+    assert_eq!(
+        runtime_provider_route_kind("/v1/models"),
+        Some(RuntimeProviderRouteKind::ModelsList)
+    );
+}
+
+#[test]
+fn provider_error_rules_do_not_treat_generic_429_as_quota() {
     assert_eq!(
         runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, 429, b"too many requests"),
-        RuntimeProviderErrorClass::Fatal
-    );
-    let message_only_rate_limit_body = serde_json::to_vec(&serde_json::json!({
-        "error": {
-            "message": "The docs mention rate_limit_exceeded as an example."
-        }
-    }))
-    .unwrap();
-    assert_eq!(
-        runtime_provider_error_class(
-            RuntimeProviderBridgeKind::DeepSeek,
-            429,
-            &message_only_rate_limit_body
-        ),
-        RuntimeProviderErrorClass::Fatal
-    );
-    let output_text_rate_limit_body =
-        br#"data: {"type":"response.output_text.delta","delta":"rate_limit_exceeded"}
-
-"#;
-    assert_eq!(
-        runtime_provider_error_class(
-            RuntimeProviderBridgeKind::DeepSeek,
-            429,
-            output_text_rate_limit_body
-        ),
-        RuntimeProviderErrorClass::Fatal
+        RuntimeProviderErrorClass::RateLimit
     );
     let body = serde_json::to_vec(&serde_json::json!({
         "error": {
@@ -285,36 +328,6 @@ fn provider_error_rules_do_not_treat_generic_429_as_quota_or_rate_limit() {
     assert_eq!(
         runtime_provider_error_class(RuntimeProviderBridgeKind::Gemini, 429, &body),
         RuntimeProviderErrorClass::Quota
-    );
-    let forbidden_quota_body = serde_json::to_vec(&serde_json::json!({
-        "error": {
-            "code": "insufficient_quota",
-            "message": "Quota exhausted."
-        }
-    }))
-    .unwrap();
-    assert_eq!(
-        runtime_provider_error_class(
-            RuntimeProviderBridgeKind::DeepSeek,
-            403,
-            &forbidden_quota_body
-        ),
-        RuntimeProviderErrorClass::Quota
-    );
-    let forbidden_rate_limit_body = serde_json::to_vec(&serde_json::json!({
-        "error": {
-            "code": "rate_limit_exceeded",
-            "message": "Rate limit exceeded."
-        }
-    }))
-    .unwrap();
-    assert_eq!(
-        runtime_provider_error_class(
-            RuntimeProviderBridgeKind::DeepSeek,
-            403,
-            &forbidden_rate_limit_body
-        ),
-        RuntimeProviderErrorClass::RateLimit
     );
     assert_eq!(
         runtime_provider_error_class(RuntimeProviderBridgeKind::DeepSeek, 401, b"{}"),
@@ -353,6 +366,35 @@ fn provider_error_rules_do_not_treat_generic_429_as_quota_or_rate_limit() {
 }
 
 #[test]
+fn provider_error_cooldown_uses_provider_aware_classification() {
+    let quota_body = serde_json::to_vec(&serde_json::json!({
+        "error": {
+            "code": "resource_exhausted"
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        runtime_provider_error_cooldown_ms(RuntimeProviderBridgeKind::Gemini, 429, &quota_body,),
+        300_000
+    );
+
+    let transient_body = serde_json::to_vec(&serde_json::json!({
+        "error": {
+            "message": "backend overloaded"
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        runtime_provider_error_cooldown_ms(
+            RuntimeProviderBridgeKind::DeepSeek,
+            503,
+            &transient_body,
+        ),
+        10_000
+    );
+}
+
+#[test]
 fn provider_native_passthrough_is_explicit() {
     assert!(runtime_provider_native_passthrough(
         RuntimeProviderBridgeKind::OpenAiResponses,
@@ -378,6 +420,18 @@ fn provider_native_passthrough_is_explicit() {
         RuntimeProviderBridgeKind::DeepSeek,
         "/v1/chat/completions"
     ));
+    assert!(runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::DeepSeek,
+        "/v1/messages"
+    ));
+    assert!(!runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::DeepSeek,
+        "/v1/embeddings"
+    ));
+    assert!(!runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::Copilot,
+        "/v1/responses/compact"
+    ));
     assert!(!runtime_provider_native_passthrough(
         RuntimeProviderBridgeKind::Anthropic,
         "/v1/responses"
@@ -389,6 +443,14 @@ fn provider_native_passthrough_is_explicit() {
     assert!(runtime_provider_native_passthrough(
         RuntimeProviderBridgeKind::Copilot,
         "/v1/chat/completions"
+    ));
+    assert!(!runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::Kiro,
+        "/v1/messages"
+    ));
+    assert!(runtime_provider_native_passthrough(
+        RuntimeProviderBridgeKind::Gemini,
+        "/v1/embeddings"
     ));
 }
 
@@ -1153,6 +1215,41 @@ fn stream_conformance_result_reports_unsupported_for_non_sse_payload() {
         result.loss,
         ProviderTransformLoss::UnsupportedUpstream { .. }
     ));
+}
+
+#[test]
+fn provider_loss_states_map_to_runtime_log_labels() {
+    let degraded = ProviderTransformLoss::DegradedButSafe {
+        reason: "json schema downgraded".to_string(),
+        details: std::collections::BTreeMap::new(),
+    };
+    assert_eq!(
+        super::provider_bridge_conformance::runtime_provider_loss_log_fields(&degraded),
+        Some(("degraded", "json schema downgraded"))
+    );
+
+    let rejected = ProviderTransformLoss::Rejected {
+        reason: "tool choice unsupported".to_string(),
+    };
+    assert_eq!(
+        super::provider_bridge_conformance::runtime_provider_loss_log_fields(&rejected),
+        Some(("rejected", "tool choice unsupported"))
+    );
+
+    let unsupported = ProviderTransformLoss::UnsupportedUpstream {
+        reason: "multimodal input not translated".to_string(),
+    };
+    assert_eq!(
+        super::provider_bridge_conformance::runtime_provider_loss_log_fields(&unsupported),
+        Some(("unsupported", "multimodal input not translated"))
+    );
+
+    assert_eq!(
+        super::provider_bridge_conformance::runtime_provider_loss_log_fields(
+            &ProviderTransformLoss::Lossless
+        ),
+        None
+    );
 }
 
 #[test]
