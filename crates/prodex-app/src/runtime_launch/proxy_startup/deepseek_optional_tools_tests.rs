@@ -1,11 +1,28 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
+    use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
+    use prodex_provider_core::{
+        deepseek_provider_core_rtk_wrapped_tool_arguments,
+        provider_core_chat_compatible_responses_value_from_chat_value,
+    };
 
     fn conversation_store() -> RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(BTreeMap::new()))
+        RuntimeDeepSeekConversationStore::default()
+    }
+
+    fn runtime_deepseek_responses_value_from_chat_value(
+        value: &serde_json::Value,
+        request_id: u64,
+    ) -> serde_json::Value {
+        provider_core_chat_compatible_responses_value_from_chat_value(
+            value,
+            request_id,
+            "deepseek",
+            RuntimeProviderBridgeKind::DeepSeek.chat_compatible_adapter_label(),
+            SUPER_DEEPSEEK_DEFAULT_MODEL,
+            "resp_deepseek",
+        )
     }
 
     #[test]
@@ -224,8 +241,8 @@ mod tests {
 
     #[test]
     fn deepseek_wraps_claw_compactor_shell_benchmarks_with_rtk() {
-        let arguments = runtime_deepseek_rtk_wrapped_tool_arguments(
-            "shell",
+        let arguments = deepseek_provider_core_rtk_wrapped_tool_arguments(
+            "exec",
             r#"{"cmd":"claw-compactor benchmark /workspace --json"}"#,
         );
         let arguments: serde_json::Value = serde_json::from_str(&arguments).unwrap();

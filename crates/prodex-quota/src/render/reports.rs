@@ -461,15 +461,24 @@ fn append_limited_quota_report_sections(
 ) -> usize {
     let total_profiles = sections.len();
     let mut shown_profiles = 0_usize;
+    output.truncate(max_lines);
     let mut remaining = max_lines.saturating_sub(output.len());
 
     for section in sections.iter().skip(start_profile) {
-        if section.len() > remaining {
+        let next_shown_profiles = shown_profiles.saturating_add(1);
+        let hidden_after =
+            total_profiles.saturating_sub(start_profile.saturating_add(next_shown_profiles));
+        let notice_lines = if start_profile > 0 || hidden_after > 0 {
+            2
+        } else {
+            0
+        };
+        if section.len().saturating_add(notice_lines) > remaining {
             break;
         }
         remaining = remaining.saturating_sub(section.len());
         output.extend(section.iter().cloned());
-        shown_profiles += 1;
+        shown_profiles = next_shown_profiles;
     }
 
     if let Some(notice) = quota_report_window_notice(
@@ -478,11 +487,13 @@ fn append_limited_quota_report_sections(
         total_profiles,
         interactive_scroll_hint,
     ) {
-        if remaining == 0 && !output.is_empty() {
-            output.pop();
+        if remaining >= 2 {
+            output.push(String::new());
+            remaining -= 1;
         }
-        output.push(String::new());
-        output.push(notice);
+        if remaining > 0 {
+            output.push(notice);
+        }
     }
 
     shown_profiles

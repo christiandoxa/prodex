@@ -1,6 +1,10 @@
 use std::collections::BTreeSet;
 
-use crate::{RuntimeTokenUsage, runtime_sse_consume_chunk, runtime_sse_finish_pending};
+use crate::{
+    RuntimeTokenUsage, runtime_connection_header_tokens,
+    runtime_header_name_matches_connection_token, runtime_sse_consume_chunk,
+    runtime_sse_finish_pending,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeResponseForwardingBodyKind {
@@ -35,14 +39,21 @@ pub struct RuntimeSseForwardingCommitDetail {
 }
 
 pub fn should_skip_runtime_response_header(name: &str) -> bool {
+    let name = name.trim();
     matches!(
         name.to_ascii_lowercase().as_str(),
         "connection"
             | "content-encoding"
             | "content-length"
             | "date"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
             | "server"
+            | "te"
+            | "trailer"
             | "transfer-encoding"
+            | "upgrade"
     )
 }
 
@@ -60,8 +71,13 @@ pub fn runtime_forward_binary_response_header(
 pub fn runtime_forward_text_response_headers<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Vec<(String, String)> {
+    let headers = headers.into_iter().collect::<Vec<_>>();
+    let connection_headers = runtime_connection_header_tokens(headers.iter().copied());
     headers
         .into_iter()
+        .filter(|(name, _)| {
+            !runtime_header_name_matches_connection_token(name, &connection_headers)
+        })
         .filter_map(|(name, value)| runtime_forward_text_response_header(name, value))
         .collect()
 }
@@ -69,8 +85,16 @@ pub fn runtime_forward_text_response_headers<'a>(
 pub fn runtime_forward_binary_response_headers<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a [u8])>,
 ) -> Vec<(String, Vec<u8>)> {
+    let headers = headers.into_iter().collect::<Vec<_>>();
+    let connection_headers =
+        runtime_connection_header_tokens(headers.iter().filter_map(|(name, value)| {
+            std::str::from_utf8(value).ok().map(|value| (*name, value))
+        }));
     headers
         .into_iter()
+        .filter(|(name, _)| {
+            !runtime_header_name_matches_connection_token(name, &connection_headers)
+        })
         .filter_map(|(name, value)| runtime_forward_binary_response_header(name, value))
         .collect()
 }
@@ -90,7 +114,7 @@ pub fn runtime_response_content_type_from_binary_headers<'a>(
 pub fn runtime_response_forwarding_body_kind(
     content_type: Option<&str>,
 ) -> RuntimeResponseForwardingBodyKind {
-    if content_type.is_some_and(|value| value.contains("text/event-stream")) {
+    if content_type.is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream")) {
         RuntimeResponseForwardingBodyKind::Sse
     } else {
         RuntimeResponseForwardingBodyKind::Unary

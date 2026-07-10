@@ -1,5 +1,6 @@
 use super::fs_utils::{
     collect_files, copy_dir_limited, read_text_limited, write_executable_script,
+    write_file_atomic_no_symlink,
 };
 use super::utils::{
     first_nonempty_line, safe_slug, shell_quote, strip_front_matter, toml_multiline_string_literal,
@@ -74,7 +75,7 @@ pub(super) fn write_gemini_agents(codex_home: &Path, extensions: &[GeminiExtensi
                 description = toml_string_literal(&description),
                 instructions = toml_multiline_string_literal(&strip_front_matter(&body)),
             );
-            fs::write(agents_root.join(format!("{agent_name}.toml")), rendered)
+            write_file_atomic_no_symlink(&agents_root.join(format!("{agent_name}.toml")), rendered)
                 .with_context(|| format!("failed to write generated agent {agent_name}"))?;
         }
     }
@@ -158,8 +159,8 @@ fn copy_skill_dir(
     }
     fs::create_dir_all(target_dir)
         .with_context(|| format!("failed to create {}", target_dir.display()))?;
-    fs::write(
-        target_dir.join(GENERATED_SKILL_MARKER_FILE),
+    write_file_atomic_no_symlink(
+        &target_dir.join(GENERATED_SKILL_MARKER_FILE),
         &extension.name,
     )
     .with_context(|| format!("failed to mark {}", target_dir.display()))?;
@@ -184,7 +185,7 @@ fn copy_skill_dir(
         GENERATED_PROMPT_MARKER,
         strip_front_matter(&source_skill)
     );
-    fs::write(target_dir.join("SKILL.md"), rewritten)
+    write_file_atomic_no_symlink(&target_dir.join("SKILL.md"), rewritten)
         .with_context(|| format!("failed to write {}", target_dir.join("SKILL.md").display()))?;
     Ok(())
 }
@@ -195,7 +196,13 @@ fn remove_generated_skill_dirs(skills_root: &Path) -> Result<()> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() && path.join(GENERATED_SKILL_MARKER_FILE).is_file() {
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.is_dir()
+            && !metadata.file_type().is_symlink()
+            && read_text_limited(&path.join(GENERATED_SKILL_MARKER_FILE), 4096).is_some()
+        {
             fs::remove_dir_all(&path)
                 .with_context(|| format!("failed to remove {}", path.display()))?;
         }

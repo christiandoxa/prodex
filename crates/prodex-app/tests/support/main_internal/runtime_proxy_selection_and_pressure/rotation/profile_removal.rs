@@ -186,6 +186,115 @@ fn remove_all_profiles_rejects_delete_home_for_external_profiles() {
 }
 
 #[test]
+fn remove_profile_refuses_managed_home_outside_managed_root() {
+    let temp_dir = TestDir::isolated();
+    let prodex_home = temp_dir.path.join("prodex");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let outside_home = temp_dir.path.join("outside-managed");
+    fs::create_dir_all(&outside_home).expect("outside profile home should exist");
+    fs::write(outside_home.join("auth.json"), "{}").expect("outside auth file should exist");
+
+    AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: outside_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("state should save");
+
+    let err = handle_remove_profile(RemoveProfileArgs {
+        name: Some("main".to_string()),
+        all: false,
+        delete_home: false,
+    })
+    .expect_err("managed profile home outside root should be refused");
+
+    assert!(
+        err.to_string()
+            .contains("outside managed profiles root"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        outside_home.exists(),
+        "outside profile home should not be deleted"
+    );
+    assert!(
+        AppState::load(&paths)
+            .expect("state should reload")
+            .profiles
+            .contains_key("main"),
+        "state file should stay unchanged after failed deletion"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn remove_profile_refuses_symlink_managed_profiles_root() {
+    let temp_dir = TestDir::isolated();
+    let prodex_home = temp_dir.path.join("prodex");
+    let prodex_home_string = prodex_home.to_string_lossy().to_string();
+    let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", &prodex_home_string);
+    let paths = AppPaths::discover().expect("paths should resolve");
+    let outside_profiles = temp_dir.path.join("outside-profiles");
+    fs::create_dir_all(&outside_profiles).expect("outside root should exist");
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    std::os::unix::fs::symlink(&outside_profiles, &paths.managed_profiles_root)
+        .expect("managed profiles root symlink should be created");
+    let profile_home = paths.managed_profiles_root.join("main");
+    fs::create_dir_all(&profile_home).expect("profile home should exist through symlink");
+    fs::write(profile_home.join("auth.json"), "{}").expect("auth file should exist");
+
+    AppState {
+        active_profile: Some("main".to_string()),
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: profile_home.clone(),
+                managed: true,
+                email: Some("main@example.com".to_string()),
+                provider: ProfileProvider::Openai,
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .expect("state should save");
+
+    let err = handle_remove_profile(RemoveProfileArgs {
+        name: Some("main".to_string()),
+        all: false,
+        delete_home: false,
+    })
+    .expect_err("managed profile root symlink should be refused");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        outside_profiles.join("main").exists(),
+        "remove must not delete through a symlinked managed profiles root"
+    );
+    assert!(
+        AppState::load(&paths)
+            .expect("state should reload")
+            .profiles
+            .contains_key("main"),
+        "state file should stay unchanged after failed deletion"
+    );
+}
+
+#[test]
 fn unique_profile_name_reclaims_untracked_managed_directory() {
     let temp_dir = TestDir::isolated();
     let state = AppState::default();

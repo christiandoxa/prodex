@@ -175,6 +175,8 @@ fn quota_reports_respect_line_budget_while_preserving_sort_order() {
     assert!(!output.contains("blocked"));
     assert!(!output.contains("error"));
     assert!(output.contains("\n\nshowing top 2 of 4 profiles"));
+    assert!(output.lines().count() <= 14);
+    assert!(output.find("ready-early") < output.find("ready-late"));
 }
 
 #[test]

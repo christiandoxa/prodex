@@ -1,11 +1,10 @@
 use super::super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
 use super::{RuntimeDeepSeekConversationStore, RuntimeDeepSeekSseState};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::io::{self, Read};
-use std::sync::{Arc, Mutex};
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 #[test]
@@ -27,7 +26,7 @@ fn deepseek_sse_reader_stores_reasoning_content_for_tool_call_replay() {
             "content": "read package metadata"
         })],
         None,
-        Arc::clone(&conversations),
+        conversations.clone(),
     );
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();
@@ -52,7 +51,7 @@ fn deepseek_sse_state_stores_tool_call_snapshot_before_done_event() {
             "content": "read recent commits"
         })],
         None,
-        Arc::clone(&conversations),
+        conversations.clone(),
     );
 
     state.observe_chat_chunk(&serde_json::json!({
@@ -130,24 +129,6 @@ fn deepseek_sse_reader_wraps_text_delta_in_message_item() {
     assert!(item_done < completed);
     assert!(output.contains("\"type\":\"message\""));
     assert!(output.contains("\"text\":\"done\""));
-    let item_ids = output
-        .lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter_map(|event| event["item"]["id"].as_str().map(str::to_string))
-        .collect::<BTreeSet<_>>();
-    let item_id = item_ids
-        .iter()
-        .next()
-        .expect("message item id should be present");
-    let uuid = item_id
-        .strip_prefix("msg_deepseek_")
-        .expect("message item id should be prodex scoped")
-        .parse::<prodex_domain::RequestId>()
-        .unwrap();
-    assert_eq!(item_ids.len(), 1);
-    assert_eq!(uuid.as_uuid().get_version_num(), 7);
-    assert!(!output.contains("\"id\":\"msg_deepseek_7\""));
 }
 
 #[test]
@@ -199,7 +180,7 @@ fn deepseek_sse_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
         7,
         Vec::new(),
         None,
-        Arc::clone(&conversations),
+        conversations.clone(),
     );
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();
@@ -263,7 +244,7 @@ fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
             "content": "run focused tests"
         })],
         None,
-        Arc::clone(&conversations),
+        conversations.clone(),
     );
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();

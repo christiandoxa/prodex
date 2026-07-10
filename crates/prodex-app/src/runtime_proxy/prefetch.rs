@@ -200,6 +200,49 @@ mod tests {
     }
 
     #[test]
+    fn prefetch_lookahead_commits_non_error_quota_code_text() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"The docs mention rate_limit_exceeded as an example.\"}\r\n\r\n".to_vec(),
+            )],
+            "non-error-quota-code-text",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::Commit { prelude, .. } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("rate_limit_exceeded"));
+            }
+            other => panic!("expected commit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_lookahead_rate_limits_before_quota_stays_retryable() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![
+                RuntimePrefetchChunk::Data(
+                    b"data: {\"type\":\"codex.rate_limits\",\"rate_limits\":[]}\r\n\r\n".to_vec(),
+                ),
+                RuntimePrefetchChunk::Data(
+                    b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"quota exhausted\"}}}\r\n\r\n".to_vec(),
+                ),
+            ],
+            "rate-limits-before-quota",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::QuotaBlocked(prelude) => {
+                let prelude = String::from_utf8_lossy(&prelude);
+                assert!(prelude.contains("codex.rate_limits"));
+                assert!(prelude.contains("insufficient_quota"));
+            }
+            other => panic!("expected quota blocked after sideband prelude, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn prefetch_lookahead_detects_previous_response_not_found_before_commit() {
         let (inspection, _prefetch) = block_on_lookahead(
             vec![RuntimePrefetchChunk::Data(
@@ -214,6 +257,24 @@ mod tests {
                 assert!(String::from_utf8_lossy(&prelude).contains("previous_response_not_found"));
             }
             other => panic!("expected previous response not found, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefetch_lookahead_commits_non_error_previous_response_code_text() {
+        let (inspection, _prefetch) = block_on_lookahead(
+            vec![RuntimePrefetchChunk::Data(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"previous_response_not_found is an upstream error code.\"}\r\n\r\n".to_vec(),
+            )],
+            "non-error-previous-response-code-text",
+        )
+        .expect("lookahead should inspect");
+
+        match inspection {
+            RuntimeSseInspection::Commit { prelude, .. } => {
+                assert!(String::from_utf8_lossy(&prelude).contains("previous_response_not_found"));
+            }
+            other => panic!("expected commit, got {other:?}"),
         }
     }
 

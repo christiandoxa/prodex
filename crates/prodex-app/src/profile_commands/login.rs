@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::time::{SystemTime, UNIX_EPOCH};
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
+    tui_primary_style, tui_secondary_style, tui_title_style,
 };
 
 mod api_key;
@@ -42,7 +43,7 @@ use self::login_menu::{
 use self::profile_names::*;
 use self::request::*;
 use super::manage::print_profile_panel;
-use super::write_secret_text_file;
+use super::{prepare_profile_codex_home, write_secret_text_file};
 use crate::{
     AppPaths, AppState, AppStateIoExt, CodexPassthroughArgs, ProfileEntry, ProfileProvider,
     agy_bin, codex_child_plan, create_codex_home_if_missing, ensure_managed_profiles_root,
@@ -222,13 +223,8 @@ fn prepare_profile_login_home(
             profile.provider.display_name()
         );
     }
-    let codex_home = profile.codex_home.clone();
-    if profile.managed {
-        prepare_managed_codex_home(paths, &codex_home)?;
-    } else {
-        create_codex_home_if_missing(&codex_home)?;
-    }
-    Ok(codex_home)
+    prepare_profile_codex_home(paths, profile)?;
+    Ok(profile.codex_home.clone())
 }
 
 fn finish_named_profile_login(
@@ -759,11 +755,7 @@ fn prompt_login_text_tui(
                 Span::raw("  "),
                 Span::styled(label.to_string(), tui_secondary_style()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             let display_value = if secret {
@@ -808,11 +800,7 @@ fn prompt_login_text_tui(
                 Span::styled("esc", tui_hint_style()),
                 Span::raw(" cancel"),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
         })?;
 

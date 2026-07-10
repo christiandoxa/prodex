@@ -46,7 +46,7 @@ pub(crate) fn wait_for_runtime_broker_registry_path(prodex_home: &Path) -> PathB
 }
 
 pub(crate) fn add_managed_profile(fixture: &Fixture, name: &str, account_id: &str) -> PathBuf {
-    let home = fixture.prodex_home.join(format!("{name}-home"));
+    let home = fixture.prodex_home.join("profiles").join(name);
     fs::create_dir_all(&home).expect("failed to create additional home");
     write_json(
         &home.join("auth.json"),
@@ -72,5 +72,5 @@ pub(crate) fn add_managed_profile(fixture: &Fixture, name: &str, account_id: &st
     );
     write_json(&fixture.prodex_home.join("state.json"), &state);
 
-    fixture.prodex_home.join(format!("{name}-home"))
+    home
 }

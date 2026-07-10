@@ -2,12 +2,10 @@ use super::super::deepseek_rewrite::{
     RuntimeDeepSeekChatSseReader, RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions,
     runtime_deepseek_chat_request_body, runtime_deepseek_chat_request_body_with_options,
 };
-use std::collections::BTreeMap;
 use std::io::{Cursor, Read};
-use std::sync::{Arc, Mutex};
 
 fn deepseek_conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 #[test]

@@ -1,0 +1,84 @@
+use super::*;
+use std::env;
+
+pub(crate) fn gateway_sso_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<RuntimeGatewaySsoConfig> {
+    let proxy_token_hash = match policy
+        .sso
+        .proxy_token_env
+        .as_deref()
+        .filter(|value| gateway_exact_policy_identifier(value))
+    {
+        Some(env_name) => {
+            let token = env::var(env_name)
+                .with_context(|| format!("gateway.sso.proxy_token_env requires {env_name}"))?
+                .trim()
+                .to_string();
+            if token.is_empty() {
+                bail!("gateway.sso.proxy_token_env env {env_name} cannot be empty");
+            }
+            Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
+                &token,
+            ))
+        }
+        None => None,
+    };
+    Ok(RuntimeGatewaySsoConfig {
+        proxy_token_hash,
+        require_tenant: policy.sso.require_tenant.unwrap_or(false),
+        token_header: gateway_sso_header(&policy.sso.token_header, "x-prodex-sso-token"),
+        user_header: gateway_sso_header(&policy.sso.user_header, "x-prodex-sso-user"),
+        role_header: gateway_sso_header(&policy.sso.role_header, "x-prodex-sso-role"),
+        tenant_header: gateway_sso_header(&policy.sso.tenant_header, "x-prodex-sso-tenant"),
+        key_prefixes_header: gateway_sso_header(
+            &policy.sso.key_prefixes_header,
+            "x-prodex-sso-key-prefixes",
+        ),
+        oidc: gateway_sso_oidc_config(policy)?,
+    })
+}
+
+fn gateway_sso_oidc_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Option<RuntimeGatewayOidcConfig>> {
+    let Some(issuer) = policy
+        .sso
+        .oidc_issuer
+        .as_deref()
+        .filter(|value| gateway_exact_policy_identifier(value))
+    else {
+        return Ok(None);
+    };
+    let audience = policy
+        .sso
+        .oidc_audience
+        .as_deref()
+        .filter(|value| gateway_exact_policy_identifier(value))
+        .context("gateway.sso.oidc_audience is required when oidc_issuer is set")?;
+    Ok(Some(RuntimeGatewayOidcConfig {
+        issuer: issuer.to_string(),
+        audience: audience.to_string(),
+        jwks_url: policy
+            .sso
+            .oidc_jwks_url
+            .as_deref()
+            .filter(|value| gateway_exact_policy_identifier(value))
+            .map(str::to_string),
+        user_claim: gateway_sso_header(&policy.sso.oidc_user_claim, "email"),
+        role_claim: gateway_sso_header(&policy.sso.oidc_role_claim, "prodex_role"),
+        tenant_claim: gateway_sso_header(&policy.sso.oidc_tenant_claim, "prodex_tenant"),
+        key_prefixes_claim: gateway_sso_header(
+            &policy.sso.oidc_key_prefixes_claim,
+            "prodex_key_prefixes",
+        ),
+    }))
+}
+
+fn gateway_sso_header(value: &Option<String>, default: &str) -> String {
+    value
+        .as_deref()
+        .filter(|value| gateway_exact_policy_identifier(value))
+        .unwrap_or(default)
+        .to_string()
+}

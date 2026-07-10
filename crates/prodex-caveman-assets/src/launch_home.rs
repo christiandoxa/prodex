@@ -1,11 +1,13 @@
 use anyhow::{Context, Result, bail};
 use chrono::Local;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::fs_ops::{
+    copy_file_streaming, read_text_file_limited, remove_existing_dir_path, write_executable_file,
+    write_text_file,
+};
 use crate::hook_trust::{configure_caveman_hook_trust_state, configure_caveman_session_start_hook};
 use crate::localization::localize_text_file;
 use crate::marketplace::{install_caveman_marketplace, install_caveman_plugin_cache};
@@ -45,6 +47,9 @@ fn prepare_prodex_overlay_home_internal(
             )
         })
         .and_then(|_| localize_prodex_overlay_rollout_state(&overlay_home))
+        .and_then(|_| {
+            localize_prodex_overlay_rollout_state_symlinks_from_base(base_codex_home, &overlay_home)
+        })
         .and_then(|_| configure_prodex_overlay_home(&overlay_home))
     {
         let _ = fs::remove_dir_all(&overlay_home);
@@ -60,10 +65,7 @@ fn remove_prodex_overlay_codex_apps_cache(codex_home: &Path) -> Result<()> {
         "cache/codex_app_directory",
     ] {
         let path = codex_home.join(relative);
-        if !path.exists() {
-            continue;
-        }
-        fs::remove_dir_all(&path).with_context(|| {
+        remove_existing_dir_path(&path).with_context(|| {
             format!(
                 "failed to remove inherited Codex app connector cache {}",
                 path.display()
@@ -105,19 +107,14 @@ if [ -e "$marker" ]; then
   exit 0
 fi
 : > "$marker" 2>/dev/null || exit 0
-printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE. Ponytail applies smallest-correct-implementation pressure. Use visible rtk <cmd> for noisy shell output, prodex-sqz for repeated/large context, prodex-token-savior and codebase-memory-mcp for code navigation/graph queries, and prodex-claw-compactor for workspace summaries. Presidio is opt-in only.'
+printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE. Ponytail applies smallest-correct-implementation pressure. Use visible rtk <cmd> for noisy shell output and codebase-memory-mcp for structural code navigation. Presidio is opt-in only.'
 "#
     );
     write_executable_script(&script_path, &script)
 }
 
 fn create_temporary_prodex_overlay_home(managed_profiles_root: &Path) -> Result<PathBuf> {
-    fs::create_dir_all(managed_profiles_root).with_context(|| {
-        format!(
-            "failed to create managed profile root {}",
-            managed_profiles_root.display()
-        )
-    })?;
+    ensure_prodex_overlay_root(managed_profiles_root)?;
 
     for attempt in 0..100 {
         let stamp = SystemTime::now()
@@ -136,6 +133,42 @@ fn create_temporary_prodex_overlay_home(managed_profiles_root: &Path) -> Result<
     }
 
     bail!("failed to allocate a temporary CODEX_HOME for Prodex overlay")
+}
+
+fn ensure_prodex_overlay_root(managed_profiles_root: &Path) -> Result<()> {
+    match fs::symlink_metadata(managed_profiles_root) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                bail!(
+                    "managed profile root {} must not be a symbolic link",
+                    managed_profiles_root.display()
+                );
+            }
+            if !metadata.is_dir() {
+                bail!(
+                    "managed profile root {} must be a directory",
+                    managed_profiles_root.display()
+                );
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(managed_profiles_root).with_context(|| {
+                format!(
+                    "failed to create managed profile root {}",
+                    managed_profiles_root.display()
+                )
+            })?;
+        }
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!(
+                    "failed to inspect managed profile root {}",
+                    managed_profiles_root.display()
+                )
+            });
+        }
+    }
+    Ok(())
 }
 
 fn share_prodex_overlay_chat_history(
@@ -171,7 +204,7 @@ fn link_prodex_overlay_shared_chat_file(source: &Path, link: &Path) -> Result<()
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     if fs::symlink_metadata(source).is_err() {
-        fs::write(source, "").with_context(|| format!("failed to write {}", source.display()))?;
+        write_text_file(source, "")?;
     }
     replace_prodex_overlay_path_with_symlink(source, link, false)
 }
@@ -208,6 +241,36 @@ fn localize_prodex_overlay_rollout_state(codex_home: &Path) -> Result<()> {
     Ok(())
 }
 
+fn localize_prodex_overlay_rollout_state_symlinks_from_base(
+    base_codex_home: &Path,
+    overlay_home: &Path,
+) -> Result<()> {
+    if !base_codex_home.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(base_codex_home)
+        .with_context(|| format!("failed to read {}", base_codex_home.display()))?
+    {
+        let entry = entry
+            .with_context(|| format!("failed to read entry in {}", base_codex_home.display()))?;
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if !is_prodex_overlay_rollout_state_file_name(&file_name) {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            copy_prodex_overlay_rollout_state_symlink(
+                &entry.path(),
+                &overlay_home.join(file_name.as_ref()),
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn localize_prodex_overlay_rollout_state_symlink(path: &Path) -> Result<()> {
     let target =
         fs::read_link(path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -216,21 +279,24 @@ fn localize_prodex_overlay_rollout_state_symlink(path: &Path) -> Result<()> {
     } else {
         path.parent().unwrap_or_else(|| Path::new(".")).join(target)
     };
-    match fs::read(&source) {
-        Ok(bytes) => {
-            fs::remove_file(path)
-                .with_context(|| format!("failed to remove {}", path.display()))?;
-            fs::write(path, bytes)
-                .with_context(|| format!("failed to write {}", path.display()))?;
-        }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            fs::remove_file(path)
-                .with_context(|| format!("failed to remove {}", path.display()))?;
-        }
-        Err(err) => {
-            return Err(err).with_context(|| format!("failed to read {}", source.display()));
-        }
+    if !copy_file_streaming(&source, path)? {
+        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
+    Ok(())
+}
+
+fn copy_prodex_overlay_rollout_state_symlink(source_link: &Path, destination: &Path) -> Result<()> {
+    let target = fs::read_link(source_link)
+        .with_context(|| format!("failed to read {}", source_link.display()))?;
+    let source = if target.is_absolute() {
+        target
+    } else {
+        source_link
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(target)
+    };
+    let _ = copy_file_streaming(&source, destination)?;
     Ok(())
 }
 
@@ -306,7 +372,7 @@ fn create_prodex_overlay_symlink(target: &Path, link: &Path, is_dir: bool) -> Re
 
 fn configure_caveman_config(codex_home: &Path) -> Result<()> {
     let config_path = codex_home.join("config.toml");
-    let contents = fs::read_to_string(&config_path).unwrap_or_default();
+    let contents = read_text_file_limited(&config_path)?.unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
         toml::Table::new()
     } else {
@@ -320,6 +386,7 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
 
     let features = ensure_child_table(&mut table, "features");
     features.insert("plugins".to_string(), toml::Value::Boolean(false));
+    features.insert("remote_plugin".to_string(), toml::Value::Boolean(false));
 
     let caveman_hook_group_index = configure_caveman_session_start_hook(&mut table);
     configure_caveman_hook_trust_state(&mut table, &config_path, caveman_hook_group_index)?;
@@ -346,25 +413,10 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
 
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Prodex overlay config")?;
-    fs::write(&config_path, rendered)
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    write_text_file(&config_path, &rendered)?;
     Ok(())
 }
 
 fn write_executable_script(path: &Path, script: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::write(path, script).with_context(|| format!("failed to write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path)
-            .with_context(|| format!("failed to stat {}", path.display()))?
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to chmod {}", path.display()))?;
-    }
-    Ok(())
+    write_executable_file(path, script)
 }

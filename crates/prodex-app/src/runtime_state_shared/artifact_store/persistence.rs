@@ -6,8 +6,11 @@ use super::super::{
 use super::RuntimeSmartContextArtifactStore;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{self, Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
+
+const RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
     Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
@@ -15,7 +18,7 @@ static RUNTIME_SMART_CONTEXT_ARTIFACT_PROCESS_LOCKS: OnceLock<
 
 impl RuntimeSmartContextArtifactStore {
     pub(crate) fn load_from_path(path: &Path) -> Self {
-        let Some(raw) = fs::read_to_string(path).ok() else {
+        let Some(raw) = runtime_smart_context_read_artifact_store(path) else {
             return Self::default();
         };
         let Ok(mut store) = serde_json::from_str::<Self>(&raw) else {
@@ -77,7 +80,7 @@ impl RuntimeSmartContextArtifactStore {
     fn write_to_path_unlocked(&self, path: &Path) -> anyhow::Result<()> {
         let raw = serde_json::to_vec(self)?;
         let temp_path = crate::runtime_store::unique_state_temp_file_path(path);
-        fs::write(&temp_path, raw)?;
+        runtime_smart_context_write_private_file(&temp_path, &raw)?;
         if let Err(err) = fs::rename(&temp_path, path) {
             let _ = fs::remove_file(&temp_path);
             return Err(err.into());
@@ -149,6 +152,75 @@ impl RuntimeSmartContextArtifactStore {
             }
         }
     }
+}
+
+fn runtime_smart_context_read_artifact_store(path: &Path) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_file()
+        || metadata.len() > RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES
+    {
+        return None;
+    }
+
+    let file = fs::File::open(path).ok()?;
+    let opened_metadata = file.metadata().ok()?;
+    if !runtime_smart_context_same_artifact_store_file(&metadata, &opened_metadata) {
+        return None;
+    }
+
+    let mut raw = String::new();
+    if file
+        .take(RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES.saturating_add(1))
+        .read_to_string(&mut raw)
+        .is_err()
+    {
+        return None;
+    }
+    if raw.len() as u64 > RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_MAX_FILE_BYTES {
+        return None;
+    }
+    Some(raw)
+}
+
+#[cfg(unix)]
+fn runtime_smart_context_same_artifact_store_file(
+    before: &fs::Metadata,
+    after: &fs::Metadata,
+) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_smart_context_same_artifact_store_file(
+    _before: &fs::Metadata,
+    _after: &fs::Metadata,
+) -> bool {
+    true
+}
+
+fn runtime_smart_context_write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = runtime_smart_context_open_private_file(path)?;
+    file.write_all(bytes)
+}
+
+#[cfg(unix)]
+fn runtime_smart_context_open_private_file(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn runtime_smart_context_open_private_file(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 fn runtime_smart_context_artifact_process_lock(path: &Path) -> Arc<Mutex<()>> {

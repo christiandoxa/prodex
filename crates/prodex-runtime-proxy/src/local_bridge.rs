@@ -291,50 +291,13 @@ pub fn local_bridge_filter_text_response_headers<'a>(
     filter: LocalBridgeHeaderFilter,
 ) -> Vec<(String, String)> {
     let headers = headers.into_iter().collect::<Vec<_>>();
-    let connection_headers = local_bridge_connection_header_tokens(headers.iter().copied());
+    let connection_headers = crate::runtime_connection_header_tokens(headers.iter().copied());
     headers
         .into_iter()
         .filter(|(name, _)| {
-            !connection_headers
-                .iter()
-                .any(|header_name| header_name.eq_ignore_ascii_case(name.trim()))
+            !crate::runtime_header_name_matches_connection_token(name, &connection_headers)
         })
         .filter_map(|(name, value)| local_bridge_filter_text_response_header(name, value, filter))
-        .collect()
-}
-
-fn local_bridge_connection_header_tokens<'a>(
-    headers: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> Vec<String> {
-    headers
-        .into_iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("connection"))
-        .flat_map(|(_, value)| value.split(','))
-        .map(str::trim)
-        .filter(|token| {
-            !token.is_empty()
-                && token.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric()
-                        || matches!(
-                            byte,
-                            b'!' | b'#'
-                                | b'$'
-                                | b'%'
-                                | b'&'
-                                | b'\''
-                                | b'*'
-                                | b'+'
-                                | b'-'
-                                | b'.'
-                                | b'^'
-                                | b'_'
-                                | b'`'
-                                | b'|'
-                                | b'~'
-                        )
-                })
-        })
-        .map(str::to_string)
         .collect()
 }
 

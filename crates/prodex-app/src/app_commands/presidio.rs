@@ -22,8 +22,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use terminal_ui::print_panel;
 use terminal_ui::{
-    tui_border_style, tui_error_style, tui_primary_style, tui_secondary_style, tui_success_style,
-    tui_title_style,
+    tui_border_style, tui_connected_header_block, tui_error_style, tui_primary_style,
+    tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 const PRODEX_PRESIDIO_FILE_NAME: &str = "presidio.toml";
@@ -329,11 +329,7 @@ fn print_presidio_panel(title: &str, fields: Vec<(String, String)>) -> Result<()
             Span::raw("  "),
             Span::styled(&panel.title, tui_secondary_style()),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
         let body = Paragraph::new(presidio_tui_text(&panel))

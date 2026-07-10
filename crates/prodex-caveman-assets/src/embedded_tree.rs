@@ -7,6 +7,7 @@ use crate::embedded_files::{
     CAVEMAN_COMPRESS_PLUGIN_FILES, CAVEMAN_CORE_PLUGIN_FILES, CLAUDE_CAVEMAN_PLUGIN_FILES,
     EmbeddedCavemanFile,
 };
+use crate::fs_ops::write_text_file;
 use crate::{PRODEX_CAVEMAN_FULL_ASSETS_ENV, PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME};
 
 pub fn install_claude_caveman_plugin(prodex_root: &Path) -> Result<PathBuf> {
@@ -32,8 +33,7 @@ pub(crate) fn write_caveman_plugin_files(root: &Path, files: &[EmbeddedCavemanFi
             fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
-        fs::write(&path, file.contents)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        write_text_file(&path, file.contents)?;
     }
     Ok(())
 }

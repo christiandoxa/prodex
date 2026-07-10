@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::embedded_tree::write_caveman_plugin_tree;
+use crate::fs_ops::{remove_existing_dir_path, write_text_file};
 use crate::{
     PRODEX_CAVEMAN_MARKETPLACE_NAME, PRODEX_CAVEMAN_PLUGIN_NAME, PRODEX_CAVEMAN_PLUGIN_VERSION,
 };
@@ -40,18 +41,10 @@ pub fn install_caveman_marketplace(codex_home: &Path) -> Result<()> {
         ],
     }))
     .context("failed to serialize Caveman marketplace manifest")?;
-    fs::write(
-        marketplace_root.join(".agents/plugins/marketplace.json"),
-        marketplace_manifest,
-    )
-    .with_context(|| {
-        format!(
-            "failed to write {}",
-            marketplace_root
-                .join(".agents/plugins/marketplace.json")
-                .display()
-        )
-    })?;
+    write_text_file(
+        &marketplace_root.join(".agents/plugins/marketplace.json"),
+        &marketplace_manifest,
+    )?;
     Ok(())
 }
 
@@ -60,10 +53,8 @@ pub fn install_caveman_plugin_cache(codex_home: &Path) -> Result<()> {
         .join("plugins/cache")
         .join(PRODEX_CAVEMAN_MARKETPLACE_NAME)
         .join(PRODEX_CAVEMAN_PLUGIN_NAME);
-    if plugin_cache_base.exists() {
-        fs::remove_dir_all(&plugin_cache_base)
-            .with_context(|| format!("failed to clear {}", plugin_cache_base.display()))?;
-    }
+    remove_existing_dir_path(&plugin_cache_base)
+        .with_context(|| format!("failed to clear {}", plugin_cache_base.display()))?;
     write_caveman_plugin_tree(&plugin_cache_base.join(PRODEX_CAVEMAN_PLUGIN_VERSION))
 }
 

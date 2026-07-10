@@ -1,5 +1,7 @@
 use super::*;
+use std::env;
 use std::fmt;
+use std::io::Read;
 
 const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -34,6 +36,13 @@ impl fmt::Display for RuntimeProxyBodyTooLarge {
 
 impl std::error::Error for RuntimeProxyBodyTooLarge {}
 
+mod websocket;
+
+pub(crate) use websocket::{
+    capture_runtime_proxy_websocket_request, is_tiny_http_websocket_upgrade,
+    proxy_runtime_responses_websocket_request,
+};
+
 fn runtime_proxy_log_dispatch_error(
     shared: &RuntimeRotationProxyShared,
     request_id: u64,
@@ -55,6 +64,32 @@ fn runtime_proxy_log_dispatch_error(
 
 fn runtime_proxy_dispatch_error_log_value(error: &str) -> String {
     redaction_redact_secret_like_text(error)
+}
+
+fn reject_runtime_proxy_capture_error(
+    request: tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    err: &anyhow::Error,
+) {
+    if runtime_proxy_error_is_body_too_large(err) {
+        runtime_proxy_log_dispatch_error(
+            shared,
+            request_id,
+            "request_body_too_large",
+            "request_body_too_large".to_string(),
+        );
+        let _ = request.respond(build_runtime_proxy_text_response(
+            413,
+            "proxied request body is too large",
+        ));
+    } else {
+        runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
+        let _ = request.respond(build_runtime_proxy_text_response(
+            502,
+            RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
+        ));
+    }
 }
 
 pub(crate) fn handle_runtime_rotation_proxy_request(
@@ -81,6 +116,7 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         let _ = request.respond(response);
         return;
     }
+    let mut captured_after_lane_limit = None;
     let _active_request_guard = match acquire_runtime_proxy_active_request_slot_with_wait(
         shared,
         request_transport,
@@ -91,6 +127,43 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
             mark_runtime_proxy_local_overload(shared, "active_request_limit");
             reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
             return;
+        }
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(_lane)) if !websocket => {
+            let captured = match capture_runtime_proxy_request(&mut request) {
+                Ok(captured) => captured,
+                Err(err) => {
+                    reject_runtime_proxy_capture_error(request, shared, request_id, &err);
+                    return;
+                }
+            };
+            match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+                shared,
+                request_transport,
+                &request_path,
+                Some(&captured),
+            ) {
+                Ok(guard) => {
+                    captured_after_lane_limit = Some(captured);
+                    guard
+                }
+                Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
+                    mark_runtime_proxy_local_overload(shared, "active_request_limit");
+                    reject_runtime_proxy_overloaded_request(
+                        request,
+                        shared,
+                        "active_request_limit",
+                    );
+                    return;
+                }
+                Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
+                    let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
+                    if runtime_proxy_lane_limit_marks_global_overload(lane) {
+                        mark_runtime_proxy_local_overload(shared, &reason);
+                    }
+                    reject_runtime_proxy_overloaded_request(request, shared, &reason);
+                    return;
+                }
+            }
         }
         Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
             let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
@@ -118,37 +191,24 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         return;
     }
 
-    dispatch_runtime_http_proxy_request(request_id, request, shared);
+    dispatch_runtime_http_proxy_request(request_id, request, shared, captured_after_lane_limit);
 }
 
 fn dispatch_runtime_http_proxy_request(
     request_id: u64,
     mut request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
+    captured: Option<RuntimeProxyRequest>,
 ) {
-    let mut captured = match capture_runtime_proxy_request(&mut request) {
-        Ok(captured) => captured,
-        Err(err) => {
-            if runtime_proxy_error_is_body_too_large(&err) {
-                runtime_proxy_log_dispatch_error(
-                    shared,
-                    request_id,
-                    "request_body_too_large",
-                    "request_body_too_large".to_string(),
-                );
-                let _ = request.respond(build_runtime_proxy_text_response(
-                    413,
-                    "proxied request body is too large",
-                ));
+    let mut captured = match captured {
+        Some(captured) => captured,
+        None => match capture_runtime_proxy_request(&mut request) {
+            Ok(captured) => captured,
+            Err(err) => {
+                reject_runtime_proxy_capture_error(request, shared, request_id, &err);
                 return;
             }
-            runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
-            let _ = request.respond(build_runtime_proxy_text_response(
-                502,
-                RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
-            ));
-            return;
-        }
+        },
     };
     if let Err(_err) =
         apply_runtime_presidio_redaction_to_request(request_id, &mut captured, shared)
@@ -318,12 +378,6 @@ pub(crate) fn respond_runtime_responses_reply(
     }
 }
 
-pub(crate) fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bool {
-    request.headers().iter().any(|header| {
-        header.field.equiv("Upgrade") && header.value.as_str().eq_ignore_ascii_case("websocket")
-    })
-}
-
 pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
 ) -> Result<RuntimeProxyRequest> {
@@ -377,18 +431,6 @@ fn runtime_proxy_request_content_length(request: &tiny_http::Request) -> Option<
             .flatten()
     })
 }
-
-pub(crate) fn capture_runtime_proxy_websocket_request(
-    request: &tiny_http::Request,
-) -> RuntimeProxyRequest {
-    RuntimeProxyRequest {
-        method: request.method().as_str().to_string(),
-        path_and_query: request.url().to_string(),
-        headers: runtime_proxy_request_headers(request),
-        body: Vec::new(),
-    }
-}
-
 pub(crate) fn runtime_proxy_request_headers(request: &tiny_http::Request) -> Vec<(String, String)> {
     request
         .headers()
@@ -400,153 +442,6 @@ pub(crate) fn runtime_proxy_request_headers(request: &tiny_http::Request) -> Vec
             )
         })
         .collect()
-}
-
-pub(crate) fn proxy_runtime_responses_websocket_request(
-    request_id: u64,
-    request: tiny_http::Request,
-    shared: &RuntimeRotationProxyShared,
-) {
-    if !is_runtime_responses_path(request.url())
-        && !is_runtime_realtime_websocket_path(request.url())
-    {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "unsupported_path",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("unsupported_path", request.url()),
-                ],
-            ),
-        );
-        let _ = request.respond(build_runtime_proxy_text_response(
-            404,
-            "Runtime websocket proxy only supports Codex responses and realtime endpoints.",
-        ));
-        return;
-    }
-
-    let handshake_request = capture_runtime_proxy_websocket_request(&request);
-    let Some(websocket_key) = runtime_proxy_websocket_key(&handshake_request) else {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "missing_sec_websocket_key",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
-                ],
-            ),
-        );
-        let _ = request.respond(build_runtime_proxy_text_response(
-            400,
-            "Missing Sec-WebSocket-Key header for runtime auto-rotate websocket proxy.",
-        ));
-        return;
-    };
-
-    let response = match build_runtime_proxy_websocket_upgrade_response(&websocket_key) {
-        Ok(response) => response,
-        Err(err) => {
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "websocket_upgrade_response_failed",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "websocket"),
-                        runtime_proxy_log_field(
-                            "error",
-                            runtime_proxy_dispatch_error_log_value(&format!("{err:#}")),
-                        ),
-                    ],
-                ),
-            );
-            let _ = request.respond(build_runtime_proxy_text_response(
-                500,
-                "Failed to build websocket upgrade response.",
-            ));
-            return;
-        }
-    };
-    let upgraded = request.upgrade("websocket", response);
-    let mut local_socket = WsSocket::from_raw_socket(upgraded, WsRole::Server, None);
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "upgraded",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("transport", "websocket"),
-                runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
-                runtime_proxy_log_field(
-                    "previous_response_id",
-                    format!(
-                        "{:?}",
-                        runtime_request_previous_response_id(&handshake_request)
-                    ),
-                ),
-                runtime_proxy_log_field(
-                    "turn_state",
-                    format!("{:?}", runtime_request_turn_state(&handshake_request)),
-                ),
-            ],
-        ),
-    );
-    let compat_surface =
-        runtime_detect_request_compatibility_surface(&handshake_request, "handshake", "websocket");
-    runtime_proxy_log_request_compatibility(shared, request_id, &compat_surface);
-    if let Err(err) = run_runtime_proxy_websocket_session(
-        request_id,
-        &mut local_socket,
-        &handshake_request,
-        shared,
-    ) {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "session_error",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field(
-                        "session_error",
-                        runtime_proxy_dispatch_error_log_value(&format!("{err:#}")),
-                    ),
-                ],
-            ),
-        );
-        if !is_runtime_proxy_transport_failure(&err) {
-            let _ = local_socket.close(None);
-        }
-    }
-}
-
-fn runtime_proxy_websocket_key(request: &RuntimeProxyRequest) -> Option<String> {
-    request.headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("Sec-WebSocket-Key")
-            .then(|| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-    })
-}
-
-fn build_runtime_proxy_websocket_upgrade_response(
-    key: &str,
-) -> Result<TinyResponse<std::io::Empty>> {
-    let accept = derive_accept_key(key.as_bytes());
-    let upgrade = TinyHeader::from_bytes("Upgrade", "websocket")
-        .map_err(|err| anyhow::anyhow!("invalid websocket Upgrade header: {err:?}"))?;
-    let connection = TinyHeader::from_bytes("Connection", "Upgrade")
-        .map_err(|err| anyhow::anyhow!("invalid websocket Connection header: {err:?}"))?;
-    let accept = TinyHeader::from_bytes("Sec-WebSocket-Accept", accept.as_bytes())
-        .map_err(|err| anyhow::anyhow!("invalid websocket accept header: {err:?}"))?;
-    Ok(TinyResponse::new_empty(TinyStatusCode(101))
-        .with_header(upgrade)
-        .with_header(connection)
-        .with_header(accept))
 }
 
 pub(crate) fn proxy_runtime_anthropic_messages_request(

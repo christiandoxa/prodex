@@ -1,7 +1,10 @@
 use anyhow::{Context, Result, anyhow};
-use redaction::redaction_redact_secret_like_text;
+use prodex_provider_core::{
+    ProviderId, provider_adapter_contract_matrix, provider_model_catalog_json,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::io::Read;
 use std::net::SocketAddr;
 use terminal_ui::print_panel;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
@@ -14,7 +17,36 @@ use crate::{
     format_copilot_main_quota, format_copilot_quota_status, format_copilot_reset_summary,
     format_gemini_main_quota, format_gemini_quota_status, format_gemini_reset_summary,
     format_main_windows, managed_profile_home_path, prepare_managed_codex_home,
+    runtime_proxy_latest_log_path_from_pointer, runtime_proxy_log_dir,
 };
+
+const DASHBOARD_PROVIDER_IDS: &[ProviderId] = &[
+    ProviderId::OpenAi,
+    ProviderId::Gemini,
+    ProviderId::Anthropic,
+    ProviderId::Copilot,
+    ProviderId::DeepSeek,
+    ProviderId::Kiro,
+    ProviderId::Local,
+];
+const DASHBOARD_MAX_JSON_BODY_BYTES: usize = 64 * 1024;
+
+#[derive(Debug)]
+struct DashboardJsonBodyTooLarge {
+    limit: usize,
+}
+
+impl std::fmt::Display for DashboardJsonBodyTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "dashboard request body exceeds {} bytes",
+            self.limit
+        )
+    }
+}
+
+impl std::error::Error for DashboardJsonBodyTooLarge {}
 
 #[derive(Debug)]
 struct DashboardServer {
@@ -51,10 +83,7 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
     };
     for request in server.incoming_requests() {
         if let Err(err) = dashboard.handle(request) {
-            eprintln!(
-                "dashboard request failed: {}",
-                dashboard_request_error_message(&err)
-            );
+            eprintln!("dashboard request failed: {err:#}");
         }
     }
     Ok(())
@@ -92,6 +121,14 @@ impl DashboardServer {
             (Method::Get, "/api/state") => respond_json_result(request, self.state_json()),
             (Method::Get, "/api/accounts") => respond_json_result(request, self.accounts_json()),
             (Method::Get, "/api/usage") => respond_json_result(request, self.usage_json()),
+            (Method::Get, "/api/providers") => respond_json_result(request, self.providers_json()),
+            (Method::Get, "/api/provider-presets") => {
+                respond_json_result(request, self.provider_presets_json())
+            }
+            (Method::Get, "/api/models") => respond_json_result(request, self.models_json()),
+            (Method::Get, "/api/runtime-status") => {
+                respond_json_result(request, self.runtime_status_json())
+            }
             (Method::Post, "/api/profile") => self.handle_add_profile(request),
             (Method::Post, "/api/profile/active") => self.handle_set_active(request),
             (Method::Delete, path) if path.starts_with("/api/profile/") => {
@@ -209,10 +246,81 @@ impl DashboardServer {
         }))
     }
 
+    fn providers_json(&self) -> Result<Value> {
+        let state = AppState::load(&self.paths)?;
+        Ok(json!({
+            "activeProfile": state.active_profile,
+            "providers": provider_presets(&state),
+            "contracts": provider_adapter_contract_matrix(),
+        }))
+    }
+
+    fn provider_presets_json(&self) -> Result<Value> {
+        let state = AppState::load(&self.paths)?;
+        Ok(json!({ "providers": provider_presets(&state) }))
+    }
+
+    fn models_json(&self) -> Result<Value> {
+        let state = AppState::load(&self.paths)?;
+        let mut models = Vec::new();
+        for provider in DASHBOARD_PROVIDER_IDS {
+            let default_model = provider_default_model(*provider);
+            let availability =
+                provider_available_through(*provider, provider_profile_count(&state, *provider));
+            for mut model in provider_model_catalog_json(*provider) {
+                let id = model
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let recommended = id == default_model;
+                if let Some(object) = model.as_object_mut() {
+                    object.insert(
+                        "providerName".to_string(),
+                        json!(provider_display_name(*provider)),
+                    );
+                    object.insert("recommended".to_string(), json!(recommended));
+                    object.insert("default".to_string(), json!(recommended));
+                    object.insert("availableThrough".to_string(), json!(availability));
+                    object.insert(
+                        "launchCommand".to_string(),
+                        json!(provider_launch_command(*provider, Some(&id))),
+                    );
+                }
+                models.push(model);
+            }
+        }
+        Ok(json!({ "models": models, "providers": provider_presets(&state) }))
+    }
+
+    fn runtime_status_json(&self) -> Result<Value> {
+        let log_dir = runtime_proxy_log_dir();
+        let latest_pointer = log_dir.join(crate::RUNTIME_PROXY_LATEST_LOG_POINTER);
+        let latest_log = runtime_proxy_latest_log_path_from_pointer();
+        let latest_log_exists = latest_log.as_ref().is_some_and(|path| path.exists());
+
+        Ok(json!({
+            "runtime": {
+                "status": if latest_log_exists { "log-available" } else { "not-running-or-no-log" },
+                "logDir": log_dir.display().to_string(),
+                "latestLogPointer": latest_pointer.display().to_string(),
+                "latestLog": latest_log.map(|path| path.display().to_string()),
+                "latestLogExists": latest_log_exists,
+                "doctorCommand": "prodex doctor --runtime",
+            },
+            "gateway": {
+                "status": "available-on-demand",
+                "startCommand": "prodex gateway --provider <provider>",
+                "providersCommand": "prodex gateway providers --json",
+                "modelsCommand": "prodex gateway models --provider <provider> --json",
+            }
+        }))
+    }
+
     fn handle_set_active(&self, mut request: Request) -> Result<()> {
         let payload: ActiveProfileRequest = match read_json_body(&mut request) {
             Ok(payload) => payload,
-            Err(err) => return respond_error(request, StatusCode(400), err),
+            Err(err) => return respond_error(request, dashboard_json_body_error_status(&err), err),
         };
         let mut state = match AppState::load(&self.paths) {
             Ok(state) => state,
@@ -238,7 +346,7 @@ impl DashboardServer {
     fn handle_add_profile(&self, mut request: Request) -> Result<()> {
         let payload: AddProfileRequest = match read_json_body(&mut request) {
             Ok(payload) => payload,
-            Err(err) => return respond_error(request, StatusCode(400), err),
+            Err(err) => return respond_error(request, dashboard_json_body_error_status(&err), err),
         };
         let name = payload.name.trim().to_string();
         if let Err(err) = prodex_profile_identity::validate_profile_name(&name) {
@@ -321,6 +429,235 @@ impl DashboardServer {
     }
 }
 
+fn provider_presets(state: &AppState) -> Vec<Value> {
+    DASHBOARD_PROVIDER_IDS
+        .iter()
+        .copied()
+        .map(|provider| {
+            let configured_profiles = provider_profile_count(state, provider);
+            let default_model = provider_default_model(provider);
+            json!({
+                "id": provider.label(),
+                "label": provider_display_name(provider),
+                "auth": provider_auth_summary(provider),
+                "defaultModel": default_model,
+                "recommendedModel": default_model,
+                "modelCount": provider_model_catalog_json(provider).len(),
+                "configuredProfiles": configured_profiles,
+                "active": provider_has_active_profile(state, provider),
+                "availableThrough": provider_available_through(provider, configured_profiles),
+                "commands": {
+                    "setup": provider_setup_commands(provider),
+                    "launch": provider_launch_command(provider, None),
+                    "quota": provider_quota_command(provider),
+                    "gateway": provider_gateway_command(provider),
+                },
+                "notes": provider_notes(provider),
+            })
+        })
+        .collect()
+}
+
+fn provider_profile_count(state: &AppState, provider: ProviderId) -> usize {
+    state
+        .profiles
+        .values()
+        .filter(|profile| profile_catalog_provider(profile) == Some(provider))
+        .count()
+}
+
+fn provider_has_active_profile(state: &AppState, provider: ProviderId) -> bool {
+    state
+        .active_profile
+        .as_ref()
+        .and_then(|name| state.profiles.get(name))
+        .and_then(profile_catalog_provider)
+        == Some(provider)
+}
+
+fn profile_catalog_provider(profile: &ProfileEntry) -> Option<ProviderId> {
+    match &profile.provider {
+        ProfileProvider::Openai => {
+            let model_provider = crate::codex_non_openai_model_provider(&profile.codex_home, None);
+            match model_provider
+                .as_ref()
+                .map(|provider| provider.provider_id.as_str())
+            {
+                Some(id) if id.eq_ignore_ascii_case(crate::SUPER_DEEPSEEK_PROVIDER_ID) => {
+                    Some(ProviderId::DeepSeek)
+                }
+                Some(id) if id.eq_ignore_ascii_case(crate::SUPER_LOCAL_PROVIDER_ID) => {
+                    Some(ProviderId::Local)
+                }
+                _ => Some(ProviderId::OpenAi),
+            }
+        }
+        ProfileProvider::Gemini { .. } => Some(ProviderId::Gemini),
+        ProfileProvider::Anthropic { .. } => Some(ProviderId::Anthropic),
+        ProfileProvider::Copilot { .. } => Some(ProviderId::Copilot),
+        ProfileProvider::Kiro { .. } => Some(ProviderId::Kiro),
+        ProfileProvider::Agy { .. } => None,
+    }
+}
+
+fn provider_display_name(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "OpenAI / ChatGPT Codex",
+        ProviderId::Gemini => "Google Gemini",
+        ProviderId::Anthropic => "Anthropic Claude",
+        ProviderId::Copilot => "GitHub Copilot",
+        ProviderId::DeepSeek => "DeepSeek",
+        ProviderId::Kiro => "Kiro CLI",
+        ProviderId::Local => "Local OpenAI-compatible",
+    }
+}
+
+fn provider_auth_summary(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "ChatGPT login, device code, or API key profile",
+        ProviderId::Gemini => "Google OAuth profile or GEMINI_API_KEY(S)",
+        ProviderId::Anthropic => "Claude OAuth import or ANTHROPIC_API_KEY(S)",
+        ProviderId::Copilot => "Copilot CLI import or GITHUB_COPILOT_API_KEY(S)",
+        ProviderId::DeepSeek => "DEEPSEEK_API_KEY(S)",
+        ProviderId::Kiro => "Kiro CLI import",
+        ProviderId::Local => "Local base URL; API key optional",
+    }
+}
+
+fn provider_default_model(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "gpt-5.3-codex",
+        ProviderId::Gemini => crate::SUPER_GEMINI_DEFAULT_MODEL,
+        ProviderId::Anthropic => crate::SUPER_ANTHROPIC_DEFAULT_MODEL,
+        ProviderId::Copilot => crate::SUPER_COPILOT_DEFAULT_MODEL,
+        ProviderId::DeepSeek => crate::SUPER_DEEPSEEK_DEFAULT_MODEL,
+        ProviderId::Kiro => crate::SUPER_KIRO_DEFAULT_MODEL,
+        ProviderId::Local => crate::SUPER_DEFAULT_LOCAL_MODEL,
+    }
+}
+
+fn provider_available_through(
+    provider: ProviderId,
+    configured_profiles: usize,
+) -> Vec<&'static str> {
+    let mut routes = Vec::new();
+    if configured_profiles > 0 {
+        routes.push("profile-backed routing");
+    }
+    match provider {
+        ProviderId::OpenAi => {
+            routes.push("gateway");
+        }
+        ProviderId::Gemini
+        | ProviderId::Anthropic
+        | ProviderId::Copilot
+        | ProviderId::DeepSeek
+        | ProviderId::Kiro => {
+            routes.push("runtime provider launch");
+            routes.push("gateway");
+        }
+        ProviderId::Local => {
+            routes.push("local URL");
+            routes.push("gateway");
+        }
+    }
+    routes
+}
+
+fn provider_setup_commands(provider: ProviderId) -> Vec<&'static str> {
+    match provider {
+        ProviderId::OpenAi => vec![
+            "prodex profile add openai-main --activate",
+            "prodex login --profile openai-main",
+            "prodex profile import-current openai-main",
+        ],
+        ProviderId::Gemini => vec![
+            "prodex login --with-google",
+            "GEMINI_API_KEY=... prodex s gemini --model auto",
+        ],
+        ProviderId::Anthropic => vec![
+            "prodex login --with-claude",
+            "prodex profile import claude --activate",
+            "ANTHROPIC_API_KEY=... prodex s --provider anthropic --model claude-sonnet-4-6",
+        ],
+        ProviderId::Copilot => vec![
+            "prodex profile import copilot --activate",
+            "GITHUB_COPILOT_API_KEY=... prodex s --provider copilot --model gpt-5.3-codex",
+        ],
+        ProviderId::DeepSeek => {
+            vec!["DEEPSEEK_API_KEY=... prodex s deepseek --model deepseek-v4-pro"]
+        }
+        ProviderId::Kiro => vec![
+            "prodex profile import kiro --activate",
+            "prodex s --provider kiro --model claude-sonnet-4",
+        ],
+        ProviderId::Local => {
+            vec!["prodex super --url http://127.0.0.1:8131 --model unsloth/qwen3.5-35b-a3b"]
+        }
+    }
+}
+
+fn provider_launch_command(provider: ProviderId, model: Option<&str>) -> String {
+    let model = model.unwrap_or_else(|| provider_default_model(provider));
+    match provider {
+        ProviderId::OpenAi => format!("prodex s -m {model}"),
+        ProviderId::Gemini => format!("prodex s gemini --model {model}"),
+        ProviderId::Anthropic => format!("prodex s --provider anthropic --model {model}"),
+        ProviderId::Copilot => format!("prodex s --provider copilot --model {model}"),
+        ProviderId::DeepSeek => format!("prodex s deepseek --model {model}"),
+        ProviderId::Kiro => format!("prodex s --provider kiro --model {model}"),
+        ProviderId::Local => format!("prodex super --url http://127.0.0.1:8131 --model {model}"),
+    }
+}
+
+fn provider_quota_command(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "prodex quota --all --provider openai --once",
+        ProviderId::Gemini => "prodex quota --all --provider gemini --once",
+        ProviderId::Anthropic => "prodex quota --all --provider anthropic --once",
+        ProviderId::Copilot => "prodex quota --all --provider copilot --once",
+        ProviderId::DeepSeek => "prodex quota --all --provider deepseek --once",
+        ProviderId::Kiro => "prodex quota --all --provider kiro --once",
+        ProviderId::Local => {
+            "prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once"
+        }
+    }
+}
+
+fn provider_gateway_command(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => "prodex gateway",
+        ProviderId::Gemini => "prodex gateway --provider gemini",
+        ProviderId::Anthropic => "prodex gateway --provider anthropic",
+        ProviderId::Copilot => "prodex gateway --provider copilot",
+        ProviderId::DeepSeek => "prodex gateway --provider deepseek",
+        ProviderId::Kiro => "prodex gateway --provider kiro",
+        ProviderId::Local => "prodex gateway --base-url http://127.0.0.1:8131/v1",
+    }
+}
+
+fn provider_notes(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::OpenAi => {
+            "Prodex profile pool keeps quota-aware rotation and continuation affinity."
+        }
+        ProviderId::Gemini => {
+            "OAuth profiles use Code Assist; API-key launches use the Gemini OpenAI-compatible endpoint."
+        }
+        ProviderId::Anthropic => {
+            "Command generation only; dashboard does not store Anthropic secrets."
+        }
+        ProviderId::Copilot => {
+            "Imported profiles keep Copilot credentials in Copilot-owned storage."
+        }
+        ProviderId::DeepSeek => {
+            "API-key runtime bridge; no profile secret is stored by this dashboard."
+        }
+        ProviderId::Kiro => "Import snapshots Kiro CLI auth for Prodex routing.",
+        ProviderId::Local => "Point Prodex at a local OpenAI-compatible /v1 server.",
+    }
+}
+
 fn quota_summary(snapshot: &ProviderQuotaSnapshot) -> Value {
     match snapshot {
         ProviderQuotaSnapshot::OpenAi(usage) => {
@@ -377,12 +714,29 @@ fn window_json(window: &prodex_quota::UsageWindow) -> Value {
 }
 
 fn read_json_body<T: for<'de> Deserialize<'de>>(request: &mut Request) -> Result<T> {
-    let mut body = String::new();
-    request
-        .as_reader()
-        .read_to_string(&mut body)
+    let body =
+        read_dashboard_json_body_limited(request.as_reader(), DASHBOARD_MAX_JSON_BODY_BYTES)?;
+    serde_json::from_slice(&body).context("invalid JSON request body")
+}
+
+fn dashboard_json_body_error_status(err: &anyhow::Error) -> StatusCode {
+    if err.downcast_ref::<DashboardJsonBodyTooLarge>().is_some() {
+        StatusCode(413)
+    } else {
+        StatusCode(400)
+    }
+}
+
+fn read_dashboard_json_body_limited(reader: impl Read, limit: usize) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    let mut reader = reader.take((limit as u64).saturating_add(1));
+    reader
+        .read_to_end(&mut body)
         .context("failed to read dashboard request body")?;
-    serde_json::from_str(&body).context("invalid JSON request body")
+    if body.len() > limit {
+        return Err(DashboardJsonBodyTooLarge { limit }.into());
+    }
+    Ok(body)
 }
 
 fn respond_json(request: Request, value: Value) -> Result<()> {
@@ -402,17 +756,9 @@ fn respond_error(request: Request, status: StatusCode, err: anyhow::Error) -> Re
         request,
         status,
         "application/json",
-        serde_json::to_vec(&json!({ "error": dashboard_error_message(&err) }))
+        serde_json::to_vec(&json!({ "error": err.to_string() }))
             .context("failed to serialize dashboard error")?,
     )
-}
-
-fn dashboard_error_message(err: &anyhow::Error) -> String {
-    redaction_redact_secret_like_text(&err.to_string())
-}
-
-fn dashboard_request_error_message(err: &anyhow::Error) -> String {
-    redaction_redact_secret_like_text(&format!("{err:#}"))
 }
 
 fn respond_html(request: Request, html: &str) -> Result<()> {
@@ -430,10 +776,14 @@ fn respond_status(
     content_type: &'static str,
     body: Vec<u8>,
 ) -> Result<()> {
+    let content_type = Header::from_bytes("content-type", content_type)
+        .map_err(|_| anyhow!("failed to build dashboard content-type header"))?;
+    let cache_control = Header::from_bytes("cache-control", "no-store")
+        .map_err(|_| anyhow!("failed to build dashboard cache-control header"))?;
     let response = Response::from_data(body)
         .with_status_code(status)
-        .with_header(Header::from_bytes("content-type", content_type).unwrap())
-        .with_header(Header::from_bytes("cache-control", "no-store").unwrap());
+        .with_header(content_type)
+        .with_header(cache_control);
     request
         .respond(response)
         .map_err(|err| anyhow!("failed to send dashboard response: {err}"))
@@ -471,6 +821,9 @@ fn hex_value(byte: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{BTreeSet, HashMap};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn dashboard_status_fields_contain_url_and_warning() {
@@ -487,28 +840,366 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_error_message_redacts_secret_like_material() {
-        let err = anyhow!(
-            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"
+    fn dashboard_state_json_works_with_empty_state() {
+        let paths = dashboard_test_paths("state-json-empty-state");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let value = dashboard.state_json().expect("state json should build");
+        assert_eq!(value["activeProfile"], Value::Null);
+        assert_eq!(value["profileCount"], 0);
+        assert_eq!(
+            value["paths"]["stateFile"],
+            paths.state_file.display().to_string()
+        );
+        assert_eq!(
+            value["paths"]["managedProfilesRoot"],
+            paths.managed_profiles_root.display().to_string()
         );
 
-        let message = dashboard_error_message(&err);
-
-        assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(message.contains("api_key=<redacted>"));
-        assert!(!message.contains("fixture-token-123"));
-        assert!(!message.contains("sk-fixture-123"));
+        let commands = &value["commands"];
+        assert_eq!(commands["open"], "prodex dashboard");
+        assert!(commands["quota"].as_str().is_some());
     }
 
     #[test]
-    fn dashboard_request_error_message_redacts_secret_like_chain() {
-        let err = anyhow!("failed: Authorization: Bearer dashboard-token")
-            .context("outer dashboard failure");
+    fn dashboard_provider_endpoints_cover_supported_providers() {
+        let paths = dashboard_test_paths("provider-endpoints");
+        let server = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
 
-        let message = dashboard_request_error_message(&err);
+        write_test_state(&paths, sample_dashboard_state(&paths));
 
-        assert!(message.contains("outer dashboard failure"));
-        assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(!message.contains("dashboard-token"));
+        let providers = server
+            .providers_json()
+            .expect("providers endpoint should build");
+        let preset_values = providers["providers"]
+            .as_array()
+            .expect("providers list should be array");
+        assert_eq!(preset_values.len(), DASHBOARD_PROVIDER_IDS.len());
+
+        let mut seen_ids = BTreeSet::new();
+        for value in preset_values {
+            let id = value["id"].as_str().expect("provider id should be present");
+            assert!(
+                DASHBOARD_PROVIDER_IDS
+                    .iter()
+                    .any(|provider| provider.label() == id)
+            );
+            assert!(
+                seen_ids.insert(id.to_string()),
+                "duplicate provider id in providers payload: {id}"
+            );
+
+            assert!(value["commands"]["setup"].is_array());
+            assert!(!value["commands"]["setup"].as_array().unwrap().is_empty());
+            assert!(value["commands"]["launch"].as_str().is_some_and(|value| {
+                value.starts_with("prodex s") || value.starts_with("prodex super")
+            }));
+        }
+
+        let contracts = providers["contracts"]
+            .as_array()
+            .expect("contracts should be array");
+        assert!(
+            !contracts.is_empty(),
+            "provider contract matrix should be present"
+        );
+    }
+
+    #[test]
+    fn dashboard_models_json_exposes_recommended_and_launch_commands() {
+        let paths = dashboard_test_paths("models-endpoint");
+        let mut state = sample_dashboard_state(&paths);
+        state.active_profile = Some("main-openai".to_string());
+        write_test_state(&paths, state);
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let models = dashboard
+            .models_json()
+            .expect("models endpoint should build");
+        let model_values = models["models"].as_array().expect("models should be array");
+        assert!(!model_values.is_empty());
+
+        let mut by_provider = HashMap::new();
+        for value in model_values {
+            let provider_name = value["providerName"]
+                .as_str()
+                .expect("providerName should be present");
+            let by = by_provider
+                .entry(provider_name.to_string())
+                .or_insert(0usize);
+            *by += 1;
+
+            assert!(value["launchCommand"].as_str().is_some_and(|value| {
+                value.contains("prodex s") || value.contains("prodex super")
+            }));
+
+            let available_through = value["availableThrough"]
+                .as_array()
+                .expect("availableThrough should be array");
+            assert!(
+                !available_through.is_empty(),
+                "each model should expose routing availability"
+            );
+
+            if value["recommended"].as_bool().unwrap_or(false) {
+                assert!(value["default"].as_bool().unwrap_or(false));
+            }
+        }
+
+        for provider in DASHBOARD_PROVIDER_IDS {
+            let provider_name = provider_display_name(*provider);
+            let expected_default = provider_default_model(*provider);
+            let provider_models: Vec<&Value> = model_values
+                .iter()
+                .filter(|value| value["providerName"] == provider_name)
+                .collect();
+            if provider_models.is_empty() {
+                continue;
+            }
+
+            let has_default_model = provider_models.iter().any(|value| {
+                value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == expected_default)
+            });
+            if *provider != ProviderId::Local {
+                assert!(
+                    has_default_model,
+                    "provider default model should be present: {provider_name}"
+                );
+            }
+            assert_eq!(
+                by_provider.get(provider_name).copied(),
+                Some(provider_models.len())
+            );
+        }
+    }
+
+    #[test]
+    fn dashboard_usage_endpoint_empty_state_is_redacted() {
+        let paths = dashboard_test_paths("usage-empty-state");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let value = dashboard.usage_json().expect("usage endpoint should build");
+        let summary = &value["summary"];
+        assert_eq!(summary["total"], 0);
+        assert_eq!(summary["ready"], 0);
+
+        let rendered = serde_json::to_string(&value).expect("render json");
+        assert!(!rendered.contains("Bearer "));
+        assert!(!rendered.contains("Authorization:"));
+        assert!(!rendered.contains("api_key"));
+        assert!(!rendered.contains("secret"));
+    }
+
+    #[test]
+    fn dashboard_provider_presets_has_setup_and_launch_commands() {
+        let paths = dashboard_test_paths("provider-presets");
+        write_test_state(&paths, sample_dashboard_state(&paths));
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let presets = dashboard
+            .provider_presets_json()
+            .expect("provider presets endpoint should build");
+        let preset_values = presets["providers"]
+            .as_array()
+            .expect("provider presets should be array");
+        assert_eq!(preset_values.len(), DASHBOARD_PROVIDER_IDS.len());
+
+        for value in preset_values {
+            let commands = value["commands"]
+                .as_object()
+                .expect("commands should be object");
+            let setup = commands["setup"].as_array().expect("setup should be array");
+            assert!(!setup.is_empty(), "setup commands should exist");
+            for command in setup {
+                let value = command.as_str().expect("setup command should be string");
+                assert!(!contains_secret_marker(value));
+            }
+
+            let launch = commands["launch"]
+                .as_str()
+                .expect("launch should be string");
+            assert!(launch.contains("prodex s") || launch.contains("prodex super"));
+            assert!(!contains_secret_marker(launch));
+        }
+    }
+
+    #[test]
+    fn dashboard_runtime_status_payload_is_non_secret() {
+        let paths = dashboard_test_paths("runtime-status");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let status = dashboard
+            .runtime_status_json()
+            .expect("runtime status endpoint should build");
+
+        let gateway = &status["gateway"];
+        let runtime = &status["runtime"];
+        assert!(gateway["startCommand"].as_str().is_some());
+        assert!(gateway["providersCommand"].as_str().is_some());
+        assert!(runtime["logDir"].as_str().is_some());
+        assert!(runtime["latestLogPointer"].as_str().is_some());
+
+        assert!(!contains_secret_marker(
+            &serde_json::to_string(&status).expect("serialize status")
+        ));
+    }
+
+    #[test]
+    fn dashboard_models_payload_has_recommended_model_per_provider_where_available() {
+        let paths = dashboard_test_paths("provider-models");
+        let state = sample_dashboard_state(&paths);
+        write_test_state(&paths, state);
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        let value = dashboard
+            .models_json()
+            .expect("models endpoint should build");
+        let models = value["models"].as_array().expect("models should be array");
+        let mut has_recommended = 0usize;
+
+        for model in models {
+            if model["recommended"].as_bool().unwrap_or(false) {
+                has_recommended += 1;
+            }
+            assert!(
+                model["availableThrough"]
+                    .as_array()
+                    .is_some_and(|paths| !paths.is_empty())
+            );
+            assert!(!contains_secret_marker(
+                &serde_json::to_string(model).expect("serialize model payload")
+            ));
+        }
+
+        assert!(
+            has_recommended > 0,
+            "recommended model markers should exist where model catalog exists"
+        );
+    }
+
+    #[test]
+    fn dashboard_handles_empty_state_endpoints() {
+        let paths = dashboard_test_paths("empty-endpoints");
+        let dashboard = DashboardServer {
+            paths: paths.clone(),
+            base_url: None,
+        };
+
+        for value in [
+            dashboard.state_json().expect("state should render"),
+            dashboard.providers_json().expect("providers should render"),
+            dashboard
+                .provider_presets_json()
+                .expect("preset should render"),
+            dashboard.models_json().expect("models should render"),
+            dashboard.usage_json().expect("usage should render"),
+            dashboard
+                .runtime_status_json()
+                .expect("runtime status should render"),
+        ] {
+            assert!(!contains_secret_marker(
+                &serde_json::to_string(&value).expect("serialize value")
+            ));
+        }
+    }
+
+    #[test]
+    fn dashboard_json_body_limit_rejects_limit_plus_one() {
+        let err = read_dashboard_json_body_limited(std::io::Cursor::new(vec![b'a'; 5]), 4)
+            .expect_err("body above limit should be rejected");
+
+        assert_eq!(dashboard_json_body_error_status(&err), StatusCode(413));
+    }
+
+    fn contains_secret_marker(value: &str) -> bool {
+        const SECRET_MARKERS: [&str; 6] = [
+            "Bearer ",
+            "api_key",
+            "\"Authorization\"",
+            "access_token",
+            "refresh_token",
+            "\"refresh\"",
+        ];
+        SECRET_MARKERS.iter().any(|marker| value.contains(marker))
+    }
+
+    fn dashboard_test_paths(name: &str) -> AppPaths {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be available")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-dashboard-tests-{name}-{stamp}-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test root should be created");
+        fs::create_dir_all(root.join("profiles")).expect("profiles directory should be created");
+        AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy"),
+        }
+    }
+
+    fn sample_dashboard_state(paths: &AppPaths) -> AppState {
+        AppState {
+            active_profile: Some("main-openai".to_string()),
+            profiles: [
+                (
+                    "main-openai".to_string(),
+                    ProfileEntry {
+                        codex_home: paths.managed_profiles_root.join("main-openai"),
+                        managed: true,
+                        email: Some("openai@example".to_string()),
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "main-gemini".to_string(),
+                    ProfileEntry {
+                        codex_home: paths.managed_profiles_root.join("main-gemini"),
+                        managed: true,
+                        email: Some("gemini@example".to_string()),
+                        provider: ProfileProvider::Gemini {
+                            email: "gemini@example".to_string(),
+                            project_id: None,
+                        },
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn write_test_state(paths: &AppPaths, state: AppState) {
+        state.save(paths).expect("state should be written");
     }
 }

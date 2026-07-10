@@ -1,3 +1,4 @@
+use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use chrono::{DateTime, Utc};
 use prodex_quota::{GeminiQuotaBucket, GeminiQuotaInfo};
 use reqwest::header::HeaderMap;
@@ -69,7 +70,18 @@ pub(super) fn runtime_gemini_quota_codex_headers(
 pub(super) fn runtime_deepseek_codex_rate_limit_headers(
     headers: &HeaderMap,
 ) -> Vec<(String, String)> {
-    runtime_openai_style_codex_rate_limit_headers(headers, "deepseek", "DeepSeek")
+    runtime_provider_codex_rate_limit_headers(RuntimeProviderBridgeKind::DeepSeek, headers)
+}
+
+pub(super) fn runtime_provider_codex_rate_limit_headers(
+    provider_kind: RuntimeProviderBridgeKind,
+    headers: &HeaderMap,
+) -> Vec<(String, String)> {
+    runtime_openai_style_codex_rate_limit_headers(
+        headers,
+        provider_kind.rate_limit_header_prefix(),
+        provider_kind.rate_limit_header_label(),
+    )
 }
 
 pub(super) fn runtime_openai_style_codex_rate_limit_headers(
@@ -371,5 +383,30 @@ mod tests {
                 .iter()
                 .any(|(name, _)| { name == "x-deepseek-requests-primary-reset-at" })
         );
+    }
+
+    #[test]
+    fn provider_headers_use_bridge_kind_metadata() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-limit-requests",
+            HeaderValue::from_static("100"),
+        );
+        headers.insert(
+            "x-ratelimit-remaining-requests",
+            HeaderValue::from_static("75"),
+        );
+
+        let adapted =
+            runtime_provider_codex_rate_limit_headers(RuntimeProviderBridgeKind::Gemini, &headers);
+
+        assert!(adapted.contains(&(
+            "x-gemini-requests-primary-used-percent".to_string(),
+            "25".to_string()
+        )));
+        assert!(adapted.contains(&(
+            "x-gemini-requests-limit-name".to_string(),
+            "Google Gemini requests".to_string()
+        )));
     }
 }

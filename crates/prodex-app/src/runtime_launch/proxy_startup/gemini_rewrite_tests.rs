@@ -2,9 +2,9 @@
 
 use super::gemini_rewrite_test_support::conversation_store;
 use super::{
-    runtime_gemini_generate_request_body, runtime_gemini_request_body_without_tool,
-    runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_generate_request_body, runtime_gemini_responses_value_from_generate_value,
 };
+use prodex_provider_core::gemini_provider_core_request_body_without_tool;
 
 #[test]
 fn gemini_request_translation_maps_tools_and_thinking() {
@@ -87,6 +87,10 @@ fn gemini_missing_response_id_fallback_uses_request_id_uuidv7() {
         7
     );
     assert_ne!(translated["id"].as_str(), Some("resp_gemini_44"));
+    assert_ne!(
+        translated["id"],
+        runtime_gemini_responses_value_from_generate_value(&response, 44)["id"]
+    );
 }
 
 #[test]
@@ -406,8 +410,9 @@ fn gemini_request_translation_strips_google_search_for_fallback() {
             None,
         )
         .expect("request should translate");
-        let stripped = runtime_gemini_request_body_without_tool(&translated.body, "googleSearch")
-            .expect("googleSearch should be stripped");
+        let stripped =
+            gemini_provider_core_request_body_without_tool(&translated.body, "googleSearch")
+                .expect("googleSearch should be stripped");
         let value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
         let request = value.get("request").unwrap_or(&value);
 
@@ -451,7 +456,7 @@ fn gemini_request_translation_maps_web_fetch_to_url_context() {
         "shell"
     );
 
-    let stripped = runtime_gemini_request_body_without_tool(&translated.body, "urlContext")
+    let stripped = gemini_provider_core_request_body_without_tool(&translated.body, "urlContext")
         .expect("urlContext should be stripped for fallback");
     let stripped_value: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
     assert_eq!(
@@ -707,6 +712,10 @@ fn gemini_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
     assert_ne!(
         translated["output"][0]["call_id"].as_str(),
         Some("call_gemini_44_0")
+    );
+    assert_ne!(
+        translated["output"][0]["call_id"],
+        runtime_gemini_responses_value_from_generate_value(&response, 44)["output"][0]["call_id"]
     );
 }
 

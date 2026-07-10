@@ -100,6 +100,9 @@ impl fmt::Display for SecretError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedLocation { .. } => write!(f, "unsupported secret location"),
+            Self::InvalidLocation { reason } if reason.contains("exceeds safe size limit") => {
+                write!(f, "secret exceeds safe size limit")
+            }
             Self::InvalidLocation { .. } => write!(f, "invalid secret location"),
             Self::Io { .. } => write!(f, "secret storage I/O error"),
         }

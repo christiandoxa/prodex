@@ -41,6 +41,26 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ],
             ),
         );
+        if event == "connection_limit_reached"
+            && !self
+                .websocket_reuse_fresh_retry_profiles
+                .contains(&profile_name)
+        {
+            self.websocket_reuse_fresh_retry_profiles
+                .insert(profile_name.clone());
+            runtime_proxy_log(
+                self.shared,
+                runtime_proxy_structured_log_message(
+                    "websocket_connection_limit_fresh_retry",
+                    [
+                        runtime_proxy_log_field("request", self.request_id.to_string()),
+                        runtime_proxy_log_field("websocket_session", self.session_id.to_string()),
+                        runtime_proxy_log_field("profile", profile_name.as_str()),
+                    ],
+                ),
+            );
+            return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
         if nonreplayable_previous_response_reuse && self.request_requires_previous_response_affinity
         {
             if !self

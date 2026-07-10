@@ -50,9 +50,26 @@ pub(crate) fn gemini_oauth_secret_path(codex_home: &Path) -> PathBuf {
 
 pub(crate) fn read_gemini_oauth_secret(codex_home: &Path) -> Result<GeminiOAuthSecret> {
     let path = gemini_oauth_secret_path(codex_home);
-    let text = std::fs::read_to_string(&path)
+    let text = secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .read_text(&secret_store::SecretLocation::file(&path))
+        .map_err(secret_file_read_error)
+        .with_context(|| format!("failed to read {}", path.display()))?
         .with_context(|| format!("failed to read {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
+    let is_non_regular_file = matches!(
+        &error,
+        secret_store::SecretError::InvalidLocation { reason }
+            if reason.ends_with(" is not a regular secret file")
+    );
+    let error = anyhow::Error::new(error);
+    if is_non_regular_file {
+        error.context("not a regular secret file")
+    } else {
+        error
+    }
 }
 
 pub(crate) fn write_gemini_oauth_secret(
@@ -211,6 +228,43 @@ mod tests {
     use super::*;
     use std::thread;
     use tiny_http::Response as TinyResponse;
+
+    fn test_gemini_oauth_secret() -> GeminiOAuthSecret {
+        GeminiOAuthSecret {
+            auth_mode: "gemini_oauth".to_string(),
+            access_token: "token-123".to_string(),
+            refresh_token: Some("refresh-123".to_string()),
+            token_type: Some("Bearer".to_string()),
+            scope: None,
+            expiry_date: None,
+            email: "user@example.com".to_string(),
+            project_id: Some("project-123".to_string()),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_gemini_oauth_secret_rejects_symlink() {
+        let root = env::temp_dir().join(format!(
+            "prodex-gemini-oauth-symlink-{}-{}",
+            std::process::id(),
+            oauth::random_hex(4).expect("random suffix")
+        ));
+        std::fs::create_dir_all(&root).expect("test dir should be created");
+        let target = root.join("target.json");
+        std::fs::write(
+            &target,
+            serde_json::to_string_pretty(&test_gemini_oauth_secret()).unwrap(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&target, gemini_oauth_secret_path(&root)).unwrap();
+
+        let err = read_gemini_oauth_secret(&root).expect_err("symlink secret must be rejected");
+
+        assert!(err.to_string().contains("failed to read"));
+        assert!(format!("{err:#}").contains("regular secret file"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn google_login_completion_requires_quota_probe_after_code_assist_setup() {

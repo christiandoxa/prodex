@@ -1,11 +1,14 @@
 use super::{
     RuntimeGeminiBindingRecorder, RuntimeGeminiOAuthPool, RuntimeGeminiOAuthPoolState,
     RuntimeGeminiOAuthProfileAuth, runtime_gemini_initial_oauth_pool_index, runtime_gemini_now_ms,
-    runtime_gemini_remember_bindings_from_responses_body, runtime_gemini_retain_code_assist_models,
-    runtime_gemini_should_inline_rate_limit_retry,
-    runtime_gemini_should_rotate_after_quota_response,
+    runtime_gemini_remember_bindings_from_responses_body,
 };
 use crate::{GeminiOAuthSecret, RuntimeProxyRequest, gemini_code_assist_endpoint};
+use prodex_provider_core::{
+    gemini_provider_core_should_inline_rate_limit_retry as runtime_gemini_should_inline_rate_limit_retry,
+    gemini_provider_core_should_rotate_after_quota_response as runtime_gemini_should_rotate_after_quota_response,
+    provider_gemini_retain_code_assist_models,
+};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -490,22 +493,25 @@ fn gemini_binding_recorder_reads_custom_tool_calls() {
 #[test]
 fn gemini_quota_rotation_predicate_respects_affinity_and_attempt_budget() {
     assert!(runtime_gemini_should_rotate_after_quota_response(
-        429, false, false, 0, 2
+        429, true, false, false, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, false, false, 0, 1
+        429, false, false, false, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, true, false, 0, 2
+        429, true, false, false, 0, 1
+    ));
+    assert!(!runtime_gemini_should_rotate_after_quota_response(
+        429, true, true, false, 0, 2
     ));
     assert!(runtime_gemini_should_rotate_after_quota_response(
-        429, true, true, 0, 2
+        429, true, true, true, 0, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        429, false, false, 1, 2
+        429, true, false, false, 1, 2
     ));
     assert!(!runtime_gemini_should_rotate_after_quota_response(
-        500, false, false, 0, 2
+        500, true, false, false, 0, 2
     ));
 }
 
@@ -529,7 +535,7 @@ fn gemini_oauth_code_assist_filters_known_unavailable_models() {
         "gemini-2.5-flash".to_string(),
     ];
 
-    runtime_gemini_retain_code_assist_models(&mut chain);
+    provider_gemini_retain_code_assist_models(&mut chain);
 
     assert_eq!(
         chain,

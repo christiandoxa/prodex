@@ -1,6 +1,6 @@
 use super::super::local_rewrite::{
-    RuntimeLocalRewriteModelMemoryState, runtime_local_rewrite_model_allows_session_memory,
-    runtime_local_rewrite_model_scope,
+    RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT, RuntimeLocalRewriteModelMemoryState,
+    runtime_local_rewrite_model_allows_session_memory, runtime_local_rewrite_model_scope,
 };
 use super::super::provider_bridge::RuntimeProviderBridgeKind;
 use crate::RuntimeProxyRequest;
@@ -39,4 +39,22 @@ fn local_rewrite_model_memory_only_overrides_auto_like_models() {
     assert!(!runtime_local_rewrite_model_allows_session_memory(
         "claude-sonnet-4-6"
     ));
+}
+
+#[test]
+fn local_rewrite_model_memory_is_bounded() {
+    let mut memory = RuntimeLocalRewriteModelMemoryState::default();
+    for index in 0..=RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT {
+        memory.remember_selected_model(&format!("session-{index:04}"), "model");
+    }
+
+    assert_eq!(memory.selected_model("session-0000"), None);
+    assert_eq!(
+        memory
+            .selected_model(&format!(
+                "session-{RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT:04}"
+            ))
+            .as_deref(),
+        Some("model")
+    );
 }

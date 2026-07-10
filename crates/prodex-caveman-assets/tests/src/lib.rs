@@ -55,22 +55,20 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
 
     let awareness = fs::read_to_string(dir.join("SUPER_OPTIMIZERS.md"))
         .expect("SUPER_OPTIMIZERS.md should exist");
-    assert!(awareness.contains("sqz"));
-    assert!(awareness.contains("Presidio redaction and prodex-memory are opt-in surfaces"));
-    assert!(awareness.contains("RTK handles upstream/input command output"));
-    assert!(awareness.contains("local optimizer stack"));
-    assert!(awareness.contains("auto-wrappers are only a backstop"));
-    assert!(awareness.contains("SQZ handles downstream/context reuse"));
-    assert!(awareness.contains("prodex-sqz"));
-    assert!(awareness.contains("token-savior"));
-    assert!(awareness.contains("Locating symbols, callers, dead code, or API changes"));
-    assert!(awareness.contains("claw-compactor"));
-    assert!(awareness.contains("prodex-claw-compactor-auto"));
-    assert!(awareness.contains("- prodex-inspect MCP:"));
-    assert!(awareness.contains("- prodex-memory backend: disabled"));
+    assert!(awareness.contains("Use visible `rtk <cmd>`"));
+    assert!(awareness.contains("codebase-memory-mcp"));
+    assert!(awareness.contains("Ponytail"));
+    for removed in [
+        "prodex-sqz",
+        "token-savior",
+        "claw-compactor",
+        "prodex-inspect",
+        "prodex-memory",
+    ] {
+        assert!(!awareness.contains(removed));
+    }
     let config = fs::read_to_string(dir.join("config.toml")).expect("config should exist");
-    assert!(config.contains("[mcp_servers.prodex-inspect]"));
-    assert!(config.contains("__inspect-mcp"));
+    assert!(!config.contains("prodex-inspect"));
 
     let agents = fs::read_to_string(dir.join("AGENTS.md")).expect("AGENTS.md should exist");
     assert_eq!(
@@ -127,6 +125,34 @@ fn prepare_prodex_overlay_home_drops_inherited_codex_apps_cache() {
 
     let _ = fs::remove_dir_all(managed);
     let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_prodex_overlay_home_rejects_symlink_managed_root() {
+    let root = temp_dir("overlay-symlink-root");
+    let managed = root.join("managed");
+    let outside = root.join("outside");
+    let base = root.join("base");
+    fs::create_dir_all(&outside).expect("outside root should exist");
+    fs::create_dir_all(&base).expect("base should exist");
+    std::os::unix::fs::symlink(&outside, &managed).expect("managed symlink should be created");
+
+    let err = prepare_prodex_overlay_home(&managed, &base)
+        .expect_err("symlink managed root should be rejected");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        fs::read_dir(&outside)
+            .expect("outside target should be readable")
+            .next()
+            .is_none(),
+        "overlay creation must not write through symlinked managed root"
+    );
+    let _ = fs::remove_dir_all(root);
 }
 
 #[cfg(unix)]
@@ -271,16 +297,14 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
         fs::read_to_string(overlay.join("config.toml")).expect("overlay config.toml");
     assert!(overlay_config.contains("prodex-caveman"));
     assert!(overlay_config.contains("plugins = false"));
+    assert!(overlay_config.contains("remote_plugin = false"));
     let hook_script = fs::read_to_string(overlay.join("bin").join("prodex-caveman-sessionstart"))
         .expect("Caveman SessionStart script should exist");
     assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
-    assert!(hook_script.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(hook_script.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
     assert!(hook_script.contains("Ponytail applies smallest-correct-implementation pressure"));
     assert!(hook_script.contains("rtk <cmd>"));
-    assert!(hook_script.contains("prodex-sqz"));
-    assert!(hook_script.contains("prodex-token-savior"));
     assert!(hook_script.contains("codebase-memory-mcp"));
-    assert!(hook_script.contains("prodex-claw-compactor"));
     assert!(hook_script.contains("Presidio is opt-in only"));
     assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
 
@@ -394,7 +418,10 @@ fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
     let state_db = shared.join("state_5.sqlite");
     let state_shm = shared.join("state_5.sqlite-shm");
     let state_wal = shared.join("state_5.sqlite-wal");
-    fs::write(&state_db, "shared rollout state").expect("state db");
+    let mut state_db_contents = b"shared rollout state".to_vec();
+    state_db_contents.extend(vec![b'x'; 600 * 1024]);
+    let state_db_len = state_db_contents.len() as u64;
+    fs::write(&state_db, &state_db_contents).expect("state db");
     fs::write(&state_shm, "shared rollout shm").expect("state shm");
     fs::write(&state_wal, "shared rollout wal").expect("state wal");
     std::os::unix::fs::symlink(&state_db, base.join("state_5.sqlite")).expect("state db symlink");
@@ -424,6 +451,14 @@ fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
                 .expect("overlay state should read from local copy")
                 .starts_with("shared rollout")
         );
+        if name == "state_5.sqlite" {
+            assert_eq!(
+                fs::metadata(&link)
+                    .expect("localized state metadata should read")
+                    .len(),
+                state_db_len
+            );
+        }
         fs::write(&link, format!("local {name}")).expect("overlay state write");
         assert!(
             fs::read_to_string(&target)
@@ -462,12 +497,9 @@ fn caveman_session_start_script_outputs_once_per_launch_home() {
     assert!(first.status.success());
     let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
     assert!(first_stdout.contains("CAVEMAN MODE ACTIVE"));
-    assert!(first_stdout.contains("PRODEX SUPER OPTIMIZERS ACTIVE WHEN AVAILABLE"));
+    assert!(first_stdout.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
     assert!(first_stdout.contains("Ponytail applies smallest-correct-implementation pressure"));
-    assert!(first_stdout.contains("prodex-sqz"));
-    assert!(first_stdout.contains("prodex-token-savior"));
     assert!(first_stdout.contains("codebase-memory-mcp"));
-    assert!(first_stdout.contains("prodex-claw-compactor"));
     assert!(first_stdout.contains("Presidio is opt-in only"));
 
     let second = std::process::Command::new(&script)

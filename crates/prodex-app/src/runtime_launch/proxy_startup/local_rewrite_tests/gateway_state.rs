@@ -10,6 +10,163 @@ use std::fs;
 use std::time::Duration;
 
 #[test]
+fn gateway_invalid_virtual_key_store_fails_closed_on_startup() {
+    let root = temp_root("gateway-invalid-key-store");
+    let paths = app_paths_for_root(root.clone());
+    fs::write(root.join("gateway-virtual-keys.json"), "{")
+        .expect("invalid gateway key store should be written");
+
+    let result = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "http://127.0.0.1:1/v1".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    });
+    let err = match result {
+        Ok(proxy) => {
+            drop(proxy);
+            panic!("invalid gateway key store should fail closed at startup");
+        }
+        Err(err) => err,
+    };
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("failed to load gateway virtual key store"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn gateway_invalid_stored_virtual_key_hash_fails_closed_on_startup() {
+    let root = temp_root("gateway-invalid-key-hash");
+    let paths = app_paths_for_root(root.clone());
+    fs::write(
+        root.join("gateway-virtual-keys.json"),
+        serde_json::json!({
+            "version": 1,
+            "keys": [{
+                "name": "team-a",
+                "token_hash_base64": "not-base64",
+                "created_at_epoch": 1,
+                "updated_at_epoch": 1
+            }]
+        })
+        .to_string(),
+    )
+    .expect("invalid gateway key hash store should be written");
+
+    let result = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "http://127.0.0.1:1/v1".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    });
+    let err = match result {
+        Ok(proxy) => {
+            drop(proxy);
+            panic!("invalid stored gateway key hash should fail closed at startup");
+        }
+        Err(err) => err,
+    };
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("invalid token hash"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn gateway_invalid_usage_store_fails_closed_on_startup() {
+    let root = temp_root("gateway-invalid-usage-store");
+    let paths = app_paths_for_root(root.clone());
+    fs::write(root.join("gateway-virtual-key-usage.json"), "{")
+        .expect("invalid gateway usage store should be written");
+
+    let result = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: "http://127.0.0.1:1/v1".to_string(),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: vec![runtime_proxy_crate::RuntimeGatewayVirtualKey {
+            name: "team-a".to_string(),
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("team-token"),
+            allowed_models: Vec::new(),
+            budget_microusd: Some(1),
+            request_budget: Some(1),
+            rpm_limit: Some(1),
+            tpm_limit: Some(1),
+        }],
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: Some("x-prodex-call-id".to_string()),
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    });
+    let err = match result {
+        Ok(proxy) => {
+            drop(proxy);
+            panic!("invalid gateway usage store should fail closed at startup");
+        }
+        Err(err) => err,
+    };
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("failed to load gateway virtual key usage"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
 fn gateway_usage_delta_store_merges_batches_without_losing_counts() {
     let root = temp_root("gateway-usage-delta-merge");
     let path = root.join("gateway-virtual-key-usage.json");

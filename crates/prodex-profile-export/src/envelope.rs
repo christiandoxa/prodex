@@ -1,6 +1,6 @@
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,6 +22,7 @@ use crate::data_model::{
 use crate::{PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, ProfileExportEnvelope};
 
 static PROFILE_EXPORT_BUNDLE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+pub(crate) const PROFILE_EXPORT_BUNDLE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 pub fn serialize_profile_export_payload<T>(payload: &T, password: Option<&str>) -> Result<Vec<u8>>
 where
@@ -42,14 +43,67 @@ pub fn read_profile_export_envelope<T>(path: &Path) -> Result<(ProfileExportEnve
 where
     T: DeserializeOwned,
 {
-    let content = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let content = read_profile_export_bundle(path)?;
     let envelope: ProfileExportEnvelope<T> = serde_json::from_slice(&content)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     let encrypted = matches!(envelope, ProfileExportEnvelope::Encrypted { .. });
     Ok((envelope, encrypted))
 }
 
+fn read_profile_export_bundle(path: &Path) -> Result<Vec<u8>> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
+    if !metadata.file_type().is_file() {
+        bail!("profile export bundle {} is not a file", path.display());
+    }
+    if metadata.len() > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    if !profile_export_same_file_metadata(&metadata, &file.metadata()?) {
+        bail!(
+            "profile export bundle changed while opening {}",
+            path.display()
+        );
+    }
+    let mut bytes = Vec::new();
+    file.take(PROFILE_EXPORT_BUNDLE_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    if bytes.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn profile_export_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn profile_export_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
+}
+
 pub fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
+    if content.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -101,10 +155,19 @@ where
             if kdf != PROFILE_EXPORT_KDF {
                 bail!("unsupported profile export KDF '{}'", kdf);
             }
-            let password = resolve_password()?;
+            if iterations != PROFILE_EXPORT_PBKDF2_ITERATIONS {
+                bail!(
+                    "unsupported profile export PBKDF2 iteration count {} (expected {})",
+                    iterations,
+                    PROFILE_EXPORT_PBKDF2_ITERATIONS
+                );
+            }
             let salt = base64::engine::general_purpose::STANDARD
                 .decode(salt_base64)
                 .context("failed to decode encrypted export salt")?;
+            if salt.len() != PROFILE_EXPORT_SALT_BYTES {
+                bail!("invalid encrypted export salt length");
+            }
             let nonce = base64::engine::general_purpose::STANDARD
                 .decode(nonce_base64)
                 .context("failed to decode encrypted export nonce")?;
@@ -114,6 +177,7 @@ where
             if nonce.len() != PROFILE_EXPORT_NONCE_BYTES {
                 bail!("invalid encrypted export nonce length");
             }
+            let password = resolve_password()?;
             let key = derive_profile_export_key(&password, &salt, iterations);
             let cipher = Aes256GcmSiv::new_from_slice(&key)
                 .map_err(|_| anyhow::anyhow!("failed to initialize import cipher"))?;
@@ -218,4 +282,59 @@ fn write_profile_export_temp_file(path: &Path, content: &[u8]) -> Result<()> {
     file.write_all(content)
         .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn encrypted_envelope(
+        iterations: u32,
+        salt: &[u8],
+    ) -> ProfileExportEnvelope<serde_json::Value> {
+        ProfileExportEnvelope::Encrypted {
+            format: PROFILE_EXPORT_FORMAT.to_string(),
+            version: PROFILE_EXPORT_VERSION,
+            cipher: PROFILE_EXPORT_CIPHER.to_string(),
+            kdf: PROFILE_EXPORT_KDF.to_string(),
+            iterations,
+            salt_base64: base64::engine::general_purpose::STANDARD.encode(salt),
+            nonce_base64: base64::engine::general_purpose::STANDARD
+                .encode([0_u8; PROFILE_EXPORT_NONCE_BYTES]),
+            ciphertext_base64: String::new(),
+        }
+    }
+
+    #[test]
+    fn encrypted_bundle_rejects_unbounded_kdf_iterations_before_password_lookup() {
+        let password_requested = AtomicBool::new(false);
+        let err = decode_profile_export_envelope(
+            encrypted_envelope(u32::MAX, &[0_u8; PROFILE_EXPORT_SALT_BYTES]),
+            || {
+                password_requested.store(true, Ordering::SeqCst);
+                Ok("secret".to_string())
+            },
+        )
+        .expect_err("unsupported iteration count should fail");
+
+        assert!(err.to_string().contains("PBKDF2 iteration count"));
+        assert!(!password_requested.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn encrypted_bundle_rejects_invalid_salt_length_before_password_lookup() {
+        let password_requested = AtomicBool::new(false);
+        let err = decode_profile_export_envelope(
+            encrypted_envelope(PROFILE_EXPORT_PBKDF2_ITERATIONS, &[0_u8; 1]),
+            || {
+                password_requested.store(true, Ordering::SeqCst);
+                Ok("secret".to_string())
+            },
+        )
+        .expect_err("invalid salt should fail");
+
+        assert!(err.to_string().contains("salt length"));
+        assert!(!password_requested.load(Ordering::SeqCst));
+    }
 }

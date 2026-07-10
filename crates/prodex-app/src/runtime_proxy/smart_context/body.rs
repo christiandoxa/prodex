@@ -35,6 +35,10 @@ use super::{
 };
 use std::borrow::Cow;
 
+mod transform;
+
+use transform::{RuntimeSmartContextBodyTransformInput, runtime_smart_context_transform_body};
+
 pub(super) fn prepare_runtime_smart_context_body<'a>(
     request_id: u64,
     request: &'a RuntimeProxyRequest,
@@ -177,84 +181,17 @@ pub(super) fn prepare_runtime_smart_context_body<'a>(
         return Cow::Borrowed(&request.body);
     }
 
-    let Some(mut outcome) = with_runtime_smart_context_proxy_state(shared, |state| {
-        let mut outcome = RuntimeSmartContextTransformOutcome::default();
-        let budget_allows_rewrite =
-            budget.policy.mode != runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough;
-        {
-            let store = &mut state.artifacts;
-            let rehydrate_plan = runtime_smart_context_auto_rehydrate_plan(
-                &value,
-                store,
-                budget.available_tokens,
-                tier,
-            );
-            outcome.deferred_rehydrate_refs =
-                runtime_smart_context_deferred_rehydrate_refs(&rehydrate_plan);
-            runtime_smart_context_rehydrate_value_with_plan(
-                &mut value,
-                store,
-                &rehydrate_plan,
-                &mut outcome.stats,
-            );
-            runtime_smart_context_selective_rehydrate_budget_aware_ranges(
-                &mut value,
-                store,
-                &transform_exactness,
-                &intent_signals.semantic_terms,
-                &rehydrate_plan,
-                budget
-                    .available_tokens
-                    .saturating_sub(rehydrate_plan.used_tokens),
-                &mut outcome.stats,
-            );
-        }
-        runtime_smart_context_apply_repo_state_micro_cache(
-            &mut value,
-            state,
+    let Some(mut outcome) = runtime_smart_context_transform_body(
+        RuntimeSmartContextBodyTransformInput {
+            shared,
             request_id,
-            &transform_exactness,
-            budget_allows_rewrite,
-            &mut outcome.stats,
-        );
-        if budget_allows_rewrite {
-            {
-                let store = &mut state.artifacts;
-                runtime_smart_context_condense_tool_outputs(
-                    &mut value,
-                    store,
-                    request_id,
-                    tier,
-                    budget.policy.max_inline_tool_output_bytes,
-                    &intent_signals,
-                    &mut outcome.stats,
-                );
-                runtime_smart_context_condense_historical_tool_call_arguments(
-                    &mut value,
-                    store,
-                    request_id,
-                    tier,
-                    budget.policy.max_inline_tool_output_bytes,
-                    &mut outcome.stats,
-                );
-                runtime_smart_context_dedupe_input_text(
-                    &mut value,
-                    store,
-                    &transform_exactness,
-                    &mut outcome.stats,
-                );
-            }
-        }
-        if budget_allows_rewrite {
-            runtime_smart_context_append_artifact_manifest_delta_if_useful(
-                &mut value,
-                state,
-                &outcome.stats,
-                &intent_signals,
-            );
-        }
-        outcome
-    }) else {
+            transform_exactness: &transform_exactness,
+            budget: &budget,
+            tier,
+            intent_signals: &intent_signals,
+        },
+        &mut value,
+    ) else {
         if let Some(body) = runtime_smart_context_minified_json_body(&value, &request.body) {
             runtime_smart_context_log(RuntimeSmartContextLogInput {
                 request_id,

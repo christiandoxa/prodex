@@ -52,11 +52,11 @@ fn catalog_covers_gateway_providers() {
             ProviderEndpoint::Embeddings,
         ]
     );
-    for provider in [
-        ProviderId::Anthropic,
-        ProviderId::Copilot,
-        ProviderId::DeepSeek,
-    ] {
+    assert!(
+        provider_supported_endpoints(ProviderId::Copilot)
+            .contains(&ProviderEndpoint::ResponsesCompact)
+    );
+    for provider in [ProviderId::Anthropic, ProviderId::DeepSeek] {
         assert_eq!(
             provider_supported_endpoints(provider),
             [
@@ -117,6 +117,77 @@ fn provider_adapter_contract_matches_fixture() {
         }
         assert!(spec.model_count > 0);
     }
+}
+
+#[test]
+fn transform_result_exposes_explicit_status_outcome() {
+    let lossless = ProviderTransformResult::lossless(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        br#"{"ok":true}"#.to_vec(),
+    );
+    assert_eq!(lossless.status(), TransformStatus::Lossless);
+    assert_eq!(lossless.outcome().value, Some(br#"{"ok":true}"#.to_vec()));
+
+    let degraded = ProviderTransformResult::degraded(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        Vec::new(),
+        "dropped unsupported option",
+        Default::default(),
+    );
+    assert_eq!(
+        degraded.status(),
+        TransformStatus::Degraded {
+            reason: "dropped unsupported option".to_string()
+        }
+    );
+    assert_eq!(
+        degraded.status().reason(),
+        Some("dropped unsupported option")
+    );
+
+    let rejected = ProviderTransformResult::rejected(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        "bad request",
+    );
+    assert_eq!(
+        rejected.outcome(),
+        TransformOutcome {
+            status: TransformStatus::Rejected {
+                reason: "bad request".to_string()
+            },
+            value: None
+        }
+    );
+
+    let unsupported = ProviderTransformResult::unsupported(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        ProviderWireFormat::OpenAiResponses,
+        ProviderWireFormat::GeminiGenerateContent,
+        "stream event unsupported",
+    );
+    assert_eq!(
+        unsupported.status(),
+        TransformStatus::Unsupported {
+            reason: "stream event unsupported".to_string()
+        }
+    );
+    assert!(ProviderConformanceExpectedLoss::Unsupported.matches_status(&unsupported.status()));
+    assert!(ProviderConformanceExpectedLoss::Unsupported.requires_reason());
+    assert!(!ProviderConformanceExpectedLoss::Lossless.requires_reason());
+    assert_eq!(
+        ProviderConformanceExpectedLoss::Unsupported.label(),
+        "unsupported"
+    );
 }
 
 #[test]
@@ -197,5 +268,26 @@ fn fallback_chain_preserves_existing_gemini_aliases() {
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Local, " local-model "),
         vec!["local-model"]
+    );
+}
+
+#[test]
+fn gemini_code_assist_model_filter_preserves_existing_runtime_behavior() {
+    let mut chain = vec![
+        "gemini-3-pro-preview".to_string(),
+        "gemini-3.1-pro-preview-customtools".to_string(),
+        "gemini-3.5-flash".to_string(),
+        "gemini-3-flash".to_string(),
+        "gemini-2.5-flash".to_string(),
+    ];
+
+    provider_gemini_retain_code_assist_models(&mut chain);
+
+    assert_eq!(
+        chain,
+        vec![
+            "gemini-3-pro-preview".to_string(),
+            "gemini-2.5-flash".to_string()
+        ]
     );
 }

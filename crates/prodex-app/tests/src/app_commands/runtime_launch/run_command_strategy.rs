@@ -25,6 +25,7 @@ fn assert_repaired_session_meta_line(line: &str, session_id: &str) {
 fn run_strategy_resolves_codex_delete_partial_selector_before_launch() {
     let root = temp_dir("delete-partial-selector");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _shared_env = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", "shared-codex-home");
     let paths = AppPaths::discover().unwrap();
     let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
     let sessions = paths.shared_codex_root.join("sessions/2026/06/05");
@@ -846,6 +847,144 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
     assert_repaired_session_meta_line(
         orphan_repaired.lines().next().unwrap(),
         "019ebd01-c881-74c0-b01d-7fdf5bd4dd32",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn run_strategy_skips_symlink_managed_profile_home_during_resume_repair() {
+    let root = temp_dir("repair-resume-skip-symlink-profile-home");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let primary_home = root.join("profiles").join("primary");
+    let outside_home = root.join("outside-profile-home");
+    let outside_sessions = outside_home.join("sessions/2026/06/13");
+    fs::create_dir_all(&primary_home).unwrap();
+    fs::create_dir_all(&outside_sessions).unwrap();
+    fs::write(
+        secret_store::auth_json_path(&primary_home),
+        r#"{"tokens":{"access_token":"profile-token"}}"#,
+    )
+    .unwrap();
+    let session_id = "019ebd01-c881-74c0-b01d-7fdf5bd4dd32";
+    let outside_session_path =
+        outside_sessions.join(format!("rollout-2026-06-13T02-04-31-{session_id}.jsonl"));
+    fs::write(
+        &outside_session_path,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"outside should stay untouched\"}}\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside_home, root.join("profiles").join("linked")).unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("primary".to_string()),
+            profiles: BTreeMap::from([(
+                "primary".to_string(),
+                ProfileEntry {
+                    codex_home: primary_home.clone(),
+                    managed: true,
+                    email: Some("primary@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: Some("primary".to_string()),
+        auto_rotate: false,
+        no_auto_rotate: true,
+        auto_redeem: false,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: vec![OsString::from(session_id)],
+    })
+    .unwrap();
+    let prepared = prepare_runtime_launch(strategy.runtime_request()).unwrap();
+
+    strategy
+        .build_plan(&prepared, prepared.runtime_proxy.as_ref())
+        .unwrap();
+
+    let untouched = fs::read_to_string(&outside_session_path).unwrap();
+    assert_eq!(
+        untouched,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\",\"payload\":{\"message\":\"outside should stay untouched\"}}\n"
+    );
+    assert!(!outside_sessions.join(".prodex-repair-bak").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn run_strategy_refuses_managed_profile_home_under_symlink_parent() {
+    let root = temp_dir("launch-reject-symlink-parent-profile-home");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_codex_home = root.join("shared-codex-home");
+    let _shared_env = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        shared_codex_home.to_str().unwrap(),
+    );
+    let profiles = root.join("profiles");
+    let outside = root.join("outside-profile-parent");
+    let link = profiles.join("link");
+    let codex_home = link.join("main");
+    fs::create_dir_all(&profiles).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    write_state(
+        &root,
+        AppState {
+            active_profile: Some("primary".to_string()),
+            profiles: BTreeMap::from([(
+                "primary".to_string(),
+                ProfileEntry {
+                    codex_home,
+                    managed: true,
+                    email: Some("primary@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            )]),
+            ..AppState::default()
+        },
+    );
+
+    let strategy = RunCommandStrategy::new(RunArgs {
+        profile: Some("primary".to_string()),
+        auto_rotate: false,
+        no_auto_rotate: true,
+        auto_redeem: false,
+        skip_quota_check: true,
+        full_access: false,
+        base_url: None,
+        no_proxy: false,
+        dry_run: false,
+        codex_features: CodexRuntimeFeatureArgs::default(),
+        codex_args: Vec::new(),
+    })
+    .unwrap();
+
+    let err = match prepare_runtime_launch(strategy.runtime_request()) {
+        Ok(_) => panic!("symlink parent managed profile home should reject"),
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains("is outside"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        !outside.join("main").exists(),
+        "launch must not create profile homes through a symlinked parent"
     );
 }
 

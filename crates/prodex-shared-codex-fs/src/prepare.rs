@@ -46,6 +46,8 @@ fn prepare_managed_codex_home_internal(
     codex_home: &Path,
     maintain_sessions: bool,
 ) -> Result<()> {
+    ensure_managed_profiles_root(paths)?;
+    ensure_managed_codex_home_is_not_symlink(codex_home)?;
     create_codex_home_if_missing(codex_home)?;
     migrate_legacy_shared_codex_roots(paths)?;
     fs::create_dir_all(&paths.shared_codex_root)
@@ -61,7 +63,30 @@ fn prepare_managed_codex_home_internal(
     Ok(())
 }
 
+fn ensure_managed_codex_home_is_not_symlink(codex_home: &Path) -> Result<()> {
+    let Some(metadata) = load_shared_codex_entry_metadata(codex_home)? else {
+        return Ok(());
+    };
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "managed Codex home {} must not be a symbolic link",
+            codex_home.display()
+        );
+    }
+    if !metadata.is_dir() {
+        bail!(
+            "managed Codex home {} must be a directory",
+            codex_home.display()
+        );
+    }
+    Ok(())
+}
+
 pub fn maintain_managed_codex_sessions(paths: &AppPaths) -> Result<()> {
+    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(&paths.shared_codex_root)?
+    else {
+        return Ok(());
+    };
     let cache_path = paths.root.join(SESSION_MAINTENANCE_CACHE_FILE);
     let previous = load_session_maintenance_cache(&cache_path);
     let mut next = SessionMaintenanceCache {
@@ -135,7 +160,10 @@ fn maintain_codex_sessions_in_dir(
             continue;
         }
 
-        let contents = persist_codex_session_file_image_attachments(codex_home, &path)?;
+        let Some(contents) = persist_codex_session_file_image_attachments(codex_home, &path)?
+        else {
+            continue;
+        };
         restore_codex_session_file_modified_time(&path, &contents)?;
         if codex_session_image_attachments_are_stable(codex_home, &contents) {
             next.files.insert(key, session_file_fingerprint(&path)?);
@@ -217,6 +245,12 @@ fn persist_codex_goal_attachment_paths_in_db(codex_home: &Path, db_path: &Path) 
 }
 
 fn path_looks_like_sqlite_db(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.file_type().is_file() {
+        return false;
+    }
     let Ok(mut file) = fs::File::open(path) else {
         return false;
     };

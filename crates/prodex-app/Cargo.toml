@@ -40,7 +40,6 @@ prodex_core = { workspace = true }
 prodex_gateway_http = { workspace = true }
 prodex_housekeeping = { workspace = true }
 prodex_mcp_stdio = { workspace = true }
-prodex_memory = { workspace = true }
 prodex_observability = { workspace = true }
 prodex_presidio = { workspace = true }
 prodex_profile_export = { workspace = true }

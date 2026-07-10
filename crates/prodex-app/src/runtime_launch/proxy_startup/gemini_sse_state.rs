@@ -1,19 +1,7 @@
 use super::super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, runtime_deepseek_created_at,
-    runtime_deepseek_store_conversation,
+    RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
 };
-use super::super::gemini_rewrite::{
-    runtime_gemini_blocked_tool_call_message, runtime_gemini_citation_text,
-    runtime_gemini_custom_tool_call_item, runtime_gemini_finish_reason,
-    runtime_gemini_finish_reason_failure, runtime_gemini_finish_reason_incomplete,
-    runtime_gemini_image_generation_call_item_from_part,
-    runtime_gemini_internal_instruction_corpus, runtime_gemini_media_content_item_from_part,
-    runtime_gemini_prompt_feedback_failure, runtime_gemini_response_metadata,
-    runtime_gemini_responses_usage, runtime_gemini_text_echoes_internal_instruction,
-    runtime_gemini_text_from_special_part, runtime_gemini_visible_text_from_part,
-    runtime_gemini_web_search_call_from_grounding,
-};
-use super::super::gemini_thought_signatures::runtime_gemini_thought_signature;
+use super::super::gemini_rewrite::runtime_gemini_blocked_tool_call_message;
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_stream_reasoning_summary_text_delta_event,
     runtime_provider_stream_text_delta_event,
@@ -22,23 +10,56 @@ use super::super::provider_sse_events::{
     runtime_provider_sse_failed_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
 };
-use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use super::RuntimeGeminiBindingRecorder;
-use super::gemini_sse_guardrails::{
-    runtime_gemini_blocked_tool_call_item,
-    runtime_gemini_conversation_requests_command_output_only, runtime_gemini_forced_command_output,
-    runtime_gemini_non_actionable_wait_or_poll_text, runtime_gemini_stream_error,
-    runtime_gemini_tool_intent_without_call, runtime_gemini_unverified_success_claim,
+use prodex_domain::RequestId;
+use prodex_provider_core::{
+    GeminiProviderCoreStreamToolCall, gemini_provider_core_citation_text,
+    gemini_provider_core_conversation_requests_command_output_only as runtime_gemini_conversation_requests_command_output_only,
+    gemini_provider_core_finish_reason_failure, gemini_provider_core_finish_reason_incomplete,
+    gemini_provider_core_forced_command_output as runtime_gemini_forced_command_output,
+    gemini_provider_core_image_generation_call_item_from_part,
+    gemini_provider_core_internal_instruction_corpus,
+    gemini_provider_core_media_content_item_from_part,
+    gemini_provider_core_non_actionable_wait_or_poll_text as runtime_gemini_non_actionable_wait_or_poll_text,
+    gemini_provider_core_output_item_done_event, gemini_provider_core_output_text_delta_event,
+    gemini_provider_core_prompt_feedback_failure,
+    gemini_provider_core_reasoning_summary_part_added_event,
+    gemini_provider_core_reasoning_summary_text_delta_event,
+    gemini_provider_core_response_completed_event, gemini_provider_core_response_created_event,
+    gemini_provider_core_response_incomplete_event, gemini_provider_core_response_metadata_event,
+    gemini_provider_core_stream_candidate_parts,
+    gemini_provider_core_stream_chat_assistant_message, gemini_provider_core_stream_chunk_metadata,
+    gemini_provider_core_stream_error as runtime_gemini_stream_error,
+    gemini_provider_core_stream_message_item, gemini_provider_core_stream_output_items,
+    gemini_provider_core_stream_output_text_content,
+    gemini_provider_core_stream_part_function_call,
+    gemini_provider_core_stream_part_has_video_metadata,
+    gemini_provider_core_stream_part_is_thought, gemini_provider_core_stream_part_text,
+    gemini_provider_core_stream_reasoning_delta_source, gemini_provider_core_stream_response_value,
+    gemini_provider_core_stream_text_delta_source, gemini_provider_core_stream_tool_call,
+    gemini_provider_core_stream_tool_call_ids,
+    gemini_provider_core_text_echoes_internal_instruction,
+    gemini_provider_core_text_from_special_part, gemini_provider_core_thought_signature,
+    gemini_provider_core_tool_intent_without_call as runtime_gemini_tool_intent_without_call,
+    gemini_provider_core_unverified_success_claim as runtime_gemini_unverified_success_claim,
+    gemini_provider_core_visible_text_from_part,
+    gemini_provider_core_web_search_call_from_grounding, provider_core_chat_compatible_created_at,
 };
-use prodex_domain::{CallId, RequestId};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 
+#[path = "gemini_sse_state/complete.rs"]
+mod gemini_sse_state_complete;
+#[path = "gemini_sse_state/events.rs"]
+mod gemini_sse_state_events;
+#[path = "gemini_sse_state/output.rs"]
+mod gemini_sse_state_output;
 #[path = "gemini_sse_tool_calls.rs"]
 mod gemini_sse_tool_calls;
 use gemini_sse_tool_calls::RuntimeGeminiToolCall;
 
 pub(super) struct RuntimeGeminiSseState {
+    request_id: u64,
     response_id: String,
     created_at: u64,
     sequence_number: u64,
@@ -47,13 +68,10 @@ pub(super) struct RuntimeGeminiSseState {
     pub(super) eof: bool,
     output_text_item_added: bool,
     output_text_item_done: bool,
-    output_text_item_id: String,
     reasoning_summary_part_added: bool,
     media_item_done: bool,
-    media_item_id: String,
     image_generation_items_done: bool,
     citation_item_done: bool,
-    citation_item_id: String,
     metadata_sent: Option<serde_json::Value>,
     model: Option<String>,
     finish_reason: Option<String>,
@@ -88,23 +106,23 @@ impl RuntimeGeminiSseState {
             runtime_gemini_conversation_requests_command_output_only(&conversation_messages);
         let forced_output_text = runtime_gemini_forced_command_output(&conversation_messages);
         let internal_instruction_corpus =
-            runtime_gemini_internal_instruction_corpus(&conversation_messages);
+            gemini_provider_core_internal_instruction_corpus(&conversation_messages);
+        let response_id = RequestId::new();
+        let request_id = (response_id.as_uuid().as_u128() >> 64) as u64;
         Self {
-            response_id: format!("resp_gemini_{}", RequestId::new()),
-            created_at: runtime_deepseek_created_at(),
+            request_id,
+            response_id: format!("resp_gemini_{response_id}"),
+            created_at: provider_core_chat_compatible_created_at(),
             sequence_number: 0,
             created: false,
             completed: false,
             eof: false,
             output_text_item_added: false,
             output_text_item_done: false,
-            output_text_item_id: format!("msg_gemini_{}", RequestId::new()),
             reasoning_summary_part_added: false,
             media_item_done: false,
-            media_item_id: format!("msg_gemini_media_{}", RequestId::new()),
             image_generation_items_done: false,
             citation_item_done: false,
-            citation_item_id: format!("msg_gemini_citations_{}", RequestId::new()),
             metadata_sent: None,
             model: None,
             finish_reason: None,
@@ -136,40 +154,29 @@ impl RuntimeGeminiSseState {
                 .into_iter()
                 .collect::<Vec<_>>();
         }
-        if let Some(id) = value
-            .get("responseId")
-            .or_else(|| value.get("id"))
-            .and_then(serde_json::Value::as_str)
-            && self.response_id.starts_with("resp_gemini_")
-        {
-            self.response_id = id.to_string();
+        let metadata = gemini_provider_core_stream_chunk_metadata(&self.response_id, value);
+        if let Some(id) = metadata.response_id {
+            self.response_id = id;
         }
-        if let Some(model) = value
-            .get("modelVersion")
-            .or_else(|| value.get("model"))
-            .and_then(serde_json::Value::as_str)
-        {
-            self.model = Some(model.to_string());
+        if let Some(model) = metadata.model {
+            self.model = Some(model);
         }
-        if let Some(usage) = value
-            .get("usageMetadata")
-            .and_then(runtime_gemini_responses_usage)
-        {
+        if let Some(usage) = metadata.usage {
             self.usage = Some(usage);
         }
-        if let Some(metadata) = runtime_gemini_response_metadata(value) {
+        if let Some(metadata) = metadata.response_metadata {
             self.metadata = Some(runtime_gemini_merge_metadata(
                 self.metadata.take(),
                 metadata.clone(),
             ));
         }
-        if let Some((code, message)) = runtime_gemini_prompt_feedback_failure(value) {
+        if let Some((code, message)) = gemini_provider_core_prompt_feedback_failure(value) {
             return self
                 .failed_event(&code, &message)
                 .into_iter()
                 .collect::<Vec<_>>();
         }
-        let finish_reason = runtime_gemini_finish_reason(value);
+        let finish_reason = metadata.finish_reason;
         if let Some(reason) = finish_reason.clone() {
             self.finish_reason = Some(reason);
         }
@@ -178,12 +185,11 @@ impl RuntimeGeminiSseState {
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
                 "response.created",
-                serde_json::json!({
-                    "type": "response.created",
-                    "sequence_number": sequence_number,
-                    "created_at": self.created_at,
-                    "response": {"id": self.response_id},
-                }),
+                gemini_provider_core_response_created_event(
+                    sequence_number,
+                    self.created_at,
+                    &self.response_id,
+                ),
             ));
             self.created = true;
         }
@@ -195,34 +201,19 @@ impl RuntimeGeminiSseState {
         if let Some(event) = self.observe_grounding(value) {
             events.push(event);
         }
-        let Some(parts) = value
-            .get("candidates")
-            .and_then(serde_json::Value::as_array)
-            .and_then(|candidates| candidates.first())
-            .and_then(|candidate| candidate.get("content"))
-            .and_then(|content| content.get("parts"))
-            .and_then(serde_json::Value::as_array)
-        else {
+        let Some(parts) = gemini_provider_core_stream_candidate_parts(value) else {
             return events;
         };
         for (part_index, part) in parts.iter().enumerate() {
-            if let Some(text) = part
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .filter(|text| !text.is_empty())
-            {
-                if part
-                    .get("thought")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-                {
+            if let Some(text) = gemini_provider_core_stream_part_text(part) {
+                if gemini_provider_core_stream_part_is_thought(part) {
                     self.reasoning_content.push_str(text);
                     events.extend(self.reasoning_delta_events(text));
-                } else if let Some(text) = runtime_gemini_visible_text_from_part(part) {
+                } else if let Some(text) = gemini_provider_core_visible_text_from_part(part) {
                     if self.command_output_only || self.forced_output_text.is_some() {
                         continue;
                     }
-                    if !runtime_gemini_text_echoes_internal_instruction(
+                    if !gemini_provider_core_text_echoes_internal_instruction(
                         &text,
                         &self.internal_instruction_corpus,
                     ) {
@@ -230,7 +221,7 @@ impl RuntimeGeminiSseState {
                     }
                 }
             }
-            if let Some(content_item) = runtime_gemini_media_content_item_from_part(part) {
+            if let Some(content_item) = gemini_provider_core_media_content_item_from_part(part) {
                 if !self.media_content_items.contains(&content_item) {
                     self.media_content_items.push(content_item);
                 }
@@ -238,16 +229,18 @@ impl RuntimeGeminiSseState {
                     self.native_parts.push(part.clone());
                 }
             }
-            if part.get("videoMetadata").is_some() && !self.native_parts.contains(part) {
+            if gemini_provider_core_stream_part_has_video_metadata(part)
+                && !self.native_parts.contains(part)
+            {
                 self.native_parts.push(part.clone());
             }
-            if let Some(text) = runtime_gemini_text_from_special_part(part)
+            if let Some(text) = gemini_provider_core_text_from_special_part(part)
                 && !self.command_output_only
                 && self.forced_output_text.is_none()
             {
                 events.extend(self.observe_output_text(&text));
             }
-            if let Some(item) = runtime_gemini_image_generation_call_item_from_part(
+            if let Some(item) = gemini_provider_core_image_generation_call_item_from_part(
                 &self.response_id,
                 part_index,
                 part,
@@ -261,13 +254,13 @@ impl RuntimeGeminiSseState {
                     self.image_generation_items.push(item);
                 }
             }
-            if let Some(function_call) = part.get("functionCall") {
+            if let Some(function_call) = gemini_provider_core_stream_part_function_call(part) {
                 if self.forced_output_text.is_some() {
                     continue;
                 }
                 events.extend(self.flush_pending_output_text_events());
-                let thought_signature = runtime_gemini_thought_signature(part)
-                    .or_else(|| runtime_gemini_thought_signature(function_call));
+                let thought_signature = gemini_provider_core_thought_signature(part)
+                    .or_else(|| gemini_provider_core_thought_signature(function_call));
                 events.extend(self.observe_function_call(
                     part_index,
                     function_call,
@@ -276,10 +269,11 @@ impl RuntimeGeminiSseState {
             }
         }
         if let Some(reason) = finish_reason {
-            if let Some(text) = runtime_gemini_citation_text(value) {
+            if let Some(text) = gemini_provider_core_citation_text(value) {
                 events.extend(self.observe_citation_text(text));
             }
-            if let Some((reason, message)) = runtime_gemini_finish_reason_incomplete(&reason) {
+            if let Some((reason, message)) = gemini_provider_core_finish_reason_incomplete(&reason)
+            {
                 events.extend(self.flush_pending_output_text_events());
                 events.extend(self.complete_tool_call_events());
                 events.extend(self.complete_output_text_item_events());
@@ -290,7 +284,7 @@ impl RuntimeGeminiSseState {
                 }
                 return events;
             }
-            if let Some((code, message)) = runtime_gemini_finish_reason_failure(&reason) {
+            if let Some((code, message)) = gemini_provider_core_finish_reason_failure(&reason) {
                 events.extend(self.flush_pending_output_text_events());
                 if let Some(event) = self.failed_event(&code, &message) {
                     events.push(event);
@@ -309,141 +303,13 @@ impl RuntimeGeminiSseState {
         if self.web_search_call.is_some() {
             return None;
         }
-        let item = runtime_gemini_web_search_call_from_grounding(value, &self.response_id)?;
+        let item = gemini_provider_core_web_search_call_from_grounding(value, &self.response_id)?;
         self.web_search_call = Some(item.clone());
         let sequence_number = self.next_sequence_number();
         Some(self.event(
             "response.output_item.done",
-            serde_json::json!({
-                "type": "response.output_item.done",
-                "sequence_number": sequence_number,
-                "item": item,
-            }),
+            gemini_provider_core_output_item_done_event(sequence_number, None, &item),
         ))
-    }
-
-    fn apply_forced_output_text(&mut self) {
-        if let Some(text) = self.forced_output_text.clone() {
-            self.output_text = text;
-            self.tool_calls.clear();
-            self.tool_call_indices_by_id.clear();
-        }
-    }
-
-    pub(super) fn complete_event(&mut self) -> Option<String> {
-        if self.completed {
-            return None;
-        }
-        self.apply_forced_output_text();
-        let mut events = self.flush_pending_output_text_events();
-        events.extend(self.complete_tool_call_events());
-        events.extend(self.complete_output_text_item_events());
-        events.extend(self.complete_media_item_events());
-        events.extend(self.complete_image_generation_item_events());
-        let output = self.output_items();
-        if output.is_empty() && self.reasoning_content.is_empty() {
-            let suffix = self
-                .finish_reason
-                .as_deref()
-                .map(|reason| format!(" finishReason={reason}"))
-                .unwrap_or_default();
-            if let Some(event) = self.failed_event(
-                "gemini_empty_response",
-                &format!("Gemini returned no visible response content.{suffix}"),
-            ) {
-                events.push(event);
-            }
-            return Some(events.join(""));
-        }
-        if self.tool_calls.is_empty()
-            && let Some(tool_name) = runtime_gemini_tool_intent_without_call(&self.output_text)
-        {
-            if let Some(event) = self.failed_event(
-                "gemini_tool_intent_without_call",
-                &format!(
-                    "Gemini stopped after announcing a `{tool_name}` tool call instead of emitting the tool call."
-                ),
-            ) {
-                events.push(event);
-            }
-            return Some(events.join(""));
-        }
-        if self.tool_calls.is_empty()
-            && let Some(reason) = runtime_gemini_non_actionable_wait_or_poll_text(&self.output_text)
-        {
-            if let Some(event) = self.failed_event(
-                "gemini_non_actionable_wait_or_poll",
-                &format!(
-                    "Gemini stopped with non-actionable wait/poll narration instead of waiting on the running tool session: {reason}."
-                ),
-            ) {
-                events.push(event);
-            }
-            return Some(events.join(""));
-        }
-        if self.tool_calls.is_empty()
-            && runtime_gemini_unverified_success_claim(
-                &self.output_text,
-                &self.conversation_messages,
-            )
-        {
-            if let Some(event) = self.failed_event(
-                "gemini_unverified_success_claim",
-                "Gemini made a success/up-to-date/no-blocker final claim without a clean verification tool result after the relevant action.",
-            ) {
-                events.push(event);
-            }
-            return Some(events.join(""));
-        }
-        let mut response = serde_json::json!({
-            "id": self.response_id,
-            "output": output,
-        });
-        response["model"] = serde_json::Value::String(
-            self.model
-                .clone()
-                .unwrap_or_else(|| GEMINI_DEFAULT_MODEL.to_string()),
-        );
-        if let Some(usage) = self.usage.clone() {
-            response["usage"] = usage;
-        }
-        if let Some(metadata) = self.metadata.clone() {
-            response["metadata"] = metadata;
-        }
-        let sequence_number = self.next_sequence_number();
-        events.push(self.event(
-            "response.completed",
-            serde_json::json!({
-                "type": "response.completed",
-                "sequence_number": sequence_number,
-                "created_at": self.created_at,
-                "response": response,
-            }),
-        ));
-        runtime_deepseek_store_conversation(
-            &self.conversations,
-            &self.response_id,
-            self.conversation_messages.clone(),
-            self.chat_assistant_messages(),
-        );
-        if let Some(recorder) = &self.binding_recorder {
-            recorder(self.response_id.clone(), self.tool_call_ids());
-        }
-        self.completed = true;
-        Some(events.join(""))
-    }
-
-    fn flush_pending_output_text_events(&mut self) -> Vec<String> {
-        if self.pending_output_text.is_empty() {
-            return Vec::new();
-        }
-        let text = std::mem::take(&mut self.pending_output_text);
-        if runtime_gemini_text_echoes_internal_instruction(&text, &self.internal_instruction_corpus)
-        {
-            Vec::new()
-        } else {
-            self.observe_output_text(&text)
-        }
     }
 
     pub(super) fn incomplete_event(&mut self, reason: &str, message: &str) -> Option<String> {
@@ -454,19 +320,13 @@ impl RuntimeGeminiSseState {
         self.completed = true;
         Some(self.event(
             "response.incomplete",
-            serde_json::json!({
-                "type": "response.incomplete",
-                "sequence_number": sequence_number,
-                "created_at": self.created_at,
-                "response": {
-                    "id": self.response_id,
-                    "status": "incomplete",
-                    "incomplete_details": {
-                        "reason": reason,
-                        "message": message,
-                    },
-                },
-            }),
+            gemini_provider_core_response_incomplete_event(
+                sequence_number,
+                self.created_at,
+                &self.response_id,
+                reason,
+                message,
+            ),
         ))
     }
 
@@ -485,414 +345,6 @@ impl RuntimeGeminiSseState {
         ))
     }
 
-    fn output_text_item_id(&self) -> &str {
-        &self.output_text_item_id
-    }
-
-    fn observe_output_text(&mut self, text: &str) -> Vec<String> {
-        let mut events = Vec::new();
-        if text.is_empty() {
-            return events;
-        }
-        if let Some(event) = self.output_text_item_added_event() {
-            events.push(event);
-        }
-        self.output_text.push_str(text);
-        let sequence_number = self.next_sequence_number();
-        let upstream_value = serde_json::json!({
-            "candidates": [{
-                "content": {
-                    "parts": [{
-                        "text": text,
-                    }]
-                }
-            }]
-        });
-        if let Some((event_name, data)) = runtime_provider_stream_text_delta_event(
-            RuntimeProviderBridgeKind::Gemini,
-            &upstream_value,
-            sequence_number,
-            self.created_at,
-            &self.response_id,
-        ) {
-            events.push(self.event(&event_name, data));
-        } else {
-            events.push(self.event(
-                "response.output_text.delta",
-                serde_json::json!({
-                    "type": "response.output_text.delta",
-                    "sequence_number": sequence_number,
-                    "created_at": self.created_at,
-                    "response_id": self.response_id,
-                    "delta": text,
-                }),
-            ));
-        }
-        events
-    }
-
-    fn metadata_event(&mut self, metadata: serde_json::Value) -> Option<String> {
-        if self.metadata_sent.as_ref() == Some(&metadata) {
-            return None;
-        }
-        self.metadata_sent = Some(metadata.clone());
-        let sequence_number = self.next_sequence_number();
-        Some(self.event(
-            "response.metadata",
-            serde_json::json!({
-                "type": "response.metadata",
-                "sequence_number": sequence_number,
-                "created_at": self.created_at,
-                "response_id": self.response_id,
-                "metadata": metadata,
-            }),
-        ))
-    }
-
-    fn output_text_item_added_event(&mut self) -> Option<String> {
-        if self.output_text_item_added {
-            return None;
-        }
-        self.output_text_item_added = true;
-        let sequence_number = self.next_sequence_number();
-        Some(runtime_provider_sse_output_text_item_added_event(
-            sequence_number,
-            &self.response_id,
-            self.output_text_item_id(),
-        ))
-    }
-
-    fn reasoning_delta_events(&mut self, text: &str) -> Vec<String> {
-        let mut events = Vec::new();
-        if let Some(event) = self.output_text_item_added_event() {
-            events.push(event);
-        }
-        if !self.reasoning_summary_part_added {
-            self.reasoning_summary_part_added = true;
-            let sequence_number = self.next_sequence_number();
-            events.push(self.event(
-                "response.reasoning_summary_part.added",
-                serde_json::json!({
-                    "type": "response.reasoning_summary_part.added",
-                    "sequence_number": sequence_number,
-                    "response_id": self.response_id,
-                    "summary_index": 0,
-                }),
-            ));
-        }
-        let sequence_number = self.next_sequence_number();
-        let upstream_value = serde_json::json!({
-            "candidates": [{
-                "content": {
-                    "parts": [{
-                        "text": text,
-                        "thought": true,
-                    }]
-                }
-            }]
-        });
-        if let Some((event_name, data)) = runtime_provider_stream_reasoning_summary_text_delta_event(
-            RuntimeProviderBridgeKind::Gemini,
-            &upstream_value,
-            sequence_number,
-            &self.response_id,
-            0,
-        ) {
-            events.push(self.event(&event_name, data));
-        } else {
-            events.push(self.event(
-                "response.reasoning_summary_text.delta",
-                serde_json::json!({
-                    "type": "response.reasoning_summary_text.delta",
-                    "sequence_number": sequence_number,
-                    "response_id": self.response_id,
-                    "summary_index": 0,
-                    "delta": text,
-                }),
-            ));
-        }
-        events
-    }
-
-    fn complete_output_text_item_events(&mut self) -> Vec<String> {
-        if self.output_text.is_empty() || self.output_text_item_done {
-            return Vec::new();
-        }
-        let mut events = Vec::new();
-        if let Some(event) = self.output_text_item_added_event() {
-            events.push(event);
-        }
-        self.output_text_item_done = true;
-        let sequence_number = self.next_sequence_number();
-        events.push(runtime_provider_sse_output_text_item_done_event(
-            sequence_number,
-            &self.response_id,
-            self.output_text_item_id(),
-            &self.output_text,
-        ));
-        events
-    }
-
-    fn media_item_id(&self) -> &str {
-        &self.media_item_id
-    }
-
-    fn citation_item_id(&self) -> &str {
-        &self.citation_item_id
-    }
-
-    fn observe_citation_text(&mut self, text: String) -> Vec<String> {
-        if self.citation_item_done || text.is_empty() {
-            return Vec::new();
-        }
-        self.citation_item_done = true;
-        self.citation_text = Some(text.clone());
-        let sequence_number = self.next_sequence_number();
-        vec![self.event(
-            "response.output_item.done",
-            serde_json::json!({
-                "type": "response.output_item.done",
-                "sequence_number": sequence_number,
-                "response_id": self.response_id,
-                "item": {
-                    "id": self.citation_item_id(),
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{
-                        "type": "output_text",
-                        "text": text,
-                    }],
-                },
-            }),
-        )]
-    }
-
-    fn complete_media_item_events(&mut self) -> Vec<String> {
-        if self.media_content_items.is_empty() || self.media_item_done {
-            return Vec::new();
-        }
-        self.media_item_done = true;
-        let sequence_number = self.next_sequence_number();
-        vec![self.event(
-            "response.output_item.done",
-            serde_json::json!({
-                "type": "response.output_item.done",
-                "sequence_number": sequence_number,
-                "response_id": self.response_id,
-                "item": {
-                    "id": self.media_item_id(),
-                    "type": "message",
-                    "role": "assistant",
-                    "content": self.media_content_items.clone(),
-                },
-            }),
-        )]
-    }
-
-    fn complete_image_generation_item_events(&mut self) -> Vec<String> {
-        if self.image_generation_items.is_empty() || self.image_generation_items_done {
-            return Vec::new();
-        }
-        self.image_generation_items_done = true;
-        let pending = self.image_generation_items.clone();
-        let mut events = Vec::new();
-        for item in pending {
-            let sequence_number = self.next_sequence_number();
-            events.push(self.event(
-                "response.output_item.done",
-                serde_json::json!({
-                    "type": "response.output_item.done",
-                    "sequence_number": sequence_number,
-                    "response_id": self.response_id,
-                    "item": item,
-                }),
-            ));
-        }
-        events
-    }
-
-    fn store_conversation_snapshot(&self) {
-        runtime_deepseek_store_conversation(
-            &self.conversations,
-            &self.response_id,
-            self.conversation_messages.clone(),
-            self.chat_assistant_messages(),
-        );
-    }
-
-    fn chat_assistant_messages(&self) -> Vec<serde_json::Value> {
-        if self.output_text.is_empty()
-            && self.reasoning_content.is_empty()
-            && self.media_content_items.is_empty()
-            && self.image_generation_items.is_empty()
-            && self.tool_calls.is_empty()
-        {
-            return Vec::new();
-        }
-        let mut assistant = serde_json::json!({
-            "role": "assistant",
-            "content": if self.output_text.is_empty() {
-                if self.tool_calls.is_empty() {
-                    serde_json::Value::Null
-                } else {
-                    serde_json::Value::String(String::new())
-                }
-            } else {
-                serde_json::Value::String(self.output_text.clone())
-            },
-        });
-        if !self.reasoning_content.is_empty() {
-            assistant["reasoning_content"] =
-                serde_json::Value::String(self.reasoning_content.clone());
-        }
-        if !self.media_content_items.is_empty() {
-            assistant["gemini_media_content"] =
-                serde_json::Value::Array(self.media_content_items.clone());
-        }
-        if !self.native_parts.is_empty() {
-            assistant["gemini_native_parts"] = serde_json::Value::Array(self.native_parts.clone());
-        }
-        if !self.image_generation_items.is_empty() {
-            assistant["gemini_image_generation"] =
-                serde_json::Value::Array(self.image_generation_items.clone());
-        }
-        if let Some(metadata) = self.metadata.clone() {
-            assistant["gemini_metadata"] = metadata;
-        }
-        if !self.tool_calls.is_empty() {
-            assistant["tool_calls"] = serde_json::Value::Array(
-                self.tool_calls
-                    .values()
-                    .map(|tool_call| {
-                        let mut item = serde_json::json!({
-                            "id": tool_call
-                                .call_id
-                                .clone()
-                                .unwrap_or_else(|| format!("call_gemini_{}", CallId::new())),
-                            "type": "function",
-                            "function": {
-                                "name": tool_call
-                                    .name
-                                    .clone()
-                                    .unwrap_or_else(|| "tool_call".to_string()),
-                                "arguments": tool_call.arguments.clone(),
-                            },
-                        });
-                        if let Some(signature) = tool_call.thought_signature.as_deref() {
-                            item["gemini_thought_signature"] =
-                                serde_json::Value::String(signature.to_string());
-                        }
-                        item
-                    })
-                    .collect(),
-            );
-        }
-        vec![assistant]
-    }
-
-    fn output_items(&self) -> Vec<serde_json::Value> {
-        let mut output = Vec::new();
-        if let Some(item) = self.web_search_call.clone() {
-            output.push(item);
-        }
-        output.extend(self.image_generation_items.clone());
-        if !self.output_text.is_empty() {
-            let mut content = vec![serde_json::json!({
-                "type": "output_text",
-                "text": self.output_text,
-            })];
-            content.extend(self.media_content_items.clone());
-            output.push(serde_json::json!({
-                "type": "message",
-                "role": "assistant",
-                "content": content,
-            }));
-        } else if !self.media_content_items.is_empty() {
-            output.push(serde_json::json!({
-                "type": "message",
-                "role": "assistant",
-                "content": self.media_content_items.clone(),
-            }));
-        }
-        if let Some(citations) = self.citation_text.clone() {
-            output.push(serde_json::json!({
-                "type": "message",
-                "role": "assistant",
-                "content": [{
-                    "type": "output_text",
-                    "text": citations,
-                }],
-            }));
-        }
-        for (index, tool_call) in &self.tool_calls {
-            let call_id = tool_call
-                .call_id
-                .clone()
-                .unwrap_or_else(|| format!("call_gemini_{}", CallId::new()));
-            let flat_name = tool_call
-                .name
-                .clone()
-                .unwrap_or_else(|| "tool_call".to_string());
-            let raw_arguments_value =
-                serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-                    .unwrap_or_else(|_| serde_json::Value::String(tool_call.arguments.clone()));
-            if let Some(blocked) =
-                runtime_gemini_blocked_tool_call_message(&flat_name, &raw_arguments_value)
-            {
-                output.push(runtime_gemini_blocked_tool_call_item(&blocked));
-                continue;
-            }
-            if flat_name == "tool_search" {
-                let arguments = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-                    .unwrap_or_else(|_| serde_json::json!({}));
-                output.push(serde_json::json!({
-                    "type": "tool_search_call",
-                    "call_id": call_id,
-                    "execution": "client",
-                    "arguments": arguments,
-                }));
-                continue;
-            }
-            if let Ok(args_value) = serde_json::from_str::<serde_json::Value>(&tool_call.arguments)
-                && let Some(item) =
-                    runtime_gemini_custom_tool_call_item(&call_id, &flat_name, &args_value)
-            {
-                output.push(item);
-                continue;
-            }
-            let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(&flat_name);
-            let mut item = serde_json::json!({
-                "type": "function_call",
-                "call_id": call_id,
-                "name": name,
-                "arguments": tool_call.arguments.clone(),
-            });
-            if let Some(namespace) = namespace {
-                item["namespace"] = serde_json::Value::String(namespace);
-            }
-            if let Some(tool_call) = self.tool_calls.get(index)
-                && let Some(signature) = tool_call.thought_signature.clone()
-            {
-                item["gemini_thought_signature"] = serde_json::Value::String(signature);
-            }
-            output.push(item);
-        }
-        output
-    }
-
-    fn tool_call_ids(&self) -> Vec<String> {
-        self.tool_calls
-            .values()
-            .map(|tool_call| {
-                tool_call
-                    .call_id
-                    .clone()
-                    .unwrap_or_else(|| format!("call_gemini_{}", CallId::new()))
-            })
-            .filter(|call_id| !call_id.trim().is_empty())
-            .collect()
-    }
-
     fn event(&self, event: &str, data: serde_json::Value) -> String {
         let data = serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string());
         format!("event: {event}\r\ndata: {data}\r\n\r\n")
@@ -903,6 +355,36 @@ impl RuntimeGeminiSseState {
         self.sequence_number = self.sequence_number.saturating_add(1);
         next
     }
+}
+
+fn runtime_gemini_stream_uuid(request_id: u64, salt: u64) -> String {
+    let low = (request_id.rotate_left(23) ^ salt) & 0x3fff_ffff_ffff_ffff | 0x8000_0000_0000_0000;
+    format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        request_id >> 32,
+        (request_id >> 16) & 0xffff,
+        request_id & 0xffff,
+        low >> 48,
+        low & 0xffff_ffff_ffff,
+    )
+}
+
+fn gemini_provider_core_stream_output_text_item_id(request_id: u64) -> String {
+    format!("msg_gemini_{}", runtime_gemini_stream_uuid(request_id, 1))
+}
+
+fn gemini_provider_core_stream_media_item_id(request_id: u64) -> String {
+    format!(
+        "msg_gemini_media_{}",
+        runtime_gemini_stream_uuid(request_id, 2)
+    )
+}
+
+fn gemini_provider_core_stream_citation_item_id(request_id: u64) -> String {
+    format!(
+        "msg_gemini_citations_{}",
+        runtime_gemini_stream_uuid(request_id, 3)
+    )
 }
 
 fn runtime_gemini_merge_metadata(

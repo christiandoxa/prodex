@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.142.4 release",
+      "baseline_source": "openai/codex rust-v0.144.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -144,7 +144,7 @@
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
-            "ReasoningEffort::Custom(\"max\".to_string())",
+            "ReasoningEffort::Max",
             "Maximum reasoning depth for the hardest problems",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
@@ -192,7 +192,7 @@
         },
         {
           "path": "codex-rs/codex-api/src/safety_buffering.rs",
-          "reason": "Owns server-provided safety-buffering treatment response headers that control Codex buffering UI visibility and faster-model metadata.",
+          "reason": "Owns server-provided safety-buffering treatment response headers that carry faster-model treatment metadata.",
           "required_contains": [
             "SafetyBufferingTreatment",
             "X_CODEX_SAFETY_BUFFERING_ENABLED_HEADER",
@@ -200,7 +200,6 @@
             "X_CODEX_SAFETY_BUFFERING_FASTER_MODEL_HEADER",
             "x-codex-safety-buffering-faster-model",
             "treatment_from_headers",
-            "show_buffering_ui",
             "faster_model"
           ]
         },
@@ -218,6 +217,7 @@
             "openai-model",
             "x-reasoning-included",
             "X-Models-Etag",
+            "bio_policy",
             "insufficient_quota",
             "rate_limit_exceeded",
             "SafetyBuffering",
@@ -263,7 +263,7 @@
             "ResponseEvent::SafetyBuffering",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
-            "with_treatment"
+            "safety_buffering(treatment)"
           ]
         },
         {
@@ -288,11 +288,12 @@
           ]
         },
         {
-          "path": "codex-rs/codex-client/src/outbound_proxy.rs",
-          "reason": "Owns Codex auth/client outbound proxy routing semantics, including environment proxy fallback and the respect_system_proxy opt-in contract.",
+          "path": "codex-rs/http-client/src/outbound_proxy.rs",
+          "reason": "Owns Codex HTTP client outbound proxy policy, including environment proxy fallback and the RespectSystemProxy opt-in contract.",
           "required_contains": [
-            "OutboundProxyConfig",
-            "respect_system_proxy",
+            "HttpClientFactory",
+            "RespectSystemProxy",
+            "OutboundProxyPolicy",
             "build_reqwest_client_for_route",
             "ClientRouteClass",
             "RouteFailureClass",
@@ -306,7 +307,7 @@
           ]
         },
         {
-          "path": "codex-rs/codex-client/src/outbound_proxy/macos.rs",
+          "path": "codex-rs/http-client/src/outbound_proxy/macos.rs",
           "reason": "Owns the Codex 0.142.2 macOS system proxy resolver added for respect_system_proxy, including CFNetwork PAC/WPAD/static proxy handling and unsupported-scheme classification.",
           "required_contains": [
             "SCDynamicStoreBuilder",
@@ -325,7 +326,7 @@
           ]
         },
         {
-          "path": "codex-rs/codex-client/src/outbound_proxy/windows.rs",
+          "path": "codex-rs/http-client/src/outbound_proxy/windows.rs",
           "reason": "Owns the Codex 0.142.1 Windows system proxy resolver added for PAC, WPAD, static proxy, bypass, and unsupported-scheme handling.",
           "required_contains": [
             "WinHttpGetIEProxyConfigForCurrentUser",
@@ -410,14 +411,14 @@
           ]
         },
         {
-          "path": "codex-rs/app-server-protocol/src/jsonrpc_lite.rs",
+          "path": "codex-rs/app-server-protocol/src/rpc.rs",
           "reason": "Owns JSON-RPC envelope schema types for app-server requests, responses, notifications, and errors.",
           "required_contains": [
-            "JsonRpcMessage",
-            "Request",
-            "Response",
-            "Notification",
-            "Error",
+            "JSONRPCMessage",
+            "JSONRPCRequest",
+            "JSONRPCResponse",
+            "JSONRPCNotification",
+            "JSONRPCError",
             "JsonSchema",
             "jsonrpc"
           ]
@@ -848,7 +849,7 @@
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
-            "ReasoningEffort::Custom(\"max\".to_string())",
+            "ReasoningEffort::Max",
             "Maximum reasoning depth for the hardest problems",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
@@ -935,7 +936,7 @@
             "ResponseEvent::SafetyBuffering",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
-            "with_treatment"
+            "safety_buffering(treatment)"
           ],
           "expected_routes_all": [
             "websocket_url_for_path(\"responses\")"
@@ -968,7 +969,7 @@
             "ResponseEvent::SafetyBuffering",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
-            "with_treatment"
+            "safety_buffering(treatment)"
           ],
           "expected_stream_events_all": [
             "response.created",
@@ -993,7 +994,6 @@
             "x-codex-safety-buffering-enabled",
             "X_CODEX_SAFETY_BUFFERING_FASTER_MODEL_HEADER",
             "x-codex-safety-buffering-faster-model",
-            "show_buffering_ui",
             "faster_model"
           ]
         },
@@ -1049,7 +1049,7 @@
         {
           "id": "proxy.system-proxy-macos",
           "kind": "capability_gate",
-          "file": "codex-rs/codex-client/src/outbound_proxy/macos.rs",
+          "file": "codex-rs/http-client/src/outbound_proxy/macos.rs",
           "reason": "respect_system_proxy support expanded from Windows to macOS in Codex 0.142.2; Prodex docs and launch overrides must keep that platform contract accurate.",
           "file_contains_all": [
             "SCDynamicStoreBuilder",
@@ -1088,14 +1088,14 @@
         {
           "id": "app-server.jsonrpc-envelope",
           "kind": "jsonrpc_schema",
-          "file": "codex-rs/app-server-protocol/src/jsonrpc_lite.rs",
+          "file": "codex-rs/app-server-protocol/src/rpc.rs",
           "reason": "Broker mode must preserve JSON-RPC 2.0 request/response/notification envelope semantics.",
           "file_contains_all": [
-            "JsonRpcMessage",
-            "Request",
-            "Response",
-            "Notification",
-            "Error",
+            "JSONRPCMessage",
+            "JSONRPCRequest",
+            "JSONRPCResponse",
+            "JSONRPCNotification",
+            "JSONRPCError",
             "jsonrpc"
           ]
         },
@@ -1162,7 +1162,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.142.4",
+      "tested_codex_release": "rust-v0.144.1",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,

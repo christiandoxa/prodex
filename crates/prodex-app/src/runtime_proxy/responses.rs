@@ -5,6 +5,7 @@ mod attempt;
 mod fallback;
 mod local_selection;
 mod previous_response;
+mod quota_blocked;
 
 use self::affinity_state::{
     RuntimeResponsesAffinityState, RuntimeResponsesRefreshRouteAffinityInput,
@@ -16,13 +17,15 @@ use self::fallback::{
     try_runtime_responses_direct_current_profile_fallback,
 };
 use self::local_selection::{
-    RuntimeResponsesLocalSelectionAction, runtime_responses_local_selection_action,
+    RuntimeResponsesLocalSelectionAction, RuntimeResponsesLocalSelectionBlocked,
+    handle_runtime_responses_local_selection_blocked, runtime_responses_local_selection_action,
     runtime_responses_local_selection_failure_reply,
 };
 use self::previous_response::{
     RuntimeResponsesPreviousResponseNotFoundContextInput,
     runtime_responses_previous_response_not_found_context,
 };
+use self::quota_blocked::{RuntimeResponsesQuotaBlocked, handle_runtime_responses_quota_blocked};
 
 fn runtime_responses_stale_continuation_reply() -> RuntimeResponsesReply {
     RuntimeResponsesReply::Buffered(RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
@@ -357,78 +360,26 @@ pub(crate) fn proxy_runtime_responses_request(
                 profile_name,
                 response,
             } => {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http quota_blocked profile={profile_name}"
-                    ),
-                );
-                if !auto_redeemed_profiles.contains(&profile_name)
-                    && runtime_auto_redeem_usage_limit_reset_credit(
+                if let Some(response) =
+                    handle_runtime_responses_quota_blocked(RuntimeResponsesQuotaBlocked {
+                        request_id,
                         shared,
-                        &profile_name,
-                        RuntimeRouteKind::Responses,
-                        "responses_quota_blocked",
-                        false,
-                    )? == RuntimeAutoRedeemResetCreditOutcome::Redeemed
+                        profile_name,
+                        response,
+                        request_model_name: request_model_name.as_deref(),
+                        previous_response_id: previous_response_id.as_deref(),
+                        request_turn_state: request_turn_state.as_deref(),
+                        request_session_id: request_session_id.as_deref(),
+                        request_requires_previous_response_affinity,
+                        previous_response_fresh_fallback_shape,
+                        affinity_state: &mut affinity_state,
+                        auto_redeemed_profiles: &mut auto_redeemed_profiles,
+                        excluded_profiles: &mut excluded_profiles,
+                        last_failure: &mut last_failure,
+                    })?
                 {
-                    auto_redeemed_profiles.insert(profile_name);
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http quota_blocked_auto_redeemed_retry route=responses"
-                        ),
-                    );
-                    continue;
-                }
-                let quota_message =
-                    extract_runtime_proxy_quota_message_from_response_reply(&response);
-                mark_runtime_profile_quota_quarantine_for_request_model(
-                    shared,
-                    &profile_name,
-                    RuntimeRouteKind::Responses,
-                    quota_message.as_deref(),
-                    request_model_name.as_deref(),
-                )?;
-                if !affinity_state.quota_blocked_affinity_is_releasable(
-                    &profile_name,
-                    request_requires_previous_response_affinity,
-                    previous_response_fresh_fallback_shape,
-                ) {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http upstream_usage_limit_passthrough route=responses profile={profile_name} reason=hard_affinity"
-                        ),
-                    );
                     return Ok(response);
                 }
-                let released_affinity = release_runtime_quota_blocked_affinity(
-                    shared,
-                    &profile_name,
-                    previous_response_id.as_deref(),
-                    request_turn_state.as_deref(),
-                    request_session_id.as_deref(),
-                )?;
-                affinity_state.clear_profile_affinity(&profile_name, true);
-                if released_affinity {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name}"
-                        ),
-                    );
-                }
-                if !runtime_has_route_eligible_quota_fallback(
-                    shared,
-                    &profile_name,
-                    &BTreeSet::new(),
-                    RuntimeRouteKind::Responses,
-                )? {
-                    return Ok(response);
-                }
-                excluded_profiles.insert(profile_name);
-                last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
             }
             RuntimeResponsesAttempt::AuthFailed {
                 profile_name,
@@ -476,42 +427,23 @@ pub(crate) fn proxy_runtime_responses_request(
                 profile_name,
                 reason,
             } => {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http local_selection_blocked profile={profile_name} route=responses reason={reason}"
-                    ),
-                );
-                mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                match runtime_responses_local_selection_action(
-                    affinity_state.quota_blocked_affinity_is_releasable(
-                        &profile_name,
+                if let Some(response) = handle_runtime_responses_local_selection_blocked(
+                    RuntimeResponsesLocalSelectionBlocked {
+                        request_id,
+                        shared,
+                        profile_name,
+                        reason,
+                        previous_response_id: previous_response_id.as_deref(),
+                        request_turn_state: request_turn_state.as_deref(),
+                        request_session_id: request_session_id.as_deref(),
                         request_requires_previous_response_affinity,
                         previous_response_fresh_fallback_shape,
-                    ),
-                ) {
-                    RuntimeResponsesLocalSelectionAction::ReturnServiceUnavailable => {
-                        return Ok(runtime_responses_local_selection_failure_reply());
-                    }
-                    RuntimeResponsesLocalSelectionAction::Rotate => {}
+                        affinity_state: &mut affinity_state,
+                        excluded_profiles: &mut excluded_profiles,
+                    },
+                )? {
+                    return Ok(response);
                 }
-                let released_affinity = release_runtime_quota_blocked_affinity(
-                    shared,
-                    &profile_name,
-                    previous_response_id.as_deref(),
-                    request_turn_state.as_deref(),
-                    request_session_id.as_deref(),
-                )?;
-                affinity_state.clear_profile_affinity(&profile_name, true);
-                if released_affinity {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http quota_blocked_affinity_released profile={profile_name} reason={reason}"
-                        ),
-                    );
-                }
-                excluded_profiles.insert(profile_name);
             }
             RuntimeResponsesAttempt::PreviousResponseNotFound {
                 profile_name,

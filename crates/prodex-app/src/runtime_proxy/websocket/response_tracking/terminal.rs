@@ -10,6 +10,7 @@ pub(super) struct RuntimeWebsocketTerminalEventRequest<'a> {
     pub(super) websocket_session: &'a mut RuntimeWebsocketSessionState,
     pub(super) profile_name: &'a str,
     pub(super) event_type: Option<&'a str>,
+    pub(super) reset_upstream_socket: bool,
     pub(super) precommit_hold_count: usize,
     pub(super) committed_previous_response_not_found: bool,
     pub(super) upstream_socket: RuntimeUpstreamWebSocket,
@@ -26,6 +27,7 @@ pub(super) fn finish_runtime_websocket_terminal_event(
         websocket_session,
         profile_name,
         event_type,
+        reset_upstream_socket,
         precommit_hold_count,
         committed_previous_response_not_found,
         mut upstream_socket,
@@ -40,7 +42,7 @@ pub(super) fn finish_runtime_websocket_terminal_event(
             event_type.unwrap_or("-"),
         ),
     );
-    if committed_previous_response_not_found {
+    if committed_previous_response_not_found || reset_upstream_socket {
         let _ = upstream_socket.close(None);
         websocket_session.reset();
     } else {

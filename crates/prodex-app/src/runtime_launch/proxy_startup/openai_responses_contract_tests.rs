@@ -1,4 +1,6 @@
-use super::deepseek_rewrite::{RuntimeDeepSeekChatSseReader, RuntimeDeepSeekConversationStore};
+use super::chat_compatible_rewrite::{
+    RuntimeChatCompatibleConversationStore, RuntimeChatCompatibleSseReader,
+};
 use super::gemini_sse::RuntimeGeminiGenerateSseReader;
 use super::local_rewrite_copilot::{
     RuntimeCopilotBindingRecorder, RuntimeCopilotResponsesSseBindingReader,
@@ -6,12 +8,11 @@ use super::local_rewrite_copilot::{
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderWireFormat, runtime_provider_openai_contract,
 };
-use std::collections::BTreeMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 
-fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+fn conversation_store() -> RuntimeChatCompatibleConversationStore {
+    RuntimeChatCompatibleConversationStore::default()
 }
 
 fn assert_openai_responses_sse_contract(provider: &str, output: &str) {
@@ -93,7 +94,7 @@ fn chat_compatible_adapters_stream_openai_responses_events() {
         "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
         "data: [DONE]\n\n",
     );
-    let mut reader = RuntimeDeepSeekChatSseReader::new(
+    let mut reader = RuntimeChatCompatibleSseReader::new(
         std::io::Cursor::new(stream.as_bytes()),
         31,
         Vec::new(),
@@ -138,7 +139,7 @@ fn copilot_adapter_streams_openai_responses_events_and_records_bindings() {
         "data: {\"id\":\"chatcmpl_copilot_1\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
         "data: [DONE]\n\n",
     );
-    let chat_reader = RuntimeDeepSeekChatSseReader::new(
+    let chat_reader = RuntimeChatCompatibleSseReader::new(
         std::io::Cursor::new(chat_stream.as_bytes()),
         33,
         Vec::new(),

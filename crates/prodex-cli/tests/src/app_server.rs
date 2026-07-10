@@ -58,6 +58,143 @@ fn app_server_broker_is_explicit_prodex_command_not_default_passthrough() {
 
     assert!(args.json);
     assert!(!args.experimental_stdio);
+    assert!(!args.experimental_stdio_passthrough_preview);
+    assert!(!args.experimental_stdio_validate);
+    assert!(!args.experimental_stdio_validate_passthrough);
+}
+
+#[test]
+fn app_server_broker_accepts_passthrough_preview_flag() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio-passthrough-preview",
+    ])
+    .expect("app-server-broker passthrough preview flag should parse");
+    let Commands::AppServerBroker(args) = command else {
+        panic!("expected app-server-broker command");
+    };
+
+    assert!(!args.json);
+    assert!(!args.experimental_stdio);
+    assert!(args.experimental_stdio_passthrough_preview);
+    assert!(!args.experimental_stdio_validate);
+    assert!(!args.experimental_stdio_validate_passthrough);
+}
+
+#[test]
+fn app_server_broker_accepts_live_flag() {
+    let command =
+        parse_cli_command_from(["prodex", "app-server-broker", "--experimental-stdio-live"])
+            .expect("app-server-broker live flag should parse");
+    let Commands::AppServerBroker(args) = command else {
+        panic!("expected app-server-broker command");
+    };
+
+    assert!(!args.json);
+    assert!(!args.experimental_stdio);
+    assert!(!args.experimental_stdio_passthrough_preview);
+    assert!(!args.experimental_stdio_validate);
+    assert!(!args.experimental_stdio_validate_passthrough);
+    assert!(args.experimental_stdio_live);
+}
+
+#[test]
+fn app_server_broker_accepts_validate_flag() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio-validate",
+    ])
+    .expect("app-server-broker validate flag should parse");
+    let Commands::AppServerBroker(args) = command else {
+        panic!("expected app-server-broker command");
+    };
+
+    assert!(!args.json);
+    assert!(!args.experimental_stdio);
+    assert!(!args.experimental_stdio_passthrough_preview);
+    assert!(args.experimental_stdio_validate);
+    assert!(!args.experimental_stdio_validate_passthrough);
+}
+
+#[test]
+fn app_server_broker_accepts_validate_passthrough_flag() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio-validate-passthrough",
+    ])
+    .expect("app-server-broker validate passthrough flag should parse");
+    let Commands::AppServerBroker(args) = command else {
+        panic!("expected app-server-broker command");
+    };
+
+    assert!(!args.json);
+    assert!(!args.experimental_stdio);
+    assert!(!args.experimental_stdio_passthrough_preview);
+    assert!(!args.experimental_stdio_validate);
+    assert!(args.experimental_stdio_validate_passthrough);
+}
+
+#[test]
+fn app_server_broker_experimental_stdio_modes_conflict() {
+    let err = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio",
+        "--experimental-stdio-passthrough-preview",
+    ])
+    .expect_err("experimental stdio modes should conflict");
+
+    let message = err.to_string();
+    assert!(message.contains("--experimental-stdio"));
+    assert!(message.contains("--experimental-stdio-passthrough-preview"));
+}
+
+#[test]
+fn app_server_broker_live_conflicts_with_preview_modes() {
+    let err = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio-live",
+        "--experimental-stdio",
+    ])
+    .expect_err("live mode should conflict with legacy preview mode");
+
+    let message = err.to_string();
+    assert!(message.contains("--experimental-stdio-live"));
+    assert!(message.contains("--experimental-stdio"));
+}
+
+#[test]
+fn app_server_broker_validate_conflicts_with_preview_modes() {
+    let err = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio",
+        "--experimental-stdio-validate",
+    ])
+    .expect_err("validate and preview modes should conflict");
+
+    let message = err.to_string();
+    assert!(message.contains("--experimental-stdio"));
+    assert!(message.contains("--experimental-stdio-validate"));
+}
+
+#[test]
+fn app_server_broker_validate_passthrough_conflicts_with_preview_modes() {
+    let err = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio-passthrough-preview",
+        "--experimental-stdio-validate-passthrough",
+    ])
+    .expect_err("validate passthrough and preview modes should conflict");
+
+    let message = err.to_string();
+    assert!(message.contains("--experimental-stdio-passthrough-preview"));
+    assert!(message.contains("--experimental-stdio-validate-passthrough"));
 }
 
 #[test]

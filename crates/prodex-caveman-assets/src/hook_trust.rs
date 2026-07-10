@@ -43,16 +43,6 @@ pub(crate) fn configure_caveman_session_start_hook(table: &mut toml::Table) -> u
     configure_session_start_command_hook(table, PRODEX_CAVEMAN_HOOK_COMMAND)
 }
 
-pub(crate) fn configure_trusted_session_start_command_hook(
-    table: &mut toml::Table,
-    config_path: &Path,
-    command: &str,
-) -> Result<usize> {
-    let group_index = configure_session_start_command_hook(table, command);
-    configure_session_start_command_hook_trust_state(table, config_path, group_index, command)?;
-    Ok(group_index)
-}
-
 fn configure_session_start_command_hook(table: &mut toml::Table, command: &str) -> usize {
     let hooks = ensure_child_table(table, "hooks");
     let session_start = hooks

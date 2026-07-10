@@ -9,54 +9,47 @@ use super::provider_bridge::{
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
-use prodex_provider_core::ProviderTransformLoss;
+use prodex_domain::{CallId, RequestId};
+use prodex_provider_core::{
+    gemini_provider_core_buffered_responses_value_with_fallback_ids,
+    gemini_provider_core_chat_assistant_messages, gemini_provider_core_normalized_response_value,
+    gemini_provider_core_response_terminal_without_history,
+    gemini_provider_core_runtime_responses_value_with_fallback_ids,
+};
 use std::io::Read;
 use std::path::PathBuf;
 
-#[path = "gemini_apply_patch.rs"]
-mod gemini_apply_patch;
-#[path = "gemini_command_output.rs"]
-mod gemini_command_output;
-#[path = "gemini_history_hardening.rs"]
-mod gemini_history_hardening;
 #[path = "gemini_request.rs"]
 mod gemini_request;
 #[path = "gemini_request_extensions.rs"]
 mod gemini_request_extensions;
-#[path = "gemini_request_generation.rs"]
-mod gemini_request_generation;
 #[path = "gemini_request_io.rs"]
 mod gemini_request_io;
-#[path = "gemini_request_media.rs"]
-mod gemini_request_media;
 #[path = "gemini_request_policy.rs"]
 mod gemini_request_policy;
 #[path = "gemini_request_session.rs"]
 mod gemini_request_session;
 #[path = "gemini_request_tool_output.rs"]
 mod gemini_request_tool_output;
-#[path = "gemini_response.rs"]
-mod gemini_response;
-#[path = "gemini_schema.rs"]
-mod gemini_schema;
 
 pub(super) use gemini_request::{
     runtime_gemini_blocked_tool_call_message, runtime_gemini_generate_request_body,
-    runtime_gemini_request_body_without_tool,
 };
-pub(super) use gemini_response::{
-    runtime_gemini_chat_assistant_messages_from_generate_value, runtime_gemini_citation_text,
-    runtime_gemini_custom_tool_call_item, runtime_gemini_custom_tool_input_from_arguments,
-    runtime_gemini_finish_reason, runtime_gemini_finish_reason_failure,
-    runtime_gemini_finish_reason_incomplete, runtime_gemini_finish_reason_retryable_invalid,
-    runtime_gemini_image_generation_call_item_from_part,
-    runtime_gemini_internal_instruction_corpus, runtime_gemini_media_content_item_from_part,
-    runtime_gemini_normalized_response_value, runtime_gemini_prompt_feedback_failure,
-    runtime_gemini_response_metadata, runtime_gemini_responses_usage,
-    runtime_gemini_responses_value_from_generate_value,
-    runtime_gemini_text_echoes_internal_instruction, runtime_gemini_text_from_special_part,
-    runtime_gemini_visible_text_from_part, runtime_gemini_web_search_call_from_grounding,
-};
+
+#[allow(dead_code)]
+pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
+    value: &serde_json::Value,
+    _request_id: u64,
+) -> serde_json::Value {
+    gemini_provider_core_runtime_responses_value_with_fallback_ids(
+        value,
+        prodex_provider_core::provider_core_chat_compatible_created_at(),
+        prodex_runtime_gemini::GEMINI_DEFAULT_MODEL,
+        runtime_gemini_blocked_tool_call_message,
+        || format!("resp_gemini_{}", RequestId::new()),
+        |_index| format!("call_gemini_{}", CallId::new()),
+    )
+}
 
 #[derive(Clone)]
 pub(crate) enum RuntimeGeminiAuth {
@@ -131,36 +124,24 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
             result,
         );
     }
-    let value = runtime_gemini_normalized_response_value(&value);
-    let mut response = translated
-        .as_ref()
-        .filter(|_| runtime_gemini_provider_core_simple_response(&value))
-        .and_then(|result| match result.loss {
-            ProviderTransformLoss::Lossless | ProviderTransformLoss::DegradedButSafe { .. } => {
-                result.body.as_ref()
-            }
-            ProviderTransformLoss::Rejected { .. }
-            | ProviderTransformLoss::UnsupportedUpstream { .. } => None,
-        })
-        .and_then(|body| serde_json::from_slice::<serde_json::Value>(body).ok())
-        .unwrap_or_else(|| runtime_gemini_responses_value_from_generate_value(&value, request_id));
-    if response.get("created_at").is_none() {
-        response["created_at"] = serde_json::Value::Number(serde_json::Number::from(
-            crate::runtime_launch::proxy_startup::deepseek_rewrite::runtime_deepseek_created_at(),
-        ));
-    }
-    let terminal_without_history = matches!(
-        response.get("status").and_then(serde_json::Value::as_str),
-        Some("failed" | "incomplete")
-    ) || response.get("error").is_some();
-    if !terminal_without_history
+    let value = gemini_provider_core_normalized_response_value(&value);
+    let response = gemini_provider_core_buffered_responses_value_with_fallback_ids(
+        value.as_ref(),
+        translated.as_ref(),
+        runtime_gemini_blocked_tool_call_message,
+        || format!("resp_gemini_{}", RequestId::new()),
+        |_index| format!("call_gemini_{}", CallId::new()),
+    );
+    if !gemini_provider_core_response_terminal_without_history(&response)
         && let Some(response_id) = response.get("id").and_then(serde_json::Value::as_str)
     {
         runtime_deepseek_store_conversation(
             conversations,
             response_id,
             conversation_messages,
-            runtime_gemini_chat_assistant_messages_from_generate_value(&value, request_id),
+            gemini_provider_core_chat_assistant_messages(&value, request_id, |name, args| {
+                runtime_gemini_blocked_tool_call_message(name, args)
+            }),
         );
     }
     let body = serde_json::to_vec(&response).context("failed to serialize Responses JSON")?;
@@ -172,107 +153,6 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
         )],
         body: body.into(),
     })
-}
-
-fn runtime_gemini_provider_core_simple_response(value: &serde_json::Value) -> bool {
-    let Some(candidate) = value
-        .get("candidates")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|candidates| candidates.first())
-    else {
-        return true;
-    };
-    let Some(parts) = candidate
-        .get("content")
-        .and_then(|content| content.get("parts"))
-        .and_then(serde_json::Value::as_array)
-    else {
-        return true;
-    };
-    runtime_gemini_provider_core_message_only_parts(parts)
-        || runtime_gemini_provider_core_function_call_only_parts(parts)
-}
-
-fn runtime_gemini_provider_core_message_only_parts(parts: &[serde_json::Value]) -> bool {
-    parts
-        .iter()
-        .all(runtime_gemini_provider_core_message_only_part)
-}
-
-fn runtime_gemini_provider_core_message_only_part(part: &serde_json::Value) -> bool {
-    if part.get("functionCall").is_some() {
-        return false;
-    }
-    if part
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .is_some()
-    {
-        return part.as_object().is_some_and(|object| {
-            object
-                .keys()
-                .all(|key| matches!(key.as_str(), "text" | "thought"))
-        });
-    }
-    part.as_object().is_some_and(|object| {
-        object.keys().all(|key| {
-            matches!(
-                key.as_str(),
-                "inlineData"
-                    | "inline_data"
-                    | "fileData"
-                    | "file_data"
-                    | "executableCode"
-                    | "codeExecutionResult"
-                    | "videoMetadata"
-            )
-        })
-    })
-}
-
-fn runtime_gemini_provider_core_function_call_only_parts(parts: &[serde_json::Value]) -> bool {
-    !parts.is_empty()
-        && parts
-            .iter()
-            .all(runtime_gemini_provider_core_function_call_part)
-}
-
-fn runtime_gemini_provider_core_function_call_part(part: &serde_json::Value) -> bool {
-    if part.get("text").is_some()
-        && !part
-            .get("thought")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-    {
-        return false;
-    }
-    let Some(function_call) = part
-        .get("functionCall")
-        .and_then(serde_json::Value::as_object)
-    else {
-        return part.as_object().is_some_and(|object| {
-            object
-                .keys()
-                .all(|key| matches!(key.as_str(), "text" | "thought"))
-        });
-    };
-    let Some(name) = function_call
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .filter(|name| !name.trim().is_empty())
-    else {
-        return false;
-    };
-    let args = function_call
-        .get("args")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    runtime_gemini_blocked_tool_call_message(name, &args).is_none()
-        && part.as_object().is_some_and(|object| {
-            object
-                .keys()
-                .all(|key| matches!(key.as_str(), "functionCall" | "thoughtSignature"))
-        })
 }
 
 pub(super) fn runtime_gemini_upstream_url(
@@ -359,50 +239,11 @@ pub(super) fn runtime_gemini_native_request_body(
     body: &[u8],
     auth: &RuntimeGeminiAuth,
 ) -> Result<Vec<u8>> {
-    let Some(project_id) = runtime_gemini_project_id(auth) else {
-        return Ok(body.to_vec());
-    };
-    let mut value = match serde_json::from_slice::<serde_json::Value>(body) {
-        Ok(value) => value,
-        Err(_) => return Ok(body.to_vec()),
-    };
-    runtime_gemini_stamp_native_project(&mut value, project_id);
-    serde_json::to_vec(&value).context("failed to serialize Gemini native request JSON")
-}
-
-fn runtime_gemini_stamp_native_project(value: &mut serde_json::Value, project_id: &str) {
-    let Some(object) = value.as_object_mut() else {
-        return;
-    };
-    let project = serde_json::Value::String(project_id.to_string());
-    if object.contains_key("project") {
-        object.insert("project".to_string(), project.clone());
-    }
-    if object.contains_key("projectId") {
-        object.insert("projectId".to_string(), project.clone());
-    }
-    if object.contains_key("cloudaicompanionProject") {
-        object.insert("cloudaicompanionProject".to_string(), project.clone());
-    }
-    runtime_gemini_stamp_native_metadata_project(object.get_mut("metadata"), project_id);
-    if let Some(request) = object.get_mut("request") {
-        runtime_gemini_stamp_native_project(request, project_id);
-    }
-}
-
-fn runtime_gemini_stamp_native_metadata_project(
-    value: Option<&mut serde_json::Value>,
-    project_id: &str,
-) {
-    let Some(metadata) = value.and_then(serde_json::Value::as_object_mut) else {
-        return;
-    };
-    if metadata.contains_key("duetProject") {
-        metadata.insert(
-            "duetProject".to_string(),
-            serde_json::Value::String(project_id.to_string()),
-        );
-    }
+    prodex_provider_core::gemini_provider_core_native_request_body_with_project(
+        body,
+        runtime_gemini_project_id(auth),
+    )
+    .context("failed to serialize Gemini native request JSON")
 }
 
 #[cfg(test)]

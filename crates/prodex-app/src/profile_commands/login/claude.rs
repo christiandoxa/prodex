@@ -2,8 +2,8 @@ use super::super::manage::print_profile_panel;
 use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider,
-    claude_oauth_profile_identity, copy_claude_oauth_credentials, create_codex_home_if_missing,
-    managed_profile_home_path, prepare_managed_codex_home, remove_dir_if_exists,
+    claude_oauth_profile_identity, copy_claude_oauth_credentials, managed_profile_home_path,
+    prepare_managed_codex_home, prepare_profile_codex_home, remove_dir_if_exists,
 };
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -27,13 +27,8 @@ pub(super) fn prepare_anthropic_profile_login_home(
             profile.provider.display_name()
         );
     }
-    let codex_home = profile.codex_home.clone();
-    if profile.managed {
-        prepare_managed_codex_home(paths, &codex_home)?;
-    } else {
-        create_codex_home_if_missing(&codex_home)?;
-    }
-    Ok(codex_home)
+    prepare_profile_codex_home(paths, profile)?;
+    Ok(profile.codex_home.clone())
 }
 
 pub(super) fn finish_named_anthropic_profile_login(

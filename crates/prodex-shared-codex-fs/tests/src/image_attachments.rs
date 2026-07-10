@@ -84,6 +84,89 @@ fn persist_codex_session_file_image_attachment_error_redacts_session_path() {
 }
 
 #[test]
+fn persist_codex_session_image_attachments_skips_oversized_session_file() {
+    let temp_dir = ImageAttachmentTestDir::new("oversized-session-file");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/10");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::File::create(&session_file)
+        .expect("session should be created")
+        .set_len(CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES + 1)
+        .expect("session size should be set");
+
+    persist_codex_session_image_attachments(&codex_home)
+        .expect("oversized session should not block attachment maintenance");
+
+    assert_eq!(
+        fs::metadata(&session_file)
+            .expect("session metadata should remain readable")
+            .len(),
+        CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES + 1
+    );
+}
+
+#[test]
+fn persist_codex_session_image_attachments_preserves_source_text_with_image_prefix() {
+    let temp_dir = ImageAttachmentTestDir::new("source-image-prefix");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/07/10");
+    let session_file = sessions_dir.join("rollout.jsonl");
+    let contents = concat!(
+        r#"{"timestamp":"2026-07-10T00:00:00Z","type":"session_meta","payload":{"id":"test"}}"#,
+        "\n",
+        r#"{"type":"response_item","payload":{"text":"const PREFIX: &str = \"<image \"; value > 0;"}}"#,
+        "\n"
+    );
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::write(&session_file, contents).expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("maintenance should succeed");
+
+    assert_eq!(
+        fs::read_to_string(&session_file).expect("session should be readable"),
+        contents
+    );
+}
+
+#[test]
+fn persist_codex_session_image_attachments_skips_active_session_tree() {
+    let temp_dir = ImageAttachmentTestDir::new("active-session-tree");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/07/10");
+    let image_source = temp_dir.path.join("codex-clipboard-active.png");
+    let stable = codex_home.join("image_attachments/codex-clipboard-active.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+    let contents = format!(
+        r#"{{"payload":{{"text":"<image path=\"{}\">"}}}}"#,
+        image_source.display()
+    );
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::write(&image_source, b"active png").expect("source image should write");
+    fs::write(&session_file, &contents).expect("session should write");
+    let active_lock =
+        lock_codex_sessions_for_child(&codex_home).expect("active session lock should succeed");
+
+    persist_codex_session_image_attachments(&codex_home).expect("maintenance should defer");
+
+    assert_eq!(
+        fs::read_to_string(&session_file).expect("session should be readable"),
+        contents
+    );
+    assert!(!stable.exists());
+
+    drop(active_lock);
+    persist_codex_session_image_attachments(&codex_home).expect("maintenance should run");
+    assert_eq!(
+        fs::read(&stable).expect("stable image should be readable"),
+        b"active png"
+    );
+}
+
+#[test]
 fn persist_codex_session_image_attachments_rewrites_to_existing_stable_copy_when_source_is_gone() {
     let temp_dir = ImageAttachmentTestDir::new("clipboard-image-source-gone");
     let codex_home = temp_dir.path.join("codex-home");
@@ -117,6 +200,52 @@ fn persist_codex_session_image_attachments_rewrites_to_existing_stable_copy_when
         !rewritten.contains(&old_path.display().to_string()),
         "session should not retain deleted clipboard path: {rewritten}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn persist_codex_session_image_attachments_replaces_stable_symlink() {
+    let temp_dir = ImageAttachmentTestDir::new("clipboard-image-stable-symlink");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/10");
+    let image_source = temp_dir.path.join("codex-clipboard-stable-symlink.png");
+    let stable = codex_home.join("image_attachments/codex-clipboard-stable-symlink.png");
+    let outside_target = temp_dir.path.join("outside-target.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(stable.parent().unwrap()).expect("stable dir should exist");
+    fs::write(&image_source, b"safe png bytes").expect("source image should write");
+    fs::write(&outside_target, b"outside target").expect("outside target should write");
+    std::os::unix::fs::symlink(&outside_target, &stable).expect("stable symlink should be created");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"payload":{{"content":[{{"type":"input_text","text":"<image path=\"{}\">"}}]}}}}"#,
+            image_source.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    assert!(
+        fs::symlink_metadata(&stable)
+            .expect("stable metadata should exist")
+            .file_type()
+            .is_file()
+    );
+    assert_eq!(
+        fs::read(&stable).expect("stable image should be readable"),
+        b"safe png bytes"
+    );
+    assert_eq!(
+        fs::read(&outside_target).expect("outside target should be readable"),
+        b"outside target"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(rewritten.contains(&stable.display().to_string()));
+    assert!(!rewritten.contains(&image_source.display().to_string()));
 }
 
 #[test]
@@ -178,6 +307,137 @@ fn persist_codex_session_local_images_array_rewrites_to_existing_stable_copy_whe
     let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
     assert!(rewritten.contains(&stable.display().to_string()));
     assert!(!rewritten.contains(&old_path.display().to_string()));
+}
+
+#[test]
+fn persist_codex_session_clipboard_image_ignores_non_temp_source() {
+    let temp_dir = ImageAttachmentTestDir::new("clipboard-image-non-temp-source");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/30");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    let outside_root = std::env::current_dir()
+        .expect("current dir should exist")
+        .join("target")
+        .join(format!(
+            "prodex-image-attachments-non-temp-{}-{unique}",
+            std::process::id()
+        ));
+    let image_source = outside_root.join("codex-clipboard-secret.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+    let _ = fs::remove_dir_all(&outside_root);
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(&outside_root).expect("outside dir should be created");
+    fs::write(&image_source, b"not a Codex clipboard temp file").expect("source should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"payload":{{"type":"user_message","local_images":["{}"]}}}}"#,
+            image_source.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    let copied = codex_home.join("image_attachments/codex-clipboard-secret.png");
+    assert!(
+        !copied.exists(),
+        "non-temp clipboard-like path should not be copied"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(rewritten.contains(&image_source.display().to_string()));
+    let _ = fs::remove_dir_all(&outside_root);
+}
+
+#[cfg(unix)]
+#[test]
+fn persist_codex_session_attachment_ignores_symlink_source() {
+    let temp_dir = ImageAttachmentTestDir::new("attachment-symlink-source");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/24");
+    let target = temp_dir.path.join("target-secret.txt");
+    let paste_source = temp_dir
+        .path
+        .join("overlay/attachments/11111111-2222-4333-8444-555555555555/pasted-text-1.txt");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(paste_source.parent().unwrap()).expect("paste source dir should exist");
+    fs::write(&target, b"symlink target should not be copied").expect("target should write");
+    std::os::unix::fs::symlink(&target, &paste_source).expect("symlink should be created");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"type":"response_item","payload":{{"arguments":"{{\"path\":\"{}\"}}"}}}}"#,
+            paste_source.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    let copied =
+        codex_home.join("attachments/11111111-2222-4333-8444-555555555555/pasted-text-1.txt");
+    assert!(
+        !copied.exists(),
+        "symlink attachment source should not be copied"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(rewritten.contains(&paste_source.display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn persist_codex_session_attachment_replaces_stable_symlink() {
+    let temp_dir = ImageAttachmentTestDir::new("attachment-stable-symlink");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/24");
+    let paste_source = temp_dir
+        .path
+        .join("overlay/attachments/11111111-2222-4333-8444-555555555555/pasted-text-1.txt");
+    let stable =
+        codex_home.join("attachments/11111111-2222-4333-8444-555555555555/pasted-text-1.txt");
+    let outside_target = temp_dir.path.join("outside-target.txt");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+    fs::create_dir_all(paste_source.parent().unwrap()).expect("paste source dir should exist");
+    fs::create_dir_all(stable.parent().unwrap()).expect("stable dir should exist");
+    fs::write(&paste_source, b"safe pasted context").expect("paste source should write");
+    fs::write(&outside_target, b"outside target").expect("outside target should write");
+    std::os::unix::fs::symlink(&outside_target, &stable).expect("stable symlink should be created");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"type":"response_item","payload":{{"arguments":"{{\"path\":\"{}\"}}"}}}}"#,
+            paste_source.display()
+        ),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home).expect("attachments should persist");
+
+    assert!(
+        fs::symlink_metadata(&stable)
+            .expect("stable metadata should exist")
+            .file_type()
+            .is_file()
+    );
+    assert_eq!(
+        fs::read(&stable).expect("stable paste should be readable"),
+        b"safe pasted context"
+    );
+    assert_eq!(
+        fs::read(&outside_target).expect("outside target should be readable"),
+        b"outside target"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    assert!(rewritten.contains(&stable.display().to_string()));
+    assert!(!rewritten.contains(&paste_source.display().to_string()));
 }
 
 #[cfg(unix)]

@@ -137,10 +137,10 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-gateway-file-ledger-io",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_file_ledger.rs",
     id: "blocking-disk-io",
-    pattern: /\bstd::fs::(?:read|create_dir_all|rename|remove_file)\s*\(/,
+    pattern: /\bstd::fs::(?:read|create_dir_all|rename|remove_file|symlink_metadata)\s*\(/,
     maxHits: 5,
     reason:
-      "gateway file ledger I/O is limited to ledger loading, append setup, atomic summary persistence, and best-effort temp-file cleanup",
+      "gateway file ledger I/O is limited to bounded ledger loading, symlink rejection, append setup, atomic summary persistence, and best-effort temp-file cleanup",
   },
   {
     name: "local-rewrite-gateway-ledger-background-save",
@@ -163,9 +163,10 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-gateway-store-file-io",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_store_file.rs",
     id: "blocking-disk-io",
-    pattern: /\bstd::fs::(?:read|write|create_dir_all|rename)\s*\(/,
-    maxHits: 4,
-    reason: "gateway file-store I/O is limited to file-backed admin/config state loading and atomic saves",
+    pattern: /\bstd::fs::(?:read|write|create_dir_all|rename|remove_file|symlink_metadata)\s*\(/,
+    maxHits: 6,
+    reason:
+      "gateway file-store I/O is limited to bounded admin/config state loading, symlink rejection, atomic saves, and temp cleanup",
   },
   {
     name: "local-rewrite-gateway-usage-openoptions-import",
@@ -199,6 +200,24 @@ const ALLOWLIST = Object.freeze([
     maxHits: 1,
     reason:
       "single bounded Gemini Live sidecar acceptor created during launch and owned by the runtime shutdown handle",
+  },
+  {
+    name: "kiro-overlay-cleanup-background",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::remove_dir_all\s*\(/,
+    maxHits: 2,
+    reason:
+      "Kiro per-request temp overlay cleanup runs on the bounded runtime blocking pool after request work completes",
+  },
+  {
+    name: "kiro-bounded-runtime-blocking-work",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
+    id: "spawn-blocking",
+    pattern: /\bspawn_blocking\s*\(/,
+    maxHits: 2,
+    reason:
+      "Kiro streaming worker and temp overlay cleanup use the bounded runtime blocking pool instead of unbounded OS thread spawning",
   },
   {
     name: "gemini-bounded-context-directory-scans",
@@ -271,9 +290,10 @@ const ALLOWLIST = Object.freeze([
     name: "gemini-context-bounded-directory-scans",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_context.rs",
     id: "blocking-disk-io",
-    pattern: /\bfs::read_dir\s*\(/,
-    maxHits: 2,
-    reason: "Gemini context discovery enforces explicit file and scan-count limits",
+    pattern: /\bfs::(?:read_dir|symlink_metadata)\s*\(/,
+    maxHits: 5,
+    reason:
+      "Gemini context discovery enforces explicit file and scan-count limits and rejects symlink entries",
   },
   {
     name: "gemini-context-bounded-ignore-file-read",
@@ -282,6 +302,14 @@ const ALLOWLIST = Object.freeze([
     pattern: /\bfs::read_to_string\s*\(/,
     maxHits: 1,
     reason: "bounded .gitignore compatibility read used only for explicit Gemini context collection",
+  },
+  {
+    name: "gemini-context-bounded-ignore-file-open",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_context.rs",
+    id: "blocking-file-open",
+    pattern: /\bfs::File::open\s*\(/,
+    maxHits: 1,
+    reason: "Gemini ignore files are opened only after a symlink and size check and read with a byte cap",
   },
   {
     name: "gemini-extension-bounded-directory-scan",
@@ -300,12 +328,21 @@ const ALLOWLIST = Object.freeze([
     reason: "Gemini memory and import text reads use a take-limited reader",
   },
   {
+    name: "gemini-bounded-text-file-symlink-check-split",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_io.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::symlink_metadata\s*\(/,
+    maxHits: 2,
+    reason: "Gemini local text reads reject symlink paths before opening byte-capped files",
+  },
+  {
     name: "gemini-bounded-local-file-metadata-split",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_local_context.rs",
     id: "blocking-disk-io",
-    pattern: /\bfs::metadata\s*\(/,
-    maxHits: 1,
-    reason: "metadata check precedes Gemini local-file reads capped by file count and total bytes",
+    pattern: /\bfs::(?:metadata|symlink_metadata)\s*\(/,
+    maxHits: 2,
+    reason:
+      "metadata and symlink checks precede Gemini local-file reads capped by file count and total bytes",
   },
   {
     name: "gemini-bounded-local-file-canonicalize-split",
@@ -322,6 +359,14 @@ const ALLOWLIST = Object.freeze([
     pattern: /\bfs::read\s*\(/,
     maxHits: 1,
     reason: "Gemini local-file content is capped by explicit per-request file and byte budgets",
+  },
+  {
+    name: "gemini-bounded-local-file-open-split",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_local_context.rs",
+    id: "blocking-file-open",
+    pattern: /\bfs::File::open\s*\(/,
+    maxHits: 1,
+    reason: "Gemini local files are opened only after bounded candidate and metadata checks",
   },
   {
     name: "gemini-bounded-local-directory-scan-split",
@@ -368,8 +413,9 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-test-fixture-disk-io",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
     id: "blocking-disk-io",
-    pattern: /\bfs::(?:read|read_to_string|remove_dir_all|create_dir_all)\s*\(/,
-    maxHits: 7,
+    pattern:
+      /\bfs::(?:read|read_to_string|write|remove_dir_all|create_dir_all|metadata|set_permissions)\s*\(/,
+    maxHits: 71,
     reason:
       "test fixtures inspect audit logs, ledgers, and isolated temp state after proxy requests complete",
   },
@@ -385,9 +431,17 @@ const ALLOWLIST = Object.freeze([
     name: "local-rewrite-split-test-ledger-read",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
     id: "blocking-disk-io",
-    pattern: /\bfs::read_to_string\s*\(/,
-    maxHits: 1,
+    pattern: /\bfs::(?:read_to_string|write)\s*\(/,
+    maxHits: 4,
     reason: "split gateway state tests inspect ledger output after proxy requests complete",
+  },
+  {
+    name: "local-rewrite-split-test-admin-auth-state",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
+    id: "blocking-disk-io",
+    pattern: /\bfs::write\s*\(/,
+    maxHits: 1,
+    reason: "split gateway admin auth tests write isolated malformed fixture state",
   },
   {
     name: "local-rewrite-split-test-audit-read",
@@ -414,12 +468,20 @@ const ALLOWLIST = Object.freeze([
     reason: "split test-only mock upstream servers run on bounded fixture threads",
   },
   {
+    name: "local-rewrite-split-test-gateway-usage-thread",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_usage.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 1,
+    reason: "split gateway usage test mock server runs on one fixture thread",
+  },
+  {
     name: "local-rewrite-transport-log-dir-create",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs",
     id: "blocking-disk-io",
     pattern: /\bstd::fs::create_dir_all\s*\(/,
     maxHits: 1,
-    reason: "best-effort runtime log directory creation before appending provider fallback diagnostics",
+    reason: "best-effort observability directory creation runs on the bounded blocking pool",
   },
   {
     name: "local-rewrite-transport-log-open",
@@ -427,7 +489,7 @@ const ALLOWLIST = Object.freeze([
     id: "blocking-file-open",
     pattern: /\bstd::fs::OpenOptions::new\s*\(/,
     maxHits: 1,
-    reason: "best-effort runtime log append for provider fallback diagnostics",
+    reason: "best-effort observability JSONL append runs on the bounded blocking pool",
   },
 ]);
 

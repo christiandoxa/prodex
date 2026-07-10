@@ -1,10 +1,10 @@
 use super::await_runtime_proxy_async_task;
-use crate::RuntimePresidioRedactionConfig;
 use crate::presidio_runtime::PresidioLanguageMode;
 use crate::runtime_core_shared::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
+use crate::{RuntimePresidioRedactionConfig, read_async_response_body_with_limit};
 use anyhow::{Context, Result, anyhow};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -12,7 +12,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+mod analyzer;
+mod json_body;
+
+use analyzer::{detect_presidio_language, merge_presidio_analyzer_results};
+use json_body::{
+    collect_json_string_values, presidio_json_value_separator, replace_json_string_values,
+};
+
 const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const PRESIDIO_RESPONSE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 static RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH: OnceLock<
     Mutex<BTreeMap<PathBuf, RuntimePresidioRedactionConfig>>,
@@ -264,7 +273,7 @@ async fn runtime_presidio_redact_text(
         return Ok(text.to_string());
     }
 
-    let anonymized = client
+    let anonymized_response = client
         .post(presidio_endpoint(&config.anonymizer_url, "anonymize"))
         .json(&serde_json::json!({
             "text": text,
@@ -274,72 +283,16 @@ async fn runtime_presidio_redact_text(
         .await
         .context("failed to call Presidio Anonymizer")?
         .error_for_status()
-        .context("Presidio Anonymizer returned an error")?
-        .json::<PresidioAnonymizeResponse>()
-        .await
+        .context("Presidio Anonymizer returned an error")?;
+    let anonymized_body = read_async_response_body_with_limit(
+        anonymized_response,
+        PRESIDIO_RESPONSE_MAX_BYTES,
+        "failed to read Presidio Anonymizer response",
+    )
+    .await?;
+    let anonymized = serde_json::from_slice::<PresidioAnonymizeResponse>(&anonymized_body)
         .context("failed to parse Presidio Anonymizer response")?;
     Ok(anonymized.text)
-}
-
-fn collect_json_string_values(
-    value: &serde_json::Value,
-    redact_string: bool,
-    values: &mut Vec<String>,
-) {
-    match value {
-        serde_json::Value::String(text) if redact_string => values.push(text.clone()),
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_json_string_values(item, redact_string, values);
-            }
-        }
-        serde_json::Value::Object(fields) => {
-            for (key, value) in fields {
-                collect_json_string_values(value, should_redact_json_string_field(key), values);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn replace_json_string_values<'a>(
-    value: &mut serde_json::Value,
-    redact_string: bool,
-    values: &mut impl Iterator<Item = &'a str>,
-) {
-    match value {
-        serde_json::Value::String(text) if redact_string => {
-            if let Some(redacted) = values.next() {
-                *text = redacted.to_string();
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                replace_json_string_values(item, redact_string, values);
-            }
-        }
-        serde_json::Value::Object(fields) => {
-            for (key, value) in fields {
-                replace_json_string_values(value, should_redact_json_string_field(key), values);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn should_redact_json_string_field(key: &str) -> bool {
-    matches!(
-        key,
-        "arguments" | "content" | "input" | "instructions" | "output" | "text"
-    )
-}
-
-fn presidio_json_value_separator(values: &[String]) -> String {
-    let mut separator = "\u{e000}PRODEX_PRESIDIO_VALUE\u{e001}".to_string();
-    while values.iter().any(|value| value.contains(&separator)) {
-        separator.push('\u{e002}');
-    }
-    separator
 }
 
 async fn presidio_analyze_async(
@@ -348,7 +301,7 @@ async fn presidio_analyze_async(
     text: &str,
     language: &str,
 ) -> Result<Vec<PresidioAnalyzerResult>> {
-    let results = client
+    let response = client
         .post(presidio_endpoint(analyzer_url, "analyze"))
         .json(&serde_json::json!({
             "text": text,
@@ -358,110 +311,20 @@ async fn presidio_analyze_async(
         .await
         .context("failed to call Presidio Analyzer")?
         .error_for_status()
-        .context("Presidio Analyzer returned an error")?
-        .json::<Vec<PresidioAnalyzerResult>>()
-        .await
+        .context("Presidio Analyzer returned an error")?;
+    let body = read_async_response_body_with_limit(
+        response,
+        PRESIDIO_RESPONSE_MAX_BYTES,
+        "failed to read Presidio Analyzer response",
+    )
+    .await?;
+    let results = serde_json::from_slice::<Vec<PresidioAnalyzerResult>>(&body)
         .context("failed to parse Presidio Analyzer response")?;
     Ok(results)
 }
 
 fn presidio_endpoint(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
-}
-
-fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String> {
-    if candidates.len() == 1 {
-        return Some(candidates[0].clone());
-    }
-
-    let id_keywords = [
-        "yang", "dan", "di", "ke", "dari", "saya", "kami", "anda", "nomor", "nama", "alamat",
-        "tanggal", "lahir", "dengan", "untuk",
-    ];
-    let en_keywords = [
-        "the", "and", "to", "from", "my", "name", "phone", "email", "address", "with", "for",
-        "birth",
-    ];
-
-    let mut id_score = 0;
-    let mut en_score = 0;
-
-    let lower_text = text.to_lowercase();
-
-    for keyword in id_keywords.iter() {
-        if lower_text.contains(keyword) {
-            id_score += 1;
-        }
-    }
-    for keyword in en_keywords.iter() {
-        if lower_text.contains(keyword) {
-            en_score += 1;
-        }
-    }
-
-    if id_score > en_score && candidates.contains(&"id".to_string()) {
-        Some("id".to_string())
-    } else if en_score > id_score && candidates.contains(&"en".to_string()) {
-        Some("en".to_string())
-    } else {
-        candidates.first().cloned()
-    }
-}
-
-fn merge_presidio_analyzer_results(
-    mut results: Vec<PresidioAnalyzerResult>,
-) -> Vec<PresidioAnalyzerResult> {
-    results.sort_by(|a, b| {
-        a.start
-            .cmp(&b.start)
-            .then_with(|| a.end.cmp(&b.end))
-            .then_with(|| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .then_with(|| b.entity_type.cmp(&a.entity_type))
-    });
-
-    let mut merged: Vec<PresidioAnalyzerResult> = Vec::new();
-    for result in results {
-        if let Some(last) = merged.last_mut() {
-            if last.start == result.start
-                && last.end == result.end
-                && last.entity_type == result.entity_type
-            {
-                if result.score > last.score {
-                    *last = result;
-                }
-                continue;
-            }
-
-            let overlaps = result.start < last.end && result.end > last.start;
-            if overlaps
-                && (result.score > last.score
-                    || (result.score == last.score
-                        && (result.end - result.start) > (last.end - last.start)))
-            {
-                if (result.start >= last.start && result.end <= last.end)
-                    || (last.start >= result.start && last.end <= result.end)
-                {
-                    if result.score > last.score {
-                        *last = result;
-                    }
-                    continue;
-                } else if result.score > last.score {
-                    last.start = last.start.min(result.start);
-                    last.end = last.end.max(result.end);
-                    last.score = result.score;
-                    last.entity_type = result.entity_type;
-                    last.language = result.language;
-                    continue;
-                }
-            }
-        }
-        merged.push(result);
-    }
-    merged
 }
 
 #[cfg(test)]

@@ -1,13 +1,11 @@
 use super::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
-    runtime_gemini_custom_tool_input_from_arguments, runtime_gemini_generate_request_body,
-    runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_generate_request_body, runtime_gemini_responses_value_from_generate_value,
 };
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use prodex_provider_core::gemini_provider_core_custom_tool_input_from_arguments;
 
 fn conversation_store() -> RuntimeDeepSeekConversationStore {
-    Arc::new(Mutex::new(BTreeMap::new()))
+    RuntimeDeepSeekConversationStore::default()
 }
 
 #[test]
@@ -165,7 +163,7 @@ fn gemini_apply_patch_input_extracts_fenced_apply_patch_block() {
     });
 
     assert_eq!(
-        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        gemini_provider_core_custom_tool_input_from_arguments(&arguments.to_string()),
         "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
     );
 }
@@ -177,7 +175,7 @@ fn gemini_apply_patch_input_repairs_add_file_lines_without_plus_prefix() {
     });
 
     assert_eq!(
-        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        gemini_provider_core_custom_tool_input_from_arguments(&arguments.to_string()),
         "*** Begin Patch\n*** Add File: gemini-patch-smoke.txt\n+PRODEX_GEMINI_LIVE_OK\n*** End Patch"
     );
 }
@@ -209,7 +207,7 @@ deleted file mode 100644
     let arguments = serde_json::json!({ "input": diff });
 
     assert_eq!(
-        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        gemini_provider_core_custom_tool_input_from_arguments(&arguments.to_string()),
         "\
 *** Begin Patch
 *** Update File: src/lib.rs
@@ -240,7 +238,7 @@ rename to new/name.txt
     let arguments = serde_json::json!({ "input": diff });
 
     assert_eq!(
-        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        gemini_provider_core_custom_tool_input_from_arguments(&arguments.to_string()),
         "\
 *** Begin Patch
 *** Update File: old/name.txt
@@ -261,7 +259,7 @@ fn gemini_apply_patch_input_normalizes_gemini_replace_args() {
     });
 
     assert_eq!(
-        runtime_gemini_custom_tool_input_from_arguments(&arguments.to_string()),
+        gemini_provider_core_custom_tool_input_from_arguments(&arguments.to_string()),
         "\
 *** Begin Patch
 *** Update File: src/lib.rs

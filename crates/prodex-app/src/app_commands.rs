@@ -12,8 +12,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::io::{BufRead, IsTerminal, Write};
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
-    tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
+    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 mod app_server_broker;
@@ -28,16 +28,12 @@ mod doctor;
 mod gateway;
 mod info;
 mod info_handler;
-mod inspect_mcp;
 mod log;
 mod log_format;
-mod log_stream_tui;
 mod log_tui;
 mod log_upstream;
 mod log_upstream_payload;
 mod mcp_jsonl_bridge;
-mod mem0_memory;
-mod memory_mcp;
 mod ping;
 mod presidio;
 mod quota;
@@ -59,11 +55,8 @@ pub(crate) use self::doctor::*;
 pub(crate) use self::gateway::*;
 pub(crate) use self::info::*;
 pub(crate) use self::info_handler::*;
-pub(crate) use self::inspect_mcp::*;
 pub(crate) use self::log::*;
 pub(crate) use self::mcp_jsonl_bridge::*;
-pub(crate) use self::mem0_memory::*;
-pub(crate) use self::memory_mcp::*;
 pub(crate) use self::ping::*;
 pub(crate) use self::presidio::*;
 pub(crate) use self::quota::*;
@@ -85,18 +78,9 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
         args.cli,
         Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
     ) {
-        if args.mem0 {
-            bail!(
-                "--mem0 is only supported by the Codex Super overlay, not native external agent CLIs"
-            );
-        }
         return crate::runtime_gemini_cli::handle_super_google_cli(args, use_presidio);
     }
-    let use_mem0 = match args.mem0_preference() {
-        Some(use_mem0) => use_mem0,
-        None => prompt_super_mem0_opt_in()?,
-    };
-    handle_caveman(args.into_caveman_args_with_choices(use_presidio, use_mem0))
+    handle_caveman(args.into_caveman_args_with_presidio(use_presidio))
 }
 
 pub(super) fn prepare_runtime_launch(
@@ -135,24 +119,6 @@ fn prompt_super_presidio_opt_in() -> Result<bool> {
         return Ok(enabled);
     }
     prompt_super_presidio_opt_in_from(stdin_is_terminal, stderr_is_terminal, stdin.lock(), stderr)
-}
-
-fn prompt_super_mem0_opt_in() -> Result<bool> {
-    let stdin = io::stdin();
-    let stderr = io::stderr();
-    let stdin_is_terminal = stdin.is_terminal();
-    let stderr_is_terminal = stderr.is_terminal();
-    if stdin_is_terminal
-        && stderr_is_terminal
-        && let Ok(enabled) = prompt_super_opt_in_tui(
-            "Prodex Super",
-            "Enable prodex-memory via managed Mem0 Docker?",
-            "Mem0 starts managed local services and a Prodex gateway so the Super overlay can keep session memory.",
-        )
-    {
-        return Ok(enabled);
-    }
-    prompt_super_mem0_opt_in_from(stdin_is_terminal, stderr_is_terminal, stdin.lock(), stderr)
 }
 
 fn prompt_super_presidio_opt_in_from<R, W>(
@@ -232,11 +198,7 @@ fn prompt_super_opt_in_tui(title: &str, question: &str, detail: &str) -> Result<
                 Span::raw("  "),
                 Span::styled("launch option", tui_secondary_style()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(vec![
@@ -265,11 +227,7 @@ fn prompt_super_opt_in_tui(title: &str, question: &str, detail: &str) -> Result<
                 Span::styled("esc", tui_hint_style()),
                 Span::raw(" skip"),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
         })?;
 
@@ -290,35 +248,6 @@ fn prompt_super_opt_in_tui(title: &str, question: &str, detail: &str) -> Result<
             }
         }
     }
-}
-
-fn prompt_super_mem0_opt_in_from<R, W>(
-    stdin_is_terminal: bool,
-    stderr_is_terminal: bool,
-    mut input: R,
-    mut output: W,
-) -> Result<bool>
-where
-    R: BufRead,
-    W: Write,
-{
-    if !stdin_is_terminal || !stderr_is_terminal {
-        return Ok(false);
-    }
-
-    write!(
-        output,
-        "Enable prodex-memory via managed Mem0 Docker? [y/N] "
-    )?;
-    output.flush().context("failed to flush prompt")?;
-    let mut answer = String::new();
-    input
-        .read_line(&mut answer)
-        .context("failed to read Mem0 memory prompt answer")?;
-    Ok(matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
 }
 
 #[cfg(test)]
@@ -365,40 +294,6 @@ mod tests {
             )?;
             assert!(!enabled);
             assert!(output.is_empty());
-        }
-        Ok(())
-    }
-
-    fn mem0_prompt_answer(answer: &str) -> Result<(bool, String)> {
-        let mut output = Vec::new();
-        let enabled =
-            prompt_super_mem0_opt_in_from(true, true, io::Cursor::new(answer), &mut output)?;
-        let output = String::from_utf8(output).context("prompt output should be UTF-8")?;
-        Ok((enabled, output))
-    }
-
-    #[test]
-    fn super_mem0_prompt_accepts_y_and_yes() -> Result<()> {
-        for answer in ["y\n", "Y\n", "yes\n", "YES\n"] {
-            let (enabled, output) = mem0_prompt_answer(answer)?;
-            assert!(enabled, "{answer:?} should opt in");
-            assert_eq!(
-                output,
-                "Enable prodex-memory via managed Mem0 Docker? [y/N] "
-            );
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn super_mem0_prompt_rejects_n_and_default() -> Result<()> {
-        for answer in ["n\n", "N\n", "\n", "no\n"] {
-            let (enabled, output) = mem0_prompt_answer(answer)?;
-            assert!(!enabled, "{answer:?} should not opt in");
-            assert_eq!(
-                output,
-                "Enable prodex-memory via managed Mem0 Docker? [y/N] "
-            );
         }
         Ok(())
     }

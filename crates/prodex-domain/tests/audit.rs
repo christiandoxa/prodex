@@ -3364,7 +3364,7 @@ fn audit_error_responses_are_stable_and_redacted() {
     let retention_batch_error = AuditRetentionBatchLimitError::TooLarge { value: 65_535 };
     assert_eq!(
         retention_batch_error.to_string(),
-        "audit retention batch limit is invalid"
+        "audit retention batch limit is too large"
     );
     assert!(!retention_batch_error.to_string().contains("65535"));
     let retention_batch = plan_audit_retention_batch_limit_error_response(&retention_batch_error);

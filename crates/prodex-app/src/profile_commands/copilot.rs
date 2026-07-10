@@ -10,9 +10,10 @@ use std::time::Duration;
 use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
-    QUOTA_HTTP_CONNECT_TIMEOUT_MS, QUOTA_HTTP_READ_TIMEOUT_MS, absolutize,
-    audit_log_event_best_effort, create_codex_home_if_missing, ensure_path_is_unique,
-    format_response_body, managed_profile_home_path, prepare_managed_codex_home,
+    QUOTA_HTTP_CONNECT_TIMEOUT_MS, QUOTA_HTTP_READ_TIMEOUT_MS,
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, absolutize, audit_log_event_best_effort,
+    create_codex_home_if_missing, ensure_path_is_unique, format_response_body,
+    managed_profile_home_path, prepare_managed_codex_home, read_blocking_response_body_with_limit,
 };
 
 pub(crate) use prodex_profile_export::CopilotUserInfo;
@@ -353,9 +354,11 @@ fn fetch_copilot_runtime_models_with_oauth(
         .send()
         .with_context(|| format!("failed to query {models_url}"))?;
     let models_status = models_resp.status();
-    let models_body = models_resp
-        .bytes()
-        .with_context(|| format!("failed to read {models_url}"))?;
+    let models_body = read_blocking_response_body_with_limit(
+        models_resp,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        &format!("failed to read {models_url}"),
+    )?;
     if !models_status.is_success() {
         let body_text = format_response_body(&models_body);
         if body_text.is_empty() {
@@ -398,9 +401,11 @@ fn fetch_copilot_runtime_legacy_token(
         .with_context(|| format!("failed to query {}", token_url))?;
     let status = response.status();
     if status.is_success() {
-        let body = response
-            .bytes()
-            .with_context(|| format!("failed to read {}", token_url))?;
+        let body = read_blocking_response_body_with_limit(
+            response,
+            RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+            &format!("failed to read {}", token_url),
+        )?;
         let value: serde_json::Value = serde_json::from_slice(&body)
             .with_context(|| format!("failed to parse {token_url}"))?;
         let api_key = value
@@ -416,9 +421,11 @@ fn fetch_copilot_runtime_legacy_token(
             model_catalog,
         });
     }
-    let body = response
-        .bytes()
-        .with_context(|| format!("failed to read {}", token_url))?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        &format!("failed to read {}", token_url),
+    )?;
     let body_text = format_response_body(&body);
     if body_text.is_empty() {
         bail!(
@@ -621,9 +628,11 @@ fn fetch_copilot_user_info_json_with_token(host: &str, token: &str) -> Result<se
         .send()
         .with_context(|| format!("failed to query {}", user_url))?;
     let status = response.status();
-    let body = response
-        .bytes()
-        .with_context(|| format!("failed to read {}", user_url))?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        &format!("failed to read {}", user_url),
+    )?;
     if !status.is_success() {
         let body_text = format_response_body(&body);
         if body_text.is_empty() {

@@ -2,6 +2,10 @@ use super::{
     load_runtime_broker_registry, runtime_broker_health_connect_timeout_ms,
     runtime_broker_health_read_timeout_ms, runtime_broker_registry_keys, runtime_process_pid_alive,
 };
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit,
+    read_blocking_response_text_with_limit,
+};
 use anyhow::{Context, Result, bail};
 use prodex_core::AppPaths;
 use prodex_runtime_broker::{
@@ -57,8 +61,12 @@ pub(crate) fn probe_runtime_broker_health(
     if !response.status().is_success() {
         return Ok(None);
     }
-    let health = response
-        .json::<RuntimeBrokerHealth>()
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read runtime broker health response",
+    )?;
+    let health = serde_json::from_slice::<RuntimeBrokerHealth>(&body)
         .context("failed to decode runtime broker health response")?;
     Ok(Some(health))
 }
@@ -81,8 +89,12 @@ pub(crate) fn probe_runtime_broker_metrics(
     if !response.status().is_success() {
         return Ok(None);
     }
-    let metrics = response
-        .json::<RuntimeBrokerMetrics>()
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read runtime broker metrics response",
+    )?;
+    let metrics = serde_json::from_slice::<RuntimeBrokerMetrics>(&body)
         .context("failed to decode runtime broker metrics response")?;
     Ok(Some(metrics))
 }
@@ -150,7 +162,12 @@ pub(crate) fn activate_runtime_broker_profile(
         .context("failed to send runtime broker activation request")?;
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().unwrap_or_default();
+        let body = read_blocking_response_text_with_limit(
+            response,
+            RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+            "failed to read runtime broker activation response",
+        )
+        .unwrap_or_default();
         bail!(
             "runtime broker activation failed with HTTP {}{}",
             status,

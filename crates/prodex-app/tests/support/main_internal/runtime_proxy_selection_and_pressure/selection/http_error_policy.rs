@@ -46,6 +46,22 @@ fn runtime_http_error_policy_rotates_explicit_quota_codes_before_commit_only() {
 }
 
 #[test]
+fn runtime_http_error_policy_rotates_deactivated_workspace_before_commit_only() {
+    let body = br#"{"detail":{"code":"deactivated_workspace"}}"#;
+
+    let precommit = runtime_http_error_policy(402, body, RuntimeHttpErrorPhase::PreCommit);
+    assert_eq!(precommit.class, RuntimeHttpErrorClass::ProfileUnavailable);
+    assert_eq!(precommit.action, RuntimeHttpErrorAction::RotateProfile);
+    assert_eq!(precommit.rule, Some("profile_unavailable"));
+    assert!(precommit.may_retry_or_rotate());
+
+    let committed = runtime_http_error_policy(402, body, RuntimeHttpErrorPhase::Committed);
+    assert_eq!(committed.class, RuntimeHttpErrorClass::ProfileUnavailable);
+    assert_eq!(committed.action, RuntimeHttpErrorAction::PassThrough);
+    assert!(!committed.may_retry_or_rotate());
+}
+
+#[test]
 fn runtime_http_error_policy_retries_transient_5xx_before_commit_only() {
     for status in [500, 502, 503, 504, 529] {
         let precommit = runtime_http_error_policy(

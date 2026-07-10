@@ -1,4 +1,4 @@
-use crate::{claude_bin, codex_bin, default_memory_store_path, kiro_bin, memory_store_ready};
+use crate::{claude_bin, codex_bin, kiro_bin};
 use anyhow::{Context, Result, bail};
 use crossterm::terminal;
 use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs, SuperDoctorArgs};
@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use terminal_ui::{
-    print_panel, print_stdout_line, text_width, tui_border_style, tui_secondary_style,
-    tui_title_style,
+    print_panel, print_stdout_line, text_width, tui_border_style, tui_connected_header_block,
+    tui_secondary_style, tui_title_style,
 };
 
 #[derive(Debug, Clone)]
@@ -95,23 +95,8 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
         version_check_row("Claude Code", claude_bin(), "--version"),
         version_check_row("Kiro CLI", kiro_bin(), "--version"),
         version_check_row("RTK", "rtk", "--version"),
-        version_check_row("SQZ MCP", "sqz-mcp", "--version"),
-        version_check_row("token-savior", "token-savior", "--version"),
         probe_check_row("codebase-memory-mcp"),
-        probe_check_row("claw-compactor"),
     ];
-    let memory_store = default_memory_store_path(paths);
-    rows.push((
-        "prodex-memory".to_string(),
-        match memory_store_ready(&memory_store) {
-            Ok(()) => format!("ok (local sqlite {})", memory_store.display()),
-            Err(err) => capability_failed_status(&err),
-        },
-    ));
-    rows.push((
-        "prodex-inspect".to_string(),
-        "ok (built-in read-only MCP)".to_string(),
-    ));
     rows.push((
         "Caveman assets".to_string(),
         match prodex_caveman_assets::verify_embedded_caveman_assets() {
@@ -139,28 +124,9 @@ pub(crate) struct SuperToolStatus {
     detail: String,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum SuperMemoryStatusMode {
-    Availability,
-    Disabled,
-    Selected(crate::SuperMemoryBackend),
-}
-
 pub(crate) fn collect_super_tool_statuses(
     paths: &AppPaths,
     check_presidio: bool,
-) -> Vec<SuperToolStatus> {
-    collect_super_tool_statuses_with_memory_mode(
-        paths,
-        check_presidio,
-        SuperMemoryStatusMode::Availability,
-    )
-}
-
-pub(crate) fn collect_super_tool_statuses_with_memory_mode(
-    paths: &AppPaths,
-    check_presidio: bool,
-    memory_mode: SuperMemoryStatusMode,
 ) -> Vec<SuperToolStatus> {
     let asset_report = prodex_caveman_assets::verify_embedded_caveman_assets();
     let mut rows = vec![
@@ -180,28 +146,12 @@ pub(crate) fn collect_super_tool_statuses_with_memory_mode(
         },
         command_tool_status("rtk", "rtk --version", "rtk", &["--version"]),
         command_tool_status("rtk-gain", "rtk gain", "rtk", &["gain"]),
-        optimizer_tool_status("sqz-mcp", "sqz-mcp MCP tools/list", "sqz-mcp"),
-        optimizer_tool_status(
-            "token-savior",
-            "token-savior MCP tools/list",
-            "token-savior",
-        ),
         optimizer_tool_status(
             "codebase-memory-mcp",
             "codebase-memory-mcp MCP tools/list",
             "codebase-memory-mcp",
         ),
-        optimizer_tool_status("claw-compactor", "claw-compactor --help", "claw-compactor"),
         ponytail_tool_status(paths),
-        SuperToolStatus {
-            name: "prodex-inspect",
-            check: "built-in",
-            ready: true,
-            status: "ok (read-only MCP)".to_string(),
-            detail: "Read-only MCP diagnostics for Prodex status, profiles, and latest runtime log"
-                .to_string(),
-        },
-        memory_tool_status(paths, memory_mode),
         SuperToolStatus {
             name: "smart-context",
             check: "built-in",
@@ -352,11 +302,8 @@ fn print_capability_panels(panels: &[CapabilityPanel]) -> Result<()> {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
-        let header = Paragraph::new(Line::styled("Prodex Capabilities", tui_title_style())).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        let header = Paragraph::new(Line::styled("Prodex Capabilities", tui_title_style()))
+            .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
         let body = Paragraph::new(capability_tui_text(panels))
             .block(
@@ -443,9 +390,8 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
             "verify embedded plugin manifests and skill frontmatter".to_string(),
         ),
         (
-            "Optional tools".to_string(),
-            "probe codex, claude, rtk, sqz-mcp, token-savior, codebase-memory-mcp, claw-compactor, ponytail, prodex-inspect, prodex-memory"
-                .to_string(),
+            "Super tools".to_string(),
+            "probe codex, claude, rtk, codebase-memory-mcp, ponytail, and Presidio".to_string(),
         ),
     ]
 }
@@ -467,28 +413,10 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             "upstream shell-output token reduction",
         ),
         capability(
-            "sqz",
-            "optimizer",
-            Some("sqz-mcp"),
-            "downstream context reuse MCP",
-        ),
-        capability(
-            "token-savior",
-            "optimizer",
-            Some("token-savior"),
-            "symbol navigation MCP",
-        ),
-        capability(
             "codebase-memory-mcp",
             "optimizer",
             Some("codebase-memory-mcp"),
             "structural codebase graph MCP",
-        ),
-        capability(
-            "claw-compactor",
-            "optimizer",
-            Some("claw-compactor"),
-            "local deterministic code-summary aid",
         ),
         capability(
             "ponytail",
@@ -496,21 +424,6 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             None,
             "managed checkout loaded as a Codex plugin in Prodex overlays",
         ),
-        ProdexCapability {
-            name: "prodex-inspect",
-            category: "diagnostics",
-            status: "built-in".to_string(),
-            command: Some("prodex __inspect-mcp"),
-            description: "read-only MCP diagnostics for Prodex status, profiles, and runtime logs"
-                .to_string(),
-        },
-        ProdexCapability {
-            name: "prodex-memory",
-            category: "memory",
-            status: "built-in".to_string(),
-            command: Some("prodex __memory-mcp"),
-            description: "local-first SQLite memory MCP without Mem0 Cloud auth".to_string(),
-        },
         ProdexCapability {
             name: "smart-context",
             category: "runtime",
@@ -562,7 +475,7 @@ fn command_available_status(command: &str) -> &'static str {
 
 fn command_capability_probe_args(command: &str) -> &'static [&'static str] {
     match command {
-        "claw-compactor" | "codebase-memory-mcp" => &["--help"],
+        "codebase-memory-mcp" => &["--help"],
         _ => &["--version"],
     }
 }
@@ -610,50 +523,6 @@ fn probe_check_row(command: &'static str) -> (String, String) {
         command.to_string(),
         command_probe_status(command, command_capability_probe_args(command)),
     )
-}
-
-fn memory_tool_status(paths: &AppPaths, memory_mode: SuperMemoryStatusMode) -> SuperToolStatus {
-    match memory_mode {
-        SuperMemoryStatusMode::Disabled => {
-            return SuperToolStatus {
-                name: "prodex-memory",
-                check: "opt-in",
-                ready: true,
-                status: "disabled".to_string(),
-                detail: "prodex-memory is enabled only with the mem prefix or Super Mem0 opt-in"
-                    .to_string(),
-            };
-        }
-        SuperMemoryStatusMode::Selected(crate::SuperMemoryBackend::Mem0) => return SuperToolStatus {
-            name: "prodex-memory",
-            check: "managed Mem0 MCP env",
-            ready: true,
-            status: "ok (managed Mem0 selected)".to_string(),
-            detail: "Mem0 Docker services and session gateway start at launch; prodex-memory MCP receives managed Mem0 env".to_string(),
-        },
-        SuperMemoryStatusMode::Availability | SuperMemoryStatusMode::Selected(crate::SuperMemoryBackend::Sqlite) => {}
-    }
-
-    let store = default_memory_store_path(paths);
-    match memory_store_ready(&store) {
-        Ok(()) => SuperToolStatus {
-            name: "prodex-memory",
-            check: "local SQLite memory store",
-            ready: true,
-            status: "ok (local sqlite)".to_string(),
-            detail: format!(
-                "store={}; Mem0 Cloud disabled; no MEM0_API_KEY required",
-                store.display()
-            ),
-        },
-        Err(err) => SuperToolStatus {
-            name: "prodex-memory",
-            check: "local SQLite memory store",
-            ready: false,
-            status: "fail".to_string(),
-            detail: capability_redacted_detail(&format!("{err:#}")),
-        },
-    }
 }
 
 fn ponytail_tool_status(_paths: &AppPaths) -> SuperToolStatus {
@@ -837,27 +706,11 @@ fn managed_optimizer_command_candidates_for_super_status(
     command: &str,
 ) -> Vec<PathBuf> {
     let mut candidates = vec![root.join(command)];
-    match command {
-        "sqz-mcp" | "sqz" => {
-            let checkout = root.join("sqz");
-            candidates.push(checkout.join(command));
-            candidates.push(checkout.join("target").join("release").join(command));
-            candidates.push(checkout.join("target").join("debug").join(command));
-        }
-        "token-savior" | "claw-compactor" => {
-            let checkout = root.join(command);
-            candidates.push(checkout.join(".venv").join("bin").join(command));
-            candidates.push(checkout.join("venv").join("bin").join(command));
-            candidates.push(checkout.join("bin").join(command));
-            candidates.push(checkout.join(command));
-        }
-        "codebase-memory-mcp" => {
-            let checkout = root.join("codebase-memory-mcp");
-            candidates.push(checkout.join(command));
-            candidates.push(checkout.join("build").join("c").join(command));
-            candidates.push(checkout.join("bin").join(command));
-        }
-        _ => {}
+    if command == "codebase-memory-mcp" {
+        let checkout = root.join("codebase-memory-mcp");
+        candidates.push(checkout.join(command));
+        candidates.push(checkout.join("build").join("c").join(command));
+        candidates.push(checkout.join("bin").join(command));
     }
     candidates
 }

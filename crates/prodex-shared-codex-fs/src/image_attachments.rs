@@ -1,4 +1,7 @@
 use super::*;
+use std::io::{Read, Write};
+
+const CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";
 const SESSION_ATTACHMENT_DIR: &str = "attachments";
@@ -14,6 +17,9 @@ const CODEX_IMAGE_PATH_ESCAPED_QUOTE: &str = r#"\""#;
 const CODEX_CLIPBOARD_PREFIX: &str = "codex-clipboard-";
 
 pub fn persist_codex_session_image_attachments(codex_home: &Path) -> Result<()> {
+    let Some(_maintenance_lock) = try_lock_codex_session_maintenance(codex_home)? else {
+        return Ok(());
+    };
     persist_codex_session_image_attachments_in_dir(codex_home, &codex_home.join("sessions"))?;
     persist_codex_session_image_attachments_in_dir(
         codex_home,
@@ -52,13 +58,86 @@ fn persist_codex_session_image_attachments_in_dir(
 pub(crate) fn persist_codex_session_file_image_attachments(
     codex_home: &Path,
     session_file: &Path,
-) -> Result<String> {
-    let contents = fs::read_to_string(session_file).context("failed to read codex session file")?;
+) -> Result<Option<String>> {
+    let Some(contents) = read_codex_session_attachment_file(session_file)? else {
+        return Ok(None);
+    };
     let rewritten = rewrite_codex_persisted_attachment_paths(codex_home, &contents)?;
-    if rewritten != contents {
-        fs::write(session_file, &rewritten).context("failed to write codex session file")?;
+    if rewritten.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        return Ok(None);
     }
-    Ok(rewritten)
+    if rewritten != contents {
+        write_codex_session_attachment_file(session_file, &rewritten)?;
+    }
+    Ok(Some(rewritten))
+}
+
+fn read_codex_session_attachment_file(path: &Path) -> Result<Option<String>> {
+    let metadata = fs::symlink_metadata(path).context("failed to read codex session file")?;
+    if metadata.file_type().is_symlink() {
+        bail!("refusing to read codex session file through symlink");
+    }
+    if !metadata.file_type().is_file() {
+        bail!("codex session path is not a file");
+    }
+    if metadata.len() > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        return Ok(None);
+    }
+    let file = fs::File::open(path).context("failed to read codex session file")?;
+    let opened_metadata = file
+        .metadata()
+        .context("failed to read codex session file metadata")?;
+    if !codex_session_same_file_metadata(&metadata, &opened_metadata) {
+        bail!("codex session file changed while opening");
+    }
+    let mut bytes = Vec::new();
+    file.take(CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .context("failed to read codex session file")?;
+    if bytes.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        return Ok(None);
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .context("failed to decode codex session file")
+}
+
+fn write_codex_session_attachment_file(path: &Path, contents: &str) -> Result<()> {
+    if contents.len() as u64 > CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES {
+        bail!(
+            "rewritten codex session exceeds safe size limit ({} bytes)",
+            CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES
+        );
+    }
+    let temp_path = path.with_extension(format!(
+        "{}.prodex-attachments-tmp-{}",
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("jsonl"),
+        std::process::id()
+    ));
+    let _ = fs::remove_file(&temp_path);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .context("failed to write codex session file")?;
+    file.write_all(contents.as_bytes())
+        .context("failed to write codex session file")?;
+    file.sync_all()
+        .context("failed to sync codex session file")?;
+    fs::rename(&temp_path, path).context("failed to write codex session file")
+}
+
+#[cfg(unix)]
+fn codex_session_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn codex_session_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
 }
 
 pub(crate) fn codex_session_image_attachments_are_stable(
@@ -143,11 +222,13 @@ fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Resul
         let tag_end = tag_start + relative_tag_end;
         let tag = &contents[tag_start..tag_end];
         let Some((relative_path_start, path_prefix, path_quote)) = image_tag_path_attr(tag) else {
+            output.push_str(&contents[cursor..tag_end]);
             cursor = tag_end;
             continue;
         };
         let path_start = tag_start + relative_path_start + path_prefix.len();
         let Some(relative_path_end) = contents[path_start..tag_end].find(path_quote) else {
+            output.push_str(&contents[cursor..tag_end]);
             cursor = tag_end;
             continue;
         };
@@ -194,8 +275,8 @@ fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<
     let destination = codex_home
         .join(SESSION_IMAGE_ATTACHMENT_DIR)
         .join(file_name);
-    if !destination.is_file() {
-        if !source.is_file() {
+    if !path_is_regular_file(&destination)? {
+        if !codex_clipboard_source_is_persistable(source) || !path_is_regular_file(source)? {
             return Ok(None);
         }
         copy_shared_codex_file(source, &destination)?;
@@ -320,8 +401,8 @@ fn stable_codex_session_attachment_path(
     let destination = codex_home
         .join(SESSION_ATTACHMENT_DIR)
         .join(relative_attachment_path);
-    if !destination.is_file() {
-        if !source.is_file() {
+    if !path_is_regular_file(&destination)? {
+        if !path_is_regular_file(source)? {
             return Ok(None);
         }
         copy_shared_codex_file(source, &destination)?;
@@ -359,6 +440,18 @@ fn codex_attachment_file_name_is_persistable(file_name: &str) -> bool {
     file_name.starts_with(CODEX_PASTED_TEXT_PREFIX)
         || file_name.starts_with(CODEX_ATTACHMENT_IMAGE_PREFIX)
         || file_name == CODEX_GOAL_OBJECTIVE_FILE
+}
+
+fn codex_clipboard_source_is_persistable(source: &Path) -> bool {
+    prodex_core::path_is_under_root(&env::temp_dir(), source)
+}
+
+fn path_is_regular_file(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.file_type().is_file()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("failed to inspect {}", path.display())),
+    }
 }
 
 #[cfg(test)]

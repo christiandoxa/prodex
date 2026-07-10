@@ -3,7 +3,10 @@ use clap::{ArgGroup, Args, Subcommand};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-pub const SUPER_OPTIMIZER_PREFIXES: [&str; 4] = ["sqz", "tokensavior", "clawcompactor", "ponytail"];
+#[path = "runtime_args/super_tail_extract.rs"]
+mod super_tail_extract;
+
+pub const SUPER_OPTIMIZER_PREFIXES: [&str; 1] = ["ponytail"];
 
 #[derive(Args, Debug)]
 pub struct RunArgs {
@@ -110,9 +113,6 @@ pub struct CavemanArgs {
     /// External provider API key supplied by a higher-level launch shortcut.
     #[arg(skip)]
     pub external_provider_api_key: Option<String>,
-    /// Local memory backend selected by a higher-level launch shortcut.
-    #[arg(skip)]
-    pub memory_backend: SuperMemoryBackend,
     #[command(flatten)]
     pub codex_features: CodexRuntimeFeatureArgs,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
@@ -157,12 +157,6 @@ pub struct SuperArgs {
     /// Disable Presidio redaction and skip the interactive opt-in prompt.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
-    /// Enable prodex-memory with the managed Mem0 OSS Docker backend.
-    #[arg(long, conflicts_with = "no_mem0")]
-    pub mem0: bool,
-    /// Skip the Mem0 prompt and leave prodex-memory disabled for Super.
-    #[arg(long, conflicts_with = "mem0")]
-    pub no_mem0: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
     #[arg(
         long,
@@ -211,13 +205,6 @@ pub struct SuperArgs {
     pub codex_args: Vec<OsString>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SuperMemoryBackend {
-    #[default]
-    Sqlite,
-    Mem0,
-}
-
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperCliAgent {
     Codex,
@@ -232,16 +219,6 @@ pub struct GeminiCompatRefreshArgs {
     #[arg(long, value_name = "PATH")]
     pub codex_home: PathBuf,
 }
-
-#[derive(Args, Debug)]
-pub struct MemoryMcpArgs {
-    /// SQLite store path for local Prodex memory.
-    #[arg(long, value_name = "PATH")]
-    pub store: Option<PathBuf>,
-}
-
-#[derive(Args, Debug)]
-pub struct InspectMcpArgs {}
 
 #[derive(Args, Debug)]
 pub struct McpJsonlBridgeArgs {
@@ -281,9 +258,60 @@ pub struct AppServerBrokerArgs {
     /// Print the broker capability contract as JSON.
     #[arg(long)]
     pub json: bool,
-    /// Reserved opt-in for future stdio brokering. Currently reports unsupported.
-    #[arg(long)]
+    /// Experimental live stdio broker that validates protocol frames and preserves input.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
+    pub experimental_stdio_live: bool,
+    /// Experimental line-by-line stdio preview that emits broker diagnostics as JSONL.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
     pub experimental_stdio: bool,
+    /// Experimental read-only stdio passthrough that mirrors input to stdout and emits diagnostics to stderr.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio",
+            "experimental_stdio_validate",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
+    pub experimental_stdio_passthrough_preview: bool,
+    /// Experimental fail-closed stdio validation that emits diagnostics and errors on malformed frames.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio",
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate_passthrough"
+        ]
+    )]
+    pub experimental_stdio_validate: bool,
+    /// Experimental stdio passthrough that validates each frame before forwarding it.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "experimental_stdio_live",
+            "experimental_stdio",
+            "experimental_stdio_passthrough_preview",
+            "experimental_stdio_validate"
+        ]
+    )]
+    pub experimental_stdio_validate_passthrough: bool,
 }
 
 #[derive(Args, Debug)]
@@ -342,66 +370,10 @@ pub struct GatewayProviderFilterArgs {
 
 impl SuperArgs {
     /// The first positional arg can look like a session ID when `trailing_var_arg=true`
-    /// leaves provider flags unseen by clap. Extract `--provider`, `--model`, and `--api-key`
-    /// from `codex_args` and apply them to the struct so downstream provider logic works.
+    /// leaves Super flags unseen by clap. Extract the small set of Super-only flags that
+    /// users commonly place after a session id so they do not leak into `codex resume`.
     pub fn extract_provider_overrides_from_codex_args(&mut self) {
-        let mut i = 0;
-        while i < self.codex_args.len() {
-            let Some(arg) = self.codex_args[i].to_str() else {
-                i += 1;
-                continue;
-            };
-            let (consumed, skip) = match arg {
-                "--provider" => {
-                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                        self.provider = parse_super_external_provider(val).ok();
-                        (2, true)
-                    } else {
-                        (1, false)
-                    }
-                }
-                a if a.starts_with("--provider=") => {
-                    if let Some(val) = a.strip_prefix("--provider=") {
-                        self.provider = parse_super_external_provider(val).ok();
-                    }
-                    (1, true)
-                }
-                "--api-key" => {
-                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                        self.api_key = Some(val.to_string());
-                        (2, true)
-                    } else {
-                        (1, false)
-                    }
-                }
-                a if a.starts_with("--api-key=") => {
-                    self.api_key = a.strip_prefix("--api-key=").map(|v| v.to_string());
-                    (1, true)
-                }
-                "--model" => {
-                    if let Some(val) = self.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                        self.local_model = Some(val.to_string());
-                        (2, true)
-                    } else {
-                        (1, false)
-                    }
-                }
-                a if a.starts_with("--model=") => {
-                    self.local_model = a.strip_prefix("--model=").map(|v| v.to_string());
-                    (1, true)
-                }
-                _ => {
-                    i += 1;
-                    continue;
-                }
-            };
-            if skip {
-                let drain_end = (i + consumed).min(self.codex_args.len());
-                self.codex_args.drain(i..drain_end);
-            } else {
-                i += consumed;
-            }
-        }
+        super_tail_extract::extract_provider_overrides_from_codex_args(self);
     }
 
     pub fn presidio_preference(&self) -> Option<bool> {
@@ -414,26 +386,12 @@ impl SuperArgs {
         }
     }
 
-    pub fn mem0_preference(&self) -> Option<bool> {
-        if self.mem0 {
-            Some(true)
-        } else if self.no_mem0 {
-            Some(false)
-        } else {
-            None
-        }
-    }
-
     pub fn into_caveman_args(self) -> CavemanArgs {
-        self.into_caveman_args_with_choices(false, false)
+        self.into_caveman_args_with_presidio(false)
     }
 
     pub fn into_caveman_args_with_presidio(self, presidio: bool) -> CavemanArgs {
-        self.into_caveman_args_with_choices(presidio, false)
-    }
-
-    pub fn into_caveman_args_with_choices(self, presidio: bool, mem0: bool) -> CavemanArgs {
-        let (prefixed_presidio, prefixed_memory, passthrough_codex_args) =
+        let (prefixed_presidio, passthrough_codex_args) =
             extract_super_leading_launch_prefixes(self.codex_args);
         let presidio = presidio || prefixed_presidio;
         let local_upstream_base_url = self.url.as_deref().map(super_local_provider_base_url);
@@ -474,9 +432,6 @@ impl SuperArgs {
         let mut codex_args = Vec::new();
         codex_args.push(OsString::from("rtk"));
         codex_args.extend(SUPER_OPTIMIZER_PREFIXES.iter().map(OsString::from));
-        if mem0 || prefixed_memory {
-            codex_args.push(OsString::from("mem"));
-        }
         if presidio {
             codex_args.push(OsString::from("presidio"));
         }
@@ -501,35 +456,27 @@ impl SuperArgs {
             super_optimizer_overlay: true,
             external_provider: self.provider,
             external_provider_api_key: self.api_key,
-            memory_backend: if mem0 {
-                SuperMemoryBackend::Mem0
-            } else {
-                SuperMemoryBackend::Sqlite
-            },
             codex_features: CodexRuntimeFeatureArgs::default(),
             codex_args,
         }
     }
 }
 
-fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, bool, Vec<OsString>) {
+fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, Vec<OsString>) {
     let mut presidio = false;
-    let mut memory = false;
     let mut consumed = 0;
     for arg in &args {
         let Some(prefix) = arg.to_str() else {
             break;
         };
         match prefix {
-            "rtk" | "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor"
-            | "ponytail" => {}
-            "mem" | "memory" => memory = true,
+            "rtk" | "ponytail" => {}
             "presidio" => presidio = true,
             _ => break,
         }
         consumed += 1;
     }
-    (presidio, memory, args.into_iter().skip(consumed).collect())
+    (presidio, args.into_iter().skip(consumed).collect())
 }
 
 impl RunArgs {
@@ -911,8 +858,6 @@ mod tests {
             no_proxy: false,
             presidio: false,
             no_presidio: false,
-            mem0: false,
-            no_mem0: false,
             url: None,
             cli: None,
             local_context_window: None,

@@ -10,7 +10,9 @@ use crate::{
     ORPHAN_MANAGED_PROFILE_AUDIT_RETENTION_SECONDS, ProdexCleanupOptions,
     perform_prodex_cleanup_with_options, print_panel, runtime_proxy_log_dir,
 };
-use terminal_ui::{text_width, tui_border_style, tui_secondary_style, tui_title_style};
+use terminal_ui::{
+    text_width, tui_border_style, tui_connected_header_block, tui_secondary_style, tui_title_style,
+};
 
 pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -100,11 +102,8 @@ fn print_cleanup_panel(fields: &[(String, String)]) -> Result<()> {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(frame.area());
-        let header = Paragraph::new(Line::styled("Prodex Cleanup", tui_title_style())).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        let header = Paragraph::new(Line::styled("Prodex Cleanup", tui_title_style()))
+            .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
         let body = Paragraph::new(cleanup_tui_text(fields))
             .block(

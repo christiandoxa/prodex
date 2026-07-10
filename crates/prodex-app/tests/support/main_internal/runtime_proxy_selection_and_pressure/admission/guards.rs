@@ -125,6 +125,152 @@ fn active_request_guard_drop_records_underflow_without_wrapping() {
 }
 
 #[test]
+fn response_lane_limit_still_rejects_fresh_request() {
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .active_request_limit(4)
+    .build();
+    let shared = harness.shared();
+    let limit = shared.lane_admission.limit(RuntimeRouteKind::Responses);
+    shared
+        .lane_admission
+        .responses_active
+        .store(limit, Ordering::SeqCst);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: Vec::new(),
+        body: br#"{"input":"fresh"}"#.to_vec(),
+    };
+
+    assert!(matches!(
+        acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+            shared,
+            "http",
+            "/backend-api/codex/responses",
+            Some(&request),
+        ),
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(RuntimeRouteKind::Responses))
+    ));
+}
+
+#[test]
+fn response_lane_limit_does_not_override_owned_previous_response_affinity() {
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .active_request_limit(4)
+    .build();
+    let shared = harness.shared();
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime state should lock");
+        runtime.state.response_profile_bindings.insert(
+            "resp-owned".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        );
+    }
+    let limit = shared.lane_admission.limit(RuntimeRouteKind::Responses);
+    shared
+        .lane_admission
+        .responses_active
+        .store(limit, Ordering::SeqCst);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: Vec::new(),
+        body: br#"{"previous_response_id":"resp-owned","input":"continue"}"#.to_vec(),
+    };
+
+    let guard = acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+        shared,
+        "http",
+        "/backend-api/codex/responses",
+        Some(&request),
+    )
+    .expect("owned previous_response_id should bypass only the lane cap");
+
+    assert_eq!(
+        shared.active_request_count.load(Ordering::SeqCst),
+        1,
+        "global active counter should still be enforced"
+    );
+    assert_eq!(
+        shared.lane_admission.responses_active.load(Ordering::SeqCst),
+        limit + 1
+    );
+    drop(guard);
+}
+
+#[test]
+fn response_lane_limit_retry_bypasses_owned_previous_response_affinity() {
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .active_request_limit(4)
+    .build();
+    let shared = harness.shared();
+    {
+        let mut runtime = shared.runtime.lock().expect("runtime state should lock");
+        runtime.state.response_profile_bindings.insert(
+            "resp-owned".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        );
+    }
+    let limit = shared.lane_admission.limit(RuntimeRouteKind::Responses);
+    shared
+        .lane_admission
+        .responses_active
+        .store(limit, Ordering::SeqCst);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: Vec::new(),
+        body: br#"{"previous_response_id":"resp-owned","input":"continue"}"#.to_vec(),
+    };
+
+    assert!(matches!(
+        acquire_runtime_proxy_active_request_slot_with_wait(
+            shared,
+            "http",
+            "/backend-api/codex/responses",
+        ),
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(RuntimeRouteKind::Responses))
+    ));
+
+    let guard = acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+        shared,
+        "http",
+        "/backend-api/codex/responses",
+        Some(&request),
+    )
+    .expect("owned previous_response_id should be retried with request context");
+
+    assert_eq!(
+        shared.active_request_count.load(Ordering::SeqCst),
+        1,
+        "global active counter should still be enforced"
+    );
+    assert_eq!(
+        shared.lane_admission.responses_active.load(Ordering::SeqCst),
+        limit + 1
+    );
+    drop(guard);
+}
+
+#[test]
 fn profile_inflight_guard_drop_records_release() {
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",

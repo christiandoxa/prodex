@@ -63,7 +63,7 @@ impl fmt::Debug for ModelRouteCandidate {
         f.debug_struct("ModelRouteCandidate")
             .field("provider", &"<redacted>")
             .field("model", &"<redacted>")
-            .field("capabilities", &self.capabilities)
+            .field("capabilities", &self.capabilities.as_slice())
             .finish()
     }
 }

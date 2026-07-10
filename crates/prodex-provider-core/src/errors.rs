@@ -1,3 +1,7 @@
+mod body;
+
+use self::body::provider_error_tokens;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderErrorClass {
     Auth,
@@ -69,5 +73,64 @@ pub fn classify_provider_error(
     ProviderErrorClassification {
         class: ProviderErrorClass::Other,
         cooldown_ms: 0,
+    }
+}
+
+pub fn classify_provider_error_body(
+    status: u16,
+    body: &[u8],
+    mut classify: impl FnMut(Option<u16>, Option<&str>, Option<&str>) -> ProviderErrorClassification,
+) -> ProviderErrorClassification {
+    let text = std::str::from_utf8(body).ok();
+    let mut best = classify(Some(status), None, text);
+    for token in provider_error_tokens(body) {
+        let candidate = classify(Some(status), Some(&token), Some(&token));
+        if provider_error_classification_rank(candidate.class)
+            < provider_error_classification_rank(best.class)
+        {
+            best = candidate;
+        }
+    }
+    best
+}
+
+fn provider_error_classification_rank(class: ProviderErrorClass) -> u8 {
+    match class {
+        ProviderErrorClass::Auth => 0,
+        ProviderErrorClass::Quota => 1,
+        ProviderErrorClass::RateLimit => 2,
+        ProviderErrorClass::NotFound => 3,
+        ProviderErrorClass::Transient => 4,
+        ProviderErrorClass::Other => 5,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProviderErrorClass, classify_provider_error, classify_provider_error_body};
+
+    #[test]
+    fn provider_error_body_prefers_structured_quota_over_generic_429() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "status": "RESOURCE_EXHAUSTED",
+                "message": "Quota exceeded."
+            }
+        }))
+        .unwrap();
+
+        let classified = classify_provider_error_body(429, &body, classify_provider_error);
+
+        assert_eq!(classified.class, ProviderErrorClass::Quota);
+        assert_eq!(classified.cooldown_ms, 300_000);
+    }
+
+    #[test]
+    fn provider_error_body_reads_sse_error_tokens() {
+        let body = b"event: error\ndata: {\"error\":{\"code\":\"model_not_supported\"}}\n\n";
+
+        let classified = classify_provider_error_body(400, body, classify_provider_error);
+
+        assert_eq!(classified.class, ProviderErrorClass::NotFound);
     }
 }

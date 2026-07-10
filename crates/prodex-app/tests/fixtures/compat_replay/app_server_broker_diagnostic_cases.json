@@ -1,0 +1,1144 @@
+[
+  {
+    "expect": {
+      "affinity_keys": [
+        {
+          "kind": "turn",
+          "value": "turn-1"
+        },
+        {
+          "kind": "thread",
+          "value": "thread-1"
+        },
+        {
+          "kind": "session",
+          "value": "sess-1"
+        }
+      ],
+      "continuation_affinity": {
+        "has_session": true,
+        "has_thread": true,
+        "has_turn": true,
+        "key_count": 3,
+        "owner": {
+          "kind": "turn",
+          "value": "turn-1"
+        },
+        "owner_kind": "turn",
+        "primary": {
+          "kind": "turn",
+          "value": "turn-1"
+        },
+        "stage": "turn_start_request"
+      },
+      "continuation_decision": "continue-turn",
+      "frame_kind": "request",
+      "id": "req-1",
+      "invalid_reason": null,
+      "is_lifecycle_method": true,
+      "item_id": "item-1",
+      "lifecycle_stage": "turn_start_request",
+      "method": "turn/start",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": true,
+        "commit_boundary": "precommit",
+        "mode": "preserve-turn-affinity",
+        "rotation_allowed": false,
+        "rotation_window": "closed",
+        "routing_hint": "preserve-turn-owner",
+        "turn_committed": false
+      },
+      "primary_affinity": {
+        "kind": "turn",
+        "value": "turn-1"
+      },
+      "session_id": "sess-1",
+      "thread_id": "thread-1",
+      "turn_id": "turn-1",
+      "valid_jsonrpc": true
+    },
+    "name": "request_with_nested_ids",
+    "payload": {
+      "id": "req-1",
+      "jsonrpc": "2.0",
+      "method": "turn/start",
+      "params": {
+        "item": {
+          "id": "item-1"
+        },
+        "sessionId": "sess-1",
+        "thread": {
+          "id": "thread-1"
+        },
+        "turn": {
+          "id": "turn-1"
+        }
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "notification",
+      "id": null,
+      "invalid_reason": null,
+      "is_lifecycle_method": true,
+      "item_id": "item-2",
+      "lifecycle_stage": null,
+      "method": "thread/resume",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": "sess-2",
+      "thread_id": "thread-2",
+      "turn_id": "turn-2",
+      "valid_jsonrpc": true
+    },
+    "name": "notification_with_client_metadata",
+    "payload": {
+      "jsonrpc": "2.0",
+      "method": "thread/resume",
+      "params": {
+        "client_metadata": {
+          "item_id": "item-2",
+          "session_id": "sess-2",
+          "thread_id": "thread-2",
+          "turn_id": "turn-2"
+        }
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "response",
+      "id": "req-2",
+      "invalid_reason": null,
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "response_frame",
+    "payload": {
+      "id": "req-2",
+      "jsonrpc": "2.0",
+      "result": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [
+        {
+          "kind": "turn",
+          "value": "turn-2b"
+        },
+        {
+          "kind": "thread",
+          "value": "thread-2b"
+        },
+        {
+          "kind": "session",
+          "value": "sess-2b"
+        }
+      ],
+      "continuation_affinity": {
+        "has_session": true,
+        "has_thread": true,
+        "has_turn": true,
+        "key_count": 3,
+        "owner": {
+          "kind": "turn",
+          "value": "turn-2b"
+        },
+        "owner_kind": "turn",
+        "primary": {
+          "kind": "turn",
+          "value": "turn-2b"
+        },
+        "stage": null
+      },
+      "continuation_decision": "continue-turn",
+      "frame_kind": "response",
+      "id": "req-2b",
+      "invalid_reason": null,
+      "is_lifecycle_method": false,
+      "item_id": "item-2b",
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": true,
+        "commit_boundary": "turn-committed",
+        "mode": "preserve-turn-affinity",
+        "rotation_allowed": false,
+        "rotation_window": "closed",
+        "routing_hint": "preserve-turn-owner",
+        "turn_committed": true
+      },
+      "primary_affinity": {
+        "kind": "turn",
+        "value": "turn-2b"
+      },
+      "session_id": "sess-2b",
+      "thread_id": "thread-2b",
+      "turn_id": "turn-2b",
+      "valid_jsonrpc": true
+    },
+    "name": "response_frame_with_result_metadata",
+    "payload": {
+      "id": "req-2b",
+      "jsonrpc": "2.0",
+      "result": {
+        "item": {
+          "id": "item-2b"
+        },
+        "thread": {
+          "id": "thread-2b",
+          "sessionId": "sess-2b"
+        },
+        "turn": {
+          "id": "turn-2b"
+        }
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": null,
+      "invalid_reason": "method_with_result_or_error",
+      "is_lifecycle_method": true,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": "turn/start",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_mixed_method_and_result",
+    "payload": {
+      "jsonrpc": "2.0",
+      "method": "turn/start",
+      "result": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": null,
+      "invalid_reason": "missing_method_and_response_payload",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": "sess-3",
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_but_informative_session_only",
+    "payload": {
+      "jsonrpc": "2.0",
+      "params": {
+        "sessionId": "sess-3"
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [
+        {
+          "kind": "turn",
+          "value": "turn-done"
+        },
+        {
+          "kind": "thread",
+          "value": "thread-done"
+        }
+      ],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": true,
+        "has_turn": true,
+        "key_count": 2,
+        "owner": {
+          "kind": "turn",
+          "value": "turn-done"
+        },
+        "owner_kind": "turn",
+        "primary": {
+          "kind": "turn",
+          "value": "turn-done"
+        },
+        "stage": "turn_completed_notification"
+      },
+      "continuation_decision": "continue-turn",
+      "frame_kind": "notification",
+      "id": null,
+      "invalid_reason": null,
+      "is_lifecycle_method": true,
+      "item_id": null,
+      "lifecycle_stage": "turn_completed_notification",
+      "method": "turn/completed",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": true,
+        "commit_boundary": "turn-committed",
+        "mode": "preserve-turn-affinity",
+        "rotation_allowed": false,
+        "rotation_window": "closed",
+        "routing_hint": "preserve-turn-owner",
+        "turn_committed": true
+      },
+      "primary_affinity": {
+        "kind": "turn",
+        "value": "turn-done"
+      },
+      "session_id": null,
+      "thread_id": "thread-done",
+      "turn_id": "turn-done",
+      "valid_jsonrpc": true
+    },
+    "name": "notification_with_turn_completed_lifecycle_method",
+    "payload": {
+      "jsonrpc": "2.0",
+      "method": "turn/completed",
+      "params": {
+        "threadId": "thread-done",
+        "turn": {
+          "id": "turn-done"
+        }
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [
+        {
+          "kind": "thread",
+          "value": "thread-started"
+        }
+      ],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": true,
+        "has_turn": false,
+        "key_count": 1,
+        "owner": {
+          "kind": "thread",
+          "value": "thread-started"
+        },
+        "owner_kind": "thread",
+        "primary": {
+          "kind": "thread",
+          "value": "thread-started"
+        },
+        "stage": "thread_started_notification"
+      },
+      "continuation_decision": "continue-thread",
+      "frame_kind": "notification",
+      "id": null,
+      "invalid_reason": null,
+      "is_lifecycle_method": true,
+      "item_id": null,
+      "lifecycle_stage": "thread_started_notification",
+      "method": "thread/started",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": true,
+        "commit_boundary": "precommit",
+        "mode": "preserve-thread-affinity",
+        "rotation_allowed": false,
+        "rotation_window": "closed",
+        "routing_hint": "preserve-thread-owner",
+        "turn_committed": false
+      },
+      "primary_affinity": {
+        "kind": "thread",
+        "value": "thread-started"
+      },
+      "session_id": null,
+      "thread_id": "thread-started",
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "notification_with_thread_started_lifecycle_method",
+    "payload": {
+      "jsonrpc": "2.0",
+      "method": "thread/started",
+      "params": {
+        "thread": {
+          "id": "thread-started"
+        }
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [
+        {
+          "kind": "turn",
+          "value": "turn-started"
+        },
+        {
+          "kind": "thread",
+          "value": "thread-started"
+        }
+      ],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": true,
+        "has_turn": true,
+        "key_count": 2,
+        "owner": {
+          "kind": "turn",
+          "value": "turn-started"
+        },
+        "owner_kind": "turn",
+        "primary": {
+          "kind": "turn",
+          "value": "turn-started"
+        },
+        "stage": "turn_started_notification"
+      },
+      "continuation_decision": "continue-turn",
+      "frame_kind": "notification",
+      "id": null,
+      "invalid_reason": null,
+      "is_lifecycle_method": true,
+      "item_id": null,
+      "lifecycle_stage": "turn_started_notification",
+      "method": "turn/started",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": true,
+        "commit_boundary": "turn-committed",
+        "mode": "preserve-turn-affinity",
+        "rotation_allowed": false,
+        "rotation_window": "closed",
+        "routing_hint": "preserve-turn-owner",
+        "turn_committed": true
+      },
+      "primary_affinity": {
+        "kind": "turn",
+        "value": "turn-started"
+      },
+      "session_id": null,
+      "thread_id": "thread-started",
+      "turn_id": "turn-started",
+      "valid_jsonrpc": true
+    },
+    "name": "notification_with_turn_started_lifecycle_method",
+    "payload": {
+      "jsonrpc": "2.0",
+      "method": "turn/started",
+      "params": {
+        "threadId": "thread-started",
+        "turn": {
+          "id": "turn-started"
+        }
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "request",
+      "id": "req-unknown",
+      "invalid_reason": null,
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": "custom/ping",
+      "method_kind": "other",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": "sess-unknown",
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "request_with_unknown_method",
+    "payload": {
+      "id": "req-unknown",
+      "jsonrpc": "2.0",
+      "method": "custom/ping",
+      "params": {
+        "sessionId": "sess-unknown"
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-bad-version",
+      "invalid_reason": "non_jsonrpc_version",
+      "is_lifecycle_method": true,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": "turn/start",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": false
+    },
+    "name": "invalid_non_jsonrpc_version",
+    "payload": {
+      "id": "req-bad-version",
+      "jsonrpc": "1.0",
+      "method": "turn/start",
+      "params": {
+        "sessionId": "sess-bad-version"
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-non-string-method",
+      "invalid_reason": "non_string_method",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": "sess-non-string",
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_non_string_method",
+    "payload": {
+      "id": "req-non-string-method",
+      "jsonrpc": "2.0",
+      "method": [
+        "turn/start"
+      ],
+      "params": {
+        "sessionId": "sess-non-string"
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-both",
+      "invalid_reason": "result_with_error",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_response_result_with_error",
+    "payload": {
+      "error": {
+        "code": -32000,
+        "message": "nope"
+      },
+      "id": "req-both",
+      "jsonrpc": "2.0",
+      "result": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": {
+        "nested": "req-object"
+      },
+      "invalid_reason": "non_scalar_id",
+      "is_lifecycle_method": true,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": "turn/start",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": "sess-non-scalar-id",
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_non_scalar_id",
+    "payload": {
+      "id": {
+        "nested": "req-object"
+      },
+      "jsonrpc": "2.0",
+      "method": "turn/start",
+      "params": {
+        "sessionId": "sess-non-scalar-id"
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-scalar-params",
+      "invalid_reason": "non_container_params",
+      "is_lifecycle_method": true,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": "turn/start",
+      "method_kind": "lifecycle",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_non_container_params",
+    "payload": {
+      "id": "req-scalar-params",
+      "jsonrpc": "2.0",
+      "method": "turn/start",
+      "params": "not-an-object-or-array"
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-error-text",
+      "invalid_reason": "non_object_error",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_non_object_error",
+    "payload": {
+      "error": "quota exceeded",
+      "id": "req-error-text",
+      "jsonrpc": "2.0"
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-error-code",
+      "invalid_reason": "non_integer_error_code",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_non_integer_error_code",
+    "payload": {
+      "error": {
+        "code": "-32000",
+        "message": "bad"
+      },
+      "id": "req-error-code",
+      "jsonrpc": "2.0"
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-error-message",
+      "invalid_reason": "non_string_error_message",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_non_string_error_message",
+    "payload": {
+      "error": {
+        "code": -32000,
+        "message": {
+          "text": "bad"
+        }
+      },
+      "id": "req-error-message",
+      "jsonrpc": "2.0"
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": null,
+      "invalid_reason": "batch_frame_unsupported",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": false
+    },
+    "name": "invalid_batch_frame_unsupported",
+    "payload": [
+      "not",
+      "a",
+      "json-rpc-object"
+    ]
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": null,
+      "invalid_reason": "missing_response_id",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_response_missing_id",
+    "payload": {
+      "jsonrpc": "2.0",
+      "result": {
+        "ok": true
+      }
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": "req-reserved-method",
+      "invalid_reason": "invalid_method_name",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": "rpc.internal",
+      "method_kind": "other",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": true
+    },
+    "name": "invalid_reserved_method_name",
+    "payload": {
+      "id": "req-reserved-method",
+      "jsonrpc": "2.0",
+      "method": "rpc.internal",
+      "params": {}
+    }
+  },
+  {
+    "expect": {
+      "affinity_keys": [],
+      "continuation_affinity": {
+        "has_session": false,
+        "has_thread": false,
+        "has_turn": false,
+        "key_count": 0,
+        "owner": null,
+        "owner_kind": "none",
+        "primary": null,
+        "stage": null
+      },
+      "continuation_decision": "fresh",
+      "frame_kind": "invalid",
+      "id": null,
+      "invalid_reason": "non_object_frame",
+      "is_lifecycle_method": false,
+      "item_id": null,
+      "lifecycle_stage": null,
+      "method": null,
+      "method_kind": "absent",
+      "policy_hint": {
+        "affinity_required": false,
+        "commit_boundary": "precommit",
+        "mode": "fresh-selection-ok",
+        "rotation_allowed": true,
+        "rotation_window": "open",
+        "routing_hint": "fresh-select-ok",
+        "turn_committed": false
+      },
+      "primary_affinity": null,
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "valid_jsonrpc": false
+    },
+    "name": "invalid_non_object_frame",
+    "payload": "not-a-json-rpc-object"
+  }
+]

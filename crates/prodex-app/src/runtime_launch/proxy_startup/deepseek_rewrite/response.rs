@@ -1,22 +1,26 @@
-use super::super::gemini_rewrite::runtime_gemini_custom_tool_input_from_arguments;
 use super::super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
+    RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_log_response_conformance,
     runtime_provider_response_conformance_result,
 };
-use super::super::provider_tools::runtime_provider_split_flat_namespace_tool_name;
 use super::{
-    RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages,
-    RuntimeDeepSeekPendingRequest, runtime_deepseek_rtk_wrapped_tool_arguments,
+    RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages, RuntimeDeepSeekPendingRequest,
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
 use prodex_domain::{CallId, RequestId};
-use prodex_provider_core::ProviderTransformLoss;
+use prodex_provider_core::{
+    deepseek_provider_core_chat_assistant_messages_from_response_value,
+    deepseek_provider_core_merge_response_metadata,
+    deepseek_provider_core_normalize_assistant_tool_call_content,
+    provider_core_chat_compatible_responses_value_from_chat_value_with_fallback_ids,
+    provider_core_rewritten_json_value,
+};
 use std::io::Read;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(
+    provider_kind: RuntimeProviderBridgeKind,
     status: u16,
     mut response: reqwest::blocking::Response,
     request_id: u64,
@@ -25,36 +29,31 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
     conversations: &RuntimeDeepSeekConversationStore,
     runtime_shared: &crate::RuntimeRotationProxyShared,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
+    let provider_label = provider_kind.chat_compatible_adapter_label();
     let mut body = Vec::new();
     response
         .read_to_end(&mut body)
-        .context("failed to read DeepSeek chat response body")?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&body).context("failed to parse DeepSeek chat response JSON")?;
-    let translated = runtime_provider_response_conformance_result(
-        RuntimeProviderBridgeKind::DeepSeek,
-        status,
-        &body,
-    );
+        .with_context(|| format!("failed to read {provider_label} chat response body"))?;
+    let value: serde_json::Value = serde_json::from_slice(&body)
+        .with_context(|| format!("failed to parse {provider_label} chat response JSON"))?;
+    let translated = runtime_provider_response_conformance_result(provider_kind, status, &body);
     if let Some(result) = translated.as_ref() {
         runtime_provider_log_response_conformance(
             runtime_shared,
             request_id,
-            RuntimeProviderBridgeKind::DeepSeek,
+            provider_kind,
             result,
         );
     }
-    let mut response = translated
+    let mut response = if let Some(mut response) = translated
         .as_ref()
-        .and_then(|result| match result.loss {
-            ProviderTransformLoss::Lossless | ProviderTransformLoss::DegradedButSafe { .. } => {
-                result.body.as_ref()
-            }
-            ProviderTransformLoss::Rejected { .. }
-            | ProviderTransformLoss::UnsupportedUpstream { .. } => None,
-        })
-        .and_then(|body| serde_json::from_slice::<serde_json::Value>(body).ok())
-        .unwrap_or_else(|| runtime_deepseek_responses_value_from_chat_value(&value, request_id));
+        .and_then(|result| provider_core_rewritten_json_value(Some(result)))
+    {
+        runtime_deepseek_apply_typed_fallback_ids(&value, &mut response);
+        response
+    } else {
+        runtime_chat_compatible_responses_value(&value, provider_kind)
+    };
     runtime_deepseek_merge_response_metadata(&mut response, response_metadata);
     if response.get("status").and_then(serde_json::Value::as_str) != Some("failed")
         && let Some(response_id) = response.get("id").and_then(serde_json::Value::as_str)
@@ -75,6 +74,27 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
         )],
         body: body.into(),
     })
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_value_from_chat_value(
+    value: &serde_json::Value,
+    _request_id: u64,
+) -> serde_json::Value {
+    runtime_chat_compatible_responses_value(value, RuntimeProviderBridgeKind::DeepSeek)
+}
+
+fn runtime_chat_compatible_responses_value(
+    value: &serde_json::Value,
+    provider_kind: RuntimeProviderBridgeKind,
+) -> serde_json::Value {
+    provider_core_chat_compatible_responses_value_from_chat_value_with_fallback_ids(
+        value,
+        runtime_provider_label(provider_kind),
+        provider_kind.chat_compatible_adapter_label(),
+        SUPER_DEEPSEEK_DEFAULT_MODEL,
+        || format!("resp_deepseek_{}", RequestId::new()),
+        || format!("call_deepseek_{}", CallId::new()),
+    )
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_take_pending_messages(
@@ -100,7 +120,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_store_conversat
     messages.extend(
         assistant_messages
             .into_iter()
-            .map(runtime_deepseek_normalize_assistant_tool_call_content),
+            .map(deepseek_provider_core_normalize_assistant_tool_call_content),
     );
     if let Ok(mut conversations) = conversations.lock() {
         conversations.insert(response_id.to_string(), messages);
@@ -111,422 +131,58 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_merge_response_
     response: &mut serde_json::Value,
     metadata: Option<serde_json::Value>,
 ) {
-    let Some(metadata) = metadata else {
-        return;
-    };
-    let Some(metadata_object) = metadata.as_object() else {
-        return;
-    };
-    let response_metadata = response
-        .as_object_mut()
-        .map(|object| {
-            object
-                .entry("metadata".to_string())
-                .or_insert_with(|| serde_json::json!({}))
-        })
-        .and_then(serde_json::Value::as_object_mut);
-    let Some(response_metadata) = response_metadata else {
-        return;
-    };
-    for (key, value) in metadata_object {
-        match (response_metadata.get_mut(key), value.as_object()) {
-            (Some(existing), Some(next)) => {
-                if let Some(existing) = existing.as_object_mut() {
-                    for (nested_key, nested_value) in next {
-                        existing.insert(nested_key.clone(), nested_value.clone());
-                    }
-                }
-            }
-            _ => {
-                response_metadata.insert(key.clone(), value.clone());
-            }
-        }
-    }
-}
-
-pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_normalize_assistant_tool_call_content(
-    mut message: serde_json::Value,
-) -> serde_json::Value {
-    let is_assistant = message.get("role").and_then(serde_json::Value::as_str) == Some("assistant");
-    let has_tool_calls = message
-        .get("tool_calls")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|tool_calls| !tool_calls.is_empty());
-    if is_assistant
-        && has_tool_calls
-        && message
-            .get("content")
-            .is_none_or(serde_json::Value::is_null)
-    {
-        message["content"] = serde_json::Value::String(String::new());
-    }
-    message
+    deepseek_provider_core_merge_response_metadata(response, metadata);
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_assistant_messages_from_response_value(
     value: &serde_json::Value,
 ) -> Vec<serde_json::Value> {
-    let Some(message) = value
+    deepseek_provider_core_chat_assistant_messages_from_response_value(value)
+}
+
+fn runtime_deepseek_apply_typed_fallback_ids(
+    source: &serde_json::Value,
+    response: &mut serde_json::Value,
+) {
+    if source
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .is_none()
+    {
+        response["id"] = serde_json::Value::String(format!("resp_deepseek_{}", RequestId::new()));
+    }
+    let Some(tool_calls) = source
         .get("choices")
         .and_then(serde_json::Value::as_array)
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.get("message"))
-    else {
-        return Vec::new();
-    };
-    let content = message
-        .get("content")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let reasoning_content = message
-        .get("reasoning_content")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let tool_calls = message.get("tool_calls").cloned();
-    if content.is_empty() && reasoning_content.is_empty() && tool_calls.is_none() {
-        return Vec::new();
-    }
-    let has_tool_calls = tool_calls.is_some();
-    let mut assistant = serde_json::json!({
-        "role": "assistant",
-        "content": if content.is_empty() {
-            if has_tool_calls {
-                serde_json::Value::String(String::new())
-            } else {
-                serde_json::Value::Null
-            }
-        } else {
-            serde_json::Value::String(content.to_string())
-        },
-    });
-    if !reasoning_content.is_empty() {
-        assistant["reasoning_content"] = serde_json::Value::String(reasoning_content.to_string());
-    }
-    if let Some(tool_calls) = tool_calls {
-        assistant["tool_calls"] = runtime_deepseek_rtk_wrapped_chat_tool_calls(tool_calls);
-    }
-    vec![assistant]
-}
-
-fn runtime_deepseek_rtk_wrapped_chat_tool_calls(
-    mut tool_calls: serde_json::Value,
-) -> serde_json::Value {
-    let Some(tool_calls_array) = tool_calls.as_array_mut() else {
-        return tool_calls;
-    };
-    for tool_call in tool_calls_array {
-        let Some(function) = tool_call
-            .get_mut("function")
-            .and_then(serde_json::Value::as_object_mut)
-        else {
-            continue;
-        };
-        let name = function
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("tool_call")
-            .to_string();
-        let Some(arguments) = function
-            .get("arguments")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-        else {
-            continue;
-        };
-        function.insert(
-            "arguments".to_string(),
-            serde_json::Value::String(runtime_deepseek_rtk_wrapped_tool_arguments(
-                &name, &arguments,
-            )),
-        );
-    }
-    tool_calls
-}
-
-pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_value_from_chat_value(
-    value: &serde_json::Value,
-    _request_id: u64,
-) -> serde_json::Value {
-    let response_id = value
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("resp_deepseek_{}", RequestId::new()));
-    let model = value
-        .get("model")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or(SUPER_DEEPSEEK_DEFAULT_MODEL);
-    let created_at = value
-        .get("created")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or_else(runtime_deepseek_created_at);
-    let message = value
-        .get("choices")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("message"));
-    let mut output = Vec::new();
-    let mut tool_call_error = None;
-    if let Some(content) = message
-        .and_then(|message| message.get("content"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|content| !content.is_empty())
-    {
-        output.push(serde_json::json!({
-            "type": "message",
-            "role": "assistant",
-            "content": [{
-                "type": "output_text",
-                "text": content,
-            }],
-        }));
-    }
-    if let Some(tool_calls) = message
         .and_then(|message| message.get("tool_calls"))
         .and_then(serde_json::Value::as_array)
-    {
-        for tool_call in tool_calls {
-            match runtime_deepseek_responses_tool_call_item(tool_call) {
-                Ok(Some(item)) => output.push(item),
-                Ok(None) => {}
-                Err(message) => {
-                    tool_call_error = Some(message);
-                    break;
-                }
-            }
+    else {
+        return;
+    };
+    let Some(output) = response
+        .get_mut("output")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    let mut output_calls = output.iter_mut().filter(|item| {
+        matches!(
+            item.get("type").and_then(serde_json::Value::as_str),
+            Some("function_call" | "custom_tool_call" | "tool_search_call")
+        )
+    });
+    for tool_call in tool_calls {
+        let Some(item) = output_calls.next() else {
+            break;
+        };
+        if tool_call
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .is_none()
+        {
+            item["call_id"] = serde_json::Value::String(format!("call_deepseek_{}", CallId::new()));
         }
     }
-    let mut response = serde_json::json!({
-        "id": response_id,
-        "object": "response",
-        "created_at": created_at,
-        "model": model,
-        "output": output,
-    });
-    if let Some(message) = tool_call_error {
-        response["status"] = serde_json::Value::String("failed".to_string());
-        response["error"] = serde_json::json!({
-            "code": "invalid_tool_call_arguments",
-            "message": message,
-        });
-    }
-    if let Some(usage) = value
-        .get("usage")
-        .and_then(runtime_deepseek_responses_usage)
-    {
-        response["usage"] = usage;
-    }
-    let mut metadata = serde_json::Map::new();
-    if let Some(logprobs) = value
-        .get("choices")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("logprobs"))
-        .filter(|logprobs| !logprobs.is_null())
-    {
-        metadata.insert("logprobs".to_string(), logprobs.clone());
-    }
-    if let Some(reasoning_content) = message
-        .and_then(|message| message.get("reasoning_content"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|reasoning_content| !reasoning_content.is_empty())
-    {
-        metadata.insert(
-            "reasoning_content".to_string(),
-            serde_json::Value::String(reasoning_content.to_string()),
-        );
-    }
-    if let Some(refusal) = message
-        .and_then(|message| message.get("refusal"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|refusal| !refusal.is_empty())
-    {
-        metadata.insert(
-            "refusal".to_string(),
-            serde_json::Value::String(refusal.to_string()),
-        );
-    }
-    if let Some(annotations) = message
-        .and_then(|message| message.get("annotations"))
-        .and_then(serde_json::Value::as_array)
-        .filter(|annotations| !annotations.is_empty())
-    {
-        metadata.insert(
-            "annotations".to_string(),
-            serde_json::Value::Array(annotations.clone()),
-        );
-    }
-    if let Some(finish_reason) = value
-        .get("choices")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("finish_reason"))
-        .and_then(serde_json::Value::as_str)
-    {
-        metadata.insert(
-            "finish_reason".to_string(),
-            serde_json::Value::String(finish_reason.to_string()),
-        );
-    }
-    if let Some(system_fingerprint) = value
-        .get("system_fingerprint")
-        .and_then(serde_json::Value::as_str)
-        .filter(|system_fingerprint| !system_fingerprint.is_empty())
-    {
-        metadata.insert(
-            "system_fingerprint".to_string(),
-            serde_json::Value::String(system_fingerprint.to_string()),
-        );
-    }
-    if !metadata.is_empty() {
-        response["metadata"] = serde_json::json!({ "deepseek": metadata });
-    }
-    response
-}
-
-fn runtime_deepseek_responses_tool_call_item(
-    tool_call: &serde_json::Value,
-) -> Result<Option<serde_json::Value>, String> {
-    let call_id = tool_call
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("call_deepseek_{}", CallId::new()));
-    let Some(function) = tool_call
-        .get("function")
-        .and_then(serde_json::Value::as_object)
-    else {
-        return Err("DeepSeek returned a tool call without a function object".to_string());
-    };
-    let Some(name) = function
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .filter(|name| !name.trim().is_empty())
-    else {
-        return Err("DeepSeek returned a tool call without a function name".to_string());
-    };
-    let arguments = function
-        .get("arguments")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("{}");
-    runtime_deepseek_validate_tool_call_arguments(name, arguments)?;
-    if name == "tool_search" {
-        let arguments = serde_json::from_str::<serde_json::Value>(arguments)
-            .map_err(|error| runtime_deepseek_tool_call_arguments_error(name, error))?;
-        return Ok(Some(serde_json::json!({
-            "type": "tool_search_call",
-            "call_id": call_id,
-            "execution": "client",
-            "arguments": arguments,
-        })));
-    }
-    if name == "apply_patch" {
-        return Ok(Some(serde_json::json!({
-            "type": "custom_tool_call",
-            "call_id": call_id,
-            "name": name,
-            "input": runtime_gemini_custom_tool_input_from_arguments(arguments),
-        })));
-    }
-    let arguments = runtime_deepseek_rtk_wrapped_tool_arguments(name, arguments);
-    let (namespace, name) = runtime_provider_split_flat_namespace_tool_name(name);
-    let mut item = serde_json::json!({
-        "type": "function_call",
-        "call_id": call_id,
-        "name": name,
-        "arguments": arguments,
-    });
-    if let Some(namespace) = namespace {
-        item["namespace"] = serde_json::Value::String(namespace);
-    }
-    if let Some(signature) = runtime_deepseek_chat_tool_call_thought_signature(tool_call) {
-        item["gemini_thought_signature"] = serde_json::Value::String(signature.to_string());
-    }
-    Ok(Some(item))
-}
-
-fn runtime_deepseek_validate_tool_call_arguments(
-    name: &str,
-    arguments: &str,
-) -> Result<(), String> {
-    if arguments.trim().is_empty() {
-        return Ok(());
-    }
-    serde_json::from_str::<serde_json::Value>(arguments)
-        .map(|_| ())
-        .map_err(|error| runtime_deepseek_tool_call_arguments_error(name, error))
-}
-
-fn runtime_deepseek_tool_call_arguments_error(name: &str, error: serde_json::Error) -> String {
-    format!("DeepSeek returned malformed JSON arguments for tool call `{name}`: {error}")
-}
-
-pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_tool_call_thought_signature(
-    tool_call: &serde_json::Value,
-) -> Option<String> {
-    tool_call
-        .get("extra_content")
-        .and_then(|value| value.get("google"))
-        .and_then(|value| value.get("thought_signature"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|signature| !signature.trim().is_empty())
-        .map(str::to_string)
-}
-
-pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_responses_usage(
-    usage: &serde_json::Value,
-) -> Option<serde_json::Value> {
-    let input_tokens = usage
-        .get("prompt_tokens")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("completion_tokens")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let total_tokens = usage
-        .get("total_tokens")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
-    let cache_hit_tokens = usage
-        .get("prompt_cache_hit_tokens")
-        .and_then(serde_json::Value::as_u64);
-    let cache_miss_tokens = usage
-        .get("prompt_cache_miss_tokens")
-        .and_then(serde_json::Value::as_u64);
-    let reasoning_tokens = usage
-        .get("completion_tokens_details")
-        .and_then(|details| details.get("reasoning_tokens"))
-        .and_then(serde_json::Value::as_u64);
-    let mut response_usage = serde_json::json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    });
-    if let Some(cache_hit_tokens) = cache_hit_tokens {
-        response_usage["input_tokens_details"] = serde_json::json!({
-            "cached_tokens": cache_hit_tokens,
-        });
-    }
-    if let Some(reasoning_tokens) = reasoning_tokens {
-        response_usage["output_tokens_details"] = serde_json::json!({
-            "reasoning_tokens": reasoning_tokens,
-        });
-    }
-    if cache_hit_tokens.is_some() || cache_miss_tokens.is_some() {
-        response_usage["metadata"] = serde_json::json!({
-            "deepseek": {
-                "prompt_cache_hit_tokens": cache_hit_tokens.unwrap_or(0),
-                "prompt_cache_miss_tokens": cache_miss_tokens.unwrap_or(0),
-            }
-        });
-    }
-    Some(response_usage)
-}
-
-pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_created_at() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
 }

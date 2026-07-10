@@ -13,8 +13,8 @@ use std::ffi::OsString;
 use std::io::{self, IsTerminal};
 use std::path::Path;
 use terminal_ui::{
-    tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style,
-    tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_detail_style,
+    tui_hint_style, tui_primary_style, tui_secondary_style, tui_title_style,
 };
 
 use crate::{
@@ -195,11 +195,7 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
                     tui_secondary_style(),
                 ),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             if reports.is_empty() {
@@ -280,7 +276,7 @@ fn render_session_reports_tui_scrollable(
                     Span::styled("Prodex Sessions", tui_title_style()),
                     Span::raw("  "),
                     Span::styled(format!("{} session(s)", reports.len()), tui_secondary_style()),
-                ])).block(Block::default().borders(Borders::ALL).border_style(tui_border_style()));
+                ])).block(tui_connected_header_block(tui_border_style()));
                 frame.render_widget(header, chunks[0]);
 
                 if reports.is_empty() {
@@ -306,7 +302,7 @@ fn render_session_reports_tui_scrollable(
                     )
                 };
                 let footer = Paragraph::new(Line::styled(footer_text, tui_hint_style().add_modifier(Modifier::BOLD)))
-                    .block(Block::default().borders(Borders::ALL).border_style(tui_border_style()));
+                    .block(tui_connected_footer_block(tui_border_style()));
                 frame.render_widget(footer, chunks[2]);
             }).context("failed to draw session scroll TUI")?;
 

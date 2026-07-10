@@ -1,4 +1,5 @@
 use super::{GeminiOAuthSecret, gemini_oauth_expiry_date_ms};
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_text_with_limit};
 use anyhow::{Context, Result, bail};
 use redaction::redaction_redact_secret_like_text;
 use reqwest::blocking::Client;
@@ -178,9 +179,11 @@ fn parse_google_token_response(
     context_label: &str,
 ) -> Result<GeminiTokenResponse> {
     let status = response.status();
-    let body = response
-        .text()
-        .with_context(|| format!("failed to read {context_label} response"))?;
+    let body = read_blocking_response_text_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        &format!("failed to read {context_label} response"),
+    )?;
     if !status.is_success() {
         let body = gemini_oauth_redacted_error_body(&body);
         bail!("{context_label} failed (HTTP {}): {body}", status.as_u16());
@@ -217,9 +220,11 @@ pub(super) fn fetch_google_user_email(client: &Client, access_token: &str) -> Re
         .send()
         .context("failed to fetch Google user info")?;
     let status = response.status();
-    let body = response
-        .text()
-        .context("failed to read Google user info response")?;
+    let body = read_blocking_response_text_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read Google user info response",
+    )?;
     if !status.is_success() {
         let body = gemini_oauth_redacted_error_body(&body);
         bail!(

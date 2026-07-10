@@ -15,7 +15,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex rtk` or default `prodex super` RTK shell-command guidance
-- Optional: `sqz-mcp`, `token-savior`, `codebase-memory-mcp`, `claw-compactor`, and a Ponytail checkout if you want the matching `prodex sqz`, `prodex tokensavior`, `prodex clawcompactor`, or `prodex ponytail` optimizer tools
+- Optional: Codebase Memory MCP and a Ponytail checkout for the minimal Super stack; Presidio services when you need PII redaction
 
 If you install `@christiandoxa/prodex` from npm, Prodex uses its bundled `@openai/codex@latest` dependency by default so a broken or architecture-mismatched global `codex` on `PATH` does not affect `prodex run`. If the bundled native Codex optional package is missing or not executable, Prodex falls back to an executable external `codex` on `PATH` and prints a notice before launch, including nvm-managed global Codex installs when the active nvm version's `bin` directory is on `PATH`. If neither bundled nor external Codex is usable, set `PRODEX_CODEX_AUTO_INSTALL=1` to let Prodex run `npm install -g @openai/codex@latest` once before retrying PATH resolution. To deliberately use an external Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
@@ -41,10 +41,10 @@ Check your installed version first:
 prodex --version
 ```
 
-The current local version in this repo is `0.258.0`:
+The current local version in this repo is `0.273.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.258.0
+npm install -g @christiandoxa/prodex@0.273.0
 ```
 
 Dependency status in this repo:
@@ -140,7 +140,7 @@ In the live `prodex quota --all --detail` view, press `f` to cycle provider filt
 
 For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt.
 
-`prodex dashboard` starts a localhost browser dashboard, defaulting to `http://127.0.0.1:8765`. It shows configured profiles, active account controls, and live quota usage using the same quota collectors as `prodex quota`. Use `prodex dashboard --port 0` to bind a free port, or `--base-url` to point quota checks at a custom Codex-compatible backend. The dashboard has no password auth, so keep it bound to localhost unless the network is trusted.
+`prodex dashboard` starts a localhost browser control plane, defaulting to `http://127.0.0.1:8765`. Happy path: open the dashboard, choose a provider setup command, pick a recommended model, run `prodex s` or `prodex s --provider ...`, then check quota/logs. The dashboard shows configured profiles, active account controls, provider setup commands for OpenAI, Gemini, Anthropic, Copilot, DeepSeek, Kiro, and local OpenAI-compatible servers, model catalog metadata, runtime/gateway pointers, and live quota usage using the same quota collectors as `prodex quota`. It generates commands for provider secrets instead of storing them. Use `prodex dashboard --port 0` to bind a free port, or `--base-url` to point quota checks at a custom Codex-compatible backend. The dashboard has no password auth, so keep it bound to localhost unless the network is trusted.
 
 Use `prodex session list` to inspect shared Codex sessions, or `prodex session current` to show sessions started from the current directory. Add `--parent-only` when you only want resumable parent sessions.
 
@@ -176,13 +176,13 @@ printf 'context from stdin' | prodex run exec "summarize this"
 
 Use this path when you want Codex CLI itself to be the front end. Prodex keeps transport behavior close to direct Codex while handling profile selection, quota preflight, continuation affinity, and safe pre-commit rotation. Prodex does not auto-redeem reset credits by default; add `--auto-redeem` when you want guarded automatic single reset-credit redemption only after the OpenAI/Codex weekly window is exhausted for every profile and the weekly reset is not already imminent. Manual `prodex redeem <profile>` is an explicit one-profile consume request; the upstream backend decides whether it applies or reports nothing-to-reset/no-credit.
 
-Recent Codex runtime feature switches are available on `prodex run`, `prodex caveman`, and `prodex super` as Codex config overrides: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens <tokens>`, `--current-time-reminder`, and `--respect-system-proxy` / `--no-respect-system-proxy`. Multi-agent `multiAgentMode` remains an upstream app-server/thread setting; use `prodex app-server` or `prodex run app-server` and pass `none`, `explicitRequestOnly`, or `proactive` through the Codex app-server API. `mcp-server`, `app-server`, and `exec-server` are direct Codex command-server passthroughs by default: Prodex selects profile `CODEX_HOME`, but does not wrap stdio, inject the runtime proxy, rotate accounts inside the protocol, or apply gateway guardrails. `prodex app-server-broker --json` reports the disabled-by-default JSON-RPC broker skeleton; stdio brokering is not enabled yet. Codex plugin catalog commands such as `prodex plugin list` are managed passthrough launches by default.
+Recent Codex runtime feature switches are available on `prodex run`, `prodex caveman`, and `prodex super` as Codex config overrides: `--web-search disabled|cached|indexed|live`, `--rollout-budget-tokens <tokens>`, `--current-time-reminder`, and `--respect-system-proxy` / `--no-respect-system-proxy`. Multi-agent `multiAgentMode` remains an upstream app-server/thread setting; use `prodex app-server` or `prodex run app-server` and pass `none`, `explicitRequestOnly`, or `proactive` through the Codex app-server API. `mcp-server`, `app-server`, and `exec-server` are direct Codex command-server passthroughs by default: Prodex selects profile `CODEX_HOME`, but does not wrap stdio, inject the runtime proxy, rotate accounts inside the protocol, or apply gateway guardrails. `prodex app-server-broker --json` reports the disabled-by-default JSON-RPC broker skeleton, including accepted compatibility aliases such as `notifications/initialized` and `turn/cancel`, upstream-compatible wire parsing where the `jsonrpc` header may be omitted, and continuation decision taxonomy (`fresh`, `continue-session`, `continue-thread`, `continue-turn`). `--experimental-stdio` provides a read-only JSONL preview surface, and `--experimental-stdio-passthrough-preview` mirrors raw stdin to stdout while sending diagnostics to stderr. Preview diagnostics and runtime log observe events redact secret-looking JSON-RPC string fields before rendering diagnostics such as `frame_id`, `request_id`, method, or metadata. Both experimental broker modes are diagnostic-only and append one local `prodex audit` summary event per preview session with counts only. Codex plugin catalog commands such as `prodex plugin list` are managed passthrough launches by default.
 
 New Codex top-level subcommands stay on this managed path by default. For example, `prodex remote-control` is treated as `prodex run remote-control` unless Prodex explicitly adds its own command with that name. Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` remain upstream behavior; `prodex delete <session>` passes through to Codex and prunes matching Prodex session affinity metadata after a successful delete.
 
 Codex CLI 0.124.0 added first-class Amazon Bedrock and OpenAI-compatible custom provider support. Configure Bedrock or another provider in the selected profile's Codex `config.toml`, for example with `model_provider = "amazon-bedrock"`.
 
-Codex 0.142.3 includes the upstream Bedrock GPT-5.6 Sol, Terra, and Luna catalog entries. Prodex does not proxy or rewrite those Bedrock launches.
+Codex 0.143.0 includes the upstream Bedrock GPT-5.6 Sol, Terra, and Luna catalog entries and Codex-owned `max` reasoning effort handling. Prodex does not proxy or rewrite those Bedrock launches.
 
 If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Codex directly without the local runtime proxy. `prodex quota` still shows the configured provider metadata; Bedrock quota, credentials, regions, and provider errors are handled by Codex and the upstream provider.
 
@@ -191,11 +191,7 @@ If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex sk
 ```bash
 prodex caveman
 prodex rtk
-prodex sqz
-prodex tokensavior
-prodex clawcompactor
 prodex ponytail
-prodex mem
 prodex super --url http://127.0.0.1:8131
 prodex super --url http://127.0.0.1:8131 --dry-run
 prodex s expose
@@ -203,22 +199,13 @@ prodex caveman --profile second
 prodex caveman exec "review this repo in caveman mode"
 ```
 
-Use this path when you want Codex itself as the front end but want Caveman mode preloaded from the upstream Caveman plugin. Prodex launches Codex from a temporary Prodex overlay `CODEX_HOME`, then activates Caveman for that session so the base profile home stays unchanged after the session exits.
+Prodex launches Caveman from a temporary overlay `CODEX_HOME`; the base profile stays unchanged. `prodex rtk` and `prodex ponytail` are shortcuts for the matching Caveman prefix.
 
-If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex skips quota preflight and launches Caveman directly without the local runtime proxy.
+`prodex super` and `prodex s` enable Caveman, RTK guidance, Ponytail when installed, Codebase Memory MCP when installed, Smart Context, and launch-time full access. They ask only whether to enable Presidio. Use `--presidio` or `--no-presidio` for non-interactive launches.
 
-Add optimizer prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `sqz`, `tokensavior`, `clawcompactor`, `ponytail`, `mem`, or `presidio`. Top-level shortcuts such as `prodex rtk`, `prodex sqz`, `prodex ponytail`, and `prodex mem` map to `prodex caveman <prefix>`. RTK is an external binary from `rtk-ai/rtk`; install it separately if `rtk gain` is unavailable.
-`prodex super` and its `prodex s` alias also enable RTK guidance and Smart Context Autopilot through a dedicated runtime proxy for OpenAI/Codex providers, then ask whether to enable Presidio redaction. Empty input or `n` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor ponytail --full-access`; `y` is equivalent to `prodex caveman rtk sqz tokensavior clawcompactor ponytail presidio --full-access`. Use `--presidio` or `--no-presidio` to make that choice non-interactive. Super then asks whether to enable prodex-memory through managed Mem0 Docker. Empty input or `n` leaves `prodex-memory` disabled; answer `y` or pass `--mem0` to start the managed Mem0 OSS Docker server, route its OpenAI-compatible calls through a session-local Prodex gateway, and avoid Mem0 Cloud or `MEM0_API_KEY`. Use `--no-mem0` to skip that prompt, or the `mem` optimizer prefix for local SQLite memory. Managed Mem0 mode requires Docker Compose; if no upstream provider API key is available, Prodex serves deterministic local embeddings for Mem0 and keeps generation disabled on that internal gateway. When Presidio is enabled and healthy, it redacts UTF-8 HTTP request bodies and WebSocket text frames through local Presidio before forwarding them upstream; service failures follow the configured `fail_mode`. The proxy preserves exact continuation behavior, then safely reduces token load with adaptive budgeting, artifact-backed tool outputs, duplicate/blob suppression, stable cache-friendly context framing, and critical-signal self-checks.
-Use `prodex s doctor` to check RTK, SQZ MCP, token-savior, codebase-memory-mcp, claw-compactor, optional built-in prodex-memory, built-in Smart Context, and embedded Caveman/Super assets without launching Codex. Add `--json`, `--strict`, or `--presidio` when you need machine-readable output, non-zero failure on unavailable tools, or Presidio service health checks. `prodex s --dry-run` includes the same optimizer matrix in the launch preview.
-Use `prodex log` to show the latest session transcript text plus the latest sent/input and received/output token counts from runtime `token_usage` markers. Use `prodex log stream` to follow transcript and token events live. Use `prodex log upstream` to follow HTTP backend-bound LLM payload snapshots after Prodex processing such as Presidio redaction and Smart Context rewriting; WebSocket request payloads are not logged, and HTTP snapshots are capped at 128 KiB per payload. Add `--json` when you want JSON Lines events.
-Use `prodex s expose` to start a browser-accessible terminal session protected by a high-entropy access token. When `cloudflared` is on `PATH`, Prodex creates a Cloudflare quick tunnel and prints the public URL; use `--no-tunnel` for loopback-only access. Closing the browser tab does not stop the PTY, and reopening the same token URL replays recent terminal scrollback while the `prodex s expose` process is still running.
-Super's optimization stack is local and deterministic by default: Caveman, Ponytail when a managed checkout exists, a Prodex overlay `rtk` PATH wrapper plus RTK auto-wrappers for common noisy commands when RTK is installed, built-in read-only `prodex-inspect` MCP diagnostics, `sqz-mcp`, `token-savior`, and `codebase-memory-mcp` MCP servers when discoverable, and `sqz`/`claw-compactor` wrapper commands when discoverable. When Claw-Compactor is available, Super also installs a trusted one-shot `prodex-claw-compactor-sessionstart` SessionStart benchmark probe wrapper. The startup probe is disabled by default so Codex launch is not delayed; opt in with `PRODEX_CLAW_SESSIONSTART_TIMEOUT_SECONDS=<seconds>`. When enabled, the probe delegates to `prodex-claw-compactor-auto "$(pwd)"` and uses a marker under `CODEX_HOME`, so Codex conversation restarts do not replay it. If the directory has no Markdown memory files, Prodex benchmarks a temporary shadow workspace with a generated `MEMORY.md` and does not modify the original directory.
-For token-savior, prefer an isolated stable-Python venv at `~/.local/share/prodex-optimizers/token-savior/.venv`; Prodex prefers that managed venv over a global `PATH` binary to avoid experimental Python dependency breakage.
-Prodex routes optional-tool state under `PRODEX_HOME` (default `~/.prodex`), including SQZ XDG state, token-savior cache/stats, Codebase Memory cache/config, claw-compactor HOME/XDG state, RTK analytics paths, and local memory, so compatible optimizer metadata stays out of worktrees. `prodex-memory` is local Mem0-style memory and does not use Mem0 Cloud or require `MEM0_API_KEY`; the `mem` prefix uses SQLite, and `--mem0` switches Super to the managed Mem0 OSS Docker backend.
-Super instructs Codex to use the available local optimizer stack where it fits: visible `rtk <cmd>` for noisy shell output when RTK is installed, `prodex-inspect` for read-only Prodex status/profile/runtime-log diagnostics, `prodex-sqz` for repeated large context and long-session reuse when SQZ is available, `prodex-token-savior` for symbol/navigation work before broad source reads when token-savior is available, `codebase-memory-mcp` for structural codebase graph queries when available, optional `prodex-memory` for durable local preferences/project facts, and `prodex-claw-compactor` or `prodex-claw-compactor-auto` for workspace-level summaries when claw-compactor is available. Presidio remains opt-in through the prompt or `--presidio`.
-RTK handles upstream/input command output before it enters the context window through visible `rtk <cmd>` commands when RTK is installed, with overlay auto-wrappers as a safety fallback. Auto-wrappers are only a backstop; write `rtk <cmd>` explicitly when you want the TUI/transcript to show RTK usage. SQZ handles downstream/context reuse through the auto-registered `prodex-sqz` MCP server when `sqz-mcp` is available.
-Managed optimizer checkouts are discovered from `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`. Put Ponytail at `~/.local/share/prodex-optimizers/ponytail` with `git clone https://github.com/DietrichGebert/ponytail.git ~/.local/share/prodex-optimizers/ponytail`. The generated `SUPER_OPTIMIZERS.md` overlay includes an `Available Now` section for the exact tools discovered in that session.
+Use `prodex s doctor --strict` to verify the minimal stack. Add `--presidio` to check the configured Analyzer and Anonymizer services.
 
+Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$XDG_DATA_HOME/prodex-optimizers`, then `~/.local/share/prodex-optimizers`.
 Use DeepSeek with the Codex/Super front end:
 
 ```bash

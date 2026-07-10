@@ -98,7 +98,10 @@ fn repair_resume_session_in_profile_root_dirs(
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
             continue;
         }
         if path

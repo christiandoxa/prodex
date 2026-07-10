@@ -1,6 +1,6 @@
 use super::{
-    RuntimeBufferedWebsocketTextFrame, RuntimeLocalWebSocket, RuntimeProxyRequest,
-    RuntimeRotationProxyShared, RuntimeWebsocketResponseBindingContext,
+    RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES, RuntimeBufferedWebsocketTextFrame, RuntimeLocalWebSocket,
+    RuntimeProxyRequest, RuntimeRotationProxyShared, RuntimeWebsocketResponseBindingContext,
     RuntimeWebsocketSessionState, release_runtime_compact_lineage,
     remember_runtime_response_ids_with_turn_state,
     remember_runtime_successful_previous_response_owner, runtime_proxy_log,
@@ -84,6 +84,7 @@ pub(super) struct RuntimeWebsocketPrecommitHoldRequest<'a> {
     pub(super) text: &'a str,
     pub(super) buffered_precommit_text_frames: &'a mut Vec<RuntimeBufferedWebsocketTextFrame>,
     pub(super) precommit_hold_count: &'a mut usize,
+    pub(super) precommit_hold_bytes: &'a mut usize,
     pub(super) precommit_hold_promotion_event_seen: &'a mut bool,
 }
 
@@ -100,6 +101,7 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
         text,
         buffered_precommit_text_frames,
         precommit_hold_count,
+        precommit_hold_bytes,
         precommit_hold_promotion_event_seen,
     } = request;
 
@@ -121,13 +123,15 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
         );
     }
     *precommit_hold_count = (*precommit_hold_count).saturating_add(1);
+    *precommit_hold_bytes = (*precommit_hold_bytes).saturating_add(text.len());
     *precommit_hold_promotion_event_seen |=
         runtime_websocket_precommit_hold_promotion_event_seen(inspected);
     buffered_precommit_text_frames.push(RuntimeBufferedWebsocketTextFrame {
         text: text.to_string(),
         response_ids: inspected.response_ids.clone(),
     });
-    if *precommit_hold_promotion_event_seen {
+    let lookahead_budget_exhausted = *precommit_hold_bytes >= RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES;
+    if *precommit_hold_promotion_event_seen || lookahead_budget_exhausted {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -135,9 +139,17 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("profile", profile_name),
-                    runtime_proxy_log_field("event", "response_created"),
+                    runtime_proxy_log_field(
+                        "event",
+                        if lookahead_budget_exhausted {
+                            "lookahead_budget_exhausted"
+                        } else {
+                            "response_created"
+                        },
+                    ),
                     runtime_proxy_log_field("reuse", reuse_existing_session.to_string()),
                     runtime_proxy_log_field("hold_count", (*precommit_hold_count).to_string()),
+                    runtime_proxy_log_field("hold_bytes", (*precommit_hold_bytes).to_string()),
                     runtime_proxy_log_field(
                         "profile_promotion_allowed",
                         precommit_hold_promotion_allowed.to_string(),

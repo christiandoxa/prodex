@@ -790,7 +790,7 @@ impl fmt::Display for AuditQueryPlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Scope(error) => error.fmt(f),
-            Self::Timestamp(error) => error.fmt(f),
+            Self::Timestamp(_) => write!(f, "audit query cursor is invalid"),
             Self::CursorSortOrderMismatch => write!(f, "audit query cursor is invalid"),
         }
     }
@@ -819,7 +819,7 @@ impl fmt::Display for AuditQueryPageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Query(error) => error.fmt(f),
-            Self::Timestamp(error) => error.fmt(f),
+            Self::Timestamp(_) => write!(f, "audit query cursor is invalid"),
             Self::Cursor(error) => error.fmt(f),
         }
     }
@@ -1118,7 +1118,10 @@ impl fmt::Debug for AuditRetentionBatchLimitError {
 
 impl fmt::Display for AuditRetentionBatchLimitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "audit retention batch limit is invalid")
+        match self {
+            Self::Zero => write!(f, "audit retention batch limit is invalid"),
+            Self::TooLarge { .. } => write!(f, "audit retention batch limit is too large"),
+        }
     }
 }
 
@@ -1366,6 +1369,9 @@ impl fmt::Display for AuditRetentionPlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Scope(error) => error.fmt(f),
+            Self::Timestamp(AuditTimestampError::TooFarFuture { .. }) => {
+                write!(f, "audit timestamp is too far in the future")
+            }
             Self::Timestamp(error) => error.fmt(f),
         }
     }
@@ -1400,6 +1406,9 @@ impl fmt::Display for AuditRetentionPageError {
             Self::Retention(error) => error.fmt(f),
             Self::Decision(error) => error.fmt(f),
             Self::CursorSortOrderMismatch => write!(f, "audit query cursor is invalid"),
+            Self::Timestamp(AuditTimestampError::TooFarFuture { .. }) => {
+                write!(f, "audit timestamp is too far in the future")
+            }
             Self::Timestamp(error) => error.fmt(f),
             Self::Cursor(error) => error.fmt(f),
         }
@@ -1482,6 +1491,9 @@ impl fmt::Display for AuditRetentionHoldError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Scope(error) => error.fmt(f),
+            Self::Timestamp(AuditTimestampError::TooFarFuture { .. }) => {
+                write!(f, "audit timestamp is too far in the future")
+            }
             Self::Timestamp(error) => error.fmt(f),
         }
     }

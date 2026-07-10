@@ -42,6 +42,145 @@ impl Drop for RuntimeProxyAsyncLoggerPauseGuard {
 }
 
 #[test]
+fn runtime_proxy_latest_log_path_from_pointer_text_accepts_owned_log_under_dir() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let log_path = dir.log_path("prodex-runtime-123.log");
+    fs::write(&log_path, "runtime\n").expect("runtime log should exist");
+    let pointer_text = format!("{}\n", log_path.display());
+
+    assert_eq!(
+        runtime_proxy_latest_log_path_from_pointer_text(&dir.path, &pointer_text),
+        Some(log_path)
+    );
+}
+
+#[test]
+fn runtime_proxy_latest_log_path_from_pointer_text_allows_missing_owned_log_under_dir() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let log_path = dir.log_path("prodex-runtime-123.log");
+    let pointer_text = format!("{}\n", log_path.display());
+
+    assert_eq!(
+        runtime_proxy_latest_log_path_from_pointer_text(&dir.path, &pointer_text),
+        Some(log_path)
+    );
+}
+
+#[test]
+fn runtime_proxy_latest_log_path_from_pointer_text_rejects_nested_log_path() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let nested = dir.log_path("nested");
+    fs::create_dir_all(&nested).expect("nested dir should exist");
+    let log_path = nested.join("prodex-runtime-123.log");
+    fs::write(&log_path, "runtime\n").expect("runtime log should exist");
+    let pointer_text = format!("{}\n", log_path.display());
+
+    assert_eq!(
+        runtime_proxy_latest_log_path_from_pointer_text(&dir.path, &pointer_text),
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_proxy_latest_log_path_from_pointer_text_rejects_symlink_log_file() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let target = dir.log_path("secret.txt");
+    let log_path = dir.log_path("prodex-runtime-symlink.log");
+    fs::write(&target, "do not read\n").expect("target should write");
+    std::os::unix::fs::symlink(&target, &log_path).expect("symlink should create");
+    let pointer_text = format!("{}\n", log_path.display());
+
+    assert_eq!(
+        runtime_proxy_latest_log_path_from_pointer_text(&dir.path, &pointer_text),
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_proxy_latest_log_path_from_pointer_text_rejects_symlink_parent() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let outside = env::temp_dir().join(format!(
+        "prodex-runtime-symlink-parent-{}-{}",
+        std::process::id(),
+        RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&outside).expect("outside dir should exist");
+    let link = dir.log_path("link");
+    std::os::unix::fs::symlink(&outside, &link).expect("symlink should create");
+    let log_path = link.join("prodex-runtime-123.log");
+    fs::write(outside.join("prodex-runtime-123.log"), "do not read\n")
+        .expect("outside log should write");
+    let pointer_text = format!("{}\n", log_path.display());
+
+    assert_eq!(
+        runtime_proxy_latest_log_path_from_pointer_text(&dir.path, &pointer_text),
+        None
+    );
+
+    let _ = fs::remove_dir_all(outside);
+}
+
+#[test]
+fn runtime_proxy_latest_log_path_from_pointer_text_rejects_outside_log_dir() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let outside = env::temp_dir().join(format!(
+        "prodex-runtime-outside-{}-{}.log",
+        std::process::id(),
+        RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let pointer_text = format!("{}\n", outside.display());
+
+    assert_eq!(
+        runtime_proxy_latest_log_path_from_pointer_text(&dir.path, &pointer_text),
+        None
+    );
+}
+
+#[test]
+fn runtime_proxy_latest_log_path_from_pointer_text_rejects_unowned_file_name() {
+    let dir = RuntimeProxyLogTestDir::new();
+    let log_path = dir.log_path("not-prodex-runtime.log");
+    let pointer_text = format!("{}\n", log_path.display());
+
+    assert_eq!(
+        runtime_proxy_latest_log_path_from_pointer_text(&dir.path, &pointer_text),
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn initialize_runtime_proxy_log_path_replaces_latest_pointer_symlink_without_touching_target() {
+    let _runtime_lock = acquire_test_runtime_lock();
+    let _env_lock = TestEnvVarGuard::lock();
+    let dir = RuntimeProxyLogTestDir::new();
+    let _log_dir = TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", dir.path.to_str().unwrap());
+    let pointer_path = dir.log_path(RUNTIME_PROXY_LATEST_LOG_POINTER);
+    let target = dir.log_path("outside-target.path");
+    fs::write(&target, "do not touch\n").expect("target should write");
+    std::os::unix::fs::symlink(&target, &pointer_path).expect("pointer symlink should create");
+
+    let log_path = initialize_runtime_proxy_log_path();
+
+    assert_eq!(
+        fs::read_to_string(&target).expect("target should remain readable"),
+        "do not touch\n"
+    );
+    assert!(
+        !fs::symlink_metadata(&pointer_path)
+            .expect("pointer metadata should exist")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        fs::read_to_string(&pointer_path).expect("pointer should be readable"),
+        format!("{}\n", log_path.display())
+    );
+}
+
+#[test]
 fn runtime_proxy_log_to_path_flushes_async_entries() {
     let _runtime_lock = acquire_test_runtime_lock();
     let dir = RuntimeProxyLogTestDir::new();

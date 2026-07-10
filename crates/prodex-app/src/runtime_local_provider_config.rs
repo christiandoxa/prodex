@@ -125,7 +125,9 @@ fn write_local_model_catalog(
     });
     let contents =
         serde_json::to_string_pretty(&catalog).context("failed to serialize local catalog")?;
-    fs::write(catalog_path, contents)
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(catalog_path), contents)
+        .map_err(anyhow::Error::new)
         .with_context(|| format!("failed to write {}", catalog_path.display()))
 }
 
@@ -310,5 +312,27 @@ mod tests {
 
         assert_eq!(args, user_args);
         assert!(!codex_home.join(LOCAL_MODEL_CATALOG_FILE).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_catalog_write_replaces_symlink_without_touching_target() {
+        let codex_home = temp_codex_home("catalog-symlink");
+        fs::create_dir_all(&codex_home).unwrap();
+        let target = codex_home.join("target.json");
+        let catalog_path = codex_home.join(LOCAL_MODEL_CATALOG_FILE);
+        fs::write(&target, "do not touch").unwrap();
+        std::os::unix::fs::symlink(&target, &catalog_path).unwrap();
+
+        write_local_model_catalog(&catalog_path, "local/qwen", 100_000, 90_000).unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "do not touch");
+        assert!(
+            !fs::symlink_metadata(&catalog_path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let _ = fs::remove_dir_all(codex_home);
     }
 }

@@ -102,6 +102,7 @@ pub(crate) fn attempt_runtime_websocket_request(
     let mut committed_response_ids = BTreeSet::new();
     let mut previous_response_owner_recorded = false;
     let mut precommit_hold_count = 0usize;
+    let mut precommit_hold_bytes = 0usize;
     let mut precommit_hold_promotion_event_seen = false;
     loop {
         match upstream_socket.read() {
@@ -134,6 +135,20 @@ pub(crate) fn attempt_runtime_websocket_request(
 
                 if !committed {
                     match inspected.retry_kind {
+                        Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached) => {
+                            runtime_proxy_log(
+                                shared,
+                                format!(
+                                    "request={request_id} transport=websocket connection_limit_reached profile={profile_name}"
+                                ),
+                            );
+                            let _ = upstream_socket.close(None);
+                            websocket_session.reset();
+                            return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                                profile_name: profile_name.to_string(),
+                                event: "connection_limit_reached",
+                            });
+                        }
                         Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked) => {
                             let _ = upstream_socket.close(None);
                             websocket_session.reset();
@@ -175,6 +190,7 @@ pub(crate) fn attempt_runtime_websocket_request(
                             text: &text,
                             buffered_precommit_text_frames: &mut buffered_precommit_text_frames,
                             precommit_hold_count: &mut precommit_hold_count,
+                            precommit_hold_bytes: &mut precommit_hold_bytes,
                             precommit_hold_promotion_event_seen:
                                 &mut precommit_hold_promotion_event_seen,
                         },
@@ -255,11 +271,7 @@ pub(crate) fn attempt_runtime_websocket_request(
                         },
                     );
                 }
-                let text = if committed_previous_response_not_found {
-                    runtime_translate_precommit_previous_response_websocket_text_frame(&text)
-                } else {
-                    runtime_translate_previous_response_websocket_text_frame(&text)
-                };
+                let text = runtime_translate_previous_response_websocket_text_frame(&text);
                 local_socket
                     .send(WsMessage::Text(text.into()))
                     .with_context(|| {
@@ -274,6 +286,11 @@ pub(crate) fn attempt_runtime_websocket_request(
                             websocket_session,
                             profile_name,
                             event_type: inspected.event_type.as_deref(),
+                            reset_upstream_socket: !realtime_websocket
+                                && matches!(
+                                    inspected.event_type.as_deref(),
+                                    Some("error" | "response.failed" | "response.incomplete")
+                                ),
                             precommit_hold_count,
                             committed_previous_response_not_found,
                             upstream_socket,

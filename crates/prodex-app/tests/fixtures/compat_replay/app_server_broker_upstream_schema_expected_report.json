@@ -1,0 +1,877 @@
+{
+  "commit_boundary_counts": {
+    "precommit": 9,
+    "turn-committed": 4
+  },
+  "continuation_decision_counts": {
+    "continue-session": 0,
+    "continue-thread": 7,
+    "continue-turn": 4,
+    "fresh": 2
+  },
+  "error_count": 0,
+  "frame_kind_counts": {
+    "invalid": 0,
+    "notification": 3,
+    "request": 5,
+    "response": 5
+  },
+  "invalid_reason_counts": {
+    "batch_frame_unsupported": 0,
+    "invalid_method_name": 0,
+    "method_with_result_or_error": 0,
+    "missing_method_and_response_payload": 0,
+    "missing_response_id": 0,
+    "non_container_params": 0,
+    "non_integer_error_code": 0,
+    "non_jsonrpc_version": 0,
+    "non_object_error": 0,
+    "non_object_frame": 0,
+    "non_scalar_id": 0,
+    "non_string_error_message": 0,
+    "non_string_method": 0,
+    "result_with_error": 0
+  },
+  "line_count": 13,
+  "method_kind_counts": {
+    "absent": 5,
+    "lifecycle": 8,
+    "other": 0
+  },
+  "owner_kind_counts": {
+    "none": 2,
+    "session": 0,
+    "thread": 7,
+    "turn": 4
+  },
+  "parsed_count": 13,
+  "policy_flag_counts": {
+    "affinity_required": 11,
+    "preserves_owner": 11,
+    "rotation_allowed": 2
+  },
+  "policy_mode_counts": {
+    "fresh-selection-ok": 2,
+    "preserve-session-affinity": 0,
+    "preserve-thread-affinity": 7,
+    "preserve-turn-affinity": 4
+  },
+  "previews": [
+    {
+      "line": 1,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": false,
+            "has_turn": false,
+            "key_count": 0,
+            "owner": null,
+            "owner_kind": "none",
+            "primary": null,
+            "stage": "thread_start_request"
+          },
+          "continuation_decision": "fresh",
+          "frame_kind": "request",
+          "id": "req-thread-start",
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "ThreadStartParams.json",
+          "lifecycle_stage": "thread_start_request",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": null,
+            "turn_id": null
+          },
+          "method": "thread/start",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": false,
+            "commit_boundary": "precommit",
+            "mode": "fresh-selection-ok",
+            "preserved_owner_kind": null,
+            "preserves_owner": false,
+            "rotation_allowed": true,
+            "rotation_window": "open",
+            "routing_hint": "fresh-select-ok",
+            "turn_committed": false
+          },
+          "primary_affinity": null,
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 2,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            {
+              "kind": "session",
+              "value": "sess_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": true,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 2,
+            "owner": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "stage": null
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "response",
+          "id": "req-thread-start",
+          "invalid_reason": null,
+          "is_lifecycle_method": false,
+          "lifecycle_schema_file": "ThreadStartResponse.json",
+          "lifecycle_stage": null,
+          "metadata": {
+            "item_id": null,
+            "session_id": "sess_123",
+            "thread_id": "thr_123",
+            "turn_id": null
+          },
+          "method": null,
+          "method_kind": "absent",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thr_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 3,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            {
+              "kind": "session",
+              "value": "sess_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": true,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 2,
+            "owner": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "stage": "thread_started_notification"
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "notification",
+          "id": null,
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "ThreadStartedNotification.json",
+          "lifecycle_stage": "thread_started_notification",
+          "metadata": {
+            "item_id": null,
+            "session_id": "sess_123",
+            "thread_id": "thr_123",
+            "turn_id": null
+          },
+          "method": "thread/started",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thr_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 4,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 1,
+            "owner": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "stage": "thread_resume_request"
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "request",
+          "id": "req-thread-resume",
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "ThreadResumeParams.json",
+          "lifecycle_stage": "thread_resume_request",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": "thr_123",
+            "turn_id": null
+          },
+          "method": "thread/resume",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thr_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 5,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            {
+              "kind": "session",
+              "value": "sess_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": true,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 2,
+            "owner": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "stage": null
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "response",
+          "id": "req-thread-resume",
+          "invalid_reason": null,
+          "is_lifecycle_method": false,
+          "lifecycle_schema_file": "ThreadResumeResponse.json",
+          "lifecycle_stage": null,
+          "metadata": {
+            "item_id": null,
+            "session_id": "sess_123",
+            "thread_id": "thr_123",
+            "turn_id": null
+          },
+          "method": null,
+          "method_kind": "absent",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thr_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 6,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 1,
+            "owner": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "stage": "thread_fork_request"
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "request",
+          "id": "req-thread-fork",
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "ThreadForkParams.json",
+          "lifecycle_stage": "thread_fork_request",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": "thr_123",
+            "turn_id": null
+          },
+          "method": "thread/fork",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thr_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 7,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thr_forked"
+            },
+            {
+              "kind": "session",
+              "value": "sess_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": true,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 2,
+            "owner": {
+              "kind": "thread",
+              "value": "thr_forked"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thr_forked"
+            },
+            "stage": null
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "response",
+          "id": "req-thread-fork",
+          "invalid_reason": null,
+          "is_lifecycle_method": false,
+          "lifecycle_schema_file": "ThreadForkResponse.json",
+          "lifecycle_stage": null,
+          "metadata": {
+            "item_id": null,
+            "session_id": "sess_123",
+            "thread_id": "thr_forked",
+            "turn_id": null
+          },
+          "method": null,
+          "method_kind": "absent",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thr_forked"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 8,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 1,
+            "owner": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thr_123"
+            },
+            "stage": "turn_start_request"
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "request",
+          "id": "req-turn-start",
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "TurnStartParams.json",
+          "lifecycle_stage": "turn_start_request",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": "thr_123",
+            "turn_id": null
+          },
+          "method": "turn/start",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thr_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 9,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "turn",
+              "value": "turn_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": false,
+            "has_turn": true,
+            "key_count": 1,
+            "owner": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "owner_kind": "turn",
+            "primary": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "stage": null
+          },
+          "continuation_decision": "continue-turn",
+          "frame_kind": "response",
+          "id": "req-turn-start",
+          "invalid_reason": null,
+          "is_lifecycle_method": false,
+          "lifecycle_schema_file": "TurnStartResponse.json",
+          "lifecycle_stage": null,
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": null,
+            "turn_id": "turn_123"
+          },
+          "method": null,
+          "method_kind": "absent",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "turn-committed",
+            "mode": "preserve-turn-affinity",
+            "preserved_owner_kind": "turn",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-turn-owner",
+            "turn_committed": true
+          },
+          "primary_affinity": {
+            "kind": "turn",
+            "value": "turn_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 10,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": true,
+            "has_turn": true,
+            "key_count": 2,
+            "owner": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "owner_kind": "turn",
+            "primary": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "stage": "turn_started_notification"
+          },
+          "continuation_decision": "continue-turn",
+          "frame_kind": "notification",
+          "id": null,
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "TurnStartedNotification.json",
+          "lifecycle_stage": "turn_started_notification",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": "thr_123",
+            "turn_id": "turn_123"
+          },
+          "method": "turn/started",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "turn-committed",
+            "mode": "preserve-turn-affinity",
+            "preserved_owner_kind": "turn",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-turn-owner",
+            "turn_committed": true
+          },
+          "primary_affinity": {
+            "kind": "turn",
+            "value": "turn_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 11,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": true,
+            "has_turn": true,
+            "key_count": 2,
+            "owner": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "owner_kind": "turn",
+            "primary": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "stage": "turn_completed_notification"
+          },
+          "continuation_decision": "continue-turn",
+          "frame_kind": "notification",
+          "id": null,
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "TurnCompletedNotification.json",
+          "lifecycle_stage": "turn_completed_notification",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": "thr_123",
+            "turn_id": "turn_123"
+          },
+          "method": "turn/completed",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "turn-committed",
+            "mode": "preserve-turn-affinity",
+            "preserved_owner_kind": "turn",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-turn-owner",
+            "turn_committed": true
+          },
+          "primary_affinity": {
+            "kind": "turn",
+            "value": "turn_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 12,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            {
+              "kind": "thread",
+              "value": "thr_123"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": true,
+            "has_turn": true,
+            "key_count": 2,
+            "owner": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "owner_kind": "turn",
+            "primary": {
+              "kind": "turn",
+              "value": "turn_123"
+            },
+            "stage": "turn_interrupt_request"
+          },
+          "continuation_decision": "continue-turn",
+          "frame_kind": "request",
+          "id": "req-turn-interrupt",
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "TurnInterruptParams.json",
+          "lifecycle_stage": "turn_interrupt_request",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": "thr_123",
+            "turn_id": "turn_123"
+          },
+          "method": "turn/interrupt",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "turn-committed",
+            "mode": "preserve-turn-affinity",
+            "preserved_owner_kind": "turn",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-turn-owner",
+            "turn_committed": true
+          },
+          "primary_affinity": {
+            "kind": "turn",
+            "value": "turn_123"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 13,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": false,
+            "has_turn": false,
+            "key_count": 0,
+            "owner": null,
+            "owner_kind": "none",
+            "primary": null,
+            "stage": null
+          },
+          "continuation_decision": "fresh",
+          "frame_kind": "response",
+          "id": "req-turn-interrupt",
+          "invalid_reason": null,
+          "is_lifecycle_method": false,
+          "lifecycle_schema_file": "TurnInterruptResponse.json",
+          "lifecycle_stage": null,
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": null,
+            "turn_id": null
+          },
+          "method": null,
+          "method_kind": "absent",
+          "policy_hint": {
+            "affinity_required": false,
+            "commit_boundary": "precommit",
+            "mode": "fresh-selection-ok",
+            "preserved_owner_kind": null,
+            "preserves_owner": false,
+            "rotation_allowed": true,
+            "rotation_window": "open",
+            "routing_hint": "fresh-select-ok",
+            "turn_committed": false
+          },
+          "primary_affinity": null,
+          "valid_jsonrpc": true
+        }
+      }
+    }
+  ],
+  "rotation_window_counts": {
+    "closed": 11,
+    "open": 2
+  },
+  "routing_hint_counts": {
+    "fresh-select-ok": 2,
+    "preserve-session-owner": 0,
+    "preserve-thread-owner": 7,
+    "preserve-turn-owner": 4
+  }
+}

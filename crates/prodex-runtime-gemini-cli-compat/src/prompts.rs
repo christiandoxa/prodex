@@ -1,4 +1,4 @@
-use super::fs_utils::{collect_files, read_text_limited};
+use super::fs_utils::{collect_files, read_text_limited, write_file_atomic_no_symlink};
 use super::utils::{
     GeminiCompatVars, safe_slug, translate_gemini_prompt_placeholders, unique_slug,
     yaml_string_literal,
@@ -368,7 +368,7 @@ fn write_prompt_file(prompts_dir: &Path, prompt: &GeneratedPrompt) -> Result<()>
     contents.push_str("---\n\n");
     contents.push_str(&prompt.body);
     contents.push('\n');
-    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
+    write_file_atomic_no_symlink(&path, contents)
 }
 
 fn remove_generated_prompt_files(prompts_dir: &Path) -> Result<()> {

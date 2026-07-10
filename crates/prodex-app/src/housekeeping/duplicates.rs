@@ -7,7 +7,7 @@ use super::{
     save_runtime_continuations_for_profiles,
 };
 use anyhow::{Context, Result};
-use prodex_core::{AppPaths, same_path};
+use prodex_core::{AppPaths, path_is_strictly_under_root, same_path};
 use prodex_state::{
     duplicate_profile_identity_key, ensure_active_profile_after_duplicate_cleanup,
     remap_profile_binding_targets, remove_duplicate_profile_from_state,
@@ -165,6 +165,16 @@ pub(super) fn cleanup_duplicate_profiles(
                 && removed_profile.codex_home.exists()
                 && !same_path(&removed_profile.codex_home, &canonical_home)
             {
+                prodex_shared_codex_fs::ensure_managed_profiles_root(paths)?;
+                if !path_is_strictly_under_root(
+                    &paths.managed_profiles_root,
+                    &removed_profile.codex_home,
+                ) {
+                    anyhow::bail!(
+                        "refusing to delete duplicate managed profile home outside managed profiles root: {}",
+                        removed_profile.codex_home.display()
+                    );
+                }
                 fs::remove_dir_all(&removed_profile.codex_home).with_context(|| {
                     format!(
                         "failed to delete duplicate managed profile home {}",

@@ -4,6 +4,7 @@ use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayScimUser, RuntimeGatewayVirtualKeyEntry,
 };
 use super::*;
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -80,7 +81,10 @@ fn runtime_gateway_oidc_admin_auth(
         .or_else(|| runtime_gateway_oidc_claim_string(&claims, "email"))
         .or_else(|| runtime_gateway_oidc_claim_string(&claims, "preferred_username"))
         .or_else(|| runtime_gateway_oidc_claim_string(&claims, "sub"))?;
-    let scim_user = runtime_gateway_scim_user_by_name(shared, &name);
+    let scim_user = match runtime_gateway_scim_user_by_name(shared, &name) {
+        Ok(user) => user,
+        Err(()) => return None,
+    };
     if scim_user.as_ref().is_some_and(|user| !user.active) {
         return None;
     }
@@ -192,14 +196,18 @@ fn runtime_gateway_oidc_fetch_json(
                 .with_context(|| format!("gateway OIDC {description} endpoint returned an error"))
         })
         .and_then(|response| {
-            response
-                .text()
-                .with_context(|| format!("failed to read gateway OIDC {description}"))
+            read_blocking_response_body_with_limit(
+                response,
+                RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+                &format!("failed to read gateway OIDC {description}"),
+            )
         });
     match fetched_payload {
         Ok(payload) => {
-            let parsed: serde_json::Value = serde_json::from_str(&payload)
+            let parsed: serde_json::Value = serde_json::from_slice(&payload)
                 .with_context(|| format!("failed to parse gateway OIDC {description}"))?;
+            let payload = String::from_utf8(payload)
+                .with_context(|| format!("gateway OIDC {description} is not UTF-8"))?;
             if let Ok(mut cache) = shared.gateway_oidc_http_cache.lock() {
                 cache.insert(url.to_string(), (now, payload));
             }
@@ -342,7 +350,10 @@ fn runtime_gateway_sso_admin_auth(
     }
     let name =
         runtime_gateway_sso_user_name(runtime_gateway_header(captured, &config.user_header))?;
-    let scim_user = runtime_gateway_scim_user_by_name(shared, name);
+    let scim_user = match runtime_gateway_scim_user_by_name(shared, name) {
+        Ok(user) => user,
+        Err(()) => return None,
+    };
     if scim_user.as_ref().is_some_and(|user| !user.active) {
         return None;
     }
@@ -439,17 +450,30 @@ fn runtime_gateway_exact_scope_string(value: &str) -> Option<String> {
 fn runtime_gateway_scim_user_by_name(
     shared: &RuntimeLocalRewriteProxyShared,
     name: &str,
-) -> Option<RuntimeGatewayScimUser> {
+) -> Result<Option<RuntimeGatewayScimUser>, ()> {
     if name.is_empty() || name.chars().any(char::is_whitespace) {
-        return None;
+        return Ok(None);
     }
-    super::local_rewrite::runtime_gateway_virtual_key_store_load(
+    let store = match super::local_rewrite::runtime_gateway_virtual_key_store_load_strict(
         &shared.gateway_state_store,
         &shared.runtime_shared.log_path,
-    )
-    .scim_users
-    .into_iter()
-    .find(|user| user.user_name.eq_ignore_ascii_case(name))
+    ) {
+        Ok(store) => store,
+        Err(err) => {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_admin_scim_state_unavailable",
+                    [runtime_proxy_log_field("error", err.to_string())],
+                ),
+            );
+            return Err(());
+        }
+    };
+    Ok(store
+        .scim_users
+        .into_iter()
+        .find(|user| user.user_name.eq_ignore_ascii_case(name)))
 }
 
 impl RuntimeGatewayAdminAuth {

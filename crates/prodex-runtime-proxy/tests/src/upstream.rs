@@ -12,6 +12,24 @@ fn upstream_url_preserves_backend_api_mount() {
 }
 
 #[test]
+fn upstream_url_only_strips_backend_api_for_exact_mount_suffix() {
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://example.test/backend-api-v2",
+            "/backend-api/prodex/responses?x=1",
+        ),
+        "https://example.test/backend-api-v2/backend-api/codex/responses?x=1"
+    );
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
+            "/backend-api-v2/prodex/responses?x=1",
+        ),
+        "https://chatgpt.com/backend-api/backend-api-v2/prodex/responses?x=1"
+    );
+}
+
+#[test]
 fn upstream_url_joins_plain_base_url() {
     assert_eq!(
         runtime_proxy_upstream_url("https://example.test/", "responses"),
@@ -20,6 +38,24 @@ fn upstream_url_joins_plain_base_url() {
     assert_eq!(
         runtime_proxy_upstream_url("https://example.test", "/responses"),
         "https://example.test/responses"
+    );
+}
+
+#[test]
+fn upstream_url_neutralizes_dot_segments_before_url_parsing_can_escape_mount() {
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
+            "/backend-api/prodex/../wham/usage?x=1",
+        ),
+        "https://chatgpt.com/backend-api/codex/%252e%252e/wham/usage?x=1"
+    );
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
+            "/backend-api/prodex/%2e%2e/wham/usage",
+        ),
+        "https://chatgpt.com/backend-api/codex/%252e%252e/wham/usage"
     );
 }
 
@@ -77,6 +113,11 @@ fn request_header_skip_list_replaces_auth_and_transport_headers() {
         "Connection",
         "Content-Length",
         "Host",
+        "Keep-Alive",
+        "Proxy-Authenticate",
+        "Proxy-Authorization",
+        "TE",
+        "Trailer",
         "Transfer-Encoding",
         "Upgrade",
         "sec-websocket-key",
@@ -87,6 +128,24 @@ fn request_header_skip_list_replaces_auth_and_transport_headers() {
             "runtime proxy should not forward local/auth header {header}"
         );
     }
+}
+
+#[test]
+fn request_header_forwarding_strips_connection_named_headers() {
+    let headers = runtime_forward_request_headers([
+        ("Connection", "keep-alive, X-Local-Hop"),
+        ("X-Local-Hop", "strip-me"),
+        ("x-codex-turn-state", "keep-me"),
+        ("User-Agent", "codex-cli-test"),
+    ]);
+
+    assert_eq!(
+        headers,
+        vec![
+            ("x-codex-turn-state", "keep-me"),
+            ("User-Agent", "codex-cli-test"),
+        ]
+    );
 }
 
 #[test]

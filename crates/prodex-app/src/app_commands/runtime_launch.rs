@@ -1,7 +1,6 @@
 use super::*;
 mod gateway_config;
 mod gateway_status;
-mod mem0_gateway;
 mod preflight;
 mod provider_names;
 mod providers;
@@ -13,11 +12,12 @@ use gateway_config::resolve_gateway_launch_config;
 #[cfg(test)]
 use gateway_config::{
     gateway_admin_tokens_config, gateway_call_id_header_config, gateway_guardrail_config,
-    gateway_guardrail_webhook_config, gateway_observability_config, gateway_sso_config,
+    gateway_guardrail_webhook_config, gateway_observability_config, gateway_openai_api_keys,
+    gateway_route_alias_model_metrics, gateway_route_aliases_config, gateway_sso_config,
     gateway_state_store_config, gateway_upstream_base_url, gateway_virtual_keys_config,
+    resolve_gateway_auth_config, resolve_gateway_guardrail_config,
 };
 use gateway_status::print_gateway_status;
-pub(crate) use mem0_gateway::start_mem0_memory_gateway_for_runtime_request;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
 use rusqlite::OptionalExtension;
 use selection::RuntimeLaunchSelection;
@@ -344,6 +344,8 @@ fn maintain_shared_codex_sessions_after_child_exit() {
         return;
     };
     let _ = maintain_managed_codex_sessions(&paths);
+    let _ =
+        prodex_shared_codex_fs::persist_codex_session_image_attachments(&paths.shared_codex_root);
 }
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
@@ -370,7 +372,7 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     let state = AppState::load(&paths)?;
     let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
     let gateway = resolve_gateway_launch_config(&paths, &state, &args, &policy)?;
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+    let proxy = start_runtime_gateway_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &state,
         upstream_base_url: gateway.upstream_base_url,
@@ -440,6 +442,7 @@ fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildPr
             .with_context(|| format!("profile '{}' is missing", selection.selected_profile_name))?
             .managed
     {
+        ensure_managed_runtime_launch_home_under_root(&paths, &selection.codex_home)?;
         prepare_managed_codex_home_for_runtime_launch(&paths, &selection.codex_home)?;
     }
 
@@ -483,6 +486,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
 
         let managed = self.selected_profile_is_managed()?;
         if managed {
+            ensure_managed_runtime_launch_home_under_root(&self.paths, &self.selection.codex_home)?;
             // ponytail: keep launch hot path out of full shared-session maintenance;
             // targeted resume repair runs before child launch, and full maintenance already runs
             // after child exit.
@@ -586,6 +590,21 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             })?
             .managed)
     }
+}
+
+fn ensure_managed_runtime_launch_home_under_root(
+    paths: &AppPaths,
+    codex_home: &Path,
+) -> Result<()> {
+    prodex_shared_codex_fs::ensure_managed_profiles_root(paths)?;
+    if !prodex_core::path_is_strictly_under_root(&paths.managed_profiles_root, codex_home) {
+        bail!(
+            "managed profile home {} is outside {}",
+            codex_home.display(),
+            paths.managed_profiles_root.display()
+        );
+    }
+    Ok(())
 }
 
 struct RuntimeProxyStartupFactory;

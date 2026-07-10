@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use prodex_app_reports::{
     SessionReport, apply_session_json_line, apply_session_json_lines, apply_session_value,
     first_string_value, is_session_metadata_file, sort_session_reports,
@@ -8,13 +8,14 @@ use rusqlite::{Connection, OpenFlags};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::{self, BufRead};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 mod session_meta;
 
 const SESSIONS_DIR: &str = "sessions";
 const ARCHIVED_SESSIONS_DIR: &str = "archived_sessions";
+const SESSION_STORE_FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SessionReportFilter<'a> {
@@ -581,7 +582,9 @@ fn is_codex_state_db_path(path: &Path) -> bool {
     let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    file_name.starts_with("state_") && file_name.ends_with(".sqlite") && path.is_file()
+    file_name.starts_with("state_")
+        && file_name.ends_with(".sqlite")
+        && path_is_regular_file_no_symlink(path)
 }
 
 fn state_db_rollout_paths_for_selector(
@@ -634,7 +637,10 @@ fn append_state_db_rollout_rows(
         let resolved_session_id =
             state_db_rollout_row_session_id(&thread_id, &rollout_path, selector);
         let path = resolve_state_db_rollout_path(codex_home, &rollout_path);
-        if path.is_file() && is_session_metadata_file(&path) {
+        if !prodex_core::path_is_under_root(codex_home, &path) {
+            continue;
+        }
+        if path_is_regular_file_no_symlink(&path) && is_session_metadata_file(&path) {
             paths.push(SessionRepairCandidate {
                 path,
                 state_db_match_kind: Some(match_kind),
@@ -694,12 +700,17 @@ fn resolve_state_db_rollout_path(codex_home: &Path, rollout_path: &str) -> PathB
     }
 }
 
+fn path_is_regular_file_no_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .ok()
+        .is_some_and(|metadata| metadata.file_type().is_file())
+}
+
 fn read_session_report(path: &Path, state: &AppState) -> Result<Option<SessionReport>> {
     let mut report = SessionReport::from_path(path, file_modified_epoch(path).unwrap_or(0));
 
     if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
-        let raw = fs::read_to_string(path)
-            .with_context(|| format!("failed to read session {}", path.display()))?;
+        let raw = read_session_file_to_string(path)?;
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
             if !session_value_starts_resume_metadata(&value) {
                 return Ok(None);
@@ -712,23 +723,19 @@ fn read_session_report(path: &Path, state: &AppState) -> Result<Option<SessionRe
             apply_session_json_lines(&mut report, raw.lines());
         }
     } else {
-        let file = fs::File::open(path)
-            .with_context(|| format!("failed to read session {}", path.display()))?;
-        let reader = io::BufReader::new(file);
+        let raw = read_session_file_to_string(path)?;
         let mut saw_resume_metadata = false;
-        for line in reader.lines() {
-            let line =
-                line.with_context(|| format!("failed to read line from {}", path.display()))?;
+        for line in raw.lines() {
             if !saw_resume_metadata {
                 if line.trim().is_empty() {
                     continue;
                 }
-                if !session_line_starts_resume_metadata(&line) {
+                if !session_line_starts_resume_metadata(line) {
                     return Ok(None);
                 }
                 saw_resume_metadata = true;
             }
-            apply_session_json_line(&mut report, &line);
+            apply_session_json_line(&mut report, line);
         }
         if !saw_resume_metadata {
             return Ok(None);
@@ -739,6 +746,60 @@ fn read_session_report(path: &Path, state: &AppState) -> Result<Option<SessionRe
         report.set_profile(Some(binding.profile_name.clone()));
     }
     Ok(Some(report))
+}
+
+fn read_session_file_to_string(path: &Path) -> Result<String> {
+    let file = open_session_regular_file(path)?;
+    let mut bytes = Vec::new();
+    file.take(SESSION_STORE_FILE_MAX_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read session {}", path.display()))?;
+    if bytes.len() as u64 > SESSION_STORE_FILE_MAX_BYTES {
+        bail!(
+            "session {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            SESSION_STORE_FILE_MAX_BYTES
+        );
+    }
+    String::from_utf8(bytes).with_context(|| format!("failed to decode session {}", path.display()))
+}
+
+fn open_session_regular_file(path: &Path) -> Result<fs::File> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect session {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        bail!(
+            "refusing to read session through symlink {}",
+            path.display()
+        );
+    }
+    if !metadata.file_type().is_file() {
+        bail!("session path {} is not a file", path.display());
+    }
+    if metadata.len() > SESSION_STORE_FILE_MAX_BYTES {
+        bail!(
+            "session {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            SESSION_STORE_FILE_MAX_BYTES
+        );
+    }
+    let file = fs::File::open(path)
+        .with_context(|| format!("failed to read session {}", path.display()))?;
+    if !same_file_metadata(&metadata, &file.metadata()?) {
+        bail!("session path changed while opening {}", path.display());
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
 }
 
 fn session_lines_start_resume_metadata<'a>(lines: impl IntoIterator<Item = &'a str>) -> bool {
@@ -771,8 +832,7 @@ fn repair_session_file_metadata_prefix(
     selector: &str,
     synthesize_missing_metadata: bool,
 ) -> Result<bool> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read session {}", path.display()))?;
+    let raw = read_session_file_to_string(path)?;
     let lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
     let Some(first_content_index) = lines.iter().position(|line| !line.trim().is_empty()) else {
         return Ok(false);
@@ -866,8 +926,7 @@ fn session_file_repair_match(path: &Path, selector: &str, exact: bool) -> Result
     if session_path_id_matches_selector(path, selector, exact) {
         return Ok(Some(path.to_path_buf()));
     }
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read session {}", path.display()))?;
+    let raw = read_session_file_to_string(path)?;
     for line in raw.lines() {
         if session_line_resume_id_matches_mode(line, selector, exact) {
             return Ok(Some(path.to_path_buf()));
@@ -877,8 +936,7 @@ fn session_file_repair_match(path: &Path, selector: &str, exact: bool) -> Result
 }
 
 fn session_file_has_resume_metadata_for_selector(path: &Path, selector: &str) -> Result<bool> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read session {}", path.display()))?;
+    let raw = read_session_file_to_string(path)?;
     Ok(raw.lines().any(|line| {
         session_meta::line_starts_codex_rollout_metadata(line)
             && session_line_resume_id_matches(line, selector)

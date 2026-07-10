@@ -10,24 +10,20 @@ pub(crate) struct CavemanLaunchStrategy {
     include_code_review: bool,
     rtk_enabled: bool,
     presidio_enabled: bool,
-    memory_enabled: bool,
     model_provider_override: Option<String>,
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
     gemini_thinking_budget_tokens: Option<u64>,
-    managed_mem0_memory: Mutex<Vec<ManagedMem0Memory>>,
 }
 
 impl CavemanLaunchStrategy {
     pub(crate) fn new(args: CavemanArgs) -> Self {
         let codex_feature_args = args.codex_args_with_feature_overrides();
-        let (rtk_enabled, super_optimizer_prefix_enabled, memory_prefix_enabled, codex_args) =
+        let (rtk_enabled, super_optimizer_prefix_enabled, codex_args) =
             runtime_caveman_extract_launch_prefixes(&codex_feature_args);
         let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
         let mut args = args;
         args.super_optimizer_overlay |= super_optimizer_prefix_enabled;
-        let memory_enabled =
-            memory_prefix_enabled || args.memory_backend == SuperMemoryBackend::Mem0;
         let (codex_args, include_code_review) =
             prepare_codex_launch_args(&codex_args, args.full_access);
         let model_provider_override =
@@ -43,12 +39,10 @@ impl CavemanLaunchStrategy {
             include_code_review,
             rtk_enabled,
             presidio_enabled,
-            memory_enabled,
             model_provider_override,
             profile_v2_name,
             model_context_window_tokens,
             gemini_thinking_budget_tokens,
-            managed_mem0_memory: Mutex::new(Vec::new()),
         }
     }
 }
@@ -90,8 +84,12 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&overlay_home)?;
         }
-        let codex_args =
-            runtime_launch_openai_spark_context_codex_args(&overlay_home, &self.codex_args);
+        let codex_args = if self.args.super_optimizer_overlay {
+            trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
+        } else {
+            self.codex_args.clone()
+        };
+        let codex_args = runtime_launch_openai_spark_context_codex_args(&overlay_home, &codex_args);
         let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args);
         let codex_args = prepare_local_provider_catalog_codex_args(&overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(&overlay_home, &codex_args)?;
@@ -101,38 +99,11 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.rtk_enabled {
             prodex_caveman_assets::configure_rtk_codex_home(&overlay_home)?;
         }
-        let managed_mem0_memory =
-            if self.memory_enabled && self.args.memory_backend == SuperMemoryBackend::Mem0 {
-                Some(start_managed_mem0_memory(
-                    &prepared.paths,
-                    &self.runtime_request(),
-                )?)
-            } else {
-                None
-            };
         if self.args.super_optimizer_overlay {
-            let memory_config = managed_mem0_memory
-                .as_ref()
-                .map(|memory| prodex_caveman_assets::SuperOptimizerMemoryConfig {
-                    enabled: true,
-                    mem0_api_url: Some(memory.api_url.as_str()),
-                    mem0_api_key: Some(memory.api_key.as_str()),
-                })
-                .unwrap_or(prodex_caveman_assets::SuperOptimizerMemoryConfig {
-                    enabled: self.memory_enabled,
-                    ..Default::default()
-                });
-            prodex_caveman_assets::configure_super_optimizer_codex_home_with_options(
+            prodex_caveman_assets::configure_super_optimizer_codex_home_with_presidio(
                 &overlay_home,
                 self.presidio_enabled,
-                memory_config,
             )?;
-        }
-        if let Some(memory) = managed_mem0_memory {
-            self.managed_mem0_memory
-                .lock()
-                .map_err(|_| anyhow::anyhow!("managed Mem0 memory lock poisoned"))?
-                .push(memory);
         }
         let mut child = codex_child_plan(overlay_home.clone(), runtime_args);
         if self.provider_runtime_uses_local_proxy_auth() {
@@ -153,6 +124,18 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         }
         Ok(RuntimeLaunchPlan::new(child).with_cleanup_path(overlay_home))
     }
+}
+
+fn trusted_workspace_codex_args(workspace: &Path, codex_args: &[OsString]) -> Vec<OsString> {
+    let workspace = serde_json::to_string(&workspace.to_string_lossy())
+        .expect("workspace path should serialize as a TOML-compatible string");
+    let mut args = Vec::with_capacity(codex_args.len() + 2);
+    args.push(OsString::from("-c"));
+    args.push(OsString::from(format!(
+        "projects={{{workspace}={{trust_level=\"trusted\"}}}}"
+    )));
+    args.extend(codex_args.iter().cloned());
+    args
 }
 
 impl CavemanLaunchStrategy {
@@ -182,8 +165,10 @@ fn write_provider_runtime_codex_auth(codex_home: &std::path::Path) -> Result<()>
         "last_refresh": null,
         "agent_identity": null
     });
-    let bytes = serde_json::to_vec_pretty(&auth_json)?;
-    std::fs::write(&auth_path, bytes)
+    let text = serde_json::to_string_pretty(&auth_json)?;
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(&auth_path), text)
+        .map_err(anyhow::Error::new)
         .with_context(|| format!("failed to write {}", auth_path.display()))?;
     Ok(())
 }
@@ -237,10 +222,9 @@ pub(super) fn prepare_prodex_overlay_home(
 
 pub(crate) fn runtime_caveman_extract_launch_prefixes(
     args: &[OsString],
-) -> (bool, bool, bool, Vec<OsString>) {
+) -> (bool, bool, Vec<OsString>) {
     let mut rtk_enabled = false;
     let mut super_optimizer_overlay = false;
-    let mut memory_enabled = false;
     let mut remaining = args.to_vec();
 
     loop {
@@ -254,12 +238,6 @@ pub(crate) fn runtime_caveman_extract_launch_prefixes(
                 remaining.remove(0);
                 continue;
             }
-            if runtime_caveman_memory_prefix(prefix) {
-                super_optimizer_overlay = true;
-                memory_enabled = true;
-                remaining.remove(0);
-                continue;
-            }
             if runtime_caveman_super_optimizer_prefix(prefix) {
                 super_optimizer_overlay = true;
                 remaining.remove(0);
@@ -270,12 +248,7 @@ pub(crate) fn runtime_caveman_extract_launch_prefixes(
         break;
     }
 
-    (
-        rtk_enabled,
-        super_optimizer_overlay,
-        memory_enabled,
-        remaining,
-    )
+    (rtk_enabled, super_optimizer_overlay, remaining)
 }
 
 pub(crate) fn runtime_caveman_extract_presidio_prefix(
@@ -294,14 +267,7 @@ pub(crate) fn runtime_caveman_extract_presidio_prefix(
 }
 
 fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
-    matches!(
-        prefix,
-        "sqz" | "tokensavior" | "token-savior" | "clawcompactor" | "claw-compactor" | "ponytail"
-    )
-}
-
-fn runtime_caveman_memory_prefix(prefix: &str) -> bool {
-    matches!(prefix, "mem" | "memory")
+    prefix == "ponytail"
 }
 
 #[cfg(test)]
@@ -321,7 +287,6 @@ mod tests {
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
-        assert!(!strategy.memory_enabled);
         assert!(strategy.args.smart_context);
         assert!(strategy.runtime_request().smart_context_enabled);
         assert!(strategy.args.full_access);
@@ -333,7 +298,7 @@ mod tests {
                 .codex_args
                 .contains(&OsString::from("--dangerously-bypass-hook-trust"))
         );
-        for extracted_prefix in ["rtk", "sqz", "tokensavior", "clawcompactor", "presidio"] {
+        for extracted_prefix in ["rtk", "ponytail", "presidio"] {
             assert!(
                 !strategy
                     .codex_args
@@ -363,6 +328,29 @@ mod tests {
     }
 
     #[test]
+    fn super_trusts_workspace_without_persisting_config() {
+        let args = trusted_workspace_codex_args(
+            Path::new("/tmp/project"),
+            &[OsString::from("--dangerously-bypass-approvals-and-sandbox")],
+        );
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("-c"),
+                OsString::from("projects={\"/tmp/project\"={trust_level=\"trusted\"}}"),
+                OsString::from("--dangerously-bypass-approvals-and-sandbox"),
+            ]
+        );
+        let config: toml::Value =
+            toml::from_str(args[1].to_str().expect("config override should be UTF-8"))
+                .expect("config override should be valid TOML");
+        assert_eq!(
+            config["projects"]["/tmp/project"]["trust_level"].as_str(),
+            Some("trusted")
+        );
+    }
+
+    #[test]
     fn super_alias_enables_optimizer_stack() {
         let strategy =
             CavemanLaunchStrategy::new(super_as_caveman_args(&["prodex", "s", "exec", "hi"]));
@@ -370,20 +358,6 @@ mod tests {
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
         assert!(strategy.args.super_optimizer_overlay);
-    }
-
-    #[test]
-    fn super_alias_mem_prefix_enables_sqlite_memory() {
-        let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
-            "prodex", "s", "mem", "exec", "hi",
-        ]));
-
-        assert!(strategy.memory_enabled);
-        assert_eq!(strategy.args.memory_backend, SuperMemoryBackend::Sqlite);
-        assert!(
-            !strategy.codex_args.contains(&OsString::from("mem")),
-            "mem should be consumed before Codex launch"
-        );
     }
 
     #[test]
@@ -525,6 +499,29 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn provider_runtime_codex_auth_is_written_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let codex_home = env::temp_dir().join(format!(
+            "prodex-caveman-auth-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        create_codex_home_if_missing(&codex_home).expect("codex home should exist");
+
+        write_provider_runtime_codex_auth(&codex_home).expect("provider auth should write");
+
+        let auth_path = codex_home.join("auth.json");
+        let mode = std::fs::metadata(&auth_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(codex_home);
+    }
+
     #[test]
     fn super_alias_keeps_optional_stack_for_local_provider() {
         let strategy = CavemanLaunchStrategy::new(super_as_caveman_args(&[
@@ -546,15 +543,11 @@ mod tests {
     }
 
     #[test]
-    fn caveman_launch_prefixes_extract_all_super_optimizers() {
-        let (rtk_enabled, super_optimizer_overlay, memory_enabled, codex_args) =
+    fn caveman_launch_prefixes_extract_minimal_super_stack() {
+        let (rtk_enabled, super_optimizer_overlay, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
                 OsString::from("rtk"),
-                OsString::from("sqz"),
-                OsString::from("tokensavior"),
-                OsString::from("clawcompactor"),
                 OsString::from("ponytail"),
-                OsString::from("mem"),
                 OsString::from("--full-access"),
                 OsString::from("exec"),
                 OsString::from("hi"),
@@ -562,7 +555,6 @@ mod tests {
 
         assert!(rtk_enabled);
         assert!(super_optimizer_overlay);
-        assert!(memory_enabled);
         assert_eq!(
             codex_args,
             vec![
@@ -575,7 +567,7 @@ mod tests {
 
     #[test]
     fn caveman_launch_prefixes_allow_rtk_caveman_ponytail_combo() {
-        let (rtk_enabled, super_optimizer_overlay, memory_enabled, codex_args) =
+        let (rtk_enabled, super_optimizer_overlay, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
                 OsString::from("rtk"),
                 OsString::from("caveman"),
@@ -586,7 +578,6 @@ mod tests {
 
         assert!(rtk_enabled);
         assert!(super_optimizer_overlay);
-        assert!(!memory_enabled);
         assert_eq!(
             codex_args,
             vec![OsString::from("exec"), OsString::from("hi")]
@@ -595,10 +586,10 @@ mod tests {
 
     #[test]
     fn caveman_launch_extracts_presidio_prefix_after_super_optimizers() {
-        let (rtk_enabled, super_optimizer_overlay, memory_enabled, codex_args) =
+        let (rtk_enabled, super_optimizer_overlay, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
                 OsString::from("rtk"),
-                OsString::from("sqz"),
+                OsString::from("ponytail"),
                 OsString::from("presidio"),
                 OsString::from("exec"),
                 OsString::from("hi"),
@@ -607,7 +598,6 @@ mod tests {
 
         assert!(rtk_enabled);
         assert!(super_optimizer_overlay);
-        assert!(!memory_enabled);
         assert!(presidio_enabled);
         assert_eq!(
             codex_args,

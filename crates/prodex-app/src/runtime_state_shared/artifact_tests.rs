@@ -34,6 +34,55 @@ mod tests {
         remove_smart_context_artifact_temp_files(&path);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn runtime_smart_context_artifact_save_replaces_symlink_without_reading_target() {
+        let path = smart_context_artifact_temp_path("symlink-save");
+        remove_smart_context_artifact_temp_files(&path);
+        let target = path.with_file_name("outside-artifacts.json");
+        fs::write(&target, r#"{"artifacts":{},"total_bytes":0}"#).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(1, "safe artifact").unwrap();
+        store.save_to_path(&path).expect("store saved");
+
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            r#"{"artifacts":{},"total_bytes":0}"#
+        );
+        assert!(
+            !fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
+        assert_eq!(loaded.artifact_count(), 1);
+        assert_eq!(
+            loaded.get_text(&artifact.id).as_deref(),
+            Some("safe artifact")
+        );
+
+        remove_smart_context_artifact_temp_files(&path);
+        let _ = fs::remove_file(target);
+    }
+
+    #[test]
+    fn runtime_smart_context_artifact_load_ignores_oversized_store_file() {
+        let path = smart_context_artifact_temp_path("oversized-load");
+        remove_smart_context_artifact_temp_files(&path);
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(64 * 1024 * 1024 + 1)
+            .unwrap();
+
+        let loaded = RuntimeSmartContextArtifactStore::load_from_path(&path);
+
+        assert_eq!(loaded.artifact_count(), 0);
+        remove_smart_context_artifact_temp_files(&path);
+    }
+
     #[test]
     fn runtime_smart_context_artifact_save_persists_static_fingerprints() {
         let path = smart_context_artifact_temp_path("static-fingerprints");

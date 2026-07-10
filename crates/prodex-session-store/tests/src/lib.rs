@@ -129,6 +129,24 @@ fn session_reports_keep_legacy_jsonl_when_first_line_has_id_without_type() {
 }
 
 #[test]
+fn session_reports_reject_oversized_session_file_before_reading() {
+    let root = test_temp_dir("session-oversized-jsonl");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let path = sessions.join("oversized.jsonl");
+    fs::File::create(&path)
+        .expect("oversized session should be created")
+        .set_len(SESSION_STORE_FILE_MAX_BYTES + 1)
+        .expect("oversized session size should be set");
+
+    let err = collect_session_reports(&root, None, &AppState::default())
+        .expect_err("oversized session should be rejected");
+    assert!(format!("{err:#}").contains("exceeds safe size limit"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_moves_late_metadata_to_start() {
     let root = test_temp_dir("session-repair-prefix");
     let sessions = root.join("sessions/2026/06/13");
@@ -421,6 +439,117 @@ fn repair_resume_session_metadata_prefix_uses_state_db_prefix_rollout_path() {
         Some("2026-06-14T23:32:19Z"),
     );
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_ignores_state_db_rollout_path_outside_root() {
+    let root = test_temp_dir("session-repair-state-db-outside-root");
+    fs::create_dir_all(&root).expect("root should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    let outside_root = std::env::current_dir()
+        .expect("current dir should exist")
+        .join("target")
+        .join(format!(
+            "prodex-session-store-outside-root-{}-{unique}",
+            std::process::id()
+        ));
+    let session_path = outside_root.join("rollout-from-state-db.jsonl");
+    fs::create_dir_all(&outside_root).expect("outside dir should be created");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"event\",\"payload\":{\"message\":\"outside root\"}}\n",
+    )
+    .expect("session should be written");
+    let db_path = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![session_id, session_path.display().to_string()],
+        )
+        .expect("thread row should be created");
+    drop(connection);
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+    let unrepairable =
+        find_unrepairable_resume_session(&root, session_id).expect("check should succeed");
+
+    assert_eq!(repaired, None);
+    assert_eq!(unrepairable, None);
+    assert!(
+        !session_path
+            .with_extension("jsonl.prodex-repair-bak")
+            .exists(),
+        "outside-root rollout path should not be modified"
+    );
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(outside_root);
+}
+
+#[cfg(unix)]
+#[test]
+fn repair_resume_session_metadata_prefix_ignores_symlink_state_db() {
+    let root = test_temp_dir("session-repair-symlink-state-db");
+    fs::create_dir_all(&root).expect("root should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let sessions = root.join("sessions/2026/07/02");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_path = sessions.join("rollout-hidden-from-state-db.jsonl");
+    fs::write(
+        &session_path,
+        "{\"timestamp\":\"2026-07-02T01:00:00Z\",\"type\":\"event\",\"payload\":{\"message\":\"must not repair from symlink db\"}}\n",
+    )
+    .expect("session should be written");
+    let outside = root.join("outside-db");
+    fs::create_dir_all(&outside).expect("outside db dir should be created");
+    let outside_db = outside.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&outside_db).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![session_id, session_path.display().to_string()],
+        )
+        .expect("thread row should be created");
+    drop(connection);
+    std::os::unix::fs::symlink(&outside_db, root.join("state_5.sqlite"))
+        .expect("state db symlink should be created");
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+
+    assert_eq!(repaired, None);
+    assert!(
+        !session_path
+            .with_extension("jsonl.prodex-repair-bak")
+            .exists(),
+        "symlinked state db must not drive session repair"
+    );
+    let raw = fs::read_to_string(&session_path).expect("session should remain readable");
+    assert!(
+        raw.lines()
+            .next()
+            .expect("session should have first line")
+            .contains(r#""type":"event""#)
+    );
     let _ = fs::remove_dir_all(root);
 }
 

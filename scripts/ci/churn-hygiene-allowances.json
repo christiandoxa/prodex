@@ -1,5 +1,44 @@
 [
   {
+    "id": "clippy-gate-remediation-0.273.0",
+    "requiredSubjects": [
+      "fix(ci): satisfy churn and clippy gates"
+    ],
+    "caps": {
+      "maxFiles": 52,
+      "maxBehaviorFiles": 52,
+      "maxLines": 383,
+      "maxFileLines": 50
+    },
+    "reason": "Reviewed compiler-driven lint remediation across provider-core and app/runtime compatibility modules after the 0.273.0 integration; changes are test scoping, equivalent lint rewrites, and narrow compatibility allowances, verified by the full all-features suite and the CI clippy command."
+  },
+  {
+    "id": "provider-gateway-control-plane-integration-0.273.0",
+    "requiredSubjects": [
+      "feat: mature provider gateway and control plane"
+    ],
+    "caps": {
+      "maxFiles": 498,
+      "maxBehaviorFiles": 491,
+      "maxLines": 113528,
+      "maxFileLines": 6750
+    },
+    "reason": "Reviewed integration of provider-core conformance, app-server diagnostics, gateway/runtime modularization, and the local control plane after merging upstream 0.273.0, with the full local all-features test matrix, formatting, focused runtime/provider tests, and merge conflict audits."
+  },
+  {
+    "id": "remove-redundant-super-integrations",
+    "requiredSubjects": [
+      "refactor(super): remove redundant optimizer integrations"
+    ],
+    "caps": {
+      "maxFiles": 44,
+      "maxBehaviorFiles": 39,
+      "maxLines": 3323,
+      "maxFileLines": 752
+    },
+    "reason": "Reviewed atomic removal of SQZ, token-savior, Claw Compactor, inspect MCP, and managed memory/Mem0 wiring with the full local test suite, workspace check, format check, CLI smoke test, documentation lint, and production-reference audit."
+  },
+  {
     "id": "runtime-goal-resume-and-log-stream-0.244.0",
     "requiredSubjects": [
       "fix(runtime): resume unfinished goals after usage limits"

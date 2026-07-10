@@ -130,7 +130,7 @@ fn runtime_proxy_log_startup_metadata_shed(
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("path", path_and_query),
+                runtime_proxy_log_field("path", runtime_proxy_log_url(path_and_query)),
                 runtime_proxy_log_field("status", status.to_string()),
             ],
         ),

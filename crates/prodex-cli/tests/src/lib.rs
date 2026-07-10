@@ -8,6 +8,7 @@ mod external_provider;
 mod ping;
 mod redeem;
 mod runtime_features;
+mod session_tail;
 mod shortcuts;
 fn parse_super_as_caveman(args: &[&str]) -> CavemanArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
@@ -49,7 +50,6 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
         left.external_provider_api_key,
         right.external_provider_api_key
     );
-    assert_eq!(left.memory_backend, right.memory_backend);
     assert_eq!(left.codex_args, right.codex_args);
 }
 #[test]
@@ -103,10 +103,6 @@ fn setup_parse_as_top_level_command() {
     assert!(!should_default_cli_invocation_to_run(&os_args(&[
         "prodex", "setup",
     ])));
-    let args = ["prodex", "__inspect-mcp"];
-    let command = parse_cli_command_from(args).expect("inspect MCP should parse");
-    assert!(matches!(command, Commands::InspectMcp(_)));
-    assert!(!should_default_cli_invocation_to_run(&os_args(&args)));
 }
 #[test]
 fn capability_list_parse_as_top_level_command() {
@@ -183,7 +179,7 @@ fn s_profile_shortcut_selects_profile() {
     assert_eq!(args.profile.as_deref(), Some("nama_profile"));
 }
 #[test]
-fn super_default_keeps_all_super_prefixes() {
+fn super_default_keeps_minimal_super_prefixes() {
     let args = parse_super_as_caveman(&["prodex", "super", "exec", "review"]);
     assert!(args.full_access);
     assert!(args.smart_context);
@@ -192,9 +188,6 @@ fn super_default_keeps_all_super_prefixes() {
         args.codex_args,
         vec![
             OsString::from("rtk"),
-            OsString::from("sqz"),
-            OsString::from("tokensavior"),
-            OsString::from("clawcompactor"),
             OsString::from("ponytail"),
             OsString::from("--dangerously-bypass-hook-trust"),
             OsString::from("exec"),
@@ -223,9 +216,6 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
         args.into_caveman_args().codex_args,
         os_args(&[
             "rtk",
-            "sqz",
-            "tokensavior",
-            "clawcompactor",
             "ponytail",
             "--dangerously-bypass-hook-trust",
             "exec",
@@ -244,9 +234,6 @@ fn super_includes_presidio_prefix_when_opted_in() {
         args.into_caveman_args_with_presidio(true).codex_args,
         os_args(&[
             "rtk",
-            "sqz",
-            "tokensavior",
-            "clawcompactor",
             "ponytail",
             "presidio",
             "--dangerously-bypass-hook-trust",
@@ -268,9 +255,6 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
         args.codex_args,
         os_args(&[
             "rtk",
-            "sqz",
-            "tokensavior",
-            "clawcompactor",
             "ponytail",
             "presidio",
             "--dangerously-bypass-hook-trust",
@@ -310,41 +294,7 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
         args.codex_args,
         os_args(&[
             "rtk",
-            "sqz",
-            "tokensavior",
-            "clawcompactor",
             "ponytail",
-            "--dangerously-bypass-hook-trust",
-            "exec",
-            "hello",
-        ])
-    );
-}
-#[test]
-fn super_mem0_flag_selects_managed_memory_backend() {
-    let command = parse_cli_command_from(["prodex", "super", "--mem0", "exec", "hello"])
-        .expect("super command should parse");
-    let Commands::Super(args) = command else {
-        panic!("expected super command");
-    };
-    assert_eq!(args.mem0_preference(), Some(true));
-    let caveman = args.into_caveman_args_with_choices(false, true);
-    assert_eq!(caveman.memory_backend, SuperMemoryBackend::Mem0);
-    assert!(caveman.codex_args.contains(&OsString::from("mem")));
-}
-#[test]
-fn super_mem_prefix_selects_sqlite_memory_backend() {
-    let args = parse_super_as_caveman(&["prodex", "s", "mem", "exec", "hello"]);
-    assert_eq!(args.memory_backend, SuperMemoryBackend::Sqlite);
-    assert_eq!(
-        args.codex_args,
-        os_args(&[
-            "rtk",
-            "sqz",
-            "tokensavior",
-            "clawcompactor",
-            "ponytail",
-            "mem",
             "--dangerously-bypass-hook-trust",
             "exec",
             "hello",
@@ -353,23 +303,11 @@ fn super_mem_prefix_selects_sqlite_memory_backend() {
 }
 #[test]
 fn super_leading_optional_prefixes_are_consumed_before_passthrough() {
-    let args = parse_super_as_caveman(&[
-        "prodex",
-        "s",
-        "sqz",
-        "token-savior",
-        "claw-compactor",
-        "presidio",
-        "exec",
-        "hello",
-    ]);
+    let args = parse_super_as_caveman(&["prodex", "s", "ponytail", "presidio", "exec", "hello"]);
     assert_eq!(
         args.codex_args,
         os_args(&[
             "rtk",
-            "sqz",
-            "tokensavior",
-            "clawcompactor",
             "ponytail",
             "presidio",
             "--dangerously-bypass-hook-trust",
@@ -377,22 +315,6 @@ fn super_leading_optional_prefixes_are_consumed_before_passthrough() {
             "hello",
         ])
     );
-}
-#[test]
-fn super_no_mem0_flag_selects_sqlite_memory_backend() {
-    let command = parse_cli_command_from(["prodex", "super", "--no-mem0", "exec", "hello"])
-        .expect("super command should parse");
-    let Commands::Super(args) = command else {
-        panic!("expected super command");
-    };
-    assert_eq!(args.mem0_preference(), Some(false));
-    let caveman = args.into_caveman_args_with_choices(false, false);
-    assert_eq!(caveman.memory_backend, SuperMemoryBackend::Sqlite);
-    assert!(!caveman.codex_args.contains(&OsString::from("mem")));
-}
-#[test]
-fn super_mem0_flags_conflict() {
-    assert!(parse_cli_command_from(["prodex", "super", "--mem0", "--no-mem0", "exec"]).is_err());
 }
 #[test]
 fn super_presidio_flags_conflict() {
@@ -512,17 +434,7 @@ fn caveman_command_keeps_smart_context_autopilot_disabled() {
 }
 #[test]
 fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
-    for (command_name, expected) in [
-        ("rtk", "rtk"),
-        ("sqz", "sqz"),
-        ("tokensavior", "tokensavior"),
-        ("token-savior", "tokensavior"),
-        ("clawcompactor", "clawcompactor"),
-        ("claw-compactor", "clawcompactor"),
-        ("ponytail", "ponytail"),
-        ("mem", "mem"),
-        ("memory", "mem"),
-    ] {
+    for (command_name, expected) in [("rtk", "rtk"), ("ponytail", "ponytail")] {
         assert!(!should_default_cli_invocation_to_run(&os_args(&[
             "prodex",
             command_name,
@@ -530,12 +442,7 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
         let command = parse_cli_command_from(["prodex", command_name, "exec", "hello"])
             .expect("optimizer shortcut should parse");
         let args = match command {
-            Commands::Rtk(args)
-            | Commands::Sqz(args)
-            | Commands::TokenSavior(args)
-            | Commands::ClawCompactor(args)
-            | Commands::Ponytail(args)
-            | Commands::Mem(args) => args,
+            Commands::Rtk(args) | Commands::Ponytail(args) => args,
             other => panic!("expected optimizer shortcut command, got {other:?}"),
         };
         assert_eq!(args.codex_args, os_args(&["exec", "hello"]));

@@ -478,14 +478,19 @@ pub fn prodex_runtime_log_paths_in_dir(dir: &Path, log_prefix: &str) -> Vec<Path
         .ok()
         .into_iter()
         .flat_map(|entries| entries.filter_map(|entry| entry.ok().map(|item| item.path())))
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| runtime_proxy_log_file_name_is_owned(name, log_prefix))
-        })
+        .filter(|path| runtime_proxy_log_path_is_regular_owned(path, log_prefix))
         .collect::<Vec<_>>();
     paths.sort();
     paths
+}
+
+fn runtime_proxy_log_path_is_regular_owned(path: &Path, log_prefix: &str) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| runtime_proxy_log_file_name_is_owned(name, log_prefix))
+        && fs::symlink_metadata(path)
+            .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
+            .unwrap_or(false)
 }
 
 pub fn cleanup_runtime_proxy_logs_in_dir(

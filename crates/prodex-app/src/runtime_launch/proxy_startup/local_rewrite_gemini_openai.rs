@@ -1,7 +1,7 @@
-use super::super::deepseek_rewrite::{
-    RuntimeDeepSeekPendingRequest, RuntimeDeepSeekRewriteOptions,
-    runtime_chat_compatible_request_body,
+use super::super::chat_compatible_rewrite::{
+    RuntimeDeepSeekRewriteOptions, runtime_provider_chat_compatible_request_body,
 };
+use super::super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::super::local_rewrite::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
@@ -78,7 +78,7 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
                     &result,
                 );
             }
-            let translated = runtime_chat_compatible_request_body(
+            let translated = runtime_provider_chat_compatible_request_body(
                 &model_body,
                 &shared.deepseek_conversations,
                 RuntimeProviderBridgeKind::Gemini,

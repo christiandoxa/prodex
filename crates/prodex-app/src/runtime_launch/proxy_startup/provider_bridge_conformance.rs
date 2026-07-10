@@ -1,0 +1,234 @@
+use super::{
+    RuntimeProviderBridgeKind, RuntimeProviderRouteKind, runtime_provider_label,
+    runtime_provider_model_from_body, runtime_provider_route_kind,
+};
+use prodex_provider_core::{
+    ProviderEndpoint, ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult,
+    provider_translator,
+};
+use runtime_proxy_crate::{
+    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+};
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_conformance_result(
+    kind: RuntimeProviderBridgeKind,
+    request: &crate::RuntimeProxyRequest,
+    body: &[u8],
+) -> Option<ProviderTransformResult> {
+    let path = path_without_query(&request.path_and_query);
+    let endpoint = match runtime_provider_route_kind(path) {
+        Some(RuntimeProviderRouteKind::Responses | RuntimeProviderRouteKind::ResponsesCompact) => {
+            ProviderEndpoint::Responses
+        }
+        _ => return None,
+    };
+    let mut input = ProviderTransformInput::new(endpoint, body.to_vec());
+    input.model = runtime_provider_model_from_body(body);
+    input.headers = request.headers.iter().cloned().collect();
+    Some(provider_translator(kind.provider_id()).transform_request(input))
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_log_request_conformance(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    result: &ProviderTransformResult,
+) {
+    runtime_provider_log_conformance(
+        shared,
+        request_id,
+        kind,
+        result,
+        "local_rewrite_provider_conformance_request",
+    );
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_response_conformance_result(
+    kind: RuntimeProviderBridgeKind,
+    status: u16,
+    body: &[u8],
+) -> Option<ProviderTransformResult> {
+    if !(200..300).contains(&status) {
+        return None;
+    }
+    let mut input = ProviderTransformInput::new(ProviderEndpoint::Responses, body.to_vec());
+    input.status = Some(status);
+    Some(provider_translator(kind.provider_id()).transform_response(input))
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_log_response_conformance(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    result: &ProviderTransformResult,
+) {
+    runtime_provider_log_conformance(
+        shared,
+        request_id,
+        kind,
+        result,
+        "local_rewrite_provider_conformance_response",
+    );
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_stream_event_conformance_result(
+    kind: RuntimeProviderBridgeKind,
+    body: &[u8],
+) -> ProviderTransformResult {
+    provider_translator(kind.provider_id()).transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        body.to_vec(),
+    ))
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_stream_text_delta_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    sequence_number: u64,
+    created_at: u64,
+    response_id: &str,
+) -> Option<(String, serde_json::Value)> {
+    let mut event =
+        runtime_provider_stream_base_event(kind, upstream_value, "response.output_text.delta")?;
+    let object = event.1.as_object_mut()?;
+    object.insert(
+        "sequence_number".to_string(),
+        serde_json::Value::from(sequence_number),
+    );
+    object.insert(
+        "created_at".to_string(),
+        serde_json::Value::from(created_at),
+    );
+    object.insert(
+        "response_id".to_string(),
+        serde_json::Value::String(response_id.to_string()),
+    );
+    Some(event)
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_stream_function_call_arguments_delta_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    sequence_number: u64,
+) -> Option<(String, serde_json::Value)> {
+    let mut event = runtime_provider_stream_base_event(
+        kind,
+        upstream_value,
+        "response.function_call_arguments.delta",
+    )?;
+    event.1.as_object_mut()?.insert(
+        "sequence_number".to_string(),
+        serde_json::Value::from(sequence_number),
+    );
+    Some(event)
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_stream_reasoning_summary_text_delta_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    sequence_number: u64,
+    response_id: &str,
+    summary_index: u64,
+) -> Option<(String, serde_json::Value)> {
+    let mut event = runtime_provider_stream_base_event(
+        kind,
+        upstream_value,
+        "response.reasoning_summary_text.delta",
+    )?;
+    let object = event.1.as_object_mut()?;
+    object.insert(
+        "sequence_number".to_string(),
+        serde_json::Value::from(sequence_number),
+    );
+    object.insert(
+        "response_id".to_string(),
+        serde_json::Value::String(response_id.to_string()),
+    );
+    object.insert(
+        "summary_index".to_string(),
+        serde_json::Value::from(summary_index),
+    );
+    Some(event)
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_log_stream_conformance(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    result: &ProviderTransformResult,
+) {
+    runtime_provider_log_conformance(
+        shared,
+        request_id,
+        kind,
+        result,
+        "local_rewrite_provider_conformance_stream",
+    );
+}
+
+fn runtime_provider_stream_base_event(
+    kind: RuntimeProviderBridgeKind,
+    upstream_value: &serde_json::Value,
+    expected_event_name: &str,
+) -> Option<(String, serde_json::Value)> {
+    let body = format!("data: {upstream_value}\n\n");
+    let result = runtime_provider_stream_event_conformance_result(kind, body.as_bytes());
+    if !matches!(result.loss, ProviderTransformLoss::Lossless) {
+        return None;
+    }
+    let body = result.body.as_ref()?;
+    let event = String::from_utf8_lossy(body);
+    let event_name = event
+        .strip_prefix("event: ")?
+        .split_once('\n')?
+        .0
+        .trim()
+        .to_string();
+    if event_name != expected_event_name {
+        return None;
+    }
+    let payload = event
+        .split_once("data: ")?
+        .1
+        .trim()
+        .strip_suffix('\n')
+        .unwrap_or(event.split_once("data: ")?.1.trim());
+    let data = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    Some((event_name, data))
+}
+
+fn runtime_provider_log_conformance(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    kind: RuntimeProviderBridgeKind,
+    result: &ProviderTransformResult,
+    event_name: &'static str,
+) {
+    let Some((loss, reason)) = runtime_provider_loss_log_fields(&result.loss) else {
+        return;
+    };
+    crate::runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            event_name,
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", runtime_provider_label(kind)),
+                runtime_proxy_log_field("endpoint", result.endpoint.label()),
+                runtime_proxy_log_field("loss", loss),
+                runtime_proxy_log_field("reason", reason),
+            ],
+        ),
+    );
+}
+
+pub(super) fn runtime_provider_loss_log_fields(
+    loss: &ProviderTransformLoss,
+) -> Option<(&'static str, &str)> {
+    match loss {
+        ProviderTransformLoss::Lossless => None,
+        ProviderTransformLoss::DegradedButSafe { reason, .. } => Some(("degraded", reason)),
+        ProviderTransformLoss::Rejected { reason } => Some(("rejected", reason)),
+        ProviderTransformLoss::UnsupportedUpstream { reason } => Some(("unsupported", reason)),
+    }
+}

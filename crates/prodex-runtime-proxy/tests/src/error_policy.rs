@@ -5,7 +5,7 @@ fn json_body(value: serde_json::Value) -> Vec<u8> {
 }
 
 fn explicit_quota_payload(code: &str, message: &str, shape: u8) -> serde_json::Value {
-    match shape % 3 {
+    match shape % 5 {
         0 => serde_json::json!({
             "error": {
                 "code": code,
@@ -18,16 +18,27 @@ fn explicit_quota_payload(code: &str, message: &str, shape: u8) -> serde_json::V
                 "detail": message,
             },
         }),
-        _ => serde_json::json!({
+        2 => serde_json::json!({
+            "error": code,
+            "message": message,
+        }),
+        3 => serde_json::json!({
+            "error": {
+                "status": code,
+                "message": message,
+            },
+        }),
+        4 => serde_json::json!({
             "outer": [
                 {
                     "inner": {
-                        "code": code,
+                        "reason": code,
                         "message": message,
                     },
                 },
             ],
         }),
+        _ => unreachable!(),
     }
 }
 
@@ -44,6 +55,12 @@ fn generic_429_payload_corpus_never_rotates_without_explicit_quota_code() {
             "plain rate limit type is not enough",
         ),
         ("rate limit exceeded words", None, Some("server_error"), ""),
+        (
+            "The docs mention rate_limit_exceeded and insufficient_quota.",
+            None,
+            None,
+            "non-error prose",
+        ),
         (
             "generic punctuation .,!?",
             Some("usage_limit"),
@@ -85,6 +102,28 @@ fn generic_429_payload_corpus_never_rotates_without_explicit_quota_code() {
 }
 
 #[test]
+fn codex_content_policy_errors_pass_through_without_quota_rotation() {
+    for code in ["invalid_prompt", "bio_policy", "cyber_policy"] {
+        let body = json_body(serde_json::json!({
+            "type": "response.failed",
+            "response": {
+                "error": {
+                    "code": code,
+                    "message": "Content policy rejected this request."
+                }
+            }
+        }));
+
+        let policy = runtime_http_error_policy(429, &body, RuntimeHttpErrorPhase::PreCommit);
+
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{code}");
+        assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough, "{code}");
+        assert_eq!(policy.rule, None, "{code}");
+        assert_eq!(policy.message, None, "{code}");
+    }
+}
+
+#[test]
 fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_statuses() {
     for (code, message) in [
         ("insufficient_quota", "Quota exhausted"),
@@ -112,6 +151,35 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
             }
         }
     }
+}
+
+#[test]
+fn deactivated_workspace_rotates_only_before_commit_for_profile_statuses() {
+    let body = json_body(serde_json::json!({
+        "detail": {
+            "code": "deactivated_workspace"
+        }
+    }));
+
+    for status in [402, 403] {
+        let precommit = runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::PreCommit);
+        assert_eq!(precommit.class, RuntimeHttpErrorClass::ProfileUnavailable);
+        assert_eq!(precommit.action, RuntimeHttpErrorAction::RotateProfile);
+        assert_eq!(precommit.rule, Some("profile_unavailable"));
+        assert_eq!(
+            precommit.message.as_deref(),
+            Some("Upstream Codex workspace is deactivated for this profile.")
+        );
+
+        let committed = runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::Committed);
+        assert_eq!(committed.class, RuntimeHttpErrorClass::ProfileUnavailable);
+        assert_eq!(committed.action, RuntimeHttpErrorAction::PassThrough);
+        assert_eq!(committed.rule, Some("profile_unavailable"));
+    }
+
+    let generic_429 = runtime_http_error_policy(429, &body, RuntimeHttpErrorPhase::PreCommit);
+    assert_eq!(generic_429.class, RuntimeHttpErrorClass::Other);
+    assert_eq!(generic_429.action, RuntimeHttpErrorAction::PassThrough);
 }
 
 #[test]
@@ -163,16 +231,12 @@ fn generic_429_passes_through_without_explicit_quota_code() {
 
 #[test]
 fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code() {
-    let bodies: [(&str, &[u8]); 8] = [
+    let bodies: [(&str, &[u8]); 7] = [
         ("empty", b"" as &[u8]),
         ("plain_too_many_requests", b"Too Many Requests" as &[u8]),
         (
             "json_too_many_requests",
             br#"{"error":{"message":"Too Many Requests"}}"# as &[u8],
-        ),
-        (
-            "json_usage_message_without_code",
-            br#"{"error":{"message":"The usage limit has been reached"}}"# as &[u8],
         ),
         (
             "json_rate_limit_type_without_exceeded_code",
@@ -212,6 +276,56 @@ fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code()
             assert_eq!(policy.rule, None, "{label} {phase:?}");
             assert_eq!(policy.message, None, "{label} {phase:?}");
         }
+    }
+}
+
+#[test]
+fn usage_limit_message_rotates_before_commit_only_for_non_429_quota_statuses() {
+    let body = br#"{"error":{"message":"The usage limit has been reached"}}"#;
+
+    for status in [402, 403] {
+        let precommit = runtime_http_error_policy(status, body, RuntimeHttpErrorPhase::PreCommit);
+        assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota, "{status}");
+        assert_eq!(
+            precommit.action,
+            RuntimeHttpErrorAction::RotateProfile,
+            "{status}"
+        );
+        assert_eq!(precommit.rule, Some("explicit_quota"), "{status}");
+        assert_eq!(
+            precommit.message.as_deref(),
+            Some("The usage limit has been reached"),
+            "{status}"
+        );
+
+        let committed = runtime_http_error_policy(status, body, RuntimeHttpErrorPhase::Committed);
+        assert_eq!(committed.class, RuntimeHttpErrorClass::Quota, "{status}");
+        assert_eq!(
+            committed.action,
+            RuntimeHttpErrorAction::PassThrough,
+            "{status}"
+        );
+        assert_eq!(committed.rule, Some("explicit_quota"), "{status}");
+        assert_eq!(
+            committed.message.as_deref(),
+            Some("The usage limit has been reached"),
+            "{status}"
+        );
+    }
+
+    for phase in [
+        RuntimeHttpErrorPhase::PreCommit,
+        RuntimeHttpErrorPhase::Committed,
+    ] {
+        let policy = runtime_http_error_policy(429, body, phase);
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{phase:?}");
+        assert_eq!(
+            policy.action,
+            RuntimeHttpErrorAction::PassThrough,
+            "{phase:?}"
+        );
+        assert_eq!(policy.rule, None, "{phase:?}");
+        assert_eq!(policy.message, None, "{phase:?}");
     }
 }
 

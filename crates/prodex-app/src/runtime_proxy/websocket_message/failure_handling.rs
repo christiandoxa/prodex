@@ -19,6 +19,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 profile_name,
                 payload,
             } => self.handle_direct_current_overloaded(profile_name, payload),
+            RuntimeWebsocketAttempt::Rejected {
+                profile_name,
+                payload,
+            } => self.handle_upstream_rejected(profile_name, payload),
             RuntimeWebsocketAttempt::PreviousResponseNotFound {
                 profile_name,
                 payload,
@@ -67,6 +71,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 profile_name,
                 payload,
             } => self.handle_candidate_overloaded(profile_name, payload),
+            RuntimeWebsocketAttempt::Rejected {
+                profile_name,
+                payload,
+            } => self.handle_upstream_rejected(profile_name, payload),
             RuntimeWebsocketAttempt::LocalSelectionBlocked {
                 profile_name,
                 reason,
@@ -94,6 +102,22 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.apply_previous_response_not_found_action(action, payload)
             }
         }
+    }
+
+    fn handle_upstream_rejected(
+        &mut self,
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+    ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} upstream_rejected profile={} action=pass_through",
+                self.request_id, self.session_id, profile_name
+            ),
+        );
+        forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
+        Ok(RuntimeWebsocketMessageLoopAction::Finished)
     }
 
     pub(super) fn handle_direct_current_transport_failed(

@@ -477,7 +477,7 @@ fn quota_message_detects_nested_error_payloads() {
 }
 
 #[test]
-fn quota_http_body_detection_requires_explicit_error_code() {
+fn quota_http_body_detection_accepts_explicit_quota_payloads_but_not_generic_429() {
     assert_eq!(
         extract_runtime_proxy_quota_message(br#"{"error":{"message":"Too Many Requests"}}"#),
         None
@@ -488,11 +488,16 @@ fn quota_http_body_detection_requires_explicit_error_code() {
         ),
         None
     );
+    assert_eq!(
+        extract_runtime_proxy_quota_message(br#"{"detail":{"code":"deactivated_workspace"}}"#),
+        None
+    );
 
     for code in [
         "insufficient_quota",
         "rate_limit_exceeded",
         "usage_not_included",
+        "usage_limit_reached",
     ] {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {

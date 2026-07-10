@@ -6,8 +6,8 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use terminal_ui::{
-    print_stderr_panel, tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style,
-    tui_success_style, tui_title_style,
+    print_stderr_panel, tui_border_style, tui_connected_header_block, tui_hint_style,
+    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> {
@@ -58,11 +58,7 @@ fn print_update_notice_tui(
                 Span::raw("  "),
                 Span::styled("available", tui_hint_style()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(update_notice_tui_lines(

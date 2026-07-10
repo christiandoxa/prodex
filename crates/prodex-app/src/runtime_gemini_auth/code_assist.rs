@@ -2,6 +2,7 @@ use super::{
     GeminiOAuthSecret, gemini_oauth_project_from_env, normalize_gemini_project_id,
     refresh_gemini_oauth_secret_if_needed, write_gemini_oauth_secret,
 };
+use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_text_with_limit};
 use anyhow::{Context, Result, bail};
 use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -22,8 +23,8 @@ use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::time::Duration;
 use terminal_ui::{
-    tui_border_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
-    tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_hint_style,
+    tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 const GEMINI_CODE_ASSIST_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com/v1internal";
@@ -276,9 +277,11 @@ fn parse_gemini_code_assist_response(
     method: &str,
 ) -> Result<Value> {
     let status = response.status();
-    let body = response
-        .text()
-        .with_context(|| format!("failed to read Gemini Code Assist {method} response"))?;
+    let body = read_blocking_response_text_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        &format!("failed to read Gemini Code Assist {method} response"),
+    )?;
     if !status.is_success() {
         if let Some(validation) = gemini_validation_from_body(&body) {
             bail!("{}", gemini_validation_error_message(&validation));
@@ -566,11 +569,7 @@ fn prompt_gemini_validation_tui(validation: &GeminiCodeAssistValidation) -> Resu
                 Span::raw("  "),
                 Span::styled("action required", tui_hint_style()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             let mut lines = vec![
@@ -604,11 +603,7 @@ fn prompt_gemini_validation_tui(validation: &GeminiCodeAssistValidation) -> Resu
                 Span::styled("esc", tui_hint_style()),
                 Span::raw(" continue"),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
         })?;
 

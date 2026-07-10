@@ -1,0 +1,90 @@
+{
+  "observe_event": {
+    "event": "app_server_broker_observe",
+    "parse_error_required_fields": [
+      "parse_ok",
+      "error"
+    ],
+    "parsed_frame_required_fields": [
+      "frame_kind",
+      "frame_id",
+      "request_id",
+      "method_kind",
+      "valid_jsonrpc",
+      "method",
+      "lifecycle_stage",
+      "lifecycle_schema_file",
+      "continuation_decision",
+      "policy_mode",
+      "commit_boundary",
+      "rotation_window",
+      "routing_hint",
+      "preserved_owner_kind",
+      "affinity_required",
+      "rotation_allowed",
+      "provider_switch_allowed",
+      "provider_switch_requires_override",
+      "turn_committed",
+      "preserves_owner",
+      "owner_kind",
+      "affinity_key_count",
+      "session_id",
+      "thread_id",
+      "turn_id",
+      "item_id",
+      "invalid_reason"
+    ],
+    "required_fields": [
+      "line"
+    ]
+  },
+  "summary_event": {
+    "event": "app_server_broker_summary",
+    "required_fields": [
+      "line_count",
+      "parsed_count",
+      "error_count",
+      "fresh_selection_ok_count",
+      "preserve_session_affinity_count",
+      "preserve_thread_affinity_count",
+      "preserve_turn_affinity_count",
+      "precommit_count",
+      "turn_committed_count",
+      "rotation_open_count",
+      "rotation_closed_count",
+      "fresh_select_ok_count",
+      "preserve_session_owner_count",
+      "preserve_thread_owner_count",
+      "preserve_turn_owner_count",
+      "affinity_required_count",
+      "rotation_allowed_count",
+      "preserves_owner_count"
+    ]
+  },
+  "audit_event": {
+    "component": "app_server_broker",
+    "action": "preview_session",
+    "outcome": "observed",
+    "modes": [
+      "stdio-preview",
+      "stdio-passthrough-preview",
+      "stdio-validate",
+      "stdio-validate-passthrough",
+      "stdio-live"
+    ],
+    "required_fields": [
+      "mode",
+      "line_count",
+      "parsed_count",
+      "error_count",
+      "frame_kind_counts",
+      "continuation_decision_counts",
+      "policy_mode_counts",
+      "commit_boundary_counts",
+      "rotation_window_counts",
+      "routing_hint_counts",
+      "provider_switch_counts",
+      "policy_flag_counts"
+    ]
+  }
+}

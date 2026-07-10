@@ -8,11 +8,12 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
-use terminal_ui::{tui_border_style, tui_primary_style, tui_secondary_style, tui_title_style};
-
-use super::{
-    SuperMemoryStatusMode, collect_super_tool_statuses_with_memory_mode, render_super_tool_statuses,
+use terminal_ui::{
+    tui_border_style, tui_connected_header_block, tui_primary_style, tui_secondary_style,
+    tui_title_style,
 };
+
+use super::{collect_super_tool_statuses, render_super_tool_statuses};
 use crate::{
     CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
@@ -37,6 +38,7 @@ pub(crate) fn run_child_plan(
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<ExitStatus> {
     cleanup_codex_arg0_temp_dirs_best_effort(&plan.codex_home);
+    let _session_lock = prodex_shared_codex_fs::lock_codex_sessions_for_child(&plan.codex_home)?;
     let mut command = Command::new(&plan.binary);
     command.args(&plan.args).env("CODEX_HOME", &plan.codex_home);
     for key in &plan.removed_env {
@@ -73,6 +75,9 @@ pub(crate) fn cleanup_codex_arg0_temp_dirs_best_effort(codex_home: &Path) {
 }
 
 fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
+    if !arg0_path_is_regular_dir(arg0_root)? {
+        return Ok(());
+    }
     let entries = match fs::read_dir(arg0_root) {
         Ok(entries) => entries,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -84,7 +89,7 @@ fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() || !arg0_dir_name_is_owned(&path) {
+        if !arg0_path_is_regular_dir(&path)? || !arg0_dir_name_is_owned(&path) {
             continue;
         }
         let Some(_lock_file) = try_lock_codex_arg0_dir(&path)? else {
@@ -103,6 +108,14 @@ fn cleanup_codex_arg0_temp_dirs(arg0_root: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn arg0_path_is_regular_dir(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(!metadata.file_type().is_symlink() && metadata.is_dir()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err),
+    }
 }
 
 fn arg0_dir_name_is_owned(path: &Path) -> bool {
@@ -141,6 +154,9 @@ fn repair_codex_arg0_permissions_best_effort(path: &Path) {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return;
     };
+    if metadata.file_type().is_symlink() {
+        return;
+    }
     if metadata.is_dir() {
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
         if let Ok(entries) = fs::read_dir(path) {
@@ -148,7 +164,7 @@ fn repair_codex_arg0_permissions_best_effort(path: &Path) {
                 repair_codex_arg0_permissions_best_effort(&entry.path());
             }
         }
-    } else {
+    } else if metadata.is_file() {
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
     }
 }
@@ -184,7 +200,7 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
-    let (rtk_enabled, super_optimizer_overlay, memory_prefix_enabled, codex_args) =
+    let (rtk_enabled, super_optimizer_overlay, codex_args) =
         runtime_caveman_extract_launch_prefixes(&args.codex_args);
     let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
@@ -215,32 +231,18 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
             .map(crate::SuperExternalProvider::as_str),
         external_provider_api_key: args.external_provider_api_key.as_deref(),
     };
-    let memory_enabled =
-        memory_prefix_enabled || args.memory_backend == crate::SuperMemoryBackend::Mem0;
-    let memory_backend = match (memory_enabled, args.memory_backend) {
-        (false, _) => "disabled",
-        (true, crate::SuperMemoryBackend::Sqlite) => "local sqlite",
-        (true, crate::SuperMemoryBackend::Mem0) => "managed Mem0 Docker (would start)",
-    };
     let mut extra_report = format!(
-        "Prodex overlay: rtk={}; super={}\nMemory backend: {}",
+        "Prodex overlay: rtk={}; super={}",
         if rtk_enabled { "enabled" } else { "disabled" },
         if super_optimizer_overlay {
             "enabled"
         } else {
             "disabled"
-        },
-        memory_backend,
+        }
     );
     if super_optimizer_overlay {
         let paths = crate::AppPaths::discover()?;
-        let memory_mode = if memory_enabled {
-            SuperMemoryStatusMode::Selected(args.memory_backend)
-        } else {
-            SuperMemoryStatusMode::Disabled
-        };
-        let statuses =
-            collect_super_tool_statuses_with_memory_mode(&paths, presidio_enabled, memory_mode);
+        let statuses = collect_super_tool_statuses(&paths, presidio_enabled);
         extra_report.push('\n');
         extra_report.push_str(&render_super_tool_statuses(&statuses));
     }
@@ -311,11 +313,7 @@ fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
             Span::raw("  "),
             Span::styled(flow.to_string(), tui_secondary_style()),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
         let body = Paragraph::new(runtime_launch_dry_run_tui_text(output))

@@ -40,6 +40,7 @@ jobs:
 
       - name: Run upstream compatibility watchdog
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           PRODEX_UPSTREAM_COMPAT_ARTIFACT_DIR: ${{ runner.temp }}/upstream-compat
           PRODEX_UPSTREAM_BASELINE_PATH: ${{ github.event.inputs.baseline_path }}
           PRODEX_UPSTREAM_FAIL_ON_DRIFT: ${{ github.event.inputs.fail_on_drift }}

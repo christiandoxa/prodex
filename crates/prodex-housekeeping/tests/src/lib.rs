@@ -45,6 +45,24 @@ fn cleanup_summary_total_and_merge_count_all_fields() {
     assert_eq!(merged.stale_login_dirs_removed, 4);
 }
 
+#[cfg(unix)]
+#[test]
+fn runtime_log_discovery_skips_symlink_log_files() {
+    let paths = test_paths("runtime-log-symlink");
+    fs::create_dir_all(&paths.root).expect("root should exist");
+    let regular = paths.root.join("prodex-runtime-1.log");
+    let symlink = paths.root.join("prodex-runtime-2.log");
+    let target = paths.root.join("secret.txt");
+    fs::write(&regular, "runtime\n").expect("regular log should write");
+    fs::write(&target, "do not read\n").expect("target should write");
+    std::os::unix::fs::symlink(&target, &symlink).expect("symlink should create");
+
+    let logs = prodex_runtime_log_paths_in_dir(&paths.root, "prodex-runtime");
+
+    assert_eq!(logs, vec![regular]);
+    fs::remove_dir_all(&paths.root).expect("test root should clean up");
+}
+
 #[test]
 fn zero_orphan_retention_selects_fresh_orphan_managed_home() {
     let paths = test_paths("zero-retention");

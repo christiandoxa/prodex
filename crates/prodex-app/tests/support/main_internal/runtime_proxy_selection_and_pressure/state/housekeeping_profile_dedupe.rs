@@ -157,6 +157,139 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
 }
 
 #[test]
+fn perform_prodex_cleanup_refuses_duplicate_managed_home_outside_managed_root() {
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
+
+    let inside_home = paths.managed_profiles_root.join("inside");
+    let outside_home = temp_dir.path.join("outside-managed");
+    fs::create_dir_all(&inside_home).expect("inside home should exist");
+    fs::create_dir_all(&outside_home).expect("outside home should exist");
+
+    let mut state = AppState {
+        active_profile: Some("inside".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "inside".to_string(),
+                ProfileEntry {
+                    codex_home: inside_home.clone(),
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "outside".to_string(),
+                ProfileEntry {
+                    codex_home: outside_home.clone(),
+                    managed: true,
+                    email: Some("Main@Example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::from([
+            ("inside".to_string(), 10),
+            ("outside".to_string(), 1),
+        ]),
+        ..AppState::default()
+    };
+    state.save(&paths).expect("state should save");
+
+    let err = perform_prodex_cleanup(&paths, &mut state)
+        .expect_err("duplicate managed home outside root should be refused");
+
+    assert!(
+        err.to_string()
+            .contains("outside managed profiles root"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        outside_home.exists(),
+        "outside managed home should not be deleted"
+    );
+    assert!(
+        AppState::load(&paths)
+            .expect("saved state should load")
+            .profiles
+            .contains_key("outside"),
+        "saved state should stay unchanged after failed cleanup"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn perform_prodex_cleanup_refuses_symlink_managed_profiles_root() {
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let outside_profiles = temp_dir.path.join("outside-profiles");
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::create_dir_all(&outside_profiles).expect("outside root should exist");
+    std::os::unix::fs::symlink(&outside_profiles, &paths.managed_profiles_root)
+        .expect("managed profiles root symlink should be created");
+
+    let primary_home = paths.managed_profiles_root.join("primary");
+    let duplicate_home = paths.managed_profiles_root.join("duplicate");
+    fs::create_dir_all(&primary_home).expect("primary home should exist through symlink");
+    fs::create_dir_all(&duplicate_home).expect("duplicate home should exist through symlink");
+
+    let mut state = AppState {
+        active_profile: Some("duplicate".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "primary".to_string(),
+                ProfileEntry {
+                    codex_home: primary_home,
+                    managed: true,
+                    email: Some("main@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "duplicate".to_string(),
+                ProfileEntry {
+                    codex_home: duplicate_home,
+                    managed: true,
+                    email: Some("Main@Example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        last_run_selected_at: BTreeMap::from([
+            ("primary".to_string(), 10),
+            ("duplicate".to_string(), 5),
+        ]),
+        ..AppState::default()
+    };
+
+    let err = perform_prodex_cleanup(&paths, &mut state)
+        .expect_err("cleanup should reject symlinked managed root");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected cleanup error: {err:#}"
+    );
+    assert!(
+        outside_profiles.join("primary").exists(),
+        "cleanup must not delete through a symlinked managed profiles root"
+    );
+}
+
+#[test]
 fn perform_prodex_cleanup_keeps_same_email_profiles_when_workspace_differs() {
     let temp_dir = TestDir::isolated();
     let paths = AppPaths {

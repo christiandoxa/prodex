@@ -4,11 +4,31 @@ use super::{
     runtime_broker_metadata_by_log_path, runtime_broker_metadata_for_log_path,
     runtime_broker_metrics_snapshot, runtime_proxy_log, runtime_proxy_persistence_enabled,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use prodex_runtime_broker::{RuntimeBrokerHealth, RuntimeBrokerMetadata};
+use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use tiny_http::{Header as TinyHeader, Response as TinyResponse};
+
+const RUNTIME_BROKER_ACTIVATION_MAX_BODY_BYTES: usize = 64 * 1024;
+
+#[derive(Debug)]
+struct RuntimeBrokerActivationBodyTooLarge {
+    limit: usize,
+}
+
+impl std::fmt::Display for RuntimeBrokerActivationBodyTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "runtime broker activation body exceeds {} bytes",
+            self.limit
+        )
+    }
+}
+
+impl std::error::Error for RuntimeBrokerActivationBodyTooLarge {}
 
 pub(crate) fn runtime_proxy_admin_token(request: &tiny_http::Request) -> Option<String> {
     request
@@ -126,16 +146,36 @@ fn runtime_broker_activation_profile(
     {
         return Err(runtime_broker_admin_error_response(error));
     }
-    let mut body = Vec::new();
-    if let Err(err) = request.as_reader().read_to_end(&mut body) {
-        return Err(build_runtime_proxy_json_error_response(
-            400,
-            "invalid_request",
-            &format!("failed to read runtime broker activation body: {err}"),
-        ));
-    }
+    let body = read_runtime_broker_activation_body_limited(
+        request.as_reader(),
+        RUNTIME_BROKER_ACTIVATION_MAX_BODY_BYTES,
+    )
+    .map_err(runtime_broker_activation_body_error_response)?;
     prodex_runtime_broker::runtime_broker_activation_profile_from_json(&body)
         .map_err(runtime_broker_admin_error_response)
+}
+
+fn runtime_broker_activation_body_error_response(err: anyhow::Error) -> tiny_http::ResponseBox {
+    if err
+        .downcast_ref::<RuntimeBrokerActivationBodyTooLarge>()
+        .is_some()
+    {
+        build_runtime_proxy_json_error_response(413, "request_too_large", &err.to_string())
+    } else {
+        build_runtime_proxy_json_error_response(400, "invalid_request", &err.to_string())
+    }
+}
+
+fn read_runtime_broker_activation_body_limited(reader: impl Read, limit: usize) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    let mut reader = reader.take((limit as u64).saturating_add(1));
+    reader
+        .read_to_end(&mut body)
+        .context("failed to read runtime broker activation body")?;
+    if body.len() > limit {
+        return Err(RuntimeBrokerActivationBodyTooLarge { limit }.into());
+    }
+    Ok(body)
 }
 
 fn apply_runtime_broker_activation(
@@ -223,5 +263,33 @@ pub(crate) fn handle_runtime_proxy_admin_request(
         prodex_runtime_broker::RuntimeBrokerAdminRoute::Activate => {
             runtime_broker_activation_response(request, shared, metadata)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_broker_activation_body_limit_allows_exact_limit() {
+        let body = vec![b'a'; 4];
+
+        let captured =
+            read_runtime_broker_activation_body_limited(std::io::Cursor::new(body.clone()), 4)
+                .unwrap();
+
+        assert_eq!(captured, body);
+    }
+
+    #[test]
+    fn runtime_broker_activation_body_limit_rejects_limit_plus_one() {
+        let err =
+            read_runtime_broker_activation_body_limited(std::io::Cursor::new(vec![b'a'; 5]), 4)
+                .expect_err("body above limit should be rejected");
+
+        assert!(
+            err.downcast_ref::<RuntimeBrokerActivationBodyTooLarge>()
+                .is_some()
+        );
     }
 }

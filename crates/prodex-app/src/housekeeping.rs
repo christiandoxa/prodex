@@ -105,11 +105,7 @@ pub(crate) use prodex_housekeeping::cleanup_runtime_proxy_latest_pointer;
 pub(crate) fn command_runs_auto_runtime_housekeeping(command: &Commands) -> bool {
     !matches!(
         command,
-        Commands::Cleanup(_)
-            | Commands::RuntimeBroker(_)
-            | Commands::Update(_)
-            | Commands::MemoryMcp(_)
-            | Commands::InspectMcp(_)
+        Commands::Cleanup(_) | Commands::RuntimeBroker(_) | Commands::Update(_)
     )
 }
 
@@ -255,7 +251,10 @@ fn runtime_broker_artifact_keys(paths: &AppPaths) -> Vec<String> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if let Some(key) = runtime_broker_artifact_key(name, path.is_dir()) {
+        let is_regular_dir = fs::symlink_metadata(&path)
+            .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir())
+            .unwrap_or(false);
+        if let Some(key) = runtime_broker_artifact_key(name, is_regular_dir) {
             keys.push(key.to_string());
         }
     }
@@ -287,6 +286,9 @@ pub(crate) fn cleanup_runtime_broker_stale_leases_for_all(paths: &AppPaths) -> u
     let mut removed = 0usize;
     for broker_key in runtime_broker_artifact_keys(paths) {
         let lease_dir = runtime_broker_lease_dir(paths, &broker_key);
+        if !runtime_broker_lease_dir_is_regular_dir(&lease_dir) {
+            continue;
+        }
         let Ok(entries) = fs::read_dir(&lease_dir) else {
             continue;
         };
@@ -295,6 +297,9 @@ pub(crate) fn cleanup_runtime_broker_stale_leases_for_all(paths: &AppPaths) -> u
             let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
+            if !runtime_broker_lease_path_is_regular_file(&path) {
+                continue;
+            }
             let pid = runtime_broker_lease_pid(file_name);
             if pid.is_some_and(runtime_process_pid_alive) {
                 continue;

@@ -1,63 +1,20 @@
 use anyhow::{Context, Result};
 use std::env;
-use std::fs;
 use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use crate::fs_ops::{read_text_file_limited, write_text_file};
 use crate::localization::localize_text_file;
 use crate::toml_helpers::ensure_child_table;
 use crate::{AGENTS_MD, PRODEX_SUPER_OPTIMIZER_AWARENESS, SUPER_OPTIMIZERS_MD};
 
-mod claw;
 mod discovery;
 mod ponytail;
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
 const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
-const CLAW_COMPACTOR_STATE_DIR_NAME: &str = "claw-compactor";
-const CODEBASE_MEMORY_STATE_DIR_NAME: &str = "codebase-memory";
-const SQZ_STATE_DIR_NAME: &str = "sqz";
-const TOKEN_SAVIOR_STATE_DIR_NAME: &str = "token-savior";
-const PRODEX_MEMORY_BACKEND_ENV: &str = "PRODEX_MEMORY_BACKEND";
-const PRODEX_MEM0_API_URL_ENV: &str = "PRODEX_MEM0_API_URL";
-const PRODEX_MEM0_API_KEY_ENV: &str = "PRODEX_MEM0_API_KEY";
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SuperOptimizerMemoryConfig<'a> {
-    pub enabled: bool,
-    pub mem0_api_url: Option<&'a str>,
-    pub mem0_api_key: Option<&'a str>,
-}
-
-impl SuperOptimizerMemoryConfig<'_> {
-    fn backend_label(&self) -> &'static str {
-        if !self.enabled {
-            "disabled"
-        } else if self.mem0_api_url.is_some() && self.mem0_api_key.is_some() {
-            "managed Mem0"
-        } else {
-            "local sqlite"
-        }
-    }
-
-    fn env_vars(&self) -> Vec<(&'static str, String)> {
-        if !self.enabled {
-            return Vec::new();
-        }
-        let (Some(api_url), Some(api_key)) = (self.mem0_api_url, self.mem0_api_key) else {
-            return Vec::new();
-        };
-        vec![
-            (PRODEX_MEMORY_BACKEND_ENV, "mem0".to_string()),
-            (PRODEX_MEM0_API_URL_ENV, api_url.to_string()),
-            (PRODEX_MEM0_API_KEY_ENV, api_key.to_string()),
-        ]
-    }
-}
 
 pub fn configure_super_optimizer_codex_home(codex_home: &Path) -> Result<()> {
     configure_super_optimizer_codex_home_with_presidio(codex_home, false)
@@ -67,67 +24,35 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
     codex_home: &Path,
     presidio_enabled: bool,
 ) -> Result<()> {
-    configure_super_optimizer_codex_home_with_options(
-        codex_home,
-        presidio_enabled,
-        SuperOptimizerMemoryConfig::default(),
-    )
-}
-
-pub fn configure_super_optimizer_codex_home_with_options(
-    codex_home: &Path,
-    presidio_enabled: bool,
-    memory_config: SuperOptimizerMemoryConfig<'_>,
-) -> Result<()> {
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let path_dirs = discovery::path_dirs_from_env();
     let optimizer_roots = discovery::managed_optimizer_roots();
-    let sqz_mcp_command = find_optimizer_command("sqz-mcp", &path_dirs, &optimizer_roots);
     let codebase_memory_command =
         find_optimizer_command("codebase-memory-mcp", &path_dirs, &optimizer_roots);
     let ponytail_checkout = ponytail::find_ponytail_checkout(&optimizer_roots);
+
     let optimizers_path = codex_home.join(SUPER_OPTIMIZERS_MD);
     let awareness = render_super_optimizer_awareness(
         &path_dirs,
-        &optimizer_roots,
-        sqz_mcp_command.as_deref(),
         codebase_memory_command.as_deref(),
         ponytail_checkout.as_deref(),
         presidio_enabled,
-        memory_config,
     );
-    fs::write(&optimizers_path, awareness)
-        .with_context(|| format!("failed to write {}", optimizers_path.display()))?;
+    write_text_file(&optimizers_path, &awareness)?;
     localize_text_file(&codex_home.join(AGENTS_MD))?;
     ensure_agents_reference(codex_home, &optimizers_path)?;
-    configure_super_optimizer_mcp_servers_with_sources(
-        codex_home,
-        &path_dirs,
-        &optimizer_roots,
-        sqz_mcp_command.as_deref(),
-        codebase_memory_command.as_deref(),
-        memory_config,
-    )?;
-    configure_super_optimizer_command_wrappers(
-        codex_home,
-        &path_dirs,
-        &optimizer_roots,
-        sqz_mcp_command.as_deref(),
-    )?;
+    configure_codebase_memory_mcp(codex_home, codebase_memory_command.as_deref())?;
     if let Some(checkout) = ponytail_checkout {
         ponytail::install_ponytail_plugin(codex_home, &checkout)?;
     }
-    claw::configure_session_hook(codex_home, &path_dirs, &optimizer_roots)
+    Ok(())
 }
 
 fn render_super_optimizer_awareness(
     path_dirs: &[PathBuf],
-    optimizer_roots: &[PathBuf],
-    sqz_mcp_command: Option<&Path>,
     codebase_memory_command: Option<&Path>,
     ponytail_checkout: Option<&Path>,
     presidio_enabled: bool,
-    memory_config: SuperOptimizerMemoryConfig<'_>,
 ) -> String {
     let mut awareness = PRODEX_SUPER_OPTIMIZER_AWARENESS.to_string();
     awareness.push_str("\n## Available Now\n\n");
@@ -136,42 +61,12 @@ fn render_super_optimizer_awareness(
         availability_label(find_path_command("rtk", path_dirs).as_deref())
     ));
     awareness.push_str(&format!(
-        "- prodex-sqz MCP: {}\n",
-        availability_label(sqz_mcp_command)
-    ));
-    awareness.push_str(&format!(
-        "- prodex-token-savior MCP: {}\n",
-        availability_label(
-            find_optimizer_command("token-savior", path_dirs, optimizer_roots).as_deref()
-        )
-    ));
-    awareness.push_str(&format!(
         "- codebase-memory-mcp: {}\n",
         availability_label(codebase_memory_command)
     ));
     awareness.push_str(&format!(
-        "- prodex-claw-compactor: {}\n",
-        availability_label(
-            find_optimizer_command("claw-compactor", path_dirs, optimizer_roots).as_deref()
-        )
-    ));
-    awareness.push_str(&format!(
         "- ponytail plugin: {}\n",
         availability_label(ponytail_checkout)
-    ));
-    let memory_availability = if memory_config.enabled {
-        availability_label(find_prodex_memory_command().as_deref())
-    } else {
-        "disabled".to_string()
-    };
-    awareness.push_str(&format!("- prodex-memory MCP: {memory_availability}\n"));
-    awareness.push_str(&format!(
-        "- prodex-inspect MCP: {}\n",
-        availability_label(find_prodex_builtin_command().as_deref())
-    ));
-    awareness.push_str(&format!(
-        "- prodex-memory backend: {}\n",
-        memory_config.backend_label()
     ));
     awareness.push_str(&format!(
         "- presidio: {}\n",
@@ -192,37 +87,29 @@ fn availability_label(path: Option<&Path>) -> String {
 fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<()> {
     let agents_path = codex_home.join(AGENTS_MD);
     let reference = format!("@{}", reference_path.display());
-    let contents = fs::read_to_string(&agents_path)
-        .with_context(|| format!("failed to read {}", agents_path.display()))?;
+    let contents = read_text_file_limited(&agents_path)?.unwrap_or_default();
     if contents.lines().any(|line| line.trim() == reference) {
         return Ok(());
     }
 
-    let mut updated = String::new();
-    if contents.trim().is_empty() {
-        updated.push_str(&reference);
-        updated.push('\n');
+    let updated = if contents.trim().is_empty() {
+        format!("{reference}\n")
     } else {
-        updated.push_str(contents.trim_end());
-        updated.push_str("\n\n");
-        updated.push_str(&reference);
-        updated.push('\n');
-    }
-    fs::write(&agents_path, updated)
-        .with_context(|| format!("failed to write {}", agents_path.display()))?;
-    Ok(())
+        format!("{}\n\n{reference}\n", contents.trim_end())
+    };
+    write_text_file(&agents_path, &updated)
 }
 
-fn configure_super_optimizer_mcp_servers_with_sources(
-    codex_home: &Path,
-    path_dirs: &[PathBuf],
-    optimizer_roots: &[PathBuf],
-    sqz_mcp_command: Option<&Path>,
-    codebase_memory_command: Option<&Path>,
-    memory_config: SuperOptimizerMemoryConfig<'_>,
-) -> Result<()> {
+fn configure_codebase_memory_mcp(codex_home: &Path, command: Option<&Path>) -> Result<()> {
+    let Some(command) = command else {
+        return Ok(());
+    };
+    let Some((bridge, bridge_args)) = mcp_jsonl_bridge_command_args(command) else {
+        return Ok(());
+    };
+
     let config_path = codex_home.join("config.toml");
-    let contents = fs::read_to_string(&config_path).unwrap_or_default();
+    let contents = read_text_file_limited(&config_path)?.unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
         toml::Table::new()
     } else {
@@ -233,161 +120,29 @@ fn configure_super_optimizer_mcp_servers_with_sources(
             _ => anyhow::bail!("{} did not parse as a TOML table", config_path.display()),
         }
     };
-    if let Some(command) = sqz_mcp_command {
-        let sqz_state = optimizer_state_dirs_from_env(SQZ_STATE_DIR_NAME);
-        let sqz_env = optimizer_state_env(sqz_state.as_ref());
-        let Some((bridge, bridge_args)) =
-            mcp_jsonl_bridge_command_args(command, &["--transport", "stdio"])
-        else {
-            return Ok(());
-        };
-        configure_stdio_mcp_server(&mut table, "prodex-sqz", bridge, &bridge_args, &sqz_env);
-    }
-
-    if let Some(command) = find_optimizer_command("token-savior", path_dirs, optimizer_roots) {
-        let workspace_roots = env::current_dir()
-            .ok()
-            .map(|path| path.display().to_string())
-            .unwrap_or_default();
-        let token_savior_state = token_savior_state_dirs_from_env();
-        if let Some(state_dirs) = token_savior_state.as_ref() {
-            write_token_savior_sitecustomize(state_dirs)?;
-        }
-        let token_savior_env = token_savior_mcp_env(&workspace_roots, token_savior_state.as_ref());
-        let Some((bridge, bridge_args)) = mcp_jsonl_bridge_command_args(&command, &[]) else {
-            return Ok(());
-        };
-        configure_stdio_mcp_server(
-            &mut table,
-            "prodex-token-savior",
-            bridge,
-            &bridge_args,
-            &token_savior_env,
-        );
-    }
-
-    if let Some(command) = codebase_memory_command {
-        let env = codebase_memory_mcp_env();
-        let Some((bridge, bridge_args)) = mcp_jsonl_bridge_command_args(command, &[]) else {
-            return Ok(());
-        };
-        configure_stdio_mcp_server(
-            &mut table,
-            "codebase-memory-mcp",
-            bridge,
-            &bridge_args,
-            &env,
-        );
-    }
-    if memory_config.enabled
-        && let Some(command) = find_prodex_memory_command()
-    {
-        let memory_env = memory_config.env_vars();
-        configure_stdio_mcp_server(
-            &mut table,
-            "prodex-memory",
-            command,
-            &["__memory-mcp".to_string()],
-            &memory_env,
-        );
-    }
-    if let Some(command) = find_prodex_builtin_command() {
-        configure_stdio_mcp_server(
-            &mut table,
-            "prodex-inspect",
-            command,
-            &["__inspect-mcp".to_string()],
-            &[],
-        );
-    }
-
+    configure_stdio_mcp_server(
+        &mut table,
+        "codebase-memory-mcp",
+        bridge,
+        &bridge_args,
+        &codebase_memory_mcp_env(),
+    );
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Super optimizer config overlay")?;
-    fs::write(&config_path, rendered)
-        .with_context(|| format!("failed to write {}", config_path.display()))?;
-    Ok(())
-}
-
-fn configure_super_optimizer_command_wrappers(
-    codex_home: &Path,
-    path_dirs: &[PathBuf],
-    optimizer_roots: &[PathBuf],
-    sqz_mcp_command: Option<&Path>,
-) -> Result<()> {
-    let bin_dir = codex_home.join("bin");
-    if let Some(command) = find_optimizer_command("sqz", path_dirs, optimizer_roots) {
-        let sqz_state = optimizer_state_dirs_from_env(SQZ_STATE_DIR_NAME);
-        let sqz_env = optimizer_state_env(sqz_state.as_ref());
-        write_shell_wrapper_with_env(&bin_dir.join("sqz"), &command, &[], &sqz_env)?;
-        write_shell_wrapper_with_env(&bin_dir.join("prodex-sqz-cli"), &command, &[], &sqz_env)?;
-    }
-    if let Some(command) = sqz_mcp_command {
-        let sqz_state = optimizer_state_dirs_from_env(SQZ_STATE_DIR_NAME);
-        let sqz_env = optimizer_state_env(sqz_state.as_ref());
-        write_shell_wrapper_with_env(&bin_dir.join("sqz-mcp"), command, &[], &sqz_env)?;
-    }
-    claw::configure_command_wrappers(&bin_dir, path_dirs, optimizer_roots)
-}
-
-pub(super) fn write_shell_wrapper_with_env(
-    path: &Path,
-    command: &Path,
-    args: &[&str],
-    env_vars: &[(&str, String)],
-) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let args = args
-        .iter()
-        .map(|arg| format!(" '{}'", arg.replace('\'', "'\\''")))
-        .collect::<String>();
-    let exports = shell_exports(env_vars);
-    let script = format!(
-        "#!/usr/bin/env sh\n{}exec '{}'{} \"$@\"\n",
-        exports,
-        command.display().to_string().replace('\'', "'\\''"),
-        args
-    );
-    fs::write(path, script).with_context(|| format!("failed to write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path)
-            .with_context(|| format!("failed to stat {}", path.display()))?
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to chmod {}", path.display()))?;
-    }
-    Ok(())
-}
-
-pub(super) fn shell_exports(env_vars: &[(&str, String)]) -> String {
-    env_vars
-        .iter()
-        .map(|(key, value)| format!("export {}='{}'\n", key, value.replace('\'', "'\\''")))
-        .collect()
+    write_text_file(&config_path, &rendered)
 }
 
 fn configure_stdio_mcp_server(
     table: &mut toml::Table,
-    server_name: &str,
+    name: &str,
     command: PathBuf,
     args: &[String],
     env_vars: &[(&str, String)],
 ) {
-    let Some(mcp_servers) = super_optimizer_mcp_servers_table(table) else {
+    let Some(mcp_servers) = mcp_servers_table(table) else {
         return;
     };
-    let server = if !mcp_servers.contains_key(server_name) {
-        ensure_child_table(mcp_servers, server_name)
-    } else {
-        match mcp_servers.get_mut(server_name) {
-            Some(toml::Value::Table(server)) => server,
-            _ => return,
-        }
-    };
+    let server = ensure_child_table(mcp_servers, name);
     server.insert(
         "command".to_string(),
         toml::Value::String(command.display().to_string()),
@@ -397,231 +152,21 @@ fn configure_stdio_mcp_server(
     } else {
         server.insert(
             "args".to_string(),
-            toml::Value::Array(
-                args.iter()
-                    .map(|arg| toml::Value::String(arg.clone()))
-                    .collect(),
-            ),
+            toml::Value::Array(args.iter().cloned().map(toml::Value::String).collect()),
         );
     }
-    if !env_vars.is_empty() {
-        let mut env_table = toml::Table::new();
-        for (key, value) in env_vars {
-            env_table.insert((*key).to_string(), toml::Value::String(value.clone()));
-        }
-        server.insert("env".to_string(), toml::Value::Table(env_table));
-    } else {
+    if env_vars.is_empty() {
         server.remove("env");
+    } else {
+        let env = env_vars
+            .iter()
+            .map(|(key, value)| (key.to_string(), toml::Value::String(value.clone())))
+            .collect();
+        server.insert("env".to_string(), toml::Value::Table(env));
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TokenSaviorStateDirs {
-    cache_dir: PathBuf,
-    python_path_dir: PathBuf,
-    stats_dir: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct OptimizerStateDirs {
-    home_dir: PathBuf,
-    data_dir: PathBuf,
-    config_dir: PathBuf,
-    state_dir: PathBuf,
-    cache_dir: PathBuf,
-}
-
-fn token_savior_mcp_env(
-    workspace_roots: &str,
-    state_dirs: Option<&TokenSaviorStateDirs>,
-) -> Vec<(&'static str, String)> {
-    let mut env_vars = vec![
-        ("TOKEN_SAVIOR_CLIENT", "codex".to_string()),
-        ("TOKEN_SAVIOR_PROFILE", "optimized".to_string()),
-        ("TOKEN_SAVIOR_NO_WARMUP", "1".to_string()),
-        ("TS_CAPTURE_DISABLED", "1".to_string()),
-        ("TS_MEMORY_DISABLE", "1".to_string()),
-        ("TS_AUTO_EXTRACT", "0".to_string()),
-        ("WORKSPACE_ROOTS", workspace_roots.to_string()),
-    ];
-    if let Some(state_dirs) = state_dirs {
-        env_vars.extend(optimizer_state_env(Some(&state_dirs.optimizer_dirs())));
-        env_vars.push((
-            "TOKEN_SAVIOR_CACHE_DIR",
-            state_dirs.cache_dir.display().to_string(),
-        ));
-        env_vars.push((
-            "PYTHONPATH",
-            pythonpath_with_prepend(&state_dirs.python_path_dir),
-        ));
-        env_vars.push((
-            "TOKEN_SAVIOR_STATS_DIR",
-            state_dirs.stats_dir.display().to_string(),
-        ));
-    }
-    env_vars
-}
-
-fn token_savior_state_dirs_from_env() -> Option<TokenSaviorStateDirs> {
-    let prodex_home = env::var_os(PRODEX_HOME_ENV)
-        .map(PathBuf::from)
-        .map(absolutize_path_lossy)
-        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")))?;
-    Some(token_savior_state_dirs_from_prodex_home(&prodex_home))
-}
-
-fn codebase_memory_mcp_env() -> Vec<(&'static str, String)> {
-    let Some(state_dirs) = optimizer_state_dirs_from_env(CODEBASE_MEMORY_STATE_DIR_NAME) else {
-        return Vec::new();
-    };
-    vec![("CBM_CACHE_DIR", state_dirs.cache_dir.display().to_string())]
-}
-
-pub(super) fn claw_compactor_state_env_from_env() -> Vec<(&'static str, String)> {
-    optimizer_state_env(optimizer_state_dirs_from_env(CLAW_COMPACTOR_STATE_DIR_NAME).as_ref())
-}
-
-fn prodex_home_from_env() -> Option<PathBuf> {
-    env::var_os(PRODEX_HOME_ENV)
-        .map(PathBuf::from)
-        .map(absolutize_path_lossy)
-        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")))
-}
-
-fn optimizer_state_dirs_from_env(name: &str) -> Option<OptimizerStateDirs> {
-    let prodex_home = prodex_home_from_env()?;
-    Some(optimizer_state_dirs_from_prodex_home(&prodex_home, name))
-}
-
-fn optimizer_state_dirs_from_prodex_home(prodex_home: &Path, name: &str) -> OptimizerStateDirs {
-    let root = prodex_home.join("optimizer-state").join(name);
-    OptimizerStateDirs {
-        home_dir: root.join("home"),
-        data_dir: root.join("data"),
-        config_dir: root.join("config"),
-        state_dir: root.join("state"),
-        cache_dir: root.join("cache"),
-    }
-}
-
-fn optimizer_state_env(state_dirs: Option<&OptimizerStateDirs>) -> Vec<(&'static str, String)> {
-    state_dirs
-        .map(|state_dirs| {
-            vec![
-                ("HOME", state_dirs.home_dir.display().to_string()),
-                ("XDG_DATA_HOME", state_dirs.data_dir.display().to_string()),
-                (
-                    "XDG_CONFIG_HOME",
-                    state_dirs.config_dir.display().to_string(),
-                ),
-                ("XDG_STATE_HOME", state_dirs.state_dir.display().to_string()),
-                ("XDG_CACHE_HOME", state_dirs.cache_dir.display().to_string()),
-            ]
-        })
-        .unwrap_or_default()
-}
-
-fn absolutize_path_lossy(path: PathBuf) -> PathBuf {
-    if path.is_absolute() {
-        return path;
-    }
-    env::current_dir()
-        .map(|current_dir| current_dir.join(&path))
-        .unwrap_or(path)
-}
-
-fn token_savior_state_dirs_from_prodex_home(prodex_home: &Path) -> TokenSaviorStateDirs {
-    let optimizer_dirs =
-        optimizer_state_dirs_from_prodex_home(prodex_home, TOKEN_SAVIOR_STATE_DIR_NAME);
-    let cache_dir = optimizer_dirs.cache_dir.clone();
-    TokenSaviorStateDirs {
-        cache_dir,
-        python_path_dir: optimizer_dirs.state_dir.join("python"),
-        stats_dir: optimizer_dirs.state_dir.join("stats"),
-    }
-}
-
-impl TokenSaviorStateDirs {
-    fn optimizer_dirs(&self) -> OptimizerStateDirs {
-        let root = self
-            .cache_dir
-            .parent()
-            .expect("token-savior cache dir should have state root")
-            .to_path_buf();
-        OptimizerStateDirs {
-            home_dir: root.join("home"),
-            data_dir: root.join("data"),
-            config_dir: root.join("config"),
-            state_dir: root.join("state"),
-            cache_dir: self.cache_dir.clone(),
-        }
-    }
-}
-
-fn pythonpath_with_prepend(path: &Path) -> String {
-    let mut paths = vec![path.to_path_buf()];
-    if let Some(existing) = env::var_os("PYTHONPATH")
-        && !existing.is_empty()
-    {
-        paths.extend(env::split_paths(&existing));
-    }
-    env::join_paths(paths)
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| path.display().to_string())
-}
-
-fn write_token_savior_sitecustomize(state_dirs: &TokenSaviorStateDirs) -> Result<()> {
-    fs::create_dir_all(&state_dirs.python_path_dir)
-        .with_context(|| format!("failed to create {}", state_dirs.python_path_dir.display()))?;
-    let sitecustomize_path = state_dirs.python_path_dir.join("sitecustomize.py");
-    fs::write(&sitecustomize_path, TOKEN_SAVIOR_SITECUSTOMIZE)
-        .with_context(|| format!("failed to write {}", sitecustomize_path.display()))?;
-    Ok(())
-}
-
-const TOKEN_SAVIOR_SITECUSTOMIZE: &str = r#"""Prodex token-savior compatibility shims."""
-
-import hashlib
-import os
-import re
-
-
-def _patch_cache_manager():
-    cache_dir = os.environ.get("TOKEN_SAVIOR_CACHE_DIR")
-    if not cache_dir:
-        return
-    try:
-        from token_savior.cache_ops import CacheManager
-    except Exception:
-        return
-
-    def _workspace_cache_dir(root_path):
-        absolute = os.path.abspath(os.path.expanduser(root_path))
-        digest = hashlib.sha256(absolute.encode("utf-8", "surrogatepass")).hexdigest()[:16]
-        name = os.path.basename(absolute.rstrip(os.sep)) or "workspace"
-        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-") or "workspace"
-        return os.path.join(os.path.expanduser(cache_dir), "projects", f"{slug}-{digest}")
-
-    def path(self):
-        project_cache_dir = _workspace_cache_dir(self.root_path)
-        new_path = os.path.join(project_cache_dir, CacheManager.FILENAME)
-        legacy = os.path.join(project_cache_dir, CacheManager.LEGACY_FILENAME)
-        if not os.path.exists(new_path) and os.path.exists(legacy):
-            try:
-                os.makedirs(project_cache_dir, exist_ok=True)
-                os.rename(legacy, new_path)
-            except OSError:
-                return legacy
-        os.makedirs(project_cache_dir, exist_ok=True)
-        return new_path
-
-    CacheManager.path = path
-
-
-_patch_cache_manager()
-"#;
-
-fn super_optimizer_mcp_servers_table(table: &mut toml::Table) -> Option<&mut toml::Table> {
+fn mcp_servers_table(table: &mut toml::Table) -> Option<&mut toml::Table> {
     if !table.contains_key("mcp_servers") {
         table.insert(
             "mcp_servers".to_string(),
@@ -634,24 +179,31 @@ fn super_optimizer_mcp_servers_table(table: &mut toml::Table) -> Option<&mut tom
     }
 }
 
+fn codebase_memory_mcp_env() -> Vec<(&'static str, String)> {
+    let prodex_home = env::var_os(PRODEX_HOME_ENV)
+        .map(PathBuf::from)
+        .or_else(|| discovery::home_dir_from_env().map(|home| home.join(".prodex")));
+    prodex_home
+        .map(|home| {
+            vec![(
+                "CBM_CACHE_DIR",
+                home.join("optimizer-state")
+                    .join("codebase-memory")
+                    .join("cache")
+                    .display()
+                    .to_string(),
+            )]
+        })
+        .unwrap_or_default()
+}
+
 fn find_optimizer_command(
     command: &str,
     path_dirs: &[PathBuf],
     optimizer_roots: &[PathBuf],
 ) -> Option<PathBuf> {
-    if prefer_managed_optimizer(command) {
-        return find_managed_optimizer_command(command, optimizer_roots)
-            .or_else(|| find_path_command(command, path_dirs));
-    }
-    find_path_command(command, path_dirs)
-        .or_else(|| find_managed_optimizer_command(command, optimizer_roots))
-}
-
-fn prefer_managed_optimizer(command: &str) -> bool {
-    matches!(
-        command,
-        "sqz" | "sqz-mcp" | "token-savior" | "claw-compactor" | "codebase-memory-mcp"
-    )
+    find_managed_optimizer_command(command, optimizer_roots)
+        .or_else(|| find_path_command(command, path_dirs))
 }
 
 fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
@@ -672,70 +224,37 @@ fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
 }
 
 fn find_managed_optimizer_command(command: &str, optimizer_roots: &[PathBuf]) -> Option<PathBuf> {
-    for root in optimizer_roots {
-        for candidate in discovery::managed_optimizer_command_candidates(root, command) {
-            if optimizer_command_ready(command, &candidate) {
-                return Some(candidate);
-            }
-        }
-    }
-    None
+    optimizer_roots.iter().find_map(|root| {
+        discovery::managed_optimizer_command_candidates(root, command)
+            .into_iter()
+            .find(|candidate| optimizer_command_ready(command, candidate))
+    })
 }
 
-fn find_prodex_memory_command() -> Option<PathBuf> {
-    find_prodex_builtin_command()
+fn find_prodex_binary() -> Option<PathBuf> {
+    env::current_exe().ok().filter(|path| path.is_file())
 }
 
-fn find_prodex_builtin_command() -> Option<PathBuf> {
-    env::current_exe().ok().filter(|path| executable_file(path))
-}
-
-fn mcp_jsonl_bridge_command_args(command: &Path, args: &[&str]) -> Option<(PathBuf, Vec<String>)> {
-    let bridge = find_prodex_builtin_command()?;
-    let mut bridge_args = vec![
-        "__mcp-jsonl-bridge".to_string(),
-        command.display().to_string(),
-    ];
-    bridge_args.extend(args.iter().map(|arg| (*arg).to_string()));
-    Some((bridge, bridge_args))
+fn mcp_jsonl_bridge_command_args(command: &Path) -> Option<(PathBuf, Vec<String>)> {
+    Some((
+        find_prodex_binary()?,
+        vec![
+            "__mcp-jsonl-bridge".to_string(),
+            command.display().to_string(),
+        ],
+    ))
 }
 
 fn optimizer_command_ready(command: &str, path: &Path) -> bool {
-    executable_file(path)
-        && match command {
-            "sqz-mcp" => {
-                command_probe_success(path, &["--transport", "stdio", "--help"])
-                    && mcp_tools_list_non_empty_jsonl(path, &["--transport", "stdio"])
-            }
-            "token-savior" => token_savior_command_ready(path),
-            "codebase-memory-mcp" => mcp_tools_list_non_empty_jsonl(path, &[]),
-            _ => true,
-        }
+    path.is_file() && (command != "codebase-memory-mcp" || mcp_tools_list_non_empty_jsonl(path))
 }
 
 pub fn super_optimizer_command_ready(command: &str, path: &Path) -> bool {
     optimizer_command_ready(command, path)
 }
 
-fn command_probe_success(path: &Path, args: &[&str]) -> bool {
-    Command::new(path)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-fn token_savior_command_ready(path: &Path) -> bool {
-    let Some(venv_root) = python_venv_root_for_command(path) else {
-        return mcp_tools_list_non_empty_jsonl(path, &[]);
-    };
-    python_venv_has_module(venv_root, "mcp") && mcp_tools_list_non_empty_jsonl(path, &[])
-}
-
-fn mcp_tools_list_non_empty_jsonl(path: &Path, args: &[&str]) -> bool {
+fn mcp_tools_list_non_empty_jsonl(path: &Path) -> bool {
     let mut child = match Command::new(path)
-        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -755,8 +274,10 @@ fn mcp_tools_list_non_empty_jsonl(path: &Path, args: &[&str]) -> bool {
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         use std::io::BufRead;
-        let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines().map_while(Result::ok) {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
             if sender.send(line).is_err() {
                 break;
             }
@@ -778,7 +299,8 @@ fn mcp_tools_list_non_empty_jsonl(path: &Path, args: &[&str]) -> bool {
         }
     }
     drop(stdin);
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     let mut ready = false;
     while std::time::Instant::now() < deadline {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
@@ -788,59 +310,20 @@ fn mcp_tools_list_non_empty_jsonl(path: &Path, args: &[&str]) -> bool {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
-        if value.get("id").and_then(serde_json::Value::as_i64) != Some(2) {
-            continue;
+        if value.get("id").and_then(serde_json::Value::as_i64) == Some(2) {
+            ready = value
+                .get("result")
+                .and_then(|result| result.get("tools"))
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|tools| !tools.is_empty());
+            break;
         }
-        ready = value
-            .get("result")
-            .and_then(|result| result.get("tools"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|tools| !tools.is_empty());
-        break;
     }
     let _ = child.kill();
     let _ = child.wait();
     ready
 }
 
-fn python_venv_root_for_command(path: &Path) -> Option<&Path> {
-    let bin_dir = path.parent()?;
-    let venv_root = bin_dir.parent()?;
-    let bin_name = bin_dir.file_name()?.to_str()?;
-    let venv_name = venv_root.file_name()?.to_str()?;
-    if matches!(bin_name, "bin" | "Scripts") && matches!(venv_name, ".venv" | "venv") {
-        Some(venv_root)
-    } else {
-        None
-    }
-}
-
-fn python_venv_has_module(venv_root: &Path, module_name: &str) -> bool {
-    let windows_site_packages = venv_root.join("Lib").join("site-packages");
-    if windows_site_packages.join(module_name).is_dir() {
-        return true;
-    }
-
-    let lib_dir = venv_root.join("lib");
-    let Ok(entries) = fs::read_dir(lib_dir) else {
-        return false;
-    };
-    entries.filter_map(|entry| entry.ok()).any(|entry| {
-        entry
-            .path()
-            .join("site-packages")
-            .join(module_name)
-            .is_dir()
-    })
-}
-
-fn executable_file(path: &Path) -> bool {
-    path.is_file()
-}
-
-#[cfg(test)]
-#[path = "super_optimizers_codebase_memory_tests.rs"]
-mod super_optimizers_codebase_memory_tests;
 #[cfg(test)]
 #[path = "super_optimizers_tests.rs"]
-mod super_optimizers_tests;
+mod tests;

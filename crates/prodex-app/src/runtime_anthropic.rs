@@ -267,12 +267,14 @@ pub(super) fn buffer_runtime_streaming_response_parts(
     let RuntimeStreamingResponse {
         status,
         headers,
-        mut body,
+        body,
         ..
     } = response;
-    let mut buffered_body = Vec::new();
-    body.read_to_end(&mut buffered_body)
-        .context("failed to buffer streaming runtime response")?;
+    let buffered_body = read_runtime_buffered_response_body_with_limit(
+        body,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to buffer streaming runtime response",
+    )?;
     Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers: headers

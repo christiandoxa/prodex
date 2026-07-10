@@ -3,7 +3,7 @@ use dirs::home_dir;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::absolutize;
@@ -102,11 +102,11 @@ fn discover_copilot_keytar_path() -> Result<PathBuf> {
         {
             let entry = entry.with_context(|| format!("failed to read {}", root.display()))?;
             let path = entry.path();
-            if !path.is_dir() {
+            if !copilot_path_is_regular_dir(&path) {
                 continue;
             }
             let keytar_path = path.join(&keytar_suffix);
-            if !keytar_path.is_file() {
+            if !copilot_keytar_path_is_regular_file(&path, &keytar_suffix) {
                 continue;
             }
             let version = path
@@ -123,6 +123,28 @@ fn discover_copilot_keytar_path() -> Result<PathBuf> {
         .pop()
         .map(|(_, path)| path)
         .context("failed to locate the Copilot CLI keychain helper")
+}
+
+fn copilot_path_is_regular_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir())
+        .unwrap_or(false)
+}
+
+fn copilot_keytar_path_is_regular_file(version_dir: &Path, keytar_suffix: &Path) -> bool {
+    let mut current = version_dir.to_path_buf();
+    for component in keytar_suffix.components() {
+        current.push(component.as_os_str());
+        if fs::symlink_metadata(&current)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return false;
+        }
+    }
+    fs::symlink_metadata(version_dir.join(keytar_suffix))
+        .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
+        .unwrap_or(false)
 }
 
 fn copilot_package_roots() -> Result<Vec<PathBuf>> {
@@ -147,4 +169,89 @@ fn copilot_package_roots() -> Result<Vec<PathBuf>> {
     }
 
     Ok(roots.into_iter().collect())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = env::temp_dir().join(format!(
+            "prodex-copilot-keychain-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn isolate_copilot_env(root: &Path) -> Vec<crate::TestEnvVarGuard> {
+        vec![
+            crate::TestEnvVarGuard::set("HOME", root.join("home").to_str().unwrap()),
+            crate::TestEnvVarGuard::set("XDG_CACHE_HOME", root.join("xdg-cache").to_str().unwrap()),
+            crate::TestEnvVarGuard::set(
+                "COPILOT_CACHE_HOME",
+                root.join("copilot-cache").to_str().unwrap(),
+            ),
+            crate::TestEnvVarGuard::set(
+                "COPILOT_HOME",
+                root.join("copilot-home").to_str().unwrap(),
+            ),
+        ]
+    }
+
+    #[test]
+    fn copilot_keytar_discovery_rejects_symlink_version_dir() {
+        let _lock = crate::TestEnvVarGuard::lock();
+        let root = temp_dir("symlink-version-dir");
+        let _env = isolate_copilot_env(&root);
+        let package_root = root
+            .join("copilot-cache")
+            .join("pkg")
+            .join(copilot_platform_label());
+        let outside_version = root.join("outside-version");
+        fs::create_dir_all(
+            outside_version
+                .join("prebuilds")
+                .join(copilot_platform_label()),
+        )
+        .unwrap();
+        fs::write(
+            outside_version
+                .join("prebuilds")
+                .join(copilot_platform_label())
+                .join("keytar.node"),
+            "",
+        )
+        .unwrap();
+        fs::create_dir_all(&package_root).unwrap();
+        std::os::unix::fs::symlink(&outside_version, package_root.join("99.0.0")).unwrap();
+
+        assert!(discover_copilot_keytar_path().is_err());
+    }
+
+    #[test]
+    fn copilot_keytar_discovery_rejects_symlink_prebuild_component() {
+        let _lock = crate::TestEnvVarGuard::lock();
+        let root = temp_dir("symlink-prebuild");
+        let _env = isolate_copilot_env(&root);
+        let version_dir = root
+            .join("copilot-cache")
+            .join("pkg")
+            .join(copilot_platform_label())
+            .join("99.0.0");
+        let outside_prebuilds = root.join("outside-prebuilds");
+        fs::create_dir_all(outside_prebuilds.join(copilot_platform_label())).unwrap();
+        fs::write(
+            outside_prebuilds
+                .join(copilot_platform_label())
+                .join("keytar.node"),
+            "",
+        )
+        .unwrap();
+        fs::create_dir_all(&version_dir).unwrap();
+        std::os::unix::fs::symlink(&outside_prebuilds, version_dir.join("prebuilds")).unwrap();
+
+        assert!(discover_copilot_keytar_path().is_err());
+    }
 }

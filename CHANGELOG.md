@@ -2,79 +2,86 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.258.0 - 2026-07-07
-
-### Runtime
-
-- Retry ready profiles after workspace credit depletion (`c9bb063`)
-
-## 0.257.0 - 2026-07-07
-
-### Runtime
-
-- Preserve main quota for spark exhaustion (`72994d8`)
-
-## 0.256.0 - 2026-07-07
+## 0.273.0 - 2026-07-10
 
 ### CLI
 
-- Unblock Spark quota and GPT-5 context launches (`e5a6122`)
+- Skip workspace trust prompt (`0c2e464`)
 
-## 0.255.0 - 2026-07-07
+## 0.272.0 - 2026-07-10
+
+### Runtime
+
+- Harden gateway and proxy boundaries (`1fc05d4`)
 
 ### CLI
 
-- Keep main quota ready when spark is exhausted (`a40abc9`)
+- Simplify optimizer candidate lookup (`11ebc21`)
 
-## 0.254.0 - 2026-07-07
-
-### Misc
-
-- Respect cached Spark context metadata (`977eff3`)
-
-## 0.253.0 - 2026-07-07
-
-### Runtime
-
-- Honor no-auto-rotate in smart context proxy (`1057370`)
-
-## 0.252.0 - 2026-07-07
-
-### Runtime
-
-- Prefer direct runtime API auth (`5027f7e`)
+## 0.270.0 - 2026-07-10
 
 ### CLI
 
-- Support Spark quota pools (`5c167cc`)
+- Trust launch directory in yolo mode (`436bce1`)
 
-## 0.251.0 - 2026-07-07
+## 0.269.0 - 2026-07-10
+
+### Misc
+
+- Protect active session transcripts (`f2113d1`)
+
+## 0.268.0 - 2026-07-10
 
 ### Runtime
 
-- Honor Copilot prompt token limits (`d1f2ce8`)
+- Harden runtime compatibility and launch handling (`1476ca5`)
 
-## 0.250.0 - 2026-07-07
+## 0.267.0 - 2026-07-09
 
 ### Runtime
 
-- Rotate usage-not-included quota errors (`236e405`)
+- Harden auth and gateway enforcement (`c457bfe`)
 
-## 0.249.0 - 2026-07-06
-
-### Misc
-
-- Align Codex OpenAI metadata (`bd4dbe1`)
-
-## 0.248.0 - 2026-07-06
+## 0.266.0 - 2026-07-09
 
 ### Misc
 
-- Add interactive log search and scroll (`d2b7150`)
+- Connect stacked panel borders (`7e0c16f`)
 
-## 0.247.0 - 2026-07-06
+## 0.265.0 - 2026-07-08
+
+### CLI
+
+- Simplify log quota header (`5bf9567`)
+
+## 0.264.0 - 2026-07-08
+
+### CLI
+
+- Smooth adaptive log quota header (`33273cd`)
+
+## 0.263.0 - 2026-07-08
+
+### CLI
+
+- Marquee log quota header (`c5cc036`)
 
 ### Misc
 
-- Refresh yanked transitive dependency (`db7ce2c`)
-- Satisfy clippy for binary payload detection (`572ef2a`)
+- Update upstream compatibility watchdog (`b5db7c3`)
+
+## 0.262.0 - 2026-07-08
+
+### CLI
+
+- Show profile quota in log headers (`5719800`)
+
+### Misc
+
+- Satisfy log TUI clippy gate (`559f856`)
+
+## 0.261.0 - 2026-07-08
+
+### Misc
+
+- Add dashboard local control plane (`5b5ac65`)

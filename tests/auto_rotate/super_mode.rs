@@ -45,7 +45,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
 
     let run = run_prodex_with_pty_prompt_answer(
         &fixture,
-        &["super", "--skip-quota-check", "--no-mem0", "exec", "hello"],
+        &["super", "--skip-quota-check", "exec", "hello"],
         &[
             ("TEST_CODEX_ARGS_LOG", args_log.as_str()),
             ("PRODEX_RUNTIME_LOG_DIR", runtime_log_dir_arg.as_str()),
@@ -78,6 +78,14 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
     assert!(
         args[..exec_index].contains(&"--dangerously-bypass-approvals-and-sandbox"),
         "Super should still launch Codex with full access, args: {args:?}"
+    );
+    let trust_override = format!(
+        "projects={{\"{}\"={{trust_level=\"trusted\"}}}}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    assert!(
+        args.contains(&trust_override.as_str()),
+        "Super should trust its launch directory for this session, args: {args:?}"
     );
     assert_eq!(
         args.last(),

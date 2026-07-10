@@ -22,8 +22,9 @@ use crate::{
     repair_missing_active_profile_and_save,
 };
 use terminal_ui::{
-    print_panel, tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style,
-    tui_secondary_style, tui_success_style, tui_title_style,
+    print_panel, tui_border_style, tui_connected_footer_block, tui_connected_header_block,
+    tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style,
+    tui_title_style,
 };
 
 const MANUAL_REDEEM_NEAR_RESET_SECONDS: i64 = 60 * 60;
@@ -197,11 +198,7 @@ fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
             Span::raw("  "),
             Span::styled("reset credit", tui_detail_style()),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
         let lines = fields
@@ -288,11 +285,7 @@ fn prompt_manual_redeem_confirmation_tui(
                 Span::raw("  "),
                 Span::styled("manual reset credit", tui_secondary_style()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(vec![
@@ -324,11 +317,7 @@ fn prompt_manual_redeem_confirmation_tui(
                 Span::styled("esc", tui_hint_style()),
                 Span::raw(" cancel"),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
         })?;
 

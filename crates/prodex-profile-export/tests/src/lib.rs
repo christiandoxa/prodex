@@ -158,6 +158,153 @@ fn import_auth_update_journal_constructor_sets_current_version() {
 }
 
 #[test]
+fn import_auth_update_journal_reader_parses_current_version() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-profile-export-journal-read-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("root should exist");
+    let path = root.join("main.json");
+    let journal = ImportedExistingProfileAuthUpdateJournal::new(
+        "main".to_string(),
+        "/tmp/main".to_string(),
+        Some("old@example.com".to_string()),
+        Some("{}".to_string()),
+        "2026-05-02T00:00:00+00:00".to_string(),
+    );
+    std::fs::write(&path, serde_json::to_string_pretty(&journal).unwrap())
+        .expect("journal should be written");
+
+    let parsed =
+        read_profile_import_auth_update_journal(&path).expect("journal should parse cleanly");
+
+    assert_eq!(parsed, journal);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn import_auth_update_journal_reader_rejects_oversized_file() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-profile-export-journal-oversized-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("root should exist");
+    let path = root.join("main.json");
+    let file = std::fs::File::create(&path).expect("journal should be created");
+    file.set_len(1024 * 1024 + 1)
+        .expect("journal should be made oversized");
+
+    let err = read_profile_import_auth_update_journal(&path)
+        .expect_err("oversized journal should be rejected");
+
+    assert!(format!("{err:#}").contains("exceeds safe size limit"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn import_auth_update_journal_reader_rejects_symlink() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-profile-export-journal-read-symlink-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("root should exist");
+    let target = root.join("target.json");
+    let path = root.join("main.json");
+    std::fs::write(&target, "{}").expect("target should be written");
+    std::os::unix::fs::symlink(&target, &path).expect("journal symlink should be created");
+
+    let err =
+        read_profile_import_auth_update_journal(&path).expect_err("symlink should be rejected");
+
+    assert!(err.to_string().contains("is not a regular file"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn import_auth_update_journal_paths_ignore_symlinks() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-profile-export-journal-symlink-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let journal_root = ensure_profile_import_auth_update_journal_root(&root)
+        .expect("journal root should be created");
+    let real_journal = journal_root.join("main-real.json");
+    let linked_journal = root.join("linked.json");
+    std::fs::write(&real_journal, "{}").expect("real journal should be written");
+    std::fs::write(&linked_journal, "{}").expect("linked journal target should be written");
+    std::os::unix::fs::symlink(&linked_journal, journal_root.join("main-linked.json"))
+        .expect("journal symlink should be created");
+
+    let paths =
+        profile_import_auth_update_journal_paths(&root).expect("journal paths should be listed");
+
+    assert_eq!(paths, vec![real_journal]);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn import_auth_update_journal_root_rejects_symlink() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-profile-export-journal-root-symlink-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let outside = root.join("outside");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&outside).expect("outside dir should exist");
+    std::os::unix::fs::symlink(&outside, profile_import_auth_update_journal_root(&root))
+        .expect("journal root symlink should be created");
+
+    let list_err = profile_import_auth_update_journal_paths(&root)
+        .expect_err("journal listing should reject symlink root");
+    assert!(
+        list_err.to_string().contains("is a symlink"),
+        "unexpected error: {list_err:#}"
+    );
+
+    let ensure_err = ensure_profile_import_auth_update_journal_root(&root)
+        .expect_err("journal root creation should reject symlink root");
+    assert!(
+        ensure_err.to_string().contains("is a symlink"),
+        "unexpected error: {ensure_err:#}"
+    );
+    assert!(
+        std::fs::read_dir(&outside)
+            .expect("outside dir should be readable")
+            .next()
+            .is_none(),
+        "journal helper must not create entries through a symlinked root"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn import_transaction_records_commit_order_and_previous_active() {
     let mut transaction = ImportedProfilesTransaction::new(Some("previous".to_string()), 2, 1);
 
@@ -708,4 +855,52 @@ fn copilot_import_summary_fields_render_new_and_updated_profiles() {
         .map(|(_, value)| value.as_str()),
         Some("Updated imported Copilot profile 'copilot-main'.")
     );
+}
+
+#[test]
+fn profile_export_envelope_rejects_oversized_bundle_before_reading() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-profile-export-oversized-read-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("temp dir should be created");
+    let path = root.join("profiles.json");
+    std::fs::File::create(&path)
+        .expect("bundle should be created")
+        .set_len(PROFILE_EXPORT_BUNDLE_MAX_BYTES + 1)
+        .expect("bundle size should be set");
+
+    let err = read_profile_export_envelope::<serde_json::Value>(&path)
+        .expect_err("oversized bundle should be rejected");
+
+    assert!(format!("{err:#}").contains("exceeds safe size limit"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn write_profile_export_bundle_rejects_oversized_payload() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-profile-export-oversized-write-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("temp dir should be created");
+    let path = root.join("profiles.json");
+    let content = vec![b' '; (PROFILE_EXPORT_BUNDLE_MAX_BYTES + 1) as usize];
+
+    let err = write_profile_export_bundle(&path, &content)
+        .expect_err("oversized bundle should be rejected");
+
+    assert!(format!("{err:#}").contains("exceeds safe size limit"));
+    assert!(!path.exists());
+    let _ = std::fs::remove_dir_all(root);
 }

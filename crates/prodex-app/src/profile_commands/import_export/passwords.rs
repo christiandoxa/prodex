@@ -18,8 +18,8 @@ use std::{env, io};
 
 use super::progress::print_profile_import_progress;
 use terminal_ui::{
-    tui_border_style, tui_detail_style, tui_hint_style, tui_primary_style, tui_secondary_style,
-    tui_success_style, tui_title_style,
+    tui_border_style, tui_connected_footer_block, tui_connected_header_block, tui_detail_style,
+    tui_hint_style, tui_primary_style, tui_secondary_style, tui_success_style, tui_title_style,
 };
 
 const PROFILE_EXPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_EXPORT_PASSWORD";
@@ -120,11 +120,7 @@ fn prompt_profile_export_password_tui(title: &str, label: &str, detail: &str) ->
                 Span::raw("  "),
                 Span::styled(label.to_string(), tui_secondary_style()),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_header_block(tui_border_style()));
             frame.render_widget(header, chunks[0]);
 
             let body = Paragraph::new(vec![
@@ -157,11 +153,7 @@ fn prompt_profile_export_password_tui(title: &str, label: &str, detail: &str) ->
                 Span::styled("esc", tui_hint_style()),
                 Span::raw(" cancel"),
             ]))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
-            );
+            .block(tui_connected_footer_block(tui_border_style()));
             frame.render_widget(footer, chunks[2]);
         })?;
 
@@ -255,9 +247,7 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
                 Span::styled("bundle protection", tui_detail_style()),
             ]))
             .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
+                tui_connected_header_block(tui_border_style()),
             );
             frame.render_widget(header, chunks[0]);
 
@@ -291,9 +281,7 @@ fn prompt_export_password_mode_tui() -> Result<bool> {
                 Span::raw(" unprotected"),
             ]))
             .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(tui_border_style()),
+                tui_connected_footer_block(tui_border_style()),
             );
             frame.render_widget(footer, chunks[2]);
         })?;

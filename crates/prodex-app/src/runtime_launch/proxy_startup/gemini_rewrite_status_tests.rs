@@ -1,7 +1,7 @@
 use super::{
-    runtime_gemini_provider_core_simple_response,
-    runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_blocked_tool_call_message, runtime_gemini_responses_value_from_generate_value,
 };
+use prodex_provider_core::gemini_provider_core_simple_response;
 
 #[test]
 fn gemini_response_translation_marks_prompt_feedback_block_as_failed() {
@@ -95,7 +95,10 @@ fn gemini_provider_core_simple_response_accepts_prompt_feedback_block() {
         }
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -111,7 +114,10 @@ fn gemini_provider_core_simple_response_accepts_max_tokens_plain_text_candidate(
         }]
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -131,7 +137,10 @@ fn gemini_provider_core_simple_response_accepts_safe_function_call_only_candidat
         }]
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -150,7 +159,10 @@ fn gemini_provider_core_simple_response_accepts_apply_patch_function_call_candid
         }]
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -169,7 +181,10 @@ fn gemini_provider_core_simple_response_accepts_tool_search_function_call_candid
         }]
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -192,7 +207,10 @@ fn gemini_provider_core_simple_response_accepts_thought_plus_safe_function_call_
         }]
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -220,7 +238,10 @@ fn gemini_provider_core_simple_response_accepts_grounding_and_citation_metadata(
         }]
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -240,7 +261,10 @@ fn gemini_provider_core_simple_response_accepts_media_and_special_parts() {
         }]
     });
 
-    assert!(runtime_gemini_provider_core_simple_response(&response));
+    assert!(gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }
 
 #[test]
@@ -260,5 +284,8 @@ fn gemini_provider_core_simple_response_rejects_mixed_visible_text_and_function_
         }]
     });
 
-    assert!(!runtime_gemini_provider_core_simple_response(&response));
+    assert!(!gemini_provider_core_simple_response(
+        &response,
+        |name, args| { runtime_gemini_blocked_tool_call_message(name, args) }
+    ));
 }

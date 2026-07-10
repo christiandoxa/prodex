@@ -233,6 +233,32 @@ function rawCodexFileUrl(ref, filePath) {
     .join("/")}`;
 }
 
+function codexContentsApiUrl(ref, filePath) {
+  return `${GITHUB_API_ROOT}repos/openai/codex/contents/${filePath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/")}?ref=${encodeURIComponent(ref)}`;
+}
+
+async function fetchCodexFileContents(ref, filePath) {
+  try {
+    const data = await fetchJson(codexContentsApiUrl(ref, filePath));
+    if (data.encoding !== "base64" || typeof data.content !== "string") {
+      throw new Error(`unexpected GitHub contents payload for ${filePath} at ${ref}`);
+    }
+    return Buffer.from(data.content.replace(/\s+/g, ""), "base64").toString("utf8");
+  } catch (error) {
+    if (error instanceof FetchResponseError && error.status === 404) {
+      throw error;
+    }
+    try {
+      return await fetchText(rawCodexFileUrl(ref, filePath), { Accept: "text/plain,*/*;q=0.8" });
+    } catch (rawError) {
+      throw new Error(`${error.message}; raw fallback: ${rawError.message}`);
+    }
+  }
+}
+
 function fetchAttemptSummary(attempts) {
   return attempts
     .map((attempt) => {
@@ -250,7 +276,7 @@ async function fetchCodexRawFile(filePath, releaseTag) {
   for (const [index, ref] of refs.entries()) {
     const url = rawCodexFileUrl(ref, filePath);
     try {
-      const contents = await fetchText(url, { Accept: "text/plain,*/*;q=0.8" });
+      const contents = await fetchCodexFileContents(ref, filePath);
       return {
         ref,
         url,

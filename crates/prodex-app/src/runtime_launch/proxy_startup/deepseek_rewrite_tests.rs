@@ -1,11 +1,42 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
+    use prodex_provider_core::deepseek_provider_core_history_has_tool_call;
 
     fn conversation_store() -> RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(BTreeMap::new()))
+        RuntimeDeepSeekConversationStore::default()
+    }
+
+    fn runtime_deepseek_responses_value_from_chat_value(
+        value: &serde_json::Value,
+        request_id: u64,
+    ) -> serde_json::Value {
+        super::super::response::runtime_deepseek_responses_value_from_chat_value(value, request_id)
+    }
+
+    #[test]
+    fn provider_conversation_store_isolates_gateway_namespaces() {
+        let conversations = conversation_store();
+        let tenant_a = conversations.scoped("tenant-a");
+        let tenant_b = conversations.scoped("tenant-b");
+        let history = vec![serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [{"id": "call-shared"}],
+        })];
+
+        tenant_a.insert_bounded("resp-shared", history.clone(), 32);
+
+        assert_eq!(tenant_a.history("resp-shared"), Some(history));
+        assert!(tenant_b.history("resp-shared").is_none());
+        assert!(
+            tenant_b
+                .find_history(|messages| deepseek_provider_core_history_has_tool_call(
+                    messages,
+                    "call-shared"
+                ))
+                .is_none()
+        );
+        assert_eq!(conversations.lock().unwrap().len(), 1);
     }
 
     #[test]
@@ -96,6 +127,10 @@ mod tests {
             7
         );
         assert_ne!(translated["id"].as_str(), Some("resp_deepseek_7"));
+        assert_ne!(
+            translated["id"],
+            runtime_deepseek_responses_value_from_chat_value(&response, 7)["id"]
+        );
     }
 
     #[test]
@@ -132,6 +167,10 @@ mod tests {
             7
         );
         assert_ne!(translated["output"][0]["call_id"].as_str(), Some("call_0"));
+        assert_ne!(
+            translated["output"][0]["call_id"],
+            runtime_deepseek_responses_value_from_chat_value(&response, 7)["output"][0]["call_id"]
+        );
     }
 
     #[test]

@@ -160,28 +160,6 @@ pub enum Commands {
     )]
     Rtk(CavemanArgs),
     #[command(
-        trailing_var_arg = true,
-        about = "Shortcut for `prodex caveman sqz`.",
-        after_help = CLI_CAVEMAN_AFTER_HELP
-    )]
-    Sqz(CavemanArgs),
-    #[command(
-        name = "tokensavior",
-        visible_alias = "token-savior",
-        trailing_var_arg = true,
-        about = "Shortcut for `prodex caveman tokensavior`.",
-        after_help = CLI_CAVEMAN_AFTER_HELP
-    )]
-    TokenSavior(CavemanArgs),
-    #[command(
-        name = "clawcompactor",
-        visible_alias = "claw-compactor",
-        trailing_var_arg = true,
-        about = "Shortcut for `prodex caveman clawcompactor`.",
-        after_help = CLI_CAVEMAN_AFTER_HELP
-    )]
-    ClawCompactor(CavemanArgs),
-    #[command(
         name = "ponytail",
         trailing_var_arg = true,
         about = "Shortcut for `prodex caveman ponytail`.",
@@ -189,17 +167,9 @@ pub enum Commands {
     )]
     Ponytail(CavemanArgs),
     #[command(
-        name = "mem",
-        visible_alias = "memory",
-        trailing_var_arg = true,
-        about = "Shortcut for `prodex caveman mem`.",
-        after_help = CLI_CAVEMAN_AFTER_HELP
-    )]
-    Mem(CavemanArgs),
-    #[command(
         trailing_var_arg = true,
         visible_alias = "s",
-        about = "Daily shortcut for Super optimizer tools, full access, and opt-in Presidio/memory prompts.",
+        about = "Daily shortcut for the minimal Super tool stack, full access, and opt-in Presidio.",
         after_help = CLI_SUPER_AFTER_HELP
     )]
     Super(SuperArgs),
@@ -224,10 +194,6 @@ pub enum Commands {
     RuntimeBroker(RuntimeBrokerArgs),
     #[command(name = "__gemini-compat-refresh", hide = true)]
     GeminiCompatRefresh(GeminiCompatRefreshArgs),
-    #[command(name = "__memory-mcp", hide = true)]
-    MemoryMcp(MemoryMcpArgs),
-    #[command(name = "__inspect-mcp", hide = true)]
-    InspectMcp(InspectMcpArgs),
     #[command(name = "__mcp-jsonl-bridge", hide = true)]
     McpJsonlBridge(McpJsonlBridgeArgs),
 }
@@ -355,14 +321,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "run"
             | "caveman"
             | "rtk"
-            | "sqz"
-            | "tokensavior"
-            | "token-savior"
-            | "clawcompactor"
-            | "claw-compactor"
             | "ponytail"
-            | "mem"
-            | "memory"
             | "super"
             | "s"
             | "app-server-broker"
@@ -372,8 +331,6 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "help"
             | "__runtime-broker"
             | "__gemini-compat-refresh"
-            | "__memory-mcp"
-            | "__inspect-mcp"
             | "__mcp-jsonl-bridge"
     )
 }

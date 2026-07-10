@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use redis::Commands;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, types::Type};
 
 use super::local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_open, runtime_gateway_redis_connection, runtime_gateway_sqlite_open,
@@ -12,7 +12,6 @@ use super::local_rewrite_gateway_ledger_types::runtime_gateway_billing_ledger_en
 use super::local_rewrite_gateway_redis_ledger::{
     runtime_gateway_redis_append_ledger_deltas, runtime_gateway_redis_ledger_load,
 };
-use super::local_rewrite_gateway_sqlite_utils::runtime_gateway_sqlite_i64_to_u64;
 use super::local_rewrite_gateway_sqlite_utils::{
     runtime_gateway_sqlite_optional_u64_to_i64, runtime_gateway_sqlite_u64_to_i64,
 };
@@ -82,7 +81,7 @@ pub(super) fn runtime_gateway_postgres_usage_load(
     )?;
     let mut usage = BTreeMap::new();
     for row in rows {
-        usage.insert(row.get(0), runtime_gateway_postgres_usage_from_row(&row));
+        usage.insert(row.get(0), runtime_gateway_postgres_usage_from_row(&row)?);
     }
     Ok(usage)
 }
@@ -466,24 +465,39 @@ pub(super) fn runtime_gateway_sqlite_usage_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage> {
     Ok(runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
-        minute_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(1)?),
-        requests_this_minute: runtime_gateway_sqlite_i64_to_u64(row.get(2)?),
-        tokens_this_minute: runtime_gateway_sqlite_i64_to_u64(row.get(3)?),
-        requests_total: runtime_gateway_sqlite_i64_to_u64(row.get(4)?),
-        spend_microusd: runtime_gateway_sqlite_i64_to_u64(row.get(5)?),
+        minute_epoch: runtime_gateway_sqlite_usage_u64(row, 1)?,
+        requests_this_minute: runtime_gateway_sqlite_usage_u64(row, 2)?,
+        tokens_this_minute: runtime_gateway_sqlite_usage_u64(row, 3)?,
+        requests_total: runtime_gateway_sqlite_usage_u64(row, 4)?,
+        spend_microusd: runtime_gateway_sqlite_usage_u64(row, 5)?,
+    })
+}
+
+fn runtime_gateway_sqlite_usage_u64(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<u64> {
+    let value: i64 = row.get(index)?;
+    u64::try_from(value).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(index, Type::Integer, Box::new(err))
     })
 }
 
 pub(super) fn runtime_gateway_postgres_usage_from_row(
     row: &postgres::Row,
-) -> runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
-    runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
-        minute_epoch: runtime_gateway_sqlite_i64_to_u64(row.get(1)),
-        requests_this_minute: runtime_gateway_sqlite_i64_to_u64(row.get(2)),
-        tokens_this_minute: runtime_gateway_sqlite_i64_to_u64(row.get(3)),
-        requests_total: runtime_gateway_sqlite_i64_to_u64(row.get(4)),
-        spend_microusd: runtime_gateway_sqlite_i64_to_u64(row.get(5)),
-    }
+) -> Result<runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage> {
+    Ok(runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
+        minute_epoch: runtime_gateway_postgres_usage_u64(row, 1)?,
+        requests_this_minute: runtime_gateway_postgres_usage_u64(row, 2)?,
+        tokens_this_minute: runtime_gateway_postgres_usage_u64(row, 3)?,
+        requests_total: runtime_gateway_postgres_usage_u64(row, 4)?,
+        spend_microusd: runtime_gateway_postgres_usage_u64(row, 5)?,
+    })
+}
+
+fn runtime_gateway_postgres_usage_u64(row: &postgres::Row, index: usize) -> Result<u64> {
+    let value: i64 = row.get(index);
+    u64::try_from(value).context("gateway usage counter is negative")
 }
 
 #[cfg(test)]
@@ -605,5 +619,28 @@ mod tests {
             !RUNTIME_GATEWAY_POSTGRES_LEDGER_INSERT_SQL
                 .contains("ON CONFLICT(request_id, key_name, phase)")
         );
+    }
+
+    #[test]
+    fn sqlite_usage_load_rejects_negative_usage_rows() {
+        let root = temp_dir("sqlite-negative");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("state.sqlite");
+        let conn = runtime_gateway_sqlite_open(&path).unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO prodex_gateway_virtual_key_usage (
+                key_name, minute_epoch, requests_this_minute, tokens_this_minute,
+                requests_total, spend_microusd
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            rusqlite::params!["alpha", 10_i64, 1_i64, 20_i64, -1_i64, 300_i64],
+        )
+        .unwrap();
+
+        assert!(runtime_gateway_sqlite_usage_load(&path).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -102,6 +102,139 @@ fn shared_codex_manifest_includes_primary_goals_db_files() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_managed_codex_home_rejects_symlink_managed_profiles_root() {
+    let temp_dir = PrepareTestDir::new("symlink-managed-root");
+    let paths = temp_dir.app_paths();
+    let outside = temp_dir.path.join("outside-profiles");
+    fs::create_dir_all(
+        paths
+            .managed_profiles_root
+            .parent()
+            .expect("managed root parent"),
+    )
+    .expect("managed root parent should exist");
+    fs::create_dir_all(&outside).expect("outside target should exist");
+    std::os::unix::fs::symlink(&outside, &paths.managed_profiles_root)
+        .expect("managed root symlink should be created");
+
+    let err = prepare_managed_codex_home(&paths, &paths.managed_profiles_root.join("main"))
+        .expect_err("symlink managed root should be rejected");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        !outside.join("main").exists(),
+        "prepare must not create profile homes through a symlinked managed root"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rejects_symlink_profile_home() {
+    let temp_dir = PrepareTestDir::new("symlink-profile-home");
+    let paths = temp_dir.app_paths();
+    let outside = temp_dir.path.join("outside-profile-home");
+    let codex_home = paths.managed_profiles_root.join("main");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed root should exist");
+    fs::create_dir_all(&outside).expect("outside target should exist");
+    std::os::unix::fs::symlink(&outside, &codex_home)
+        .expect("profile home symlink should be created");
+
+    let err =
+        prepare_managed_codex_home(&paths, &codex_home).expect_err("profile symlink should reject");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        !outside.join("history.jsonl").exists(),
+        "prepare must not materialize shared files through a symlinked profile home"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rejects_symlink_shared_file_destination() {
+    let temp_dir = PrepareTestDir::new("symlink-shared-file");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_history = codex_home.join("history.jsonl");
+    let shared_history = paths.shared_codex_root.join("history.jsonl");
+    let outside_history = temp_dir.path.join("outside-history.jsonl");
+
+    fs::create_dir_all(&codex_home).expect("codex home should exist");
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should exist");
+    fs::write(&local_history, r#"{"text":"local"}"#).expect("local history should write");
+    fs::write(&outside_history, r#"{"text":"outside"}"#).expect("outside history should write");
+    std::os::unix::fs::symlink(&outside_history, &shared_history)
+        .expect("shared history symlink should be created");
+
+    let err = prepare_managed_codex_home(&paths, &codex_home)
+        .expect_err("shared file symlink should be rejected");
+
+    assert!(
+        err.to_string().contains("expected")
+            && err
+                .to_string()
+                .contains("to be a file for shared Codex state"),
+        "unexpected error: {err:#}"
+    );
+    assert_eq!(
+        fs::read_to_string(&outside_history).expect("outside history should remain readable"),
+        r#"{"text":"outside"}"#
+    );
+    assert_eq!(
+        fs::read_to_string(&local_history).expect("local history should remain readable"),
+        r#"{"text":"local"}"#
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rejects_symlink_shared_directory_destination() {
+    let temp_dir = PrepareTestDir::new("symlink-shared-dir");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_session = codex_home.join("sessions/2026/07/09/rollout.jsonl");
+    let shared_sessions = paths.shared_codex_root.join("sessions");
+    let outside_sessions = temp_dir.path.join("outside-sessions");
+
+    fs::create_dir_all(local_session.parent().expect("local session parent"))
+        .expect("local session parent should exist");
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should exist");
+    fs::create_dir_all(&outside_sessions).expect("outside sessions should exist");
+    fs::write(&local_session, "{}\n").expect("local session should write");
+    std::os::unix::fs::symlink(&outside_sessions, &shared_sessions)
+        .expect("shared sessions symlink should be created");
+
+    let err = prepare_managed_codex_home(&paths, &codex_home)
+        .expect_err("shared directory symlink should be rejected");
+
+    assert!(
+        err.to_string().contains("expected")
+            && err
+                .to_string()
+                .contains("to be a directory for shared Codex state"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        !outside_sessions.join("2026/07/09/rollout.jsonl").exists(),
+        "prepare must not copy shared sessions through a symlinked directory"
+    );
+    assert!(
+        fs::symlink_metadata(&shared_sessions)
+            .expect("shared sessions metadata should exist")
+            .file_type()
+            .is_symlink(),
+        "rejected shared sessions path should remain a symlink"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn prepare_managed_codex_home_links_primary_goals_db_before_it_exists() {
     let temp_dir = PrepareTestDir::new("missing-goals-db-link");
     let paths = temp_dir.app_paths();
@@ -528,6 +661,73 @@ fn prepare_managed_codex_home_rewrites_goal_objective_attachment_paths() {
         !rewritten.contains(&old_root.display().to_string()),
         "goal objective should not retain deleted overlay path: {rewritten}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_does_not_follow_symlinked_goals_db() {
+    let temp_dir = PrepareTestDir::new("symlink-goals-db");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let attachment_id = "eeeeeeee-ffff-4aaa-8bbb-cccccccccccc";
+    let old_root = temp_dir.path.join("deleted-overlay");
+    let old_goal_file = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("goal-objective.md");
+    let shared_dir = paths
+        .shared_codex_root
+        .join("attachments")
+        .join(attachment_id);
+    fs::create_dir_all(&shared_dir).expect("shared attachment dir should create");
+    fs::write(shared_dir.join("goal-objective.md"), b"stable objective")
+        .expect("stable goal file should write");
+
+    let outside_db = temp_dir.path.join("outside-goals.sqlite");
+    let conn = rusqlite::Connection::open(&outside_db).expect("outside goals db should open");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY NOT NULL,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+        "#,
+    )
+    .expect("goals schema should create");
+    let objective = format!(
+        "Read the Codex goal objective file at {} before continuing.",
+        old_goal_file.display()
+    );
+    conn.execute(
+        "INSERT INTO thread_goals (thread_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES (?1, 'goal-1', ?2, 'paused', 1, 1)",
+        rusqlite::params!["thread-1", objective],
+    )
+    .expect("goal row should insert");
+    drop(conn);
+
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should create");
+    std::os::unix::fs::symlink(&outside_db, paths.shared_codex_root.join("goals_1.sqlite"))
+        .expect("goals db symlink should create");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    let conn = rusqlite::Connection::open(&outside_db).expect("outside goals db should reopen");
+    let retained: String = conn
+        .query_row(
+            "SELECT objective FROM thread_goals WHERE thread_id = 'thread-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("goal objective should read");
+    assert!(retained.contains(&old_goal_file.display().to_string()));
+    assert!(!retained.contains(&shared_dir.display().to_string()));
 }
 
 #[cfg(unix)]

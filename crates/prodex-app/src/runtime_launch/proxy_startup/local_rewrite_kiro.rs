@@ -1,6 +1,6 @@
+use super::chat_compatible_request::runtime_provider_chat_compatible_request_body;
 use super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, runtime_chat_compatible_request_body,
-    runtime_deepseek_store_conversation,
+    RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
 };
 use super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
@@ -15,7 +15,9 @@ use super::provider_sse_events::{
     runtime_provider_sse_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
 };
-use crate::profile_commands::{read_kiro_auth_secret, write_kiro_cli_data_dir};
+use crate::profile_commands::{
+    create_private_kiro_temp_root, read_kiro_auth_secret, write_kiro_cli_data_dir,
+};
 use crate::runtime_anthropic::{
     RuntimeAnthropicMessagesRequest, build_runtime_anthropic_error_parts,
     translate_runtime_anthropic_messages_request, translate_runtime_responses_reply_to_anthropic,
@@ -39,9 +41,11 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::runtime::Runtime as TokioRuntime;
 
 const KIRO_SEMANTIC_COMPACT_INSTRUCTIONS: &str = "\
 Compact the supplied coding-agent transcript into one durable continuation summary. \
@@ -189,7 +193,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
             .unwrap_or(false)
     };
 
-    let translated = runtime_chat_compatible_request_body(
+    let translated = runtime_provider_chat_compatible_request_body(
         &body,
         &shared.deepseek_conversations,
         super::provider_bridge::RuntimeProviderBridgeKind::Kiro,
@@ -199,7 +203,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
     )?;
     let prompt_messages = translated.messages.clone();
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
-    let overlay_root = runtime_kiro_temp_dir("runtime");
+    let overlay_root = create_private_kiro_temp_root("runtime")?;
     let result = (|| {
         let secret = read_kiro_auth_secret(&auth.codex_home)?;
         let data_dir = overlay_root.join("kiro-data");
@@ -315,16 +319,17 @@ pub(super) fn send_runtime_kiro_upstream_request(
             })
         }
     })();
-    let _ = fs::remove_dir_all(&overlay_root);
+    schedule_runtime_kiro_overlay_cleanup(&shared.runtime_shared.async_runtime, overlay_root);
     result
 }
 
 pub(super) fn runtime_kiro_compact_response_parts(
     request_id: u64,
     body: &[u8],
+    async_runtime: &Arc<TokioRuntime>,
     auth: &RuntimeKiroProfileAuth,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
-    match runtime_kiro_semantic_compact_summary(request_id, body, auth) {
+    match runtime_kiro_semantic_compact_summary(request_id, body, async_runtime, auth) {
         Ok(summary) => runtime_gemini_compact_response_parts(&summary),
         Err(_) => runtime_gemini_local_compact_response_parts(body),
     }
@@ -333,6 +338,7 @@ pub(super) fn runtime_kiro_compact_response_parts(
 fn runtime_kiro_semantic_compact_summary(
     request_id: u64,
     body: &[u8],
+    async_runtime: &Arc<TokioRuntime>,
     auth: &RuntimeKiroProfileAuth,
 ) -> Result<String> {
     let mut value: Value =
@@ -365,7 +371,7 @@ fn runtime_kiro_semantic_compact_summary(
         object.remove(key);
     }
 
-    let translated = runtime_chat_compatible_request_body(
+    let translated = runtime_provider_chat_compatible_request_body(
         &serde_json::to_vec(&value).context("failed to serialize Kiro compact request")?,
         &RuntimeDeepSeekConversationStore::default(),
         super::provider_bridge::RuntimeProviderBridgeKind::Kiro,
@@ -374,7 +380,7 @@ fn runtime_kiro_semantic_compact_summary(
         Default::default(),
     )?;
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
-    let overlay_root = runtime_kiro_temp_dir("compact");
+    let overlay_root = create_private_kiro_temp_root("compact")?;
     let result = (|| {
         let secret = read_kiro_auth_secret(&auth.codex_home)?;
         let data_dir = overlay_root.join("kiro-data");
@@ -399,8 +405,14 @@ fn runtime_kiro_semantic_compact_summary(
         let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
         runtime_kiro_compact_summary_from_response(&response)
     })();
-    let _ = fs::remove_dir_all(&overlay_root);
+    schedule_runtime_kiro_overlay_cleanup(async_runtime, overlay_root);
     result
+}
+
+fn schedule_runtime_kiro_overlay_cleanup(async_runtime: &Arc<TokioRuntime>, overlay_root: PathBuf) {
+    drop(async_runtime.spawn_blocking(move || {
+        let _ = fs::remove_dir_all(overlay_root);
+    }));
 }
 
 fn runtime_kiro_compact_summary_from_response(response: &Value) -> Result<String> {
@@ -1021,14 +1033,6 @@ fn runtime_kiro_role_label(role: &str) -> &'static str {
     }
 }
 
-fn runtime_kiro_temp_dir(name: &str) -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    env::temp_dir().join(format!("prodex-kiro-{name}-{}-{stamp}", std::process::id()))
-}
-
 fn runtime_kiro_json_parts(status: u16, body: Value) -> RuntimeHeapTrimmedBufferedResponseParts {
     let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
     RuntimeHeapTrimmedBufferedResponseParts {
@@ -1195,7 +1199,7 @@ fn runtime_kiro_streaming_reader(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeKiroStreamingReader> {
     let secret = read_kiro_auth_secret(&auth.codex_home)?;
-    let overlay_root = runtime_kiro_temp_dir("runtime");
+    let overlay_root = create_private_kiro_temp_root("runtime")?;
     let data_dir = overlay_root.join("kiro-data");
     write_kiro_cli_data_dir(&data_dir, &secret)?;
     let mut extra_env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
@@ -1930,10 +1934,9 @@ mod tests {
     use super::*;
     use crate::runtime_anthropic::translate_runtime_anthropic_messages_request;
     use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
-    use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
         let script = root.join("fake-kiro-compact");
@@ -2031,8 +2034,8 @@ print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), f
         };
         let translated_request =
             translate_runtime_anthropic_messages_request(&request).expect("anthropic request");
-        let conversations = Arc::new(Mutex::new(BTreeMap::new()));
-        let translated = runtime_chat_compatible_request_body(
+        let conversations = RuntimeDeepSeekConversationStore::default();
+        let translated = runtime_provider_chat_compatible_request_body(
             &translated_request.translated_request.body,
             &conversations,
             RuntimeProviderBridgeKind::Kiro,
@@ -2192,6 +2195,8 @@ print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), f
             })],
             command: Some(write_fake_kiro_compact_agent(&root)),
         };
+        let async_runtime =
+            Arc::new(TokioRuntime::new().expect("tokio runtime should be available for test"));
         let summary = runtime_kiro_semantic_compact_summary(
             7,
             &serde_json::to_vec(&json!({
@@ -2216,6 +2221,7 @@ print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), f
                 ]
             }))
             .expect("request body"),
+            &async_runtime,
             &auth,
         )
         .expect("semantic compact summary should succeed");

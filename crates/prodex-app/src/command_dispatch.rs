@@ -47,8 +47,6 @@ impl CommandDispatchExt for Commands {
             Commands::RuntimeBroker(_)
                 | Commands::Update(_)
                 | Commands::GeminiCompatRefresh(_)
-                | Commands::MemoryMcp(_)
-                | Commands::InspectMcp(_)
                 | Commands::McpJsonlBridge(_)
         )
     }
@@ -268,18 +266,6 @@ impl CommandExecute for SessionCommands {
     }
 }
 
-impl CommandExecute for MemoryMcpArgs {
-    fn execute(self) -> Result<()> {
-        handle_memory_mcp(self)
-    }
-}
-
-impl CommandExecute for InspectMcpArgs {
-    fn execute(self) -> Result<()> {
-        handle_inspect_mcp(self)
-    }
-}
-
 impl CommandExecute for McpJsonlBridgeArgs {
     fn execute(self) -> Result<()> {
         handle_mcp_jsonl_bridge(self)
@@ -303,10 +289,7 @@ impl CommandExecute for SuperArgs {
                 bail!("--dry-run is not supported with native external agent CLIs")
             }
             let use_presidio = self.presidio_preference().unwrap_or(false);
-            let use_mem0 = self.mem0_preference().unwrap_or(false);
-            return handle_caveman_dry_run(
-                self.into_caveman_args_with_choices(use_presidio, use_mem0),
-            );
+            return handle_caveman_dry_run(self.into_caveman_args_with_presidio(use_presidio));
         }
         handle_super(self)
     }
@@ -340,20 +323,8 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Rtk(command) => {
             RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "rtk"))
         }
-        Commands::Sqz(command) => {
-            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "sqz"))
-        }
-        Commands::TokenSavior(command) => {
-            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "tokensavior"))
-        }
-        Commands::ClawCompactor(command) => {
-            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "clawcompactor"))
-        }
         Commands::Ponytail(command) => {
             RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "ponytail"))
-        }
-        Commands::Mem(command) => {
-            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "mem"))
         }
         Commands::Super(command) => RoutedCommand::new(command),
         Commands::Expose(command) => RoutedCommand::new(command),
@@ -361,8 +332,6 @@ fn command_into_routed_command(command: Commands) -> RoutedCommand {
         Commands::Claude(command) => RoutedCommand::new(command),
         Commands::RuntimeBroker(command) => RoutedCommand::new(command),
         Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),
-        Commands::MemoryMcp(command) => RoutedCommand::new(command),
-        Commands::InspectMcp(command) => RoutedCommand::new(command),
         Commands::McpJsonlBridge(command) => RoutedCommand::new(command),
     }
 }

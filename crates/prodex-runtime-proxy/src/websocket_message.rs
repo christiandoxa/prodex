@@ -16,6 +16,7 @@ pub struct RuntimeBufferedWebsocketTextFrame {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeWebsocketRetryInspectionKind {
+    ConnectionLimitReached,
     QuotaBlocked,
     Overloaded,
     PreviousResponseNotFound,
@@ -151,8 +152,9 @@ pub fn inspect_runtime_websocket_text_frame(payload: &str) -> RuntimeInspectedWe
     };
 
     let event_type = runtime_response_event_type_from_value(&value);
-    let retry_kind = if extract_runtime_proxy_previous_response_message_from_value(&value).is_some()
-    {
+    let retry_kind = if runtime_websocket_connection_limit_reached(&value) {
+        Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
+    } else if extract_runtime_proxy_previous_response_message_from_value(&value).is_some() {
         Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
     } else if extract_runtime_proxy_overload_message_from_value(&value).is_some() {
         Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
@@ -166,7 +168,8 @@ pub fn inspect_runtime_websocket_text_frame(payload: &str) -> RuntimeInspectedWe
         .is_some_and(runtime_proxy_precommit_hold_event_kind);
     let terminal_event = event_type
         .as_deref()
-        .is_some_and(|kind| matches!(kind, "response.completed" | "response.failed"));
+        .is_some_and(runtime_responses_websocket_terminal_event_kind)
+        || runtime_websocket_wrapped_error_is_terminal(&value);
 
     RuntimeInspectedWebsocketTextFrame {
         event_type,
@@ -179,6 +182,33 @@ pub fn inspect_runtime_websocket_text_frame(payload: &str) -> RuntimeInspectedWe
     }
 }
 
+fn runtime_websocket_connection_limit_reached(value: &serde_json::Value) -> bool {
+    const CODE: &str = "websocket_connection_limit_reached";
+    value
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|code| code.eq_ignore_ascii_case(CODE))
+        || value
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|code| code.eq_ignore_ascii_case(CODE))
+}
+
+fn runtime_websocket_wrapped_error_is_terminal(value: &serde_json::Value) -> bool {
+    runtime_response_event_type_from_value(value).as_deref() == Some("error")
+        && (runtime_websocket_connection_limit_reached(value)
+            || runtime_websocket_wrapped_error_status(value).is_some_and(|status| status >= 400))
+}
+
+fn runtime_websocket_wrapped_error_status(value: &serde_json::Value) -> Option<u16> {
+    value
+        .get("status")
+        .or_else(|| value.get("status_code"))
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|status| u16::try_from(status).ok())
+}
+
 pub fn runtime_response_event_type(payload: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(payload)
         .ok()
@@ -188,7 +218,10 @@ pub fn runtime_response_event_type(payload: &str) -> Option<String> {
 pub fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "response.created"
+        "codex.rate_limits"
+            | "codex.response.metadata"
+            | "response.metadata"
+            | "response.created"
             | "response.in_progress"
             | "response.queued"
             | "response.output_item.added"
@@ -209,9 +242,21 @@ pub fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool {
     )
 }
 
+fn runtime_responses_websocket_terminal_event_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "response.completed" | "response.failed" | "response.incomplete"
+    )
+}
+
 pub fn is_runtime_terminal_event(payload: &str) -> bool {
-    runtime_response_event_type(payload)
-        .is_some_and(|kind| matches!(kind.as_str(), "response.completed" | "response.failed"))
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return false;
+    };
+    runtime_response_event_type_from_value(&value)
+        .as_deref()
+        .is_some_and(runtime_responses_websocket_terminal_event_kind)
+        || runtime_websocket_wrapped_error_is_terminal(&value)
 }
 
 #[cfg(test)]

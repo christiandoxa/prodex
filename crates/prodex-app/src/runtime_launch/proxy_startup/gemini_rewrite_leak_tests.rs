@@ -188,7 +188,7 @@ fn gemini_response_translation_drops_super_capabilities_instruction_leak() {
         "modelVersion": "gemini-3.1-pro-preview",
         "candidates": [{
             "content": {"parts": [{
-                "text": "Never commit AST summary artifacts into source trees or merge diffs containing proxy markers.\n\nFor diagnostics, the runtime provides `prodex super check-optimizers` to verify installed paths and current optimizer integration status.\n\nThe Prodex bridge handles auto-compression of the main runtime system prompt and capabilities during launch; do not manipulate the system prompt yourself.\n\nWhen reviewing diffs of files managed by Prodex Super, expand proxy markers first.\n\nFor queries related to `presidio`, verify that `--presidio` was passed during launch.\n\nOnly use `prodex-sqz` or `token-savior` tools when the optimizer report shows them as available MCP servers.\n\nThe `rtk proxy` fallback allows you to pipe content through `rtk`.\n\nUse these capabilities only as directed.\n\nSaya lanjut memeriksa implementasi Gemini."
+                "text": "Use visible `rtk <cmd>` for noisy shell output.\n\nUse `codebase-memory-mcp` for architecture, call-chain, impact, and structural code search.\n\nFollow Ponytail's smallest-correct-implementation pressure.\n\nMissing optional tools must not block the session.\n\nSaya lanjut memeriksa implementasi Gemini."
             }]},
             "finishReason": "STOP"
         }]

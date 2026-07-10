@@ -145,12 +145,28 @@ fn read_exported_secret_file(
     file_name: &str,
 ) -> Result<prodex_profile_export::ExportedSecretFile> {
     let path = codex_home.join(file_name);
-    let text =
-        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let text = secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .read_text(&secret_store::SecretLocation::file(&path))
+        .map_err(secret_file_read_error)?
+        .with_context(|| format!("failed to read {}", path.display()))?;
     Ok(prodex_profile_export::ExportedSecretFile {
         path: file_name.to_string(),
         text,
     })
+}
+
+fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
+    let is_non_regular_file = matches!(
+        &error,
+        secret_store::SecretError::InvalidLocation { reason }
+            if reason.ends_with(" is not a regular secret file")
+    );
+    let error = anyhow::Error::new(error);
+    if is_non_regular_file {
+        error.context("not a regular secret file")
+    } else {
+        error
+    }
 }
 
 fn default_profile_export_path() -> PathBuf {

@@ -1,15 +1,18 @@
+#![allow(dead_code)]
+
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::deepseek_sse::RuntimeDeepSeekSseState;
+use super::provider_bridge::RuntimeProviderBridgeKind;
 use super::provider_sse_reader::{
     RuntimeProviderSseJsonReader, RuntimeProviderSseJsonState, RuntimeProviderSseObserver,
 };
 use std::io::{self, Read};
 
-pub(super) struct RuntimeDeepSeekChatSseReader<R: Read> {
+pub(super) struct RuntimeChatCompatibleSseReader<R: Read> {
     inner: RuntimeProviderSseJsonReader<R, RuntimeDeepSeekSseState>,
 }
 
-impl<R: Read> RuntimeDeepSeekChatSseReader<R> {
+impl<R: Read> RuntimeChatCompatibleSseReader<R> {
     #[cfg(test)]
     pub(super) fn new(
         reader: R,
@@ -36,10 +39,31 @@ impl<R: Read> RuntimeDeepSeekChatSseReader<R> {
         conversations: RuntimeDeepSeekConversationStore,
         observer: Option<RuntimeProviderSseObserver>,
     ) -> Self {
+        Self::new_with_provider_and_observer(
+            reader,
+            RuntimeProviderBridgeKind::DeepSeek,
+            request_id,
+            conversation_messages,
+            response_metadata,
+            conversations,
+            observer,
+        )
+    }
+
+    pub(super) fn new_with_provider_and_observer(
+        reader: R,
+        provider_kind: RuntimeProviderBridgeKind,
+        request_id: u64,
+        conversation_messages: Vec<serde_json::Value>,
+        response_metadata: Option<serde_json::Value>,
+        conversations: RuntimeDeepSeekConversationStore,
+        observer: Option<RuntimeProviderSseObserver>,
+    ) -> Self {
         Self {
             inner: RuntimeProviderSseJsonReader::new_with_observer(
                 reader,
-                RuntimeDeepSeekSseState::new(
+                RuntimeDeepSeekSseState::new_with_provider(
+                    provider_kind,
                     request_id,
                     conversation_messages,
                     response_metadata,
@@ -73,8 +97,10 @@ impl RuntimeProviderSseJsonState for RuntimeDeepSeekSseState {
     }
 }
 
-impl<R: Read> Read for RuntimeDeepSeekChatSseReader<R> {
+impl<R: Read> Read for RuntimeChatCompatibleSseReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.inner.read(buf)
     }
 }
+
+pub(super) type RuntimeDeepSeekChatSseReader<R> = RuntimeChatCompatibleSseReader<R>;

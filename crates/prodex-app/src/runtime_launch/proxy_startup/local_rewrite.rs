@@ -4,9 +4,11 @@ use super::local_rewrite_copilot::{
     RuntimeCopilotOAuthPool, runtime_copilot_model_catalog_from_provider,
     runtime_copilot_oauth_pool_from_provider,
 };
+use super::local_rewrite_gateway_admin_auth::runtime_gateway_admin_auth;
 use super::local_rewrite_gateway_admin_auth::runtime_gateway_prefetch_oidc_cache;
 use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_admin_response, runtime_gateway_request_path_is_admin,
+    runtime_gateway_request_path_requires_admin_auth,
 };
 pub(crate) use super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
@@ -15,8 +17,9 @@ pub(crate) use super::local_rewrite_gateway_config::{
 };
 pub(super) use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_guardrail_webhook_block;
 pub(super) use super::local_rewrite_gateway_keys::{
+    runtime_gateway_request_header_rejection, runtime_gateway_virtual_key_admission,
     runtime_gateway_virtual_key_entries_from_sources, runtime_gateway_virtual_key_entries_is_empty,
-    runtime_gateway_virtual_key_rejection, runtime_gateway_virtual_key_store_load,
+    runtime_gateway_virtual_key_store_load, runtime_gateway_virtual_key_store_load_strict,
     runtime_local_rewrite_request_is_authorized,
 };
 pub(super) use super::local_rewrite_gateway_ledger::{
@@ -27,7 +30,7 @@ use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 #[cfg(test)]
 pub(super) use super::local_rewrite_gateway_usage::runtime_gateway_virtual_key_usage_apply_deltas;
 pub(super) use super::local_rewrite_gateway_usage::{
-    runtime_gateway_virtual_key_usage_load, schedule_runtime_gateway_virtual_key_usage_save,
+    runtime_gateway_virtual_key_usage_load_strict, schedule_runtime_gateway_virtual_key_usage_save,
 };
 pub(super) use super::local_rewrite_gateway_usage_backend::RuntimeGatewayVirtualKeyUsageDelta;
 pub(super) use super::local_rewrite_gateway_util::runtime_gateway_generate_virtual_key_token;
@@ -42,12 +45,13 @@ use super::local_rewrite_kiro::{
     runtime_kiro_compact_response_parts, runtime_kiro_model_catalog_from_provider,
     runtime_kiro_models_buffered_response,
 };
-pub(super) use super::local_rewrite_model_memory::{
-    RuntimeLocalRewriteModelMemoryState, runtime_local_rewrite_model_selection,
-};
 #[cfg(test)]
 pub(super) use super::local_rewrite_model_memory::{
-    runtime_local_rewrite_model_allows_session_memory, runtime_local_rewrite_model_scope,
+    RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT, runtime_local_rewrite_model_allows_session_memory,
+    runtime_local_rewrite_model_scope,
+};
+pub(super) use super::local_rewrite_model_memory::{
+    RuntimeLocalRewriteModelMemoryState, runtime_local_rewrite_model_selection,
 };
 pub(crate) use super::local_rewrite_options::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
@@ -65,6 +69,7 @@ use super::provider_bridge::{
     runtime_provider_request_ledger_message,
 };
 use super::*;
+use anyhow::Context;
 use redaction::redaction_redact_secret_like_text;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -76,6 +81,9 @@ pub(super) const RUNTIME_GATEWAY_REDIS_KEY_STORE_KEY: &str = "prodex:gateway:vir
 pub(super) const RUNTIME_GATEWAY_REDIS_KEY_STORE_LOCK: &str = "prodex:gateway:virtual_keys:lock";
 pub(super) const RUNTIME_GATEWAY_REDIS_LEDGER_KEY: &str = "prodex:gateway:billing_ledger";
 pub(super) const RUNTIME_GATEWAY_REDIS_LEDGER_LOCK: &str = "prodex:gateway:billing_ledger:lock";
+const RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT: usize = 32;
+const RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER: &str =
+    "x-prodex-internal-conversation-namespace";
 pub(super) const RUNTIME_GATEWAY_SCIM_USER_SCHEMA: &str =
     "urn:ietf:params:scim:schemas:core:2.0:User";
 pub(super) const RUNTIME_GATEWAY_SCIM_PRODEX_SCHEMA: &str =
@@ -119,6 +127,45 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig,
     pub(super) gateway_call_id_header: Option<String>,
     pub(super) gateway_observability: RuntimeGatewayObservabilityConfig,
+    pub(super) gateway_observability_slots: Arc<tokio::sync::Semaphore>,
+    pub(super) gateway_reconcile_slots: Arc<tokio::sync::Semaphore>,
+    pub(super) allow_local_file_access: bool,
+}
+
+#[allow(dead_code)]
+impl RuntimeLocalRewriteProxyShared {
+    fn conversation_store_for_request(
+        &self,
+        request: &RuntimeProxyRequest,
+        store: &RuntimeDeepSeekConversationStore,
+    ) -> RuntimeDeepSeekConversationStore {
+        if self.allow_local_file_access {
+            return store.clone();
+        }
+        let namespace = request
+            .headers
+            .iter()
+            .find(|(name, _)| {
+                name.eq_ignore_ascii_case(RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER)
+            })
+            .map(|(_, value)| value.as_str())
+            .unwrap_or("gateway");
+        store.scoped(namespace)
+    }
+
+    pub(super) fn deepseek_conversations_for_request(
+        &self,
+        request: &RuntimeProxyRequest,
+    ) -> RuntimeDeepSeekConversationStore {
+        self.conversation_store_for_request(request, &self.deepseek_conversations)
+    }
+
+    pub(super) fn gemini_conversations_for_request(
+        &self,
+        request: &RuntimeProxyRequest,
+    ) -> RuntimeDeepSeekConversationStore {
+        self.conversation_store_for_request(request, &self.gemini_conversations)
+    }
 }
 
 pub(super) type RuntimeLocalRewriteModelMemory = Arc<Mutex<RuntimeLocalRewriteModelMemoryState>>;
@@ -138,8 +185,49 @@ pub(super) struct RuntimeGatewayVirtualKeyUsageState {
     pub(super) call_ids: Arc<Mutex<BTreeMap<u64, String>>>,
 }
 
+pub(super) fn runtime_gateway_try_reserve_background_task(
+    slots: &Arc<tokio::sync::Semaphore>,
+) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    Arc::clone(slots).try_acquire_owned().ok()
+}
+
+struct RuntimeGatewayUsageRequestGuard {
+    request_ids: Arc<Mutex<BTreeSet<u64>>>,
+    request_id: u64,
+}
+
+impl RuntimeGatewayUsageRequestGuard {
+    fn new(shared: &RuntimeLocalRewriteProxyShared, request_id: u64) -> Self {
+        Self {
+            request_ids: Arc::clone(&shared.gateway_usage.request_ids),
+            request_id,
+        }
+    }
+}
+
+impl Drop for RuntimeGatewayUsageRequestGuard {
+    fn drop(&mut self) {
+        if let Ok(mut request_ids) = self.request_ids.lock() {
+            request_ids.remove(&self.request_id);
+        }
+    }
+}
+
 pub(crate) fn start_runtime_local_rewrite_proxy(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
+) -> Result<RuntimeRotationProxy> {
+    start_runtime_local_rewrite_proxy_with_file_access(options, true)
+}
+
+pub(crate) fn start_runtime_gateway_rewrite_proxy(
+    options: RuntimeLocalRewriteProxyStartOptions<'_>,
+) -> Result<RuntimeRotationProxy> {
+    start_runtime_local_rewrite_proxy_with_file_access(options, false)
+}
+
+fn start_runtime_local_rewrite_proxy_with_file_access(
+    options: RuntimeLocalRewriteProxyStartOptions<'_>,
+    allow_local_file_access: bool,
 ) -> Result<RuntimeRotationProxy> {
     let RuntimeLocalRewriteProxyStartOptions {
         paths,
@@ -245,9 +333,11 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         gateway_virtual_keys,
         &gateway_state_store,
         &log_path,
-    );
+    )
+    .context("failed to load gateway virtual key store")?;
     let gateway_virtual_key_usage =
-        runtime_gateway_virtual_key_usage_load(&gateway_state_store, &log_path);
+        runtime_gateway_virtual_key_usage_load_strict(&gateway_state_store, &log_path)
+            .context("failed to load gateway virtual key usage")?;
     let gateway_auth_required =
         gateway_auth_token_hash.is_some() || !gateway_virtual_key_entries.is_empty();
     runtime_proxy_log_to_path(
@@ -286,9 +376,9 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         upstream_base_url,
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         provider,
-        deepseek_conversations: Arc::new(Mutex::new(BTreeMap::new())),
+        deepseek_conversations: RuntimeDeepSeekConversationStore::default(),
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
-        gemini_conversations: Arc::new(Mutex::new(BTreeMap::new())),
+        gemini_conversations: RuntimeDeepSeekConversationStore::default(),
         gemini_oauth_pool,
         copilot_oauth_pool,
         model_memory: Arc::new(Mutex::new(RuntimeLocalRewriteModelMemoryState::default())),
@@ -322,6 +412,13 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         gateway_guardrail_webhook,
         gateway_call_id_header,
         gateway_observability,
+        gateway_observability_slots: Arc::new(tokio::sync::Semaphore::new(
+            RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT,
+        )),
+        gateway_reconcile_slots: Arc::new(tokio::sync::Semaphore::new(
+            RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT,
+        )),
+        allow_local_file_access,
     };
     if shared.gateway_sso.oidc.is_some()
         && let Err(_err) = runtime_gateway_prefetch_oidc_cache(&shared)
@@ -618,36 +715,110 @@ fn handle_runtime_local_rewrite_proxy_request(
         let _ = request.respond(response);
         return;
     }
-    if runtime_gateway_virtual_key_entries_is_empty(shared)
-        && !runtime_gateway_request_path_is_admin(&request_path, shared)
-    {
-        let authorized = shared
+    let preauthorized_admin =
+        if runtime_gateway_request_path_requires_admin_auth(&request_path, shared) {
+            let header_request = capture_runtime_proxy_websocket_request(&request);
+            let Some(admin_auth) = runtime_gateway_admin_auth(&header_request, shared) else {
+                let auth_configured = shared.gateway_auth_token_hash.is_some()
+                    || !shared.gateway_admin_tokens.is_empty()
+                    || shared.gateway_sso.proxy_token_hash.is_some()
+                    || shared.gateway_sso.oidc.is_some();
+                runtime_proxy_log(
+                    runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_admin_auth_rejected",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("path", path_without_query(&request_path)),
+                            runtime_proxy_log_field("stage", "headers"),
+                        ],
+                    ),
+                );
+                let (status, code, message) = if auth_configured {
+                    (
+                        401,
+                        "invalid_admin_token",
+                        "missing or invalid gateway admin bearer token",
+                    )
+                } else {
+                    (
+                        403,
+                        "admin_auth_not_configured",
+                        "configure a gateway admin bearer token to use gateway admin endpoints",
+                    )
+                };
+                let _ = request.respond(build_runtime_proxy_json_error_response(
+                    status, code, message,
+                ));
+                return;
+            };
+            Some(admin_auth)
+        } else {
+            None
+        };
+    let virtual_keys_empty = runtime_gateway_virtual_key_entries_is_empty(shared);
+    let legacy_data_plane_authorized =
+        shared
             .gateway_auth_token_hash
             .as_ref()
             .is_some_and(|auth_token_hash| {
                 runtime_local_rewrite_request_is_authorized(&request, auth_token_hash)
             });
-        if !authorized
-            && (shared.gateway_auth_token_hash.is_some() || !shared.gateway_admin_tokens.is_empty())
-        {
-            runtime_gateway_audit_data_plane_auth_failed(shared, &request_path);
-            runtime_proxy_log(
-                runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_auth_rejected",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("path", request_path.as_str()),
-                    ],
-                ),
-            );
-            let _ = request.respond(build_runtime_proxy_text_response(
-                401,
-                "missing or invalid gateway bearer token",
-            ));
-            return;
-        }
+    let admin_auth_configured = !shared.gateway_admin_tokens.is_empty()
+        || shared.gateway_sso.proxy_token_hash.is_some()
+        || shared.gateway_sso.oidc.is_some();
+    if virtual_keys_empty
+        && !runtime_gateway_request_path_is_admin(&request_path, shared)
+        && !legacy_data_plane_authorized
+        && (shared.gateway_auth_token_hash.is_some() || admin_auth_configured)
+    {
+        runtime_gateway_audit_data_plane_auth_failed(shared, &request_path);
+        runtime_proxy_log(
+            runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_auth_rejected",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("path", path_without_query(&request_path)),
+                ],
+            ),
+        );
+        let _ = request.respond(build_runtime_proxy_text_response(
+            401,
+            "missing or invalid gateway bearer token",
+        ));
+        return;
+    }
+    if !virtual_keys_empty
+        && !runtime_gateway_request_path_is_admin(&request_path, shared)
+        && let Some(rejection) =
+            runtime_gateway_request_header_rejection(request_id, &request, shared)
+    {
+        runtime_gateway_audit_data_plane_virtual_key_rejected(
+            shared,
+            &request_path,
+            rejection.code(),
+        );
+        runtime_proxy_log(
+            runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_virtual_key_rejected",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("reason", rejection.code()),
+                    runtime_proxy_log_field("path", path_without_query(&request_path)),
+                    runtime_proxy_log_field("stage", "headers"),
+                ],
+            ),
+        );
+        let _ = request.respond(build_runtime_proxy_json_error_response(
+            rejection.status(),
+            rejection.code(),
+            "gateway virtual key policy rejected this request",
+        ));
+        return;
     }
     let websocket = is_tiny_http_websocket_upgrade(&request);
     let request_transport = if websocket { "websocket" } else { "http" };
@@ -679,6 +850,28 @@ fn handle_runtime_local_rewrite_proxy_request(
             RuntimeLocalRewriteProviderOptions::Gemini { .. }
         ) && is_runtime_realtime_websocket_path(&request_path)
         {
+            if let Some(rejection) =
+                runtime_gateway_request_header_rejection(request_id, &request, shared)
+            {
+                runtime_proxy_log(
+                    runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_virtual_key_rejected",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "websocket"),
+                            runtime_proxy_log_field("reason", rejection.code()),
+                            runtime_proxy_log_field("path", path_without_query(&request_path)),
+                        ],
+                    ),
+                );
+                let _ = request.respond(build_runtime_proxy_json_error_response(
+                    rejection.status(),
+                    rejection.code(),
+                    "gateway virtual key policy rejected this request",
+                ));
+                return;
+            }
             handle_runtime_gemini_live_websocket_request(request_id, request, shared);
             return;
         }
@@ -689,7 +882,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("path", request_path),
+                    runtime_proxy_log_field("path", path_without_query(&request_path)),
                 ],
             ),
         );
@@ -772,7 +965,9 @@ fn handle_runtime_local_rewrite_proxy_request(
         ));
         return;
     }
-    if let Some(response) = runtime_gateway_admin_response(request_id, &captured, shared) {
+    if let Some(response) =
+        runtime_gateway_admin_response(request_id, &captured, shared, preauthorized_admin)
+    {
         let _ = request.respond(response);
         return;
     }
@@ -817,37 +1012,54 @@ fn handle_runtime_local_rewrite_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
         captured.body = redacted_body;
     }
-    if let Some(rejection) = runtime_gateway_virtual_key_rejection(request_id, &captured, shared) {
-        runtime_gateway_audit_data_plane_virtual_key_rejected(
-            shared,
-            captured.path_and_query.as_str(),
-            rejection.code(),
-        );
-        runtime_proxy_log(
-            runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_virtual_key_rejected",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("reason", rejection.code()),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
-                ],
-            ),
-        );
-        let _ = request.respond(build_runtime_proxy_json_error_response(
-            rejection.status(),
-            rejection.code(),
-            "gateway virtual key policy rejected this request",
+    let conversation_namespace =
+        match runtime_gateway_virtual_key_admission(request_id, &captured, shared) {
+            Ok(namespace) => namespace,
+            Err(rejection) => {
+                runtime_gateway_audit_data_plane_virtual_key_rejected(
+                    shared,
+                    &captured.path_and_query,
+                    rejection.code(),
+                );
+                runtime_proxy_log(
+                    runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_virtual_key_rejected",
+                        [
+                            runtime_proxy_log_field("request", request_id.to_string()),
+                            runtime_proxy_log_field("transport", "http"),
+                            runtime_proxy_log_field("reason", rejection.code()),
+                            runtime_proxy_log_field(
+                                "path",
+                                path_without_query(&captured.path_and_query),
+                            ),
+                        ],
+                    ),
+                );
+                let _ = request.respond(build_runtime_proxy_json_error_response(
+                    rejection.status(),
+                    rejection.code(),
+                    "gateway virtual key policy rejected this request",
+                ));
+                return;
+            }
+        };
+    if !shared.allow_local_file_access {
+        captured.headers.retain(|(name, _)| {
+            !name.eq_ignore_ascii_case(RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER)
+        });
+        captured.headers.push((
+            RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER.to_string(),
+            conversation_namespace.unwrap_or_else(|| "gateway".to_string()),
         ));
-        return;
     }
+    let _gateway_usage_request_guard = RuntimeGatewayUsageRequestGuard::new(shared, request_id);
     if let Some(block) =
         runtime_gateway_guardrail_webhook_block("pre", request_id, &captured.body, shared)
     {
@@ -867,7 +1079,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("phase", "pre"),
                     runtime_proxy_log_field("reason", block.reason.as_str()),
                     runtime_proxy_log_field("matched_value_redacted", "true"),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -891,7 +1103,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("transport", "http"),
                     runtime_proxy_log_field("reason", block.kind.as_str()),
                     runtime_proxy_log_field("matched_value_redacted", "true"),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -929,7 +1141,7 @@ fn handle_runtime_local_rewrite_proxy_request(
                     runtime_proxy_log_field("alias", rewrite.alias.as_str()),
                     runtime_proxy_log_field("strategy", rewrite.strategy.as_str()),
                     runtime_proxy_log_field("model", rewrite.model.as_str()),
-                    runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                    runtime_proxy_log_field("path", path_without_query(&captured.path_and_query)),
                 ],
             ),
         );
@@ -941,7 +1153,12 @@ fn handle_runtime_local_rewrite_proxy_request(
             return;
         }
         if let RuntimeLocalRewriteProviderOptions::Kiro { auth } = &shared.provider {
-            let parts = runtime_kiro_compact_response_parts(request_id, &captured.body, auth);
+            let parts = runtime_kiro_compact_response_parts(
+                request_id,
+                &captured.body,
+                &shared.runtime_shared.async_runtime,
+                auth,
+            );
             let _ = request.respond(runtime_local_rewrite_response_with_call_id(
                 parts, request_id, shared,
             ));
@@ -1127,5 +1344,33 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("local-rewrite-token"));
         assert!(!message.contains("local-rewrite-key"));
+    }
+}
+
+#[cfg(test)]
+mod request_guard_tests {
+    use super::*;
+
+    #[test]
+    fn gateway_usage_request_guard_releases_request_id() {
+        let request_ids = Arc::new(Mutex::new(BTreeSet::from([7])));
+        {
+            let _guard = RuntimeGatewayUsageRequestGuard {
+                request_ids: Arc::clone(&request_ids),
+                request_id: 7,
+            };
+        }
+
+        assert!(request_ids.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn gateway_background_task_slots_are_bounded() {
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = runtime_gateway_try_reserve_background_task(&slots).unwrap();
+
+        assert!(runtime_gateway_try_reserve_background_task(&slots).is_none());
+        drop(permit);
+        assert!(runtime_gateway_try_reserve_background_task(&slots).is_some());
     }
 }

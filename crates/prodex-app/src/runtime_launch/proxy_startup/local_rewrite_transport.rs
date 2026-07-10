@@ -1,7 +1,9 @@
 use super::anthropic_rewrite::{RuntimeAnthropicAuth, RuntimeAnthropicProviderAuth};
 use super::gemini_rewrite::RuntimeGeminiAuth;
-use super::local_rewrite::RuntimeLocalRewriteProxyShared;
-use super::local_rewrite::schedule_runtime_gateway_billing_ledger_reconcile;
+use super::local_rewrite::{
+    RuntimeLocalRewriteProxyShared, runtime_gateway_try_reserve_background_task,
+    schedule_runtime_gateway_billing_ledger_reconcile,
+};
 use super::local_rewrite_transport_copilot::{
     runtime_copilot_initiator_header, runtime_copilot_request_has_vision_input,
 };
@@ -16,12 +18,15 @@ use anyhow::{Context, Result};
 use prodex_domain::RequestId;
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{
-    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    local_bridge_authorization_bearer_token, path_without_query, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message,
 };
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
     Anthropic { auth: &'a RuntimeAnthropicAuth },
@@ -121,11 +126,31 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             }
         }
         RuntimeLocalRewritePreparedAuth::OpenAiResponses { api_key } => {
+            let replacing_openai_auth = api_key.is_some()
+                || request.headers.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("authorization")
+                        && runtime_local_rewrite_authorization_is_gateway_credential(shared, value)
+                });
+            let connection_headers = runtime_proxy_crate::runtime_connection_header_tokens(
+                request
+                    .headers
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.as_str())),
+            );
             for (name, value) in &request.headers {
+                if runtime_proxy_crate::runtime_header_name_matches_connection_token(
+                    name,
+                    &connection_headers,
+                ) {
+                    continue;
+                }
                 if should_skip_runtime_local_rewrite_request_header(name) {
                     continue;
                 }
-                if api_key.is_some() && name.eq_ignore_ascii_case("authorization") {
+                if replacing_openai_auth
+                    && (name.eq_ignore_ascii_case("authorization")
+                        || name.eq_ignore_ascii_case("chatgpt-account-id"))
+                {
                     continue;
                 }
                 upstream_request = upstream_request.header(name.as_str(), value.as_str());
@@ -188,7 +213,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("method", request.method.as_str()),
-                runtime_proxy_log_field("url", upstream_url),
+                runtime_proxy_log_field("url", runtime_local_rewrite_log_url(upstream_url)),
                 runtime_proxy_log_field("provider", runtime_provider_label(provider_kind)),
                 runtime_proxy_log_field("model", model.as_deref().unwrap_or("unknown")),
                 runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
@@ -199,7 +224,13 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     let response = upstream_request
         .body(body)
         .send()
-        .with_context(|| format!("failed to proxy local provider request to {upstream_url}"))?;
+        .map_err(reqwest::Error::without_url)
+        .with_context(|| {
+            format!(
+                "failed to proxy local provider request to {}",
+                runtime_local_rewrite_log_url(upstream_url)
+            )
+        })?;
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -277,66 +308,104 @@ pub(super) fn emit_runtime_gateway_spend_event(
     );
     runtime_proxy_log(&shared.runtime_shared, event.log_message());
     schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
+    if !shared.gateway_observability.sink_enabled("jsonl")
+        && !shared.gateway_observability.sink_enabled("http")
+    {
+        return;
+    }
+    let Some(permit) =
+        runtime_gateway_try_reserve_background_task(&shared.gateway_observability_slots)
+    else {
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_observability_dropped",
+                [
+                    runtime_proxy_log_field("request", event.request.to_string()),
+                    runtime_proxy_log_field("reason", "task_limit"),
+                ],
+            ),
+        );
+        return;
+    };
+    let shared = shared.clone();
+    drop(
+        shared
+            .runtime_shared
+            .async_runtime
+            .clone()
+            .spawn_blocking(move || {
+                let _permit = permit;
+                emit_runtime_gateway_observability_sinks(&shared, &event);
+            }),
+    );
+}
+
+fn emit_runtime_gateway_observability_sinks(
+    shared: &RuntimeLocalRewriteProxyShared,
+    event: &RuntimeProviderGatewaySpendEvent,
+) {
     if shared.gateway_observability.sink_enabled("jsonl")
         && let Some(path) = shared.gateway_observability.jsonl_path.as_ref()
     {
-        let path = path.clone();
-        let runtime_shared = shared.runtime_shared.clone();
-        let event_for_jsonl = event.clone();
-        shared.runtime_shared.async_runtime.spawn_blocking(move || {
-            if let Err(err) = runtime_gateway_observability_write_jsonl(&path, &event_for_jsonl) {
-                let redacted_path =
-                    runtime_gateway_observability_redacted_log_text(&path.display().to_string());
-                let redacted_error =
-                    runtime_gateway_observability_redacted_log_text(&err.to_string());
-                runtime_proxy_log(
-                    &runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "gateway_observability_jsonl_failed",
-                        [
-                            runtime_proxy_log_field("request", event_for_jsonl.request.to_string()),
-                            runtime_proxy_log_field("path", redacted_path),
-                            runtime_proxy_log_field("error", redacted_error),
-                        ],
-                    ),
-                );
-            }
-        });
+        if let Err(err) = runtime_gateway_observability_write_jsonl(path, event) {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_observability_jsonl_failed",
+                    [
+                        runtime_proxy_log_field("request", event.request.to_string()),
+                        runtime_proxy_log_field(
+                            "path",
+                            runtime_gateway_observability_redacted_log_text(
+                                &path.display().to_string(),
+                            ),
+                        ),
+                        runtime_proxy_log_field(
+                            "error",
+                            runtime_gateway_observability_redacted_log_text(&err.to_string()),
+                        ),
+                    ],
+                ),
+            );
+        }
     }
     if shared.gateway_observability.sink_enabled("http")
         && let Some(endpoint) = shared.gateway_observability.http_endpoint.as_deref()
     {
         let payload = runtime_gateway_observability_http_payload(
-            &event,
+            event,
             shared.gateway_observability.http_schema.as_str(),
         );
-        let client = shared.client.clone();
-        let endpoint = endpoint.to_string();
-        let token = shared.gateway_observability.http_bearer_token.clone();
-        let runtime_shared = shared.runtime_shared.clone();
-        let request_id = event.request;
-        shared.runtime_shared.async_runtime.spawn_blocking(move || {
-            let mut request = client.post(&endpoint).json(&payload);
-            if let Some(token) = token.as_deref() {
-                request = request.bearer_auth(token);
-            }
-            if let Err(err) = request.send() {
-                let redacted_endpoint = runtime_gateway_observability_redacted_log_text(&endpoint);
-                let redacted_error =
-                    runtime_gateway_observability_redacted_log_text(&err.to_string());
-                runtime_proxy_log(
-                    &runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "gateway_observability_http_failed",
-                        [
-                            runtime_proxy_log_field("request", request_id.to_string()),
-                            runtime_proxy_log_field("endpoint", redacted_endpoint),
-                            runtime_proxy_log_field("error", redacted_error),
-                        ],
-                    ),
-                );
-            }
-        });
+        let mut request = shared
+            .client
+            .post(endpoint)
+            .timeout(RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT)
+            .json(&payload);
+        if let Some(token) = shared.gateway_observability.http_bearer_token.as_deref() {
+            request = request.bearer_auth(token);
+        }
+        if let Err(err) = request.send() {
+            let error = runtime_gateway_observability_redacted_log_text(
+                &reqwest::Error::without_url(err).to_string(),
+            );
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "gateway_observability_http_failed",
+                    [
+                        runtime_proxy_log_field("request", event.request.to_string()),
+                        runtime_proxy_log_field(
+                            "endpoint",
+                            runtime_gateway_observability_redacted_log_text(
+                                &runtime_local_rewrite_log_url(endpoint),
+                            ),
+                        ),
+                        runtime_proxy_log_field("error", error),
+                    ],
+                ),
+            );
+        }
     }
 }
 
@@ -424,10 +493,12 @@ pub(super) fn runtime_local_rewrite_upstream_url(
 ) -> String {
     let base_url = base_url.trim_end_matches('/');
     let mount_path = mount_path.trim_end_matches('/');
+    let path_and_query = runtime_proxy_crate::runtime_escape_url_path_dot_segments(path_and_query);
     let (path, query) = path_and_query
+        .as_ref()
         .split_once('?')
         .map(|(path, query)| (path, Some(query)))
-        .unwrap_or((path_and_query, None));
+        .unwrap_or((path_and_query.as_ref(), None));
     let suffix = path
         .strip_prefix(mount_path)
         .filter(|suffix| suffix.is_empty() || suffix.starts_with('/'))
@@ -444,6 +515,21 @@ pub(super) fn runtime_local_rewrite_upstream_url(
         upstream_url.push_str(query);
     }
     upstream_url
+}
+
+pub(super) fn runtime_local_rewrite_log_url(value: &str) -> String {
+    if let Ok(mut url) = reqwest::Url::parse(value) {
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        return url.to_string();
+    }
+    value
+        .split_once('?')
+        .map(|(path, _)| path)
+        .unwrap_or(value)
+        .to_string()
 }
 
 pub(super) fn runtime_deepseek_upstream_url(
@@ -584,7 +670,7 @@ fn runtime_local_rewrite_trace_context_headers(
 }
 
 fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
+    let lower = name.trim().to_ascii_lowercase();
     matches!(
         lower.as_str(),
         "connection"
@@ -599,6 +685,31 @@ fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
             | "upgrade"
     ) || lower.starts_with("sec-websocket-")
         || lower.starts_with("x-prodex-internal-")
+}
+
+fn runtime_local_rewrite_authorization_is_gateway_credential(
+    shared: &RuntimeLocalRewriteProxyShared,
+    authorization: &str,
+) -> bool {
+    if shared
+        .gateway_auth_token_hash
+        .as_ref()
+        .is_some_and(|hash| hash.verify_authorization_header(authorization))
+    {
+        return true;
+    }
+    let Some(token) = local_bridge_authorization_bearer_token(authorization) else {
+        return false;
+    };
+    shared
+        .gateway_virtual_keys
+        .lock()
+        .map(|entries| {
+            entries
+                .iter()
+                .any(|entry| !entry.disabled && entry.key.token_hash.verify_bearer_token(token))
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -654,6 +765,26 @@ mod tests {
                 format!("https://upstream.test{path}")
             );
         }
+    }
+
+    #[test]
+    fn local_rewrite_upstream_url_neutralizes_dot_segments_before_url_parsing_can_escape_base() {
+        assert_eq!(
+            runtime_local_rewrite_upstream_url(
+                "https://upstream.test/v1",
+                "/v1",
+                "/v1/../admin?x=1"
+            ),
+            "https://upstream.test/v1/%252e%252e/admin?x=1"
+        );
+        assert_eq!(
+            runtime_local_rewrite_upstream_url(
+                "https://upstream.test/v1",
+                "/v1",
+                "/v1/%2e%2e/admin"
+            ),
+            "https://upstream.test/v1/%252e%252e/admin"
+        );
     }
 
     #[test]
@@ -784,5 +915,17 @@ mod tests {
         assert!(!redacted_error.contains("fixture_http_notreal_12345"));
         assert!(redacted_path.contains("sk-live-<redacted>"));
         assert!(!redacted_path.contains("sk-live-fixture-notreal-path"));
+    }
+
+    #[test]
+    fn log_url_strips_query_fragment_and_userinfo() {
+        let url = runtime_local_rewrite_log_url(
+            "https://user:secret@example.test/v1/responses?access_token=secret#frag",
+        );
+        assert_eq!(url, "https://example.test/v1/responses");
+        assert_eq!(
+            runtime_local_rewrite_log_url("/v1/responses?key=secret"),
+            "/v1/responses"
+        );
     }
 }

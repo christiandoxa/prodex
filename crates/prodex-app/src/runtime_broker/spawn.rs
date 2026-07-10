@@ -343,8 +343,8 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         return runtime_proxy_endpoint_from_registry(paths, &existing_broker_key, &existing);
     }
 
-    let instance_token = runtime_random_token("broker");
-    let admin_token = runtime_random_token("admin");
+    let instance_token = runtime_random_token("broker")?;
+    let admin_token = runtime_random_token("admin")?;
     spawn_runtime_broker_process(
         paths,
         RuntimeBrokerSpawnConfig {

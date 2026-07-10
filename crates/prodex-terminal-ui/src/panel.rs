@@ -6,6 +6,7 @@ use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::symbols::border;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::io::{self, IsTerminal};
@@ -38,6 +39,45 @@ pub fn tui_primary_style() -> Style {
 
 pub fn tui_border_style() -> Style {
     Style::default().fg(Color::Cyan)
+}
+
+pub fn tui_connected_header_block(border_style: Style) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .border_set(tui_connected_header_border_set())
+}
+
+pub fn tui_connected_footer_block(border_style: Style) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .border_set(tui_connected_footer_border_set())
+}
+
+pub fn tui_connected_header_border_set() -> border::Set<'static> {
+    border::Set {
+        bottom_left: "├",
+        bottom_right: "┤",
+        ..border::PLAIN
+    }
+}
+
+pub fn tui_connected_footer_border_set() -> border::Set<'static> {
+    border::Set {
+        top_left: "├",
+        top_right: "┤",
+        ..border::PLAIN
+    }
+}
+
+pub fn tui_connected_separator_line(width: u16) -> String {
+    match width {
+        0 => String::new(),
+        1 => "─".to_string(),
+        2 => "├┤".to_string(),
+        width => format!("├{}┤", "─".repeat(usize::from(width).saturating_sub(2))),
+    }
 }
 
 pub fn tui_hint_style() -> Style {
@@ -284,11 +324,7 @@ where
             title.to_string(),
             tui_title_style(),
         )]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(tui_border_style()),
-        );
+        .block(tui_connected_header_block(tui_border_style()));
         frame.render_widget(header, chunks[0]);
 
         let rendered_body_lines = body_lines

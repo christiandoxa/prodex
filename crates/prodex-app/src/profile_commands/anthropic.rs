@@ -6,7 +6,7 @@ use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     claude_config_dir_from_env_or_default, claude_oauth_profile_identity,
     copy_claude_oauth_credentials, ensure_path_is_unique, managed_profile_home_path,
-    prepare_managed_codex_home,
+    prepare_managed_codex_home, prepare_profile_codex_home,
 };
 
 pub(super) fn is_claude_import_source(path: &Path) -> bool {
@@ -40,9 +40,14 @@ pub(crate) fn handle_import_claude_profile(args: &ImportProfileArgs) -> Result<(
         Some(existing) if args.name.is_none() => {
             let profile = state
                 .profiles
+                .get(&existing)
+                .with_context(|| format!("profile '{}' is missing", existing))?;
+            prepare_profile_codex_home(&paths, profile)?;
+            copy_claude_oauth_credentials(&source_config_dir, &profile.codex_home)?;
+            let profile = state
+                .profiles
                 .get_mut(&existing)
                 .with_context(|| format!("profile '{}' is missing", existing))?;
-            copy_claude_oauth_credentials(&source_config_dir, &profile.codex_home)?;
             profile.email = account.clone();
             profile.provider = ProfileProvider::Anthropic {
                 account: account.clone(),

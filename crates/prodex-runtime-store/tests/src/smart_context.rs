@@ -272,6 +272,26 @@ fn smart_context_artifact_file_save_merges_existing_json() {
     std::fs::remove_file(path).expect("temp store removed");
 }
 
+#[test]
+fn smart_context_artifact_file_load_ignores_oversized_store() {
+    let path = smart_context_temp_path("oversized");
+    let _ = std::fs::remove_file(&path);
+    std::fs::File::create(&path)
+        .expect("temp store created")
+        .set_len(64 * 1024 * 1024 + 1)
+        .expect("temp store made oversized");
+
+    let loaded = load_runtime_smart_context_artifact_store(
+        &path,
+        40,
+        RuntimeSmartContextArtifactStorePolicy::default(),
+    )
+    .expect("oversized store should be ignored");
+
+    assert_eq!(loaded, RuntimeSmartContextArtifactStore::default());
+    std::fs::remove_file(path).expect("temp store removed");
+}
+
 fn smart_context_temp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

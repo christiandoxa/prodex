@@ -57,6 +57,7 @@
     "package.json",
     "package-lock.json",
     "npm/prodex/package.json",
+    "npm/prodex-gateway-sdk/package.json",
     "npm/platforms/linux-x64/package.json",
     "npm/platforms/linux-arm64/package.json",
     "npm/platforms/darwin-x64/package.json",

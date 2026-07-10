@@ -1,7 +1,13 @@
-use super::super::gemini_request_media::runtime_gemini_mime_type_for_uri;
+use super::super::gemini_request_io::runtime_gemini_path_has_symlink_component;
 use base64::Engine;
+use prodex_provider_core::{
+    gemini_provider_core_local_context_text_part, gemini_provider_core_media_part_from_data,
+    gemini_provider_core_mime_type_for_uri, gemini_provider_core_mime_type_is_text,
+    gemini_provider_core_skip_context_path_name, gemini_provider_core_text_part,
+};
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 pub(super) const RUNTIME_GEMINI_CONTEXT_FILE_LIMIT: usize = 16;
@@ -25,6 +31,9 @@ pub(super) fn runtime_gemini_part_from_local_path(
         return None;
     }
     let path = runtime_gemini_resolve_local_path(path)?;
+    if runtime_gemini_path_has_symlink_component(&path) {
+        return None;
+    }
     let metadata = fs::metadata(&path).ok()?;
     if metadata.is_dir() {
         return runtime_gemini_part_from_local_dir(&path, budget);
@@ -40,25 +49,28 @@ pub(super) fn runtime_gemini_part_from_local_path(
     if file_len == 0 || file_len > RUNTIME_GEMINI_CONTEXT_BYTE_LIMIT.saturating_sub(budget.bytes) {
         return None;
     }
-    let data = fs::read(&path).ok()?;
+    let data = runtime_gemini_read_local_context_file(
+        &path,
+        &metadata,
+        RUNTIME_GEMINI_CONTEXT_BYTE_LIMIT.saturating_sub(budget.bytes),
+    )?;
     budget.files = budget.files.saturating_add(1);
     budget.bytes = budget.bytes.saturating_add(data.len());
     budget.paths.insert(dedup_path);
-    let mime_type =
-        mime_type.unwrap_or_else(|| runtime_gemini_mime_type_for_uri(&path.to_string_lossy()));
-    if runtime_gemini_mime_type_is_text(mime_type)
+    let mime_type = mime_type
+        .unwrap_or_else(|| gemini_provider_core_mime_type_for_uri(&path.to_string_lossy()));
+    if gemini_provider_core_mime_type_is_text(mime_type)
         && let Ok(text) = String::from_utf8(data.clone())
     {
-        return Some(serde_json::json!({
-            "text": format!("Content from @{}:\n{}", path.display(), text),
-        }));
+        return Some(gemini_provider_core_local_context_text_part(
+            path.display(),
+            &text,
+        ));
     }
-    Some(serde_json::json!({
-        "inlineData": {
-            "mimeType": mime_type,
-            "data": base64::engine::general_purpose::STANDARD.encode(data),
-        }
-    }))
+    gemini_provider_core_media_part_from_data(
+        &base64::engine::general_purpose::STANDARD.encode(data),
+        Some(mime_type),
+    )
 }
 
 fn runtime_gemini_part_from_local_dir(
@@ -80,26 +92,63 @@ fn runtime_gemini_part_from_local_dir(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if runtime_gemini_skip_context_path_name(name) {
+        if gemini_provider_core_skip_context_path_name(name) {
             continue;
         }
-        if entry.is_dir() {
+        let Ok(metadata) = fs::symlink_metadata(&entry) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
             if let Some(part) = runtime_gemini_part_from_local_dir(&entry, budget) {
                 parts.push(part);
             }
-        } else if let Some(part) = runtime_gemini_part_from_local_path(&entry, None, budget) {
+        } else if metadata.is_file()
+            && let Some(part) = runtime_gemini_part_from_local_path(&entry, None, budget)
+        {
             parts.push(part);
         }
     }
     (!parts.is_empty()).then(|| {
-        serde_json::json!({
-            "text": parts
+        gemini_provider_core_text_part(
+            parts
                 .iter()
                 .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
                 .collect::<Vec<_>>()
                 .join("\n\n"),
-        })
+        )
     })
+}
+
+fn runtime_gemini_read_local_context_file(
+    path: &Path,
+    metadata: &fs::Metadata,
+    max_bytes: usize,
+) -> Option<Vec<u8>> {
+    let file = fs::File::open(path).ok()?;
+    let opened_metadata = file.metadata().ok()?;
+    if !runtime_gemini_same_local_context_file(metadata, &opened_metadata) {
+        return None;
+    }
+
+    let mut data = Vec::new();
+    file.take((max_bytes as u64).saturating_add(1))
+        .read_to_end(&mut data)
+        .ok()?;
+    (data.len() <= max_bytes).then_some(data)
+}
+
+#[cfg(unix)]
+fn runtime_gemini_same_local_context_file(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_gemini_same_local_context_file(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
+    true
 }
 
 pub(super) fn runtime_gemini_resolve_local_path(path: &Path) -> Option<PathBuf> {
@@ -109,22 +158,51 @@ pub(super) fn runtime_gemini_resolve_local_path(path: &Path) -> Option<PathBuf> 
     std::env::current_dir().ok().map(|cwd| cwd.join(path))
 }
 
-fn runtime_gemini_mime_type_is_text(mime_type: &str) -> bool {
-    mime_type.starts_with("text/")
-        || matches!(
-            mime_type,
-            "application/json"
-                | "application/xml"
-                | "application/javascript"
-                | "application/typescript"
-                | "application/x-sh"
-                | "application/octet-stream"
-        )
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub(super) fn runtime_gemini_skip_context_path_name(name: &str) -> bool {
-    matches!(
-        name,
-        ".git" | "node_modules" | "target" | "dist" | "build" | "__pycache__" | "vendor"
-    )
+    #[test]
+    fn gemini_local_context_file_read_rejects_replaced_file() {
+        let path = runtime_gemini_local_context_test_path("replaced");
+        fs::write(&path, "small").unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        fs::File::create(&path)
+            .unwrap()
+            .set_len((RUNTIME_GEMINI_CONTEXT_BYTE_LIMIT as u64).saturating_add(1))
+            .unwrap();
+
+        let data = runtime_gemini_read_local_context_file(
+            &path,
+            &metadata,
+            RUNTIME_GEMINI_CONTEXT_BYTE_LIMIT,
+        );
+
+        assert!(data.is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn gemini_local_context_file_read_respects_byte_limit() {
+        let path = runtime_gemini_local_context_test_path("limit");
+        fs::write(&path, b"abcdef").unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+
+        let data = runtime_gemini_read_local_context_file(&path, &metadata, 5);
+
+        assert!(data.is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    fn runtime_gemini_local_context_test_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "prodex-gemini-local-context-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
 }

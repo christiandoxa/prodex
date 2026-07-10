@@ -1,5 +1,6 @@
 use super::manage::print_profile_panel;
 use anyhow::{Context, Result, bail};
+use prodex_core::path_is_strictly_under_root;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
@@ -60,7 +61,8 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         args.name.as_deref(),
         args.delete_home,
     )?;
-    let removed_profiles = remove_profiles_from_state(&mut state, &target_names, args.delete_home)?;
+    let removed_profiles =
+        remove_profiles_from_state(&paths, &mut state, &target_names, args.delete_home)?;
     prune_removed_profile_metadata(&mut state, &target_names);
     state.save(&paths)?;
     persist_pruned_profile_runtime_sidecars(&paths, &state.profiles)?;
@@ -79,6 +81,7 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
 }
 
 fn remove_profiles_from_state(
+    paths: &AppPaths,
     state: &mut AppState,
     target_names: &[String],
     delete_home: bool,
@@ -89,7 +92,7 @@ fn remove_profiles_from_state(
             .profiles
             .remove(name)
             .with_context(|| format!("profile '{}' disappeared from state", name))?;
-        let deleted_home = remove_profile_home_if_requested(&profile, delete_home)?;
+        let deleted_home = remove_profile_home_if_requested(paths, &profile, delete_home)?;
         removed_profiles.push(RemovedProfileRecord {
             name: name.clone(),
             managed: profile.managed,
@@ -101,7 +104,11 @@ fn remove_profiles_from_state(
     Ok(removed_profiles)
 }
 
-fn remove_profile_home_if_requested(profile: &ProfileEntry, delete_home: bool) -> Result<bool> {
+fn remove_profile_home_if_requested(
+    paths: &AppPaths,
+    profile: &ProfileEntry,
+    delete_home: bool,
+) -> Result<bool> {
     let should_delete_home = prodex_profile_identity::should_delete_profile_home(
         profile.managed,
         delete_home,
@@ -109,6 +116,16 @@ fn remove_profile_home_if_requested(profile: &ProfileEntry, delete_home: bool) -
     )?;
     if !should_delete_home {
         return Ok(false);
+    }
+
+    if profile.managed {
+        super::ensure_managed_profiles_root(paths)?;
+        if !path_is_strictly_under_root(&paths.managed_profiles_root, &profile.codex_home) {
+            bail!(
+                "refusing to delete managed profile home outside managed profiles root: {}",
+                profile.codex_home.display()
+            );
+        }
     }
 
     if profile.codex_home.exists() {

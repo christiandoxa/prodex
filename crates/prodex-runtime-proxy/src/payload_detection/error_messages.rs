@@ -137,11 +137,7 @@ fn extract_runtime_proxy_previous_response_message_candidate(
     value: &serde_json::Value,
 ) -> Option<String> {
     match value {
-        serde_json::Value::String(message) => {
-            (runtime_proxy_previous_response_missing_text_signature(message)
-                || runtime_proxy_tool_context_missing_text_signature(message))
-            .then(|| message.to_string())
-        }
+        serde_json::Value::String(_) => None,
         serde_json::Value::Object(map) => {
             let message = map
                 .get("message")
@@ -152,9 +148,7 @@ fn extract_runtime_proxy_previous_response_message_candidate(
             let error_type = map.get("type").and_then(serde_json::Value::as_str);
             let param = map.get("param").and_then(serde_json::Value::as_str);
 
-            if code == Some("previous_response_not_found")
-                || message.is_some_and(runtime_proxy_previous_response_missing_message)
-            {
+            if code == Some("previous_response_not_found") {
                 return Some(
                     message
                         .unwrap_or(
@@ -197,12 +191,6 @@ fn runtime_proxy_previous_response_missing_text_signature(message: &str) -> bool
     let lower = message.trim().to_ascii_lowercase();
     lower.starts_with("previous_response_not_found")
         || (lower.starts_with("previous response") && lower.contains("not found"))
-}
-
-fn runtime_proxy_previous_response_missing_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("previous_response_not_found")
-        || (lower.contains("previous response") && lower.contains("not found"))
 }
 
 fn runtime_proxy_tool_context_missing_text_signature(message: &str) -> bool {

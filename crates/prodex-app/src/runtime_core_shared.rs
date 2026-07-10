@@ -68,12 +68,43 @@ pub(super) fn runtime_proxy_latest_log_pointer_path() -> PathBuf {
     runtime_proxy_log_dir().join(RUNTIME_PROXY_LATEST_LOG_POINTER)
 }
 
+pub(crate) fn runtime_proxy_latest_log_path_from_pointer() -> Option<PathBuf> {
+    runtime_proxy_latest_log_path_from_pointer_text(
+        &runtime_proxy_log_dir(),
+        &fs::read_to_string(runtime_proxy_latest_log_pointer_path()).ok()?,
+    )
+}
+
+pub(crate) fn runtime_proxy_latest_log_path_from_pointer_text(
+    log_dir: &Path,
+    pointer_text: &str,
+) -> Option<PathBuf> {
+    let path = PathBuf::from(pointer_text.lines().next()?.trim());
+    if path.as_os_str().is_empty() {
+        return None;
+    }
+    let file_name = path.file_name().and_then(|name| name.to_str())?;
+    if !file_name.starts_with(RUNTIME_PROXY_LOG_FILE_PREFIX) || !file_name.ends_with(".log") {
+        return None;
+    }
+    let parent = path.parent()?;
+    if !prodex_core::same_path(parent, log_dir) {
+        return None;
+    }
+    if !prodex_core::path_is_under_root(log_dir, &path) {
+        return None;
+    }
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => None,
+        Ok(_) => Some(path),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Some(path),
+        Err(_) => None,
+    }
+}
+
 pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
     let log_path = create_runtime_proxy_log_path();
-    let _ = fs::write(
-        runtime_proxy_latest_log_pointer_path(),
-        format!("{}\n", log_path.display()),
-    );
+    let _ = write_runtime_proxy_latest_log_pointer(&log_path);
     let (executable_path, executable_sha256) = runtime_current_binary_identity();
     runtime_proxy_log_to_path(
         &log_path,
@@ -90,6 +121,62 @@ pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
         ),
     );
     log_path
+}
+
+fn write_runtime_proxy_latest_log_pointer(log_path: &Path) -> io::Result<()> {
+    let pointer_path = runtime_proxy_latest_log_pointer_path();
+    if let Some(parent) = pointer_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temp_path = runtime_proxy_latest_log_pointer_temp_path(&pointer_path);
+    write_runtime_proxy_private_file(&temp_path, format!("{}\n", log_path.display()).as_bytes())?;
+    if let Err(err) = fs::rename(&temp_path, &pointer_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn runtime_proxy_latest_log_pointer_temp_path(pointer_path: &Path) -> PathBuf {
+    let file_name = pointer_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(RUNTIME_PROXY_LATEST_LOG_POINTER);
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let sequence = RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    pointer_path.with_file_name(format!(
+        "{file_name}.{}.{}.{}.tmp",
+        std::process::id(),
+        millis,
+        sequence
+    ))
+}
+
+fn write_runtime_proxy_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = open_runtime_proxy_private_file(path)?;
+    file.write_all(bytes)
+}
+
+#[cfg(unix)]
+fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
 }
 
 pub(super) fn runtime_proxy_worker_count() -> usize {

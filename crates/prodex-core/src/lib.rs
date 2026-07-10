@@ -3,6 +3,7 @@ use dirs::home_dir;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -96,13 +97,74 @@ pub fn same_path(left: &Path, right: &Path) -> bool {
 }
 
 pub fn normalize_path_for_compare(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    fs::canonicalize(path).unwrap_or_else(|_| normalize_missing_path_for_compare(path))
+}
+
+fn normalize_missing_path_for_compare(path: &Path) -> PathBuf {
+    let lexical = normalize_path_lexically(path);
+    let mut cursor = lexical.as_path();
+    let mut missing = Vec::new();
+
+    while let Some(name) = cursor.file_name() {
+        missing.push(name.to_os_string());
+        let Some(parent) = cursor.parent() else {
+            break;
+        };
+        if let Ok(mut resolved) = fs::canonicalize(parent) {
+            for part in missing.iter().rev() {
+                resolved.push(part);
+            }
+            return normalize_path_lexically(&resolved);
+        }
+        cursor = parent;
+    }
+
+    lexical
+}
+
+fn normalize_path_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    let mut rooted = false;
+
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                normalized.push(prefix.as_os_str());
+                rooted = true;
+            }
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+                rooted = true;
+            }
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::ParentDir) | None if !rooted => normalized.push(".."),
+                _ => {}
+            },
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
 }
 
 pub fn path_is_under_root(root: &Path, path: &Path) -> bool {
     let root = normalize_path_for_compare(root);
     let path = normalize_path_for_compare(path);
     path == root || path.starts_with(root)
+}
+
+pub fn path_is_strictly_under_root(root: &Path, path: &Path) -> bool {
+    let root = normalize_path_for_compare(root);
+    let path = normalize_path_for_compare(path);
+    path != root && path.starts_with(root)
 }
 
 pub fn system_time_to_unix_seconds(time: SystemTime) -> Option<i64> {

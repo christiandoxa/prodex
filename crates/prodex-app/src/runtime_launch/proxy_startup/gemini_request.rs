@@ -1,20 +1,13 @@
-use super::super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions,
-    runtime_chat_compatible_request_body,
+use super::super::chat_compatible_rewrite::{
+    RuntimeChatCompatibleConversationStore, RuntimeDeepSeekRewriteOptions,
+    runtime_provider_chat_compatible_request_body,
 };
 use super::super::provider_bridge::RuntimeProviderBridgeKind;
 use super::RuntimeGeminiTranslatedRequest;
-use super::gemini_command_output::runtime_gemini_structured_command_tool_response;
-use super::gemini_history_hardening::runtime_gemini_harden_contents;
 #[cfg(test)]
 use super::gemini_request_extensions::{
     runtime_gemini_active_extension_manifests_from_roots,
     runtime_gemini_extension_context_files_from_roots,
-};
-use super::gemini_request_generation::runtime_gemini_generation_config;
-use super::gemini_request_io::runtime_gemini_collect_path_values;
-use super::gemini_request_media::{
-    runtime_gemini_media_part_from_data, runtime_gemini_media_part_from_uri_or_data_url,
 };
 #[cfg(test)]
 use super::gemini_request_policy::RuntimeGeminiPolicyCompat;
@@ -22,6 +15,15 @@ use super::gemini_request_policy::RuntimeGeminiPolicyCompat;
 use super::gemini_request_policy::runtime_gemini_settings_paths_for;
 use super::gemini_request_session::{
     runtime_gemini_export_checkpoint, runtime_gemini_imported_session_contents,
+};
+use prodex_provider_core::{
+    gemini_provider_core_contextual_user_instruction_text as runtime_gemini_contextual_user_instruction_text,
+    gemini_provider_core_generation_config_from_request as runtime_gemini_generation_config,
+    gemini_provider_core_harden_contents as runtime_gemini_harden_contents,
+    gemini_provider_core_media_part_from_data as runtime_gemini_media_part_from_data,
+    gemini_provider_core_media_part_from_uri_or_data_url as runtime_gemini_media_part_from_uri_or_data_url,
+    gemini_provider_core_structured_command_tool_response as runtime_gemini_structured_command_tool_response,
+    gemini_provider_core_tool_config_from_request as runtime_gemini_tool_config_from_chat,
 };
 mod gemini_request_context;
 mod gemini_request_instruction;
@@ -31,25 +33,18 @@ mod gemini_request_tools;
 mod gemini_request_util;
 use super::gemini_request_tool_output::runtime_gemini_mask_tool_response_for_history;
 use anyhow::{Context, Result};
-pub(super) use gemini_request_context::runtime_gemini_collect_string_values;
 use gemini_request_context::{
     runtime_gemini_collect_at_path_parts, runtime_gemini_collect_explicit_file_parts,
 };
-use gemini_request_instruction::{
-    runtime_gemini_contextual_user_instruction_text, runtime_gemini_system_instruction,
-};
+use gemini_request_instruction::runtime_gemini_system_instruction;
 use gemini_request_local_context::{
     RuntimeGeminiFileReadBudget, runtime_gemini_part_from_local_path,
 };
 use gemini_request_memory::runtime_gemini_hierarchical_memory;
 #[cfg(test)]
 use gemini_request_memory::runtime_gemini_memory_files_enabled;
-pub(in super::super) use gemini_request_tools::{
-    runtime_gemini_blocked_tool_call_message, runtime_gemini_request_body_without_tool,
-};
-use gemini_request_tools::{
-    runtime_gemini_tool_config_from_chat, runtime_gemini_tools_from_requests,
-};
+pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message;
+use gemini_request_tools::runtime_gemini_tools_from_requests;
 pub(super) use gemini_request_util::{runtime_gemini_config_dir, runtime_gemini_home_dir};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
@@ -95,15 +90,33 @@ pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_PREVIEW_CHARS: usize = 1_000;
 
 pub(in super::super) fn runtime_gemini_generate_request_body(
     body: &[u8],
-    conversations: &RuntimeDeepSeekConversationStore,
+    conversations: &RuntimeChatCompatibleConversationStore,
     code_assist: bool,
     project_id: Option<&str>,
     thinking_budget_tokens: Option<u64>,
 ) -> Result<RuntimeGeminiTranslatedRequest> {
+    runtime_gemini_generate_request_body_with_local_file_access(
+        body,
+        conversations,
+        code_assist,
+        project_id,
+        thinking_budget_tokens,
+        true,
+    )
+}
+
+pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_access(
+    body: &[u8],
+    conversations: &RuntimeChatCompatibleConversationStore,
+    code_assist: bool,
+    project_id: Option<&str>,
+    thinking_budget_tokens: Option<u64>,
+    allow_local_file_access: bool,
+) -> Result<RuntimeGeminiTranslatedRequest> {
     let original: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
     let chat_source = runtime_gemini_chat_source_request(&original);
-    let chat = runtime_chat_compatible_request_body(
+    let chat = runtime_provider_chat_compatible_request_body(
         &serde_json::to_vec(&chat_source).context("failed to serialize Gemini chat source JSON")?,
         conversations,
         RuntimeProviderBridgeKind::Gemini,
@@ -111,8 +124,16 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
         true,
         RuntimeDeepSeekRewriteOptions::default(),
     )?;
-    let chat_value: serde_json::Value = serde_json::from_slice(&chat.body)
+    let mut chat_value: serde_json::Value = serde_json::from_slice(&chat.body)
         .context("failed to parse translated chat request JSON")?;
+    if chat_value.get("tool_choice").is_none()
+        && let Some(tool_choice) =
+            super::super::provider_tools::runtime_provider_chat_tool_choice_from_responses_request(
+                &original, false,
+            )
+    {
+        chat_value["tool_choice"] = tool_choice;
+    }
     let model = chat_value
         .get("model")
         .and_then(serde_json::Value::as_str)
@@ -124,17 +145,23 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
         .unwrap_or(false);
 
     let mut request = serde_json::Map::new();
-    if let Some(system_instruction) = runtime_gemini_system_instruction(&chat_value, &original) {
+    if let Some(system_instruction) =
+        runtime_gemini_system_instruction(&chat_value, &original, allow_local_file_access)
+    {
         request.insert("systemInstruction".to_string(), system_instruction);
     }
     request.insert(
         "contents".to_string(),
-        serde_json::Value::Array(runtime_gemini_contents_from_chat(&chat_value, &original)),
+        serde_json::Value::Array(runtime_gemini_contents_from_chat(
+            &chat_value,
+            &original,
+            allow_local_file_access,
+        )),
     );
     if let Some(tools) = runtime_gemini_tools_from_requests(&original, &chat_value, &model) {
         request.insert("tools".to_string(), tools);
     }
-    if let Some(tool_config) = runtime_gemini_tool_config_from_chat(&chat_value, &original) {
+    if let Some(tool_config) = runtime_gemini_tool_config_from_chat(&chat_value) {
         request.insert("toolConfig".to_string(), tool_config);
     }
     request.insert(
@@ -157,8 +184,10 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
     if let Some(labels) = original.get("labels").filter(|value| !value.is_null()) {
         request.insert("labels".to_string(), labels.clone());
     }
-    runtime_gemini_export_checkpoint(&original, &request)
-        .context("failed to export Gemini session checkpoint")?;
+    if allow_local_file_access {
+        runtime_gemini_export_checkpoint(&original, &request)
+            .context("failed to export Gemini session checkpoint")?;
+    }
 
     let body_value = if code_assist {
         serde_json::json!({
@@ -250,8 +279,13 @@ fn runtime_gemini_chat_source_content_part_supported(part: &serde_json::Value) -
 fn runtime_gemini_contents_from_chat(
     chat: &serde_json::Value,
     original: &serde_json::Value,
+    allow_local_file_access: bool,
 ) -> Vec<serde_json::Value> {
-    let mut contents = runtime_gemini_imported_session_contents(original);
+    let mut contents = if allow_local_file_access {
+        runtime_gemini_imported_session_contents(original)
+    } else {
+        Vec::new()
+    };
     let mut tool_names_by_call_id = BTreeMap::new();
     let Some(messages) = chat.get("messages").and_then(serde_json::Value::as_array) else {
         return contents;
@@ -343,6 +377,7 @@ fn runtime_gemini_contents_from_chat(
                         "functionResponse": runtime_gemini_function_response_from_tool_message(
                             &messages[index],
                             &tool_names_by_call_id,
+                            allow_local_file_access,
                         ),
                     }));
                     index += 1;
@@ -372,7 +407,7 @@ fn runtime_gemini_contents_from_chat(
             "parts": [{ "text": "" }],
         }));
     }
-    let extra_parts = runtime_gemini_input_extra_parts(original);
+    let extra_parts = runtime_gemini_input_extra_parts(original, allow_local_file_access);
     if !extra_parts.is_empty() {
         runtime_gemini_append_media_parts_to_last_user_content(&mut contents, extra_parts);
     }
@@ -401,35 +436,43 @@ fn runtime_gemini_append_media_parts_to_last_user_content(
     }));
 }
 
-fn runtime_gemini_input_extra_parts(original: &serde_json::Value) -> Vec<serde_json::Value> {
+fn runtime_gemini_input_extra_parts(
+    original: &serde_json::Value,
+    allow_local_file_access: bool,
+) -> Vec<serde_json::Value> {
     let mut parts = Vec::new();
     if let Some(input) = original.get("input").and_then(serde_json::Value::as_array) {
         for item in input {
-            runtime_gemini_collect_media_parts(item, &mut parts);
+            runtime_gemini_collect_media_parts(item, &mut parts, allow_local_file_access);
         }
     }
-    let mut budget = RuntimeGeminiFileReadBudget::default();
-    runtime_gemini_collect_explicit_file_parts(original, &mut parts, &mut budget);
-    runtime_gemini_collect_at_path_parts(original, &mut parts, &mut budget);
+    if allow_local_file_access {
+        let mut budget = RuntimeGeminiFileReadBudget::default();
+        runtime_gemini_collect_explicit_file_parts(original, &mut parts, &mut budget);
+        runtime_gemini_collect_at_path_parts(original, &mut parts, &mut budget);
+    }
     parts
 }
 
 fn runtime_gemini_collect_media_parts(
     value: &serde_json::Value,
     parts: &mut Vec<serde_json::Value>,
+    allow_local_file_access: bool,
 ) {
     match value {
         serde_json::Value::Array(values) => {
             for value in values {
-                runtime_gemini_collect_media_parts(value, parts);
+                runtime_gemini_collect_media_parts(value, parts, allow_local_file_access);
             }
         }
         serde_json::Value::Object(object) => {
-            if let Some(part) = runtime_gemini_media_part_from_content_object(object) {
+            if let Some(part) =
+                runtime_gemini_media_part_from_content_object(object, allow_local_file_access)
+            {
                 parts.push(part);
             }
             if let Some(content) = object.get("content") {
-                runtime_gemini_collect_media_parts(content, parts);
+                runtime_gemini_collect_media_parts(content, parts, allow_local_file_access);
             }
         }
         _ => {}
@@ -438,6 +481,7 @@ fn runtime_gemini_collect_media_parts(
 
 fn runtime_gemini_media_part_from_content_object(
     object: &serde_json::Map<String, serde_json::Value>,
+    allow_local_file_access: bool,
 ) -> Option<serde_json::Value> {
     let kind = object
         .get("type")
@@ -452,7 +496,7 @@ fn runtime_gemini_media_part_from_content_object(
             runtime_gemini_media_part_from_uri_or_data_url(image_url, None)
         }
         "input_file" | "file" | "media" | "input_audio" | "input_video" => {
-            runtime_gemini_media_part_from_generic_content_object(object)
+            runtime_gemini_media_part_from_generic_content_object(object, allow_local_file_access)
         }
         _ => None,
     }
@@ -469,6 +513,7 @@ pub(in super::super) fn runtime_gemini_image_url_value(value: &serde_json::Value
 
 fn runtime_gemini_media_part_from_generic_content_object(
     object: &serde_json::Map<String, serde_json::Value>,
+    allow_local_file_access: bool,
 ) -> Option<serde_json::Value> {
     let mime_type = object
         .get("mime_type")
@@ -497,6 +542,9 @@ fn runtime_gemini_media_part_from_generic_content_object(
     if let Some(uri) = uri {
         return runtime_gemini_media_part_from_uri_or_data_url(uri, mime_type);
     }
+    if !allow_local_file_access {
+        return None;
+    }
     let path = object
         .get("path")
         .or_else(|| object.get("file_path"))
@@ -509,6 +557,7 @@ fn runtime_gemini_media_part_from_generic_content_object(
 fn runtime_gemini_function_response_from_tool_message(
     message: &serde_json::Value,
     tool_names_by_call_id: &BTreeMap<String, String>,
+    persist_tool_output: bool,
 ) -> serde_json::Value {
     let call_id = message
         .get("tool_call_id")
@@ -528,7 +577,16 @@ fn runtime_gemini_function_response_from_tool_message(
                 "output": text
             })
         });
-    let response = runtime_gemini_mask_tool_response_for_history(&name, call_id, response);
+    let response = if persist_tool_output {
+        runtime_gemini_mask_tool_response_for_history(&name, call_id, response)
+    } else {
+        prodex_provider_core::gemini_provider_core_mask_tool_response_for_history(
+            response,
+            RUNTIME_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD,
+            RUNTIME_GEMINI_TOOL_OUTPUT_PREVIEW_CHARS,
+            None,
+        )
+    };
     runtime_gemini_function_response_part(call_id, &name, response)
 }
 
@@ -584,10 +642,9 @@ fn chat_message_text(message: &serde_json::Value) -> Option<String> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Arc, Mutex};
 
-    fn test_conversation_store() -> RuntimeDeepSeekConversationStore {
-        Arc::new(Mutex::new(std::collections::BTreeMap::new()))
+    fn test_conversation_store() -> RuntimeChatCompatibleConversationStore {
+        RuntimeChatCompatibleConversationStore::default()
     }
 
     #[test]
@@ -765,6 +822,52 @@ mod tests {
         assert_eq!(
             exported["request"]["contents"][0]["parts"][0]["text"],
             "Persist this translated request"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn gemini_gateway_translation_does_not_access_request_selected_local_files() {
+        let directory = std::env::temp_dir().join(format!(
+            "prodex-gemini-gateway-files-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let secret = directory.join("secret.txt");
+        let checkpoint = directory.join("checkpoint.json");
+        fs::write(&secret, "gateway-must-not-read-this-secret").unwrap();
+        let body = serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "input": format!("Review @\"{}\"", secret.display()),
+            "include_paths": [secret.clone()],
+            "gemini_memory_file": secret.clone(),
+            "gemini_session_file": secret.clone(),
+            "gemini_export_file": checkpoint.clone(),
+        });
+
+        let translated = runtime_gemini_generate_request_body_with_local_file_access(
+            &serde_json::to_vec(&body).unwrap(),
+            &test_conversation_store(),
+            false,
+            None,
+            None,
+            false,
+        )
+        .expect("gateway request should translate without host file access");
+
+        assert!(
+            !String::from_utf8_lossy(&translated.body)
+                .contains("gateway-must-not-read-this-secret")
+        );
+        assert!(!checkpoint.exists());
+        assert!(
+            runtime_gemini_input_extra_parts(
+                &serde_json::json!({
+                    "input": [{"type": "input_file", "path": secret}],
+                }),
+                false,
+            )
+            .is_empty()
         );
         fs::remove_dir_all(directory).unwrap();
     }

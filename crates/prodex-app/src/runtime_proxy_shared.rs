@@ -172,6 +172,10 @@ pub(super) enum RuntimeWebsocketAttempt {
         profile_name: String,
         payload: RuntimeWebsocketErrorPayload,
     },
+    Rejected {
+        profile_name: String,
+        payload: RuntimeWebsocketErrorPayload,
+    },
     LocalSelectionBlocked {
         profile_name: String,
         reason: &'static str,
@@ -206,6 +210,7 @@ pub(super) enum RuntimeWebsocketConnectResult {
     },
     QuotaBlocked(RuntimeWebsocketErrorPayload),
     Overloaded(RuntimeWebsocketErrorPayload),
+    Rejected(RuntimeWebsocketErrorPayload),
 }
 
 #[derive(Debug)]

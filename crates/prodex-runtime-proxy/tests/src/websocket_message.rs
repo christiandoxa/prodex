@@ -183,7 +183,83 @@ fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
 }
 
 #[test]
+fn websocket_text_frame_inspection_ignores_non_error_quota_code_text() {
+    let payload = serde_json::json!({
+        "type": "response.output_text.delta",
+        "delta": "The docs mention rate_limit_exceeded as an example.",
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(inspected.retry_kind, None);
+    assert!(!inspected.terminal_event);
+}
+
+#[test]
+fn websocket_text_frame_inspection_ignores_non_error_previous_response_code_text() {
+    let payload = serde_json::json!({
+        "type": "response.output_text.delta",
+        "delta": "previous_response_not_found is an upstream error code.",
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(inspected.retry_kind, None);
+    assert!(!inspected.terminal_event);
+}
+
+#[test]
+fn websocket_text_frame_inspection_classifies_connection_limit() {
+    let payload = serde_json::json!({
+        "type": "error",
+        "error": {
+            "code": "websocket_connection_limit_reached",
+            "message": "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.",
+        }
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(
+        inspected.retry_kind,
+        Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
+    );
+    assert!(inspected.terminal_event);
+}
+
+#[test]
+fn websocket_text_frame_inspection_treats_wrapped_status_error_as_terminal() {
+    let payload = serde_json::json!({
+        "type": "error",
+        "status_code": 400,
+        "error": {
+            "type": "invalid_request_error",
+            "message": "Model does not support image inputs",
+        }
+    })
+    .to_string();
+
+    let inspected = inspect_runtime_websocket_text_frame(&payload);
+
+    assert_eq!(inspected.retry_kind, None);
+    assert!(inspected.terminal_event);
+    assert!(is_runtime_terminal_event(&payload));
+
+    let unwrapped = r#"{"type":"error","error":{"message":"still open"}}"#;
+    assert!(!inspect_runtime_websocket_text_frame(unwrapped).terminal_event);
+    assert!(!is_runtime_terminal_event(unwrapped));
+}
+
+#[test]
 fn websocket_event_kind_helpers_match_stream_boundaries() {
+    assert!(runtime_proxy_precommit_hold_event_kind("codex.rate_limits"));
+    assert!(runtime_proxy_precommit_hold_event_kind(
+        "codex.response.metadata"
+    ));
+    assert!(runtime_proxy_precommit_hold_event_kind("response.metadata"));
     assert!(runtime_proxy_precommit_hold_event_kind("response.created"));
     assert!(!runtime_proxy_precommit_hold_event_kind(
         "response.completed"
@@ -193,5 +269,8 @@ fn websocket_event_kind_helpers_match_stream_boundaries() {
     ));
     assert!(is_runtime_terminal_event(
         r#"{"type":"response.completed"}"#
+    ));
+    assert!(is_runtime_terminal_event(
+        r#"{"type":"response.incomplete"}"#
     ));
 }

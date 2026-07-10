@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -16,7 +17,7 @@ pub(crate) const RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_HEADER: &str =
 pub(crate) fn runtime_copilot_workspace_custom_instructions(root: &Path) -> Result<Option<String>> {
     let mut paths = Vec::new();
     let global = root.join(".github").join("copilot-instructions.md");
-    if global.is_file() {
+    if runtime_copilot_instruction_path_is_regular_file(&global) {
         paths.push(global);
     }
     let scoped_root = root.join(".github").join("instructions");
@@ -36,11 +37,9 @@ pub(crate) fn runtime_copilot_workspace_custom_instructions(root: &Path) -> Resu
         let relative = path.strip_prefix(root).unwrap_or(path.as_path());
         let max_remaining = RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_TOTAL_BYTES - total_bytes;
         let max_bytes = RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILE_BYTES.min(max_remaining);
-        let mut content = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        if content.len() > max_bytes {
-            content.truncate(max_bytes);
-        }
+        let Some(content) = runtime_copilot_read_instruction_file(&path, max_bytes)? else {
+            continue;
+        };
         let content = content.trim();
         if content.is_empty() {
             continue;
@@ -83,7 +82,9 @@ fn runtime_copilot_workspace_custom_instructions_cache() -> &'static Option<Arc<
 }
 
 fn runtime_copilot_collect_instruction_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
-    if paths.len() >= RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILES || !root.is_dir() {
+    if paths.len() >= RUNTIME_COPILOT_CUSTOM_INSTRUCTIONS_MAX_FILES
+        || !runtime_copilot_instruction_path_is_dir(root)
+    {
         return Ok(());
     }
     let mut entries = fs::read_dir(root)
@@ -96,12 +97,14 @@ fn runtime_copilot_collect_instruction_paths(root: &Path, paths: &mut Vec<PathBu
             break;
         }
         let path = entry.path();
-        let file_type = entry
-            .file_type()
+        let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("failed to inspect {}", path.display()))?;
-        if file_type.is_dir() {
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
             runtime_copilot_collect_instruction_paths(&path, paths)?;
-        } else if file_type.is_file()
+        } else if metadata.is_file()
             && path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -111,6 +114,59 @@ fn runtime_copilot_collect_instruction_paths(root: &Path, paths: &mut Vec<PathBu
         }
     }
     Ok(())
+}
+
+fn runtime_copilot_read_instruction_file(path: &Path, max_bytes: usize) -> Result<Option<String>> {
+    if max_bytes == 0 || !runtime_copilot_instruction_path_is_regular_file(path) {
+        return Ok(None);
+    }
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.take(max_bytes as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut content = String::from_utf8_lossy(&bytes).into_owned();
+    if content.len() > max_bytes {
+        let mut end = max_bytes.min(content.len());
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        content.truncate(end);
+    }
+    Ok(Some(content))
+}
+
+fn runtime_copilot_instruction_path_is_regular_file(path: &Path) -> bool {
+    if runtime_copilot_path_has_symlink_component(path) {
+        return false;
+    }
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
+}
+
+fn runtime_copilot_instruction_path_is_dir(path: &Path) -> bool {
+    if runtime_copilot_path_has_symlink_component(path) {
+        return false;
+    }
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+}
+
+fn runtime_copilot_path_has_symlink_component(path: &Path) -> bool {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if fs::symlink_metadata(&current)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

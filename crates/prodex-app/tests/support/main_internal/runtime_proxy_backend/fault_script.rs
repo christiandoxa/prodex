@@ -75,6 +75,48 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn usage_limit_429(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 429 Too Many Requests",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "error": {
+                    "message": "You've hit your usage limit. Upgrade to Pro or try again later."
+                },
+                "status": 429
+            })
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
+    pub(crate) fn explicit_quota_429(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+    ) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 429 Too Many Requests",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "error": {
+                    "code": "insufficient_quota",
+                    "message": "scripted quota exhausted"
+                },
+                "status": 429
+            })
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn stalled_json(
         route: RuntimeProxyBackendFaultRoute,
         account_id: &str,

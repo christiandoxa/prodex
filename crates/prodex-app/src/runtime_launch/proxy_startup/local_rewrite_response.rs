@@ -1,78 +1,33 @@
-use super::deepseek_rewrite::{
-    RuntimeDeepSeekChatSseReader, runtime_deepseek_chat_buffered_response_parts,
-    runtime_deepseek_take_pending_messages,
-};
-use super::gemini_rewrite::runtime_gemini_generate_buffered_response_parts;
-use super::gemini_sse::RuntimeGeminiGenerateSseReader;
+use self::dispatch::respond_runtime_local_rewrite_live_response;
 use super::local_rewrite::{
-    RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult, runtime_gateway_guardrail_webhook_block,
-};
-use super::local_rewrite_copilot::{
-    RuntimeCopilotBindingRecorder, RuntimeCopilotResponsesSseBindingReader,
-    runtime_copilot_remember_bindings_from_responses_body,
-};
-use super::local_rewrite_gemini::{
-    RuntimeGeminiRequestContext, runtime_gemini_remember_bindings_from_responses_body,
-};
-use super::local_rewrite_rate_limits::{
-    append_binary_rate_limit_headers, append_text_rate_limit_headers,
-    runtime_deepseek_codex_rate_limit_headers, runtime_openai_style_codex_rate_limit_headers,
 };
 use super::local_rewrite_response_guardrails::runtime_gateway_guardrail_stream_body;
 use super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
-use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_log_stream_conformance,
-    runtime_provider_stream_event_conformance_result,
-};
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeStreamingResponse,
     build_runtime_proxy_json_error_response, build_runtime_proxy_response_from_parts,
-    build_runtime_proxy_text_response, write_runtime_streaming_response,
+    write_runtime_streaming_response,
 };
 use anyhow::{Context, Result};
 use prodex_domain::CallId;
-use runtime_proxy_crate::path_without_query;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::io::Read;
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Instant;
 
-const RUNTIME_LOCAL_REWRITE_RESPONSE_TRANSFORM_FAILED_MESSAGE: &str =
-    "provider response could not be transformed";
-
-fn runtime_local_rewrite_response_transform_failed_response() -> tiny_http::ResponseBox {
-    build_runtime_proxy_text_response(502, RUNTIME_LOCAL_REWRITE_RESPONSE_TRANSFORM_FAILED_MESSAGE)
-}
-
-#[derive(Clone, Copy)]
-struct RuntimeChatCompatibleProvider {
-    prefix: &'static str,
-    label: &'static str,
-}
-
-struct RuntimeChatCompatibleRewriteContext<'a> {
-    status: u16,
-    content_type: &'a str,
-    shared: &'a RuntimeLocalRewriteProxyShared,
-    captured: &'a RuntimeProxyRequest,
-    provider: RuntimeChatCompatibleProvider,
-    profile_name: Option<String>,
-    binding_recorder: Option<RuntimeCopilotBindingRecorder>,
-}
-
-struct RuntimeGeminiRewriteContext<'a> {
-    prefix: Vec<u8>,
-    status: u16,
-    content_type: &'a str,
-    shared: &'a RuntimeLocalRewriteProxyShared,
-    captured: &'a RuntimeProxyRequest,
-    gemini_context: Option<RuntimeGeminiRequestContext>,
-}
+#[path = "local_rewrite_response_dispatch.rs"]
+mod dispatch;
+#[path = "local_rewrite_response_chat_compatible.rs"]
+mod local_rewrite_response_chat_compatible;
+#[path = "local_rewrite_response_copilot.rs"]
+mod local_rewrite_response_copilot;
+#[path = "local_rewrite_response_gemini.rs"]
+mod local_rewrite_response_gemini;
+#[path = "local_rewrite_response_passthrough.rs"]
+mod local_rewrite_response_passthrough;
 
 pub(super) fn runtime_local_rewrite_buffered_response_from_response(
     response: reqwest::blocking::Response,
@@ -87,16 +42,11 @@ pub(super) fn runtime_local_rewrite_buffered_response_from_response(
     runtime_local_rewrite_buffered_response_parts(status, headers, response)
 }
 
-fn runtime_gateway_audit_data_plane_response_guardrail_blocked(
+fn runtime_gateway_audit_response_blocked(
     shared: &RuntimeLocalRewriteProxyShared,
+    action: &str,
     reason: &str,
 ) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "reason": reason,
-        },
-    });
     let default_log_dir = shared
         .runtime_shared
         .log_path
@@ -106,35 +56,12 @@ fn runtime_gateway_audit_data_plane_response_guardrail_blocked(
     let _ = prodex_audit_log::append_audit_event(
         &path,
         "gateway_data_plane",
-        "response_guardrail_blocked",
+        action,
         "failure",
-        payload,
-    );
-}
-
-fn runtime_gateway_audit_data_plane_response_guardrail_webhook_blocked(
-    shared: &RuntimeLocalRewriteProxyShared,
-    reason: &str,
-) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "phase": "post",
-            "reason": reason,
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        "response_guardrail_webhook_blocked",
-        "failure",
-        payload,
+        serde_json::json!({
+            "state_backend": shared.gateway_state_store.label(),
+            "details": {"reason": reason},
+        }),
     );
 }
 
@@ -149,7 +76,11 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
             &shared.gateway_guardrails,
         )
     {
-        runtime_gateway_audit_data_plane_response_guardrail_blocked(shared, block.kind.as_str());
+        runtime_gateway_audit_response_blocked(
+            shared,
+            "response_guardrail_blocked",
+            block.kind.as_str(),
+        );
         crate::runtime_proxy_log(
             &shared.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -172,8 +103,9 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
         && let Some(block) =
             runtime_gateway_guardrail_webhook_block("post", request_id, &parts.body, shared)
     {
-        runtime_gateway_audit_data_plane_response_guardrail_webhook_blocked(
+        runtime_gateway_audit_response_blocked(
             shared,
+            "response_guardrail_webhook_blocked",
             block.reason.as_str(),
         );
         crate::runtime_proxy_log(
@@ -216,15 +148,6 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         gemini_context,
         copilot_context,
     } = response;
-    let provider_profile_name = gemini_context
-        .as_ref()
-        .map(|context| context.profile_name.clone())
-        .or_else(|| {
-            copilot_context
-                .as_ref()
-                .map(|context| context.profile_name.clone())
-        })
-        .unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
     if let RuntimeLocalRewriteUpstreamResponse::Streaming(streaming_response) = response {
         let writer = request.into_writer();
         let mut headers = streaming_response.headers;
@@ -267,224 +190,15 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         }
         RuntimeLocalRewriteUpstreamResponse::Streaming(_) => unreachable!(),
     };
-    let prefix = live_response.prefix;
-    let response = live_response.response;
-    let status = response.status().as_u16();
-    let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
-        response
-            .headers()
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_bytes())),
+    respond_runtime_local_rewrite_live_response(
+        request_id,
+        request,
+        live_response,
+        gemini_context,
+        copilot_context,
+        captured,
+        shared,
     );
-    let text_headers = runtime_proxy_crate::runtime_forward_text_response_headers(
-        response
-            .headers()
-            .iter()
-            .filter_map(|(name, value)| value.to_str().ok().map(|value| (name.as_str(), value))),
-    );
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let deepseek_responses_route = matches!(
-        &shared.provider,
-        RuntimeLocalRewriteProviderOptions::DeepSeek { .. }
-    ) && path_without_query(&captured.path_and_query)
-        .ends_with("/responses");
-    let anthropic_responses_route = matches!(
-        &shared.provider,
-        RuntimeLocalRewriteProviderOptions::Anthropic { .. }
-    ) && path_without_query(&captured.path_and_query)
-        .ends_with("/responses");
-    let gemini_responses_route = matches!(
-        &shared.provider,
-        RuntimeLocalRewriteProviderOptions::Gemini { .. }
-    ) && path_without_query(&captured.path_and_query)
-        .ends_with("/responses");
-    let copilot_responses_route = matches!(
-        &shared.provider,
-        RuntimeLocalRewriteProviderOptions::Copilot { .. }
-    ) && path_without_query(&captured.path_and_query)
-        .ends_with("/responses");
-    if deepseek_responses_route && (200..300).contains(&status) {
-        respond_runtime_chat_compatible_rewrite(
-            request_id,
-            request,
-            response,
-            RuntimeChatCompatibleRewriteContext {
-                status,
-                content_type: &content_type,
-                shared,
-                captured,
-                provider: RuntimeChatCompatibleProvider {
-                    prefix: "deepseek",
-                    label: "DeepSeek",
-                },
-                profile_name: None,
-                binding_recorder: None,
-            },
-        );
-        return;
-    }
-
-    if anthropic_responses_route && (200..300).contains(&status) {
-        respond_runtime_chat_compatible_rewrite(
-            request_id,
-            request,
-            response,
-            RuntimeChatCompatibleRewriteContext {
-                status,
-                content_type: &content_type,
-                shared,
-                captured,
-                provider: RuntimeChatCompatibleProvider {
-                    prefix: "anthropic",
-                    label: "Anthropic",
-                },
-                profile_name: None,
-                binding_recorder: None,
-            },
-        );
-        return;
-    }
-
-    if gemini_responses_route && (200..300).contains(&status) {
-        if gemini_context.is_none() {
-            respond_runtime_chat_compatible_rewrite(
-                request_id,
-                request,
-                response,
-                RuntimeChatCompatibleRewriteContext {
-                    status,
-                    content_type: &content_type,
-                    shared,
-                    captured,
-                    provider: RuntimeChatCompatibleProvider {
-                        prefix: "gemini",
-                        label: "Google Gemini",
-                    },
-                    profile_name: None,
-                    binding_recorder: None,
-                },
-            );
-        } else {
-            respond_runtime_gemini_rewrite(
-                request_id,
-                request,
-                response,
-                RuntimeGeminiRewriteContext {
-                    prefix,
-                    status,
-                    content_type: &content_type,
-                    shared,
-                    captured,
-                    gemini_context,
-                },
-            );
-        }
-        return;
-    }
-
-    if copilot_responses_route && (200..300).contains(&status) {
-        let profile_name = copilot_context
-            .as_ref()
-            .map(|context| context.profile_name.clone())
-            .unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
-        let binding_recorder = copilot_context
-            .as_ref()
-            .and_then(|context| context.binding_recorder.clone());
-        if content_type.contains("text/event-stream") {
-            let writer = request.into_writer();
-            let mut headers = text_headers;
-            runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-            let body: Box<dyn Read + Send> = Box::new(
-                RuntimeCopilotResponsesSseBindingReader::new(response, binding_recorder),
-            );
-            let body = runtime_gateway_spend_stream_body(
-                runtime_gateway_guardrail_stream_body(body, request_id, shared),
-                request_id,
-                status,
-                captured,
-                shared,
-            );
-            let streaming = RuntimeStreamingResponse {
-                status,
-                headers,
-                body,
-                request_id,
-                profile_name,
-                log_path: shared.runtime_shared.log_path.clone(),
-                shared: shared.runtime_shared.clone(),
-                _inflight_guard: None,
-            };
-            let _ = write_runtime_streaming_response(writer, streaming);
-            return;
-        }
-
-        let response_started_at = Instant::now();
-        let response = runtime_local_rewrite_buffered_response_parts(status, headers, response)
-            .map(|parts| {
-                runtime_copilot_remember_bindings_from_responses_body(
-                    binding_recorder.as_ref(),
-                    &parts.body,
-                );
-                emit_runtime_gateway_response_spend_event_for_body(
-                    request_id,
-                    captured,
-                    shared,
-                    parts.status,
-                    response_started_at.elapsed().as_millis(),
-                    parts.body.as_slice(),
-                );
-                runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
-            })
-            .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
-        let _ = request.respond(response);
-        return;
-    }
-
-    if content_type.contains("text/event-stream") {
-        let writer = request.into_writer();
-        let mut headers = text_headers;
-        runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-        let body = runtime_gateway_spend_stream_body(
-            runtime_gateway_guardrail_stream_body(Box::new(response), request_id, shared),
-            request_id,
-            status,
-            captured,
-            shared,
-        );
-        let streaming = RuntimeStreamingResponse {
-            status,
-            headers,
-            body,
-            request_id,
-            profile_name: provider_profile_name,
-            log_path: shared.runtime_shared.log_path.clone(),
-            shared: shared.runtime_shared.clone(),
-            _inflight_guard: None,
-        };
-        let _ = write_runtime_streaming_response(writer, streaming);
-        return;
-    }
-
-    let response_started_at = Instant::now();
-    let response = runtime_local_rewrite_buffered_response_parts(status, headers, response)
-        .map(|parts| {
-            emit_runtime_gateway_response_spend_event_for_body(
-                request_id,
-                captured,
-                shared,
-                parts.status,
-                response_started_at.elapsed().as_millis(),
-                parts.body.as_slice(),
-            );
-            runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
-        })
-        .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
-    let _ = request.respond(response);
 }
 
 fn runtime_local_rewrite_call_id(
@@ -500,7 +214,7 @@ fn runtime_local_rewrite_call_id(
         .unwrap_or_else(|| format!("prodex-{}", CallId::new()))
 }
 
-fn runtime_local_rewrite_append_call_id_header(
+pub(super) fn runtime_local_rewrite_append_call_id_header(
     headers: &mut Vec<(String, String)>,
     request_id: u64,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -513,248 +227,7 @@ fn runtime_local_rewrite_append_call_id_header(
     }
 }
 
-fn respond_runtime_chat_compatible_rewrite(
-    request_id: u64,
-    request: tiny_http::Request,
-    response: reqwest::blocking::Response,
-    context: RuntimeChatCompatibleRewriteContext<'_>,
-) {
-    let RuntimeChatCompatibleRewriteContext {
-        status,
-        content_type,
-        shared,
-        captured,
-        provider,
-        profile_name,
-        binding_recorder,
-    } = context;
-    let profile_name = profile_name.unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
-    let rate_limit_headers = if provider.prefix == "deepseek" {
-        runtime_deepseek_codex_rate_limit_headers(response.headers())
-    } else {
-        runtime_openai_style_codex_rate_limit_headers(
-            response.headers(),
-            provider.prefix,
-            provider.label,
-        )
-    };
-    let pending_request =
-        runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
-    let conversation_messages = pending_request.messages;
-    let response_metadata = pending_request.response_metadata;
-    if content_type.contains("text/event-stream") {
-        let writer = request.into_writer();
-        let mut headers = vec![(
-            "content-type".to_string(),
-            "text/event-stream; charset=utf-8".to_string(),
-        )];
-        append_text_rate_limit_headers(&mut headers, rate_limit_headers);
-        runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-        let observer = {
-            let shared = shared.runtime_shared.clone();
-            Arc::new(move |value: &serde_json::Value| {
-                let body = format!("data: {}\n\n", value).into_bytes();
-                let result = runtime_provider_stream_event_conformance_result(
-                    RuntimeProviderBridgeKind::DeepSeek,
-                    &body,
-                );
-                runtime_provider_log_stream_conformance(
-                    &shared,
-                    request_id,
-                    RuntimeProviderBridgeKind::DeepSeek,
-                    &result,
-                );
-            })
-        };
-        let reader = RuntimeDeepSeekChatSseReader::new_with_observer(
-            response,
-            request_id,
-            conversation_messages,
-            response_metadata,
-            Arc::clone(&shared.deepseek_conversations),
-            Some(observer),
-        );
-        let body: Box<dyn Read + Send> = if let Some(binding_recorder) = binding_recorder {
-            Box::new(RuntimeCopilotResponsesSseBindingReader::new(
-                reader,
-                Some(binding_recorder),
-            ))
-        } else {
-            Box::new(reader)
-        };
-        let body = runtime_gateway_spend_stream_body(
-            runtime_gateway_guardrail_stream_body(body, request_id, shared),
-            request_id,
-            status,
-            captured,
-            shared,
-        );
-        let streaming = RuntimeStreamingResponse {
-            status,
-            headers,
-            body,
-            request_id,
-            profile_name,
-            log_path: shared.runtime_shared.log_path.clone(),
-            shared: shared.runtime_shared.clone(),
-            _inflight_guard: None,
-        };
-        let _ = write_runtime_streaming_response(writer, streaming);
-        return;
-    }
-
-    let response_started_at = Instant::now();
-    let response = runtime_deepseek_chat_buffered_response_parts(
-        status,
-        response,
-        request_id,
-        conversation_messages,
-        response_metadata,
-        &shared.deepseek_conversations,
-        &shared.runtime_shared,
-    )
-    .map(|mut parts| {
-        runtime_copilot_remember_bindings_from_responses_body(
-            binding_recorder.as_ref(),
-            &parts.body,
-        );
-        append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
-        emit_runtime_gateway_response_spend_event_for_body(
-            request_id,
-            captured,
-            shared,
-            parts.status,
-            response_started_at.elapsed().as_millis(),
-            parts.body.as_slice(),
-        );
-        runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
-    })
-    .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
-    let _ = request.respond(response);
-}
-
-fn respond_runtime_gemini_rewrite(
-    request_id: u64,
-    request: tiny_http::Request,
-    response: reqwest::blocking::Response,
-    context: RuntimeGeminiRewriteContext<'_>,
-) {
-    let RuntimeGeminiRewriteContext {
-        prefix,
-        status,
-        content_type,
-        shared,
-        captured,
-        gemini_context,
-    } = context;
-    let RuntimeGeminiRequestContext {
-        profile_name,
-        conversation_messages,
-        binding_recorder,
-    } = gemini_context.unwrap_or_else(|| RuntimeGeminiRequestContext {
-        profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
-        conversation_messages: Vec::new(),
-        binding_recorder: None,
-    });
-    let mut rate_limit_headers = shared
-        .gemini_oauth_pool
-        .as_ref()
-        .map(|pool| pool.quota_headers_for_profile(&profile_name))
-        .unwrap_or_default();
-    if rate_limit_headers.is_empty() {
-        rate_limit_headers =
-            runtime_openai_style_codex_rate_limit_headers(response.headers(), "gemini", "Gemini");
-    }
-    if content_type.contains("text/event-stream") {
-        let writer = request.into_writer();
-        let mut headers = vec![(
-            "content-type".to_string(),
-            "text/event-stream; charset=utf-8".to_string(),
-        )];
-        append_text_rate_limit_headers(&mut headers, rate_limit_headers);
-        headers.push(("x-reasoning-included".to_string(), "true".to_string()));
-        runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-        let body: Box<dyn Read + Send> = if prefix.is_empty() {
-            Box::new(response)
-        } else {
-            Box::new(std::io::Cursor::new(prefix).chain(response))
-        };
-        let observer = {
-            let shared = shared.runtime_shared.clone();
-            Arc::new(move |value: &serde_json::Value| {
-                let body = format!("data: {}\n\n", value).into_bytes();
-                let result = runtime_provider_stream_event_conformance_result(
-                    RuntimeProviderBridgeKind::Gemini,
-                    &body,
-                );
-                runtime_provider_log_stream_conformance(
-                    &shared,
-                    request_id,
-                    RuntimeProviderBridgeKind::Gemini,
-                    &result,
-                );
-            })
-        };
-        let body: Box<dyn Read + Send> =
-            Box::new(RuntimeGeminiGenerateSseReader::new_with_observer(
-                body,
-                request_id,
-                conversation_messages,
-                Arc::clone(&shared.gemini_conversations),
-                binding_recorder,
-                Some(observer),
-            ));
-        let body = runtime_gateway_spend_stream_body(
-            runtime_gateway_guardrail_stream_body(body, request_id, shared),
-            request_id,
-            status,
-            captured,
-            shared,
-        );
-        let streaming = RuntimeStreamingResponse {
-            status,
-            headers,
-            body,
-            request_id,
-            profile_name,
-            log_path: shared.runtime_shared.log_path.clone(),
-            shared: shared.runtime_shared.clone(),
-            _inflight_guard: None,
-        };
-        let _ = write_runtime_streaming_response(writer, streaming);
-        return;
-    }
-
-    let response_started_at = Instant::now();
-    let response = runtime_gemini_generate_buffered_response_parts(
-        status,
-        response,
-        request_id,
-        conversation_messages,
-        &shared.gemini_conversations,
-        &shared.runtime_shared,
-    )
-    .map(|mut parts| {
-        runtime_gemini_remember_bindings_from_responses_body(
-            binding_recorder.as_ref(),
-            &parts.body,
-        );
-        append_binary_rate_limit_headers(&mut parts.headers, rate_limit_headers);
-        emit_runtime_gateway_response_spend_event_for_body(
-            request_id,
-            captured,
-            shared,
-            parts.status,
-            response_started_at.elapsed().as_millis(),
-            parts.body.as_slice(),
-        );
-        runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
-    })
-    .unwrap_or_else(|_err| runtime_local_rewrite_response_transform_failed_response());
-    let _ = request.respond(response);
-}
-
-fn runtime_local_rewrite_buffered_response_parts(
+pub(super) fn runtime_local_rewrite_buffered_response_parts(
     status: u16,
     headers: Vec<(String, Vec<u8>)>,
     mut response: reqwest::blocking::Response,
@@ -768,20 +241,4 @@ fn runtime_local_rewrite_buffered_response_parts(
         headers,
         body: body.into(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn response_transform_failure_message_is_stable_and_redacted() {
-        let message = RUNTIME_LOCAL_REWRITE_RESPONSE_TRANSFORM_FAILED_MESSAGE;
-        assert_eq!(message, "provider response could not be transformed");
-        assert!(!message.contains("serde"));
-        assert!(!message.contains("json"));
-        assert!(!message.contains("Gemini"));
-        assert!(!message.contains("DeepSeek"));
-        assert!(!message.contains("Copilot"));
-    }
 }

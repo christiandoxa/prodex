@@ -21,7 +21,7 @@ use ui::{expose_html_response, expose_js_response, expose_text_response};
 
 const EXPOSE_SCROLLBACK_LIMIT: usize = 1024 * 1024;
 const EXPOSE_MAX_INPUT_BYTES: usize = 16 * 1024;
-const EXPOSE_AUTH_BACKOFF: Duration = Duration::from_secs(2);
+const EXPOSE_CLIENT_QUEUE_CAPACITY: usize = 64;
 
 pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
     let token = expose_random_token()?;
@@ -40,7 +40,6 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
         pty,
         active_clients: AtomicUsize::new(0),
         max_clients: args.max_clients.max(1),
-        failed_auth: AtomicUsize::new(0),
     });
 
     let server_for_thread = Arc::clone(&server);
@@ -49,8 +48,12 @@ pub(crate) fn handle_expose(args: ExposeArgs) -> Result<()> {
         while shared_for_thread.pty.running.load(Ordering::SeqCst) {
             match server_for_thread.recv_timeout(Duration::from_millis(250)) {
                 Ok(Some(request)) => {
-                    let shared = Arc::clone(&shared_for_thread);
-                    thread::spawn(move || handle_expose_request(request, &shared));
+                    if expose_request_requires_worker(&request, &shared_for_thread.token) {
+                        let shared = Arc::clone(&shared_for_thread);
+                        thread::spawn(move || handle_expose_request(request, &shared));
+                    } else {
+                        handle_expose_request(request, &shared_for_thread);
+                    }
                 }
                 Ok(None) => {}
                 Err(_) => break,
@@ -147,13 +150,12 @@ struct ExposeShared {
     pty: ExposePty,
     active_clients: AtomicUsize,
     max_clients: usize,
-    failed_auth: AtomicUsize,
 }
 
 struct ExposePty {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     scrollback: Arc<Mutex<VecDeque<u8>>>,
-    clients: Arc<Mutex<Vec<Sender<Vec<u8>>>>>,
+    clients: Arc<Mutex<Vec<mpsc::SyncSender<Vec<u8>>>>>,
     running: Arc<AtomicBool>,
 }
 
@@ -276,10 +278,6 @@ fn handle_expose_request(request: tiny_http::Request, shared: &Arc<ExposeShared>
         return;
     }
     if !expose_request_authorized(&url, &shared.token) {
-        let failures = shared.failed_auth.fetch_add(1, Ordering::SeqCst);
-        if failures > 2 {
-            thread::sleep(EXPOSE_AUTH_BACKOFF);
-        }
         let _ = request.respond(expose_text_response(404, "not found"));
         return;
     }
@@ -294,6 +292,14 @@ fn handle_expose_request(request: tiny_http::Request, shared: &Arc<ExposeShared>
     }
 }
 
+fn expose_request_requires_worker(request: &tiny_http::Request, token: &str) -> bool {
+    expose_url_requires_worker(request.url(), token)
+}
+
+fn expose_url_requires_worker(url: &str, token: &str) -> bool {
+    url != "/app.js" && expose_request_authorized(url, token)
+}
+
 fn handle_expose_stream(request: tiny_http::Request, shared: &Arc<ExposeShared>) {
     if shared.active_clients.fetch_add(1, Ordering::SeqCst) >= shared.max_clients {
         shared.active_clients.fetch_sub(1, Ordering::SeqCst);
@@ -302,7 +308,7 @@ fn handle_expose_stream(request: tiny_http::Request, shared: &Arc<ExposeShared>)
     }
     let _guard = ExposeClientGuard(Arc::clone(shared));
 
-    let (tx, rx) = channel::<Vec<u8>>();
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(EXPOSE_CLIENT_QUEUE_CAPACITY);
     if let Ok(mut clients) = shared.pty.clients.lock() {
         clients.push(tx);
     }
@@ -401,7 +407,7 @@ fn expose_command_builder(command: Option<&str>) -> CommandBuilder {
 
 fn expose_broadcast_output(
     scrollback: &Arc<Mutex<VecDeque<u8>>>,
-    clients: &Arc<Mutex<Vec<Sender<Vec<u8>>>>>,
+    clients: &Arc<Mutex<Vec<mpsc::SyncSender<Vec<u8>>>>>,
     bytes: &[u8],
 ) {
     if let Ok(mut buffer) = scrollback.lock() {
@@ -411,7 +417,7 @@ fn expose_broadcast_output(
         }
     }
     if let Ok(mut clients) = clients.lock() {
-        clients.retain(|client| client.send(bytes.to_vec()).is_ok());
+        clients.retain(|client| client.try_send(bytes.to_vec()).is_ok());
     }
 }
 
@@ -491,6 +497,47 @@ mod tests {
             "/t/abc?access_token=wrong",
             "abc"
         ));
+    }
+
+    #[test]
+    fn expose_workers_are_reserved_for_authorized_session_requests() {
+        assert!(!expose_url_requires_worker("/app.js", "abc"));
+        assert!(!expose_url_requires_worker("/t/abc", "abc"));
+        assert!(!expose_url_requires_worker(
+            "/t/abc?access_token=wrong",
+            "abc"
+        ));
+        assert!(expose_url_requires_worker(
+            "/stream/abc?access_token=abc",
+            "abc"
+        ));
+        assert!(expose_url_requires_worker(
+            "/input/abc?access_token=abc",
+            "abc"
+        ));
+    }
+
+    #[test]
+    fn expose_broadcast_drops_clients_with_full_output_queues() {
+        let scrollback = Arc::new(Mutex::new(VecDeque::new()));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let clients = Arc::new(Mutex::new(vec![sender]));
+
+        expose_broadcast_output(&scrollback, &clients, b"first");
+        expose_broadcast_output(&scrollback, &clients, b"second");
+
+        assert!(clients.lock().unwrap().is_empty());
+        assert_eq!(receiver.recv().unwrap(), b"first");
+        assert!(receiver.recv().is_err());
+        assert_eq!(
+            scrollback
+                .lock()
+                .unwrap()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            b"firstsecond"
+        );
     }
 
     #[test]

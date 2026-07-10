@@ -2,11 +2,23 @@
 
 use super::gemini_rewrite_test_support::conversation_store;
 use super::{
-    runtime_deepseek_store_conversation,
-    runtime_gemini_chat_assistant_messages_from_generate_value,
+    runtime_deepseek_store_conversation, runtime_gemini_blocked_tool_call_message,
     runtime_gemini_generate_request_body, runtime_gemini_harden_tool_call_thought_signatures,
-    runtime_gemini_request_body_without_tool, runtime_gemini_responses_value_from_generate_value,
+    runtime_gemini_responses_value_from_generate_value,
 };
+
+use prodex_provider_core::{
+    gemini_provider_core_chat_assistant_messages, gemini_provider_core_request_body_without_tool,
+};
+
+fn gemini_chat_assistant_messages_from_generate_value(
+    value: &serde_json::Value,
+    request_id: u64,
+) -> Vec<serde_json::Value> {
+    gemini_provider_core_chat_assistant_messages(value, request_id, |name, args| {
+        runtime_gemini_blocked_tool_call_message(name, args)
+    })
+}
 
 #[test]
 fn gemini_preserves_thought_signature_for_tool_followup_history() {
@@ -31,7 +43,7 @@ fn gemini_preserves_thought_signature_for_tool_followup_history() {
         &conversations,
         "resp_sig_1",
         vec![serde_json::json!({"role": "user", "content": "read README"})],
-        runtime_gemini_chat_assistant_messages_from_generate_value(&response, 12),
+        gemini_chat_assistant_messages_from_generate_value(&response, 12),
     );
     let followup = serde_json::json!({
         "model": "gemini-3.1-pro-preview-customtools",
@@ -221,8 +233,9 @@ fn gemini_request_translation_maps_code_interpreter_to_code_execution() {
     assert_eq!(value["tools"][0]["codeExecution"], serde_json::json!({}));
     assert_eq!(value["tools"][1]["googleSearch"], serde_json::json!({}));
 
-    let stripped = runtime_gemini_request_body_without_tool(&translated.body, "codeExecution")
-        .expect("codeExecution should be removable for unsupported-model fallback");
+    let stripped =
+        gemini_provider_core_request_body_without_tool(&translated.body, "codeExecution")
+            .expect("codeExecution should be removable for unsupported-model fallback");
     let stripped: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
     assert!(stripped["tools"][0].get("codeExecution").is_none());
     assert_eq!(stripped["tools"][0]["googleSearch"], serde_json::json!({}));
@@ -254,7 +267,7 @@ fn gemini_request_translation_maps_computer_tool_to_native_computer_use() {
         value["tools"][0]["computerUse"]["excludedPredefinedFunctions"][0],
         "open_web_browser"
     );
-    let stripped = runtime_gemini_request_body_without_tool(&translated.body, "computerUse")
+    let stripped = gemini_provider_core_request_body_without_tool(&translated.body, "computerUse")
         .expect("computerUse should be removable for unsupported-model fallback");
     let stripped: serde_json::Value = serde_json::from_slice(&stripped).unwrap();
     assert!(stripped.get("tools").is_none());
