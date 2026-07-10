@@ -867,7 +867,10 @@ while moving legacy adapter code behind enterprise boundaries.
   allowing the test-only `postgres` execution proof, and
   `npm run ci:storage-sqlite-boundary-guard` runs the guard self-test plus
   workspace scan to keep production SQLite storage plans driver-free while
-  allowing the test-only `rusqlite` execution coverage.
+  allowing the test-only `rusqlite` execution coverage. With
+  `PRODEX_TEST_POSTGRES_URL` set, the PostgreSQL guard also applies the
+  enterprise migration twice and verifies one RLS policy per tenant-owned
+  table.
 - **Implemented fix or boundary:** Enterprise storage plans require versioned
   migrations run by external migrators, not by request-serving gateway opens.
   Backend-open readiness planners now require a known current schema version for
@@ -884,6 +887,9 @@ while moving legacy adapter code behind enterprise boundaries.
   storage plan. The production Kubernetes migration Job now runs
   `prodex-gateway migrate --backend postgres --url-env PRODEX_GATEWAY_POSTGRES_URL`
   with migration-only credentials instead of a placeholder shell command.
+  The initial enterprise PostgreSQL migration now queries `pg_policies` and
+  creates only missing tenant-isolation policies, so retries are repeatable and
+  cannot introduce a temporary policy-free window.
   Domain migration plan debug output redacts descriptions, lock owners, and
   version strings while preserving execution shape; see
   `docs/adr/0835-domain-migration-plan-debug-redaction.md`. Migration
@@ -898,7 +904,8 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0588-gateway-external-migrator-command.md`, and
   `docs/adr/0976-gateway-test-schema-bootstrap-explicit.md`, and
   `docs/adr/0978-gateway-compatibility-schema-versioned-migrations.md`, and
-  `docs/adr/0982-gateway-compatibility-contract-choreography.md`.
+  `docs/adr/0982-gateway-compatibility-contract-choreography.md`, and
+  `docs/adr/1056-postgres-rls-migration-repeatability.md`.
 - **Remaining gap:** Compatibility-schema contract choreography is now
   documented. Future destructive migrations still need to execute that
   choreography with release-specific evidence before legacy gateway tables or

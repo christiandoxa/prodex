@@ -178,7 +178,8 @@ Before declaring the enterprise target complete, verify:
 - All target boundary crates exist and are protected by guards.
 - `prodex-app` contains composition logic only for migrated paths.
 - Data-plane and control-plane binaries or entrypoints are separately runnable.
-- PostgreSQL migrations are external and RLS is enabled.
+- PostgreSQL migrations are external, repeatable on the same schema, and RLS is
+  enabled with exactly one tenant-isolation policy per tenant-owned table.
 - Redis is not used as durable whole-map billing state.
 - OIDC/JWKS network fetches are off request paths.
 - Runtime-policy reload failure preserves the previous cache entry, returns an

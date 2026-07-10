@@ -61,6 +61,18 @@ const OPTIONAL_POSTGRES_EVIDENCE_TEST = Object.freeze({
     "--test-threads=1",
   ],
 });
+const OPTIONAL_POSTGRES_MIGRATION_TEST = Object.freeze({
+  command: "cargo",
+  args: [
+    "test",
+    "-q",
+    "-p",
+    "prodex-storage-postgres",
+    "postgres_migration_can_be_applied_twice_without_duplicate_rls_policies",
+    "--",
+    "--test-threads=1",
+  ],
+});
 
 function stripComment(line) {
   let inString = false;
@@ -314,6 +326,11 @@ async function main() {
   await runCommand(
     OPTIONAL_POSTGRES_EVIDENCE_TEST.command,
     OPTIONAL_POSTGRES_EVIDENCE_TEST.args,
+    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+  );
+  await runCommand(
+    OPTIONAL_POSTGRES_MIGRATION_TEST.command,
+    OPTIONAL_POSTGRES_MIGRATION_TEST.args,
     { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
   );
 }

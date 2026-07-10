@@ -234,42 +234,42 @@ ALTER TABLE prodex_usage_ledger ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prodex_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prodex_idempotency_records ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY prodex_tenants_tenant_isolation ON prodex_tenants
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_virtual_keys_tenant_isolation ON prodex_virtual_keys
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_service_identities_tenant_isolation ON prodex_service_identities
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_users_tenant_isolation ON prodex_users
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_role_bindings_tenant_isolation ON prodex_role_bindings
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_provider_credentials_tenant_isolation ON prodex_provider_credentials
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_budget_counters_tenant_isolation ON prodex_budget_counters
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_budget_policies_tenant_isolation ON prodex_budget_policies
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_reservations_tenant_isolation ON prodex_reservations
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_usage_ledger_tenant_isolation ON prodex_usage_ledger
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_audit_log_tenant_isolation ON prodex_audit_log
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
-CREATE POLICY prodex_idempotency_records_tenant_isolation ON prodex_idempotency_records
-    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
-    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
+DO $migration$
+DECLARE tenant_table TEXT;
+BEGIN
+    FOREACH tenant_table IN ARRAY ARRAY[
+        'prodex_tenants',
+        'prodex_virtual_keys',
+        'prodex_service_identities',
+        'prodex_users',
+        'prodex_role_bindings',
+        'prodex_provider_credentials',
+        'prodex_budget_counters',
+        'prodex_budget_policies',
+        'prodex_reservations',
+        'prodex_usage_ledger',
+        'prodex_audit_log',
+        'prodex_idempotency_records'
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_policies
+            WHERE schemaname = current_schema()
+              AND tablename = tenant_table
+              AND policyname = tenant_table || '_tenant_isolation'
+        ) THEN
+            EXECUTE format(
+                $policy$
+                CREATE POLICY %I ON %I
+                    USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
+                    WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
+                $policy$,
+                tenant_table || '_tenant_isolation',
+                tenant_table
+            );
+        END IF;
+    END LOOP;
+END $migration$;
 "#,
 };
 
