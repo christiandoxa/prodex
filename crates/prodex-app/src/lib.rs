@@ -49,6 +49,7 @@ mod core_constants;
 mod dashboard;
 mod dashboard_html;
 mod expose;
+mod gateway_backend;
 mod housekeeping;
 mod presidio_runtime;
 mod profile_commands;
@@ -150,6 +151,7 @@ pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result
 pub fn migrate_gateway_compatibility_state_postgres(url: &str) -> anyhow::Result<()> {
     runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url)
 }
+pub use gateway_backend::{GatewayBackend, start_policy_gateway_backend};
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;

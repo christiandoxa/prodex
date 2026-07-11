@@ -2,6 +2,8 @@ use super::*;
 mod gateway_config;
 #[path = "runtime_launch/gateway_shutdown.rs"]
 mod gateway_shutdown;
+#[path = "runtime_launch/gateway_startup.rs"]
+mod gateway_startup;
 mod gateway_status;
 mod preflight;
 mod provider_names;
@@ -20,6 +22,7 @@ use gateway_config::{
 };
 #[cfg(test)]
 use gateway_config::{resolve_gateway_launch_config, resolve_gateway_launch_config_with_secrets};
+use gateway_startup::start_gateway_backend;
 use gateway_status::print_gateway_status;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
 use rusqlite::OptionalExtension;
@@ -371,36 +374,19 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
 }
 
 pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
-    let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
-    let gateway = gateway_config::resolve_current_gateway_launch_config(&paths, &state, &args)?;
-    let proxy = start_runtime_gateway_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &state,
-        upstream_base_url: gateway.upstream_base_url,
-        provider: gateway.provider_options,
-        upstream_no_proxy: false,
-        smart_context_enabled: args.smart_context,
-        presidio_redaction_enabled: gateway.presidio_redaction_enabled,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some(&gateway.listen_addr),
-        gateway_auth_token_hash: gateway.auth_token_hash,
-        gateway_admin_tokens: gateway.admin_tokens,
-        gateway_sso: gateway.sso,
-        gateway_state_store: gateway.state_store,
-        gateway_virtual_keys: gateway.virtual_keys,
-        gateway_route_aliases: gateway.route_aliases,
-        gateway_guardrails: gateway.guardrails,
-        gateway_guardrail_webhook: gateway.guardrail_webhook,
-        gateway_call_id_header: Some(gateway.call_id_header),
-        gateway_observability: gateway.observability,
-    })?;
+    let backend = start_gateway_backend(args)?;
     print_gateway_status(
-        proxy.listen_addr,
-        gateway.provider_name.unwrap_or("openai-compatible"),
-        gateway.auth_required,
+        backend.listen_addr(),
+        backend.provider_name(),
+        backend.auth_required(),
     );
-    gateway_shutdown::wait_for_signal_and_drain(&proxy)
+    gateway_shutdown::wait_for_signal_and_drain(&backend)
+}
+
+pub(crate) fn start_policy_gateway_backend_inner(
+    preferred_listen_addr: Option<String>,
+) -> Result<GatewayBackend> {
+    gateway_startup::start_policy_gateway_backend(preferred_listen_addr)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 939,
-    "reason": "Runtime launch command routing, provider selection, proxy wiring, and session/runtime entry planning remain capped after wiring the provider-aware gateway configuration boundary."
+    "maxLines": 925,
+    "reason": "Runtime launch command routing, provider selection, and session/runtime entry planning remain capped after gateway backend startup moved to its focused module."
   },
   {
     "file": "crates/prodex-app/src/app_server_broker_preview.rs",

@@ -1,8 +1,8 @@
-use crate::RuntimeRotationProxy;
+use crate::GatewayBackend;
 use anyhow::{Context as _, Result, bail};
 use std::time::Duration;
 
-pub(super) fn wait_for_signal_and_drain(proxy: &RuntimeRotationProxy) -> Result<()> {
+pub(super) fn wait_for_signal_and_drain(backend: &GatewayBackend) -> Result<()> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -11,7 +11,7 @@ pub(super) fn wait_for_signal_and_drain(proxy: &RuntimeRotationProxy) -> Result<
     let timeout = Duration::from_millis(
         prodex_gateway_http::GatewayHttpPolicy::production_default().connection_drain_timeout_ms,
     );
-    if !proxy.shutdown_and_drain(timeout) {
+    if !backend.shutdown_and_drain(timeout) {
         bail!("gateway shutdown timed out while draining active requests");
     }
     Ok(())
