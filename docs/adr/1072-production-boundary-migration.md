@@ -22,13 +22,16 @@ Use a two-stage strangler boundary in the legacy production handler:
 1. Parse one `CanonicalRequestTarget` and pass that exact object by reference to
    `plan_application_request_context`. The application boundary classifies its typed route, plane,
    and required credential scope. Unknown routes stop before authentication or backend work.
-2. Keep secret verification in the legacy handler/router for this slice. The explicit
-   `local_rewrite_application_boundary` adapter converts only that verified outcome into a typed
-   compatibility principal, or the existing explicitly open data-plane mode, for
-   `plan_application_request_authentication_from_compatibility`.
-3. The application planner invokes `prodex-authn::authenticate_compatibility_request`. Its result
-   is a mandatory second gate: even a credential accepted by legacy verification cannot continue
-   with a missing or mismatched data/control scope.
+2. Keep bounded secret verification in the transport adapter. The explicit
+   `local_rewrite_application_boundary` converts verified bearer, admin, and virtual-key outcomes
+   into `VerifiedCredentialEvidence::Principal`. Verified OIDC credentials instead retain the
+   actual JWT header/claims and immutable JWKS cache snapshot as typed OIDC evidence; the request
+   path never performs discovery or a JWKS refresh.
+3. The application planner invokes `prodex-authn::authenticate_verified_credential` with the
+   credential scope from the existing `ApplicationRequestContext`. OIDC evidence also enters the
+   canonical issuer, audience, algorithm, key, signature, time, principal, tenant, and role checks.
+   Missing OIDC roles use an explicit trusted SCIM/viewer fallback; present roles must map to the
+   resolved principal and unknown roles fail closed.
 4. The authenticated principal enters the canonical authorization policy before local admission.
    Data-plane requests pass `prodex-authz` scope and role checks and resolve a typed tenant.
    Control-plane requests pass `prodex-control-plane` operation, role, resource, and tenant checks.
@@ -49,8 +52,8 @@ material. Deadline, trace, and audit correlation remain later production slices.
 
 ## Compatibility
 
-Legacy gateway/admin token, trusted-proxy SSO, OIDC, and virtual-key secret verification remain
-unchanged. Existing authentication failure status, body, audit writes, runtime logs, provider
+Gateway/admin token, trusted-proxy SSO, OIDC signature, and virtual-key secret verification remain
+in their bounded transport adapters. Existing authentication failure status, body, audit writes, runtime logs, provider
 headers, reservation/accounting effects, streaming, and affinity behavior remain owned by their
 existing adapters. Anonymous data-plane operation remains possible only when the legacy
 configuration has no authentication mechanism enabled.
@@ -67,11 +70,12 @@ upgrade handoff from transport-neutral request inputs. Hyper and `tiny_http` ada
 the same response/side-effect differential corpus, including partial-stream cancellation and
 bounded drain, before the dedicated composition root removes the loopback backend.
 
-Characterization coverage compares the legacy data-plane decision matrix with the new application
+Characterization coverage compares the established data-plane decision matrix with the application
 gate. Focused negative coverage exercises anonymous denial, both scope crossings, insufficient
-roles on both planes, and cross-tenant control-plane access. Existing gateway integration tests
-remain the response and side-effect oracle for bearer, virtual-key, admin, health, provider, audit,
-and accounting behavior.
+roles, unknown OIDC roles, mismatched OIDC principal/tenant evidence, and cross-tenant control-plane
+access. Gateway integration coverage preserves unscoped OIDC admin behavior and SCIM role/tenant
+fallback while remaining the response and side-effect oracle for bearer, virtual-key, admin,
+health, provider, audit, and accounting behavior.
 
 `scripts/ci/production-boundary-guard.mjs` is a positive and negative CI guard. It rejects builds
 when the canonical application context is removed, data-plane authentication moves after
@@ -81,14 +85,14 @@ duplicate router-level admin role policy is reintroduced.
 
 ## Consequences
 
-- `prodex-authn` and `prodex-application` now execute on real legacy gateway traffic.
+- `prodex-authn` and `prodex-application` now authenticate typed evidence on real gateway traffic.
 - Route, credential-scope, role, and tenant policy has one authoritative production boundary.
 - Two uncompiled request-entry/preparation prototypes containing duplicate auth and admission
   branches are deleted (280 lines); the production handler is the single compatibility path.
-- Secret parsing and verification, durable admission, reconciliation, accounting, and provider
-  invocation remain explicit migration gaps.
-- The compatibility authentication API must be deleted after every credential kind is validated
-  directly by `prodex-authn` and produces a canonical principal.
+- Low-level secret parsing and signature verification, durable admission, reconciliation,
+  accounting, and provider invocation remain explicit migration gaps.
+- The compatibility authentication API has no production callers and can be removed separately
+  after downstream API compatibility is no longer required.
 - The compatibility gateway adapter can be removed only after provider, streaming, accounting, and
   control-plane side-effect parity is proven on the dedicated server path, and after the pipeline
   no longer owns `tiny_http::Request` response or upgrade I/O.

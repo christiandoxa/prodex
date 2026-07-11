@@ -16,7 +16,9 @@ const FILES = Object.freeze({
   providerAdapter:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/projected_credential.rs",
   application: "crates/prodex-application/src/request_context.rs",
-  authn: "crates/prodex-authn/src/compatibility.rs",
+  authn: "crates/prodex-authn/src/evidence.rs",
+  oidcAdapter:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/token_claims.rs",
   pipeline:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline.rs",
   governance:
@@ -371,33 +373,153 @@ export function validateProductionBoundary(sources) {
   for (const [needle, message] of [
     [
       "plan_application_request_context(target)",
-      `${FILES.adapter}: compatibility adapter must invoke application request-context planning`,
+      `${FILES.adapter}: credential adapter must invoke application request-context planning`,
     ],
     [
-      "plan_application_request_authentication_from_compatibility(",
-      `${FILES.adapter}: compatibility adapter must invoke application authentication`,
+      "plan_application_request_authentication_from_evidence(",
+      `${FILES.adapter}: credential evidence must invoke application authentication`,
     ],
     [
-      "plan_application_data_plane_authorization_from_compatibility(",
-      `${FILES.adapter}: compatibility adapter must invoke data-plane authorization`,
+      "plan_application_data_plane_authorization(",
+      `${FILES.adapter}: credential evidence must invoke data-plane authorization`,
     ],
     [
-      "plan_application_control_plane_authorization_from_compatibility(",
-      `${FILES.adapter}: compatibility adapter must invoke control-plane authorization`,
+      "plan_application_control_plane_authorization(",
+      `${FILES.adapter}: credential evidence must invoke control-plane authorization`,
     ],
     [
       "RuntimeGatewayAdminPreauthorization",
-      `${FILES.adapter}: compatibility adapter must carry control-plane preauthorization`,
+      `${FILES.adapter}: credential adapter must carry control-plane preauthorization`,
     ],
     [
       "CredentialScope::DataPlane",
-      `${FILES.adapter}: compatibility adapter must construct typed data-plane principals`,
+      `${FILES.adapter}: credential adapter must construct typed data-plane principals`,
     ],
     [
       "CredentialScope::ControlPlane",
-      `${FILES.adapter}: compatibility adapter must construct typed control-plane principals`,
+      `${FILES.adapter}: credential adapter must construct typed control-plane principals`,
+    ],
+    [
+      "VerifiedCredentialEvidence::Principal",
+      `${FILES.adapter}: verified bearer, admin, and virtual-key principals must use typed evidence`,
+    ],
+    [
+      "VerifiedCredentialEvidence::Oidc",
+      `${FILES.adapter}: verified OIDC credentials must use typed evidence`,
+    ],
+    [
+      "token.canonical_claims(principal_id",
+      `${FILES.adapter}: OIDC evidence must derive canonical claims from verified identity material`,
+    ],
+    [
+      'let oidc_name = format!("oidc:{subject_name}")',
+      `${FILES.adapter}: OIDC principal identity must bind the verified subject name`,
+    ],
+    [
+      "[resolved_tenant_text.as_bytes(), oidc_name.as_bytes()]",
+      `${FILES.adapter}: OIDC principal identity must bind the resolved tenant mapping`,
+    ],
+    [
+      ".map(runtime_gateway_control_plane_tenant_id_from_text)",
+      `${FILES.adapter}: present OIDC tenant claims must use the canonical text-to-tenant mapping`,
+    ],
+    [
+      '"prodex:gateway-admin-control-plane-tenant-text:v1"',
+      `${FILES.adapter}: non-UUID tenant text must retain a stable independent namespace`,
+    ],
+    [
+      "VerifiedOidcRoleEvidence::Claim(ExplicitRoleMapper::new",
+      `${FILES.adapter}: present OIDC roles must carry an explicit canonical claim mapping`,
+    ],
+    [
+      "VerifiedOidcRoleEvidence::TrustedMissingClaimFallback",
+      `${FILES.adapter}: missing OIDC role fallback must remain explicit and typed`,
     ],
   ]) requireText(errors, sources.adapter, needle, message);
+  for (const source of [sources.adapter, sources.pipeline]) {
+    for (const forbidden of [
+      "plan_application_request_authentication_from_compatibility",
+      "plan_application_data_plane_authorization_from_compatibility",
+      "plan_application_control_plane_authorization_from_compatibility",
+      "CompatibilityAuthenticationRequest",
+    ]) {
+      forbidText(
+        errors,
+        source,
+        forbidden,
+        `${FILES.adapter}: production must not restore compatibility authentication authority`,
+      );
+    }
+  }
+  forbidText(
+    errors,
+    sources.adapter,
+    "principal.credential_scope !=",
+    `${FILES.adapter}: route credential scope must remain owned by application authentication`,
+  );
+  for (const forbidden of [
+    "token.canonical_claims(principal.id",
+    "principal_id: principal.id",
+    'expect("admin principal has tenant")',
+  ]) {
+    forbidText(
+      errors,
+      sources.adapter,
+      forbidden,
+      `${FILES.adapter}: OIDC claim identity and tenant must not be copied or assumed from the resolved principal`,
+    );
+  }
+
+  for (const [needle, message] of [
+    [
+      "decode_header(token)",
+      `${FILES.oidcAdapter}: OIDC evidence must retain the verified JWT header`,
+    ],
+    [
+      "decode::<BTreeMap<String, serde_json::Value>>",
+      `${FILES.oidcAdapter}: OIDC evidence must come from verified JWT claims`,
+    ],
+    [
+      ".gateway_oidc_jwks_snapshot",
+      `${FILES.oidcAdapter}: OIDC request authentication must use the immutable JWKS snapshot`,
+    ],
+    [
+      "snapshot.domain_snapshot_at(now, now_unix_ms)",
+      `${FILES.oidcAdapter}: OIDC evidence must adapt the immutable JWKS snapshot into the canonical model`,
+    ],
+    [
+      '.get("iss")',
+      `${FILES.oidcAdapter}: canonical OIDC claims must use the verified issuer claim`,
+    ],
+    [
+      "runtime_gateway_require_oidc_audience(&claims, &config.audience)",
+      `${FILES.oidcAdapter}: canonical OIDC claims must bind the verified audience`,
+    ],
+    [
+      'runtime_gateway_oidc_numeric_date_ms(&claims, "exp")',
+      `${FILES.oidcAdapter}: canonical OIDC claims must retain the verified expiry`,
+    ],
+    [
+      "JwtAlgorithm::Es384",
+      `${FILES.oidcAdapter}: canonical OIDC algorithm mapping must cover the production verifier allowlist`,
+    ],
+    [
+      "principal_id: PrincipalId",
+      `${FILES.oidcAdapter}: canonical OIDC identity must be supplied independently of the resolved principal`,
+    ],
+  ]) requireText(errors, sources.oidcAdapter, needle, message);
+  for (const forbidden of [
+    "runtime_gateway_oidc_send(",
+    "runtime_gateway_oidc_fetch_json(",
+    "runtime_gateway_prefetch_oidc_cache(",
+  ]) {
+    forbidText(
+      errors,
+      sources.oidcAdapter,
+      forbidden,
+      `${FILES.oidcAdapter}: OIDC authentication must not perform request-path network refresh`,
+    );
+  }
 
   for (const [needle, message] of [
     [
@@ -495,8 +617,14 @@ export function validateProductionBoundary(sources) {
   requireText(
     errors,
     sources.application,
-    "authenticate_compatibility_request(CompatibilityAuthenticationRequest",
-    `${FILES.application}: application authentication must invoke prodex-authn`,
+    "authenticate_verified_credential(VerifiedCredentialAuthenticationRequest",
+    `${FILES.application}: application authentication must invoke typed prodex-authn evidence`,
+  );
+  requireText(
+    errors,
+    sources.application,
+    "required_scope: request.required_credential_scope",
+    `${FILES.application}: canonical request context must own route credential scope`,
   );
   for (const [needle, message] of [
     [
@@ -528,13 +656,39 @@ export function validateProductionBoundary(sources) {
     errors,
     sources.authn,
     "principal.credential_scope != required",
-    `${FILES.authn}: compatibility authentication must fail closed on scope mismatch`,
+    `${FILES.authn}: verified credential evidence must fail closed on scope mismatch`,
   );
+  for (const [needle, message] of [
+    [
+      "validate_oidc_token_claims(",
+      `${FILES.authn}: verified OIDC evidence must invoke canonical claim validation`,
+    ],
+    [
+      "claims.principal_id == principal.id",
+      `${FILES.authn}: verified OIDC evidence must bind the resolved principal identity`,
+    ],
+    [
+      "claims.credential_scope == principal.credential_scope",
+      `${FILES.authn}: verified OIDC evidence must bind principal credential scope`,
+    ],
+    [
+      ".role_for_claim(Some(role_claim))",
+      `${FILES.authn}: present OIDC role claims must be mapped canonically`,
+    ],
+    [
+      "role == principal.role",
+      `${FILES.authn}: mapped or trusted OIDC roles must bind the resolved principal role`,
+    ],
+    [
+      ".tenant_id\n            .is_none_or",
+      `${FILES.authn}: present OIDC tenant claims must bind the resolved tenant`,
+    ],
+  ]) requireText(errors, sources.authn, needle, message);
   requireText(
     errors,
     sources.modules,
     "mod local_rewrite_application_boundary;",
-    `${FILES.modules}: production compatibility adapter module is not compiled`,
+    `${FILES.modules}: production credential adapter module is not compiled`,
   );
   requireText(
     errors,
@@ -656,7 +810,11 @@ function runSelfTest() {
       plan_application_control_plane_idempotency_replay(operation, existing.as_ref());
     }`,
     adapter:
-      "plan_application_request_context(target); plan_application_request_authentication_from_compatibility(); plan_application_data_plane_authorization_from_compatibility(); plan_application_control_plane_authorization_from_compatibility(); RuntimeGatewayAdminPreauthorization; CredentialScope::DataPlane; CredentialScope::ControlPlane;",
+      `plan_application_request_context(target); plan_application_request_authentication_from_evidence(); plan_application_data_plane_authorization(); plan_application_control_plane_authorization(); RuntimeGatewayAdminPreauthorization; CredentialScope::DataPlane; CredentialScope::ControlPlane; VerifiedCredentialEvidence::Principal; VerifiedCredentialEvidence::Oidc; token.canonical_claims(principal_id); VerifiedOidcRoleEvidence::Claim(ExplicitRoleMapper::new([])); VerifiedOidcRoleEvidence::TrustedMissingClaimFallback;
+      let oidc_name = format!("oidc:{subject_name}");
+      stable(&[resolved_tenant_text.as_bytes(), oidc_name.as_bytes()]);
+      claimed_tenant_id.map(runtime_gateway_control_plane_tenant_id_from_text);
+      "prodex:gateway-admin-control-plane-tenant-text:v1";`,
     dataPlaneAdapter:
       `plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); RuntimeGatewayApplicationAdmission::CompatibilityAnonymous; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
       fn runtime_gateway_provider_invocation() {
@@ -671,8 +829,25 @@ function runSelfTest() {
       material.with_exposed_secret(|bytes| expose(bytes));
     }`,
     application:
-      "classify_request_target(target); authenticate_compatibility_request(CompatibilityAuthenticationRequest {}); authorize_boundary_scope(boundary, principal); authorize_boundary_role(boundary, principal); decide_control_plane_action(action); principal.tenant_context(TenantMode::SingleTenant);",
-    authn: "if principal.credential_scope != required {}",
+      "classify_request_target(target); authenticate_verified_credential(VerifiedCredentialAuthenticationRequest { required_scope: request.required_credential_scope }); authorize_boundary_scope(boundary, principal); authorize_boundary_role(boundary, principal); decide_control_plane_action(action); principal.tenant_context(TenantMode::SingleTenant);",
+    authn: `if principal.credential_scope != required {}
+      validate_oidc_token_claims();
+      claims.principal_id == principal.id;
+      claims.credential_scope == principal.credential_scope;
+      mapper.role_for_claim(Some(role_claim));
+      role == principal.role;
+      claims
+            .tenant_id
+            .is_none_or();`,
+    oidcAdapter: `decode_header(token);
+      decode::<BTreeMap<String, serde_json::Value>>();
+      shared.gateway_oidc_jwks_snapshot.load_full();
+      snapshot.domain_snapshot_at(now, now_unix_ms);
+      claims.get("iss");
+      runtime_gateway_require_oidc_audience(&claims, &config.audience);
+      runtime_gateway_oidc_numeric_date_ms(&claims, "exp");
+      JwtAlgorithm::Es384;
+      fn canonical_claims(principal_id: PrincipalId) {}`,
     modules:
       "mod local_rewrite_application_boundary; mod local_rewrite_application_data_plane; mod local_rewrite_pipeline;",
   };
@@ -738,9 +913,57 @@ function runSelfTest() {
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      application: valid.application.replace("authenticate_compatibility_request", "shadow_authenticate"),
-    }).some((error) => error.includes("invoke prodex-authn")),
+      application: valid.application.replace("authenticate_verified_credential", "shadow_authenticate"),
+    }).some((error) => error.includes("typed prodex-authn evidence")),
     "shadow application authentication accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adapter: `${valid.adapter} plan_application_request_authentication_from_compatibility();`,
+    }).some((error) => error.includes("compatibility authentication authority")),
+    "compatibility production authentication accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      oidcAdapter: valid.oidcAdapter.replace(
+        "snapshot.domain_snapshot_at(now, now_unix_ms);",
+        "synthetic_snapshot;",
+      ),
+    }).some((error) => error.includes("immutable JWKS snapshot into the canonical model")),
+    "synthetic OIDC JWKS evidence accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      oidcAdapter: `${valid.oidcAdapter} runtime_gateway_oidc_send();`,
+    }).some((error) => error.includes("request-path network refresh")),
+    "OIDC request-path network refresh accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      authn: valid.authn.replace("claims.principal_id == principal.id;", "true;"),
+    }).some((error) => error.includes("bind the resolved principal identity")),
+    "unbound resolved OIDC principal accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adapter: valid.adapter.replace(
+        'let oidc_name = format!("oidc:{subject_name}");',
+        "let oidc_name = principal.name;",
+      ),
+    }).some((error) => error.includes("verified subject name")),
+    "OIDC principal identity detached from verified subject accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      authn: valid.authn.replace("mapper.role_for_claim(Some(role_claim));", "trusted_role;"),
+    }).some((error) => error.includes("role claims must be mapped canonically")),
+    "unmapped OIDC role claim accepted",
   );
   assertSelfTest(
     validateProductionBoundary({

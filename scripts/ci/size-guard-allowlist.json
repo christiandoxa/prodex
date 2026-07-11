@@ -236,8 +236,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1730,
-    "reason": "Gateway admin auth coverage now proves background-only OIDC discovery/JWKS refresh without request-path fetching; capped while token, SSO, OIDC, and SCIM scenarios split into focused fixtures."
+    "maxLines": 1713,
+    "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh; canonical OIDC/SCIM evidence coverage moved to a focused nested fixture, and the remaining legacy matrix stays capped."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
