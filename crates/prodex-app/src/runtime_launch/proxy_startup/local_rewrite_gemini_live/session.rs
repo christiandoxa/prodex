@@ -22,7 +22,15 @@ pub(super) fn runtime_gemini_live_session<S>(
 where
     S: Read + Write,
 {
-    let mut state = RuntimeGeminiLiveState::new(request_id);
+    let mut state = RuntimeGeminiLiveState::new_with_model(
+        request_id,
+        shared
+            .runtime_shared
+            .runtime_config
+            .gemini
+            .live_model
+            .clone(),
+    );
     loop {
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
@@ -92,7 +100,15 @@ pub(super) fn runtime_gemini_live_duplex_session<S>(
 where
     S: Read + Write,
 {
-    let mut state = RuntimeGeminiLiveState::new(request_id);
+    let mut state = RuntimeGeminiLiveState::new_with_model(
+        request_id,
+        shared
+            .runtime_shared
+            .runtime_config
+            .gemini
+            .live_model
+            .clone(),
+    );
     loop {
         let mut progressed = false;
         match local_socket.read() {

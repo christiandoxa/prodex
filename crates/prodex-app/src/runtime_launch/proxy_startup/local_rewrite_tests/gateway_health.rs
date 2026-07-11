@@ -1,3 +1,5 @@
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -99,6 +101,74 @@ fn gateway_operational_health_endpoints_are_public_and_machine_readable() {
         assert_eq!(rejected_method["object"], "gateway.health");
         assert_eq!(rejected_method["probe"], probe);
         assert_eq!(rejected_method["status"], "method_not_allowed");
+    }
+}
+
+#[test]
+fn gateway_rejects_unknown_and_ambiguous_targets_before_upstream_work() {
+    let root = temp_root("gateway-canonical-target-denial");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_n(0);
+    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths: &paths,
+        state: &AppState::default(),
+        upstream_base_url: format!("http://{}/v1", upstream.addr),
+        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: vec!["upstream-key".to_string()],
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("gateway proxy should start");
+    let client = reqwest::blocking::Client::new();
+
+    let unknown = client
+        .get(format!("http://{}/v1/not-supported", proxy.listen_addr))
+        .send()
+        .expect("unknown request should be sent");
+    assert_eq!(unknown.status().as_u16(), 404);
+    let unknown: serde_json::Value = unknown.json().expect("unknown response should be json");
+    assert_eq!(unknown["error"]["code"], "route_not_available");
+
+    for path in ["/v1//responses", "/v1/%2e%2e/admin", "/v1/%2Fadmin"] {
+        let mut stream = TcpStream::connect(proxy.listen_addr)
+            .expect("raw ambiguous request should connect to gateway");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("raw gateway request should set a read timeout");
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            proxy.listen_addr,
+        )
+        .expect("raw ambiguous request should be written exactly");
+        let mut raw = Vec::new();
+        stream
+            .read_to_end(&mut raw)
+            .expect("raw gateway response should be readable");
+        let split = raw
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("raw gateway response should contain headers");
+        let headers = std::str::from_utf8(&raw[..split])
+            .expect("raw gateway response headers should be UTF-8");
+        assert!(headers.starts_with("HTTP/1.1 400"), "{path}: {headers}");
+        let response: serde_json::Value =
+            serde_json::from_slice(&raw[split + 4..]).expect("invalid response should be JSON");
+        assert_eq!(response["error"]["code"], "invalid_request_target");
     }
 }
 

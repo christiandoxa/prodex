@@ -15,13 +15,14 @@ pub(crate) use attempt::{
 };
 #[allow(unused_imports)]
 pub(crate) use queue::note_runtime_probe_refresh_progress;
+pub(crate) use queue::{
+    initialize_runtime_probe_refresh_queue, runtime_probe_refresh_queue,
+    runtime_probe_refresh_queue_backlog, runtime_probe_refresh_revision,
+    schedule_runtime_probe_refresh,
+};
 #[cfg(test)]
 pub(crate) use queue::{
     runtime_probe_refresh_nonlocal_upstream_for_test, runtime_probe_refresh_queue_active,
-};
-pub(crate) use queue::{
-    runtime_probe_refresh_queue, runtime_probe_refresh_queue_backlog,
-    runtime_probe_refresh_revision, schedule_runtime_probe_refresh,
 };
 #[allow(unused_imports)]
 pub(crate) use startup::runtime_profiles_needing_startup_probe_refresh;

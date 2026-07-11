@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH, RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER,
-    runtime_proxy_admission_wait_budget_ms, runtime_proxy_long_lived_queue_wait_budget_ms,
-    runtime_proxy_pressure_admission_wait_budget_ms,
-    runtime_proxy_pressure_long_lived_queue_wait_budget_ms,
+    RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH, RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER, RuntimeConfig,
 };
 
 use super::{RuntimeProxyRequest, RuntimeRouteKind, is_runtime_anthropic_messages_path};
@@ -31,11 +28,20 @@ pub(crate) fn runtime_proxy_request_lane(path: &str, websocket: bool) -> Runtime
 pub(crate) fn runtime_proxy_request_inflight_wait_budget(
     request: &RuntimeProxyRequest,
     pressure_mode: bool,
+    config: &RuntimeConfig,
 ) -> Duration {
     if runtime_proxy_request_prefers_interactive_inflight_wait(request) {
-        runtime_proxy_admission_wait_budget(RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH, pressure_mode)
+        runtime_proxy_admission_wait_budget_with_config(
+            RUNTIME_PROXY_ANTHROPIC_MESSAGES_PATH,
+            pressure_mode,
+            config,
+        )
     } else if runtime_proxy_request_prefers_inflight_wait(request) {
-        runtime_proxy_admission_wait_budget(&request.path_and_query, pressure_mode)
+        runtime_proxy_admission_wait_budget_with_config(
+            &request.path_and_query,
+            pressure_mode,
+            config,
+        )
     } else {
         Duration::ZERO
     }
@@ -49,11 +55,15 @@ pub(crate) fn runtime_proxy_interactive_wait_budget_ms(path: &str, base_budget_m
     }
 }
 
-pub(crate) fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> Duration {
+pub(crate) fn runtime_proxy_admission_wait_budget_with_config(
+    path: &str,
+    pressure_mode: bool,
+    config: &RuntimeConfig,
+) -> Duration {
     let base_budget_ms = if pressure_mode {
-        runtime_proxy_pressure_admission_wait_budget_ms()
+        config.tuning.pressure_admission_wait_budget_ms
     } else {
-        runtime_proxy_admission_wait_budget_ms()
+        config.tuning.admission_wait_budget_ms
     };
     Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
         path,
@@ -61,17 +71,27 @@ pub(crate) fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: boo
     ))
 }
 
-pub(crate) fn runtime_proxy_long_lived_queue_wait_budget(
+pub(crate) fn runtime_proxy_long_lived_queue_wait_budget_with_config(
     path: &str,
     pressure_mode: bool,
+    config: &RuntimeConfig,
 ) -> Duration {
     let base_budget_ms = if pressure_mode {
-        runtime_proxy_pressure_long_lived_queue_wait_budget_ms()
+        config.tuning.pressure_long_lived_queue_wait_budget_ms
     } else {
-        runtime_proxy_long_lived_queue_wait_budget_ms()
+        config.tuning.long_lived_queue_wait_budget_ms
     };
     Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
         path,
         base_budget_ms,
     ))
+}
+
+#[cfg(test)]
+pub(crate) fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> Duration {
+    runtime_proxy_admission_wait_budget_with_config(
+        path,
+        pressure_mode,
+        &RuntimeConfig::compatibility_current(),
+    )
 }

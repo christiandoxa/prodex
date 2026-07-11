@@ -33,12 +33,14 @@ pub(super) fn runtime_gemini_exact_output_short_circuit(
         .map(|pool| runtime_gemini_binding_recorder(pool, selected.profile_name.clone(), None));
     let fake_stream =
         gemini_provider_core_exact_output_sse_stream(request_id, &translated.model, &output);
-    let mut reader = RuntimeGeminiGenerateSseReader::new(
+    let mut reader = RuntimeGeminiGenerateSseReader::new_with_config(
         std::io::Cursor::new(fake_stream.into_bytes()),
         request_id,
         translated.messages.clone(),
         shared.gemini_conversations.clone(),
         binding_recorder,
+        None,
+        shared.runtime_shared.runtime_config.gemini.clone(),
     );
     let mut body = String::new();
     reader

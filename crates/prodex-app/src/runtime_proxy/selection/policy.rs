@@ -108,11 +108,12 @@ pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
 pub(crate) fn runtime_websocket_previous_response_reuse_is_stale(
     nonreplayable_previous_response_reuse: bool,
     reuse_terminal_idle: Option<Duration>,
+    stale_after_ms: u64,
 ) -> bool {
     runtime_proxy_crate::runtime_websocket_previous_response_reuse_is_stale_at(
         nonreplayable_previous_response_reuse,
         reuse_terminal_idle,
-        Duration::from_millis(runtime_proxy_websocket_previous_response_reuse_stale_ms()),
+        Duration::from_millis(stale_after_ms),
     )
 }
 

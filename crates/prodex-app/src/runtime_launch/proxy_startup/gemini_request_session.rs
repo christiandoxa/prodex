@@ -1,16 +1,17 @@
 use super::gemini_request::RUNTIME_GEMINI_IMPORT_BYTE_LIMIT;
 use super::gemini_request_io::runtime_gemini_read_text_limited;
+use crate::RuntimeGeminiConfig;
 use anyhow::{Context, Result};
 use prodex_provider_core::gemini_provider_core_collect_path_values;
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 
 pub(super) fn runtime_gemini_export_checkpoint(
     original: &serde_json::Value,
     request: &serde_json::Map<String, serde_json::Value>,
+    config: &RuntimeGeminiConfig,
 ) -> Result<()> {
-    let Some(path) = runtime_gemini_export_checkpoint_path(original) else {
+    let Some(path) = runtime_gemini_export_checkpoint_path(original, config) else {
         return Ok(());
     };
     if let Some(parent) = path.parent()
@@ -26,7 +27,10 @@ pub(super) fn runtime_gemini_export_checkpoint(
     Ok(())
 }
 
-fn runtime_gemini_export_checkpoint_path(original: &serde_json::Value) -> Option<PathBuf> {
+fn runtime_gemini_export_checkpoint_path(
+    original: &serde_json::Value,
+    config: &RuntimeGeminiConfig,
+) -> Option<PathBuf> {
     for key in [
         "gemini_export_file",
         "geminiExportFile",
@@ -44,25 +48,15 @@ fn runtime_gemini_export_checkpoint_path(original: &serde_json::Value) -> Option
             return Some(PathBuf::from(path));
         }
     }
-    for key in [
-        "PRODEX_GEMINI_EXPORT_FILE",
-        "PRODEX_GEMINI_CHECKPOINT_EXPORT_FILE",
-    ] {
-        if let Some(path) = env::var_os(key)
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
-        {
-            return Some(path);
-        }
-    }
-    None
+    config.export_checkpoint_path.clone()
 }
 
 pub(super) fn runtime_gemini_imported_session_contents(
     original: &serde_json::Value,
+    config: &RuntimeGeminiConfig,
 ) -> Vec<serde_json::Value> {
     let mut contents = Vec::new();
-    for value in runtime_gemini_import_values(original) {
+    for value in runtime_gemini_import_values(original, config) {
         contents.extend(
             prodex_provider_core::gemini_provider_core_import_contents_from_value(
                 &value,
@@ -73,7 +67,10 @@ pub(super) fn runtime_gemini_imported_session_contents(
     contents
 }
 
-fn runtime_gemini_import_values(original: &serde_json::Value) -> Vec<serde_json::Value> {
+fn runtime_gemini_import_values(
+    original: &serde_json::Value,
+    config: &RuntimeGeminiConfig,
+) -> Vec<serde_json::Value> {
     let mut values = Vec::new();
     for key in [
         "gemini_session",
@@ -98,15 +95,7 @@ fn runtime_gemini_import_values(original: &serde_json::Value) -> Vec<serde_json:
     ] {
         gemini_provider_core_collect_path_values(original.get(key), &mut paths);
     }
-    for key in [
-        "PRODEX_GEMINI_SESSION_FILE",
-        "PRODEX_GEMINI_CHECKPOINT_FILE",
-        "PRODEX_GEMINI_IMPORT_FILE",
-    ] {
-        if let Some(value) = env::var_os(key) {
-            paths.extend(env::split_paths(&value));
-        }
-    }
+    paths.extend(config.import_paths.iter().cloned());
     for path in paths {
         if let Some(text) =
             runtime_gemini_read_text_limited(&path, RUNTIME_GEMINI_IMPORT_BYTE_LIMIT)

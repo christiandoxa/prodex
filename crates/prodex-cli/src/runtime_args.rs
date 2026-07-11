@@ -246,10 +246,17 @@ pub struct ExposeArgs {
     #[arg(long, default_value_t = 32)]
     pub rows: u16,
     /// Maximum concurrent browser clients.
-    #[arg(long, default_value_t = 4)]
-    pub max_clients: usize,
-    /// Serve only on loopback and do not launch cloudflared.
-    #[arg(long)]
+    #[arg(
+        long,
+        default_value_t = 4,
+        value_parser = clap::value_parser!(u16).range(1..=32)
+    )]
+    pub max_clients: u16,
+    /// Explicitly publish the loopback-only server through a cloudflared quick tunnel.
+    #[arg(long, conflicts_with = "no_tunnel")]
+    pub tunnel: bool,
+    /// Deprecated compatibility alias; tunnel access is now disabled by default.
+    #[arg(long, hide = true, conflicts_with = "tunnel")]
     pub no_tunnel: bool,
 }
 
@@ -814,28 +821,7 @@ fn toml_string_literal(value: &str) -> String {
 }
 
 #[derive(Args, Debug)]
-pub struct RuntimeBrokerArgs {
-    #[arg(long)]
-    pub current_profile: String,
-    #[arg(long)]
-    pub upstream_base_url: String,
-    #[arg(long, default_value_t = false)]
-    pub include_code_review: bool,
-    #[arg(long = "upstream-no-proxy", default_value_t = false)]
-    pub upstream_no_proxy: bool,
-    #[arg(long = "smart-context", default_value_t = false)]
-    pub smart_context_enabled: bool,
-    #[arg(long = "model-context-window-tokens", hide = true)]
-    pub model_context_window_tokens: Option<u64>,
-    #[arg(long)]
-    pub broker_key: String,
-    #[arg(long)]
-    pub instance_token: String,
-    #[arg(long)]
-    pub admin_token: String,
-    #[arg(long)]
-    pub listen_addr: Option<String>,
-}
+pub struct RuntimeBrokerArgs {}
 
 #[cfg(test)]
 mod tests {

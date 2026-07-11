@@ -246,7 +246,10 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Cow::Borrowed(&request.body);
     }
 
-    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE") {
+    if runtime_take_fault_injection_budget(
+        "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE",
+        shared.runtime_config.fault_smart_context_panic_once,
+    ) {
         runtime_smart_context_log_prepare_fallback(
             request_id,
             shared,
@@ -328,7 +331,10 @@ fn prepare_runtime_smart_context_body_safely<'a>(
     }
 
     let result = catch_runtime_smart_context_unwind_silently(|| {
-        if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE") {
+        if runtime_take_fault_injection_budget(
+            "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE",
+            shared.runtime_config.fault_smart_context_unwind_once,
+        ) {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);
         }
         prepare_runtime_smart_context_body(

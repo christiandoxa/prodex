@@ -15,10 +15,20 @@ impl RuntimePrefetchStream {
         async_runtime: Arc<TokioRuntime>,
         log_path: PathBuf,
         request_id: u64,
+        runtime_config: &RuntimeConfig,
     ) -> Self {
         let (sender, receiver) =
             mpsc::sync_channel::<RuntimePrefetchChunk>(RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY);
-        let shared = Arc::new(RuntimePrefetchSharedState::default());
+        let shared = Arc::new(RuntimePrefetchSharedState {
+            config: RuntimePrefetchConfig {
+                retry_delay_ms: runtime_config.prefetch_backpressure_retry_ms,
+                timeout_ms: runtime_config.prefetch_backpressure_timeout_ms,
+                max_buffered_bytes: runtime_config.prefetch_max_buffered_bytes,
+                lookahead_timeout_ms: runtime_config.tuning.sse_lookahead_timeout_ms,
+                stream_idle_timeout_ms: runtime_config.tuning.stream_idle_timeout_ms,
+            },
+            ..RuntimePrefetchSharedState::default()
+        });
         let worker_shared = Arc::clone(&shared);
         let worker = async_runtime.spawn(async move {
             runtime_prefetch_response_chunks(response, sender, worker_shared, log_path, request_id)
@@ -38,8 +48,7 @@ impl RuntimePrefetchStream {
         timeout: Duration,
     ) -> std::result::Result<RuntimePrefetchChunk, RecvTimeoutError> {
         let started_at = Instant::now();
-        let retry_delay =
-            Duration::from_millis(runtime_proxy_prefetch_backpressure_retry_ms().max(1));
+        let retry_delay = Duration::from_millis(self.shared.config.retry_delay_ms.max(1));
 
         loop {
             if let Some(chunk) = self.backlog.pop_front() {

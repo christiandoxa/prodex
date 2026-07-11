@@ -19,6 +19,7 @@ pub(super) struct RuntimeGeminiGenerateSseReader<R: Read> {
 }
 
 impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
+    #[cfg(test)]
     pub(super) fn new(
         reader: R,
         request_id: u64,
@@ -26,23 +27,26 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
     ) -> Self {
-        Self::new_with_observer(
+        let config = crate::RuntimeConfig::compatibility_current();
+        Self::new_with_config(
             reader,
             request_id,
             conversation_messages,
             conversations,
             binding_recorder,
             None,
+            config.gemini,
         )
     }
 
-    pub(super) fn new_with_observer(
+    pub(super) fn new_with_config(
         reader: R,
         request_id: u64,
         conversation_messages: Vec<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
         observer: Option<RuntimeProviderSseObserver>,
+        gemini_config: crate::RuntimeGeminiConfig,
     ) -> Self {
         Self {
             inner: RuntimeProviderSseJsonReader::new_with_observer(
@@ -52,6 +56,7 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
                     conversation_messages,
                     conversations,
                     binding_recorder,
+                    gemini_config,
                 ),
                 observer,
             ),

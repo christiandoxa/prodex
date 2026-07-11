@@ -319,4 +319,12 @@ fn restore_error_responses_are_stable_and_redacted() {
     assert_eq!(mismatch.code, "restore_checksum_mismatch");
     assert_eq!(mismatch.message, "backup integrity verification failed");
     assert!(!mismatch.message.contains("sha256"));
+    assert_eq!(
+        serde_json::to_value(&mismatch).unwrap(),
+        serde_json::json!({
+            "status": "conflict",
+            "code": "restore_checksum_mismatch",
+            "message": "backup integrity verification failed"
+        })
+    );
 }

@@ -1,21 +1,25 @@
 use super::super::gemini_request_extensions::runtime_gemini_extension_context_files;
 use super::super::gemini_request_io::runtime_gemini_read_text_limited;
-use super::gemini_request_util::{runtime_gemini_bool_value, runtime_gemini_env_bool};
+use super::gemini_request_util::runtime_gemini_bool_value;
 use super::{RUNTIME_GEMINI_MEMORY_BYTE_LIMIT, runtime_gemini_config_dir};
+use crate::RuntimeGeminiConfig;
 use prodex_provider_core::{
     gemini_provider_core_collect_path_values, gemini_provider_core_truncate_to_bytes,
 };
 use std::env;
 use std::path::Path;
 
-pub(super) fn runtime_gemini_hierarchical_memory(original: &serde_json::Value) -> Option<String> {
+pub(super) fn runtime_gemini_hierarchical_memory(
+    original: &serde_json::Value,
+    config: &RuntimeGeminiConfig,
+) -> Option<String> {
     let mut sections = Vec::new();
     let mut budget = RUNTIME_GEMINI_MEMORY_BYTE_LIMIT;
     runtime_gemini_collect_inline_memory_sections(original, &mut sections, &mut budget);
-    if runtime_gemini_memory_files_enabled(original) {
+    if runtime_gemini_memory_files_enabled_with_config(original, config) {
         runtime_gemini_collect_standard_memory_files(&mut sections, &mut budget);
     }
-    runtime_gemini_collect_extension_memory_files(&mut sections, &mut budget);
+    runtime_gemini_collect_extension_memory_files(config, &mut sections, &mut budget);
     (!sections.is_empty()).then(|| sections.join("\n\n"))
 }
 
@@ -79,10 +83,11 @@ fn runtime_gemini_collect_memory_value(
     }
 }
 
-pub(super) fn runtime_gemini_memory_files_enabled(original: &serde_json::Value) -> bool {
-    if runtime_gemini_env_bool("PRODEX_GEMINI_DISABLE_MEMORY") == Some(true)
-        || runtime_gemini_env_bool("PRODEX_GEMINI_DISABLE_CONTEXT_FILES") == Some(true)
-    {
+fn runtime_gemini_memory_files_enabled_with_config(
+    original: &serde_json::Value,
+    config: &RuntimeGeminiConfig,
+) -> bool {
+    if config.memory_files_disabled {
         return false;
     }
     for key in [
@@ -95,12 +100,13 @@ pub(super) fn runtime_gemini_memory_files_enabled(original: &serde_json::Value) 
             return runtime_gemini_bool_value(value).unwrap_or(false);
         }
     }
-    for key in ["PRODEX_GEMINI_LOAD_MEMORY", "PRODEX_GEMINI_MEMORY"] {
-        if let Some(enabled) = runtime_gemini_env_bool(key) {
-            return enabled;
-        }
-    }
-    true
+    config.memory_files_default
+}
+
+#[cfg(test)]
+pub(super) fn runtime_gemini_memory_files_enabled(original: &serde_json::Value) -> bool {
+    let config = crate::RuntimeConfig::compatibility_current();
+    runtime_gemini_memory_files_enabled_with_config(original, &config.gemini)
 }
 
 fn runtime_gemini_collect_standard_memory_files(sections: &mut Vec<String>, budget: &mut usize) {
@@ -149,12 +155,13 @@ fn runtime_gemini_collect_standard_memory_files(sections: &mut Vec<String>, budg
     }
 }
 
-fn runtime_gemini_collect_extension_memory_files(sections: &mut Vec<String>, budget: &mut usize) {
-    let mut paths = Vec::new();
-    if let Some(configured) = env::var_os("PRODEX_GEMINI_EXTENSION_MEMORY") {
-        paths.extend(env::split_paths(&configured));
-    }
-    paths.extend(runtime_gemini_extension_context_files());
+fn runtime_gemini_collect_extension_memory_files(
+    config: &RuntimeGeminiConfig,
+    sections: &mut Vec<String>,
+    budget: &mut usize,
+) {
+    let mut paths = config.extension_memory_paths.clone();
+    paths.extend(runtime_gemini_extension_context_files(config));
     for path in paths {
         runtime_gemini_push_memory_file_section("Extension", &path, sections, budget);
     }

@@ -10,6 +10,9 @@ use crate::validate_secrets::{
     validate_gateway_secret_ref, validate_gateway_secret_source, validate_secret_policy,
 };
 use anyhow::{Context, Result, bail};
+use prodex_authn::{
+    OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES, OidcEndpointPolicy, ValidatedOidcIssuer,
+};
 use secret_store::SecretBackendKind;
 use std::path::Path;
 
@@ -591,8 +594,10 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             bail!("{field} in {} cannot be empty", path.display());
         }
     }
-    let oidc_enabled =
-        sso.oidc_issuer.is_some() || sso.oidc_audience.is_some() || sso.oidc_jwks_url.is_some();
+    let oidc_enabled = sso.oidc_issuer.is_some()
+        || sso.oidc_audience.is_some()
+        || sso.oidc_jwks_url.is_some()
+        || !sso.oidc_jwks_origin_allowlist.is_empty();
     if oidc_enabled {
         if sso.oidc_issuer.is_none() || sso.oidc_audience.is_none() {
             bail!(
@@ -600,37 +605,46 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
                 path.display()
             );
         }
-        if let Some(issuer) = sso.oidc_issuer.as_deref() {
-            if issuer.chars().any(char::is_whitespace) {
-                bail!(
-                    "gateway.sso.oidc_issuer in {} must not contain whitespace",
-                    path.display()
-                );
-            }
-            if !issuer.starts_with("https://")
-                || !gateway_observability_http_endpoint_has_http_host(issuer)
-            {
-                bail!(
-                    "gateway.sso.oidc_issuer in {} must be an https URL with host",
-                    path.display()
-                );
-            }
+        let issuer = sso
+            .oidc_issuer
+            .as_deref()
+            .expect("OIDC issuer presence checked above");
+        ValidatedOidcIssuer::parse(issuer).with_context(|| {
+            format!(
+                "gateway.sso.oidc_issuer in {} must be an https URL with host and permitted OIDC policy",
+                path.display()
+            )
+        })?;
+        if sso.oidc_jwks_origin_allowlist.len() > OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES {
+            bail!(
+                "gateway.sso.oidc_jwks_origin_allowlist in {} must contain at most {} entries",
+                path.display(),
+                OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES
+            );
         }
+        OidcEndpointPolicy::with_jwks_origin_allowlist(
+            issuer,
+            None,
+            sso.oidc_jwks_origin_allowlist.iter().map(String::as_str),
+        )
+        .with_context(|| {
+            format!(
+                "gateway.sso.oidc_jwks_origin_allowlist in {} is not permitted",
+                path.display()
+            )
+        })?;
         if let Some(jwks_url) = sso.oidc_jwks_url.as_deref() {
-            if jwks_url.chars().any(char::is_whitespace) {
-                bail!(
-                    "gateway.sso.oidc_jwks_url in {} must not contain whitespace",
+            OidcEndpointPolicy::with_jwks_origin_allowlist(
+                issuer,
+                Some(jwks_url),
+                sso.oidc_jwks_origin_allowlist.iter().map(String::as_str),
+            )
+            .with_context(|| {
+                format!(
+                    "gateway.sso.oidc_jwks_url in {} must be an https URL with host and permitted OIDC policy",
                     path.display()
-                );
-            }
-            if !jwks_url.starts_with("https://")
-                || !gateway_observability_http_endpoint_has_http_host(jwks_url)
-            {
-                bail!(
-                    "gateway.sso.oidc_jwks_url in {} must be an https URL with host",
-                    path.display()
-                );
-            }
+                )
+            })?;
         }
     }
     if let Some(role) = sso.default_role.as_deref() {
@@ -641,209 +655,9 @@ fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     Ok(())
 }
 
-pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    validate_optional_usize(
-        policy.runtime_proxy.worker_count,
-        path,
-        "runtime_proxy.worker_count",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.long_lived_worker_count,
-        path,
-        "runtime_proxy.long_lived_worker_count",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.probe_refresh_worker_count,
-        path,
-        "runtime_proxy.probe_refresh_worker_count",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.async_worker_count,
-        path,
-        "runtime_proxy.async_worker_count",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.long_lived_queue_capacity,
-        path,
-        "runtime_proxy.long_lived_queue_capacity",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.active_request_limit,
-        path,
-        "runtime_proxy.active_request_limit",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.profile_inflight_soft_limit,
-        path,
-        "runtime_proxy.profile_inflight_soft_limit",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.profile_inflight_hard_limit,
-        path,
-        "runtime_proxy.profile_inflight_hard_limit",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.responses_active_limit,
-        path,
-        "runtime_proxy.responses_active_limit",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.compact_active_limit,
-        path,
-        "runtime_proxy.compact_active_limit",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.websocket_active_limit,
-        path,
-        "runtime_proxy.websocket_active_limit",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.standard_active_limit,
-        path,
-        "runtime_proxy.standard_active_limit",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.http_connect_timeout_ms,
-        path,
-        "runtime_proxy.http_connect_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.stream_idle_timeout_ms,
-        path,
-        "runtime_proxy.stream_idle_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.compact_request_timeout_ms,
-        path,
-        "runtime_proxy.compact_request_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.sse_lookahead_timeout_ms,
-        path,
-        "runtime_proxy.sse_lookahead_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.prefetch_backpressure_retry_ms,
-        path,
-        "runtime_proxy.prefetch_backpressure_retry_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.prefetch_backpressure_timeout_ms,
-        path,
-        "runtime_proxy.prefetch_backpressure_timeout_ms",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.prefetch_max_buffered_bytes,
-        path,
-        "runtime_proxy.prefetch_max_buffered_bytes",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.websocket_connect_timeout_ms,
-        path,
-        "runtime_proxy.websocket_connect_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.websocket_happy_eyeballs_delay_ms,
-        path,
-        "runtime_proxy.websocket_happy_eyeballs_delay_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.websocket_precommit_progress_timeout_ms,
-        path,
-        "runtime_proxy.websocket_precommit_progress_timeout_ms",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.websocket_connect_worker_count,
-        path,
-        "runtime_proxy.websocket_connect_worker_count",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.websocket_connect_queue_capacity,
-        path,
-        "runtime_proxy.websocket_connect_queue_capacity",
-    )?;
-    validate_optional_usize_allow_zero(
-        policy.runtime_proxy.websocket_connect_overflow_capacity,
-        path,
-        "runtime_proxy.websocket_connect_overflow_capacity",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.websocket_dns_worker_count,
-        path,
-        "runtime_proxy.websocket_dns_worker_count",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.websocket_dns_queue_capacity,
-        path,
-        "runtime_proxy.websocket_dns_queue_capacity",
-    )?;
-    validate_optional_usize_allow_zero(
-        policy.runtime_proxy.websocket_dns_overflow_capacity,
-        path,
-        "runtime_proxy.websocket_dns_overflow_capacity",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.broker_ready_timeout_ms,
-        path,
-        "runtime_proxy.broker_ready_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.broker_health_connect_timeout_ms,
-        path,
-        "runtime_proxy.broker_health_connect_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.broker_health_read_timeout_ms,
-        path,
-        "runtime_proxy.broker_health_read_timeout_ms",
-    )?;
-    validate_optional_u64(
-        policy
-            .runtime_proxy
-            .websocket_previous_response_reuse_stale_ms,
-        path,
-        "runtime_proxy.websocket_previous_response_reuse_stale_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.admission_wait_budget_ms,
-        path,
-        "runtime_proxy.admission_wait_budget_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.pressure_admission_wait_budget_ms,
-        path,
-        "runtime_proxy.pressure_admission_wait_budget_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.long_lived_queue_wait_budget_ms,
-        path,
-        "runtime_proxy.long_lived_queue_wait_budget_ms",
-    )?;
-    validate_optional_u64(
-        policy
-            .runtime_proxy
-            .pressure_long_lived_queue_wait_budget_ms,
-        path,
-        "runtime_proxy.pressure_long_lived_queue_wait_budget_ms",
-    )?;
-    validate_optional_u64(
-        policy.runtime_proxy.sync_probe_pressure_pause_ms,
-        path,
-        "runtime_proxy.sync_probe_pressure_pause_ms",
-    )?;
-    validate_optional_i64_percent(
-        policy.runtime_proxy.responses_critical_floor_percent,
-        path,
-        "runtime_proxy.responses_critical_floor_percent",
-    )?;
-    validate_optional_usize(
-        policy.runtime_proxy.startup_sync_probe_warm_limit,
-        path,
-        "runtime_proxy.startup_sync_probe_warm_limit",
-    )?;
-
-    Ok(())
-}
+#[path = "validate/runtime_proxy.rs"]
+mod runtime_proxy;
+pub use runtime_proxy::validate_runtime_proxy_policy;
 
 #[cfg(test)]
 #[path = "../tests/src/validate.rs"]

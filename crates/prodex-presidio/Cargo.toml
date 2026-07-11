@@ -14,3 +14,6 @@ reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+
+[lints]
+workspace = true

@@ -5,6 +5,8 @@ use crate::runtime_launch::proxy_startup::local_rewrite::{
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use std::fs;
 use std::net::SocketAddr;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
@@ -139,9 +141,21 @@ impl TestJwksServer {
         Self::start_with_success_count_and_cache_control(success_count, None)
     }
 
+    pub(super) fn start_with_delay(delay: Duration) -> Self {
+        Self::start_with_options(0, None, delay)
+    }
+
     pub(super) fn start_with_success_count_and_cache_control(
         success_count: usize,
         cache_control: Option<&'static str>,
+    ) -> Self {
+        Self::start_with_options(success_count, cache_control, Duration::ZERO)
+    }
+
+    fn start_with_options(
+        success_count: usize,
+        cache_control: Option<&'static str>,
+        response_delay: Duration,
     ) -> Self {
         let server = TinyServer::http("127.0.0.1:0").expect("test JWKS server should bind");
         let addr = server
@@ -156,6 +170,9 @@ impl TestJwksServer {
                     break;
                 };
                 let current = request_count_for_thread.fetch_add(1, Ordering::Relaxed);
+                if !response_delay.is_zero() {
+                    std::thread::sleep(response_delay);
+                }
                 let mut response = if current < success_count {
                     TinyResponse::from_string(gateway_oidc_test_jwks()).with_status_code(200)
                 } else {
@@ -207,7 +224,7 @@ impl TestOidcDiscoveryServer {
                 request_count_for_thread.fetch_add(1, Ordering::Relaxed);
                 let path = request.url().to_string();
                 let body = if path == "/.well-known/openid-configuration" {
-                    format!(r#"{{"jwks_uri":"http://{addr}/jwks.json"}}"#)
+                    format!(r#"{{"issuer":"http://{addr}","jwks_uri":"http://{addr}/jwks.json"}}"#)
                 } else {
                     gateway_oidc_test_jwks().to_string()
                 };
@@ -353,7 +370,23 @@ pub(super) fn temp_root(name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("prodex-{name}-{nonce}"));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
     root
+}
+
+pub(super) fn write_private_test_secret(
+    path: impl AsRef<std::path::Path>,
+    text: impl Into<String>,
+) -> Result<(), secret_store::SecretError> {
+    let path = path.as_ref();
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .expect("test secret parent should be private");
+    }
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(path), text)
 }
 
 pub(super) fn app_paths_for_root(root: std::path::PathBuf) -> AppPaths {

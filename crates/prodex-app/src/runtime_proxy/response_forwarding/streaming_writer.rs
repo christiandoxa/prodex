@@ -119,7 +119,10 @@ pub(crate) fn write_runtime_streaming_response(
             break;
         }
         if chunk_count == 0
-            && runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_STREAM_READ_ERROR_ONCE")
+            && runtime_take_fault_injection_budget(
+                "PRODEX_RUNTIME_FAULT_STREAM_READ_ERROR_ONCE",
+                response.shared.runtime_config.fault_stream_read_error_once,
+            )
         {
             let err = io::Error::new(
                 io::ErrorKind::ConnectionReset,

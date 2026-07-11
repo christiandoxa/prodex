@@ -8,7 +8,7 @@ pub(crate) fn runtime_resolve_websocket_tcp_addrs(
     timeout: Duration,
 ) -> io::Result<Vec<SocketAddr>> {
     runtime_resolve_websocket_tcp_addrs_with_executor(
-        runtime_websocket_dns_resolve_executor(),
+        runtime_websocket_dns_resolve_executor(shared),
         Some(shared.log_path.as_path()),
         Some(request_id),
         host.to_string(),
@@ -28,10 +28,20 @@ pub(crate) fn connect_runtime_proxy_upstream_tcp_stream(
     uri: &tungstenite::http::Uri,
 ) -> std::result::Result<RuntimeWebsocketTcpConnectSuccess, WsError> {
     let target = runtime_websocket_target_from_uri(uri)?;
-    let connect_timeout = Duration::from_millis(runtime_proxy_websocket_connect_timeout_ms());
-    let io_timeout = Duration::from_millis(runtime_proxy_websocket_precommit_progress_timeout_ms());
-    let happy_eyeballs_delay =
-        Duration::from_millis(runtime_proxy_websocket_happy_eyeballs_delay_ms());
+    let connect_timeout =
+        Duration::from_millis(shared.runtime_config.tuning.websocket_connect_timeout_ms);
+    let io_timeout = Duration::from_millis(
+        shared
+            .runtime_config
+            .tuning
+            .websocket_precommit_progress_timeout_ms,
+    );
+    let happy_eyeballs_delay = Duration::from_millis(
+        shared
+            .runtime_config
+            .tuning
+            .websocket_happy_eyeballs_delay_ms,
+    );
 
     if let Some(proxy) =
         runtime_websocket_http_proxy_for_uri(shared, uri, &target).map_err(WsError::Io)?
@@ -257,10 +267,19 @@ pub(crate) fn runtime_websocket_http_proxy_for_uri(
     uri: &tungstenite::http::Uri,
     target: &RuntimeWebsocketTarget,
 ) -> io::Result<Option<RuntimeWebsocketHttpProxy>> {
-    if shared.upstream_no_proxy || runtime_websocket_no_proxy_matches(&target.host, target.port) {
+    if shared.upstream_no_proxy
+        || shared
+            .runtime_config
+            .websocket_environment
+            .no_proxy_matches(&target.host, target.port)
+    {
         return Ok(None);
     }
-    let Some(proxy_url) = runtime_websocket_proxy_env_url(uri.scheme_str().unwrap_or("wss")) else {
+    let Some(proxy_url) = shared
+        .runtime_config
+        .websocket_environment
+        .proxy_url(uri.scheme_str().unwrap_or("wss"))
+    else {
         return Ok(None);
     };
     if proxy_url.scheme() != "http" {
@@ -290,28 +309,6 @@ pub(crate) fn runtime_websocket_http_proxy_for_uri(
         host,
         port,
     }))
-}
-
-pub(crate) fn runtime_websocket_proxy_env_url(scheme: &str) -> Option<reqwest::Url> {
-    runtime_websocket_proxy_env_keys(scheme)
-        .iter()
-        .find_map(|key| {
-            let value = env::var_os(key)?;
-            runtime_websocket_parse_proxy_url(&value.to_string_lossy())
-        })
-}
-
-pub(crate) fn runtime_websocket_parse_proxy_url(value: &str) -> Option<reqwest::Url> {
-    let candidate = runtime_websocket_proxy_url_candidate(value)?;
-    reqwest::Url::parse(&candidate).ok()
-}
-
-pub(crate) fn runtime_websocket_no_proxy_matches(host: &str, port: u16) -> bool {
-    ["NO_PROXY", "no_proxy"].into_iter().any(|key| {
-        env::var_os(key).is_some_and(|value| {
-            runtime_websocket_no_proxy_value_matches(&value.to_string_lossy(), host, port)
-        })
-    })
 }
 
 pub(crate) fn runtime_websocket_establish_http_proxy_tunnel(

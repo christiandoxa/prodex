@@ -1,4 +1,5 @@
 use super::local_rewrite::{RuntimeLocalRewriteProxyShared, runtime_gateway_billing_ledger_load};
+use super::local_rewrite_application_boundary::runtime_gateway_admin_control_plane_action;
 use super::local_rewrite_gateway_admin_auth::{
     RuntimeGatewayAdminAuth, runtime_gateway_admin_auth_is_unscoped,
     runtime_gateway_admin_auth_matches_entry,
@@ -6,9 +7,7 @@ use super::local_rewrite_gateway_admin_auth::{
 use super::local_rewrite_gateway_admin_response::{
     runtime_gateway_admin_csv_response, runtime_gateway_admin_json_response,
 };
-use super::local_rewrite_gateway_admin_router::{
-    runtime_gateway_admin_control_plane_action, runtime_gateway_http_request_meta,
-};
+use super::local_rewrite_gateway_admin_router::runtime_gateway_http_request_meta;
 use super::local_rewrite_gateway_billing_csv::{
     runtime_gateway_billing_ledger_csv, runtime_gateway_billing_summary_csv,
 };

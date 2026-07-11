@@ -20,7 +20,9 @@ use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::{TokioExecutor, TokioIo},
 };
-use prodex_gateway_http::{GatewayHttpPolicy, GatewayHttpRouteKind, classify_route};
+use prodex_gateway_http::{
+    CanonicalRequestTarget, GatewayHttpPolicy, GatewayHttpRoutePlane, classify_request_target,
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{OwnedSemaphorePermit, Semaphore, watch},
@@ -36,6 +38,8 @@ const ROUTE_UNAVAILABLE: &[u8] =
     br#"{"error":{"code":"route_not_available","message":"route is not available"}}"#;
 const INVALID_REQUEST: &[u8] =
     br#"{"error":{"code":"invalid_request","message":"request is invalid"}}"#;
+const INVALID_REQUEST_TARGET: &[u8] =
+    br#"{"error":{"code":"invalid_request_target","message":"request target is invalid"}}"#;
 const BODY_TOO_LARGE: &[u8] = br#"{"error":{"code":"request_body_too_large","message":"request body exceeds the configured limit"}}"#;
 const BACKEND_TIMEOUT: &[u8] =
     br#"{"error":{"code":"backend_timeout","message":"gateway backend timed out"}}"#;
@@ -176,6 +180,7 @@ where
         tasks.spawn(serve_connection(stream, state, permit));
     };
 
+    drop(listener);
     let _ = shutdown_tx.send(true);
     let deadline = Instant::now() + config.drain_timeout;
     let max_connections = config.max_connections as u32;
@@ -221,8 +226,20 @@ async fn proxy_request(
     state: ProxyState,
     permit: Arc<OwnedSemaphorePermit>,
 ) -> Result<Response<ProxyBody>, Infallible> {
-    let route = classify_route(request.uri().path());
-    if !route_allowed(state.mode, route) {
+    if request.uri().scheme().is_some() || request.uri().authority().is_some() {
+        return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET));
+    }
+    let raw_target = request
+        .uri()
+        .path_and_query()
+        .map_or_else(|| request.uri().path(), |target| target.as_str());
+    let Ok(target) = CanonicalRequestTarget::parse(raw_target) else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET));
+    };
+    let Some(route) = classify_request_target(&target) else {
+        return Ok(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE));
+    };
+    if !route_allowed(state.mode, route.plane) {
         return Ok(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE));
     }
     match content_length(&request) {
@@ -241,6 +258,10 @@ async fn proxy_request(
     let mut uri_parts = parts.uri.into_parts();
     uri_parts.scheme = Some(hyper::http::uri::Scheme::HTTP);
     uri_parts.authority = Some(state.backend_authority.clone());
+    let Ok(path_and_query) = target.path_and_query().parse() else {
+        return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET));
+    };
+    uri_parts.path_and_query = Some(path_and_query);
     let Ok(uri) = Uri::from_parts(uri_parts) else {
         return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST));
     };
@@ -279,17 +300,18 @@ async fn proxy_request(
     ))
 }
 
-fn route_allowed(mode: GatewayServerMode, route: GatewayHttpRouteKind) -> bool {
-    match mode {
-        GatewayServerMode::DataPlane => route != GatewayHttpRouteKind::ControlPlane,
-        GatewayServerMode::ControlPlane => matches!(
-            route,
-            GatewayHttpRouteKind::ControlPlane
-                | GatewayHttpRouteKind::HealthLive
-                | GatewayHttpRouteKind::HealthReady
-                | GatewayHttpRouteKind::HealthStartup
-        ),
-    }
+fn route_allowed(mode: GatewayServerMode, plane: GatewayHttpRoutePlane) -> bool {
+    matches!(plane, GatewayHttpRoutePlane::Health)
+        || matches!(
+            (mode, plane),
+            (
+                GatewayServerMode::DataPlane,
+                GatewayHttpRoutePlane::DataPlane
+            ) | (
+                GatewayServerMode::ControlPlane,
+                GatewayHttpRoutePlane::ControlPlane
+            )
+        )
 }
 
 fn content_length(request: &Request<Incoming>) -> Result<Option<u64>, ()> {

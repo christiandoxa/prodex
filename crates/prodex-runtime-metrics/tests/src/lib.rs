@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::{
     PrometheusTextOptions, RuntimeBrokerContinuationMetrics,
@@ -147,8 +148,8 @@ fn sample_broker_metadata() -> broker::RuntimeBrokerMetadata {
         current_profile: "main".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
-        instance_token: "instance".to_string(),
-        admin_token: "admin".to_string(),
+        instance_id: "instance".to_string(),
+        admin_token: Arc::new(broker::RuntimeBrokerSecret::new("admin").unwrap()),
         prodex_version: Some("0.29.0".to_string()),
         executable_path: Some("/tmp/prodex".to_string()),
         executable_sha256: Some("abcd1234".to_string()),
@@ -175,7 +176,7 @@ fn sample_broker_metrics() -> broker::RuntimeBrokerMetrics {
             current_profile: "main".to_string(),
             include_code_review: false,
             active_requests: 5,
-            instance_token: "instance".to_string(),
+            instance_id: "instance".to_string(),
             persistence_role: "owner".to_string(),
             prodex_version: Some("0.29.0".to_string()),
             executable_path: Some("/tmp/prodex".to_string()),

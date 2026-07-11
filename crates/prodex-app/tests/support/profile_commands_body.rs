@@ -102,7 +102,7 @@ impl ProfileCommandsTestDir {
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        fs::create_dir_all(&path).expect("test dir should be created");
+        create_codex_home_if_missing(&path).expect("test dir should be created");
         Self { path }
     }
 }

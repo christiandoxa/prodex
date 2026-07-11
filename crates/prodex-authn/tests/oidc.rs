@@ -1,6 +1,7 @@
 use prodex_authn::{
-    AuthenticationError, AuthenticationErrorStatus, OidcRefreshRuntimeMode, OidcRefreshSource,
-    TokenClaims, authenticate_oidc_claims, plan_authentication_error_response,
+    AuthenticationError, AuthenticationErrorStatus, OidcEndpointPolicy,
+    OidcEndpointValidationError, OidcRefreshRuntimeMode, OidcRefreshSource, TokenClaims,
+    ValidatedOidcIssuer, authenticate_oidc_claims, plan_authentication_error_response,
     plan_oidc_jwks_refresh,
 };
 use prodex_domain::{
@@ -230,6 +231,124 @@ fn background_refresh_plan_rejects_cross_issuer_jwks_url() {
         ),
         Err(AuthenticationError::JwksUrlIssuerMismatch)
     );
+}
+
+#[test]
+fn oidc_issuer_uses_standard_canonical_url_identity() {
+    let issuer = ValidatedOidcIssuer::parse("HTTPS://ISSUER.EXAMPLE.COM:443/").unwrap();
+    assert_eq!(issuer.as_str(), "https://issuer.example.com");
+
+    let policy = OidcEndpointPolicy::new("https://issuer.example.com/tenant", None).unwrap();
+    assert_eq!(
+        policy.discovery_endpoint().as_str(),
+        "https://issuer.example.com/tenant/.well-known/openid-configuration"
+    );
+    assert_eq!(
+        policy
+            .validate_discovery_document(
+                "https://issuer.example.com/tenant",
+                "https://issuer.example.com/jwks.json",
+            )
+            .unwrap()
+            .as_str(),
+        "https://issuer.example.com/jwks.json"
+    );
+    assert_eq!(
+        policy.validate_discovery_document(
+            "https://issuer.example.com/tenant/",
+            "https://issuer.example.com/jwks.json",
+        ),
+        Err(OidcEndpointValidationError::IssuerMismatch)
+    );
+}
+
+#[test]
+fn oidc_endpoint_policy_rejects_malicious_urls_and_addresses() {
+    for endpoint in [
+        "http://issuer.example.com",
+        "https://user@issuer.example.com",
+        "https://issuer.example.com/path?token=secret",
+        "https://issuer.example.com/path#fragment",
+        "https://issuer.example.com./jwks.json",
+        "https://issuer.example.com:0/jwks.json",
+        "https://127.0.0.1/jwks.json",
+        "https://10.0.0.1/jwks.json",
+        "https://169.254.169.254/latest/meta-data",
+        "https://224.0.0.1/jwks.json",
+        "https://[::]/jwks.json",
+        "https://[::1]/jwks.json",
+        "https://[fc00::1]/jwks.json",
+        "https://[fe80::1]/jwks.json",
+        "https://[ff02::1]/jwks.json",
+        "https://[::ffff:127.0.0.1]/jwks.json",
+        "https://[64:ff9b::a9fe:a9fe]/jwks.json",
+        "https://[2001::1]/jwks.json",
+        "https://[2002:7f00:1::]/jwks.json",
+    ] {
+        assert!(
+            ValidatedOidcIssuer::parse(endpoint).is_err(),
+            "malicious OIDC endpoint unexpectedly accepted: {endpoint}"
+        );
+    }
+}
+
+#[test]
+fn oidc_jwks_requires_exact_origin_or_explicit_origin_allowlist() {
+    assert_eq!(
+        OidcEndpointPolicy::new(
+            "https://issuer.example.com",
+            Some("https://keys.example.com/jwks.json"),
+        ),
+        Err(OidcEndpointValidationError::OriginForbidden)
+    );
+    assert_eq!(
+        OidcEndpointPolicy::new(
+            "https://issuer.example.com:8443",
+            Some("https://issuer.example.com/jwks.json"),
+        ),
+        Err(OidcEndpointValidationError::OriginForbidden)
+    );
+
+    let allowed = OidcEndpointPolicy::with_jwks_origin_allowlist(
+        "https://issuer.example.com",
+        Some("https://keys.example.com:8443/jwks.json"),
+        ["https://keys.example.com:8443"],
+    )
+    .unwrap();
+    assert_eq!(allowed.configured_jwks().unwrap().port(), 8443);
+    assert_eq!(
+        allowed.validate_jwks_endpoint("https://keys.example.com/jwks.json"),
+        Err(OidcEndpointValidationError::OriginForbidden)
+    );
+
+    let origins = (0..17)
+        .map(|index| format!("https://keys-{index}.example.com"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        OidcEndpointPolicy::with_jwks_origin_allowlist(
+            "https://issuer.example.com",
+            None,
+            origins.iter().map(String::as_str),
+        ),
+        Err(OidcEndpointValidationError::TooManyOrigins)
+    );
+}
+
+#[test]
+fn oidc_redirects_are_disabled_and_debug_output_is_redacted() {
+    let policy = OidcEndpointPolicy::new(
+        "https://issuer.example.com",
+        Some("https://issuer.example.com/private/jwks.json"),
+    )
+    .unwrap();
+    assert!(!policy.redirects_allowed());
+    assert_eq!(
+        policy.validate_redirect("https://issuer.example.com/other"),
+        Err(OidcEndpointValidationError::RedirectForbidden)
+    );
+    let debug = format!("{policy:?}");
+    assert!(!debug.contains("issuer.example.com"));
+    assert!(!debug.contains("private"));
 }
 
 #[test]

@@ -208,8 +208,7 @@ fn perform_prodex_cleanup_refuses_duplicate_managed_home_outside_managed_root() 
         .expect_err("duplicate managed home outside root should be refused");
 
     assert!(
-        err.to_string()
-            .contains("outside managed profiles root"),
+        err.to_string().contains("outside managed profiles root"),
         "unexpected error: {err:#}"
     );
     assert!(

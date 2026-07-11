@@ -1,7 +1,7 @@
 use super::{
     RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES, RuntimePrefetchChunk, RuntimePrefetchStream,
     RuntimeSseInspection, RuntimeSseInspectionProgress, inspect_runtime_sse_buffer,
-    runtime_proxy_log_to_path, runtime_proxy_sse_lookahead_timeout_ms,
+    runtime_proxy_log_to_path,
 };
 use anyhow::Result;
 use std::io;
@@ -14,7 +14,8 @@ async fn inspect_runtime_sse_lookahead(
     log_path: &Path,
     request_id: u64,
 ) -> Result<RuntimeSseInspection> {
-    let deadline = Instant::now() + Duration::from_millis(runtime_proxy_sse_lookahead_timeout_ms());
+    let deadline =
+        Instant::now() + Duration::from_millis(prefetch.shared.config.lookahead_timeout_ms);
     let mut buffered = Vec::new();
 
     loop {

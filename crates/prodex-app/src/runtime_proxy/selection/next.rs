@@ -28,7 +28,8 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     let sync_probe_pressure_mode =
         runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let allow_disk_auth_fallback = !sync_probe_pressure_mode;
-    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let inflight_soft_limit =
+        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let mut selection_state = {
         let mut runtime = shared
             .runtime

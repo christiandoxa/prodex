@@ -56,11 +56,14 @@ fn secret_ref_well_formed_rejects_non_printable_or_overlong_parts() {
 fn secret_material_debug_display_do_not_expose_value_or_version() {
     let material = SecretMaterial::new("super-secret-token", Some("v7"));
 
-    assert_eq!(material.expose_secret(), b"super-secret-token");
+    material.with_exposed_secret(|secret| assert_eq!(secret, b"super-secret-token"));
     assert_eq!(material.version(), Some("v7"));
     assert!(!format!("{material:?}").contains("super-secret-token"));
     assert!(!format!("{material:?}").contains("v7"));
     assert_eq!(material.to_string(), "<redacted-secret>");
+
+    fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    requires_zeroize_on_drop::<SecretMaterial>();
 }
 
 #[test]
@@ -97,7 +100,7 @@ fn secret_provider_contract_resolves_reference_by_purpose_without_raw_domain_sec
         ))
         .unwrap();
 
-    assert_eq!(material.expose_secret(), b"resolved-token");
+    material.with_exposed_secret(|secret| assert_eq!(secret, b"resolved-token"));
     assert_eq!(material.version(), Some("v2"));
 }
 

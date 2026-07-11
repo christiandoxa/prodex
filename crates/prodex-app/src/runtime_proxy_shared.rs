@@ -139,10 +139,32 @@ pub(super) enum RuntimePrefetchSendOutcome {
     TimedOut { message: String },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RuntimePrefetchConfig {
+    pub(super) retry_delay_ms: u64,
+    pub(super) timeout_ms: u64,
+    pub(super) max_buffered_bytes: usize,
+    pub(super) lookahead_timeout_ms: u64,
+    pub(super) stream_idle_timeout_ms: u64,
+}
+
+impl Default for RuntimePrefetchConfig {
+    fn default() -> Self {
+        Self {
+            retry_delay_ms: RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS,
+            timeout_ms: RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS,
+            max_buffered_bytes: RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES,
+            lookahead_timeout_ms: RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
+            stream_idle_timeout_ms: RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct RuntimePrefetchSharedState {
     pub(super) terminal_error: Mutex<Option<(io::ErrorKind, String)>>,
     pub(super) queued_bytes: AtomicUsize,
+    pub(super) config: RuntimePrefetchConfig,
 }
 
 pub(super) struct RuntimePrefetchStream {

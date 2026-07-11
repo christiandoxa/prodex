@@ -99,15 +99,15 @@ pub(super) fn respond_runtime_gemini_rewrite(
                 );
             })
         };
-        let body: Box<dyn Read + Send> =
-            Box::new(RuntimeGeminiGenerateSseReader::new_with_observer(
-                body,
-                request_id,
-                conversation_messages,
-                shared.gemini_conversations.clone(),
-                binding_recorder,
-                Some(observer),
-            ));
+        let body: Box<dyn Read + Send> = Box::new(RuntimeGeminiGenerateSseReader::new_with_config(
+            body,
+            request_id,
+            conversation_messages,
+            shared.gemini_conversations.clone(),
+            binding_recorder,
+            Some(observer),
+            shared.runtime_shared.runtime_config.gemini.clone(),
+        ));
         let body = runtime_gateway_spend_stream_body(
             runtime_gateway_guardrail_stream_body(body, request_id, shared),
             request_id,

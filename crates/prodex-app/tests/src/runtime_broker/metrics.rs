@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime_broker_test_secret;
 
 fn temp_log_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -57,6 +58,7 @@ fn test_runtime_broker_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
     };
 
     RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder()
@@ -116,8 +118,8 @@ fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_cou
             current_profile: "main".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
+            admin_token: runtime_broker_test_secret("secret"),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,
@@ -172,8 +174,8 @@ fn runtime_broker_metrics_snapshot_counts_pending_live_reasons_once() {
             current_profile: "main".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
+            admin_token: runtime_broker_test_secret("secret"),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,

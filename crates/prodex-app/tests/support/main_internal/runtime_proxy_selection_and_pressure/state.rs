@@ -82,6 +82,7 @@ fn merge_runtime_usage_snapshots_keeps_newer_entries() {
 fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
     let temp_dir = TestDir::isolated();
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),

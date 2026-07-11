@@ -1,9 +1,7 @@
 use super::{
     RUNTIME_PROXY_PREFETCH_MAX_CHUNK_BYTES, RUNTIME_PROXY_PREFETCH_QUEUE_CAPACITY,
     RuntimePrefetchChunk, RuntimePrefetchSendOutcome, RuntimePrefetchSharedState,
-    runtime_proxy_log_to_path, runtime_proxy_prefetch_backpressure_retry_ms,
-    runtime_proxy_prefetch_backpressure_timeout_ms, runtime_proxy_prefetch_max_buffered_bytes,
-    runtime_reqwest_error_kind,
+    runtime_proxy_log_to_path, runtime_reqwest_error_kind,
 };
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
@@ -57,9 +55,9 @@ async fn runtime_prefetch_send_with_wait(
     chunk: Vec<u8>,
 ) -> RuntimePrefetchSendOutcome {
     let started_at = Instant::now();
-    let retry_delay = Duration::from_millis(runtime_proxy_prefetch_backpressure_retry_ms());
-    let timeout = Duration::from_millis(runtime_proxy_prefetch_backpressure_timeout_ms());
-    let buffered_limit = runtime_proxy_prefetch_max_buffered_bytes().max(1);
+    let retry_delay = Duration::from_millis(shared.config.retry_delay_ms);
+    let timeout = Duration::from_millis(shared.config.timeout_ms);
+    let buffered_limit = shared.config.max_buffered_bytes.max(1);
     let mut pending = RuntimePrefetchChunk::Data(chunk);
     let mut retries = 0usize;
     loop {

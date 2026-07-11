@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::*;
 
@@ -11,8 +12,8 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
         current_profile: "main".to_string(),
         include_code_review: false,
         upstream_no_proxy: false,
-        instance_token: "instance".to_string(),
-        admin_token: "admin".to_string(),
+        instance_id: "instance".to_string(),
+        admin_token: Arc::new(RuntimeBrokerSecret::new("admin").unwrap()),
         prodex_version: Some("0.7.0".to_string()),
         executable_path: Some("/tmp/prodex".to_string()),
         executable_sha256: Some("abc123".to_string()),

@@ -108,7 +108,7 @@ pub(crate) fn schedule_runtime_startup_probe_warmup(shared: &RuntimeRotationProx
         return;
     }
 
-    let sync_limit = runtime_startup_sync_probe_warm_limit();
+    let sync_limit = shared.runtime_config.startup_sync_probe_warm_limit;
     let sync_count = if cfg!(test) {
         refresh_jobs.len()
     } else {

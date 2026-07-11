@@ -47,9 +47,6 @@ pub(super) fn write_auth_json_with_tokens(
     refresh_token: Option<&str>,
     last_refresh: Option<&str>,
 ) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("failed to create auth parent dir");
-    }
     let mut auth_json = serde_json::json!({
         "tokens": {
             "access_token": access_token,
@@ -62,7 +59,9 @@ pub(super) fn write_auth_json_with_tokens(
     if let Some(last_refresh) = last_refresh {
         auth_json["last_refresh"] = serde_json::Value::String(last_refresh.to_string());
     }
-    fs::write(path, auth_json.to_string()).expect("failed to write auth.json");
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(path), auth_json.to_string())
+        .expect("failed to write auth.json");
 }
 
 pub(super) fn fake_jwt_with_exp(exp: i64) -> String {

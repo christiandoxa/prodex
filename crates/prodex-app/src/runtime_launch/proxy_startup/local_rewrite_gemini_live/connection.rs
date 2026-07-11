@@ -12,17 +12,15 @@ use tungstenite::client::IntoClientRequest;
 
 pub(super) fn runtime_gemini_live_connect(
     auth: &RuntimeGeminiAuth,
+    configured_endpoint: Option<&str>,
 ) -> Result<RuntimeUpstreamWebSocket> {
-    let endpoint = std::env::var("PRODEX_GEMINI_LIVE_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| GEMINI_LIVE_WEBSOCKET_URL.to_string());
+    let endpoint = configured_endpoint.unwrap_or(GEMINI_LIVE_WEBSOCKET_URL);
     let url = match auth {
         RuntimeGeminiAuth::ApiKey { api_key } => {
             let separator = if endpoint.contains('?') { '&' } else { '?' };
             format!("{endpoint}{separator}key={api_key}")
         }
-        RuntimeGeminiAuth::OAuth { .. } => endpoint,
+        RuntimeGeminiAuth::OAuth { .. } => endpoint.to_string(),
     };
     let mut request = url
         .into_client_request()

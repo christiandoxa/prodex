@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 #[test]
 fn registry_builds_admin_urls_and_matches_launch_config() {
@@ -31,11 +32,11 @@ fn registry_json_defaults_smart_context_disabled() {
             "upstream_base_url": "https://upstream.example",
             "include_code_review": true,
             "current_profile": "work",
-            "instance_token": "broker-token",
-            "admin_token": "admin-token"
+            "instance_id": "broker-instance",
+            "future_metadata": true
         }"#,
     )
-    .expect("legacy registry should deserialize");
+    .expect("registry should deserialize");
 
     assert!(!registry.smart_context_enabled);
     assert!(registry.matches_launch_config("https://upstream.example", true, false, false));
@@ -67,12 +68,17 @@ fn registry_helpers_format_mount_paths_targets_and_startup_grace() {
 
 #[test]
 fn admin_helpers_plan_errors_and_activation_success() {
+    let secret = RuntimeBrokerSecret::new("secret").unwrap();
     assert_eq!(
-        runtime_broker_validate_admin_token(Some("secret"), "secret"),
+        runtime_broker_validate_admin_token(Some("secret"), &secret),
         Ok(())
     );
     assert_eq!(
-        runtime_broker_validate_admin_token(None, "secret"),
+        runtime_broker_validate_admin_token(None, &secret),
+        Err(runtime_broker_admin_forbidden_error())
+    );
+    assert_eq!(
+        runtime_broker_validate_admin_token(Some("secret-extra"), &secret),
         Err(runtime_broker_admin_forbidden_error())
     );
     assert_eq!(
@@ -118,8 +124,8 @@ fn health_from_metadata_preserves_identity_fields() {
         current_profile: "work".to_string(),
         include_code_review: true,
         upstream_no_proxy: false,
-        instance_token: "broker-token".to_string(),
-        admin_token: "admin-token".to_string(),
+        instance_id: "broker-token".to_string(),
+        admin_token: Arc::new(RuntimeBrokerSecret::new("admin-token").unwrap()),
         prodex_version: Some("0.7.0".to_string()),
         executable_path: Some("/tmp/prodex".to_string()),
         executable_sha256: Some("abc123".to_string()),
@@ -132,6 +138,69 @@ fn health_from_metadata_preserves_identity_fields() {
     assert_eq!(health.persistence_role, "owner");
     assert_eq!(health.current_profile, "work");
     assert_eq!(health.executable_sha256.as_deref(), Some("abc123"));
+    let payload = serde_json::to_value(&health).unwrap();
+    assert_eq!(
+        payload,
+        serde_json::json!({
+            "pid": 42,
+            "started_at": 100,
+            "current_profile": "work",
+            "include_code_review": true,
+            "active_requests": 3,
+            "instance_id": "broker-token",
+            "persistence_role": "owner",
+            "prodex_version": "0.7.0",
+            "executable_path": "/tmp/prodex",
+            "executable_sha256": "abc123"
+        })
+    );
+    let serialized = payload.to_string();
+    let debug = format!("{metadata:?}");
+    assert!(!serialized.contains("admin-token"));
+    assert!(!serialized.contains("admin_token"));
+    assert!(!debug.contains("admin-token"));
+}
+
+#[test]
+fn registry_backup_payload_snapshot_contains_metadata_only() {
+    let payload = serde_json::to_value(test_registry()).unwrap();
+    assert_eq!(
+        payload,
+        serde_json::json!({
+            "pid": 42,
+            "listen_addr": "127.0.0.1:4567",
+            "started_at": 100,
+            "upstream_base_url": "https://upstream.example",
+            "include_code_review": true,
+            "upstream_no_proxy": false,
+            "smart_context_enabled": false,
+            "current_profile": "work",
+            "instance_id": "broker-token",
+            "prodex_version": "0.7.0",
+            "executable_path": "/tmp/prodex",
+            "executable_sha256": "abc123",
+            "openai_mount_path": "/backend-api/prodex"
+        })
+    );
+    let serialized = payload.to_string();
+
+    assert!(!serialized.contains("admin-token"));
+    assert!(!serialized.contains("admin_token"));
+    assert!(!serialized.contains("instance_token"));
+    assert!(serialized.contains("broker-token"));
+}
+
+#[test]
+fn legacy_registry_secret_fields_are_detected() {
+    assert!(runtime_broker_registry_contains_legacy_secrets(
+        br#"{"admin_token":"secret"}"#.to_vec()
+    ));
+    assert!(runtime_broker_registry_contains_legacy_secrets(
+        br#"{"instance_token":"secret"}"#.to_vec()
+    ));
+    assert!(!runtime_broker_registry_contains_legacy_secrets(
+        br#"{"instance_id":"public"}"#.to_vec()
+    ));
 }
 
 #[test]
@@ -149,7 +218,7 @@ fn registry_reuse_decision_requires_launch_match_and_matching_health() {
         current_profile: registry.current_profile.clone(),
         include_code_review: registry.include_code_review,
         active_requests: 0,
-        instance_token: registry.instance_token.clone(),
+        instance_id: registry.instance_id.clone(),
         persistence_role: "owner".to_string(),
         prodex_version: registry.prodex_version.clone(),
         executable_path: registry.executable_path.clone(),

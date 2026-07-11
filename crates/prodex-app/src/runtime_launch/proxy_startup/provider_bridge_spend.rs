@@ -1,5 +1,5 @@
 use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_label};
-use prodex_domain::{CallId, RequestId};
+use prodex_domain::{CallId, RequestId, ReservationReconciliationReason};
 use prodex_provider_core::{
     ProviderModelCost, calculate_cost_microusd, estimate_request_input_tokens,
     estimate_text_tokens, extract_usage_tokens, microusd_to_usd,
@@ -51,6 +51,7 @@ pub(super) fn runtime_provider_gateway_spend_event(
         input_tokens,
         output_tokens,
         cost_usd,
+        reconciliation_reason: None,
         sink: "runtime-log".to_string(),
     }
 }
@@ -129,6 +130,7 @@ pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(
         input_tokens,
         output_tokens,
         cost_usd,
+        reconciliation_reason: Some(ReservationReconciliationReason::Completed),
         sink: "runtime-log".to_string(),
     }
 }
@@ -156,6 +158,7 @@ pub(super) struct RuntimeProviderGatewaySpendEvent {
     pub(super) input_tokens: Option<u64>,
     pub(super) output_tokens: Option<u64>,
     pub(super) cost_usd: Option<f64>,
+    pub(super) reconciliation_reason: Option<ReservationReconciliationReason>,
     pub(super) sink: String,
 }
 
@@ -180,6 +183,7 @@ impl fmt::Debug for RuntimeProviderGatewaySpendEvent {
             .field("input_tokens", &redacted_option(&self.input_tokens))
             .field("output_tokens", &redacted_option(&self.output_tokens))
             .field("cost_usd", &redacted_option(&self.cost_usd))
+            .field("reconciliation_reason", &self.reconciliation_reason)
             .field("sink", &self.sink)
             .finish()
     }
@@ -215,6 +219,18 @@ impl RuntimeProviderGatewaySpendEvent {
                 runtime_proxy_log_field("input_tokens", optional_u64_label(self.input_tokens)),
                 runtime_proxy_log_field("output_tokens", optional_u64_label(self.output_tokens)),
                 runtime_proxy_log_field("cost_usd", optional_f64_label(self.cost_usd)),
+                runtime_proxy_log_field(
+                    "reconciliation_reason",
+                    self.reconciliation_reason
+                        .map(|reason| match reason {
+                            ReservationReconciliationReason::Completed => "completed",
+                            ReservationReconciliationReason::Cancelled => "cancelled",
+                            ReservationReconciliationReason::StreamInterrupted => {
+                                "stream_interrupted"
+                            }
+                        })
+                        .unwrap_or("none"),
+                ),
                 runtime_proxy_log_field("sink", self.sink.as_str()),
             ],
         )
@@ -292,6 +308,7 @@ mod tests {
             input_tokens: Some(345),
             output_tokens: Some(678),
             cost_usd: Some(0.12345678),
+            reconciliation_reason: Some(ReservationReconciliationReason::Completed),
             sink: "runtime-log".to_string(),
         };
         let rendered = format!("{event:?}");

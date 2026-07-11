@@ -245,7 +245,11 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
     let started_at = Instant::now();
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
-    let budget = runtime_proxy_admission_wait_budget(path, pressure_mode);
+    let budget = runtime_proxy_admission_wait_budget_with_config(
+        path,
+        pressure_mode,
+        &shared.runtime_config,
+    );
     let mut waited = false;
     loop {
         match probe_runtime_proxy_active_request_slot(shared, transport, path, request) {
@@ -330,7 +334,11 @@ where
     let started_at = Instant::now();
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_request_path(shared, path, transport == "websocket");
-    let budget = runtime_proxy_long_lived_queue_wait_budget(path, pressure_mode);
+    let budget = runtime_proxy_long_lived_queue_wait_budget_with_config(
+        path,
+        pressure_mode,
+        &shared.runtime_config,
+    );
     let mut waited = false;
     loop {
         match try_enqueue(item) {

@@ -17,3 +17,6 @@ redis = { workspace = true, features = ["connection-manager", "tokio-rustls-comp
 [dev-dependencies]
 prodex_domain = { workspace = true }
 tokio = { workspace = true }
+
+[lints]
+workspace = true

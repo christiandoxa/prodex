@@ -71,12 +71,12 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
     let second_home = root.join("profiles").join("second");
     fs::create_dir_all(&main_home).unwrap();
     fs::create_dir_all(&second_home).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&main_home),
         r#"{"tokens":{"access_token":"main-token","account_id":"main-account"}}"#,
     )
     .unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&second_home),
         r#"{"tokens":{"access_token":"second-token","account_id":"second-account"}}"#,
     )
@@ -203,12 +203,12 @@ fn run_strategy_skips_goal_resume_relaunch_when_goal_is_complete() {
     let second_home = root.join("profiles").join("second");
     fs::create_dir_all(&main_home).unwrap();
     fs::create_dir_all(&second_home).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&main_home),
         r#"{"tokens":{"access_token":"main-token","account_id":"main-account"}}"#,
     )
     .unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&second_home),
         r#"{"tokens":{"access_token":"second-token","account_id":"second-account"}}"#,
     )
@@ -320,12 +320,12 @@ fn run_strategy_relaunch_after_child_exit_appends_goal_resume_and_releases_bindi
     let second_home = root.join("profiles").join("second");
     fs::create_dir_all(&main_home).unwrap();
     fs::create_dir_all(&second_home).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&main_home),
         r#"{"tokens":{"access_token":"main-token","account_id":"main-account"}}"#,
     )
     .unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&second_home),
         r#"{"tokens":{"access_token":"second-token","account_id":"second-account"}}"#,
     )
@@ -759,7 +759,7 @@ fn run_strategy_repairs_resume_session_in_selected_profile_home_before_codex_lau
     fs::create_dir_all(&sessions).unwrap();
     fs::create_dir_all(&other_sessions).unwrap();
     fs::create_dir_all(&orphan_sessions).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&profile_home),
         r#"{"tokens":{"access_token":"profile-token"}}"#,
     )
@@ -865,7 +865,7 @@ fn run_strategy_skips_symlink_managed_profile_home_during_resume_repair() {
     let outside_sessions = outside_home.join("sessions/2026/06/13");
     fs::create_dir_all(&primary_home).unwrap();
     fs::create_dir_all(&outside_sessions).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&primary_home),
         r#"{"tokens":{"access_token":"profile-token"}}"#,
     )
@@ -1000,7 +1000,7 @@ fn run_strategy_repairs_resume_session_in_managed_profile_after_shared_migration
     let profile_home = root.join("profiles").join("em2015-139.com");
     let sessions = profile_home.join("sessions/2026/06/14");
     fs::create_dir_all(&sessions).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&profile_home),
         r#"{"tokens":{"access_token":"profile-token"}}"#,
     )

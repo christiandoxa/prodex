@@ -10,7 +10,8 @@ pub(crate) fn runtime_has_route_eligible_quota_fallback(
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let allow_disk_auth_fallback =
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
-    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let inflight_soft_limit =
+        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let disk_fallback_profiles = {
         let mut runtime = shared
             .runtime
@@ -18,18 +19,18 @@ pub(crate) fn runtime_has_route_eligible_quota_fallback(
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         let mut disk_fallback_profiles = Vec::new();
-        for profile in runtime_profile_selection_catalog(&runtime).entries {
-            if profile.name == profile_name || excluded_profiles.contains(&profile.name) {
+        for (candidate_name, profile) in &runtime.state.profiles {
+            if candidate_name == profile_name || excluded_profiles.contains(candidate_name) {
                 continue;
             }
             let auth_failure_active = runtime_profile_auth_failure_active_with_auth_cache(
                 &runtime.profile_health,
                 &runtime.profile_usage_auth,
-                &profile.name,
+                candidate_name,
                 now,
             );
             let in_selection_backoff = runtime_profile_name_in_selection_backoff(
-                &profile.name,
+                candidate_name,
                 &runtime.profile_retry_backoff_until,
                 &runtime.profile_transport_backoff_until,
                 &runtime.profile_route_circuit_open_until,
@@ -37,19 +38,21 @@ pub(crate) fn runtime_has_route_eligible_quota_fallback(
                 now,
             );
             let inflight_count =
-                runtime_profile_inflight_sort_key(&profile.name, &runtime.profile_inflight);
+                runtime_profile_inflight_sort_key(candidate_name, &runtime.profile_inflight);
             if auth_failure_active || in_selection_backoff || inflight_count >= inflight_soft_limit
             {
                 continue;
             }
             match runtime_profile_cached_auth_summary_from_maps_for_selection(
-                &profile.name,
+                candidate_name,
                 &runtime.profile_usage_auth,
                 &runtime.profile_probe_cache,
             ) {
                 Some(summary) if summary.quota_compatible => return Ok(true),
                 Some(_) => {}
-                None if allow_disk_auth_fallback => disk_fallback_profiles.push(profile.codex_home),
+                None if allow_disk_auth_fallback => {
+                    disk_fallback_profiles.push(profile.codex_home.clone());
+                }
                 None => {}
             }
         }

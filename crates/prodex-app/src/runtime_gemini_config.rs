@@ -11,6 +11,7 @@ use prodex_runtime_gemini::{
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -343,8 +344,7 @@ fn write_gemini_model_catalog(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<PathBuf> {
-    fs::create_dir_all(codex_home)
-        .with_context(|| format!("failed to create {}", codex_home.display()))?;
+    crate::create_codex_home_if_missing(codex_home)?;
     let catalog_path = codex_home.join(GEMINI_MODEL_CATALOG_FILE);
     let catalog = json!({
         "models": gemini_catalog_models(

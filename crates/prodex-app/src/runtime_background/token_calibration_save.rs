@@ -1,7 +1,4 @@
-use super::{
-    runtime_allocator_trim_best_effort, runtime_proxy_log_to_path,
-    worker_spawn::spawn_runtime_background_worker_or_log,
-};
+use super::{runtime_proxy_log_to_path, worker_spawn::spawn_runtime_background_worker_or_log};
 use anyhow::{Context, Result};
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
@@ -142,7 +139,6 @@ fn runtime_smart_context_token_calibration_save_worker_loop(
                 ),
             ),
         }
-        runtime_allocator_trim_best_effort();
     }
 }
 

@@ -3,8 +3,15 @@ use super::local_rewrite_gateway_keys::RuntimeGatewayDurableReservationError;
 
 pub(super) fn runtime_gateway_postgres_reserve_usage(
     shared: &RuntimeLocalRewriteProxyShared,
+    plan: &prodex_storage_postgres::PostgresAtomicReservationSqlPlan,
     command: prodex_storage::AtomicReservationCommand,
 ) -> Result<(), RuntimeGatewayDurableReservationError> {
+    if plan.tenant_id != command.request.tenant_id
+        || plan.storage_key != command.storage_key
+        || plan.idempotency_key != command.idempotency_key
+    {
+        return Err(RuntimeGatewayDurableReservationError::Failed);
+    }
     let repository = shared
         .gateway_postgres_repository
         .as_ref()

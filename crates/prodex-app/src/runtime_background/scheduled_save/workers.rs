@@ -86,7 +86,6 @@ pub(crate) fn runtime_state_save_worker_loop(queue: Arc<RuntimeStateSaveQueue>) 
                     ),
                 ),
             }
-            runtime_allocator_trim_best_effort();
         },
     )
 }
@@ -152,7 +151,6 @@ pub(crate) fn runtime_continuation_journal_save_worker_loop(
                     ),
                 ),
             }
-            runtime_allocator_trim_best_effort();
         },
     )
 }
@@ -207,19 +205,6 @@ pub(crate) fn runtime_smart_context_artifact_save_worker_loop(
                     ),
                 ),
             }
-            runtime_allocator_trim_best_effort();
         },
     )
-}
-
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
-unsafe extern "C" {
-    fn malloc_trim(pad: usize) -> i32;
-}
-
-pub(crate) fn runtime_allocator_trim_best_effort() {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    unsafe {
-        let _ = malloc_trim(0);
-    }
 }

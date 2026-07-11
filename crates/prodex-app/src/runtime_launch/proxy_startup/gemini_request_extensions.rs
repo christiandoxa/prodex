@@ -3,6 +3,7 @@ use super::gemini_request::{
     runtime_gemini_config_dir,
 };
 use super::gemini_request_io::runtime_gemini_read_text_limited;
+use crate::RuntimeGeminiConfig;
 use prodex_provider_core::gemini_provider_core_collect_string_values;
 use std::collections::BTreeSet;
 use std::env;
@@ -16,19 +17,34 @@ pub(super) struct RuntimeGeminiExtensionManifest {
     pub(super) value: serde_json::Value,
 }
 
-pub(super) fn runtime_gemini_extension_context_files() -> Vec<PathBuf> {
-    let roots = runtime_gemini_extension_roots();
+pub(super) fn runtime_gemini_extension_context_files(config: &RuntimeGeminiConfig) -> Vec<PathBuf> {
+    let roots = runtime_gemini_extension_roots(config);
     let cwd = env::current_dir().ok();
-    runtime_gemini_extension_context_files_from_roots(&roots, cwd.as_deref())
+    runtime_gemini_extension_context_files_from_roots_with_config(
+        &roots,
+        cwd.as_deref(),
+        Some(config),
+    )
 }
 
+#[cfg(test)]
 pub(super) fn runtime_gemini_extension_context_files_from_roots(
     roots: &[PathBuf],
     cwd: Option<&Path>,
 ) -> Vec<PathBuf> {
+    runtime_gemini_extension_context_files_from_roots_with_config(roots, cwd, None)
+}
+
+fn runtime_gemini_extension_context_files_from_roots_with_config(
+    roots: &[PathBuf],
+    cwd: Option<&Path>,
+    config: Option<&RuntimeGeminiConfig>,
+) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
-    for extension in runtime_gemini_active_extension_manifests_from_roots(roots, cwd) {
+    for extension in
+        runtime_gemini_active_extension_manifests_from_roots_with_config(roots, cwd, config)
+    {
         for name in runtime_gemini_extension_context_file_names(&extension.value) {
             let Some(path) = runtime_gemini_safe_extension_path(&extension.directory, &name) else {
                 continue;
@@ -46,15 +62,30 @@ pub(super) fn runtime_gemini_extension_context_files_from_roots(
     paths
 }
 
-pub(super) fn runtime_gemini_active_extension_manifests() -> Vec<RuntimeGeminiExtensionManifest> {
-    let roots = runtime_gemini_extension_roots();
+pub(super) fn runtime_gemini_active_extension_manifests(
+    config: &RuntimeGeminiConfig,
+) -> Vec<RuntimeGeminiExtensionManifest> {
+    let roots = runtime_gemini_extension_roots(config);
     let cwd = env::current_dir().ok();
-    runtime_gemini_active_extension_manifests_from_roots(&roots, cwd.as_deref())
+    runtime_gemini_active_extension_manifests_from_roots_with_config(
+        &roots,
+        cwd.as_deref(),
+        Some(config),
+    )
 }
 
+#[cfg(test)]
 pub(super) fn runtime_gemini_active_extension_manifests_from_roots(
     roots: &[PathBuf],
     cwd: Option<&Path>,
+) -> Vec<RuntimeGeminiExtensionManifest> {
+    runtime_gemini_active_extension_manifests_from_roots_with_config(roots, cwd, None)
+}
+
+fn runtime_gemini_active_extension_manifests_from_roots_with_config(
+    roots: &[PathBuf],
+    cwd: Option<&Path>,
+    config: Option<&RuntimeGeminiConfig>,
 ) -> Vec<RuntimeGeminiExtensionManifest> {
     let mut manifests = Vec::new();
     let mut seen = BTreeSet::new();
@@ -63,7 +94,8 @@ pub(super) fn runtime_gemini_active_extension_manifests_from_roots(
             break;
         }
         if root.join("gemini-extension.json").is_file() {
-            if let Some(manifest) = runtime_gemini_load_extension_manifest(root, root.parent(), cwd)
+            if let Some(manifest) =
+                runtime_gemini_load_extension_manifest(root, root.parent(), cwd, config)
                 && seen.insert(manifest.name.to_ascii_lowercase())
             {
                 manifests.push(manifest);
@@ -82,7 +114,7 @@ pub(super) fn runtime_gemini_active_extension_manifests_from_roots(
                 continue;
             }
             if let Some(manifest) =
-                runtime_gemini_load_extension_manifest(&directory, Some(root), cwd)
+                runtime_gemini_load_extension_manifest(&directory, Some(root), cwd, config)
                 && seen.insert(manifest.name.to_ascii_lowercase())
             {
                 manifests.push(manifest);
@@ -97,6 +129,7 @@ fn runtime_gemini_load_extension_manifest(
     directory: &Path,
     root: Option<&Path>,
     cwd: Option<&Path>,
+    config: Option<&RuntimeGeminiConfig>,
 ) -> Option<RuntimeGeminiExtensionManifest> {
     let text = runtime_gemini_read_text_limited(
         &directory.join("gemini-extension.json"),
@@ -117,7 +150,7 @@ fn runtime_gemini_load_extension_manifest(
     let root = root
         .map(Path::to_path_buf)
         .unwrap_or_else(|| directory.parent().unwrap_or(directory).to_path_buf());
-    if !runtime_gemini_extension_is_enabled(&name, cwd, &root) {
+    if !runtime_gemini_extension_is_enabled(&name, cwd, &root, config) {
         return None;
     }
     Some(RuntimeGeminiExtensionManifest {
@@ -127,11 +160,8 @@ fn runtime_gemini_load_extension_manifest(
     })
 }
 
-fn runtime_gemini_extension_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(configured) = env::var_os("PRODEX_GEMINI_EXTENSION_DIRS") {
-        roots.extend(env::split_paths(&configured));
-    }
+fn runtime_gemini_extension_roots(config: &RuntimeGeminiConfig) -> Vec<PathBuf> {
+    let mut roots = config.extension_dirs.clone();
     if let Some(gemini_home) = runtime_gemini_config_dir() {
         roots.push(gemini_home.join("extensions"));
     }
@@ -173,8 +203,9 @@ fn runtime_gemini_extension_is_enabled(
     name: &str,
     cwd: Option<&Path>,
     extension_root: &Path,
+    config: Option<&RuntimeGeminiConfig>,
 ) -> bool {
-    if let Some(enabled) = runtime_gemini_extension_name_override(name) {
+    if let Some(enabled) = config.and_then(|config| config.extension_enabled_override(name)) {
         return enabled;
     }
     let Some(cwd) = cwd else {
@@ -202,28 +233,6 @@ fn runtime_gemini_extension_is_enabled(
         }
     }
     enabled
-}
-
-fn runtime_gemini_extension_name_override(name: &str) -> Option<bool> {
-    let value = env::var("PRODEX_GEMINI_EXTENSIONS").ok()?;
-    let requested = value
-        .split([',', ';', ' ', '\n', '\t'])
-        .filter_map(|item| {
-            let item = item.trim().to_ascii_lowercase();
-            (!item.is_empty()).then_some(item)
-        })
-        .collect::<Vec<_>>();
-    if requested.is_empty() {
-        return None;
-    }
-    if requested.len() == 1 && requested[0] == "none" {
-        return Some(false);
-    }
-    Some(
-        requested
-            .iter()
-            .any(|item| item == &name.to_ascii_lowercase()),
-    )
 }
 
 fn runtime_gemini_extension_override_matches(rule: &str, cwd: &Path) -> Option<bool> {

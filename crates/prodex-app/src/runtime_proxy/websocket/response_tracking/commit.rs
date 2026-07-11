@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::time::Duration;
 
-use crate::{runtime_proxy_stream_idle_timeout_ms, runtime_set_upstream_websocket_io_timeout};
+use crate::runtime_set_upstream_websocket_io_timeout;
 
 use super::{
     RuntimeBufferedWebsocketTextFrame, RuntimeLocalWebSocket, RuntimeRotationProxyShared,
@@ -51,7 +51,9 @@ pub(crate) fn commit_runtime_websocket_attempt(
 
     runtime_set_upstream_websocket_io_timeout(
         upstream_socket,
-        Some(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms())),
+        Some(Duration::from_millis(
+            shared.runtime_config.tuning.stream_idle_timeout_ms,
+        )),
     )
     .context("failed to restore runtime websocket idle timeout")?;
     remember_runtime_session_id(

@@ -12,3 +12,6 @@ path = "src/lib.rs"
 
 [dependencies]
 toml = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,6 +1,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct SecretRef {
@@ -97,26 +98,40 @@ pub enum SecretPurpose {
     BreakGlassCredential,
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Owned secret bytes are erased on drop and can only be borrowed inside a
+/// caller-provided closure.
+///
+/// ```compile_fail
+/// use prodex_domain::SecretMaterial;
+/// let material = SecretMaterial::new("secret", None::<String>);
+/// let _copy = material.clone();
+/// ```
+///
+/// ```compile_fail
+/// fn requires_serialize<T: serde::Serialize>() {}
+/// requires_serialize::<prodex_domain::SecretMaterial>();
+/// ```
 pub struct SecretMaterial {
-    bytes: Vec<u8>,
-    version: Option<String>,
+    bytes: Zeroizing<Vec<u8>>,
+    version: Option<Zeroizing<String>>,
 }
+
+impl ZeroizeOnDrop for SecretMaterial {}
 
 impl SecretMaterial {
     pub fn new(bytes: impl Into<Vec<u8>>, version: Option<impl Into<String>>) -> Self {
         Self {
-            bytes: bytes.into(),
-            version: version.map(Into::into),
+            bytes: Zeroizing::new(bytes.into()),
+            version: version.map(|value| Zeroizing::new(value.into())),
         }
     }
 
-    pub fn expose_secret(&self) -> &[u8] {
-        &self.bytes
+    pub fn with_exposed_secret<T>(&self, expose: impl FnOnce(&[u8]) -> T) -> T {
+        expose(self.bytes.as_slice())
     }
 
     pub fn version(&self) -> Option<&str> {
-        self.version.as_deref()
+        self.version.as_ref().map(|version| version.as_str())
     }
 }
 
@@ -124,7 +139,7 @@ impl fmt::Debug for SecretMaterial {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SecretMaterial")
             .field("bytes", &"<redacted>")
-            .field("version", &self.version.as_deref().map(|_| "<redacted>"))
+            .field("version", &self.version.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }

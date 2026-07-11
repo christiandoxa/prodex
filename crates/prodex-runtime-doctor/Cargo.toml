@@ -19,3 +19,6 @@ runtime_proxy_crate = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 terminal_ui = { workspace = true }
+
+[lints]
+workspace = true

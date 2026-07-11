@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::Local;
+use prodex_runtime_broker::{RuntimeBrokerBootstrap, read_runtime_broker_bootstrap};
 use redaction::redaction_redact_secret_like_text;
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -12,27 +13,30 @@ use crate::{
     RuntimeBrokerRegistry, RuntimeRotationProxy, RuntimeRotationProxyStartOptions,
     audit_log_event_best_effort, cleanup_runtime_broker_stale_leases,
     register_runtime_broker_metadata, register_runtime_proxy_persistence_mode,
-    remove_runtime_broker_registry_if_token_matches, runtime_broker_startup_grace_seconds,
+    remove_runtime_broker_capability_if_matches,
+    remove_runtime_broker_registry_if_instance_matches, runtime_broker_startup_grace_seconds,
     runtime_current_prodex_version_identity, runtime_proxy_log_to_path,
-    runtime_upstream_proxy_mode_label, save_runtime_broker_registry,
-    start_runtime_rotation_proxy_with_options, try_acquire_runtime_owner_lock,
+    runtime_upstream_proxy_mode_label, save_runtime_broker_capability,
+    save_runtime_broker_registry, start_runtime_rotation_proxy_with_options,
+    try_acquire_runtime_owner_lock,
 };
 
-pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
+pub(crate) fn handle_runtime_broker(_args: RuntimeBrokerArgs) -> Result<()> {
+    let bootstrap = read_runtime_broker_bootstrap(std::io::stdin().lock())?;
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let mut proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
         paths: &paths,
         state: &state,
-        current_profile: &args.current_profile,
-        upstream_base_url: args.upstream_base_url.clone(),
-        include_code_review: args.include_code_review,
-        upstream_no_proxy: args.upstream_no_proxy,
+        current_profile: &bootstrap.current_profile,
+        upstream_base_url: bootstrap.upstream_base_url.clone(),
+        include_code_review: bootstrap.include_code_review,
+        upstream_no_proxy: bootstrap.upstream_no_proxy,
         auto_redeem: false,
-        smart_context_enabled: args.smart_context_enabled,
+        smart_context_enabled: bootstrap.smart_context_enabled,
         presidio_redaction_enabled: false,
-        model_context_window_tokens: args.model_context_window_tokens,
-        preferred_listen_addr: args.listen_addr.as_deref(),
+        model_context_window_tokens: bootstrap.model_context_window_tokens,
+        preferred_listen_addr: bootstrap.listen_addr.as_deref(),
     })?;
     if proxy.owner_lock.is_none() {
         runtime_proxy_log_to_path(
@@ -41,11 +45,14 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
         );
     }
 
-    let metadata = runtime_broker_publish_start(&paths, &args, &proxy)?;
+    let metadata = runtime_broker_publish_start(&paths, &bootstrap, &proxy)?;
 
-    let startup_grace_until = metadata
-        .started_at
-        .saturating_add(runtime_broker_startup_grace_seconds());
+    let startup_grace_until =
+        metadata
+            .started_at
+            .saturating_add(runtime_broker_startup_grace_seconds(
+                proxy.runtime_config.broker_ready_timeout_ms,
+            ));
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
     let lease_scan_interval = Duration::from_millis(
         RUNTIME_BROKER_LEASE_SCAN_INTERVAL_MS.max(RUNTIME_BROKER_POLL_INTERVAL_MS),
@@ -63,7 +70,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
             last_owner_promotion_attempt_at = Instant::now();
         }
         if active_requests == 0 && last_lease_scan_at.elapsed() >= lease_scan_interval {
-            cached_live_leases = cleanup_runtime_broker_stale_leases(&paths, &args.broker_key);
+            cached_live_leases = cleanup_runtime_broker_stale_leases(&paths, &bootstrap.broker_key);
             last_lease_scan_at = Instant::now();
         }
         if cached_live_leases > 0 || active_requests > 0 {
@@ -81,7 +88,7 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
                     &proxy.log_path,
                     &format!(
                         "runtime_broker_idle_shutdown broker_key={} idle_seconds={}",
-                        args.broker_key,
+                        bootstrap.broker_key,
                         now.saturating_sub(*idle_since)
                     ),
                 );
@@ -92,25 +99,35 @@ pub(crate) fn handle_runtime_broker(args: RuntimeBrokerArgs) -> Result<()> {
     }
 
     drop(proxy);
-    remove_runtime_broker_registry_if_token_matches(&paths, &args.broker_key, &args.instance_token);
+    remove_runtime_broker_registry_if_instance_matches(
+        &paths,
+        &bootstrap.broker_key,
+        &bootstrap.instance_id,
+    );
+    remove_runtime_broker_capability_if_matches(
+        &paths,
+        &bootstrap.broker_key,
+        &bootstrap.instance_id,
+        &bootstrap.admin_token,
+    );
     Ok(())
 }
 
 pub(crate) fn runtime_broker_publish_start(
     paths: &AppPaths,
-    args: &RuntimeBrokerArgs,
+    bootstrap: &RuntimeBrokerBootstrap,
     proxy: &RuntimeRotationProxy,
 ) -> Result<RuntimeBrokerMetadata> {
     let current_identity = runtime_current_prodex_version_identity();
     let metadata = RuntimeBrokerMetadata {
-        broker_key: args.broker_key.clone(),
+        broker_key: bootstrap.broker_key.clone(),
         listen_addr: proxy.listen_addr.to_string(),
         started_at: Local::now().timestamp(),
-        current_profile: args.current_profile.clone(),
-        include_code_review: args.include_code_review,
-        upstream_no_proxy: args.upstream_no_proxy,
-        instance_token: args.instance_token.clone(),
-        admin_token: args.admin_token.clone(),
+        current_profile: bootstrap.current_profile.clone(),
+        include_code_review: bootstrap.include_code_review,
+        upstream_no_proxy: bootstrap.upstream_no_proxy,
+        instance_id: bootstrap.instance_id.clone(),
+        admin_token: bootstrap.admin_token.clone(),
         prodex_version: current_identity.prodex_version.clone(),
         executable_path: current_identity
             .executable_path
@@ -118,18 +135,16 @@ pub(crate) fn runtime_broker_publish_start(
             .map(|path| path.display().to_string()),
         executable_sha256: current_identity.executable_sha256.clone(),
     };
-    register_runtime_broker_metadata(&proxy.log_path, metadata.clone());
     let registry = RuntimeBrokerRegistry {
         pid: std::process::id(),
         listen_addr: proxy.listen_addr.to_string(),
         started_at: metadata.started_at,
-        upstream_base_url: args.upstream_base_url.clone(),
-        include_code_review: args.include_code_review,
-        upstream_no_proxy: args.upstream_no_proxy,
-        smart_context_enabled: args.smart_context_enabled,
-        current_profile: args.current_profile.clone(),
-        instance_token: args.instance_token.clone(),
-        admin_token: args.admin_token.clone(),
+        upstream_base_url: bootstrap.upstream_base_url.clone(),
+        include_code_review: bootstrap.include_code_review,
+        upstream_no_proxy: bootstrap.upstream_no_proxy,
+        smart_context_enabled: bootstrap.smart_context_enabled,
+        current_profile: bootstrap.current_profile.clone(),
+        instance_id: bootstrap.instance_id.clone(),
         prodex_version: current_identity.prodex_version.clone(),
         executable_path: current_identity
             .executable_path
@@ -138,17 +153,31 @@ pub(crate) fn runtime_broker_publish_start(
         executable_sha256: current_identity.executable_sha256.clone(),
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
-    save_runtime_broker_registry(paths, &args.broker_key, &registry)?;
+    save_runtime_broker_registry(paths, &bootstrap.broker_key, &registry)?;
+    if let Err(err) = save_runtime_broker_capability(
+        paths,
+        &bootstrap.broker_key,
+        &bootstrap.instance_id,
+        &bootstrap.admin_token,
+    ) {
+        remove_runtime_broker_registry_if_instance_matches(
+            paths,
+            &bootstrap.broker_key,
+            &bootstrap.instance_id,
+        );
+        return Err(err);
+    }
+    register_runtime_broker_metadata(&proxy.log_path, metadata.clone());
     runtime_proxy_log_to_path(
         &proxy.log_path,
         &format!(
             "runtime_broker_started listen_addr={} broker_key={} current_profile={} include_code_review={} smart_context_enabled={} upstream_proxy_mode={} prodex_version={} executable_path={} executable_sha256={}",
             proxy.listen_addr,
-            args.broker_key,
-            args.current_profile,
-            args.include_code_review,
-            args.smart_context_enabled,
-            runtime_upstream_proxy_mode_label(args.upstream_no_proxy),
+            bootstrap.broker_key,
+            bootstrap.current_profile,
+            bootstrap.include_code_review,
+            bootstrap.smart_context_enabled,
+            runtime_upstream_proxy_mode_label(bootstrap.upstream_no_proxy),
             metadata.prodex_version.as_deref().unwrap_or("-"),
             metadata.executable_path.as_deref().unwrap_or("-"),
             metadata.executable_sha256.as_deref().unwrap_or("-")
@@ -159,13 +188,13 @@ pub(crate) fn runtime_broker_publish_start(
         "start",
         "success",
         serde_json::json!({
-            "broker_key": args.broker_key,
+            "broker_key": bootstrap.broker_key,
             "listen_addr": proxy.listen_addr.to_string(),
-            "current_profile": args.current_profile,
-            "include_code_review": args.include_code_review,
-            "smart_context_enabled": args.smart_context_enabled,
-            "upstream_proxy_mode": runtime_upstream_proxy_mode_label(args.upstream_no_proxy),
-            "upstream_base_url": args.upstream_base_url,
+            "current_profile": bootstrap.current_profile,
+            "include_code_review": bootstrap.include_code_review,
+            "smart_context_enabled": bootstrap.smart_context_enabled,
+            "upstream_proxy_mode": runtime_upstream_proxy_mode_label(bootstrap.upstream_no_proxy),
+            "upstream_base_url": bootstrap.upstream_base_url,
             "prodex_version": metadata.prodex_version,
             "executable_path": metadata.executable_path,
             "executable_sha256": metadata.executable_sha256,

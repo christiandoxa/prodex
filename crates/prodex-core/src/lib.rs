@@ -248,6 +248,12 @@ pub fn runtime_broker_artifact_key(name: &str, is_dir: bool) -> Option<&str> {
     {
         return Some(key);
     }
+    if let Some(key) = name
+        .strip_prefix("runtime-broker-")
+        .and_then(|suffix| suffix.strip_suffix(".capability"))
+    {
+        return Some(key);
+    }
     if is_dir {
         return name
             .strip_prefix("runtime-broker-")

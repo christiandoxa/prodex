@@ -21,3 +21,6 @@ redaction = { workspace = true }
 reqwest = { workspace = true }
 runtime_proxy = { workspace = true }
 terminal_ui = { workspace = true }
+
+[lints]
+workspace = true

@@ -13,9 +13,14 @@ path = "src/lib.rs"
 [dependencies]
 aes-gcm-siv = { workspace = true }
 anyhow = { workspace = true }
+argon2 = { workspace = true }
 base64 = { workspace = true }
 getrandom = { workspace = true }
 pbkdf2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+zeroize = { workspace = true }
+
+[lints]
+workspace = true

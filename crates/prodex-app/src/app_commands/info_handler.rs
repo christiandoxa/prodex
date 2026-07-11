@@ -10,26 +10,27 @@ use terminal_ui::{
 };
 
 use crate::{
-    AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, collect_active_runtime_log_paths,
-    collect_info_quota_aggregate, collect_info_runtime_load_summary,
-    collect_info_token_usage_summary, collect_prodex_processes, collect_recent_runtime_log_paths,
-    collect_runtime_broker_metrics_targets, collect_runtime_tuning_snapshot, estimate_info_runway,
-    format_audit_logs_summary, format_info_load_summary, format_info_pool_remaining,
-    format_info_process_summary, format_info_prodex_version,
-    format_info_provider_capabilities_summary, format_info_provider_summary,
-    format_info_quota_data_summary, format_info_runway, format_info_token_usage_summary,
-    format_runtime_broker_metrics_targets, format_runtime_logs_summary,
-    format_runtime_policy_summary, format_runtime_proxy_contract_summary,
-    format_runtime_proxy_preset, format_runtime_tuning_budgets, format_runtime_tuning_transport,
-    format_runtime_tuning_workers, format_secret_backend_summary, print_panel,
-    runtime_policy_summary,
+    AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, RuntimeConfig,
+    collect_active_runtime_log_paths, collect_info_quota_aggregate,
+    collect_info_runtime_load_summary, collect_info_token_usage_summary, collect_prodex_processes,
+    collect_recent_runtime_log_paths, collect_runtime_broker_metrics_targets,
+    collect_runtime_tuning_snapshot, estimate_info_runway, format_audit_logs_summary,
+    format_info_load_summary, format_info_pool_remaining, format_info_process_summary,
+    format_info_prodex_version, format_info_provider_capabilities_summary,
+    format_info_provider_summary, format_info_quota_data_summary, format_info_runway,
+    format_info_token_usage_summary, format_runtime_broker_metrics_targets,
+    format_runtime_logs_summary, format_runtime_policy_summary,
+    format_runtime_proxy_contract_summary, format_runtime_proxy_preset,
+    format_runtime_tuning_budgets, format_runtime_tuning_transport, format_runtime_tuning_workers,
+    format_secret_backend_summary, print_panel, runtime_policy_summary,
 };
 
 pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let policy_summary = runtime_policy_summary()?;
-    let runtime_tuning = collect_runtime_tuning_snapshot();
+    let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths)?;
+    let runtime_tuning = collect_runtime_tuning_snapshot(&runtime_config);
     let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
     let now = Local::now().timestamp();
     let version_summary = format_info_prodex_version(&paths)?;

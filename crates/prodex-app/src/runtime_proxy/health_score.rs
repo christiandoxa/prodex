@@ -2,9 +2,10 @@ use anyhow::Result;
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
+#[cfg(test)]
+use crate::runtime_proxy_profile_inflight_soft_limit;
 use crate::{
     RuntimeProfileHealth, RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind,
-    runtime_proxy_profile_inflight_hard_limit, runtime_proxy_profile_inflight_soft_limit,
 };
 
 fn runtime_route_kind_to_proxy(
@@ -47,7 +48,7 @@ pub(crate) fn runtime_profile_inflight_hard_limited_for_context(
     profile_name: &str,
     context: &str,
 ) -> Result<bool> {
-    let hard_limit = runtime_proxy_profile_inflight_hard_limit();
+    let hard_limit = shared.runtime_config.tuning.profile_inflight_hard_limit;
     let runtime = shared
         .runtime
         .lock()
@@ -218,6 +219,19 @@ pub(crate) fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) 
     ))
 }
 
+pub(crate) fn runtime_profile_inflight_soft_limit_for_shared(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    pressure_mode: bool,
+) -> usize {
+    runtime_proxy_crate::runtime_profile_inflight_soft_limit(
+        runtime_route_kind_to_proxy(route_kind),
+        pressure_mode,
+        shared.runtime_config.tuning.profile_inflight_soft_limit,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn runtime_profile_inflight_soft_limit(
     route_kind: RuntimeRouteKind,
     pressure_mode: bool,

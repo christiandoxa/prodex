@@ -1,4 +1,16 @@
 use super::*;
+use zeroize::Zeroize;
+
+pub fn runtime_broker_registry_contains_legacy_secrets(mut bytes: Vec<u8>) -> bool {
+    let contains = [
+        b"\"instance_token\"".as_slice(),
+        b"\"admin_token\"".as_slice(),
+    ]
+    .into_iter()
+    .any(|field| bytes.windows(field.len()).any(|window| window == field));
+    bytes.zeroize();
+    contains
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeBrokerRegistry {
@@ -12,8 +24,7 @@ pub struct RuntimeBrokerRegistry {
     #[serde(default)]
     pub smart_context_enabled: bool,
     pub current_profile: String,
-    pub instance_token: String,
-    pub admin_token: String,
+    pub instance_id: String,
     #[serde(default)]
     pub prodex_version: Option<String>,
     #[serde(default)]
@@ -66,7 +77,7 @@ pub struct RuntimeBrokerHealth {
     pub current_profile: String,
     pub include_code_review: bool,
     pub active_requests: usize,
-    pub instance_token: String,
+    pub instance_id: String,
     pub persistence_role: String,
     #[serde(default)]
     pub prodex_version: Option<String>,
@@ -89,7 +100,7 @@ impl RuntimeBrokerHealth {
             current_profile: metadata.current_profile.clone(),
             include_code_review: metadata.include_code_review,
             active_requests,
-            instance_token: metadata.instance_token.clone(),
+            instance_id: metadata.instance_id.clone(),
             persistence_role: if persistence_owner {
                 "owner"
             } else {
@@ -103,7 +114,7 @@ impl RuntimeBrokerHealth {
     }
 
     pub fn matches_registry_instance(&self, registry: &RuntimeBrokerRegistry) -> bool {
-        self.instance_token == registry.instance_token
+        self.instance_id == registry.instance_id
     }
 }
 

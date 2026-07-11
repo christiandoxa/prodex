@@ -17,3 +17,6 @@ prodex_observability = { workspace = true }
 prodex_provider_core = { workspace = true }
 prodex_provider_spi = { workspace = true }
 prodex_storage = { workspace = true }
+
+[lints]
+workspace = true

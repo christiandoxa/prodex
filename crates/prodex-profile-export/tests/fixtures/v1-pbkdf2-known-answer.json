@@ -1,0 +1,11 @@
+{
+  "payload_kind": "encrypted",
+  "format": "prodex_profile_export",
+  "version": 1,
+  "cipher": "aes_256_gcm_siv",
+  "kdf": "pbkdf2_sha256",
+  "iterations": 100000,
+  "salt_base64": "AAECAwQFBgcICQoLDA0ODw==",
+  "nonce_base64": "EBESExQVFhcYGRob",
+  "ciphertext_base64": "QoPAA9jsszeKVKsTOJHEN+v8mXCJZKFabRDzkEzCB5k+O7cMo6LkLpFpN1uhlg=="
+}

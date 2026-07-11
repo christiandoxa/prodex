@@ -59,7 +59,7 @@ fn observed_binary_identity_prefers_matching_health_then_registry_then_process()
         current_profile: "work".to_string(),
         include_code_review: true,
         active_requests: 0,
-        instance_token: "broker-token".to_string(),
+        instance_id: "broker-token".to_string(),
         persistence_role: "owner".to_string(),
         prodex_version: Some("0.8.0".to_string()),
         executable_path: None,
@@ -73,7 +73,7 @@ fn observed_binary_identity_prefers_matching_health_then_registry_then_process()
     assert_eq!(observed.executable_sha256.as_deref(), Some("health-sha"));
 
     let mismatched_health = RuntimeBrokerHealth {
-        instance_token: "other-token".to_string(),
+        instance_id: "other-token".to_string(),
         ..health
     };
     let observed = runtime_broker_observed_binary_identity(

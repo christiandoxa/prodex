@@ -192,8 +192,11 @@ fn profile_export_round_trip_preserves_oauth_provider_secret_files() {
     .to_string();
     write_secret_text_file(&gemini_home.join(GEMINI_OAUTH_SECRET_FILE), &gemini_secret)
         .expect("Gemini secret should be written");
-    write_secret_text_file(&anthropic_home.join(CLAUDE_CREDENTIALS_FILE), &claude_secret)
-        .expect("Claude secret should be written");
+    write_secret_text_file(
+        &anthropic_home.join(CLAUDE_CREDENTIALS_FILE),
+        &claude_secret,
+    )
+    .expect("Claude secret should be written");
 
     let source_state = AppState {
         active_profile: Some("gemini-main".to_string()),
@@ -230,9 +233,15 @@ fn profile_export_round_trip_preserves_oauth_provider_secret_files() {
     let payload = build_profile_export_payload(&source_state, &selected_names)
         .expect("provider payload should build");
     assert_eq!(payload.profiles[0].auth_json, "");
-    assert_eq!(payload.profiles[0].secret_files[0].path, GEMINI_OAUTH_SECRET_FILE);
+    assert_eq!(
+        payload.profiles[0].secret_files[0].path,
+        GEMINI_OAUTH_SECRET_FILE
+    );
     assert_eq!(payload.profiles[1].auth_json, "");
-    assert_eq!(payload.profiles[1].secret_files[0].path, CLAUDE_CREDENTIALS_FILE);
+    assert_eq!(
+        payload.profiles[1].secret_files[0].path,
+        CLAUDE_CREDENTIALS_FILE
+    );
 
     let encoded =
         serialize_profile_export_payload(&payload, None).expect("plain export should encode");
@@ -345,39 +354,32 @@ fn profile_export_round_trip_encrypted_requires_matching_password() {
         .expect("encrypted export should encode");
     let envelope: ProfileExportEnvelope =
         serde_json::from_slice(&encoded).expect("encrypted bundle should parse");
-    let decoded = match envelope {
-        ProfileExportEnvelope::Encrypted {
+    match &envelope {
+        ProfileExportEnvelope::EncryptedV2 {
             format,
             version,
             cipher,
             kdf,
-            iterations,
-            salt_base64,
-            nonce_base64,
-            ciphertext_base64,
+            ..
         } => {
-            validate_profile_export_header(&format, version).expect("header should validate");
+            validate_profile_export_header(format, *version).expect("header should validate");
+            assert_eq!(*version, PROFILE_EXPORT_VERSION_V2);
             assert_eq!(cipher, PROFILE_EXPORT_CIPHER);
-            assert_eq!(kdf, PROFILE_EXPORT_KDF);
-            let salt = base64::engine::general_purpose::STANDARD
-                .decode(salt_base64)
-                .expect("salt should decode");
-            let nonce = base64::engine::general_purpose::STANDARD
-                .decode(nonce_base64)
-                .expect("nonce should decode");
-            let ciphertext = base64::engine::general_purpose::STANDARD
-                .decode(ciphertext_base64)
-                .expect("ciphertext should decode");
-            let key = derive_profile_export_key("secret-password", &salt, iterations);
-            let cipher = Aes256GcmSiv::new_from_slice(&key).expect("cipher should init");
-            let plaintext = cipher
-                .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
-                .expect("ciphertext should decrypt");
-            serde_json::from_slice::<ProfileExportPayload>(&plaintext)
-                .expect("payload should parse")
+            assert!(matches!(kdf, ProfileExportKdfParameters::Argon2id { .. }));
         }
         _ => panic!("expected encrypted bundle"),
-    };
+    }
+
+    let wrong_password =
+        prodex_profile_export::decode_profile_export_envelope(envelope.clone(), || {
+            Ok("wrong-password".to_string())
+        })
+        .expect_err("wrong password should fail");
+    assert!(wrong_password.to_string().contains("failed to decrypt"));
+    let decoded = prodex_profile_export::decode_profile_export_envelope(envelope, || {
+        Ok("secret-password".to_string())
+    })
+    .expect("matching password should decrypt");
 
     assert_eq!(decoded.active_profile.as_deref(), Some("main"));
     assert_eq!(decoded.profiles.len(), 1);
@@ -457,7 +459,7 @@ fn profile_export_password_protect_uses_env_password_in_non_tty() {
     let envelope = read_profile_export_envelope_for_test(&output_path);
     assert!(matches!(
         &envelope,
-        ProfileExportEnvelope::Encrypted { .. }
+        ProfileExportEnvelope::EncryptedV2 { .. }
     ));
     let decoded = prodex_profile_export::decode_profile_export_envelope(envelope, || {
         Ok("secret-password".to_string())
@@ -679,10 +681,8 @@ fn seed_profile_export_state() {
 }
 
 fn read_profile_export_envelope_for_test(path: &Path) -> ProfileExportEnvelope {
-    serde_json::from_slice(
-        &fs::read(path).expect("profile export bundle should be readable"),
-    )
-    .expect("profile export bundle should parse")
+    serde_json::from_slice(&fs::read(path).expect("profile export bundle should be readable"))
+        .expect("profile export bundle should parse")
 }
 
 #[test]
@@ -874,14 +874,20 @@ fn profile_export_round_trip_preserves_kiro_provider_metadata() {
     assert_eq!(payload.profiles.len(), 1);
     assert!(payload.profiles[0].auth_json.is_empty());
     assert_eq!(payload.profiles[0].secret_files.len(), 2);
-    assert_eq!(payload.profiles[0].secret_files[0].path, KIRO_CREDENTIALS_FILE);
+    assert_eq!(
+        payload.profiles[0].secret_files[0].path,
+        KIRO_CREDENTIALS_FILE
+    );
     assert_eq!(
         parse_kiro_auth_secret_text(&payload.profiles[0].secret_files[0].text)
             .expect("exported Kiro secret should parse")
             .auth_key,
         "codewhisperer:odic:token"
     );
-    assert_eq!(payload.profiles[0].secret_files[1].path, KIRO_MODEL_CATALOG_FILE);
+    assert_eq!(
+        payload.profiles[0].secret_files[1].path,
+        KIRO_MODEL_CATALOG_FILE
+    );
     assert_eq!(
         parse_kiro_model_catalog_text(&payload.profiles[0].secret_files[1].text)
             .expect("exported Kiro model catalog should parse")

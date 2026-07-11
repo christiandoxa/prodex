@@ -97,6 +97,10 @@ fn runtime_broker_artifact_key_parses_registry_and_lease_names() {
         Some("main")
     );
     assert_eq!(
+        runtime_broker_artifact_key("runtime-broker-main.capability", false),
+        Some("main")
+    );
+    assert_eq!(
         runtime_broker_artifact_key("runtime-broker-main-leases", true),
         Some("main")
     );

@@ -59,3 +59,8 @@ pub fn run_runtime_proxy_hot_path_bench_check(
         },
     )
 }
+
+#[doc(hidden)]
+pub fn runtime_allocator_trim_for_benchmark() -> bool {
+    crate::runtime_allocator::runtime_allocator_trim_best_effort()
+}

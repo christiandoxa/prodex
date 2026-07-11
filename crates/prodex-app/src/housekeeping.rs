@@ -267,15 +267,23 @@ pub(crate) fn cleanup_runtime_broker_stale_registries(paths: &AppPaths) -> Resul
     let mut removed = 0usize;
     for broker_key in runtime_broker_artifact_keys(paths) {
         let Some(registry) = load_runtime_broker_registry(paths, &broker_key)? else {
+            if fs::symlink_metadata(runtime_broker_capability_file_path(paths, &broker_key)).is_ok()
+            {
+                remove_runtime_broker_capability(paths, &broker_key);
+                removed += usize::from(
+                    fs::symlink_metadata(runtime_broker_capability_file_path(paths, &broker_key))
+                        .is_err(),
+                );
+            }
             continue;
         };
         if runtime_process_pid_alive(registry.pid) {
             continue;
         }
-        remove_runtime_broker_registry_if_token_matches(
+        remove_runtime_broker_registry_if_instance_matches(
             paths,
             &broker_key,
-            &registry.instance_token,
+            &registry.instance_id,
         );
         removed += 1;
     }

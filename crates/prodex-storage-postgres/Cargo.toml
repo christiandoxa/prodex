@@ -16,3 +16,6 @@ prodex_storage = { workspace = true }
 
 [dev-dependencies]
 postgres = { workspace = true, features = ["with-uuid-1"] }
+
+[lints]
+workspace = true

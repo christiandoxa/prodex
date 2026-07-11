@@ -52,7 +52,13 @@ impl RuntimeGeminiSseState {
             &self.media_content_items,
             self.citation_text.as_deref(),
             &tool_calls,
-            runtime_gemini_blocked_tool_call_message,
+            |name, args| {
+                runtime_gemini_blocked_tool_call_message_with_config(
+                    name,
+                    args,
+                    &self.gemini_config,
+                )
+            },
         )
     }
 

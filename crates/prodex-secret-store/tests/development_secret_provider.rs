@@ -19,6 +19,11 @@ fn temp_dir(name: &str) -> PathBuf {
         std::process::id()
     ));
     fs::create_dir_all(&path).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
     path
 }
 
@@ -82,25 +87,22 @@ fn development_provider_resolves_environment_reference_with_exact_provider_name(
         SecretProviderKind::DevelopmentEnvFile
     );
     assert!(!provider.descriptor().supports_rotation_without_restart);
-    assert_eq!(
-        provider
-            .resolve(&request(
-                DEVELOPMENT_SECRET_PROVIDER_NAME,
-                "env:PRODEX_TEST_DEVELOPMENT_SECRET",
-                None,
-            ))
-            .unwrap()
-            .expose_secret(),
-        b"development-token"
-    );
-    assert_eq!(
+    provider
+        .resolve(&request(
+            DEVELOPMENT_SECRET_PROVIDER_NAME,
+            "env:PRODEX_TEST_DEVELOPMENT_SECRET",
+            None,
+        ))
+        .unwrap()
+        .with_exposed_secret(|secret| assert_eq!(secret, b"development-token"));
+    assert!(matches!(
         provider.resolve(&request(
             "Development",
             "env:PRODEX_TEST_DEVELOPMENT_SECRET",
             None
         )),
         Err(SecretResolutionError::NotFound)
-    );
+    ));
 
     let rendered = format!("{provider:?}");
     assert!(!rendered.contains("development-token"));
@@ -115,6 +117,11 @@ fn development_provider_resolves_private_file_below_root() {
     let root = temp_dir("file");
     let path = root.join("nested/token");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(path.parent().unwrap(), fs::Permissions::from_mode(0o700)).unwrap();
+    }
     write_private(&path, b"file-token");
     let provider = DevelopmentSecretProvider::for_development(&root).unwrap();
 
@@ -125,16 +132,16 @@ fn development_provider_resolves_private_file_below_root() {
             None,
         ))
         .unwrap();
-    assert_eq!(material.expose_secret(), b"file-token");
+    material.with_exposed_secret(|secret| assert_eq!(secret, b"file-token"));
     assert_eq!(material.version(), None);
-    assert_eq!(
+    assert!(matches!(
         provider.resolve(&request(
             DEVELOPMENT_SECRET_PROVIDER_NAME,
             "file:nested/token",
             Some("v1"),
         )),
         Err(SecretResolutionError::StaleVersion)
-    );
+    ));
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -162,9 +169,11 @@ fn development_provider_rejects_unknown_reference_schemes_and_missing_environmen
         } else {
             SecretResolutionError::PermissionDenied
         };
-        assert_eq!(
-            provider.resolve(&request(DEVELOPMENT_SECRET_PROVIDER_NAME, name, None)),
-            Err(expected),
+        assert!(
+            matches!(
+                provider.resolve(&request(DEVELOPMENT_SECRET_PROVIDER_NAME, name, None)),
+                Err(error) if error == expected
+            ),
             "unexpected result for reference kind {name}"
         );
     }
@@ -195,10 +204,10 @@ fn development_provider_rejects_file_escape_public_and_oversized_inputs() {
         ("file:public", SecretResolutionError::PermissionDenied),
         ("file:oversized", SecretResolutionError::ProviderUnavailable),
     ] {
-        assert_eq!(
+        assert!(matches!(
             provider.resolve(&request(DEVELOPMENT_SECRET_PROVIDER_NAME, name, None)),
-            Err(expected)
-        );
+            Err(error) if error == expected
+        ));
     }
 
     fs::remove_dir_all(root).unwrap();
@@ -218,10 +227,10 @@ fn development_provider_constructor_and_errors_are_redacted() {
     let rendered = format!("{provider:?}");
     assert!(!rendered.contains(sensitive_name));
     assert!(!rendered.contains(&root.display().to_string()));
-    assert_eq!(
+    assert!(matches!(
         provider.resolve(&request(sensitive_name, "env:MISSING", None)),
         Err(SecretResolutionError::NotFound)
-    );
+    ));
 
     fs::remove_dir_all(root).unwrap();
 }

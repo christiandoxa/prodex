@@ -189,12 +189,7 @@ fn secret_backend_summary_rejects_unimplemented_keyring_backend() {
     assert!(summary.contains("invalid"));
     assert!(summary.contains("not implemented"));
     assert_eq!(json["invalid"], serde_json::Value::Bool(true));
-    assert!(
-        json["error"]
-            .as_str()
-            .unwrap()
-            .contains("not implemented")
-    );
+    assert!(json["error"].as_str().unwrap().contains("not implemented"));
 }
 
 #[test]
@@ -297,8 +292,8 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
             current_profile: "main".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
+            admin_token: runtime_broker_test_secret("secret"),
             prodex_version: current_identity.prodex_version.clone(),
             executable_path: current_identity
                 .executable_path
@@ -324,7 +319,7 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
         .json::<RuntimeBrokerHealth>()
         .expect("runtime broker health should decode");
     assert_eq!(health.current_profile, "main");
-    assert_eq!(health.instance_token, "instance");
+    assert_eq!(health.instance_id, "instance");
     assert_eq!(health.persistence_role, "owner");
     assert_eq!(
         health.prodex_version.as_deref(),
@@ -471,8 +466,8 @@ fn runtime_proxy_broker_activate_endpoint_updates_current_profile() {
             current_profile: "main".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
+            admin_token: runtime_broker_test_secret("secret"),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
             executable_path: None,
             executable_sha256: None,

@@ -12,3 +12,6 @@ path = "src/lib.rs"
 
 [dependencies]
 prodex_runtime_broker = { workspace = true }
+
+[lints]
+workspace = true

@@ -19,8 +19,11 @@ mod proxy_state;
 mod routes;
 #[path = "runtime_launch/run_command_strategy.rs"]
 mod run_command_strategy;
+#[path = "runtime_launch/secure_fixture.rs"]
+mod secure_fixture;
 #[path = "runtime_launch/super_runtime.rs"]
 mod super_runtime;
+use secure_fixture::{temp_dir, write_runtime_launch_auth};
 fn gateway_args() -> GatewayArgs {
     GatewayArgs {
         command: None,
@@ -1627,7 +1630,7 @@ fn prepare_runtime_launch_skips_proxy_for_non_openai_model_provider() {
         "model_provider = 'amazon-bedrock'\n",
     )
     .unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&openai_home),
         r#"{"tokens":{"access_token":"chatgpt-token"}}"#,
     )
@@ -1741,12 +1744,12 @@ fn prepare_runtime_launch_dry_run_uses_proxy_preview_without_recording_selection
     let second_home = root.join("second-home");
     fs::create_dir_all(&main_home).unwrap();
     fs::create_dir_all(&second_home).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&main_home),
         r#"{"tokens":{"access_token":"main-token"}}"#,
     )
     .unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&second_home),
         r#"{"tokens":{"access_token":"second-token"}}"#,
     )
@@ -2231,21 +2234,6 @@ fn test_run_args(codex_args: Vec<OsString>) -> RunArgs {
         codex_args,
     }
 }
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = env::temp_dir().join(format!(
-        "prodex-runtime-launch-{name}-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    if dir.exists() {
-        fs::remove_dir_all(&dir).unwrap();
-    }
-    dir
-}
-
 #[test]
 fn post_exit_maintenance_stabilizes_history_image_attachment_paths() {
     let root = temp_dir("post-exit-history-attachment");

@@ -4,7 +4,10 @@ use crate::runtime_launch::proxy_startup::chat_compatible_rewrite::runtime_provi
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use serde_json::{Value, json};
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
@@ -236,23 +239,26 @@ fn kiro_semantic_compact_summary_uses_acp_turn() {
     ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("temp root should exist");
+    #[cfg(unix)]
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+        .expect("temp root should be private");
     let codex_home = root.join("kiro-home");
-    fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
-        codex_home.join("kiro_auth.json"),
-        serde_json::json!({
-            "auth_key": "kirocli:social:token",
-            "auth_kind": "social",
-            "auth_json": "{\"token\":\"abc\"}",
-            "email": "kiro@example.com",
-            "profile_arn": null,
-            "profile_name": null,
-            "start_url": null,
-            "region": "us-east-1"
-        })
-        .to_string(),
-    )
-    .expect("kiro auth secret should be written");
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(
+            &secret_store::SecretLocation::file(codex_home.join("kiro_auth.json")),
+            serde_json::json!({
+                "auth_key": "kirocli:social:token",
+                "auth_kind": "social",
+                "auth_json": "{\"token\":\"abc\"}",
+                "email": "kiro@example.com",
+                "profile_arn": null,
+                "profile_name": null,
+                "start_url": null,
+                "region": "us-east-1"
+            })
+            .to_string(),
+        )
+        .expect("kiro auth secret should be written");
     let auth = RuntimeKiroProfileAuth {
         profile_name: "kiro-main".to_string(),
         codex_home: codex_home.clone(),
@@ -264,6 +270,13 @@ fn kiro_semantic_compact_summary_uses_acp_turn() {
         })],
         command: Some(write_fake_kiro_compact_agent(&root)),
     };
+    let async_runtime = Arc::new(
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("Kiro compact test runtime should build"),
+    );
     let summary = runtime_kiro_semantic_compact_summary(
         7,
         &serde_json::to_vec(&json!({
@@ -288,6 +301,7 @@ fn kiro_semantic_compact_summary_uses_acp_turn() {
             ]
         }))
         .expect("request body"),
+        &async_runtime,
         &auth,
     )
     .expect("semantic compact summary should succeed");

@@ -139,11 +139,8 @@ pub(super) fn runtime_smart_context_log(input: RuntimeSmartContextLogInput<'_>) 
         runtime_proxy_crate::SmartContextRolloutDecisionInput {
             enabled: true,
             explicit_exact_mode: false,
-            shadow_mode: runtime_smart_context_env_flag("PRODEX_SMART_CONTEXT_SHADOW"),
-            canary_percent: runtime_smart_context_env_percent(
-                "PRODEX_SMART_CONTEXT_CANARY_PERCENT",
-                100,
-            ),
+            shadow_mode: shared.runtime_config.smart_context_shadow,
+            canary_percent: shared.runtime_config.smart_context_canary_percent,
             stable_key: format!(
                 "{}:{}:{}:{}",
                 shared.log_path.display(),

@@ -74,8 +74,7 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
             upstream_no_proxy: false,
             smart_context_enabled: false,
             current_profile: "main".to_string(),
-            instance_token: "stale-instance".to_string(),
-            admin_token: "stale-admin".to_string(),
+            instance_id: "stale-instance".to_string(),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,
@@ -83,6 +82,7 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
         },
     )
     .expect("stale runtime broker registry should save");
+    save_runtime_broker_test_capability(&paths, stale_broker_key, "stale-instance", "stale-admin");
     let stale_lease_dir = runtime_broker_lease_dir(&paths, stale_broker_key);
     fs::create_dir_all(&stale_lease_dir).expect("stale lease dir should exist");
     let stale_lease = stale_lease_dir.join("999999999-stale.lease");
@@ -103,7 +103,10 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
     .expect("auto housekeeping should succeed")
     .expect("auto housekeeping should run");
 
-    assert_eq!(summary.runtime_logs_removed, RUNTIME_PROXY_LOG_RETENTION_COUNT + 1);
+    assert_eq!(
+        summary.runtime_logs_removed,
+        RUNTIME_PROXY_LOG_RETENTION_COUNT + 1
+    );
     assert_eq!(summary.stale_runtime_log_pointer_removed, 1);
     assert_eq!(summary.stale_login_dirs_removed, 1);
     assert_eq!(summary.stale_root_temp_files_removed, 1);
@@ -114,13 +117,23 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
 
     assert!(!pointer.exists(), "stale runtime pointer should be removed");
     assert!(!stale_login.exists(), "stale login dir should be removed");
-    assert!(!stale_root_temp.exists(), "stale root temp file should be removed");
+    assert!(
+        !stale_root_temp.exists(),
+        "stale root temp file should be removed"
+    );
     assert!(
         !runtime_broker_registry_file_path(&paths, stale_broker_key).exists(),
         "dead broker registry should be removed"
     );
+    assert!(
+        !runtime_broker_capability_file_path(&paths, stale_broker_key).exists(),
+        "dead broker capability should be removed"
+    );
     assert!(!stale_lease.exists(), "dead broker lease should be removed");
-    assert!(orphan.exists(), "orphan managed home should remain manual cleanup");
+    assert!(
+        orphan.exists(),
+        "orphan managed home should remain manual cleanup"
+    );
     assert!(old_session_dir.join("old.jsonl").exists());
     assert!(paths.shared_codex_root.join("history.jsonl").exists());
     for path in &transient_root_files {
@@ -135,5 +148,8 @@ fn auto_runtime_housekeeping_removes_runtime_garbage_without_touching_user_state
         AUTO_RUNTIME_HOUSEKEEPING_INTERVAL_SECONDS.max(60),
     )
     .expect("throttled auto housekeeping should succeed");
-    assert!(skipped.is_none(), "recent auto housekeeping should be throttled");
+    assert!(
+        skipped.is_none(),
+        "recent auto housekeeping should be throttled"
+    );
 }

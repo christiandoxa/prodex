@@ -5,6 +5,7 @@ mod locations;
 mod model;
 mod projected_provider;
 mod refresh_lease;
+mod secure_file;
 mod selection;
 
 pub use self::development_provider::*;

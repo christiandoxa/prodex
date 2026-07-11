@@ -21,6 +21,7 @@ struct DoctorPanel {
 
 pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
+    let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths)?;
     let mut state = AppState::load(&paths)?;
     let repaired_import_auth_journals = if args.repair_import_auth_journals {
         let repaired = repair_profile_import_auth_journals(&paths, &mut state)?;
@@ -57,6 +58,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             runtime_metrics_targets: &runtime_metrics_targets,
             import_auth_journal_count,
             repaired_import_auth_journals,
+            runtime_config: &runtime_config,
         });
         let json = serde_json::to_string_pretty(&bundle)
             .context("failed to serialize redacted doctor bundle")?;
@@ -69,7 +71,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     if args.runtime && args.json {
         let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
         let mut value = if args.suggest_policy {
-            runtime_doctor_json_value_with_policy_suggestions(&summary)
+            runtime_doctor_json_value_with_policy_suggestions(&summary, &runtime_config)
         } else {
             runtime_doctor_json_value(&summary)
         };
@@ -213,7 +215,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             fields,
         });
         if args.suggest_policy {
-            let suggestions = runtime_doctor_policy_suggestions(&summary);
+            let suggestions = runtime_doctor_policy_suggestions(&summary, &runtime_config);
             suggestion_lines = runtime_doctor_policy_suggestion_lines(&suggestions);
         }
     }
@@ -457,6 +459,7 @@ struct DoctorRedactedBundleContext<'a> {
     runtime_metrics_targets: &'a [String],
     import_auth_journal_count: usize,
     repaired_import_auth_journals: Option<usize>,
+    runtime_config: &'a RuntimeConfig,
 }
 
 fn doctor_redacted_bundle_json_value(
@@ -464,7 +467,7 @@ fn doctor_redacted_bundle_json_value(
 ) -> serde_json::Value {
     let runtime_summary = collect_runtime_doctor_summary_with_tail_bytes(context.args.tail_bytes);
     let runtime_json = if context.args.suggest_policy {
-        runtime_doctor_json_value_with_policy_suggestions(&runtime_summary)
+        runtime_doctor_json_value_with_policy_suggestions(&runtime_summary, context.runtime_config)
     } else {
         runtime_doctor_json_value(&runtime_summary)
     };

@@ -22,6 +22,7 @@ pub(super) fn runtime_gateway_openapi_spec_for_mount(mount_path: &str) -> serde_
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
 
     fn assert_local_refs_resolve(value: &serde_json::Value, spec: &serde_json::Value) {
         match value {
@@ -46,6 +47,20 @@ mod tests {
             }
             _ => {}
         }
+    }
+
+    #[test]
+    fn openapi_components_contract_is_stable() {
+        let serialized = serde_json::to_vec(&runtime_gateway_openapi_components()).unwrap();
+        let digest = Sha256::digest(serialized);
+        let digest = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(
+            digest,
+            "0793d38857e524a3a14fa77974ebaf7cc56d5a4b8afc9243de5faddbbbdbc3c0"
+        );
     }
 
     #[test]

@@ -1,355 +1,742 @@
 use super::*;
+use std::sync::atomic::AtomicI64;
 
+#[cfg(any(test, feature = "bench-support"))]
+pub(super) use prodex_runtime_tuning::usize_override_with_policy;
 pub(super) use prodex_runtime_tuning::{
     RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
-    RuntimeTuningSnapshot, RuntimeTuningSnapshotInput, percent_override_with_policy,
-    runtime_probe_refresh_worker_count_default, runtime_proxy_active_request_limit_default,
-    runtime_proxy_async_worker_count_default, runtime_proxy_lane_limits_from_overrides,
-    runtime_proxy_log_queue_capacity_default, runtime_proxy_long_lived_queue_capacity_default,
-    runtime_proxy_long_lived_worker_count_default, runtime_proxy_worker_count_default,
-    runtime_take_fault_injection, runtime_websocket_dns_resolve_overflow_capacity_default,
+    RuntimeTuningSnapshot, RuntimeTuningSnapshotInput, runtime_probe_refresh_worker_count_default,
+    runtime_proxy_active_request_limit_default, runtime_proxy_async_worker_count_default,
+    runtime_proxy_lane_limits_from_overrides, runtime_proxy_log_queue_capacity_default,
+    runtime_proxy_long_lived_queue_capacity_default, runtime_proxy_long_lived_worker_count_default,
+    runtime_proxy_worker_count_default, runtime_take_fault_injection,
+    runtime_take_fault_injection_budget, runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
     runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
     runtime_websocket_tcp_connect_queue_capacity_default,
-    runtime_websocket_tcp_connect_worker_count_default, timeout_override_ms_with_policy,
-    usize_override_with_policy, usize_override_with_policy_allow_zero,
+    runtime_websocket_tcp_connect_worker_count_default,
 };
 
-pub(crate) fn collect_runtime_tuning_snapshot() -> RuntimeTuningSnapshot {
-    let worker_count = runtime_proxy_worker_count();
-    let long_lived_worker_count = runtime_proxy_long_lived_worker_count();
-    let long_lived_queue_capacity =
-        runtime_proxy_long_lived_queue_capacity(long_lived_worker_count);
-    let active_request_limit =
-        runtime_proxy_active_request_limit(worker_count, long_lived_worker_count);
-    let lane_limits =
-        runtime_proxy_lane_limits(active_request_limit, worker_count, long_lived_worker_count);
-    let (precommit_attempt_limit, precommit_budget) = runtime_proxy_precommit_budget(false, false);
-    let (pressure_precommit_attempt_limit, pressure_precommit_budget) =
-        runtime_proxy_precommit_budget(false, true);
-    let (continuation_precommit_attempt_limit, continuation_precommit_budget) =
-        runtime_proxy_precommit_budget(true, false);
-    let websocket_connect_worker_count = runtime_websocket_tcp_connect_worker_count();
-    let websocket_connect_queue_capacity =
-        runtime_websocket_tcp_connect_queue_capacity(websocket_connect_worker_count);
-    let websocket_connect_overflow_capacity = runtime_websocket_tcp_connect_overflow_capacity(
-        websocket_connect_worker_count,
-        websocket_connect_queue_capacity,
-    );
-    let websocket_dns_worker_count = runtime_websocket_dns_resolve_worker_count();
-    let websocket_dns_queue_capacity =
-        runtime_websocket_dns_resolve_queue_capacity(websocket_dns_worker_count);
-    let websocket_dns_overflow_capacity = runtime_websocket_dns_resolve_overflow_capacity(
-        websocket_dns_worker_count,
-        websocket_dns_queue_capacity,
-    );
+const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
+const DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS: u64 = 2_000;
+const DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 300;
+const DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 30_000;
+const DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 86_400;
+const MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS: u64 = 10_000;
+const MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 86_400;
+const MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 3_600_000;
+const MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 604_800;
 
-    RuntimeTuningSnapshotInput {
-        worker_count,
-        long_lived_worker_count,
-        async_worker_count: runtime_proxy_async_worker_count(),
-        probe_refresh_worker_count: runtime_probe_refresh_worker_count(),
-        long_lived_queue_capacity,
-        active_request_limit,
-        lane_limits: RuntimeTuningLaneLimits {
-            responses: lane_limits.responses,
-            compact: lane_limits.compact,
-            websocket: lane_limits.websocket,
-            standard: lane_limits.standard,
-        },
-        precommit: RuntimeTuningPrecommitBudget {
-            attempt_limit: precommit_attempt_limit,
-            budget: precommit_budget,
-        },
-        pressure_precommit: RuntimeTuningPrecommitBudget {
-            attempt_limit: pressure_precommit_attempt_limit,
-            budget: pressure_precommit_budget,
-        },
-        continuation_precommit: RuntimeTuningPrecommitBudget {
-            attempt_limit: continuation_precommit_attempt_limit,
-            budget: continuation_precommit_budget,
-        },
-        admission_wait_budget_ms: runtime_proxy_admission_wait_budget_ms(),
-        pressure_admission_wait_budget_ms: runtime_proxy_pressure_admission_wait_budget_ms(),
-        long_lived_queue_wait_budget_ms: runtime_proxy_long_lived_queue_wait_budget_ms(),
-        pressure_long_lived_queue_wait_budget_ms:
-            runtime_proxy_pressure_long_lived_queue_wait_budget_ms(),
-        http_connect_timeout_ms: runtime_proxy_http_connect_timeout_ms(),
-        stream_idle_timeout_ms: runtime_proxy_stream_idle_timeout_ms(),
-        sse_lookahead_timeout_ms: runtime_proxy_sse_lookahead_timeout_ms(),
-        websocket_connect_timeout_ms: runtime_proxy_websocket_connect_timeout_ms(),
-        websocket_happy_eyeballs_delay_ms: runtime_proxy_websocket_happy_eyeballs_delay_ms(),
-        websocket_precommit_progress_timeout_ms:
-            runtime_proxy_websocket_precommit_progress_timeout_ms(),
-        websocket_connect_worker_count,
-        websocket_connect_queue_capacity,
-        websocket_connect_overflow_capacity,
-        websocket_dns_worker_count,
-        websocket_dns_queue_capacity,
-        websocket_dns_overflow_capacity,
-        websocket_previous_response_reuse_stale_ms:
-            runtime_proxy_websocket_previous_response_reuse_stale_ms(),
-        profile_inflight_soft_limit: runtime_proxy_profile_inflight_soft_limit(),
-        profile_inflight_hard_limit: runtime_proxy_profile_inflight_hard_limit(),
+#[path = "runtime_config/environment.rs"]
+mod environment;
+#[path = "runtime_config/types.rs"]
+mod types;
+use environment::{RuntimeConfigEnvironment, RuntimeConfigParser};
+pub(crate) use types::*;
+
+impl RuntimeConfig {
+    pub(crate) fn from_env_policy_and_cli(paths: &AppPaths) -> Result<Self, ConfigErrors> {
+        let environment = RuntimeConfigEnvironment::read_process();
+        Self::from_environment(paths, environment)
     }
-    .into_snapshot()
+
+    fn from_environment(
+        paths: &AppPaths,
+        environment: RuntimeConfigEnvironment,
+    ) -> Result<Self, ConfigErrors> {
+        let mut parser = RuntimeConfigParser::new(environment);
+        let loaded_policy = match prodex_runtime_policy::load_runtime_policy_cached(&paths.root) {
+            Ok(policy) => policy,
+            Err(_) => {
+                parser.errors.push(ConfigError {
+                    key: "runtime.policy",
+                    message: "could not be loaded",
+                });
+                None
+            }
+        };
+        let runtime_policy = loaded_policy.as_ref().map(|policy| policy.runtime.clone());
+        let mut proxy_policy = loaded_policy
+            .map(|policy| policy.runtime_proxy)
+            .unwrap_or_default();
+        let preset_key = prodex_runtime_policy::PRODEX_RUNTIME_PROXY_PRESET_ENV;
+        let preset = parser.environment.get(preset_key).and_then(|value| {
+            let parsed = value
+                .to_str()
+                .and_then(prodex_runtime_policy::RuntimePolicyProxyPreset::parse);
+            if parsed.is_none() {
+                parser.compatibility_defaults.push(preset_key);
+            }
+            parsed
+        });
+        proxy_policy = proxy_policy.with_effective_preset(preset);
+        let config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
+        if parser.errors.is_empty() {
+            let config = RuntimeConfig {
+                compatibility_defaults: parser.compatibility_defaults,
+                ..config
+            };
+            RUNTIME_RESPONSES_QUOTA_CRITICAL_FLOOR_PERCENT.store(
+                config.responses_quota_critical_floor_percent,
+                Ordering::Relaxed,
+            );
+            Ok(config)
+        } else {
+            Err(ConfigErrors(parser.errors))
+        }
+    }
+
+    #[cfg(any(test, feature = "bench-support"))]
+    pub(crate) fn compatibility_current() -> Self {
+        let paths = AppPaths::discover()
+            .unwrap_or_else(|error| panic!("failed to discover runtime configuration: {error}"));
+        Self::from_env_policy_and_cli(&paths).unwrap_or_else(|errors| panic!("{errors}"))
+    }
+
+    fn parse(
+        parser: &mut RuntimeConfigParser,
+        runtime_policy: Option<&prodex_runtime_policy::RuntimePolicyRuntimeSettings>,
+        policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
+    ) -> Self {
+        let parallelism = thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(4);
+        let worker_count = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
+                policy.worker_count,
+                runtime_proxy_worker_count_default(parallelism),
+            )
+            .clamp(1, 64);
+        let long_lived_worker_count = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
+                policy.long_lived_worker_count,
+                runtime_proxy_long_lived_worker_count_default(parallelism),
+            )
+            .clamp(1, 256);
+        let async_worker_count = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT",
+                policy.async_worker_count,
+                runtime_proxy_async_worker_count_default(parallelism),
+            )
+            .clamp(2, 8);
+        let probe_refresh_worker_count = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
+                policy.probe_refresh_worker_count,
+                runtime_probe_refresh_worker_count_default(parallelism),
+            )
+            .clamp(1, 8);
+        let long_lived_queue_capacity = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
+                policy.long_lived_queue_capacity,
+                runtime_proxy_long_lived_queue_capacity_default(long_lived_worker_count),
+            )
+            .max(1);
+        let active_request_limit = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
+                policy.active_request_limit,
+                runtime_proxy_active_request_limit_default(worker_count, long_lived_worker_count),
+            )
+            .max(1);
+        let lane_limits = Self::parse_lane_limits(
+            parser,
+            policy,
+            active_request_limit,
+            worker_count,
+            long_lived_worker_count,
+        );
+        let websocket = Self::parse_websocket_tuning(parser, policy, parallelism);
+        let (precommit, pressure_precommit, continuation_precommit) = (
+            runtime_proxy_precommit_budget(false, false),
+            runtime_proxy_precommit_budget(false, true),
+            runtime_proxy_precommit_budget(true, false),
+        );
+        let tuning = RuntimeTuningSnapshotInput {
+            worker_count,
+            long_lived_worker_count,
+            async_worker_count,
+            probe_refresh_worker_count,
+            long_lived_queue_capacity,
+            active_request_limit,
+            lane_limits: RuntimeTuningLaneLimits {
+                responses: lane_limits.responses,
+                compact: lane_limits.compact,
+                websocket: lane_limits.websocket,
+                standard: lane_limits.standard,
+            },
+            precommit: RuntimeTuningPrecommitBudget {
+                attempt_limit: precommit.0,
+                budget: precommit.1,
+            },
+            pressure_precommit: RuntimeTuningPrecommitBudget {
+                attempt_limit: pressure_precommit.0,
+                budget: pressure_precommit.1,
+            },
+            continuation_precommit: RuntimeTuningPrecommitBudget {
+                attempt_limit: continuation_precommit.0,
+                budget: continuation_precommit.1,
+            },
+            admission_wait_budget_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
+                policy.admission_wait_budget_ms,
+                RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS,
+            ),
+            pressure_admission_wait_budget_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS",
+                policy.pressure_admission_wait_budget_ms,
+                RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS,
+            ),
+            long_lived_queue_wait_budget_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
+                policy.long_lived_queue_wait_budget_ms,
+                RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
+            ),
+            pressure_long_lived_queue_wait_budget_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
+                policy.pressure_long_lived_queue_wait_budget_ms,
+                RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
+            ),
+            http_connect_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS",
+                policy.http_connect_timeout_ms,
+                RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS,
+            ),
+            stream_idle_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS",
+                policy.stream_idle_timeout_ms,
+                RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
+            ),
+            sse_lookahead_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS",
+                policy.sse_lookahead_timeout_ms,
+                RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
+            ),
+            websocket_connect_timeout_ms: websocket.connect_timeout_ms,
+            websocket_happy_eyeballs_delay_ms: websocket.happy_eyeballs_delay_ms,
+            websocket_precommit_progress_timeout_ms: websocket.precommit_progress_timeout_ms,
+            websocket_connect_worker_count: websocket.connect_worker_count,
+            websocket_connect_queue_capacity: websocket.connect_queue_capacity,
+            websocket_connect_overflow_capacity: websocket.connect_overflow_capacity,
+            websocket_dns_worker_count: websocket.dns_worker_count,
+            websocket_dns_queue_capacity: websocket.dns_queue_capacity,
+            websocket_dns_overflow_capacity: websocket.dns_overflow_capacity,
+            websocket_previous_response_reuse_stale_ms: parser.compatibility_u64(
+                "PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS",
+                policy
+                    .websocket_previous_response_reuse_stale_ms
+                    .unwrap_or(RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS),
+                false,
+                true,
+                u64::MAX,
+            ),
+            profile_inflight_soft_limit: parser.positive_usize(
+                "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT",
+                policy.profile_inflight_soft_limit,
+                RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+            ),
+            profile_inflight_hard_limit: parser.positive_usize(
+                "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT",
+                policy.profile_inflight_hard_limit,
+                RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
+            ),
+        }
+        .into_snapshot();
+        Self::parse_remaining(parser, runtime_policy, policy, tuning)
+    }
+
+    fn parse_lane_limits(
+        parser: &mut RuntimeConfigParser,
+        policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
+        global_limit: usize,
+        worker_count: usize,
+        long_lived_worker_count: usize,
+    ) -> RuntimeProxyLaneLimits {
+        let overrides = RuntimeProxyLaneLimitOverrides {
+            responses: nonzero(parser.positive_usize(
+                "PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT",
+                policy.responses_active_limit,
+                1,
+            )),
+            compact: nonzero(parser.positive_usize(
+                "PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT",
+                policy.compact_active_limit,
+                1,
+            )),
+            websocket: nonzero(parser.positive_usize(
+                "PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT",
+                policy.websocket_active_limit,
+                1,
+            )),
+            standard: nonzero(parser.positive_usize(
+                "PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT",
+                policy.standard_active_limit,
+                1,
+            )),
+        };
+        let configured = runtime_proxy_lane_limits_from_overrides(
+            global_limit,
+            worker_count,
+            long_lived_worker_count,
+            RuntimeProxyLaneLimitOverrides {
+                responses: if parser
+                    .environment
+                    .get("PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT")
+                    .is_some()
+                    || policy.responses_active_limit.is_some()
+                {
+                    overrides.responses
+                } else {
+                    None
+                },
+                compact: if parser
+                    .environment
+                    .get("PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT")
+                    .is_some()
+                    || policy.compact_active_limit.is_some()
+                {
+                    overrides.compact
+                } else {
+                    None
+                },
+                websocket: if parser
+                    .environment
+                    .get("PRODEX_RUNTIME_PROXY_WEBSOCKET_ACTIVE_LIMIT")
+                    .is_some()
+                    || policy.websocket_active_limit.is_some()
+                {
+                    overrides.websocket
+                } else {
+                    None
+                },
+                standard: if parser
+                    .environment
+                    .get("PRODEX_RUNTIME_PROXY_STANDARD_ACTIVE_LIMIT")
+                    .is_some()
+                    || policy.standard_active_limit.is_some()
+                {
+                    overrides.standard
+                } else {
+                    None
+                },
+            },
+        );
+        RuntimeProxyLaneLimits {
+            responses: configured.responses,
+            compact: configured.compact,
+            websocket: configured.websocket,
+            standard: configured.standard,
+        }
+    }
+
+    fn parse_websocket_tuning(
+        parser: &mut RuntimeConfigParser,
+        policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
+        parallelism: usize,
+    ) -> ParsedWebsocketTuning {
+        let connect_worker_count = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT",
+                policy.websocket_connect_worker_count,
+                runtime_websocket_tcp_connect_worker_count_default(parallelism),
+            )
+            .max(1);
+        let connect_queue_capacity = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY",
+                policy.websocket_connect_queue_capacity,
+                runtime_websocket_tcp_connect_queue_capacity_default(connect_worker_count),
+            )
+            .max(connect_worker_count)
+            .max(1);
+        let dns_worker_count = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT",
+                policy.websocket_dns_worker_count,
+                runtime_websocket_dns_resolve_worker_count_default(parallelism),
+            )
+            .max(1);
+        let dns_queue_capacity = parser
+            .positive_usize(
+                "PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY",
+                policy.websocket_dns_queue_capacity,
+                runtime_websocket_dns_resolve_queue_capacity_default(dns_worker_count),
+            )
+            .max(dns_worker_count)
+            .max(1);
+        ParsedWebsocketTuning {
+            connect_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
+                policy.websocket_connect_timeout_ms,
+                RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS,
+            ),
+            happy_eyeballs_delay_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS",
+                policy.websocket_happy_eyeballs_delay_ms,
+                RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS,
+            ),
+            precommit_progress_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS",
+                policy.websocket_precommit_progress_timeout_ms,
+                RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS,
+            ),
+            connect_worker_count,
+            connect_queue_capacity,
+            connect_overflow_capacity: parser.usize_allow_zero(
+                "PRODEX_RUNTIME_WEBSOCKET_CONNECT_OVERFLOW_CAPACITY",
+                policy.websocket_connect_overflow_capacity,
+                runtime_websocket_tcp_connect_overflow_capacity_default(
+                    connect_worker_count,
+                    connect_queue_capacity,
+                ),
+            ),
+            dns_worker_count,
+            dns_queue_capacity,
+            dns_overflow_capacity: parser.usize_allow_zero(
+                "PRODEX_RUNTIME_WEBSOCKET_DNS_OVERFLOW_CAPACITY",
+                policy.websocket_dns_overflow_capacity,
+                runtime_websocket_dns_resolve_overflow_capacity_default(
+                    dns_worker_count,
+                    dns_queue_capacity,
+                ),
+            ),
+        }
+    }
+
+    fn parse_remaining(
+        parser: &mut RuntimeConfigParser,
+        runtime_policy: Option<&prodex_runtime_policy::RuntimePolicyRuntimeSettings>,
+        policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
+        tuning: RuntimeTuningSnapshot,
+    ) -> Self {
+        let log_format = parser
+            .environment
+            .get("PRODEX_RUNTIME_LOG_FORMAT")
+            .and_then(|value| value.to_str())
+            .and_then(RuntimeLogFormat::parse)
+            .or_else(|| runtime_policy.and_then(|runtime| runtime.log_format))
+            .unwrap_or(RuntimeLogFormat::Text);
+        if parser
+            .environment
+            .get("PRODEX_RUNTIME_LOG_FORMAT")
+            .is_some()
+            && parser
+                .environment
+                .get("PRODEX_RUNTIME_LOG_FORMAT")
+                .and_then(|value| value.to_str())
+                .and_then(RuntimeLogFormat::parse)
+                .is_none()
+        {
+            parser
+                .compatibility_defaults
+                .push("PRODEX_RUNTIME_LOG_FORMAT");
+        }
+        let log_dir = parser
+            .environment
+            .get("PRODEX_RUNTIME_LOG_DIR")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| runtime_policy.and_then(|runtime| runtime.log_dir.clone()))
+            .unwrap_or_else(env::temp_dir);
+        let https_proxy = parser.compatibility_proxy(&[
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "PROXY",
+            "proxy",
+        ]);
+        let http_proxy = parser.compatibility_proxy(&[
+            "HTTP_PROXY",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "PROXY",
+            "proxy",
+        ]);
+        let no_proxy = ["NO_PROXY", "no_proxy"]
+            .into_iter()
+            .filter_map(|key| parser.environment.get(key))
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+        let gemini = Self::parse_gemini(parser);
+        Self {
+            tuning,
+            compact_request_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS",
+                policy.compact_request_timeout_ms,
+                RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS,
+            ),
+            prefetch_backpressure_retry_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS",
+                policy.prefetch_backpressure_retry_ms,
+                RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS,
+            ),
+            prefetch_backpressure_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS",
+                policy.prefetch_backpressure_timeout_ms,
+                RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS,
+            ),
+            prefetch_max_buffered_bytes: parser.positive_usize(
+                "PRODEX_RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES",
+                policy.prefetch_max_buffered_bytes,
+                RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES,
+            ),
+            sync_probe_pressure_pause_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS",
+                policy.sync_probe_pressure_pause_ms,
+                RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS,
+            ),
+            responses_quota_critical_floor_percent: parser
+                .positive_i64(
+                    "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT",
+                    policy.responses_critical_floor_percent,
+                    2,
+                )
+                .clamp(1, 10),
+            startup_sync_probe_warm_limit: parser
+                .positive_usize(
+                    "PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT",
+                    policy.startup_sync_probe_warm_limit,
+                    RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT,
+                )
+                .min(RUNTIME_STARTUP_PROBE_WARM_LIMIT),
+            broker_ready_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS",
+                policy.broker_ready_timeout_ms,
+                RUNTIME_BROKER_READY_TIMEOUT_MS,
+            ),
+            broker_health_connect_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS",
+                policy.broker_health_connect_timeout_ms,
+                RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS,
+            ),
+            broker_health_read_timeout_ms: parser.positive_u64(
+                "PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS",
+                policy.broker_health_read_timeout_ms,
+                RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS,
+            ),
+            max_request_body_bytes: parser.positive_u64(
+                "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES",
+                None,
+                RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES,
+            ),
+            debug_anthropic_compat: parser
+                .environment
+                .get("PRODEX_DEBUG_ANTHROPIC_COMPAT")
+                .is_some(),
+            smart_context_shadow: parser.compatibility_flag("PRODEX_SMART_CONTEXT_SHADOW"),
+            smart_context_canary_percent: parser.compatibility_u64(
+                "PRODEX_SMART_CONTEXT_CANARY_PERCENT",
+                100,
+                true,
+                true,
+                100,
+            ) as u8,
+            fault_upstream_connect_error_once: parser.usize_allow_zero(
+                "PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE",
+                None,
+                0,
+            ),
+            fault_stream_read_error_once: parser.usize_allow_zero(
+                "PRODEX_RUNTIME_FAULT_STREAM_READ_ERROR_ONCE",
+                None,
+                0,
+            ),
+            fault_smart_context_panic_once: parser.usize_allow_zero(
+                "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE",
+                None,
+                0,
+            ),
+            fault_smart_context_unwind_once: parser.usize_allow_zero(
+                "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE",
+                None,
+                0,
+            ),
+            log_dir,
+            log_format,
+            websocket_environment: RuntimeWebsocketEnvironment {
+                https_proxy,
+                http_proxy,
+                no_proxy,
+            },
+            oidc: RuntimeOidcTimingConfig {
+                prefetch_timeout: Duration::from_millis(parser.compatibility_u64(
+                    "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS",
+                    DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
+                    true,
+                    false,
+                    MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
+                )),
+                http_cache_ttl: Duration::from_secs(parser.compatibility_u64(
+                    "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS",
+                    DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
+                    true,
+                    true,
+                    MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
+                )),
+                refresh_failure_backoff: Duration::from_millis(parser.compatibility_u64(
+                    "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS",
+                    DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
+                    true,
+                    false,
+                    MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
+                )),
+                last_known_good_window: Duration::from_secs(parser.compatibility_u64(
+                    "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",
+                    DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
+                    true,
+                    true,
+                    MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
+                )),
+            },
+            gemini,
+            compatibility_defaults: Vec::new(),
+        }
+    }
+
+    fn parse_gemini(parser: &mut RuntimeConfigParser) -> RuntimeGeminiConfig {
+        let split_paths = |key| {
+            parser
+                .environment
+                .get(key)
+                .map(env::split_paths)
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+        };
+        let extension_dirs = split_paths("PRODEX_GEMINI_EXTENSION_DIRS");
+        let import_paths = [
+            "PRODEX_GEMINI_SESSION_FILE",
+            "PRODEX_GEMINI_CHECKPOINT_FILE",
+            "PRODEX_GEMINI_IMPORT_FILE",
+        ]
+        .into_iter()
+        .flat_map(split_paths)
+        .collect();
+        let extension_memory_paths = split_paths("PRODEX_GEMINI_EXTENSION_MEMORY");
+        let export_checkpoint_path = [
+            "PRODEX_GEMINI_EXPORT_FILE",
+            "PRODEX_GEMINI_CHECKPOINT_EXPORT_FILE",
+        ]
+        .into_iter()
+        .filter_map(|key| parser.environment.get(key))
+        .find(|path| !path.is_empty())
+        .map(PathBuf::from);
+        let tool_output_dir = parser
+            .environment
+            .get("PRODEX_GEMINI_TOOL_OUTPUT_DIR")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        let extension_selection =
+            match parser
+                .compatibility_text("PRODEX_GEMINI_EXTENSIONS")
+                .map(|value| {
+                    value
+                        .split([',', ';', ' ', '\n', '\t'])
+                        .filter_map(|item| {
+                            let item = item.trim().to_ascii_lowercase();
+                            (!item.is_empty()).then_some(item)
+                        })
+                        .collect::<BTreeSet<_>>()
+                }) {
+                None => RuntimeGeminiExtensionSelection::All,
+                Some(names) if names.is_empty() => RuntimeGeminiExtensionSelection::All,
+                Some(names) if names.len() == 1 && names.contains("none") => {
+                    RuntimeGeminiExtensionSelection::None
+                }
+                Some(names) => RuntimeGeminiExtensionSelection::Names(names),
+            };
+        let memory_files_disabled =
+            parser.compatibility_optional_bool("PRODEX_GEMINI_DISABLE_MEMORY") == Some(true)
+                || parser.compatibility_optional_bool("PRODEX_GEMINI_DISABLE_CONTEXT_FILES")
+                    == Some(true);
+        let memory_files_default = parser
+            .compatibility_optional_bool("PRODEX_GEMINI_LOAD_MEMORY")
+            .or_else(|| parser.compatibility_optional_bool("PRODEX_GEMINI_MEMORY"))
+            .unwrap_or(true);
+        let live_url = parser
+            .compatibility_text("PRODEX_GEMINI_LIVE_URL")
+            .filter(|value| !value.trim().is_empty());
+        let live_model = parser.compatibility_text("PRODEX_GEMINI_LIVE_MODEL");
+        let sticky_fresh_oauth = parser
+            .compatibility_text("PRODEX_GEMINI_STICKY_FRESH_OAUTH")
+            .is_none_or(|value| {
+                !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "0" | "false" | "off" | "no"
+                )
+            });
+        RuntimeGeminiConfig {
+            extension_dirs,
+            extension_selection,
+            export_checkpoint_path,
+            import_paths,
+            tool_output_mask_threshold: parser.compatibility_u64(
+                "PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD",
+                RuntimeGeminiConfig::DEFAULT_TOOL_OUTPUT_MASK_THRESHOLD as u64,
+                false,
+                true,
+                usize::MAX as u64,
+            ) as usize,
+            tool_output_dir,
+            memory_files_disabled,
+            memory_files_default,
+            extension_memory_paths,
+            live_url,
+            live_model,
+            sticky_fresh_oauth,
+        }
+    }
 }
 
-pub(super) fn runtime_proxy_http_connect_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.http_connect_timeout_ms),
-        RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS,
-    )
+struct ParsedWebsocketTuning {
+    connect_timeout_ms: u64,
+    happy_eyeballs_delay_ms: u64,
+    precommit_progress_timeout_ms: u64,
+    connect_worker_count: usize,
+    connect_queue_capacity: usize,
+    connect_overflow_capacity: usize,
+    dns_worker_count: usize,
+    dns_queue_capacity: usize,
+    dns_overflow_capacity: usize,
 }
 
-pub(super) fn runtime_proxy_stream_idle_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.stream_idle_timeout_ms),
-        RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
-    )
+fn nonzero(value: usize) -> Option<usize> {
+    (value > 0).then_some(value)
 }
 
-pub(super) fn runtime_proxy_compact_request_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.compact_request_timeout_ms),
-        RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_sse_lookahead_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.sse_lookahead_timeout_ms),
-        RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_prefetch_backpressure_retry_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS",
-        runtime_policy_proxy().and_then(|policy| policy.prefetch_backpressure_retry_ms),
-        RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_prefetch_backpressure_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.prefetch_backpressure_timeout_ms),
-        RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_prefetch_max_buffered_bytes() -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES",
-        runtime_policy_proxy().and_then(|policy| policy.prefetch_max_buffered_bytes),
-        RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES,
-    )
-}
-
-pub(super) fn runtime_proxy_websocket_connect_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_connect_timeout_ms),
-        RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_websocket_happy_eyeballs_delay_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_happy_eyeballs_delay_ms),
-        RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_websocket_precommit_progress_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_precommit_progress_timeout_ms),
-        RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_websocket_tcp_connect_worker_count() -> usize {
-    let parallelism = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(4);
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_connect_worker_count),
-        runtime_websocket_tcp_connect_worker_count_default(parallelism),
-    )
-    .max(1)
-}
-
-pub(super) fn runtime_websocket_tcp_connect_queue_capacity(worker_count: usize) -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_connect_queue_capacity),
-        runtime_websocket_tcp_connect_queue_capacity_default(worker_count),
-    )
-    .max(worker_count)
-    .max(1)
-}
-
-pub(super) fn runtime_websocket_tcp_connect_overflow_capacity(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    usize_override_with_policy_allow_zero(
-        "PRODEX_RUNTIME_WEBSOCKET_CONNECT_OVERFLOW_CAPACITY",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_connect_overflow_capacity),
-        runtime_websocket_tcp_connect_overflow_capacity_default(worker_count, queue_capacity),
-    )
-}
-
-pub(super) fn runtime_websocket_dns_resolve_worker_count() -> usize {
-    let parallelism = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(2);
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_dns_worker_count),
-        runtime_websocket_dns_resolve_worker_count_default(parallelism),
-    )
-    .max(1)
-}
-
-pub(super) fn runtime_websocket_dns_resolve_queue_capacity(worker_count: usize) -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_dns_queue_capacity),
-        runtime_websocket_dns_resolve_queue_capacity_default(worker_count),
-    )
-    .max(worker_count)
-    .max(1)
-}
-
-pub(super) fn runtime_websocket_dns_resolve_overflow_capacity(
-    worker_count: usize,
-    queue_capacity: usize,
-) -> usize {
-    usize_override_with_policy_allow_zero(
-        "PRODEX_RUNTIME_WEBSOCKET_DNS_OVERFLOW_CAPACITY",
-        runtime_policy_proxy().and_then(|policy| policy.websocket_dns_overflow_capacity),
-        runtime_websocket_dns_resolve_overflow_capacity_default(worker_count, queue_capacity),
-    )
-}
-
-pub(super) fn runtime_broker_ready_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.broker_ready_timeout_ms),
-        RUNTIME_BROKER_READY_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_broker_health_connect_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.broker_health_connect_timeout_ms),
-        RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_broker_health_read_timeout_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS",
-        runtime_policy_proxy().and_then(|policy| policy.broker_health_read_timeout_ms),
-        RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_websocket_previous_response_reuse_stale_ms() -> u64 {
-    env::var("PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .or_else(|| {
-            runtime_policy_proxy()
-                .and_then(|policy| policy.websocket_previous_response_reuse_stale_ms)
-        })
-        .unwrap_or(RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS)
-}
-
-pub(super) fn runtime_proxy_admission_wait_budget_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
-        runtime_policy_proxy().and_then(|policy| policy.admission_wait_budget_ms),
-        RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_pressure_admission_wait_budget_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS",
-        runtime_policy_proxy().and_then(|policy| policy.pressure_admission_wait_budget_ms),
-        RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_long_lived_queue_wait_budget_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
-        runtime_policy_proxy().and_then(|policy| policy.long_lived_queue_wait_budget_ms),
-        RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_pressure_long_lived_queue_wait_budget_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
-        runtime_policy_proxy().and_then(|policy| policy.pressure_long_lived_queue_wait_budget_ms),
-        RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_sync_probe_pressure_pause_ms() -> u64 {
-    timeout_override_ms_with_policy(
-        "PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS",
-        runtime_policy_proxy().and_then(|policy| policy.sync_probe_pressure_pause_ms),
-        RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS,
-    )
-}
-
-pub(super) fn runtime_proxy_profile_inflight_soft_limit() -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT",
-        runtime_policy_proxy().and_then(|policy| policy.profile_inflight_soft_limit),
-        RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
-    )
-}
-
-pub(super) fn runtime_proxy_profile_inflight_hard_limit() -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT",
-        runtime_policy_proxy().and_then(|policy| policy.profile_inflight_hard_limit),
-        RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
-    )
+pub(crate) fn collect_runtime_tuning_snapshot(config: &RuntimeConfig) -> RuntimeTuningSnapshot {
+    config.tuning
 }
 
 pub(super) fn runtime_proxy_responses_quota_critical_floor_percent() -> i64 {
-    percent_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_RESPONSES_CRITICAL_FLOOR_PERCENT",
-        runtime_policy_proxy().and_then(|policy| policy.responses_critical_floor_percent),
-        2,
-    )
-    .clamp(1, 10)
+    let configured = RUNTIME_RESPONSES_QUOTA_CRITICAL_FLOOR_PERCENT.load(Ordering::Relaxed);
+    if configured > 0 {
+        return configured;
+    }
+
+    // Compatibility fallback for pure helpers invoked before proxy startup. Production proxy
+    // startup always publishes the validated value before binding a listener.
+    #[cfg(test)]
+    return RuntimeConfig::compatibility_current().responses_quota_critical_floor_percent;
+
+    #[cfg(not(test))]
+    2
 }
 
-pub(super) fn runtime_startup_sync_probe_warm_limit() -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT",
-        runtime_policy_proxy().and_then(|policy| policy.startup_sync_probe_warm_limit),
-        RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT,
-    )
-    .min(RUNTIME_STARTUP_PROBE_WARM_LIMIT)
-}
+static RUNTIME_RESPONSES_QUOTA_CRITICAL_FLOOR_PERCENT: AtomicI64 = AtomicI64::new(0);
+
+#[cfg(test)]
+#[path = "runtime_config/test_compat.rs"]
+mod test_compat;
+#[cfg(test)]
+pub(crate) use test_compat::*;
 
 #[cfg(test)]
 #[path = "../tests/src/runtime_tuning.rs"]

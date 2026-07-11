@@ -1,4 +1,6 @@
 use super::{TestDir, UsageServer, Value, fs, json};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct Fixture {
@@ -34,6 +36,14 @@ pub(crate) fn setup_fixture() -> Fixture {
     fs::create_dir_all(&main_home).expect("failed to create main home");
     fs::create_dir_all(&second_home).expect("failed to create second home");
     fs::create_dir_all(&bin_root).expect("failed to create bin dir");
+    for directory in [
+        &prodex_home,
+        &prodex_home.join("profiles"),
+        &main_home,
+        &second_home,
+    ] {
+        secure_test_directory(directory);
+    }
 
     write_json(
         &prodex_home.join("state.json"),
@@ -103,6 +113,7 @@ if [ "$1" = "login" ]; then
   if [ "$with_api_key" = "1" ]; then
     IFS= read -r api_key
     printf '{"auth_mode":"apikey","OPENAI_API_KEY":"%s"}\n' "$api_key" > "$CODEX_HOME/auth.json"
+    chmod 600 "$CODEX_HOME/auth.json"
     exit 0
   fi
   account_id="${TEST_LOGIN_ACCOUNT_ID:-main-account}"
@@ -113,6 +124,7 @@ if [ "$1" = "login" ]; then
   else
     printf '{"tokens":{"access_token":"%s","account_id":"%s"}}\n' "$token" "$account_id" > "$CODEX_HOME/auth.json"
   fi
+  chmod 600 "$CODEX_HOME/auth.json"
 fi
 session_marker="${TEST_SESSION_MARKER:-}"
 if [ -n "$session_marker" ]; then
@@ -147,12 +159,30 @@ exit 0
 pub(crate) fn write_json(path: &Path, value: &Value) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("failed to create json parent dir");
+        if path.file_name().is_some_and(|name| name == "auth.json") {
+            secure_test_directory(parent);
+        }
+    }
+    if path.file_name().is_some_and(|name| name == "auth.json") {
+        secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+            .write_text(
+                &secret_store::SecretLocation::file(path),
+                serde_json::to_string_pretty(value).expect("failed to encode auth json"),
+            )
+            .expect("failed to write auth json securely");
+        return;
     }
     fs::write(
         path,
         serde_json::to_vec_pretty(value).expect("failed to encode json"),
     )
     .expect("failed to write json");
+}
+
+fn secure_test_directory(path: &Path) {
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .expect("failed to secure test directory");
 }
 
 fn write_executable(path: &Path, content: &str) {

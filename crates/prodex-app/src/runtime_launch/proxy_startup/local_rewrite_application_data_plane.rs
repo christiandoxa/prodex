@@ -1,0 +1,487 @@
+use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite_gateway_admin_router::runtime_gateway_http_request_meta;
+use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
+use super::provider_bridge::{RuntimeProviderGatewaySpendEvent, runtime_provider_model_from_body};
+use crate::RuntimeProxyRequest;
+use prodex_application::{
+    ApplicationAuthorizedRequestContext, ApplicationDataPlaneError, ApplicationDataPlanePlan,
+    ApplicationDataPlaneRequest, ApplicationProviderRetryRequest,
+    ApplicationUsageReconciliationError, ApplicationUsageReconciliationPlan,
+    ApplicationUsageReconciliationRequest, plan_application_data_plane,
+    plan_application_data_plane_execution, plan_application_provider_retry,
+    plan_application_usage_reconciliation,
+};
+use prodex_domain::{
+    Principal, RequestId, ReservationReconciliationReason, ReservationRecord, SecretRef,
+    TenantContext, TenantId, TenantScopedResource, UsageAmount,
+};
+use prodex_gateway_core::{GatewayAdmissionRequest, GatewayUsageReconciliationRequest};
+use prodex_gateway_http::{GatewayHttpExecutionPlan, GatewayHttpPolicy, GatewayHttpRouteKind};
+use prodex_observability::{TraceContext, TraceContextError};
+use prodex_provider_core::{ProviderAdapterContract, ProviderEndpoint, provider_adapter};
+use prodex_provider_spi::{
+    ProviderInvocation, ProviderRetryDecision, ProviderRetryPolicy, ProviderRetryStage,
+    ProviderRoute, ProviderRouteError, ProviderStreamMode,
+};
+use prodex_storage::{
+    AtomicReservationCommand, DurableStoreKind, TenantStorageKey, UsageReconciliationCommand,
+};
+use std::error::Error;
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RuntimeGatewayTenantResource {
+    tenant_id: TenantId,
+}
+
+impl TenantScopedResource for RuntimeGatewayTenantResource {
+    fn tenant_id(&self) -> TenantId {
+        self.tenant_id
+    }
+}
+
+#[derive(Clone)]
+pub(super) enum RuntimeGatewayApplicationAdmission {
+    TenantBound(Box<ApplicationDataPlanePlan>),
+    CompatibilityAnonymous,
+}
+
+impl RuntimeGatewayApplicationAdmission {
+    pub(super) fn tenant_bound(&self) -> Option<&ApplicationDataPlanePlan> {
+        match self {
+            Self::TenantBound(plan) => Some(plan),
+            Self::CompatibilityAnonymous => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum RuntimeGatewayApplicationDataPlaneError {
+    Execution(prodex_application::ApplicationDataPlaneExecutionError),
+    MissingPrincipal,
+    RouteUnavailable,
+    ProviderRoute(ProviderRouteError),
+    TraceContext(TraceContextError),
+    Admission(ApplicationDataPlaneError),
+    DispatchMismatch,
+}
+
+impl fmt::Display for RuntimeGatewayApplicationDataPlaneError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Execution(error) => error.fmt(f),
+            Self::Admission(error) => error.fmt(f),
+            Self::ProviderRoute(error) => error.fmt(f),
+            Self::TraceContext(error) => error.fmt(f),
+            Self::MissingPrincipal | Self::RouteUnavailable | Self::DispatchMismatch => {
+                write!(f, "application data-plane request is invalid")
+            }
+        }
+    }
+}
+
+impl Error for RuntimeGatewayApplicationDataPlaneError {}
+
+pub(super) fn runtime_gateway_application_http_policy(
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> GatewayHttpPolicy {
+    let defaults = GatewayHttpPolicy::production_default();
+    let stream_idle_timeout_ms = shared
+        .runtime_shared
+        .runtime_config
+        .tuning
+        .stream_idle_timeout_ms;
+    GatewayHttpPolicy {
+        max_body_bytes: usize::try_from(
+            shared.runtime_shared.runtime_config.max_request_body_bytes,
+        )
+        .unwrap_or(usize::MAX),
+        request_timeout_ms: defaults.request_timeout_ms.max(stream_idle_timeout_ms),
+        stream_idle_timeout_ms,
+        max_concurrent_streams: u32::try_from(shared.runtime_shared.active_request_limit)
+            .unwrap_or(u32::MAX)
+            .max(1),
+        connection_drain_timeout_ms: defaults.connection_drain_timeout_ms,
+        require_trace_context: false,
+    }
+}
+
+pub(super) fn runtime_gateway_application_local_admission(
+    authorized: &ApplicationAuthorizedRequestContext<'_>,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<GatewayHttpExecutionPlan, RuntimeGatewayApplicationDataPlaneError> {
+    plan_application_data_plane_execution(
+        runtime_gateway_application_http_policy(shared),
+        authorized,
+    )
+    .map_err(RuntimeGatewayApplicationDataPlaneError::Execution)
+}
+
+pub(super) fn runtime_gateway_application_data_plane_admission(
+    authorized: &ApplicationAuthorizedRequestContext<'_>,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    request_id: RequestId,
+    reservation: AtomicReservationCommand,
+) -> Result<RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError> {
+    let Some(tenant) = authorized.tenant_context() else {
+        return Ok(RuntimeGatewayApplicationAdmission::CompatibilityAnonymous);
+    };
+    let principal = authorized
+        .principal()
+        .cloned()
+        .ok_or(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal)?;
+    let trace_context = runtime_gateway_application_trace_context(request_id)
+        .map_err(RuntimeGatewayApplicationDataPlaneError::TraceContext)?;
+    let provider_invocation =
+        runtime_gateway_provider_invocation(RuntimeGatewayProviderInvocationInput {
+            tenant,
+            principal: principal.clone(),
+            request_id,
+            reservation: &reservation,
+            route: authorized.request().route(),
+            captured,
+            shared,
+        })?;
+    let http = runtime_gateway_http_request_meta(captured, captured.path_and_query.as_str());
+    let request = ApplicationDataPlaneRequest {
+        http,
+        admission: GatewayAdmissionRequest {
+            tenant,
+            principal,
+            resource: RuntimeGatewayTenantResource {
+                tenant_id: tenant.tenant_id,
+            },
+            reservation,
+            provider_invocation,
+            trace_context,
+        },
+    };
+    plan_application_data_plane(runtime_gateway_application_http_policy(shared), request)
+        .map(|plan| RuntimeGatewayApplicationAdmission::TenantBound(Box::new(plan)))
+        .map_err(RuntimeGatewayApplicationDataPlaneError::Admission)
+}
+
+struct RuntimeGatewayProviderInvocationInput<'a> {
+    tenant: TenantContext,
+    principal: Principal,
+    request_id: RequestId,
+    reservation: &'a AtomicReservationCommand,
+    route: GatewayHttpRouteKind,
+    captured: &'a RuntimeProxyRequest,
+    shared: &'a RuntimeLocalRewriteProxyShared,
+}
+
+fn runtime_gateway_provider_invocation(
+    input: RuntimeGatewayProviderInvocationInput<'_>,
+) -> Result<ProviderInvocation, RuntimeGatewayApplicationDataPlaneError> {
+    let provider = input.shared.provider.bridge_kind().provider_id();
+    let endpoint = runtime_gateway_provider_endpoint(input.route)
+        .ok_or(RuntimeGatewayApplicationDataPlaneError::RouteUnavailable)?;
+    let wire_format = provider_adapter(provider).upstream_request_format();
+    let model = runtime_provider_model_from_body(&input.captured.body)
+        .unwrap_or_else(|| "unknown".to_string());
+    let route = ProviderRoute::new(provider, endpoint, wire_format, model)
+        .map_err(RuntimeGatewayApplicationDataPlaneError::ProviderRoute)?;
+    Ok(ProviderInvocation {
+        tenant: input.tenant,
+        principal: input.principal,
+        request_id: input.request_id,
+        call_id: input.reservation.request.call_id,
+        route,
+        credential_ref: SecretRef::new("runtime-provider", provider.label(), None::<String>),
+        stream_mode: runtime_gateway_provider_stream_mode(input.captured),
+        estimated_usage: input.reservation.request.estimate,
+    })
+}
+
+fn runtime_gateway_provider_endpoint(route: GatewayHttpRouteKind) -> Option<ProviderEndpoint> {
+    match route {
+        GatewayHttpRouteKind::DataPlaneResponses | GatewayHttpRouteKind::DataPlaneWebSocket => {
+            Some(ProviderEndpoint::Responses)
+        }
+        GatewayHttpRouteKind::DataPlaneCompact => Some(ProviderEndpoint::ResponsesCompact),
+        GatewayHttpRouteKind::DataPlaneChatCompletions => Some(ProviderEndpoint::ChatCompletions),
+        GatewayHttpRouteKind::DataPlaneMessages => Some(ProviderEndpoint::Messages),
+        GatewayHttpRouteKind::DataPlaneEmbeddings => Some(ProviderEndpoint::Embeddings),
+        GatewayHttpRouteKind::DataPlaneModels | GatewayHttpRouteKind::DataPlaneModel => {
+            Some(ProviderEndpoint::Models)
+        }
+        GatewayHttpRouteKind::DataPlaneImagesGenerations
+        | GatewayHttpRouteKind::DataPlaneImagesEdits
+        | GatewayHttpRouteKind::DataPlaneImagesVariations => Some(ProviderEndpoint::Images),
+        GatewayHttpRouteKind::DataPlaneAudioSpeech
+        | GatewayHttpRouteKind::DataPlaneAudioTranscriptions
+        | GatewayHttpRouteKind::DataPlaneAudioTranslations => Some(ProviderEndpoint::Audio),
+        GatewayHttpRouteKind::DataPlaneBatches | GatewayHttpRouteKind::DataPlaneBatch => {
+            Some(ProviderEndpoint::Batches)
+        }
+        GatewayHttpRouteKind::DataPlaneRerank => Some(ProviderEndpoint::Rerank),
+        GatewayHttpRouteKind::DataPlaneA2a => Some(ProviderEndpoint::A2a),
+        GatewayHttpRouteKind::DataPlaneQuota
+        | GatewayHttpRouteKind::ControlPlane
+        | GatewayHttpRouteKind::HealthLive
+        | GatewayHttpRouteKind::HealthReady
+        | GatewayHttpRouteKind::HealthStartup
+        | GatewayHttpRouteKind::Unknown => None,
+    }
+}
+
+fn runtime_gateway_provider_stream_mode(captured: &RuntimeProxyRequest) -> ProviderStreamMode {
+    let streaming = serde_json::from_slice::<serde_json::Value>(&captured.body)
+        .ok()
+        .and_then(|body| body.get("stream").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false);
+    if streaming {
+        ProviderStreamMode::Streaming
+    } else {
+        ProviderStreamMode::Unary
+    }
+}
+
+fn runtime_gateway_application_trace_context(
+    request_id: RequestId,
+) -> Result<TraceContext, TraceContextError> {
+    let trace_id = request_id.as_uuid().simple().to_string();
+    TraceContext::new(&trace_id, &trace_id[..16], "01")
+}
+
+pub(super) fn runtime_gateway_application_provider_dispatch(
+    admission: &RuntimeGatewayApplicationAdmission,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<(), RuntimeGatewayApplicationDataPlaneError> {
+    let Some(plan) = admission.tenant_bound() else {
+        return Ok(());
+    };
+    let expected_provider = shared.provider.bridge_kind().provider_id();
+    let expected_endpoint = runtime_gateway_provider_endpoint(plan.http.route)
+        .ok_or(RuntimeGatewayApplicationDataPlaneError::RouteUnavailable)?;
+    if plan.admission.provider_invocation.route.provider != expected_provider
+        || plan.admission.provider_invocation.route.endpoint != expected_endpoint
+        || plan.admission.provider_invocation.stream_mode
+            != runtime_gateway_provider_stream_mode(captured)
+    {
+        return Err(RuntimeGatewayApplicationDataPlaneError::DispatchMismatch);
+    }
+    Ok(())
+}
+
+pub(super) fn runtime_gateway_application_provider_stage_is_committed(
+    stage: ProviderRetryStage,
+) -> bool {
+    debug_assert!(matches!(
+        stage,
+        ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation
+    ));
+    // Provider adapters retain their heterogeneous precommit attempt budgets. The application
+    // planner is authoritative here only after the response is irreversible, where retry denial
+    // is independent of the adapter-specific attempt count.
+    let plan = plan_application_provider_retry(ApplicationProviderRetryRequest {
+        policy: ProviderRetryPolicy::single_retry(),
+        stage,
+        attempted_precommit_retries: 0,
+    });
+    plan.retry.decision == ProviderRetryDecision::DeniedCommitted
+}
+
+pub(super) struct RuntimeGatewayApplicationReconciliationInput<'a> {
+    pub(super) state_store: &'a RuntimeGatewayStateStore,
+    pub(super) storage_key: TenantStorageKey,
+    pub(super) record: ReservationRecord,
+    pub(super) actual: UsageAmount,
+    pub(super) event: &'a RuntimeProviderGatewaySpendEvent,
+}
+
+pub(super) struct RuntimeGatewayApplicationReconciliationPlan {
+    pub(super) application: ApplicationUsageReconciliationPlan,
+    pub(super) command: UsageReconciliationCommand,
+}
+
+#[derive(Debug)]
+pub(super) enum RuntimeGatewayApplicationReconciliationError {
+    UnsupportedStore,
+    InvalidRequestId,
+    TraceContext(TraceContextError),
+    Application(ApplicationUsageReconciliationError),
+}
+
+impl fmt::Display for RuntimeGatewayApplicationReconciliationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Application(error) => error.fmt(f),
+            Self::TraceContext(error) => error.fmt(f),
+            Self::UnsupportedStore | Self::InvalidRequestId => {
+                write!(f, "application usage reconciliation is unavailable")
+            }
+        }
+    }
+}
+
+impl Error for RuntimeGatewayApplicationReconciliationError {}
+
+pub(super) fn runtime_gateway_application_usage_reconciliation(
+    input: RuntimeGatewayApplicationReconciliationInput<'_>,
+) -> Result<RuntimeGatewayApplicationReconciliationPlan, RuntimeGatewayApplicationReconciliationError>
+{
+    let durable_store = match input.state_store {
+        RuntimeGatewayStateStore::Sqlite { .. } => DurableStoreKind::Sqlite,
+        RuntimeGatewayStateStore::Postgres { .. } => DurableStoreKind::Postgres,
+        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
+            return Err(RuntimeGatewayApplicationReconciliationError::UnsupportedStore);
+        }
+    };
+    let request_id = input
+        .event
+        .request_id
+        .strip_prefix("prodex-")
+        .unwrap_or(&input.event.request_id)
+        .parse::<RequestId>()
+        .map_err(|_| RuntimeGatewayApplicationReconciliationError::InvalidRequestId)?;
+    let command = UsageReconciliationCommand {
+        storage_key: input.storage_key,
+        snapshot: prodex_domain::BudgetSnapshot {
+            reserved: input.record.reserved,
+            committed: UsageAmount::ZERO,
+        },
+        record: input.record,
+        actual: input.actual,
+        reason: input
+            .event
+            .reconciliation_reason
+            .unwrap_or(ReservationReconciliationReason::Completed),
+    };
+    let request = ApplicationUsageReconciliationRequest {
+        durable_store,
+        gateway: GatewayUsageReconciliationRequest {
+            tenant: TenantContext {
+                tenant_id: input.record.tenant_id,
+            },
+            request_id,
+            reconciliation: command.clone(),
+            trace_context: runtime_gateway_application_trace_context(request_id)
+                .map_err(RuntimeGatewayApplicationReconciliationError::TraceContext)?,
+        },
+    };
+    let application = plan_application_usage_reconciliation(request)
+        .map_err(RuntimeGatewayApplicationReconciliationError::Application)?;
+    Ok(RuntimeGatewayApplicationReconciliationPlan {
+        application,
+        command,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prodex_domain::{
+        CallId, ReservationId, ReservationReconciliationReason, ReservationRequest,
+    };
+
+    #[test]
+    fn provider_retry_boundary_marks_irreversible_stages_committed() {
+        assert!(runtime_gateway_application_provider_stage_is_committed(
+            ProviderRetryStage::AfterFirstByte
+        ));
+        assert!(runtime_gateway_application_provider_stage_is_committed(
+            ProviderRetryStage::AfterCancellation
+        ));
+    }
+
+    #[test]
+    fn provider_route_mapping_covers_forwarded_data_plane_routes() {
+        for route in [
+            GatewayHttpRouteKind::DataPlaneResponses,
+            GatewayHttpRouteKind::DataPlaneCompact,
+            GatewayHttpRouteKind::DataPlaneChatCompletions,
+            GatewayHttpRouteKind::DataPlaneMessages,
+            GatewayHttpRouteKind::DataPlaneEmbeddings,
+            GatewayHttpRouteKind::DataPlaneImagesGenerations,
+            GatewayHttpRouteKind::DataPlaneAudioSpeech,
+            GatewayHttpRouteKind::DataPlaneBatches,
+            GatewayHttpRouteKind::DataPlaneRerank,
+            GatewayHttpRouteKind::DataPlaneA2a,
+        ] {
+            assert!(runtime_gateway_provider_endpoint(route).is_some());
+        }
+    }
+
+    #[test]
+    fn application_reconciliation_preserves_cancelled_and_partial_stream_usage() {
+        let tenant_id = TenantId::new();
+        let request = ReservationRequest {
+            tenant_id,
+            call_id: CallId::new(),
+            reservation_id: ReservationId::new(),
+            estimate: UsageAmount::new(100, 1_000),
+        };
+        let record = ReservationRecord::from_request(request, 1_000, 60_000).unwrap();
+        let state_store = RuntimeGatewayStateStore::sqlite("/tmp/prodex-test.sqlite".into());
+
+        for reason in [
+            ReservationReconciliationReason::Cancelled,
+            ReservationReconciliationReason::StreamInterrupted,
+        ] {
+            let event = RuntimeProviderGatewaySpendEvent {
+                event: "gateway_spend",
+                phase: "response",
+                request: 7,
+                key_name: Some("test-key".to_string()),
+                tenant_id: Some(tenant_id.to_string()),
+                request_id: format!("prodex-{}", RequestId::new()),
+                legacy_request_sequence: 7,
+                call_id: format!("prodex-{}", request.call_id),
+                provider: "openai".to_string(),
+                path: "/v1/responses".to_string(),
+                model: "gpt-5.4".to_string(),
+                status: 200,
+                elapsed_ms: 1,
+                request_bytes: 10,
+                response_bytes: Some(5),
+                input_tokens: Some(3),
+                output_tokens: Some(2),
+                cost_usd: None,
+                reconciliation_reason: Some(reason),
+                sink: "runtime-log".to_string(),
+            };
+            let plan = runtime_gateway_application_usage_reconciliation(
+                RuntimeGatewayApplicationReconciliationInput {
+                    state_store: &state_store,
+                    storage_key: TenantStorageKey::tenant(tenant_id),
+                    record,
+                    actual: UsageAmount::new(5, 50),
+                    event: &event,
+                },
+            )
+            .unwrap();
+
+            assert_eq!(
+                plan.application
+                    .gateway
+                    .reconciliation
+                    .reconciliation
+                    .reason,
+                reason,
+            );
+            assert_eq!(
+                plan.application
+                    .gateway
+                    .reconciliation
+                    .reconciliation
+                    .commit
+                    .actual,
+                UsageAmount::new(5, 50),
+            );
+            assert_eq!(
+                plan.application
+                    .gateway
+                    .reconciliation
+                    .reconciliation
+                    .released_event
+                    .expect("partial usage releases the unconsumed reservation")
+                    .amount,
+                UsageAmount::new(95, 950),
+            );
+        }
+    }
+}

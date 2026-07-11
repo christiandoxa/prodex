@@ -10,44 +10,119 @@ use aes_gcm_siv::{
     aead::{Aead, KeyInit},
 };
 use anyhow::{Context, Result, bail};
+use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
 use pbkdf2::pbkdf2_hmac;
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 use crate::data_model::{
-    PROFILE_EXPORT_FORMAT, PROFILE_EXPORT_KEY_BYTES, PROFILE_EXPORT_NONCE_BYTES,
-    PROFILE_EXPORT_PBKDF2_ITERATIONS, PROFILE_EXPORT_SALT_BYTES, PROFILE_EXPORT_VERSION,
+    PROFILE_EXPORT_ARGON2_ITERATIONS, PROFILE_EXPORT_ARGON2_MAX_ITERATIONS,
+    PROFILE_EXPORT_ARGON2_MAX_MEMORY_KIB, PROFILE_EXPORT_ARGON2_MAX_PARALLELISM,
+    PROFILE_EXPORT_ARGON2_MEMORY_KIB, PROFILE_EXPORT_ARGON2_MIN_ITERATIONS,
+    PROFILE_EXPORT_ARGON2_MIN_MEMORY_KIB, PROFILE_EXPORT_ARGON2_MIN_PARALLELISM,
+    PROFILE_EXPORT_ARGON2_PARALLELISM, PROFILE_EXPORT_ARGON2_VERSION, PROFILE_EXPORT_FORMAT,
+    PROFILE_EXPORT_KEY_BYTES, PROFILE_EXPORT_NONCE_BYTES, PROFILE_EXPORT_PASSWORD_MAX_BYTES,
+    PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS, PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
+    PROFILE_EXPORT_PLAINTEXT_MAX_BYTES, PROFILE_EXPORT_SALT_BYTES, PROFILE_EXPORT_VERSION_V1,
+    PROFILE_EXPORT_VERSION_V2,
 };
-use crate::{PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, ProfileExportEnvelope};
+use crate::{
+    PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, ProfileExportEnvelope, ProfileExportKdfParameters,
+};
 
 static PROFILE_EXPORT_BUNDLE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-pub(crate) const PROFILE_EXPORT_BUNDLE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+pub const PROFILE_EXPORT_BUNDLE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+pub const PROFILE_EXPORT_CIPHERTEXT_MAX_BYTES: usize =
+    PROFILE_EXPORT_PLAINTEXT_MAX_BYTES + PROFILE_EXPORT_AUTH_TAG_BYTES;
+const PROFILE_EXPORT_AUTH_TAG_BYTES: usize = 16;
+
+#[derive(Serialize)]
+struct PlainProfileExportEnvelope<'a, T> {
+    payload_kind: &'static str,
+    format: &'static str,
+    version: u32,
+    payload: &'a T,
+}
 
 pub fn serialize_profile_export_payload<T>(payload: &T, password: Option<&str>) -> Result<Vec<u8>>
 where
-    T: Clone + Serialize,
+    T: Serialize,
 {
-    let envelope = match password {
-        Some(password) => encrypt_profile_export_payload(payload, password)?,
-        None => ProfileExportEnvelope::Plain {
-            format: PROFILE_EXPORT_FORMAT.to_string(),
-            version: PROFILE_EXPORT_VERSION,
-            payload: payload.clone(),
-        },
+    let encoded = match password {
+        Some(password) => {
+            serde_json::to_vec_pretty(&encrypt_profile_export_payload(payload, password)?)
+        }
+        None => serde_json::to_vec_pretty(&PlainProfileExportEnvelope {
+            payload_kind: "plain",
+            format: PROFILE_EXPORT_FORMAT,
+            version: PROFILE_EXPORT_VERSION_V1,
+            payload,
+        }),
     };
-    serde_json::to_vec_pretty(&envelope).context("failed to serialize profile export bundle")
+    let encoded = encoded.context("failed to serialize profile export bundle")?;
+    if encoded.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle exceeds safe size limit ({} bytes)",
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
+    Ok(encoded)
 }
 
 pub fn read_profile_export_envelope<T>(path: &Path) -> Result<(ProfileExportEnvelope<T>, bool)>
 where
     T: DeserializeOwned,
 {
-    let content = read_profile_export_bundle(path)?;
-    let envelope: ProfileExportEnvelope<T> = serde_json::from_slice(&content)
+    let content = Zeroizing::new(read_profile_export_bundle(path)?);
+    let envelope = parse_profile_export_envelope(&content)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    let encrypted = matches!(envelope, ProfileExportEnvelope::Encrypted { .. });
+    let encrypted = matches!(
+        envelope,
+        ProfileExportEnvelope::Encrypted { .. } | ProfileExportEnvelope::EncryptedV2 { .. }
+    );
     Ok((envelope, encrypted))
+}
+
+pub fn parse_profile_export_envelope<T>(content: &[u8]) -> Result<ProfileExportEnvelope<T>>
+where
+    T: DeserializeOwned,
+{
+    if content.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
+        bail!(
+            "profile export bundle exceeds safe size limit ({} bytes)",
+            PROFILE_EXPORT_BUNDLE_MAX_BYTES
+        );
+    }
+    let envelope: ProfileExportEnvelope<T> =
+        serde_json::from_slice(content).map_err(redacted_profile_export_parse_error)?;
+    validate_profile_export_envelope(&envelope)?;
+    Ok(envelope)
+}
+
+fn redacted_profile_export_parse_error(error: serde_json::Error) -> anyhow::Error {
+    let detail = error.to_string();
+    for stable_error in [
+        "profile export exceeds profile count limit",
+        "profile export exceeds secret-file count limit",
+        "profile export exceeds per-profile secret-file count limit",
+        "profile export nested secret exceeds size limit",
+    ] {
+        if detail.contains(stable_error) {
+            return anyhow::anyhow!(stable_error);
+        }
+    }
+    anyhow::anyhow!("invalid profile export envelope")
+}
+
+fn redacted_decrypted_payload_parse_error(error: serde_json::Error) -> anyhow::Error {
+    let error = redacted_profile_export_parse_error(error);
+    if error.to_string() == "invalid profile export envelope" {
+        anyhow::anyhow!("failed to parse decrypted profile export payload")
+    } else {
+        error
+    }
 }
 
 fn read_profile_export_bundle(path: &Path) -> Result<Vec<u8>> {
@@ -129,67 +204,112 @@ pub fn decode_profile_export_envelope<T>(
 where
     T: DeserializeOwned,
 {
+    validate_profile_export_envelope(&envelope)?;
     match envelope {
-        ProfileExportEnvelope::Plain {
-            format,
-            version,
-            payload,
-        } => {
-            validate_profile_export_header(&format, version)?;
-            Ok(payload)
-        }
+        ProfileExportEnvelope::Plain { payload, .. } => Ok(payload),
         ProfileExportEnvelope::Encrypted {
-            format,
-            version,
-            cipher,
-            kdf,
             iterations,
             salt_base64,
             nonce_base64,
             ciphertext_base64,
-        } => {
-            validate_profile_export_header(&format, version)?;
-            if cipher != PROFILE_EXPORT_CIPHER {
-                bail!("unsupported profile export cipher '{}'", cipher);
-            }
-            if kdf != PROFILE_EXPORT_KDF {
-                bail!("unsupported profile export KDF '{}'", kdf);
-            }
-            if iterations != PROFILE_EXPORT_PBKDF2_ITERATIONS {
-                bail!(
-                    "unsupported profile export PBKDF2 iteration count {} (expected {})",
+            ..
+        } => decrypt_profile_export_payload(
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+            ProfileExportKdfPlan::Pbkdf2Sha256 { iterations },
+            resolve_password,
+        ),
+        ProfileExportEnvelope::EncryptedV2 {
+            kdf:
+                ProfileExportKdfParameters::Argon2id {
+                    memory_kib,
                     iterations,
-                    PROFILE_EXPORT_PBKDF2_ITERATIONS
-                );
-            }
-            let salt = base64::engine::general_purpose::STANDARD
-                .decode(salt_base64)
-                .context("failed to decode encrypted export salt")?;
-            if salt.len() != PROFILE_EXPORT_SALT_BYTES {
-                bail!("invalid encrypted export salt length");
-            }
-            let nonce = base64::engine::general_purpose::STANDARD
-                .decode(nonce_base64)
-                .context("failed to decode encrypted export nonce")?;
-            let ciphertext = base64::engine::general_purpose::STANDARD
-                .decode(ciphertext_base64)
-                .context("failed to decode encrypted export payload")?;
-            if nonce.len() != PROFILE_EXPORT_NONCE_BYTES {
-                bail!("invalid encrypted export nonce length");
-            }
-            let password = resolve_password()?;
-            let key = derive_profile_export_key(&password, &salt, iterations);
-            let cipher = Aes256GcmSiv::new_from_slice(&key)
-                .map_err(|_| anyhow::anyhow!("failed to initialize import cipher"))?;
-            let plaintext = cipher
-                .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
-                .map_err(|_| anyhow::anyhow!("failed to decrypt profile export bundle"))?;
-            serde_json::from_slice(&plaintext)
-                .context("failed to parse decrypted profile export payload")
-        }
+                    parallelism,
+                    ..
+                },
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+            ..
+        } => decrypt_profile_export_payload(
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+            ProfileExportKdfPlan::Argon2id {
+                memory_kib,
+                iterations,
+                parallelism,
+            },
+            resolve_password,
+        ),
     }
 }
 
+#[derive(Clone, Copy)]
+enum ProfileExportKdfPlan {
+    Pbkdf2Sha256 {
+        iterations: u32,
+    },
+    Argon2id {
+        memory_kib: u32,
+        iterations: u32,
+        parallelism: u32,
+    },
+}
+
+fn decrypt_profile_export_payload<T>(
+    salt_base64: String,
+    nonce_base64: String,
+    ciphertext_base64: String,
+    kdf: ProfileExportKdfPlan,
+    resolve_password: impl FnOnce() -> Result<String>,
+) -> Result<T>
+where
+    T: DeserializeOwned,
+{
+    let salt = Zeroizing::new(
+        base64::engine::general_purpose::STANDARD
+            .decode(salt_base64)
+            .context("failed to decode encrypted export salt")?,
+    );
+    let nonce = Zeroizing::new(
+        base64::engine::general_purpose::STANDARD
+            .decode(nonce_base64)
+            .context("failed to decode encrypted export nonce")?,
+    );
+    let ciphertext = Zeroizing::new(
+        base64::engine::general_purpose::STANDARD
+            .decode(ciphertext_base64)
+            .context("failed to decode encrypted export payload")?,
+    );
+    let password = Zeroizing::new(resolve_password()?);
+    validate_profile_export_password(password.as_bytes())?;
+    let mut key = Zeroizing::new([0_u8; PROFILE_EXPORT_KEY_BYTES]);
+    derive_profile_export_key_into(password.as_str(), &salt, kdf, &mut key)?;
+    let cipher = Aes256GcmSiv::new_from_slice(key.as_ref())
+        .map_err(|_| anyhow::anyhow!("failed to initialize import cipher"))?;
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt(Nonce::from_slice(&nonce), ciphertext.as_slice())
+            .map_err(|_| anyhow::anyhow!("failed to decrypt profile export bundle"))?,
+    );
+    if plaintext.len() > PROFILE_EXPORT_PLAINTEXT_MAX_BYTES {
+        bail!(
+            "decrypted profile export payload exceeds safe size limit ({} bytes)",
+            PROFILE_EXPORT_PLAINTEXT_MAX_BYTES
+        );
+    }
+    serde_json::from_slice(&plaintext).map_err(redacted_decrypted_payload_parse_error)
+}
+
+/// Derives a legacy version-1 PBKDF2 key.
+///
+/// This remains source-compatible for callers that inspect old envelopes. New
+/// code should use the encrypt/decode APIs, whose key buffers zeroize on drop.
+#[deprecated(
+    note = "legacy v1 compatibility helper returns a raw key; use profile export encrypt/decode APIs"
+)]
 pub fn derive_profile_export_key(
     password: &str,
     salt: &[u8],
@@ -200,15 +320,217 @@ pub fn derive_profile_export_key(
     key
 }
 
+fn derive_profile_export_key_into(
+    password: &str,
+    salt: &[u8],
+    kdf: ProfileExportKdfPlan,
+    key: &mut [u8; PROFILE_EXPORT_KEY_BYTES],
+) -> Result<()> {
+    match kdf {
+        ProfileExportKdfPlan::Pbkdf2Sha256 { iterations } => {
+            pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, iterations, key);
+            Ok(())
+        }
+        ProfileExportKdfPlan::Argon2id {
+            memory_kib,
+            iterations,
+            parallelism,
+        } => {
+            let params = Params::new(
+                memory_kib,
+                iterations,
+                parallelism,
+                Some(PROFILE_EXPORT_KEY_BYTES),
+            )
+            .map_err(|_| anyhow::anyhow!("invalid profile export Argon2id parameters"))?;
+            Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+                .hash_password_into(password.as_bytes(), salt, key)
+                .map_err(|_| anyhow::anyhow!("failed to derive profile export key"))
+        }
+    }
+}
+
 pub fn validate_profile_export_header(format: &str, version: u32) -> Result<()> {
     if format != PROFILE_EXPORT_FORMAT {
-        bail!("unsupported profile export format '{}'", format);
+        bail!("unsupported profile export format");
     }
-    if version != PROFILE_EXPORT_VERSION {
+    if !matches!(
+        version,
+        PROFILE_EXPORT_VERSION_V1 | PROFILE_EXPORT_VERSION_V2
+    ) {
         bail!(
-            "unsupported profile export version {} (expected {})",
+            "unsupported profile export version {} (supported: {}, {})",
             version,
-            PROFILE_EXPORT_VERSION
+            PROFILE_EXPORT_VERSION_V1,
+            PROFILE_EXPORT_VERSION_V2
+        );
+    }
+    Ok(())
+}
+
+fn validate_profile_export_header_version(format: &str, version: u32, expected: u32) -> Result<()> {
+    validate_profile_export_header(format, version)?;
+    if version != expected {
+        bail!(
+            "profile export envelope kind requires version {} (received {})",
+            expected,
+            version
+        );
+    }
+    Ok(())
+}
+
+fn validate_profile_export_envelope<T>(envelope: &ProfileExportEnvelope<T>) -> Result<()> {
+    match envelope {
+        ProfileExportEnvelope::Plain {
+            format, version, ..
+        } => validate_profile_export_header_version(format, *version, PROFILE_EXPORT_VERSION_V1),
+        ProfileExportEnvelope::Encrypted {
+            format,
+            version,
+            cipher,
+            kdf,
+            iterations,
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+        } => {
+            validate_profile_export_header_version(format, *version, PROFILE_EXPORT_VERSION_V1)?;
+            validate_profile_export_cipher(cipher)?;
+            if kdf != PROFILE_EXPORT_KDF {
+                bail!("unsupported profile export KDF");
+            }
+            validate_profile_export_pbkdf2_iterations(*iterations)?;
+            validate_encrypted_profile_export_fields(salt_base64, nonce_base64, ciphertext_base64)
+        }
+        ProfileExportEnvelope::EncryptedV2 {
+            format,
+            version,
+            cipher,
+            kdf,
+            salt_base64,
+            nonce_base64,
+            ciphertext_base64,
+        } => {
+            validate_profile_export_header_version(format, *version, PROFILE_EXPORT_VERSION_V2)?;
+            validate_profile_export_cipher(cipher)?;
+            match kdf {
+                ProfileExportKdfParameters::Argon2id {
+                    version,
+                    memory_kib,
+                    iterations,
+                    parallelism,
+                } => validate_profile_export_argon2id_parameters(
+                    *version,
+                    *memory_kib,
+                    *iterations,
+                    *parallelism,
+                )?,
+            }
+            validate_encrypted_profile_export_fields(salt_base64, nonce_base64, ciphertext_base64)
+        }
+    }
+}
+
+fn validate_profile_export_cipher(cipher: &str) -> Result<()> {
+    if cipher != PROFILE_EXPORT_CIPHER {
+        bail!("unsupported profile export cipher");
+    }
+    Ok(())
+}
+
+fn validate_profile_export_pbkdf2_iterations(iterations: u32) -> Result<()> {
+    if !(PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS..=PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS)
+        .contains(&iterations)
+    {
+        bail!(
+            "profile export PBKDF2 iteration count {} is outside safe range {}..={}",
+            iterations,
+            PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
+            PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS
+        );
+    }
+    Ok(())
+}
+
+fn validate_profile_export_argon2id_parameters(
+    version: u32,
+    memory_kib: u32,
+    iterations: u32,
+    parallelism: u32,
+) -> Result<()> {
+    if version != PROFILE_EXPORT_ARGON2_VERSION {
+        bail!("unsupported profile export Argon2id version {}", version);
+    }
+    if !(PROFILE_EXPORT_ARGON2_MIN_MEMORY_KIB..=PROFILE_EXPORT_ARGON2_MAX_MEMORY_KIB)
+        .contains(&memory_kib)
+    {
+        bail!("profile export Argon2id memory cost is outside safe range");
+    }
+    if !(PROFILE_EXPORT_ARGON2_MIN_ITERATIONS..=PROFILE_EXPORT_ARGON2_MAX_ITERATIONS)
+        .contains(&iterations)
+    {
+        bail!("profile export Argon2id iteration count is outside safe range");
+    }
+    if !(PROFILE_EXPORT_ARGON2_MIN_PARALLELISM..=PROFILE_EXPORT_ARGON2_MAX_PARALLELISM)
+        .contains(&parallelism)
+    {
+        bail!("profile export Argon2id parallelism is outside safe range");
+    }
+    Ok(())
+}
+
+fn validate_encrypted_profile_export_fields(
+    salt_base64: &str,
+    nonce_base64: &str,
+    ciphertext_base64: &str,
+) -> Result<()> {
+    validate_base64_field("salt", salt_base64, PROFILE_EXPORT_SALT_BYTES, true)?;
+    validate_base64_field("nonce", nonce_base64, PROFILE_EXPORT_NONCE_BYTES, true)?;
+    validate_base64_field(
+        "payload",
+        ciphertext_base64,
+        PROFILE_EXPORT_CIPHERTEXT_MAX_BYTES,
+        false,
+    )?;
+    let ciphertext_len = decoded_base64_length(ciphertext_base64)?;
+    if ciphertext_len < PROFILE_EXPORT_AUTH_TAG_BYTES {
+        bail!("invalid encrypted export payload length");
+    }
+    Ok(())
+}
+
+fn validate_base64_field(label: &str, value: &str, limit: usize, exact: bool) -> Result<()> {
+    let decoded_len = decoded_base64_length(value)
+        .with_context(|| format!("invalid encrypted export {label} encoding"))?;
+    if (exact && decoded_len != limit) || (!exact && decoded_len > limit) {
+        bail!("invalid encrypted export {label} length");
+    }
+    Ok(())
+}
+
+fn decoded_base64_length(value: &str) -> Result<usize> {
+    let bytes = value.as_bytes();
+    if !bytes.len().is_multiple_of(4) {
+        bail!("invalid base64 length");
+    }
+    let padding = bytes.iter().rev().take_while(|byte| **byte == b'=').count();
+    if padding > 2
+        || bytes[..bytes.len().saturating_sub(padding)]
+            .iter()
+            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(*byte, b'+' | b'/'))
+        || bytes[..bytes.len().saturating_sub(padding)].contains(&b'=')
+    {
+        bail!("invalid base64 encoding");
+    }
+    Ok(bytes.len() / 4 * 3 - padding)
+}
+
+fn validate_profile_export_password(password: &[u8]) -> Result<()> {
+    if password.is_empty() || password.len() > PROFILE_EXPORT_PASSWORD_MAX_BYTES {
+        bail!(
+            "profile export password must contain 1..={} bytes",
+            PROFILE_EXPORT_PASSWORD_MAX_BYTES
         );
     }
     Ok(())
@@ -217,34 +539,59 @@ pub fn validate_profile_export_header(format: &str, version: u32) -> Result<()> 
 fn encrypt_profile_export_payload<T>(
     payload: &T,
     password: &str,
-) -> Result<ProfileExportEnvelope<T>>
+) -> Result<ProfileExportEnvelope<()>>
 where
-    T: Clone + Serialize,
+    T: Serialize,
 {
-    let payload_json =
-        serde_json::to_vec(payload).context("failed to serialize profile export payload")?;
-    let mut salt = [0_u8; PROFILE_EXPORT_SALT_BYTES];
-    getrandom::fill(&mut salt)
+    validate_profile_export_password(password.as_bytes())?;
+    let payload_json = Zeroizing::new(
+        serde_json::to_vec(payload).context("failed to serialize profile export payload")?,
+    );
+    if payload_json.len() > PROFILE_EXPORT_PLAINTEXT_MAX_BYTES {
+        bail!(
+            "profile export payload exceeds safe size limit ({} bytes)",
+            PROFILE_EXPORT_PLAINTEXT_MAX_BYTES
+        );
+    }
+    let mut salt = Zeroizing::new([0_u8; PROFILE_EXPORT_SALT_BYTES]);
+    getrandom::fill(&mut salt[..])
         .map_err(|err| anyhow::anyhow!("failed to generate export salt: {err}"))?;
-    let mut nonce = [0_u8; PROFILE_EXPORT_NONCE_BYTES];
-    getrandom::fill(&mut nonce)
+    let mut nonce = Zeroizing::new([0_u8; PROFILE_EXPORT_NONCE_BYTES]);
+    getrandom::fill(&mut nonce[..])
         .map_err(|err| anyhow::anyhow!("failed to generate export nonce: {err}"))?;
-    let key = derive_profile_export_key(password, &salt, PROFILE_EXPORT_PBKDF2_ITERATIONS);
-    let cipher = Aes256GcmSiv::new_from_slice(&key)
+    let password = Zeroizing::new(password.to_string());
+    let mut key = Zeroizing::new([0_u8; PROFILE_EXPORT_KEY_BYTES]);
+    derive_profile_export_key_into(
+        password.as_str(),
+        &salt[..],
+        ProfileExportKdfPlan::Argon2id {
+            memory_kib: PROFILE_EXPORT_ARGON2_MEMORY_KIB,
+            iterations: PROFILE_EXPORT_ARGON2_ITERATIONS,
+            parallelism: PROFILE_EXPORT_ARGON2_PARALLELISM,
+        },
+        &mut key,
+    )?;
+    let cipher = Aes256GcmSiv::new_from_slice(key.as_ref())
         .map_err(|_| anyhow::anyhow!("failed to initialize export cipher"))?;
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce), payload_json.as_ref())
-        .map_err(|_| anyhow::anyhow!("failed to encrypt profile export payload"))?;
+    let ciphertext = Zeroizing::new(
+        cipher
+            .encrypt(Nonce::from_slice(&nonce[..]), payload_json.as_slice())
+            .map_err(|_| anyhow::anyhow!("failed to encrypt profile export payload"))?,
+    );
 
-    Ok(ProfileExportEnvelope::Encrypted {
+    Ok(ProfileExportEnvelope::EncryptedV2 {
         format: PROFILE_EXPORT_FORMAT.to_string(),
-        version: PROFILE_EXPORT_VERSION,
+        version: PROFILE_EXPORT_VERSION_V2,
         cipher: PROFILE_EXPORT_CIPHER.to_string(),
-        kdf: PROFILE_EXPORT_KDF.to_string(),
-        iterations: PROFILE_EXPORT_PBKDF2_ITERATIONS,
-        salt_base64: base64::engine::general_purpose::STANDARD.encode(salt),
-        nonce_base64: base64::engine::general_purpose::STANDARD.encode(nonce),
-        ciphertext_base64: base64::engine::general_purpose::STANDARD.encode(ciphertext),
+        kdf: ProfileExportKdfParameters::Argon2id {
+            version: PROFILE_EXPORT_ARGON2_VERSION,
+            memory_kib: PROFILE_EXPORT_ARGON2_MEMORY_KIB,
+            iterations: PROFILE_EXPORT_ARGON2_ITERATIONS,
+            parallelism: PROFILE_EXPORT_ARGON2_PARALLELISM,
+        },
+        salt_base64: base64::engine::general_purpose::STANDARD.encode(salt.as_ref()),
+        nonce_base64: base64::engine::general_purpose::STANDARD.encode(nonce.as_ref()),
+        ciphertext_base64: base64::engine::general_purpose::STANDARD.encode(ciphertext.as_slice()),
     })
 }
 
@@ -285,56 +632,5 @@ fn write_profile_export_temp_file(path: &Path, content: &[u8]) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    fn encrypted_envelope(
-        iterations: u32,
-        salt: &[u8],
-    ) -> ProfileExportEnvelope<serde_json::Value> {
-        ProfileExportEnvelope::Encrypted {
-            format: PROFILE_EXPORT_FORMAT.to_string(),
-            version: PROFILE_EXPORT_VERSION,
-            cipher: PROFILE_EXPORT_CIPHER.to_string(),
-            kdf: PROFILE_EXPORT_KDF.to_string(),
-            iterations,
-            salt_base64: base64::engine::general_purpose::STANDARD.encode(salt),
-            nonce_base64: base64::engine::general_purpose::STANDARD
-                .encode([0_u8; PROFILE_EXPORT_NONCE_BYTES]),
-            ciphertext_base64: String::new(),
-        }
-    }
-
-    #[test]
-    fn encrypted_bundle_rejects_unbounded_kdf_iterations_before_password_lookup() {
-        let password_requested = AtomicBool::new(false);
-        let err = decode_profile_export_envelope(
-            encrypted_envelope(u32::MAX, &[0_u8; PROFILE_EXPORT_SALT_BYTES]),
-            || {
-                password_requested.store(true, Ordering::SeqCst);
-                Ok("secret".to_string())
-            },
-        )
-        .expect_err("unsupported iteration count should fail");
-
-        assert!(err.to_string().contains("PBKDF2 iteration count"));
-        assert!(!password_requested.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn encrypted_bundle_rejects_invalid_salt_length_before_password_lookup() {
-        let password_requested = AtomicBool::new(false);
-        let err = decode_profile_export_envelope(
-            encrypted_envelope(PROFILE_EXPORT_PBKDF2_ITERATIONS, &[0_u8; 1]),
-            || {
-                password_requested.store(true, Ordering::SeqCst);
-                Ok("secret".to_string())
-            },
-        )
-        .expect_err("invalid salt should fail");
-
-        assert!(err.to_string().contains("salt length"));
-        assert!(!password_requested.load(Ordering::SeqCst));
-    }
-}
+#[path = "envelope/tests.rs"]
+mod tests;

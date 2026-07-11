@@ -111,6 +111,10 @@ pub(crate) fn attempt_runtime_websocket_request(
                 mark_runtime_websocket_upstream_frame_seen(
                     &mut upstream_socket,
                     &mut first_upstream_frame_seen,
+                    shared
+                        .runtime_config
+                        .tuning
+                        .websocket_precommit_progress_timeout_ms,
                 )?;
 
                 let mut inspected = inspect_runtime_websocket_text_frame(text.as_str());
@@ -304,6 +308,10 @@ pub(crate) fn attempt_runtime_websocket_request(
                 mark_runtime_websocket_upstream_frame_seen(
                     &mut upstream_socket,
                     &mut first_upstream_frame_seen,
+                    shared
+                        .runtime_config
+                        .tuning
+                        .websocket_precommit_progress_timeout_ms,
                 )?;
                 if !committed {
                     commit_runtime_websocket_attempt(RuntimeWebsocketCommitRequest {
@@ -335,6 +343,10 @@ pub(crate) fn attempt_runtime_websocket_request(
                 mark_runtime_websocket_upstream_frame_seen(
                     &mut upstream_socket,
                     &mut first_upstream_frame_seen,
+                    shared
+                        .runtime_config
+                        .tuning
+                        .websocket_precommit_progress_timeout_ms,
                 )?;
                 upstream_socket
                     .send(WsMessage::Pong(payload))
@@ -344,6 +356,10 @@ pub(crate) fn attempt_runtime_websocket_request(
                 mark_runtime_websocket_upstream_frame_seen(
                     &mut upstream_socket,
                     &mut first_upstream_frame_seen,
+                    shared
+                        .runtime_config
+                        .tuning
+                        .websocket_precommit_progress_timeout_ms,
                 )?;
             }
             Ok(WsMessage::Close(frame)) => {

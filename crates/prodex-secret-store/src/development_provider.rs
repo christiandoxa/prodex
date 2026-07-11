@@ -5,6 +5,7 @@ use prodex_domain::{
 use std::env;
 use std::fmt;
 use std::path::Path;
+use zeroize::Zeroizing;
 
 use crate::{PROJECTED_SECRET_MAX_BYTES, ProjectedSecretProvider, SecretError};
 
@@ -87,8 +88,8 @@ fn read_environment(name: &str) -> Result<Vec<u8>, SecretResolutionError> {
         return Err(SecretResolutionError::PermissionDenied);
     }
 
-    let value = match env::var(name) {
-        Ok(value) => value,
+    let mut value = match env::var(name) {
+        Ok(value) => Zeroizing::new(value),
         Err(env::VarError::NotPresent) => return Err(SecretResolutionError::NotFound),
         Err(env::VarError::NotUnicode(_)) => {
             return Err(SecretResolutionError::ProviderUnavailable);
@@ -97,7 +98,7 @@ fn read_environment(name: &str) -> Result<Vec<u8>, SecretResolutionError> {
     if value.len() as u64 > PROJECTED_SECRET_MAX_BYTES {
         return Err(SecretResolutionError::ProviderUnavailable);
     }
-    Ok(value.into_bytes())
+    Ok(std::mem::take(&mut *value).into_bytes())
 }
 
 fn valid_environment_name(name: &str) -> bool {

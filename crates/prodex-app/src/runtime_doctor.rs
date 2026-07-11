@@ -22,8 +22,10 @@ pub(crate) use prodex_runtime_doctor::summarize_runtime_log_tail;
 #[cfg(test)]
 pub(crate) use state::{collect_runtime_doctor_state, runtime_doctor_degraded_routes};
 
-fn runtime_doctor_tuning_snapshot() -> prodex_runtime_doctor::RuntimeDoctorTuningSnapshot {
-    let snapshot = collect_runtime_tuning_snapshot();
+fn runtime_doctor_tuning_snapshot(
+    config: &RuntimeConfig,
+) -> prodex_runtime_doctor::RuntimeDoctorTuningSnapshot {
+    let snapshot = collect_runtime_tuning_snapshot(config);
     prodex_runtime_doctor::RuntimeDoctorTuningSnapshot {
         active_request_limit: snapshot.active_request_limit,
         lane_limits: prodex_runtime_doctor::RuntimeDoctorTuningLaneLimits {
@@ -47,19 +49,21 @@ fn runtime_doctor_tuning_snapshot() -> prodex_runtime_doctor::RuntimeDoctorTunin
 
 pub(crate) fn runtime_doctor_json_value_with_policy_suggestions(
     summary: &RuntimeDoctorSummary,
+    config: &RuntimeConfig,
 ) -> serde_json::Value {
     prodex_runtime_doctor::runtime_doctor_json_value_with_policy_suggestions(
         summary,
-        runtime_doctor_tuning_snapshot(),
+        runtime_doctor_tuning_snapshot(config),
     )
 }
 
 pub(crate) fn runtime_doctor_policy_suggestions(
     summary: &RuntimeDoctorSummary,
+    config: &RuntimeConfig,
 ) -> Vec<prodex_runtime_doctor::RuntimeDoctorPolicySuggestion> {
     prodex_runtime_doctor::runtime_doctor_policy_suggestions(
         summary,
-        runtime_doctor_tuning_snapshot(),
+        runtime_doctor_tuning_snapshot(config),
     )
 }
 

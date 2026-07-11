@@ -1,30 +1,42 @@
 use super::{
-    load_runtime_broker_registry, runtime_broker_health_connect_timeout_ms,
-    runtime_broker_health_read_timeout_ms, runtime_broker_registry_keys, runtime_process_pid_alive,
+    load_runtime_broker_capability, load_runtime_broker_registry, runtime_broker_registry_keys,
+    runtime_process_pid_alive,
 };
 use crate::{
-    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit,
-    read_blocking_response_text_with_limit,
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeConfig,
+    read_blocking_response_body_with_limit, read_blocking_response_text_with_limit,
 };
 use anyhow::{Context, Result, bail};
 use prodex_core::AppPaths;
 use prodex_runtime_broker::{
     RuntimeBrokerHealth, RuntimeBrokerMetrics, RuntimeBrokerObservation, RuntimeBrokerRegistry,
+    RuntimeBrokerSecret,
 };
 use reqwest::blocking::Client;
+use reqwest::header::HeaderValue;
 use std::time::Duration;
 
-pub(crate) fn runtime_broker_client() -> Result<Client> {
+fn runtime_broker_admin_header(capability: &RuntimeBrokerSecret) -> Result<HeaderValue> {
+    let mut value = HeaderValue::from_str(capability.expose())
+        .context("runtime broker capability is not a valid HTTP header value")?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+pub(crate) fn runtime_broker_client_with_config(config: &RuntimeConfig) -> Result<Client> {
     Client::builder()
         .no_proxy()
         .connect_timeout(Duration::from_millis(
-            runtime_broker_health_connect_timeout_ms(),
+            config.broker_health_connect_timeout_ms,
         ))
-        .timeout(Duration::from_millis(
-            runtime_broker_health_read_timeout_ms(),
-        ))
+        .timeout(Duration::from_millis(config.broker_health_read_timeout_ms))
         .build()
         .context("failed to build runtime broker control client")
+}
+
+#[cfg(test)]
+pub(crate) fn runtime_broker_client() -> Result<Client> {
+    runtime_broker_client_with_config(&RuntimeConfig::compatibility_current())
 }
 
 pub(crate) fn runtime_broker_health_url(registry: &RuntimeBrokerRegistry) -> String {
@@ -45,13 +57,19 @@ pub(crate) fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> S
 
 pub(crate) fn probe_runtime_broker_health(
     client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerHealth>> {
+    let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
+    else {
+        return Ok(None);
+    };
     let response = match client
         .get(runtime_broker_health_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            &registry.admin_token,
+            runtime_broker_admin_header(&capability)?,
         )
         .send()
     {
@@ -73,13 +91,19 @@ pub(crate) fn probe_runtime_broker_health(
 
 pub(crate) fn probe_runtime_broker_metrics(
     client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> Result<Option<RuntimeBrokerMetrics>> {
+    let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
+    else {
+        return Ok(None);
+    };
     let response = match client
         .get(runtime_broker_metrics_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            &registry.admin_token,
+            runtime_broker_admin_header(&capability)?,
         )
         .send()
     {
@@ -102,7 +126,10 @@ pub(crate) fn probe_runtime_broker_metrics(
 pub(crate) fn collect_live_runtime_broker_observations(
     paths: &AppPaths,
 ) -> Vec<RuntimeBrokerObservation> {
-    let Ok(client) = runtime_broker_client() else {
+    let Ok(config) = RuntimeConfig::from_env_policy_and_cli(paths) else {
+        return Vec::new();
+    };
+    let Ok(client) = runtime_broker_client_with_config(&config) else {
         return Vec::new();
     };
 
@@ -114,7 +141,9 @@ pub(crate) fn collect_live_runtime_broker_observations(
         if !runtime_process_pid_alive(registry.pid) {
             continue;
         }
-        let Ok(Some(metrics)) = probe_runtime_broker_metrics(&client, &registry) else {
+        let Ok(Some(metrics)) =
+            probe_runtime_broker_metrics(&client, paths, &broker_key, &registry)
+        else {
             continue;
         };
         observations.push(RuntimeBrokerObservation {
@@ -146,14 +175,17 @@ pub(crate) fn format_runtime_broker_metrics_targets(targets: &[String]) -> Strin
 
 pub(crate) fn activate_runtime_broker_profile(
     client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
     registry: &RuntimeBrokerRegistry,
     current_profile: &str,
 ) -> Result<()> {
+    let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
     let response = client
         .post(runtime_broker_activate_url(registry))
         .header(
             prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
-            &registry.admin_token,
+            runtime_broker_admin_header(&capability)?,
         )
         .json(&serde_json::json!({
             "current_profile": current_profile,
@@ -179,4 +211,18 @@ pub(crate) fn activate_runtime_broker_profile(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_broker_admin_header_debug_is_redacted() {
+        let capability = RuntimeBrokerSecret::new("debug-secret-capability").unwrap();
+        let header = runtime_broker_admin_header(&capability).unwrap();
+
+        assert!(header.is_sensitive());
+        assert!(!format!("{header:?}").contains(capability.expose()));
+    }
 }

@@ -4,7 +4,7 @@ use super::runtime_broker_observed_binary_identity;
 use crate::{
     AppPaths, RuntimeBrokerHealth, RuntimeBrokerRegistry, RuntimeBrokerVersionGuardOutcome,
     audit_log_event_best_effort, cleanup_runtime_broker_stale_leases,
-    remove_runtime_broker_registry_if_token_matches, runtime_current_prodex_binary_identity,
+    remove_runtime_broker_registry_if_instance_matches, runtime_current_prodex_binary_identity,
     runtime_current_prodex_version_identity, runtime_process_pid_alive, terminate_runtime_process,
 };
 
@@ -64,7 +64,7 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
             "pid": registry.pid,
             "listen_addr": registry.listen_addr,
             "started_at": registry.started_at,
-            "instance_token": registry.instance_token,
+            "instance_id": registry.instance_id,
             "upstream_base_url": registry.upstream_base_url,
             "include_code_review": registry.include_code_review,
             "current_prodex_version": current_identity.prodex_version,
@@ -82,6 +82,6 @@ pub(crate) fn replace_runtime_broker_if_version_mismatch_with_health(
         }),
     );
     terminate_runtime_process(registry.pid);
-    remove_runtime_broker_registry_if_token_matches(paths, broker_key, &registry.instance_token);
+    remove_runtime_broker_registry_if_instance_matches(paths, broker_key, &registry.instance_id);
     RuntimeBrokerVersionGuardOutcome::Replaced
 }

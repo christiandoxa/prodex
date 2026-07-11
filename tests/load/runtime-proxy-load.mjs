@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -447,16 +447,20 @@ async function startMock(args) {
 }
 
 async function prepareProdexHome(root, profiles) {
-  await mkdir(path.join(root, "profiles"), { recursive: true });
+  const profilesRoot = path.join(root, "profiles");
+  await mkdir(profilesRoot, { recursive: true, mode: 0o700 });
+  await chmod(profilesRoot, 0o700);
   const stateProfiles = {};
   for (let index = 1; index <= profiles; index += 1) {
     const name = `load-${index}`;
     const accountId = `${name}-account`;
     const profileHome = path.join(root, "profiles", name);
-    await mkdir(profileHome, { recursive: true });
+    await mkdir(profileHome, { recursive: true, mode: 0o700 });
+    await chmod(profileHome, 0o700);
     await writeFile(
       path.join(profileHome, "auth.json"),
       JSON.stringify({ tokens: { access_token: `token-${name}`, account_id: accountId } }),
+      { mode: 0o600 },
     );
     stateProfiles[name] = {
       codex_home: profileHome,
@@ -514,24 +518,20 @@ async function startProxy(args, upstreamBaseUrl) {
   await prepareProdexHome(root, args.profiles);
   await mkdir(runtimeLogDir, { recursive: true });
   const listenAddr = args.listenAddr ?? `127.0.0.1:${await freePort()}`;
-  const childArgs = [
-    "__runtime-broker",
-    "--current-profile",
-    "load-1",
-    "--upstream-base-url",
-    upstreamBaseUrl,
-    "--broker-key",
-    "load-harness",
-    "--instance-token",
-    `load-instance-${process.pid}`,
-    "--admin-token",
-    `load-admin-${process.pid}`,
-    "--listen-addr",
-    listenAddr,
-  ];
-  if (args.upstreamNoProxy) {
-    childArgs.push("--upstream-no-proxy");
-  }
+  const childArgs = ["__runtime-broker"];
+  const bootstrap = {
+    version: 1,
+    current_profile: "load-1",
+    upstream_base_url: upstreamBaseUrl,
+    include_code_review: false,
+    upstream_no_proxy: args.upstreamNoProxy,
+    smart_context_enabled: false,
+    model_context_window_tokens: null,
+    broker_key: "load-harness",
+    instance_id: `load-instance-${process.pid}`,
+    admin_token: `load-admin-${process.pid}`,
+    listen_addr: listenAddr,
+  };
   const child = spawn(path.resolve(args.prodex), childArgs, {
     env: {
       ...process.env,
@@ -542,8 +542,9 @@ async function startProxy(args, upstreamBaseUrl) {
         .filter(Boolean)
         .join(","),
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
+  child.stdin.end(JSON.stringify(bootstrap));
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   let childSpawnError = null;

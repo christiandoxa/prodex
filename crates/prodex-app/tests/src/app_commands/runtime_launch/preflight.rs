@@ -183,7 +183,7 @@ fn prepare_runtime_launch_auto_selects_ready_snapshot_before_current_network_pre
     let ready_home = root.join("ready-home");
     fs::create_dir_all(&current_home).unwrap();
     fs::create_dir_all(&ready_home).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         ready_home.join("auth.json"),
         serde_json::json!({
             "tokens": {

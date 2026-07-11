@@ -2,13 +2,19 @@ use super::local_rewrite::{
     RUNTIME_GATEWAY_REDIS_LEDGER_KEY, RUNTIME_GATEWAY_REDIS_LEDGER_LOCK,
     RuntimeGatewayDurableReservationState, RuntimeLocalRewriteProxyShared,
 };
+use super::local_rewrite_application_data_plane::{
+    RuntimeGatewayApplicationReconciliationInput, runtime_gateway_application_usage_reconciliation,
+};
 use super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
 use super::local_rewrite_gateway_file_ledger::{
     runtime_gateway_file_ledger_load, runtime_gateway_file_ledger_reconcile_response,
 };
-use super::local_rewrite_gateway_ledger_types::{
-    RuntimeGatewayBillingLedgerEntry, runtime_gateway_usd_to_microusd,
+use super::local_rewrite_gateway_ledger_types::RuntimeGatewayBillingLedgerEntry;
+use super::local_rewrite_gateway_reconciliation_audit::runtime_gateway_audit_usage_reconciliation;
+use super::local_rewrite_gateway_reconciliation_runtime::{
+    runtime_gateway_durable_actual_usage, runtime_gateway_postgres_load_durable_reservation_state,
+    runtime_gateway_postgres_reconcile_usage,
 };
 use super::local_rewrite_gateway_redis_ledger::{
     runtime_gateway_redis_ledger_load, runtime_gateway_redis_ledger_reconcile_response,
@@ -24,7 +30,7 @@ use super::local_rewrite_gateway_util::{
 };
 use super::provider_bridge::RuntimeProviderGatewaySpendEvent;
 use super::*;
-use prodex_domain::{RequestId, ReservationReconciliationReason, UsageAmount};
+use prodex_domain::{RequestId, UsageAmount};
 use rusqlite::OptionalExtension;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -108,6 +114,12 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
                             continue;
                         }
                     }
+                    runtime_gateway_audit_usage_reconciliation(
+                        &runtime_shared,
+                        &state_store,
+                        &event,
+                        "success",
+                    );
                     if let Ok(mut request_ids) = request_ids.lock() {
                         request_ids.remove(&event.request);
                     }
@@ -170,56 +182,16 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
             durable_reservations.remove(&event.request);
         }
         if let Some(_err) = last_error {
+            runtime_gateway_audit_usage_reconciliation(
+                &runtime_shared,
+                &state_store,
+                &event,
+                "failure",
+            );
             crate::runtime_proxy_log(
                 &runtime_shared,
                 runtime_proxy_structured_log_message(
                     "gateway_billing_ledger_reconcile_failed",
-                    [
-                        runtime_proxy_log_field("request", event.request.to_string()),
-                        runtime_proxy_log_field("backend", state_store.label()),
-                        runtime_proxy_log_field(
-                            "error_kind",
-                            RUNTIME_GATEWAY_LEDGER_PERSISTENCE_FAILED_ERROR_KIND,
-                        ),
-                    ],
-                ),
-            );
-        }
-    });
-}
-
-pub(super) fn schedule_runtime_gateway_durable_reconcile(
-    shared: &RuntimeLocalRewriteProxyShared,
-    event: RuntimeProviderGatewaySpendEvent,
-) {
-    if event.phase != "response" {
-        return;
-    }
-    let should_reconcile = shared
-        .gateway_usage
-        .request_ids
-        .lock()
-        .map(|request_ids| request_ids.contains(&event.request))
-        .unwrap_or(false);
-    if !should_reconcile {
-        return;
-    }
-    let state_store = shared.gateway_state_store.clone();
-    let runtime_shared = shared.runtime_shared.clone();
-    let postgres_repository = shared.gateway_postgres_repository.clone();
-    let durable_reservations = Arc::clone(&shared.gateway_usage.durable_reservations);
-    shared.runtime_shared.async_runtime.spawn_blocking(move || {
-        if let Err(_err) = runtime_gateway_durable_reconcile_response(
-            &runtime_shared,
-            &state_store,
-            postgres_repository.as_ref(),
-            &durable_reservations,
-            &event,
-        ) {
-            crate::runtime_proxy_log(
-                &runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_durable_reconcile_failed",
                     [
                         runtime_proxy_log_field("request", event.request.to_string()),
                         runtime_proxy_log_field("backend", state_store.label()),
@@ -293,100 +265,54 @@ fn runtime_gateway_durable_reconcile_response(
             ),
         );
     }
-    let command = prodex_storage::UsageReconciliationCommand {
-        storage_key: state.storage_key,
-        snapshot: prodex_domain::BudgetSnapshot {
-            reserved: state.record.reserved,
-            committed: UsageAmount::ZERO,
+    let planned = runtime_gateway_application_usage_reconciliation(
+        RuntimeGatewayApplicationReconciliationInput {
+            state_store,
+            storage_key: state.storage_key,
+            record: state.record,
+            actual,
+            event,
         },
-        record: state.record,
-        actual,
-        reason: ReservationReconciliationReason::Completed,
-    };
-    match state_store {
-        RuntimeGatewayStateStore::Sqlite { path } => {
-            let plan = prodex_storage_sqlite::plan_sqlite_usage_reconciliation(command)
-                .map_err(std::io::Error::other)?;
-            runtime_gateway_sqlite_reconcile_usage(path, &plan, &state.record, actual)
-                .map_err(std::io::Error::other)
-        }
-        RuntimeGatewayStateStore::Postgres { .. } => runtime_shared
-            .async_runtime
-            .handle()
-            .block_on(
-                postgres_repository
-                    .ok_or_else(|| {
-                        std::io::Error::other("PostgreSQL accounting repository unavailable")
-                    })?
-                    .reconcile_usage(command, runtime_gateway_unix_epoch_millis()),
-            )
-            .map(|_| ())
-            .map_err(std::io::Error::other),
-        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => Ok(()),
+    )
+    .map_err(std::io::Error::other)?;
+    if planned
+        .application
+        .gateway
+        .reconciliation
+        .reconciliation
+        .reason
+        != planned.command.reason
+    {
+        return Err(std::io::Error::other(
+            "application reconciliation plan mismatch",
+        ));
     }
-}
-
-fn runtime_gateway_postgres_load_durable_reservation_state(
-    runtime_shared: &RuntimeRotationProxyShared,
-    repository: Option<&prodex_storage_postgres_runtime::PostgresRepository>,
-    event: &RuntimeProviderGatewaySpendEvent,
-) -> std::io::Result<Option<RuntimeGatewayDurableReservationState>> {
-    let Some(tenant_id) = event
-        .tenant_id
-        .as_deref()
-        .and_then(|tenant_id| tenant_id.parse::<prodex_domain::TenantId>().ok())
-    else {
-        return Ok(None);
-    };
-    let call_id_text = event
-        .call_id
-        .strip_prefix("prodex-")
-        .unwrap_or(&event.call_id);
-    let Ok(call_id) = call_id_text.parse::<prodex_domain::CallId>() else {
-        return Ok(None);
-    };
-    let stored = runtime_shared
-        .async_runtime
-        .handle()
-        .block_on(
-            repository
-                .ok_or_else(|| {
-                    std::io::Error::other("PostgreSQL accounting repository unavailable")
-                })?
-                .load_reservation(tenant_id, call_id),
+    match (state_store, planned.application.storage) {
+        (
+            RuntimeGatewayStateStore::Sqlite { path },
+            prodex_application::ApplicationUsageReconciliationStoragePlan::Sqlite(storage),
+        ) => runtime_gateway_sqlite_reconcile_usage(
+            path,
+            &storage,
+            &planned.command.record,
+            planned.command.actual,
         )
-        .map_err(std::io::Error::other)?;
-    let Some(stored) = stored else {
-        return Ok(None);
-    };
-    let storage_key = match stored.virtual_key_id {
-        Some(virtual_key_id) => {
-            prodex_storage::TenantStorageKey::virtual_key(tenant_id, virtual_key_id)
+        .map_err(std::io::Error::other),
+        (
+            RuntimeGatewayStateStore::Postgres { .. },
+            prodex_application::ApplicationUsageReconciliationStoragePlan::Postgres(storage),
+        ) => runtime_gateway_postgres_reconcile_usage(
+            runtime_shared,
+            postgres_repository,
+            &storage,
+            planned.command,
+        ),
+        (RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. }, _) => {
+            Ok(())
         }
-        None => prodex_storage::TenantStorageKey::tenant(tenant_id),
-    };
-    Ok(Some(RuntimeGatewayDurableReservationState {
-        storage_key,
-        record: stored.record,
-    }))
-}
-
-fn runtime_gateway_durable_actual_usage(
-    record: &prodex_domain::ReservationRecord,
-    event: &RuntimeProviderGatewaySpendEvent,
-) -> (UsageAmount, bool) {
-    let actual_tokens = event
-        .input_tokens
-        .unwrap_or_default()
-        .saturating_add(event.output_tokens.unwrap_or_default());
-    let actual_cost_micros = runtime_gateway_usd_to_microusd(event.cost_usd).unwrap_or_default();
-    let actual = UsageAmount::new(actual_tokens, actual_cost_micros);
-    if actual.exceeds(record.reserved) {
-        // ponytail: under-reserved requests still settle at the reserved estimate; once every
-        // request reserves enough output-side headroom, remove this clamp and trust actual usage.
-        (record.reserved, true)
-    } else {
-        (actual, false)
+        _ => Err(std::io::Error::other(
+            "application reconciliation storage mismatch",
+        )),
     }
 }
 
@@ -652,6 +578,7 @@ mod tests {
             input_tokens: Some(7),
             output_tokens: Some(11),
             cost_usd: None,
+            reconciliation_reason: Some(prodex_domain::ReservationReconciliationReason::Completed),
             sink: "runtime-log".to_string(),
         };
 
@@ -691,6 +618,7 @@ mod tests {
             input_tokens: Some(7),
             output_tokens: Some(11),
             cost_usd: None,
+            reconciliation_reason: Some(prodex_domain::ReservationReconciliationReason::Completed),
             sink: "runtime-log".to_string(),
         };
 

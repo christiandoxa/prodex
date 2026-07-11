@@ -14,3 +14,6 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 ratatui = { workspace = true }
 unicode-width = { workspace = true }
+
+[lints]
+workspace = true

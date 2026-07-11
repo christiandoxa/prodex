@@ -467,6 +467,7 @@ impl RuntimeProxyWebsocketStaleReuseBenchCase {
         let stale = runtime_websocket_previous_response_reuse_is_stale(
             nonreplayable,
             Some(self.stale_elapsed),
+            RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS,
         );
         let fallback_allowed =
             runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed(

@@ -248,11 +248,20 @@ fn runtime_doctor_count_stale_runtime_broker_leases(paths: &AppPaths, broker_key
 
 fn runtime_doctor_probe_runtime_broker_health_status(
     client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
     registry: &RuntimeBrokerRegistry,
 ) -> (&'static str, Option<RuntimeBrokerHealth>) {
+    let Ok(capability) = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)
+    else {
+        return ("health_unreachable", None);
+    };
     let response = client
         .get(runtime_broker_health_url(registry))
-        .header("X-Prodex-Admin-Token", &registry.admin_token)
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            capability.expose(),
+        )
         .send();
     match response {
         Ok(response) => {
@@ -281,7 +290,9 @@ fn runtime_doctor_probe_runtime_broker_health_status(
 fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut RuntimeDoctorSummary) {
     let current_identity = runtime_current_prodex_binary_identity();
     let current_doctor_identity = runtime_doctor_binary_identity(&current_identity);
-    let client = runtime_broker_client().ok();
+    let client = RuntimeConfig::from_env_policy_and_cli(paths)
+        .ok()
+        .and_then(|config| runtime_broker_client_with_config(&config).ok());
     for broker_key in runtime_broker_registry_keys(paths) {
         let Ok(Some(registry)) = load_runtime_broker_registry(paths, &broker_key) else {
             continue;
@@ -302,7 +313,14 @@ fn runtime_doctor_collect_broker_identities(paths: &AppPaths, summary: &mut Runt
         }
         let (health_status, health) = client
             .as_ref()
-            .map(|client| runtime_doctor_probe_runtime_broker_health_status(client, &registry))
+            .map(|client| {
+                runtime_doctor_probe_runtime_broker_health_status(
+                    client,
+                    paths,
+                    &broker_key,
+                    &registry,
+                )
+            })
             .unwrap_or(("health_unreachable", None));
         let (identity, source) = health
             .as_ref()

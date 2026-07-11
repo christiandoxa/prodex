@@ -2,7 +2,9 @@ use super::super::*;
 use super::worker::runtime_probe_refresh_worker_loop;
 use crate::runtime_background::worker_spawn::spawn_runtime_background_worker_or_log;
 
-pub(crate) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
+fn runtime_probe_refresh_queue_with_worker_count(
+    worker_count: usize,
+) -> Arc<RuntimeProbeRefreshQueue> {
     Arc::clone(RUNTIME_PROBE_REFRESH_QUEUE.get_or_init(|| {
         let queue = Arc::new(RuntimeProbeRefreshQueue {
             pending: Mutex::new(BTreeMap::new()),
@@ -11,7 +13,7 @@ pub(crate) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
             wait: Arc::new((Mutex::new(()), Condvar::new())),
             revision: Arc::new(AtomicU64::new(0)),
         });
-        for worker_index in 0..runtime_probe_refresh_worker_count() {
+        for worker_index in 0..worker_count.max(1) {
             let worker_queue = Arc::clone(&queue);
             spawn_runtime_background_worker_or_log(
                 format!("prodex-runtime-probe-refresh-{worker_index}"),
@@ -21,6 +23,22 @@ pub(crate) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
         }
         queue
     }))
+}
+
+pub(crate) fn initialize_runtime_probe_refresh_queue(worker_count: usize) {
+    let _ = runtime_probe_refresh_queue_with_worker_count(worker_count);
+}
+
+pub(crate) fn runtime_probe_refresh_queue() -> Arc<RuntimeProbeRefreshQueue> {
+    if let Some(queue) = RUNTIME_PROBE_REFRESH_QUEUE.get() {
+        return Arc::clone(queue);
+    }
+    let parallelism = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4);
+    runtime_probe_refresh_queue_with_worker_count(runtime_probe_refresh_worker_count_default(
+        parallelism,
+    ))
 }
 
 pub(crate) fn runtime_probe_refresh_queue_backlog() -> usize {

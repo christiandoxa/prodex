@@ -1,16 +1,30 @@
+use std::fmt;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::IMPORT_AUTH_UPDATE_JOURNAL_VERSION;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ImportedExistingProfileAuthUpdate {
     pub profile_name: String,
     pub codex_home: PathBuf,
     pub previous_auth_json: Option<String>,
     pub previous_email: Option<String>,
     pub journal_path: Option<PathBuf>,
+}
+
+impl fmt::Debug for ImportedExistingProfileAuthUpdate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImportedExistingProfileAuthUpdate")
+            .field("profile_name", &self.profile_name)
+            .field("codex_home", &self.codex_home)
+            .field("previous_auth_json", &"<redacted>")
+            .field("previous_email", &self.previous_email)
+            .field("journal_path", &self.journal_path)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +82,7 @@ impl ImportedProfilesTransaction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportedExistingProfileAuthUpdateJournal {
     pub version: u32,
     pub profile_name: String,
@@ -76,6 +90,20 @@ pub struct ImportedExistingProfileAuthUpdateJournal {
     pub previous_email: Option<String>,
     pub previous_auth_json: Option<String>,
     pub created_at: String,
+}
+
+impl fmt::Debug for ImportedExistingProfileAuthUpdateJournal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImportedExistingProfileAuthUpdateJournal")
+            .field("version", &self.version)
+            .field("profile_name", &self.profile_name)
+            .field("codex_home", &self.codex_home)
+            .field("previous_email", &self.previous_email)
+            .field("previous_auth_json", &"<redacted>")
+            .field("created_at", &self.created_at)
+            .finish()
+    }
 }
 
 impl ImportedExistingProfileAuthUpdateJournal {

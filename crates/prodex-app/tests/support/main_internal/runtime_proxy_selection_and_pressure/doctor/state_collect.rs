@@ -28,10 +28,9 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-        smart_context_enabled: false,
+            smart_context_enabled: false,
             current_profile: "main".to_string(),
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,
@@ -39,6 +38,7 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
         },
     )
     .expect("doctor mismatch registry should save");
+    save_runtime_broker_test_capability(&paths, "doctor-mismatch", "instance", "secret");
 
     let health_thread = thread::spawn(move || {
         let request = server.recv().expect("health request should arrive");
@@ -48,7 +48,7 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
             current_profile: "main".to_string(),
             include_code_review: false,
             active_requests: 0,
-            instance_token: "instance".to_string(),
+            instance_id: "instance".to_string(),
             persistence_role: "owner".to_string(),
             prodex_version: Some("0.26.0".to_string()),
             executable_path: Some("/tmp/prodex-0.26.0".to_string()),
@@ -118,10 +118,9 @@ fn runtime_doctor_collect_state_surfaces_dead_broker_registry_and_stale_leases()
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-        smart_context_enabled: false,
+            smart_context_enabled: false,
             current_profile: "main".to_string(),
-            instance_token: "dead-instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "dead-instance".to_string(),
             prodex_version: Some("0.1.0".to_string()),
             executable_path: Some("/tmp/old-prodex".to_string()),
             executable_sha256: Some("deadbeef".to_string()),
@@ -193,10 +192,9 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-        smart_context_enabled: false,
+            smart_context_enabled: false,
             current_profile: "main".to_string(),
-            instance_token: "timeout-instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "timeout-instance".to_string(),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
             executable_path: env::current_exe()
                 .ok()
@@ -206,6 +204,7 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
         },
     )
     .expect("timeout broker registry should save");
+    save_runtime_broker_test_capability(&paths, "doctor-timeout", "timeout-instance", "secret");
 
     let health_thread = thread::spawn(move || {
         let request = server.recv().expect("timeout health request should arrive");

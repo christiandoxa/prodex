@@ -1,12 +1,13 @@
+use crate::secure_file::{self, FileSecurity, SecureDirectory};
 use sha2::{Digest, Sha256};
 use std::error::Error as StdError;
 use std::fmt;
-use std::fs;
-use std::fs::OpenOptions;
-use std::io::{self, Read as _, Write};
+use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use zeroize::Zeroizing;
 
 const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
 const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -75,7 +76,8 @@ impl RefreshLeaseCoordinator {
         sensitive_key: impl AsRef<[u8]>,
     ) -> Result<RefreshLeaseDecision, RefreshLeaseError> {
         let paths = self.paths_for_key(sensitive_key);
-        fs::create_dir_all(&self.root).map_err(|err| RefreshLeaseError::io(&self.root, err))?;
+        SecureDirectory::open(&self.root, true)
+            .map_err(|error| RefreshLeaseError::io(&self.root, error))?;
         remove_stale_result(&paths.result_path, self.result_ttl)?;
 
         if let Some(result_json) = read_fresh_result(&paths.result_path, self.result_ttl)? {
@@ -87,9 +89,10 @@ impl RefreshLeaseCoordinator {
             cleanup_stale_lock(&paths.lock_path, self.lease_ttl)?;
 
             match create_lock(&paths.lock_path) {
-                Ok(()) => {
+                Ok(lock_file) => {
                     let mut owner = RefreshLeaseOwner {
                         lock_path: paths.lock_path,
+                        lock_file,
                         result_path: paths.result_path,
                         released: false,
                     };
@@ -173,7 +176,7 @@ pub enum RefreshLeaseRole {
 
 pub enum RefreshLeaseDecision {
     Owner(RefreshLeaseOwner),
-    Follower { result_json: String },
+    Follower { result_json: Zeroizing<String> },
     Bypass { reason: RefreshLeaseBypassReason },
 }
 
@@ -207,6 +210,7 @@ pub enum RefreshLeaseBypassReason {
 
 pub struct RefreshLeaseOwner {
     lock_path: PathBuf,
+    lock_file: File,
     result_path: PathBuf,
     released: bool,
 }
@@ -223,12 +227,8 @@ impl RefreshLeaseOwner {
             return Ok(());
         }
 
-        match fs::remove_file(&self.lock_path) {
+        match secure_file::delete_private_verified(&self.lock_path, &self.lock_file) {
             Ok(()) => {
-                self.released = true;
-                Ok(())
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 self.released = true;
                 Ok(())
             }
@@ -340,23 +340,13 @@ fn hex_lower(bytes: &[u8]) -> String {
     output
 }
 
-fn create_lock(path: &Path) -> io::Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    let mut file = options.open(path)?;
+fn create_lock(path: &Path) -> io::Result<File> {
     let content = format!(
         "pid={}\ncreated_unix_ms={}\n",
         std::process::id(),
         unix_millis(SystemTime::now())
     );
-    file.write_all(content.as_bytes())
+    secure_file::create_private(path, content.as_bytes())
 }
 
 fn write_result(path: &Path, result_json: &str) -> Result<(), RefreshLeaseError> {
@@ -364,102 +354,66 @@ fn write_result(path: &Path, result_json: &str) -> Result<(), RefreshLeaseError>
         return Err(refresh_result_size_error(path));
     }
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| RefreshLeaseError::io(parent, err))?;
-    }
+    secure_file::write_private_atomic(path, result_json.as_bytes())
+        .map_err(|error| RefreshLeaseError::io(path, error))
+}
 
-    let temp_path = unique_temp_path(path);
-    write_private_file(&temp_path, result_json.as_bytes())?;
-    match fs::rename(&temp_path, path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
-            fs::remove_file(path).map_err(|err| RefreshLeaseError::io(path, err))?;
-            fs::rename(&temp_path, path).map_err(|err| RefreshLeaseError::io(path, err))
+fn read_fresh_result(
+    path: &Path,
+    ttl: Duration,
+) -> Result<Option<Zeroizing<String>>, RefreshLeaseError> {
+    let opened = match secure_file::open_file(path, FileSecurity::Private) {
+        Ok(Some(opened)) => opened,
+        Ok(None) => return Ok(None),
+        Err(error) if unsafe_entry_error(&error) => {
+            remove_entry(path)?;
+            return Ok(None);
         }
-        Err(err) => Err(RefreshLeaseError::io(path, err)),
-    }
-}
-
-fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), RefreshLeaseError> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    let mut file = options
-        .open(path)
-        .map_err(|err| RefreshLeaseError::io(path, err))?;
-    file.write_all(bytes)
-        .map_err(|err| RefreshLeaseError::io(path, err))
-}
-
-fn read_fresh_result(path: &Path, ttl: Duration) -> Result<Option<String>, RefreshLeaseError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(RefreshLeaseError::io(path, err)),
+        Err(error) => return Err(RefreshLeaseError::io(path, error)),
     };
-    if !metadata.file_type().is_file()
-        || metadata_is_stale(&metadata, ttl)
-        || metadata.len() > REFRESH_LEASE_RESULT_MAX_BYTES
+    if metadata_is_stale(opened.metadata(), ttl)
+        || opened.metadata().len() > REFRESH_LEASE_RESULT_MAX_BYTES
     {
-        let _ = fs::remove_file(path);
+        remove_entry(path)?;
         return Ok(None);
     }
-
-    let file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(RefreshLeaseError::io(path, err)),
-    };
-    let opened_metadata = file
-        .metadata()
-        .map_err(|err| RefreshLeaseError::io(path, err))?;
-    if !same_refresh_result_metadata(&metadata, &opened_metadata) {
-        let _ = fs::remove_file(path);
-        return Ok(None);
+    let mut bytes = Zeroizing::new(
+        opened
+            .read_bounded(REFRESH_LEASE_RESULT_MAX_BYTES)
+            .map_err(|error| RefreshLeaseError::io(path, error))?,
+    );
+    match String::from_utf8(std::mem::take(&mut *bytes)) {
+        Ok(value) => Ok(Some(Zeroizing::new(value))),
+        Err(error) => {
+            drop(Zeroizing::new(error.into_bytes()));
+            remove_entry(path)?;
+            Ok(None)
+        }
     }
-
-    let mut value = String::new();
-    file.take(REFRESH_LEASE_RESULT_MAX_BYTES.saturating_add(1))
-        .read_to_string(&mut value)
-        .map_err(|err| RefreshLeaseError::io(path, err))?;
-    if value.len() as u64 > REFRESH_LEASE_RESULT_MAX_BYTES {
-        let _ = fs::remove_file(path);
-        return Ok(None);
-    }
-    Ok(Some(value))
 }
 
 fn remove_stale_result(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseError> {
     if is_path_stale(path, ttl)? {
-        let _ = fs::remove_file(path);
+        remove_entry(path)?;
     }
     Ok(())
 }
 
 fn cleanup_stale_lock(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseError> {
     if is_path_stale(path, ttl)? {
-        let _ = fs::remove_file(path);
+        remove_entry(path)?;
     }
     Ok(())
 }
 
 fn is_path_stale(path: &Path, ttl: Duration) -> Result<bool, RefreshLeaseError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => return Err(RefreshLeaseError::io(path, err)),
+    let opened = match secure_file::open_file(path, FileSecurity::Private) {
+        Ok(Some(opened)) => opened,
+        Ok(None) => return Ok(false),
+        Err(error) if unsafe_entry_error(&error) => return Ok(true),
+        Err(error) => return Err(RefreshLeaseError::io(path, error)),
     };
-    if !metadata.file_type().is_file() {
-        return Ok(true);
-    }
-
-    Ok(metadata_is_stale(&metadata, ttl))
+    Ok(metadata_is_stale(opened.metadata(), ttl))
 }
 
 fn metadata_is_stale(metadata: &fs::Metadata, ttl: Duration) -> bool {
@@ -474,15 +428,18 @@ fn metadata_is_stale(metadata: &fs::Metadata, ttl: Duration) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(unix)]
-fn same_refresh_result_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
+fn unsafe_entry_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::InvalidData
+            | io::ErrorKind::InvalidInput
+            | io::ErrorKind::NotADirectory
+            | io::ErrorKind::PermissionDenied
+    )
 }
 
-#[cfg(not(unix))]
-fn same_refresh_result_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
+fn remove_entry(path: &Path) -> Result<(), RefreshLeaseError> {
+    secure_file::remove_untrusted_entry(path).map_err(|error| RefreshLeaseError::io(path, error))
 }
 
 fn refresh_result_size_error(path: &Path) -> RefreshLeaseError {
@@ -503,15 +460,6 @@ fn next_sleep(poll_interval: Duration, wait_timeout: Duration, started: Instant)
         return Duration::ZERO;
     }
     poll_interval.min(remaining)
-}
-
-fn unique_temp_path(path: &Path) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let pid = std::process::id();
-    path.with_extension(format!("{pid}.{nanos:x}.tmp"))
 }
 
 fn unix_millis(time: SystemTime) -> u128 {

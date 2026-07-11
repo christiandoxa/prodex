@@ -31,6 +31,7 @@ os_info = { workspace = true }
 prodex_audit_log = { workspace = true }
 prodex_app_reports = { workspace = true }
 prodex_application = { workspace = true }
+prodex_authn = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }
 codex_config = { workspace = true }
 prodex_caveman_assets = { workspace = true }
@@ -40,6 +41,7 @@ prodex_control_plane = { workspace = true }
 prodex_context = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_core = { workspace = true }
+prodex_gateway_core = { workspace = true }
 prodex_gateway_http = { workspace = true }
 prodex_housekeeping = { workspace = true }
 prodex_mcp_stdio = { workspace = true }
@@ -48,6 +50,7 @@ prodex_presidio = { workspace = true }
 prodex_profile_export = { workspace = true }
 prodex_profile_identity = { workspace = true }
 prodex_provider_core = { workspace = true }
+prodex_provider_spi = { workspace = true }
 prodex_proxy_config = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_runtime_quota = { workspace = true }
@@ -92,12 +95,12 @@ sha2 = { workspace = true }
 terminal_ui = { workspace = true }
 prodex_update_notice = { workspace = true }
 uuid = { workspace = true }
+zeroize = { workspace = true }
 tiny_http = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
 jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
 
-
-[dev-dependencies]
-aes-gcm-siv = { workspace = true }
+[lints]
+workspace = true

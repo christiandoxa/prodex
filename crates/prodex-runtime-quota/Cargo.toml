@@ -16,3 +16,6 @@ prodex_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
 prodex_shared_types = { workspace = true }
 runtime_proxy = { workspace = true }
+
+[lints]
+workspace = true

@@ -14,3 +14,6 @@ path = "src/lib.rs"
 prodex_runtime_proxy = { workspace = true }
 runtime_anthropic = { workspace = true }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true
