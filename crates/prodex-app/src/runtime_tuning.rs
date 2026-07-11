@@ -566,31 +566,27 @@ impl RuntimeConfig {
                 no_proxy,
             },
             oidc: RuntimeOidcTimingConfig {
-                prefetch_timeout: Duration::from_millis(parser.compatibility_u64(
+                prefetch_timeout: Duration::from_millis(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS",
                     DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
-                    true,
                     false,
                     MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
                 )),
-                http_cache_ttl: Duration::from_secs(parser.compatibility_u64(
+                http_cache_ttl: Duration::from_secs(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS",
                     DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
                     true,
-                    true,
                     MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
                 )),
-                refresh_failure_backoff: Duration::from_millis(parser.compatibility_u64(
+                refresh_failure_backoff: Duration::from_millis(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS",
                     DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
-                    true,
                     false,
                     MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
                 )),
-                last_known_good_window: Duration::from_secs(parser.compatibility_u64(
+                last_known_good_window: Duration::from_secs(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",
                     DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
-                    true,
                     true,
                     MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
                 )),

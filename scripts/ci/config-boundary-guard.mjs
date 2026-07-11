@@ -39,6 +39,20 @@ const RUNTIME_GEMINI_ENV_KEYS = Object.freeze([
   "PRODEX_GEMINI_LIVE_MODEL",
   "PRODEX_GEMINI_STICKY_FRESH_OAUTH",
 ]);
+const RUNTIME_OIDC_HOT_PATH_FILES = Object.freeze([
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_sso_config.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/admin.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/cache.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/endpoint_policy.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/token_claims.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/transport.rs",
+]);
+const RUNTIME_OIDC_ENV_KEYS = Object.freeze([
+  "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS",
+  "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS",
+  "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS",
+  "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",
+]);
 const RUNTIME_ENV_READ_PATTERN = /\b(?:std\s*::\s*)?env\s*::\s*(?:var|var_os|vars|vars_os)\s*\(/u;
 const ALLOWED_DEPENDENCIES = new Set(["prodex_domain"]);
 const ALLOWED_DEV_DEPENDENCIES = new Set([]);
@@ -196,9 +210,9 @@ export function validateConfigRequiredContracts(sourceText, sourcePath = CONFIG_
   return errors;
 }
 
-export function validateRuntimeGeminiConfigBoundary(environmentSource, hotPathSources) {
+function validateRuntimeSnapshotBoundary(environmentSource, hotPathSources, environmentKeys, boundaryName) {
   const errors = [];
-  for (const key of RUNTIME_GEMINI_ENV_KEYS) {
+  for (const key of environmentKeys) {
     const count = environmentSource.split(`"${key}"`).length - 1;
     if (count !== 1) {
       errors.push(`${RUNTIME_CONFIG_ENVIRONMENT}: expected exactly one startup read entry for ${key}, found ${count}`);
@@ -207,11 +221,29 @@ export function validateRuntimeGeminiConfigBoundary(environmentSource, hotPathSo
   for (const [file, source] of hotPathSources) {
     source.split(/\r?\n/u).forEach((line, index) => {
       if (RUNTIME_ENV_READ_PATTERN.test(line)) {
-        errors.push(`${file}:${index + 1}: runtime Gemini hot path must use RuntimeConfig, not '${line.trim()}'`);
+        errors.push(`${file}:${index + 1}: ${boundaryName} hot path must use RuntimeConfig, not '${line.trim()}'`);
       }
     });
   }
   return errors;
+}
+
+export function validateRuntimeGeminiConfigBoundary(environmentSource, hotPathSources) {
+  return validateRuntimeSnapshotBoundary(
+    environmentSource,
+    hotPathSources,
+    RUNTIME_GEMINI_ENV_KEYS,
+    "runtime Gemini",
+  );
+}
+
+export function validateRuntimeOidcConfigBoundary(environmentSource, hotPathSources) {
+  return validateRuntimeSnapshotBoundary(
+    environmentSource,
+    hotPathSources,
+    RUNTIME_OIDC_ENV_KEYS,
+    "runtime OIDC",
+  );
 }
 
 async function rustFilesUnder(dir) {
@@ -245,6 +277,14 @@ async function validateRuntimeGeminiConfigSources() {
     RUNTIME_GEMINI_HOT_PATH_FILES.map(async (file) => [file, await fs.readFile(path.join(repoRoot, file), "utf8")]),
   );
   return validateRuntimeGeminiConfigBoundary(environmentSource, hotPathSources);
+}
+
+async function validateRuntimeOidcConfigSources() {
+  const environmentSource = await fs.readFile(path.join(repoRoot, RUNTIME_CONFIG_ENVIRONMENT), "utf8");
+  const hotPathSources = await Promise.all(
+    RUNTIME_OIDC_HOT_PATH_FILES.map(async (file) => [file, await fs.readFile(path.join(repoRoot, file), "utf8")]),
+  );
+  return validateRuntimeOidcConfigBoundary(environmentSource, hotPathSources);
 }
 
 function assertSelfTest(condition, message) {
@@ -391,6 +431,24 @@ message: "configuration is not currently available"
     ),
     "missing Gemini startup key accepted",
   );
+  const oidcEnvironment = RUNTIME_OIDC_ENV_KEYS.map((key) => `"${key}",`).join("\n");
+  assertSelfTest(
+    validateRuntimeOidcConfigBoundary(oidcEnvironment, [["good.rs", "env::current_dir();"]]).length === 0,
+    "typed OIDC runtime config rejected",
+  );
+  assertSelfTest(
+    validateRuntimeOidcConfigBoundary(oidcEnvironment, [["bad.rs", "let value = env::var_os(\"KEY\");"]]).some(
+      (error) => error.includes("RuntimeConfig"),
+    ),
+    "OIDC request-path environment read accepted",
+  );
+  assertSelfTest(
+    validateRuntimeOidcConfigBoundary(
+      oidcEnvironment.replace('"PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",', ""),
+      [],
+    ).some((error) => error.includes("PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS")),
+    "missing OIDC startup key accepted",
+  );
 }
 
 async function main() {
@@ -403,6 +461,7 @@ async function main() {
     ...validateConfigManifest(manifest),
     ...(await validateConfigSources()),
     ...(await validateRuntimeGeminiConfigSources()),
+    ...(await validateRuntimeOidcConfigSources()),
   ];
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);
