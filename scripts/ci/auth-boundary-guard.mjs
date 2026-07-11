@@ -12,7 +12,7 @@ const CRATES = Object.freeze([
     manifest: "crates/prodex-authn/Cargo.toml",
     srcDir: "crates/prodex-authn/src",
     lib: "crates/prodex-authn/src/lib.rs",
-    allowedDependencies: new Set(["prodex_domain"]),
+    allowedDependencies: new Set(["prodex_domain", "url"]),
   },
   {
     name: "prodex-authz",

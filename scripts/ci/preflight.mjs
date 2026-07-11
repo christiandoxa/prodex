@@ -210,6 +210,16 @@ export function preflightSteps(args) {
       args: ["scripts/ci/application-boundary-guard.mjs"],
     },
     {
+      label: "production-boundary-guard-self-test",
+      command: "node",
+      args: ["scripts/ci/production-boundary-guard.mjs", "--self-test"],
+    },
+    {
+      label: "production-boundary-guard",
+      command: "node",
+      args: ["scripts/ci/production-boundary-guard.mjs"],
+    },
+    {
       label: "control-plane-boundary-guard-self-test",
       command: "node",
       args: ["scripts/ci/control-plane-boundary-guard.mjs", "--self-test"],

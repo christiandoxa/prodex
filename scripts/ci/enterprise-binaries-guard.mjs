@@ -16,6 +16,7 @@ const BINARIES = [
     required: ["Control-plane entrypoint", "DedicatedServerMode::ControlPlane"],
   },
 ];
+const SERVE_COMPOSITION_PATH = "src/enterprise_serve.rs";
 const FORBIDDEN_PATTERNS = [
   { name: "business runtime module", pattern: /runtime_launch|runtime_proxy|local_rewrite/u },
   { name: "HTTP framework", pattern: /\b(axum|hyper|tower|tiny_http)\s*::/u },
@@ -45,10 +46,69 @@ function validateBinary(binary) {
   return errors;
 }
 
+function validateServeComposition(source) {
+  const errors = [];
+  const loopbackBackend =
+    'prodex_app::start_policy_gateway_backend(Some("127.0.0.1:0".to_string()))';
+  const asyncFront = "let server_result = serve(";
+  const backendDrain = "backend.shutdown_and_drain(drain_timeout)";
+  for (const [needle, message] of [
+    [
+      loopbackBackend,
+      `${SERVE_COMPOSITION_PATH}: compatibility backend must stay ephemeral and loopback-only until the typed transport port replaces it`,
+    ],
+    [
+      "GatewayServerConfig::production(listen_addr, server_mode)",
+      `${SERVE_COMPOSITION_PATH}: public traffic must enter the route-isolated async server`,
+    ],
+    [
+      "backend.listen_addr()",
+      `${SERVE_COMPOSITION_PATH}: async server must target only the owned compatibility backend`,
+    ],
+    [
+      backendDrain,
+      `${SERVE_COMPOSITION_PATH}: compatibility backend must drain after the async server stops`,
+    ],
+  ]) {
+    if (!source.includes(needle)) errors.push(message);
+  }
+  const start = source.indexOf(loopbackBackend);
+  const serve = source.indexOf(asyncFront);
+  const drain = source.indexOf(backendDrain);
+  if (start < 0 || serve < 0 || drain < 0 || !(start < serve && serve < drain)) {
+    errors.push(
+      `${SERVE_COMPOSITION_PATH}: startup, route-isolated serving, and backend drain must remain ordered`,
+    );
+  }
+  if ((source.match(/start_policy_gateway_backend\s*\(/gu) ?? []).length !== 1) {
+    errors.push(`${SERVE_COMPOSITION_PATH}: dedicated serve must own exactly one compatibility backend`);
+  }
+  return errors;
+}
+
 function runSelfTest() {
   const bad = "fn main() { tiny_http::Server::http(\"127.0.0.1:0\"); }";
   if (!FORBIDDEN_PATTERNS.some((forbidden) => forbidden.pattern.test(bad))) {
     throw new Error("self-test failed: forbidden pattern did not match");
+  }
+  const validServe = `
+    let backend = prodex_app::start_policy_gateway_backend(Some("127.0.0.1:0".to_string()));
+    let server_result = serve(
+      GatewayServerConfig::production(listen_addr, server_mode),
+      backend.listen_addr(),
+    );
+    backend.shutdown_and_drain(drain_timeout);
+  `;
+  if (validateServeComposition(validServe).length !== 0) {
+    throw new Error("self-test failed: valid transitional serve composition was rejected");
+  }
+  const publicLegacy = validServe.replace('"127.0.0.1:0".to_string()', "listen_addr.to_string()");
+  if (validateServeComposition(publicLegacy).length === 0) {
+    throw new Error("self-test failed: public legacy listener was accepted");
+  }
+  const bypassedFront = validServe.replace("let server_result = serve(", "let server_result = direct(");
+  if (validateServeComposition(bypassedFront).length === 0) {
+    throw new Error("self-test failed: route-isolated async front bypass was accepted");
   }
 }
 
@@ -57,7 +117,11 @@ function main() {
     runSelfTest();
     return;
   }
-  const errors = BINARIES.flatMap(validateBinary);
+  const serveSource = fs.readFileSync(path.join(repoRoot, SERVE_COMPOSITION_PATH), "utf8");
+  const errors = [
+    ...BINARIES.flatMap(validateBinary),
+    ...validateServeComposition(serveSource),
+  ];
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);
     process.exitCode = 1;
