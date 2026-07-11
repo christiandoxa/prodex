@@ -1,4 +1,5 @@
 use prodex_shared_types::RuntimeQuotaSource;
+use runtime_proxy_crate as runtime_proxy;
 
 pub fn runtime_quota_source_to_proxy(
     source: RuntimeQuotaSource,

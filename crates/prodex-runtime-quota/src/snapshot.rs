@@ -9,6 +9,7 @@ use prodex_quota::{RuntimeQuotaSummary, RuntimeQuotaWindowStatus, UsageResponse}
 use prodex_runtime_state::{
     RuntimeProfileUsageSnapshot as RuntimeProfileUsageSnapshotGeneric, RuntimeRouteKind,
 };
+use runtime_proxy_crate as runtime_proxy;
 
 pub type RuntimeProfileUsageSnapshot = RuntimeProfileUsageSnapshotGeneric<RuntimeQuotaWindowStatus>;
 
