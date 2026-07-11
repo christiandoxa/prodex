@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "lifecycle/audit.rs"]
 mod audit;
+#[path = "lifecycle/drain.rs"]
+mod drain;
 #[path = "lifecycle/wait.rs"]
 mod wait;
 pub(crate) use audit::audit_runtime_proxy_startup_state;

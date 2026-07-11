@@ -1,5 +1,7 @@
 use super::*;
 mod gateway_config;
+#[path = "runtime_launch/gateway_shutdown.rs"]
+mod gateway_shutdown;
 mod gateway_status;
 mod preflight;
 mod provider_names;
@@ -398,9 +400,7 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
         gateway.provider_name.unwrap_or("openai-compatible"),
         gateway.auth_required,
     );
-    loop {
-        std::thread::park();
-    }
+    gateway_shutdown::wait_for_signal_and_drain(&proxy)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

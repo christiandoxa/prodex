@@ -1071,7 +1071,11 @@ while moving legacy adapter code behind enterprise boundaries.
   `usize::MAX`, and Redis ledger compatibility reads cap accidental unbounded
   loads before issuing `LRANGE`. Runtime proxy request body limit env overrides
   now reject empty, whitespace-bearing, non-numeric, or zero values instead of
-  silently falling back to the default capture limit.
+  silently falling back to the default capture limit. The legacy gateway now
+  handles SIGTERM/SIGINT by setting its existing draining flag, unblocking
+  accept workers, waiting on the atomic in-flight count for the bounded
+  30-second HTTP drain budget, and logging completion or timeout off the request
+  path.
 - **ADRs:** `docs/adr/0095-gateway-http-policy-boundary.md`,
   `docs/adr/0229-gateway-http-execution-plan.md`,
   `docs/adr/0238-gateway-http-timeout-ordering.md`,
@@ -1082,7 +1086,8 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0550-gateway-http-observability-failure-redaction.md`, and
   `docs/adr/0551-gateway-jsonl-observability-failure-redaction.md`, and
   `docs/adr/0664-gateway-admin-ledger-export-limit.md`, and
-  `docs/adr/0010-runtime-request-body-limit.md`.
+  `docs/adr/0010-runtime-request-body-limit.md`, and
+  `docs/adr/1061-legacy-gateway-signal-drain.md`.
 - **Remaining gap:** The remaining `tiny_http` and mutex-backed
   compatibility paths in `prodex-app` are now staged behind an explicit async
   serve migration contract (`docs/adr/0983-async-serve-composition-root-staging.md`),
@@ -1372,7 +1377,10 @@ while moving legacy adapter code behind enterprise boundaries.
   redacts locations, values, keyring backend selections, refresh-lease payloads,
   secret revision metadata, paths, accounts, and backend reasons while
   preserving variant names; see
-  `docs/adr/0985-secret-store-debug-redaction.md`. The production-oriented
+  `docs/adr/0985-secret-store-debug-redaction.md`. The development provider
+  implements the same domain contract for bounded `env:` and rooted private
+  `file:` references without becoming a production fallback; see
+  `docs/adr/1060-development-secret-provider.md`. The production-oriented
   projected provider implements the domain `SecretProvider` contract with
   canonical root containment, bounded private files, exact version sidecars,
   redacted debug output, and rotation-visible rereads; see
