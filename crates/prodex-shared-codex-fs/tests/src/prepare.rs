@@ -1,0 +1,1058 @@
+use super::*;
+use filetime::FileTime;
+use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+struct PrepareTestDir {
+    path: PathBuf,
+}
+
+impl PrepareTestDir {
+    fn new(name: &str) -> Self {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!(
+            "prodex-shared-prepare-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("test dir should be created");
+        Self { path }
+    }
+
+    fn app_paths(&self) -> AppPaths {
+        AppPaths {
+            root: self.path.join("prodex"),
+            state_file: self.path.join("prodex/state.json"),
+            managed_profiles_root: self.path.join("prodex/profiles"),
+            shared_codex_root: self.path.join("shared-codex"),
+            legacy_shared_codex_root: self.path.join("legacy-shared-codex"),
+        }
+    }
+}
+
+impl Drop for PrepareTestDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+#[test]
+fn shared_codex_manifest_includes_environments_toml_as_file() {
+    assert!(shared_codex_manifest_entries().contains(&SharedCodexEntry::file("environments.toml")));
+}
+
+#[test]
+fn shared_codex_manifest_includes_managed_config_toml_as_file() {
+    assert!(
+        shared_codex_manifest_entries().contains(&SharedCodexEntry::file("managed_config.toml"))
+    );
+}
+
+#[test]
+fn shared_codex_manifest_includes_mcp_oauth_fallback_credentials_as_file() {
+    assert!(shared_codex_manifest_entries().contains(&SharedCodexEntry::file(".credentials.json")));
+}
+
+#[test]
+fn shared_codex_manifest_includes_plugin_marketplace_state() {
+    let entries = shared_codex_manifest_entries();
+    for name in [
+        "plugins",
+        ".tmp/plugins",
+        ".tmp/marketplaces",
+        ".tmp/known_marketplaces.json",
+        ".tmp/app-server-remote-plugin-sync-v1",
+    ] {
+        let expected = if name.ends_with(".json") || name.ends_with("-v1") {
+            SharedCodexEntry::file(name)
+        } else {
+            SharedCodexEntry::directory(name)
+        };
+        assert!(
+            entries.contains(&expected),
+            "shared Codex manifest should include {name}"
+        );
+    }
+}
+
+#[test]
+fn shared_codex_manifest_includes_attachment_dirs() {
+    let entries = shared_codex_manifest_entries();
+    for name in ["attachments", "image_attachments"] {
+        assert!(
+            entries.contains(&SharedCodexEntry::directory(name)),
+            "shared Codex manifest should include {name}"
+        );
+    }
+}
+
+#[test]
+fn shared_codex_manifest_includes_primary_goals_db_files() {
+    let entries = shared_codex_manifest_entries();
+    for name in ["goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal"] {
+        assert!(
+            entries.contains(&SharedCodexEntry::file(name)),
+            "shared Codex manifest should include {name}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rejects_symlink_managed_profiles_root() {
+    let temp_dir = PrepareTestDir::new("symlink-managed-root");
+    let paths = temp_dir.app_paths();
+    let outside = temp_dir.path.join("outside-profiles");
+    fs::create_dir_all(
+        paths
+            .managed_profiles_root
+            .parent()
+            .expect("managed root parent"),
+    )
+    .expect("managed root parent should exist");
+    fs::create_dir_all(&outside).expect("outside target should exist");
+    std::os::unix::fs::symlink(&outside, &paths.managed_profiles_root)
+        .expect("managed root symlink should be created");
+
+    let err = prepare_managed_codex_home(&paths, &paths.managed_profiles_root.join("main"))
+        .expect_err("symlink managed root should be rejected");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        !outside.join("main").exists(),
+        "prepare must not create profile homes through a symlinked managed root"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rejects_symlink_profile_home() {
+    let temp_dir = PrepareTestDir::new("symlink-profile-home");
+    let paths = temp_dir.app_paths();
+    let outside = temp_dir.path.join("outside-profile-home");
+    let codex_home = paths.managed_profiles_root.join("main");
+    fs::create_dir_all(&paths.managed_profiles_root).expect("managed root should exist");
+    fs::create_dir_all(&outside).expect("outside target should exist");
+    std::os::unix::fs::symlink(&outside, &codex_home)
+        .expect("profile home symlink should be created");
+
+    let err =
+        prepare_managed_codex_home(&paths, &codex_home).expect_err("profile symlink should reject");
+
+    assert!(
+        err.to_string().contains("must not be a symbolic link"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        !outside.join("history.jsonl").exists(),
+        "prepare must not materialize shared files through a symlinked profile home"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rejects_symlink_shared_file_destination() {
+    let temp_dir = PrepareTestDir::new("symlink-shared-file");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_history = codex_home.join("history.jsonl");
+    let shared_history = paths.shared_codex_root.join("history.jsonl");
+    let outside_history = temp_dir.path.join("outside-history.jsonl");
+
+    fs::create_dir_all(&codex_home).expect("codex home should exist");
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should exist");
+    fs::write(&local_history, r#"{"text":"local"}"#).expect("local history should write");
+    fs::write(&outside_history, r#"{"text":"outside"}"#).expect("outside history should write");
+    std::os::unix::fs::symlink(&outside_history, &shared_history)
+        .expect("shared history symlink should be created");
+
+    let err = prepare_managed_codex_home(&paths, &codex_home)
+        .expect_err("shared file symlink should be rejected");
+
+    assert!(
+        err.to_string().contains("expected")
+            && err
+                .to_string()
+                .contains("to be a file for shared Codex state"),
+        "unexpected error: {err:#}"
+    );
+    assert_eq!(
+        fs::read_to_string(&outside_history).expect("outside history should remain readable"),
+        r#"{"text":"outside"}"#
+    );
+    assert_eq!(
+        fs::read_to_string(&local_history).expect("local history should remain readable"),
+        r#"{"text":"local"}"#
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rejects_symlink_shared_directory_destination() {
+    let temp_dir = PrepareTestDir::new("symlink-shared-dir");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_session = codex_home.join("sessions/2026/07/09/rollout.jsonl");
+    let shared_sessions = paths.shared_codex_root.join("sessions");
+    let outside_sessions = temp_dir.path.join("outside-sessions");
+
+    fs::create_dir_all(local_session.parent().expect("local session parent"))
+        .expect("local session parent should exist");
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should exist");
+    fs::create_dir_all(&outside_sessions).expect("outside sessions should exist");
+    fs::write(&local_session, "{}\n").expect("local session should write");
+    std::os::unix::fs::symlink(&outside_sessions, &shared_sessions)
+        .expect("shared sessions symlink should be created");
+
+    let err = prepare_managed_codex_home(&paths, &codex_home)
+        .expect_err("shared directory symlink should be rejected");
+
+    assert!(
+        err.to_string().contains("expected")
+            && err
+                .to_string()
+                .contains("to be a directory for shared Codex state"),
+        "unexpected error: {err:#}"
+    );
+    assert!(
+        !outside_sessions.join("2026/07/09/rollout.jsonl").exists(),
+        "prepare must not copy shared sessions through a symlinked directory"
+    );
+    assert!(
+        fs::symlink_metadata(&shared_sessions)
+            .expect("shared sessions metadata should exist")
+            .file_type()
+            .is_symlink(),
+        "rejected shared sessions path should remain a symlink"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_links_primary_goals_db_before_it_exists() {
+    let temp_dir = PrepareTestDir::new("missing-goals-db-link");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    for name in ["goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal"] {
+        let local_path = codex_home.join(name);
+        let shared_path = paths.shared_codex_root.join(name);
+        assert_eq!(
+            fs::read_link(&local_path).expect("local goals db path should be a symlink"),
+            shared_path
+        );
+    }
+}
+
+#[test]
+fn shared_codex_manifest_keeps_cloud_config_bundle_cache_profile_local() {
+    assert!(
+        !shared_codex_manifest_entries()
+            .contains(&SharedCodexEntry::file("cloud-config-bundle-cache.json"))
+    );
+}
+
+#[test]
+fn profile_v2_config_names_match_plain_ascii_profile_names() {
+    assert!(is_shared_codex_profile_v2_config_name(
+        "local_1-prod.config.toml"
+    ));
+    assert!(!is_shared_codex_profile_v2_config_name(".config.toml"));
+    assert!(!is_shared_codex_profile_v2_config_name(
+        "team.prod.config.toml"
+    ));
+    assert!(!is_shared_codex_profile_v2_config_name(
+        "../prod.config.toml"
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_restores_session_mtime_from_last_timestamp() {
+    let temp_dir = PrepareTestDir::new("session-mtime");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/19/rollout-2026-06-19T08-00-00-session.jsonl");
+    let stale_mtime = FileTime::from_unix_time(1_800_000_000, 0);
+    let expected_mtime = FileTime::from_unix_time(1_766_132_168, 0);
+
+    fs::create_dir_all(session_file.parent().expect("session parent"))
+        .expect("session parent should be created");
+    fs::write(
+        &session_file,
+        concat!(
+            r#"{"timestamp":"2025-12-19T08:00:00Z","type":"session_meta"}"#,
+            "\n",
+            r#"{"timestamp":"2025-12-19T08:16:08Z","type":"response_item"}"#,
+            "\n"
+        ),
+    )
+    .expect("session file should write");
+    filetime::set_file_mtime(&session_file, stale_mtime).expect("session mtime should update");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    let restored_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("session metadata should read"),
+    );
+    assert_eq!(restored_mtime, expected_mtime);
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_only_reprocesses_changed_sessions() {
+    let temp_dir = PrepareTestDir::new("incremental-session-maintenance");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/21/rollout-session.jsonl");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(
+        &session_file,
+        "{\"timestamp\":\"2026-06-21T08:00:00Z\",\"type\":\"session_meta\"}\n",
+    )
+    .expect("session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("first prepare should succeed");
+    let cache_path = paths.root.join(SESSION_MAINTENANCE_CACHE_FILE);
+    let first_cache = fs::read(&cache_path).expect("maintenance cache should exist");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("unchanged prepare should succeed");
+    assert_eq!(
+        fs::read(&cache_path).expect("maintenance cache should remain readable"),
+        first_cache
+    );
+
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&session_file)
+        .expect("session should open")
+        .write_all(b"{\"timestamp\":\"2026-06-21T08:05:00Z\",\"type\":\"response_item\"}\n")
+        .expect("session should append");
+    prepare_managed_codex_home(&paths, &codex_home).expect("changed prepare should succeed");
+
+    let restored_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("session metadata should read"),
+    );
+    assert_eq!(restored_mtime, FileTime::from_unix_time(1_782_029_100, 0));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_repairs_corrupt_session_metadata_prefix() {
+    let temp_dir = PrepareTestDir::new("repair-session-metadata-prefix");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_id = "01900000-0000-7000-8000-000000000003";
+    let session_file = paths.shared_codex_root.join(format!(
+        "sessions/2026/07/03/rollout-2026-07-03T18-17-41-{session_id}.jsonl"
+    ));
+    fs::create_dir_all(session_file.parent().expect("session parent"))
+        .expect("session parent should exist");
+    fs::write(
+        &session_file,
+        "corrupt attachment rewrite prefix\n{\"timestamp\":\"2026-07-03T18:17:41Z\",\"type\":\"response_item\",\"payload\":{\"cwd\":\"/tmp/workspace\"}}\n",
+    )
+    .expect("corrupt session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home)
+        .expect("managed codex home should repair the session");
+
+    let repaired = fs::read_to_string(&session_file).expect("repaired session should read");
+    let mut lines = repaired.lines();
+    let metadata: serde_json::Value = serde_json::from_str(
+        lines
+            .next()
+            .expect("repaired session should start with metadata"),
+    )
+    .expect("first line should be valid metadata JSON");
+    assert_eq!(metadata["type"], "session_meta");
+    assert_eq!(metadata["payload"]["session_id"], session_id);
+    assert_eq!(metadata["payload"]["id"], session_id);
+    assert!(lines.any(|line| line.contains(r#""type":"response_item""#)));
+    assert!(
+        fs::read_to_string(session_file.with_extension("jsonl.prodex-repair-bak"))
+            .expect("repair backup should read")
+            .starts_with("corrupt attachment rewrite prefix")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_retries_attachment_that_appears_later() {
+    let temp_dir = PrepareTestDir::new("late-session-attachment");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/21/rollout-session.jsonl");
+    let source = temp_dir.path.join("codex-clipboard-late.png");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"timestamp":"2026-06-21T08:00:00Z","text":"<image path=\"{}\">"}}"#,
+            source.display()
+        ),
+    )
+    .expect("session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("first prepare should succeed");
+    let stable = paths
+        .shared_codex_root
+        .join("image_attachments/codex-clipboard-late.png");
+    assert!(!stable.exists());
+
+    fs::write(&source, b"late image").expect("late source should write");
+    prepare_managed_codex_home(&paths, &codex_home).expect("second prepare should retry");
+
+    assert_eq!(
+        fs::read(&stable).expect("stable image should exist"),
+        b"late image"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should read");
+    assert!(rewritten.contains(&stable.display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_persists_local_images_array_for_resume() {
+    let temp_dir = PrepareTestDir::new("local-images-array-resume");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/30/rollout-session.jsonl");
+    let source = temp_dir.path.join("codex-clipboard-resume.png");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(&source, b"resume image").expect("source image should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"timestamp":"2026-06-30T08:00:00Z","type":"event_msg","payload":{{"type":"user_message","message":"[Image #1]","local_images":["{}"]}}}}"#,
+            source.display()
+        ),
+    )
+    .expect("session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    let stable = paths
+        .shared_codex_root
+        .join("image_attachments/codex-clipboard-resume.png");
+    assert_eq!(
+        fs::read(&stable).expect("stable image should exist"),
+        b"resume image"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should read");
+    assert!(rewritten.contains(&stable.display().to_string()));
+    assert!(!rewritten.contains(&source.display().to_string()));
+    assert_eq!(
+        fs::read_link(codex_home.join("image_attachments"))
+            .expect("image attachments should be symlinked"),
+        paths.shared_codex_root.join("image_attachments")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_shares_pasted_attachment_dirs() {
+    let temp_dir = PrepareTestDir::new("shared-pasted-attachments");
+    let paths = temp_dir.app_paths();
+    let first_home = temp_dir.path.join("first-profile-codex-home");
+    let second_home = temp_dir.path.join("second-profile-codex-home");
+
+    prepare_managed_codex_home(&paths, &first_home).expect("first home should prepare");
+    let pasted_text =
+        first_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt");
+    let pasted_image =
+        first_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/image-1.png");
+    fs::create_dir_all(pasted_text.parent().expect("attachment parent"))
+        .expect("attachment parent should create");
+    fs::write(&pasted_text, b"pasted text").expect("pasted text should write");
+    fs::write(&pasted_image, b"pasted image").expect("pasted image should write");
+
+    prepare_managed_codex_home(&paths, &second_home).expect("second home should prepare");
+
+    assert_eq!(
+        fs::read(
+            paths
+                .shared_codex_root
+                .join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/pasted-text-1.txt")
+        )
+        .expect("shared pasted text should exist"),
+        b"pasted text"
+    );
+    assert_eq!(
+        fs::read(second_home.join("attachments/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/image-1.png"))
+            .expect("second home should see pasted image"),
+        b"pasted image"
+    );
+    assert_eq!(
+        fs::read_link(second_home.join("attachments")).expect("attachments should be symlinked"),
+        paths.shared_codex_root.join("attachments")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_existing_profile_attachment_dirs_to_shared() {
+    let temp_dir = PrepareTestDir::new("migrate-profile-attachments");
+    let paths = temp_dir.app_paths();
+    let first_home = temp_dir.path.join("first-profile-codex-home");
+    let second_home = temp_dir.path.join("second-profile-codex-home");
+    let local_pasted_text =
+        first_home.join("attachments/cccccccc-dddd-4eee-8fff-000000000000/pasted-text-1.txt");
+    let local_clipboard_image = first_home.join("image_attachments/codex-clipboard-local.png");
+    fs::create_dir_all(local_pasted_text.parent().expect("attachment parent"))
+        .expect("attachment parent should create");
+    fs::create_dir_all(
+        local_clipboard_image
+            .parent()
+            .expect("image attachment parent"),
+    )
+    .expect("image attachment parent should create");
+    fs::write(&local_pasted_text, b"legacy pasted text").expect("local pasted text should write");
+    fs::write(&local_clipboard_image, b"legacy clipboard image")
+        .expect("local clipboard image should write");
+
+    prepare_managed_codex_home(&paths, &first_home).expect("first home should migrate");
+    prepare_managed_codex_home(&paths, &second_home).expect("second home should prepare");
+
+    assert_eq!(
+        fs::read(
+            paths
+                .shared_codex_root
+                .join("attachments/cccccccc-dddd-4eee-8fff-000000000000/pasted-text-1.txt")
+        )
+        .expect("shared pasted text should exist"),
+        b"legacy pasted text"
+    );
+    assert_eq!(
+        fs::read(
+            paths
+                .shared_codex_root
+                .join("image_attachments/codex-clipboard-local.png")
+        )
+        .expect("shared clipboard image should exist"),
+        b"legacy clipboard image"
+    );
+    assert_eq!(
+        fs::read(
+            second_home.join("attachments/cccccccc-dddd-4eee-8fff-000000000000/pasted-text-1.txt")
+        )
+        .expect("second home should see migrated pasted text"),
+        b"legacy pasted text"
+    );
+    assert_eq!(
+        fs::read_link(first_home.join("attachments"))
+            .expect("first attachments should be symlinked"),
+        paths.shared_codex_root.join("attachments")
+    );
+    assert_eq!(
+        fs::read_link(first_home.join("image_attachments"))
+            .expect("first image attachments should be symlinked"),
+        paths.shared_codex_root.join("image_attachments")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rescans_v2_cache_for_attachment_image_paths() {
+    let temp_dir = PrepareTestDir::new("v2-cache-attachment-image-rescan");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths
+        .shared_codex_root
+        .join("sessions/2026/06/25/rollout-session.jsonl");
+    let source = temp_dir
+        .path
+        .join("overlay/attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::create_dir_all(source.parent().expect("source parent")).expect("source parent");
+    fs::write(&source, b"goal resume image").expect("source image should write");
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"timestamp":"2026-06-25T08:00:00Z","type":"event_msg","payload":{{"goal":{{"objective":"image file: {}"}}}}}}"#,
+            source.display()
+        ),
+    )
+    .expect("session should write");
+
+    let cache_key = session_file
+        .strip_prefix(&paths.shared_codex_root)
+        .expect("session should be under shared root")
+        .to_string_lossy()
+        .into_owned();
+    let stale_v2_cache = SessionMaintenanceCache {
+        version: 2,
+        files: BTreeMap::from([(cache_key, session_file_fingerprint(&session_file).unwrap())]),
+    };
+    fs::create_dir_all(&paths.root).expect("prodex root should exist");
+    fs::write(
+        paths.root.join(SESSION_MAINTENANCE_CACHE_FILE),
+        serde_json::to_vec(&stale_v2_cache).expect("cache should serialize"),
+    )
+    .expect("stale cache should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("prepare should rescan old cache");
+
+    let stable = paths
+        .shared_codex_root
+        .join("attachments/31e02015-1740-4a23-85fe-51cf33a476e6/image-1.png");
+    assert_eq!(
+        fs::read(&stable).expect("stable image attachment should exist"),
+        b"goal resume image"
+    );
+    let rewritten = fs::read_to_string(&session_file).expect("session should read");
+    assert!(rewritten.contains(&stable.display().to_string()));
+    assert!(!rewritten.contains(&source.display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_rewrites_goal_objective_attachment_paths() {
+    let temp_dir = PrepareTestDir::new("goal-objective-attachments");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let attachment_id = "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb";
+    let old_root = temp_dir.path.join("deleted-overlay");
+    let old_paste = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("pasted-text-1.txt");
+    let old_image = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("image-1.png");
+    let old_goal_file = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("goal-objective.md");
+    let shared_dir = paths
+        .shared_codex_root
+        .join("attachments")
+        .join(attachment_id);
+    fs::create_dir_all(&shared_dir).expect("shared attachment dir should create");
+    fs::write(shared_dir.join("pasted-text-1.txt"), b"stable paste")
+        .expect("stable paste should write");
+    fs::write(shared_dir.join("image-1.png"), b"stable image").expect("stable image should write");
+    fs::write(shared_dir.join("goal-objective.md"), b"stable objective")
+        .expect("stable goal file should write");
+
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should create");
+    let db_path = paths.shared_codex_root.join("goals_1.sqlite");
+    let conn = rusqlite::Connection::open(&db_path).expect("goals db should open");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY NOT NULL,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+        "#,
+    )
+    .expect("goals schema should create");
+    let objective = format!(
+        "use pasted text file: {} and image file: {}. Read the Codex goal objective file at {} before continuing.",
+        old_paste.display(),
+        old_image.display(),
+        old_goal_file.display()
+    );
+    conn.execute(
+        "INSERT INTO thread_goals (thread_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES (?1, 'goal-1', ?2, 'paused', 1, 1)",
+        rusqlite::params!["thread-1", objective],
+    )
+    .expect("goal row should insert");
+    drop(conn);
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    let conn = rusqlite::Connection::open(&db_path).expect("goals db should reopen");
+    let rewritten: String = conn
+        .query_row(
+            "SELECT objective FROM thread_goals WHERE thread_id = 'thread-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("goal objective should read");
+    assert!(rewritten.contains(&shared_dir.join("pasted-text-1.txt").display().to_string()));
+    assert!(rewritten.contains(&shared_dir.join("image-1.png").display().to_string()));
+    assert!(rewritten.contains(&shared_dir.join("goal-objective.md").display().to_string()));
+    assert!(
+        !rewritten.contains(&old_root.display().to_string()),
+        "goal objective should not retain deleted overlay path: {rewritten}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_does_not_follow_symlinked_goals_db() {
+    let temp_dir = PrepareTestDir::new("symlink-goals-db");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let attachment_id = "eeeeeeee-ffff-4aaa-8bbb-cccccccccccc";
+    let old_root = temp_dir.path.join("deleted-overlay");
+    let old_goal_file = old_root
+        .join("attachments")
+        .join(attachment_id)
+        .join("goal-objective.md");
+    let shared_dir = paths
+        .shared_codex_root
+        .join("attachments")
+        .join(attachment_id);
+    fs::create_dir_all(&shared_dir).expect("shared attachment dir should create");
+    fs::write(shared_dir.join("goal-objective.md"), b"stable objective")
+        .expect("stable goal file should write");
+
+    let outside_db = temp_dir.path.join("outside-goals.sqlite");
+    let conn = rusqlite::Connection::open(&outside_db).expect("outside goals db should open");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE thread_goals (
+            thread_id TEXT PRIMARY KEY NOT NULL,
+            goal_id TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL,
+            token_budget INTEGER,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            time_used_seconds INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+        "#,
+    )
+    .expect("goals schema should create");
+    let objective = format!(
+        "Read the Codex goal objective file at {} before continuing.",
+        old_goal_file.display()
+    );
+    conn.execute(
+        "INSERT INTO thread_goals (thread_id, goal_id, objective, status, created_at_ms, updated_at_ms) VALUES (?1, 'goal-1', ?2, 'paused', 1, 1)",
+        rusqlite::params!["thread-1", objective],
+    )
+    .expect("goal row should insert");
+    drop(conn);
+
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should create");
+    std::os::unix::fs::symlink(&outside_db, paths.shared_codex_root.join("goals_1.sqlite"))
+        .expect("goals db symlink should create");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should prepare");
+
+    let conn = rusqlite::Connection::open(&outside_db).expect("outside goals db should reopen");
+    let retained: String = conn
+        .query_row(
+            "SELECT objective FROM thread_goals WHERE thread_id = 'thread-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("goal objective should read");
+    assert!(retained.contains(&old_goal_file.display().to_string()));
+    assert!(!retained.contains(&shared_dir.display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_ignores_cache_write_failure() {
+    let temp_dir = PrepareTestDir::new("cache-write-failure");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths.shared_codex_root.join("sessions/rollout.jsonl");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    fs::write(
+        &session_file,
+        "{\"timestamp\":\"2026-06-21T08:00:00Z\",\"type\":\"session_meta\"}\n",
+    )
+    .expect("session should write");
+    fs::create_dir_all(paths.root.join(SESSION_MAINTENANCE_CACHE_FILE))
+        .expect("directory should block cache file writes");
+
+    prepare_managed_codex_home(&paths, &codex_home)
+        .expect("cache failure must not block managed home preparation");
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_detects_same_size_same_mtime_replacement() {
+    let temp_dir = PrepareTestDir::new("same-metadata-session-replacement");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_file = paths.shared_codex_root.join("sessions/rollout.jsonl");
+    fs::create_dir_all(session_file.parent().expect("session parent")).expect("session parent");
+    let first = "{\"timestamp\":\"2026-06-21T08:00:00Z\",\"type\":\"session_meta\"}\n";
+    let second = "{\"timestamp\":\"2026-06-21T09:00:00Z\",\"type\":\"session_meta\"}\n";
+    assert_eq!(first.len(), second.len());
+    fs::write(&session_file, first).expect("first session should write");
+    prepare_managed_codex_home(&paths, &codex_home).expect("first prepare should succeed");
+    let cached_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("first metadata should read"),
+    );
+
+    fs::write(&session_file, second).expect("replacement session should write");
+    filetime::set_file_mtime(&session_file, cached_mtime).expect("mtime should match cache");
+    prepare_managed_codex_home(&paths, &codex_home).expect("replacement should be detected");
+
+    let restored_mtime = FileTime::from_last_modification_time(
+        &fs::metadata(&session_file).expect("replacement metadata should read"),
+    );
+    assert_eq!(restored_mtime, FileTime::from_unix_time(1_782_032_400, 0));
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_plugin_cache_and_marketplace_state_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("plugin-cache-marketplaces");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let plugin_manifest = codex_home
+        .join("plugins/cache/openai-curated/sample-plugin/1.2.3/.codex-plugin/plugin.json");
+    let marketplace_manifest = codex_home.join(".tmp/marketplaces/openai-curated/marketplace.json");
+    let known_marketplaces = codex_home.join(".tmp/known_marketplaces.json");
+    let remote_sync_marker = codex_home.join(".tmp/app-server-remote-plugin-sync-v1");
+
+    fs::create_dir_all(plugin_manifest.parent().unwrap()).expect("plugin cache dir");
+    fs::create_dir_all(marketplace_manifest.parent().unwrap()).expect("marketplace dir");
+    fs::write(&plugin_manifest, r#"{"name":"sample-plugin"}"#).expect("plugin manifest");
+    fs::write(&marketplace_manifest, r#"{"plugins":[]}"#).expect("marketplace manifest");
+    fs::write(&known_marketplaces, r#"{"marketplaces":[]}"#).expect("known marketplaces");
+    fs::write(&remote_sync_marker, "synced").expect("remote plugin sync marker");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_to_string(
+            paths
+                .shared_codex_root
+                .join("plugins/cache/openai-curated/sample-plugin/1.2.3/.codex-plugin/plugin.json")
+        )
+        .expect("shared plugin manifest should read"),
+        r#"{"name":"sample-plugin"}"#
+    );
+    assert_eq!(
+        fs::read_to_string(
+            paths
+                .shared_codex_root
+                .join(".tmp/marketplaces/openai-curated/marketplace.json")
+        )
+        .expect("shared marketplace manifest should read"),
+        r#"{"plugins":[]}"#
+    );
+    assert_eq!(
+        fs::read_to_string(
+            codex_home
+                .join("plugins/cache/openai-curated/sample-plugin/1.2.3/.codex-plugin/plugin.json")
+        )
+        .expect("profile plugin symlink should remain readable"),
+        r#"{"name":"sample-plugin"}"#
+    );
+    assert_eq!(
+        fs::read_link(codex_home.join("plugins")).expect("plugins should be shared by symlink"),
+        paths.shared_codex_root.join("plugins")
+    );
+    assert_eq!(
+        fs::read_to_string(paths.shared_codex_root.join(".tmp/known_marketplaces.json"))
+            .expect("known marketplaces should move to shared root"),
+        r#"{"marketplaces":[]}"#
+    );
+    assert_eq!(
+        fs::read_to_string(
+            paths
+                .shared_codex_root
+                .join(".tmp/app-server-remote-plugin-sync-v1")
+        )
+        .expect("remote plugin sync marker should move to shared root"),
+        "synced"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_profile_v2_config_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("profile-v2-config-file");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_path = codex_home.join("bedrock.config.toml");
+    let shared_path = paths.shared_codex_root.join("bedrock.config.toml");
+
+    fs::create_dir_all(&codex_home).expect("codex home should be created");
+    fs::write(&local_path, "model_provider = \"amazon-bedrock\"\n")
+        .expect("profile v2 config should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_to_string(&shared_path).expect("shared profile v2 config should be readable"),
+        "model_provider = \"amazon-bedrock\"\n"
+    );
+    assert_eq!(
+        fs::read_link(&local_path).expect("local profile v2 config should be a symlink"),
+        shared_path
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_links_existing_shared_profile_v2_config() {
+    let temp_dir = PrepareTestDir::new("existing-profile-v2-config-file");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_path = codex_home.join("bedrock.config.toml");
+    let shared_path = paths.shared_codex_root.join("bedrock.config.toml");
+
+    fs::create_dir_all(&paths.shared_codex_root).expect("shared root should be created");
+    fs::write(&shared_path, "model_provider = \"amazon-bedrock\"\n")
+        .expect("shared profile v2 config should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_link(&local_path).expect("local profile v2 config should be a symlink"),
+        shared_path
+    );
+    assert_eq!(
+        fs::read_to_string(&local_path).expect("local profile v2 config link should be readable"),
+        "model_provider = \"amazon-bedrock\"\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_goals_sqlite_files_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("goals-sqlite-files");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let goals_files = [
+        ("goals_1.sqlite", "main db"),
+        ("goals_1.sqlite-shm", "shared memory"),
+        ("goals_1.sqlite-wal", "write ahead log"),
+    ];
+
+    fs::create_dir_all(&codex_home).expect("codex home should be created");
+    for (file_name, contents) in goals_files {
+        fs::write(codex_home.join(file_name), contents).expect("goals sqlite file should write");
+    }
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    for (file_name, contents) in goals_files {
+        let local_path = codex_home.join(file_name);
+        let shared_path = paths.shared_codex_root.join(file_name);
+        assert_eq!(
+            fs::read_to_string(&shared_path).expect("shared goals sqlite file should be readable"),
+            contents
+        );
+        assert_eq!(
+            fs::read_link(&local_path).expect("local goals sqlite file should be a symlink"),
+            shared_path
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_memories_sqlite_files_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("memories-sqlite-files");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let memories_files = [
+        ("memories_1.sqlite", "main db"),
+        ("memories_1.sqlite-shm", "shared memory"),
+        ("memories_1.sqlite-wal", "write ahead log"),
+    ];
+
+    fs::create_dir_all(&codex_home).expect("codex home should be created");
+    for (file_name, contents) in memories_files {
+        fs::write(codex_home.join(file_name), contents).expect("memories sqlite file should write");
+    }
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed home should prepare");
+
+    for (file_name, contents) in memories_files {
+        let local_path = codex_home.join(file_name);
+        let shared_path = paths.shared_codex_root.join(file_name);
+        assert_eq!(
+            fs::read_to_string(&shared_path).expect("shared memories sqlite file should read"),
+            contents
+        );
+        assert_eq!(
+            fs::read_link(&local_path).expect("local memories sqlite path should be a symlink"),
+            shared_path
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_migrates_environments_toml_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("environments-file");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_path = codex_home.join("environments.toml");
+    let shared_path = paths.shared_codex_root.join("environments.toml");
+
+    fs::create_dir_all(&codex_home).expect("codex home should be created");
+    fs::write(&local_path, "[env.local]\nvalue = \"profile\"\n")
+        .expect("environment file should write");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_to_string(&shared_path).expect("shared environments should be readable"),
+        "[env.local]\nvalue = \"profile\"\n"
+    );
+    assert_eq!(
+        fs::read_link(&local_path).expect("local environments should be a symlink"),
+        shared_path
+    );
+    assert_eq!(
+        fs::read_to_string(&local_path).expect("local environments link should be readable"),
+        "[env.local]\nvalue = \"profile\"\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_managed_codex_home_copies_environments_toml_symlink_target_to_shared_root() {
+    let temp_dir = PrepareTestDir::new("environments-symlink");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let local_path = codex_home.join("environments.toml");
+    let source_path = temp_dir.path.join("source-environments.toml");
+    let shared_path = paths.shared_codex_root.join("environments.toml");
+
+    fs::create_dir_all(&codex_home).expect("codex home should be created");
+    fs::write(&source_path, "[env.external]\nvalue = \"linked\"\n")
+        .expect("source environment file should write");
+    std::os::unix::fs::symlink(&source_path, &local_path)
+        .expect("local environments symlink should be created");
+
+    prepare_managed_codex_home(&paths, &codex_home).expect("managed codex home should be prepared");
+
+    assert_eq!(
+        fs::read_to_string(&shared_path).expect("shared environments should be readable"),
+        "[env.external]\nvalue = \"linked\"\n"
+    );
+    assert_eq!(
+        fs::read_link(&local_path).expect("local environments should be relinked"),
+        shared_path
+    );
+}

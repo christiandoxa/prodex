@@ -1,0 +1,290 @@
+[
+  {
+    "id": "postgres-tls-and-release-0.274.0",
+    "requiredSubjects": [
+      "feat(storage): enforce postgres transport tls",
+      "fix(ci): verify postgres tls deployment",
+      "chore(release): release 0.274.0"
+    ],
+    "caps": {
+      "maxFiles": 47,
+      "maxBehaviorFiles": 29,
+      "maxLines": 1256,
+      "maxFileLines": 237
+    },
+    "reason": "Reviewed release range combining the shared rustls PostgreSQL connector, fail-closed production policy, pooled and blocking TLS proof with hostname mismatch rejection, backup/restore fixture repair, deployment security validation, full all-features local suite, and synchronized 0.274.0 Cargo/npm/changelog metadata."
+  },
+  {
+    "id": "grouped-request-budget-accounting-20260711",
+    "requiredSubjects": [
+      "feat(storage): enforce grouped request budgets"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 28,
+      "maxLines": 1249,
+      "maxFileLines": 159
+    },
+    "reason": "Reviewed atomic grouped request-budget accounting across domain, storage plans, PostgreSQL schema/runtime, gateway admission, multi-replica PostgreSQL/Redis proofs, policy documentation, size ratchets, clippy, changed tests, and the real Docker-backed storage proof."
+  },
+  {
+    "id": "pooled-postgres-accounting-runtime-20260711",
+    "requiredSubjects": [
+      "feat(storage): add pooled postgres runtime"
+    ],
+    "caps": {
+      "maxFiles": 9,
+      "maxBehaviorFiles": 6,
+      "maxLines": 1120,
+      "maxFileLines": 774
+    },
+    "reason": "Reviewed atomic introduction of the bounded async PostgreSQL accounting adapter with multi-agent implementation review, checked numeric conversions, explicit TLS selection and timeouts, serializable reservation retries, redacted errors, focused unit tests, real two-client PostgreSQL proof, clippy, size, dependency, and architecture boundary guards."
+  },
+  {
+    "id": "enterprise-gateway-integration-20260710",
+    "requiredSubjects": [
+      "feat: harden enterprise gateway runtime"
+    ],
+    "caps": {
+      "maxFiles": 1394,
+      "maxBehaviorFiles": 309,
+      "maxLines": 147903,
+      "maxFileLines": 8398
+    },
+    "reason": "Reviewed integration of the preserved local enterprise gateway series with upstream main using multi-agent conflict audits, the full all-features local test matrix, focused gateway regressions, formatting, and exact size ratchets."
+  },
+  {
+    "id": "enterprise-readiness-checkpoint-20260710",
+    "requiredSubjects": [
+      "feat: checkpoint enterprise readiness refactor"
+    ],
+    "caps": {
+      "maxFiles": 1248,
+      "maxBehaviorFiles": 243,
+      "maxLines": 117227,
+      "maxFileLines": 6148
+    },
+    "reason": "Reviewed preserved enterprise readiness checkpoint with the full all-features local test matrix and exact per-file size ratchets before upstream integration."
+  },
+  {
+    "id": "upstream-main-merge-20260710",
+    "requiredSubjects": [
+      "chore: merge origin/main"
+    ],
+    "caps": {
+      "maxFiles": 726,
+      "maxBehaviorFiles": 707,
+      "maxLines": 134083,
+      "maxFileLines": 6750
+    },
+    "reason": "Reviewed merge of the latest upstream main through multi-agent conflict audits, focused runtime regressions, formatting, and the full all-features local test matrix."
+  },
+  {
+    "id": "clippy-gate-remediation-0.273.0",
+    "requiredSubjects": [
+      "fix(ci): satisfy churn and clippy gates"
+    ],
+    "caps": {
+      "maxFiles": 52,
+      "maxBehaviorFiles": 52,
+      "maxLines": 383,
+      "maxFileLines": 50
+    },
+    "reason": "Reviewed compiler-driven lint remediation across provider-core and app/runtime compatibility modules after the 0.273.0 integration; changes are test scoping, equivalent lint rewrites, and narrow compatibility allowances, verified by the full all-features suite and the CI clippy command."
+  },
+  {
+    "id": "provider-gateway-control-plane-integration-0.273.0",
+    "requiredSubjects": [
+      "feat: mature provider gateway and control plane"
+    ],
+    "caps": {
+      "maxFiles": 498,
+      "maxBehaviorFiles": 491,
+      "maxLines": 113528,
+      "maxFileLines": 6750
+    },
+    "reason": "Reviewed integration of provider-core conformance, app-server diagnostics, gateway/runtime modularization, and the local control plane after merging upstream 0.273.0, with the full local all-features test matrix, formatting, focused runtime/provider tests, and merge conflict audits."
+  },
+  {
+    "id": "remove-redundant-super-integrations",
+    "requiredSubjects": [
+      "refactor(super): remove redundant optimizer integrations"
+    ],
+    "caps": {
+      "maxFiles": 44,
+      "maxBehaviorFiles": 39,
+      "maxLines": 3323,
+      "maxFileLines": 752
+    },
+    "reason": "Reviewed atomic removal of SQZ, token-savior, Claw Compactor, inspect MCP, and managed memory/Mem0 wiring with the full local test suite, workspace check, format check, CLI smoke test, documentation lint, and production-reference audit."
+  },
+  {
+    "id": "runtime-goal-resume-and-log-stream-0.244.0",
+    "requiredSubjects": [
+      "fix(runtime): resume unfinished goals after usage limits"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 25,
+      "maxLines": 1700,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed cross-cutting runtime goal resume fallback, post-exit relaunch wiring, log-stream binary tool-output suppression, Kiro/local rewrite parity updates, focused regression tests, and 0.244.0 release metadata with the full local Rust test suite."
+  },
+  {
+    "id": "provider-conformance-v1-0.242.0",
+    "requiredSubjects": [
+      "feat: Provider Conformance Layer v1"
+    ],
+    "caps": {
+      "maxFiles": 60,
+      "maxBehaviorFiles": 48,
+      "maxLines": 15000,
+      "maxFileLines": 5000
+    },
+    "reason": "Reviewed cross-cutting provider conformance layer v1: ProviderTranslator trait, Gemini/DeepSeek translators, 109 conformance fixtures, JSON catalog (62 models), app-side bridge with full test suite, clippy, catalog/capability/compat gates."
+  },
+  {
+    "id": "deepseek-compatibility-0.232.0",
+    "requiredSubjects": [
+      "feat(deepseek): expand compatibility for 0.232.0"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 25,
+      "maxLines": 4100,
+      "maxFileLines": 1750
+    },
+    "reason": "Reviewed cross-cutting DeepSeek compatibility expansion, quota/auth reporting updates, and 0.232.0 release metadata with local full test suite, format, clippy, lockfile refresh, and diff checks."
+  },
+  {
+    "id": "quota-native-ratatui-and-release-0.225.0",
+    "requiredSubjects": [
+      "feat(quota): render quota views with native ratatui"
+    ],
+    "caps": {
+      "maxFiles": 24,
+      "maxBehaviorFiles": 13,
+      "maxLines": 1800,
+      "maxFileLines": 850
+    },
+    "reason": "Reviewed quota TUI native ratatui conversion, capability dry-run status cleanup, Ponytail plugin defaults, and 0.225.0 release metadata with local full test suite, format, lockfile refresh, and diff checks."
+  },
+  {
+    "id": "release-tui-and-codex-compat-0.223.0",
+    "requiredSubjects": [
+      "chore(release): prepare 0.223.0"
+    ],
+    "caps": {
+      "maxFiles": 48,
+      "maxBehaviorFiles": 36,
+      "maxLines": 2453,
+      "maxFileLines": 245
+    },
+    "reason": "Reviewed cross-cutting TUI cleanup, upstream Codex compatibility baseline refresh, and release metadata with local full test suite, focused login regression, format, clippy, and CI guard checks."
+  },
+  {
+    "id": "runtime-support-crate-extraction-0.199.0",
+    "requiredSubjects": [
+      "feat: standardize runtime support crates"
+    ],
+    "caps": {
+      "maxFiles": 60,
+      "maxBehaviorFiles": 40,
+      "maxLines": 7000,
+      "maxFileLines": 900
+    },
+    "reason": "Reviewed cross-cutting runtime support crate extraction, MCP stdio consolidation, Gemini compatibility relocation, Presidio runtime split, and launch/session maintenance refactors with local full test suite, format, prebuild, and diff checks."
+  },
+  {
+    "id": "inspect-diagnostics-and-readme-presidio-0.197.0",
+    "requiredSubjects": [
+      "feat: add prodex inspect diagnostics"
+    ],
+    "caps": {
+      "maxFiles": 46,
+      "maxBehaviorFiles": 32,
+      "maxLines": 1900,
+      "maxFileLines": 400
+    },
+    "reason": "Reviewed inspect MCP diagnostics, README Presidio en/id documentation, runtime hot-path guard split-module allowlist updates, and release metadata with local full test suite plus staged preflight."
+  },
+  {
+    "id": "runtime-provider-split-and-claude-mem-removal-0.193.0",
+    "requiredSubjects": [
+      "refactor(runtime): split provider modules and remove Claude-Mem"
+    ],
+    "caps": {
+      "maxFiles": 70,
+      "maxBehaviorFiles": 54,
+      "maxLines": 6000,
+      "maxFileLines": 1000
+    },
+    "reason": "Reviewed provider module extraction and complete Claude-Mem removal with the local full test suite, pre-push release hygiene, formatting, metadata, and size guards."
+  },
+  {
+    "id": "gateway-routing-0.189.0",
+    "requiredSubjects": [
+      "feat: add gateway routing"
+    ],
+    "caps": {
+      "maxFiles": 40,
+      "maxBehaviorFiles": 27,
+      "maxLines": 3300,
+      "maxFileLines": 650
+    },
+    "reason": "Reviewed cross-cutting gateway routing release with local full test suite, release hygiene, format, and whitespace gates."
+  },
+  {
+    "id": "runtime-hot-path-optimization-0.178.0",
+    "requiredSubjects": [
+      "perf(runtime): optimize hot paths"
+    ],
+    "caps": {
+      "maxFiles": 40,
+      "maxBehaviorFiles": 26,
+      "maxLines": 1800,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed runtime hot-path optimization with local full test suite and runtime proxy bench guard."
+  },
+  {
+    "id": "gemini-provider-parity-0.156.0",
+    "requiredSubjects": [
+      "feat(gemini): deliver Codex-native provider parity"
+    ],
+    "caps": {
+      "maxFiles": 66,
+      "maxBehaviorFiles": 54,
+      "maxLines": 12000,
+      "maxFileLines": 3000
+    },
+    "reason": "Reviewed cross-cutting Gemini provider parity release with complete local full, clippy, and serial test gates."
+  },
+  {
+    "id": "gemini-provider-parity-hardening-0.158.0",
+    "requiredSubjects": [
+      "feat(gemini): harden Codex-native provider parity"
+    ],
+    "caps": {
+      "maxFiles": 45,
+      "maxBehaviorFiles": 34,
+      "maxLines": 2700,
+      "maxFileLines": 500
+    },
+    "reason": "Reviewed cross-cutting Gemini bridge hardening with local full, preflight, and credentialed Gemini live smoke gates."
+  },
+  {
+    "id": "gemini-provider-startup-tooling-0.160.0",
+    "requiredSubjects": [
+      "fix: improve gemini provider startup and tool handling"
+    ],
+    "caps": {
+      "maxFiles": 30,
+      "maxBehaviorFiles": 18,
+      "maxLines": 1300,
+      "maxFileLines": 350
+    },
+    "reason": "Reviewed Gemini provider tool-response, retry, live-smoke, and Caveman startup fixes with local full, preflight, schema, and release smoke gates."
+  }
+]

@@ -1,0 +1,17 @@
+[package]
+name = "prodex-context"
+version.workspace = true
+edition.workspace = true
+description = "Context audit and compression helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_context"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+terminal_ui = { workspace = true }

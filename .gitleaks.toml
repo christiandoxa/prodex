@@ -1,0 +1,35 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic JWT fixture used by parser tests"
+paths = [
+  '''tests/support/main_internal_body\.rs''',
+]
+regexes = [
+  '''eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0\.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL3Byb2ZpbGUiOnsiZW1haWwiOiJ1c2VyQGV4YW1wbGUuY29tIn19\.c2ln''',
+]
+
+[[allowlists]]
+description = "Synthetic API-key literal used by redaction tests"
+regexes = [
+  '''sk-fixture-123''',
+]
+
+[[allowlists]]
+description = "Synthetic virtual-key identifier used by audit validation tests"
+regexes = [
+  '''01hxy3-redacted''',
+]
+
+[[allowlists]]
+description = "Local token-savior cache is ignored workspace state, not repository content"
+paths = [
+  '''\.token-savior-cache\.json''',
+]
+
+[[allowlists]]
+description = "Cargo build output is ignored workspace state, not repository content"
+paths = [
+  '''target/''',
+]

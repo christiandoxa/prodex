@@ -1,0 +1,6 @@
+[2026-04-24 11:00:00.000 +07:00] request_id=req-old selection_pick profile=alpha route=responses reason=healthy quota_source=persisted_snapshot
+[2026-04-24 11:00:00.100 +07:00] request_id=req-old first_upstream_chunk profile=alpha route=responses transport=http
+[2026-04-24 11:00:01.000 +07:00] request=42 selection_keep_affinity profile=beta route=responses affinity=previous_response_id
+[2026-04-24 11:00:01.050 +07:00] request=42 responses_pre_send_skip profile=beta route=responses reason=quota_critical_floor_before_send
+{"timestamp":"2026-04-24T04:00:01.100Z","message":"request=42 upstream_connect_http profile=beta route=responses transport=http status=429","fields":{"request":42,"profile":"beta","route":"responses","status":429}}
+[2026-04-24 11:00:01.200 +07:00] request=42 previous_response_fresh_fallback_blocked profile=beta route=responses reason=previous_response_not_found request_shape=continuation_only outcome=blocked_nonreplayable_without_affinity

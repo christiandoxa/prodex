@@ -1,0 +1,15 @@
+[package]
+name = "prodex-storage-redis"
+version.workspace = true
+edition.workspace = true
+description = "Redis key and Lua planning for Prodex distributed rate limiting"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_storage_redis"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }
+prodex_storage = { workspace = true }

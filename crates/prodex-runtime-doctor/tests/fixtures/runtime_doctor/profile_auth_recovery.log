@@ -1,0 +1,2 @@
+[2026-04-24 10:10:00.000 +07:00] request=51 profile_auth_recovered profile=main route=responses source=refresh changed=true
+[2026-04-24 10:10:01.000 +07:00] request=52 profile_auth_recovery_failed profile=second route=websocket error=refresh_failed

@@ -1,0 +1,103 @@
+[package]
+name = "prodex-app"
+version.workspace = true
+edition.workspace = true
+description = "Application orchestration crate for the prodex CLI"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_app"
+path = "src/lib.rs"
+test = false
+doctest = false
+
+[features]
+default = []
+bench-support = ["dep:prodex_bench_support"]
+
+[dependencies]
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+crossterm = { workspace = true }
+dirs = { workspace = true }
+fs2 = { workspace = true }
+getrandom = { workspace = true }
+portable-pty = { workspace = true }
+os_info = { workspace = true }
+prodex_audit_log = { workspace = true }
+prodex_app_reports = { workspace = true }
+prodex_application = { workspace = true }
+prodex_bench_support = { workspace = true, optional = true }
+codex_config = { workspace = true }
+prodex_caveman_assets = { workspace = true }
+prodex_cli = { workspace = true }
+prodex_config = { workspace = true }
+prodex_control_plane = { workspace = true }
+prodex_context = { workspace = true }
+prodex_domain = { workspace = true }
+prodex_core = { workspace = true }
+prodex_gateway_http = { workspace = true }
+prodex_housekeeping = { workspace = true }
+prodex_mcp_stdio = { workspace = true }
+prodex_observability = { workspace = true }
+prodex_presidio = { workspace = true }
+prodex_profile_export = { workspace = true }
+prodex_profile_identity = { workspace = true }
+prodex_provider_core = { workspace = true }
+prodex_proxy_config = { workspace = true }
+prodex_quota = { workspace = true }
+prodex_runtime_quota = { workspace = true }
+prodex_runtime_state = { workspace = true }
+prodex_storage = { workspace = true }
+prodex_storage_postgres = { workspace = true }
+prodex_storage_postgres_runtime = { workspace = true }
+prodex_storage_redis = { workspace = true }
+prodex_storage_redis_runtime = { workspace = true }
+prodex_storage_sqlite = { workspace = true }
+postgres = { workspace = true, features = ["with-uuid-1"] }
+redaction = { workspace = true }
+redis = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+ratatui = { workspace = true }
+rpassword = { workspace = true }
+rusqlite = { workspace = true }
+runtime_anthropic_crate = { workspace = true }
+prodex_runtime_doctor = { workspace = true }
+prodex_runtime_gemini = { workspace = true }
+prodex_runtime_gemini_cli_compat = { workspace = true }
+prodex_runtime_broker = { workspace = true }
+prodex_runtime_broker_log = { workspace = true }
+prodex_runtime_capabilities = { workspace = true }
+prodex_runtime_claude = { workspace = true }
+prodex_runtime_cookies = { workspace = true }
+prodex_runtime_launch = { workspace = true }
+runtime_log = { workspace = true }
+runtime_metrics = { workspace = true }
+prodex_runtime_policy = { workspace = true }
+runtime_proxy_crate = { workspace = true }
+prodex_runtime_store = { workspace = true }
+prodex_runtime_tuning = { workspace = true }
+prodex_session_store = { workspace = true }
+prodex_shared_codex_fs = { workspace = true }
+prodex_shared_types = { workspace = true }
+prodex_state = { workspace = true }
+secret_store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+terminal_ui = { workspace = true }
+prodex_update_notice = { workspace = true }
+uuid = { workspace = true }
+tiny_http = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
+jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
+
+
+[dev-dependencies]
+aes-gcm-siv = { workspace = true }

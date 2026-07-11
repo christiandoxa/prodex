@@ -1,0 +1,1240 @@
+{
+  "codex": {
+    "compatibility": {
+      "upstream_repository": "https://github.com/openai/codex",
+      "baseline_source": "openai/codex rust-v0.144.1 release",
+      "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
+      "format_version": 2,
+      "critical_files": [
+        {
+          "path": "codex-rs/core/src/client.rs",
+          "reason": "Owns Responses route constants, compact route calls, request metadata/header construction, and websocket client metadata used by Prodex affinity.",
+          "required_contains": [
+            "RESPONSES_ENDPOINT",
+            "/responses",
+            "RESPONSES_COMPACT_ENDPOINT",
+            "/responses/compact",
+            "build_responses_headers",
+            "build_responses_compatibility_headers",
+            "build_ws_client_metadata",
+            "build_session_headers",
+            "CodexResponsesMetadata",
+            "response_create_client_metadata",
+            "previous_response_id",
+            "X_CODEX_INSTALLATION_ID_HEADER",
+            "x-codex-installation-id",
+            "X_CODEX_TURN_STATE_HEADER",
+            "x-codex-turn-state",
+            "X_CODEX_TURN_METADATA_HEADER",
+            "x-codex-turn-metadata",
+            "X_CODEX_PARENT_THREAD_ID_HEADER",
+            "x-codex-parent-thread-id",
+            "X_CODEX_WINDOW_ID_HEADER",
+            "x-codex-window-id",
+            "X_OPENAI_MEMGEN_REQUEST_HEADER",
+            "x-openai-memgen-request",
+            "X_OPENAI_SUBAGENT_HEADER",
+            "x-openai-subagent",
+            "X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER",
+            "x-responsesapi-include-timing-metrics",
+            "X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER",
+            "x-openai-internal-codex-responses-lite",
+            "WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
+            "x-codex-beta-features",
+            "OPENAI_BETA_HEADER",
+            "responses_websockets=2026-02-06",
+            "x-client-request-id",
+            "stream_responses_websocket",
+            "compact_conversation_history",
+            "compact_input",
+            "client_metadata",
+            "X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY",
+            "x-codex-ws-stream-request-start-ms",
+            "item_ids_enabled",
+            "prepare_response_items_for_request",
+            "responses_request_properties_match"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/compact_remote.rs",
+          "reason": "Owns remote compaction flow that reaches unary /responses/compact and supplies request metadata/turn-state context.",
+          "required_contains": [
+            "run_remote_compact_task",
+            "run_inline_remote_auto_compact_task",
+            "compact_conversation_history",
+            "CompactionImplementation::ResponsesCompact",
+            "ContextCompactionItem",
+            "CompactionTurnMetadata",
+            "CodexResponsesRequestKind::Compaction",
+            "turn_state",
+            "responses_metadata"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/turn_metadata.rs",
+          "reason": "Owns turn metadata state conversion into CodexResponsesMetadata and extra responsesapi client metadata.",
+          "required_contains": [
+            "request_kind",
+            "window_id",
+            "Turn",
+            "Memory",
+            "CodexResponsesMetadata",
+            "CodexResponsesRequestKind",
+            "to_responses_metadata",
+            "responses_metadata_template",
+            "set_responsesapi_client_metadata",
+            "ThreadSource",
+            "thread_source"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/responses_metadata.rs",
+          "reason": "Owns Codex Responses metadata, compatibility headers, client_metadata, and compaction metadata schema.",
+          "required_contains": [
+            "CodexResponsesMetadata",
+            "CodexResponsesRequestKind",
+            "COMPACTION_KEY",
+            "compaction",
+            "WINDOW_ID_KEY",
+            "window_id",
+            "CompactionTurnMetadata",
+            "CompactionTrigger",
+            "CompactionReason",
+            "CompactionImplementation",
+            "CompactionPhase",
+            "CompactionStrategy",
+            "Turn",
+            "Prewarm",
+            "Compaction",
+            "Memory",
+            "compatibility_headers",
+            "client_metadata",
+            "turn_metadata_payload",
+            "X_CODEX_TURN_METADATA_HEADER",
+            "to_ascii_json_string",
+            "ThreadSource",
+            "THREAD_SOURCE_KEY",
+            "thread_source"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider-info/src/lib.rs",
+          "reason": "Owns remote compaction capability gating for model providers and Bedrock model ID constants. Prodex Gemini relies on the current OpenAI/Azure capability behavior, and Prodex Bedrock direct-launch docs/guards track the upstream static catalog contract.",
+          "required_contains": [
+            "ModelProviderInfo",
+            "supports_remote_compaction",
+            "is_openai()",
+            "is_azure_responses_provider",
+            "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+            "openai.gpt-5.6-sol",
+            "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+            "openai.gpt-5.6-terra",
+            "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "openai.gpt-5.6-luna"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+          "reason": "Owns the Codex static Amazon Bedrock model catalog. Prodex launches Bedrock/custom providers directly, so compatibility tracking must preserve the upstream GPT-5.6 Bedrock slugs, max reasoning effort, and default-only service-tier contract.",
+          "required_contains": [
+            "static_model_catalog",
+            "with_default_only_service_tier",
+            "gpt_5_6_bedrock_model",
+            "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "ReasoningEffort::Max",
+            "Maximum reasoning depth for the hardest problems",
+            "model.additional_speed_tiers.clear()",
+            "model.service_tiers.clear()",
+            "model.default_service_tier = None"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/provider.rs",
+          "reason": "Owns the Codex model manager wiring for the static Amazon Bedrock catalog used by direct Bedrock launches.",
+          "required_contains": [
+            "amazon_bedrock_provider_creates_static_models_manager",
+            "openai.gpt-5.5",
+            "openai.gpt-5.4",
+            "openai.gpt-5.6-sol",
+            "openai.gpt-5.6-terra",
+            "openai.gpt-5.6-luna"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/realtime_conversation.rs",
+          "reason": "Owns realtime websocket start header construction; v1 websocket sessions require the openai-alpha quicksilver=v1 header.",
+          "required_contains": [
+            "ConversationStartTransport::Websocket",
+            "realtime_request_headers",
+            "RealtimeWsVersion::V1",
+            "openai-alpha",
+            "quicksilver=v1"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/endpoint/realtime_call.rs",
+          "reason": "Owns WebRTC realtime call creation, AVAS query parameters, backend/API request shape, and call-id Location parsing used before realtime sideband websocket attachment.",
+          "required_contains": [
+            "RealtimeCallClient",
+            "realtime/calls",
+            "create_with_session_and_headers",
+            "configure_realtime_call_request",
+            "intent",
+            "quicksilver",
+            "architecture",
+            "avas",
+            "validate_avas_session_config",
+            "AVAS realtime calls require realtime v1"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/safety_buffering.rs",
+          "reason": "Owns server-provided safety-buffering treatment response headers that carry faster-model treatment metadata.",
+          "required_contains": [
+            "SafetyBufferingTreatment",
+            "X_CODEX_SAFETY_BUFFERING_ENABLED_HEADER",
+            "x-codex-safety-buffering-enabled",
+            "X_CODEX_SAFETY_BUFFERING_FASTER_MODEL_HEADER",
+            "x-codex-safety-buffering-faster-model",
+            "treatment_from_headers",
+            "faster_model"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "Owns SSE Responses stream parsing, turn-state capture, completion boundary, and quota/error event interpretation.",
+          "required_contains": [
+            "spawn_response_stream",
+            "process_sse",
+            "process_responses_event",
+            "x-codex-turn-state",
+            "response.completed",
+            "response.failed",
+            "response.metadata",
+            "openai-model",
+            "x-reasoning-included",
+            "X-Models-Etag",
+            "bio_policy",
+            "insufficient_quota",
+            "rate_limit_exceeded",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/endpoint/compact.rs",
+          "reason": "Owns unary /responses/compact transport and response x-codex-turn-state capture.",
+          "required_contains": [
+            "CompactClient",
+            "responses/compact",
+            "compact_input",
+            "X_CODEX_TURN_STATE_HEADER",
+            "x-codex-turn-state",
+            "turn_state",
+            "headers"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Owns websocket Responses connection setup, request header merging, stream completion boundary, rate limit events, and wrapped websocket errors.",
+          "required_contains": [
+            "ResponsesWebsocketConnection",
+            "websocket_url_for_path(\"responses\")",
+            "merge_request_headers",
+            "add_auth_headers",
+            "x-codex-turn-state",
+            "response.completed",
+            "codex.rate_limits",
+            "openai-model",
+            "x-reasoning-included",
+            "x-models-etag",
+            "parse_wrapped_websocket_error_event",
+            "websocket_connection_limit_reached",
+            "serialize_websocket_request",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "safety_buffering(treatment)"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/config/mod.rs",
+          "reason": "Owns Codex feature config resolution and maps features.respect_system_proxy into auth route configuration used by Codex-owned auth clients.",
+          "required_contains": [
+            "respect_system_proxy",
+            "Feature::RespectSystemProxy",
+            "resolve_bootstrap_respect_system_proxy",
+            "AuthRouteConfig::respect_system_proxy",
+            "features.enabled",
+            "feature_requirements"
+          ]
+        },
+        {
+          "path": "codex-rs/features/src/lib.rs",
+          "reason": "Owns the upstream feature registry key for the opt-in auth system proxy feature exposed by Prodex as a Codex config override.",
+          "required_contains": [
+            "RespectSystemProxy",
+            "respect_system_proxy",
+            "key: \"respect_system_proxy\""
+          ]
+        },
+        {
+          "path": "codex-rs/http-client/src/outbound_proxy.rs",
+          "reason": "Owns Codex HTTP client outbound proxy policy, including environment proxy fallback and the RespectSystemProxy opt-in contract.",
+          "required_contains": [
+            "HttpClientFactory",
+            "RespectSystemProxy",
+            "OutboundProxyPolicy",
+            "build_reqwest_client_for_route",
+            "ClientRouteClass",
+            "RouteFailureClass",
+            "SystemProxyDecision",
+            "resolve_system_proxy",
+            "resolve_platform_system_proxy",
+            "Sha256",
+            "no_proxy",
+            "target_os = \"macos\"",
+            "mod macos"
+          ]
+        },
+        {
+          "path": "codex-rs/http-client/src/outbound_proxy/macos.rs",
+          "reason": "Owns the Codex 0.142.2 macOS system proxy resolver added for respect_system_proxy, including CFNetwork PAC/WPAD/static proxy handling and unsupported-scheme classification.",
+          "required_contains": [
+            "SCDynamicStoreBuilder",
+            "CFNetworkCopyProxiesForURL",
+            "CFNetworkExecuteProxyAutoConfigurationURL",
+            "CFNetworkExecuteProxyAutoConfigurationScript",
+            "PAC_EXECUTION_TIMEOUT",
+            "proxy_array_decision",
+            "proxy_entry_decision",
+            "kCFProxyTypeAutoConfigurationURL",
+            "kCFProxyTypeAutoConfigurationJavaScript",
+            "kCFProxyTypeHTTPS",
+            "kCFProxyTypeSOCKS",
+            "UnsupportedProxyScheme",
+            "RouteFailureClass"
+          ]
+        },
+        {
+          "path": "codex-rs/http-client/src/outbound_proxy/windows.rs",
+          "reason": "Owns the Codex 0.142.1 Windows system proxy resolver added for PAC, WPAD, static proxy, bypass, and unsupported-scheme handling.",
+          "required_contains": [
+            "WinHttpGetIEProxyConfigForCurrentUser",
+            "WinHttpGetProxyForUrl",
+            "WINHTTP_AUTOPROXY_CONFIG_URL",
+            "WINHTTP_AUTOPROXY_AUTO_DETECT",
+            "WINHTTP_ACCESS_TYPE_NAMED_PROXY",
+            "WINHTTP_ACCESS_TYPE_NO_PROXY",
+            "proxy_list_decision",
+            "proxy_bypass_matches_origin",
+            "ParsedProxyListDecision",
+            "<local>",
+            "WinHttpOpen",
+            "GlobalFree"
+          ]
+        },
+        {
+          "path": "codex-rs/core-plugins/src/manifest.rs",
+          "reason": "Owns local Codex plugin manifest parsing for interface logoDark dark-mode logo metadata used by embedded Prodex plugins.",
+          "required_contains": [
+            "RawPluginManifestInterface",
+            "logo_dark",
+            "logoDark",
+            "interface.logoDark",
+            "resolve_interface_asset_path",
+            "PluginManifestInterface"
+          ]
+        },
+        {
+          "path": "codex-rs/plugin/src/manifest.rs",
+          "reason": "Owns the shared parsed Codex plugin interface model, including dark-mode logo resource metadata.",
+          "required_contains": [
+            "PluginManifestInterface",
+            "logo_dark",
+            "pub logo_dark: Option<Resource>"
+          ]
+        },
+        {
+          "path": "codex-rs/ext/web-search/src/tool.rs",
+          "reason": "Owns standalone web search tool exposure and plaintext result delivery used by code mode and provider compatibility paths.",
+          "required_contains": [
+            "ToolExposure::Direct",
+            "SearchOutput",
+            "response.output"
+          ]
+        },
+        {
+          "path": "codex-rs/tools/src/json_schema.rs",
+          "reason": "Owns normalized tool schema composition preservation and large-schema compaction behavior consumed by richer MCP tools.",
+          "required_contains": [
+            "anyOf",
+            "oneOf",
+            "allOf",
+            "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
+            "prune_schema_compositions"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/README.md",
+          "reason": "Owns public app-server JSON-RPC lifecycle docs and generated-schema command surface.",
+          "required_contains": [
+            "codex app-server generate-json-schema",
+            "--experimental",
+            "thread/start",
+            "thread/resume",
+            "thread/fork",
+            "turn/start",
+            "thread/started",
+            "turn/started",
+            "turn/completed",
+            "JSON-RPC"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/export.rs",
+          "reason": "Owns app-server JSON schema generation used to compare schema-level protocol drift.",
+          "required_contains": [
+            "generate_internal_json_schema",
+            "JsonSchemaEmitter",
+            "schema_for",
+            "GeneratedSchema"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/rpc.rs",
+          "reason": "Owns JSON-RPC envelope schema types for app-server requests, responses, notifications, and errors.",
+          "required_contains": [
+            "JSONRPCMessage",
+            "JSONRPCRequest",
+            "JSONRPCResponse",
+            "JSONRPCNotification",
+            "JSONRPCError",
+            "JsonSchema",
+            "jsonrpc"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/common.rs",
+          "reason": "Owns stable app-server method names and notification names for thread and turn lifecycle.",
+          "required_contains": [
+            "ThreadStart => \"thread/start\"",
+            "ThreadResume => \"thread/resume\"",
+            "ThreadFork => \"thread/fork\"",
+            "TurnStart => \"turn/start\"",
+            "ThreadStarted => \"thread/started\"",
+            "TurnStarted => \"turn/started\"",
+            "JsonSchema",
+            "ClientRequest",
+            "ServerNotification"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+          "reason": "Owns initialize/initialized handshake state and startup notifications.",
+          "required_contains": [
+            "InitializeRequestProcessor",
+            "initialize",
+            "Already initialized",
+            "send_initialize_notifications_to_connection",
+            "track_initialized_request"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Owns thread start/resume/fork request processing and thread-scoped request IDs.",
+          "required_contains": [
+            "ThreadRequestProcessor",
+            "ThreadStartParams",
+            "ThreadResumeParams",
+            "ThreadForkParams",
+            "ThreadCompactStartParams",
+            "ConnectionRequestId"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+          "reason": "Owns turn/start request processing and the initial in-progress turn response.",
+          "required_contains": [
+            "TurnRequestProcessor",
+            "TurnStartParams",
+            "TurnStartResponse",
+            "turn/start",
+            "TurnStatus::InProgress",
+            "ThreadSettingsBuildParams"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_serialization.rs",
+          "reason": "Owns app-server request serialization scopes, including thread and thread-path queues.",
+          "required_contains": [
+            "ClientRequestSerializationScope",
+            "RequestSerializationQueueKey",
+            "Thread",
+            "ThreadPath",
+            "RequestSerializationAccess",
+            "QueuedInitializedRequest"
+          ]
+        }
+      ],
+      "expected_headers": [
+        "session_id",
+        "x-openai-subagent",
+        "x-openai-memgen-request",
+        "x-codex-installation-id",
+        "x-codex-turn-state",
+        "x-codex-turn-metadata",
+        "x-codex-parent-thread-id",
+        "x-codex-window-id",
+        "x-client-request-id",
+        "x-codex-beta-features",
+        "x-responsesapi-include-timing-metrics",
+        "x-openai-internal-codex-responses-lite",
+        "ws_request_header_x_openai_internal_codex_responses_lite",
+        "OpenAI-Beta",
+        "User-Agent",
+        "x-codex-ws-stream-request-start-ms"
+      ],
+      "proxy_replaced_headers": [
+        "Authorization",
+        "ChatGPT-Account-Id"
+      ],
+      "proxy_skipped_headers": [
+        "Host",
+        "Connection",
+        "Content-Length",
+        "Transfer-Encoding",
+        "Upgrade",
+        "sec-websocket-*"
+      ],
+      "expected_routes": [
+        "/responses",
+        "/responses/compact",
+        "/memories/trace_summarize",
+        "websocket_url_for_path(\"responses\")",
+        "/realtime/calls"
+      ],
+      "expected_stream_events": [
+        "response.created",
+        "response.in_progress",
+        "response.queued",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.reasoning_summary_part.added",
+        "response.completed",
+        "response.failed",
+        "response.metadata",
+        "codex.rate_limits"
+      ],
+      "semantic_checks": [
+        {
+          "id": "client.responses-route",
+          "kind": "route",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Responses unary traffic must keep the upstream route constant and path together.",
+          "file_contains_all": [
+            "RESPONSES_ENDPOINT",
+            "/responses"
+          ],
+          "expected_routes_all": [
+            "/responses"
+          ]
+        },
+        {
+          "id": "sse.responses-http-route-behavior",
+          "kind": "route_event_group",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "SSE Responses traffic must keep the upstream stream parser, response metadata headers, and lifecycle event assumptions tied to the /responses route.",
+          "file_contains_all": [
+            "spawn_response_stream",
+            "process_sse",
+            "process_responses_event",
+            "x-codex-turn-state",
+            "openai-model",
+            "x-reasoning-included",
+            "X-Models-Etag",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
+          ],
+          "expected_routes_all": [
+            "/responses"
+          ],
+          "expected_stream_events_all": [
+            "response.created",
+            "response.completed",
+            "response.failed",
+            "response.metadata"
+          ]
+        },
+        {
+          "id": "client.responses-compact-route",
+          "kind": "route",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Remote compaction must keep using the upstream Responses compact route.",
+          "file_contains_all": [
+            "RESPONSES_COMPACT_ENDPOINT",
+            "/responses/compact",
+            "compact_conversation_history",
+            "compact_input",
+            "CodexResponsesMetadata"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ]
+        },
+        {
+          "id": "client.responses-compact-metadata-header",
+          "kind": "header_group",
+          "reason": "Remote compact unary traffic must forward the Codex turn metadata header added for compaction attribution.",
+          "file": "codex-rs/core/src/client.rs",
+          "file_contains_all": [
+            "compact_conversation_history",
+            "build_responses_headers",
+            "build_responses_compatibility_headers",
+            "CodexResponsesMetadata",
+            "compact_input"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-metadata"
+          ]
+        },
+        {
+          "id": "client.conversation-headers",
+          "kind": "header_group",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Conversation metadata headers are forwarded together for affinity and upstream Codex behavior.",
+          "file_contains_all": [
+            "build_responses_headers",
+            "build_responses_compatibility_headers",
+            "build_ws_client_metadata",
+            "build_session_headers",
+            "x-codex-installation-id",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-codex-window-id",
+            "x-openai-memgen-request",
+            "x-openai-subagent",
+            "x-responsesapi-include-timing-metrics",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
+            "x-client-request-id",
+            "x-codex-ws-stream-request-start-ms"
+          ],
+          "expected_headers_all": [
+            "x-codex-installation-id",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-codex-window-id",
+            "x-openai-memgen-request",
+            "x-openai-subagent",
+            "x-responsesapi-include-timing-metrics",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
+            "x-client-request-id",
+            "x-codex-ws-stream-request-start-ms"
+          ]
+        },
+        {
+          "id": "proxy.preserved-headers",
+          "kind": "header_group",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Prodex must keep preserving upstream Codex metadata headers that drive affinity, subagent behavior, beta transport, and client identity.",
+          "file_contains_all": [
+            "build_responses_headers",
+            "build_responses_compatibility_headers",
+            "build_session_headers",
+            "x-openai-subagent",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-beta-features",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
+            "OPENAI_BETA_HEADER",
+            "x-codex-ws-stream-request-start-ms"
+          ],
+          "expected_headers_all": [
+            "session_id",
+            "x-openai-subagent",
+            "x-codex-turn-state",
+            "x-codex-turn-metadata",
+            "x-codex-beta-features",
+            "x-openai-internal-codex-responses-lite",
+            "ws_request_header_x_openai_internal_codex_responses_lite",
+            "User-Agent",
+            "x-codex-ws-stream-request-start-ms"
+          ]
+        },
+        {
+          "id": "client.websocket-beta",
+          "kind": "co_occurrence",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Websocket transport remains gated by the upstream beta header and version token.",
+          "file_contains_all": [
+            "stream_responses_websocket",
+            "OPENAI_BETA_HEADER",
+            "responses_websockets=2026-02-06"
+          ],
+          "expected_headers_all": [
+            "OpenAI-Beta"
+          ]
+        },
+        {
+          "id": "realtime.websocket-v1-alpha-header",
+          "kind": "header_behavior",
+          "file": "codex-rs/core/src/realtime_conversation.rs",
+          "reason": "Realtime v1 websocket startup must send the upstream openai-alpha quicksilver=v1 header.",
+          "file_contains_all": [
+            "ConversationStartTransport::Websocket",
+            "realtime_request_headers",
+            "RealtimeWsVersion::V1",
+            "openai-alpha",
+            "quicksilver=v1"
+          ]
+        },
+        {
+          "id": "realtime.call-avas-route",
+          "kind": "route",
+          "file": "codex-rs/codex-api/src/endpoint/realtime_call.rs",
+          "reason": "WebRTC realtime call setup must keep the AVAS realtime/calls route and quicksilver query contract that Prodex proxies before sideband websocket attach.",
+          "file_contains_all": [
+            "RealtimeCallClient",
+            "realtime/calls",
+            "create_with_session_and_headers",
+            "configure_realtime_call_request",
+            "intent",
+            "quicksilver",
+            "architecture",
+            "avas"
+          ],
+          "expected_routes_all": [
+            "/realtime/calls"
+          ]
+        },
+        {
+          "id": "compact.remote-responses-compact",
+          "kind": "route",
+          "file": "codex-rs/core/src/compact_remote.rs",
+          "reason": "Remote compaction is tied to the Responses compact implementation and item shape.",
+          "file_contains_all": [
+            "run_remote_compact_task",
+            "compact_conversation_history",
+            "CompactionImplementation::ResponsesCompact",
+            "ContextCompactionItem",
+            "CodexResponsesRequestKind::Compaction"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ]
+        },
+        {
+          "id": "compact.remote-turn-metadata-header",
+          "kind": "header_group",
+          "reason": "Remote compaction must derive and pass compaction-specific turn metadata into the compact request.",
+          "file": "codex-rs/core/src/compact_remote.rs",
+          "file_contains_all": [
+            "CompactionTurnMetadata",
+            "compact_conversation_history",
+            "CodexResponsesRequestKind::Compaction",
+            "responses_metadata"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-metadata"
+          ]
+        },
+        {
+          "id": "compact.response-turn-state",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/compact.rs",
+          "reason": "Compact unary responses can establish x-codex-turn-state, which Prodex must bind for follow-up affinity.",
+          "file_contains_all": [
+            "compact_input",
+            "X_CODEX_TURN_STATE_HEADER",
+            "x-codex-turn-state",
+            "turn_state",
+            "headers"
+          ],
+          "expected_routes_all": [
+            "/responses/compact"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-state"
+          ]
+        },
+        {
+          "id": "turn-metadata.request-kind-window",
+          "kind": "metadata_group",
+          "reason": "Codex 0.135 turn metadata distinguishes turn, prewarm, compaction, and memory requests and stamps the logical window id for turn-owned model requests.",
+          "file": "codex-rs/core/src/turn_metadata.rs",
+          "file_contains_all": [
+            "request_kind",
+            "window_id",
+            "Turn",
+            "Memory",
+            "CodexResponsesMetadata",
+            "to_responses_metadata",
+            "ThreadSource",
+            "thread_source"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-metadata"
+          ]
+        },
+        {
+          "id": "turn-metadata.compaction-dispatch",
+          "kind": "metadata_group",
+          "reason": "Compaction requests must carry trigger, reason, implementation, phase, and strategy metadata in x-codex-turn-metadata.",
+          "file": "codex-rs/core/src/responses_metadata.rs",
+          "file_contains_all": [
+            "COMPACTION_KEY",
+            "compaction",
+            "CompactionTurnMetadata",
+            "CompactionTrigger",
+            "CompactionReason",
+            "CompactionImplementation",
+            "CompactionPhase",
+            "CompactionStrategy",
+            "CodexResponsesRequestKind",
+            "turn_metadata_payload",
+            "X_CODEX_TURN_METADATA_HEADER",
+            "ThreadSource",
+            "THREAD_SOURCE_KEY",
+            "thread_source"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-metadata"
+          ]
+        },
+        {
+          "id": "model-provider.remote-compaction-capability",
+          "kind": "capability_gate",
+          "file": "codex-rs/model-provider-info/src/lib.rs",
+          "reason": "Gemini semantic compact depends on Codex continuing to expose remote compaction through the current OpenAI/Azure provider capability gate.",
+          "file_contains_all": [
+            "ModelProviderInfo",
+            "supports_remote_compaction",
+            "is_openai()",
+            "is_azure_responses_provider"
+          ]
+        },
+        {
+          "id": "model-provider.bedrock-gpt-5-6-catalog",
+          "kind": "provider_catalog",
+          "file": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+          "reason": "Codex 0.142.3 adds GPT-5.6 Sol/Terra/Luna Bedrock models by copying GPT-5.5 config, adding max reasoning effort, and keeping Bedrock service tiers default-only.",
+          "file_contains_all": [
+            "static_model_catalog",
+            "with_default_only_service_tier",
+            "gpt_5_6_bedrock_model",
+            "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "ReasoningEffort::Max",
+            "Maximum reasoning depth for the hardest problems",
+            "model.additional_speed_tiers.clear()",
+            "model.service_tiers.clear()",
+            "model.default_service_tier = None"
+          ]
+        },
+        {
+          "id": "model-provider.bedrock-static-manager-models",
+          "kind": "provider_catalog",
+          "file": "codex-rs/model-provider/src/provider.rs",
+          "reason": "Codex 0.142.3 static Bedrock model manager must expose the existing GPT-5.5/GPT-5.4 IDs plus GPT-5.6 Sol/Terra/Luna.",
+          "file_contains_all": [
+            "amazon_bedrock_provider_creates_static_models_manager",
+            "openai.gpt-5.5",
+            "openai.gpt-5.4",
+            "openai.gpt-5.6-sol",
+            "openai.gpt-5.6-terra",
+            "openai.gpt-5.6-luna"
+          ]
+        },
+        {
+          "id": "sse.responses-events",
+          "kind": "event_group",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "SSE parsing must keep response lifecycle events grouped for stream compatibility.",
+          "file_contains_all": [
+            "process_responses_event",
+            "response.completed",
+            "response.failed",
+            "response.metadata",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "with_treatment"
+          ],
+          "expected_stream_events_all": [
+            "response.created",
+            "response.completed",
+            "response.failed",
+            "response.metadata"
+          ]
+        },
+        {
+          "id": "sse.quota-codes",
+          "kind": "co_occurrence",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "Quota rotation must remain tied to explicit upstream quota and rate-limit codes.",
+          "file_contains_all": [
+            "insufficient_quota",
+            "rate_limit_exceeded"
+          ]
+        },
+        {
+          "id": "websocket.responses-route",
+          "kind": "route",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket sessions must keep the upstream Responses websocket route.",
+          "file_contains_all": [
+            "ResponsesWebsocketConnection",
+            "websocket_url_for_path(\"responses\")"
+          ],
+          "expected_routes_all": [
+            "websocket_url_for_path(\"responses\")"
+          ]
+        },
+        {
+          "id": "websocket.session-behavior",
+          "kind": "route_event_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket sessions must preserve upstream route selection, request metadata merge behavior, turn-state affinity, lifecycle events, and wrapped error handling.",
+          "file_contains_all": [
+            "ResponsesWebsocketConnection",
+            "websocket_url_for_path(\"responses\")",
+            "merge_request_headers",
+            "add_auth_headers",
+            "x-codex-turn-state",
+            "parse_wrapped_websocket_error_event",
+            "websocket_connection_limit_reached",
+            "serialize_websocket_request",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "safety_buffering(treatment)"
+          ],
+          "expected_routes_all": [
+            "websocket_url_for_path(\"responses\")"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-state"
+          ],
+          "expected_stream_events_all": [
+            "response.created",
+            "response.in_progress",
+            "response.queued",
+            "response.output_item.added",
+            "response.content_part.added",
+            "response.reasoning_summary_part.added",
+            "response.completed",
+            "response.failed",
+            "codex.rate_limits"
+          ]
+        },
+        {
+          "id": "websocket.responses-events",
+          "kind": "event_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket stream parsing must preserve response lifecycle and rate-limit events.",
+          "file_contains_all": [
+            "response.completed",
+            "codex.rate_limits",
+            "SafetyBuffering",
+            "safety_buffering",
+            "ResponseEvent::SafetyBuffering",
+            "treatment_from_headers",
+            "SafetyBufferingTreatment",
+            "safety_buffering(treatment)"
+          ],
+          "expected_stream_events_all": [
+            "response.created",
+            "response.in_progress",
+            "response.queued",
+            "response.output_item.added",
+            "response.content_part.added",
+            "response.reasoning_summary_part.added",
+            "response.completed",
+            "response.failed",
+            "codex.rate_limits"
+          ]
+        },
+        {
+          "id": "safety-buffering.response-header-treatment",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/safety_buffering.rs",
+          "reason": "Codex safety-buffering UI treatment is now controlled by response headers that Prodex must preserve transparently.",
+          "file_contains_all": [
+            "treatment_from_headers",
+            "X_CODEX_SAFETY_BUFFERING_ENABLED_HEADER",
+            "x-codex-safety-buffering-enabled",
+            "X_CODEX_SAFETY_BUFFERING_FASTER_MODEL_HEADER",
+            "x-codex-safety-buffering-faster-model",
+            "faster_model"
+          ]
+        },
+        {
+          "id": "websocket.header-auth-merge",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Websocket request metadata should merge upstream headers while auth remains profile-owned.",
+          "file_contains_all": [
+            "merge_request_headers",
+            "add_auth_headers",
+            "x-codex-turn-state"
+          ],
+          "expected_headers_all": [
+            "x-codex-turn-state"
+          ],
+          "proxy_replaced_headers_all": [
+            "Authorization",
+            "ChatGPT-Account-Id"
+          ]
+        },
+        {
+          "id": "proxy.replaced-headers",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Selected Prodex profiles replace upstream auth/account headers instead of forwarding caller-supplied values.",
+          "file_contains_all": [
+            "merge_request_headers",
+            "add_auth_headers"
+          ],
+          "proxy_replaced_headers_all": [
+            "Authorization",
+            "ChatGPT-Account-Id"
+          ]
+        },
+        {
+          "id": "proxy.skipped-transport-headers",
+          "kind": "header_group",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Prodex must keep treating hop-by-hop and websocket handshake headers as transport-local rather than upstream metadata.",
+          "file_contains_all": [
+            "merge_request_headers"
+          ],
+          "proxy_skipped_headers_all": [
+            "Host",
+            "Connection",
+            "Content-Length",
+            "Transfer-Encoding",
+            "Upgrade",
+            "sec-websocket-*"
+          ]
+        },
+        {
+          "id": "proxy.system-proxy-macos",
+          "kind": "capability_gate",
+          "file": "codex-rs/http-client/src/outbound_proxy/macos.rs",
+          "reason": "respect_system_proxy support expanded from Windows to macOS in Codex 0.142.2; Prodex docs and launch overrides must keep that platform contract accurate.",
+          "file_contains_all": [
+            "SCDynamicStoreBuilder",
+            "CFNetworkCopyProxiesForURL",
+            "CFNetworkExecuteProxyAutoConfigurationURL",
+            "CFNetworkExecuteProxyAutoConfigurationScript",
+            "PAC_EXECUTION_TIMEOUT",
+            "proxy_array_decision",
+            "UnsupportedProxyScheme"
+          ]
+        },
+        {
+          "id": "plugins.dark-mode-logo",
+          "kind": "metadata_group",
+          "file": "codex-rs/core-plugins/src/manifest.rs",
+          "reason": "Codex 0.142.2 local plugin manifests can provide interface.logoDark; Prodex embedded Codex plugins should keep compatible metadata.",
+          "file_contains_all": [
+            "RawPluginManifestInterface",
+            "logo_dark",
+            "logoDark",
+            "interface.logoDark",
+            "resolve_interface_asset_path",
+            "PluginManifestInterface"
+          ]
+        },
+        {
+          "id": "app-server.schema-generation",
+          "kind": "schema_generation",
+          "file": "codex-rs/app-server/README.md",
+          "reason": "Generated schema support must stay exposed so Prodex can move from token checks to schema-aware compatibility.",
+          "file_contains_all": [
+            "codex app-server generate-json-schema",
+            "--experimental"
+          ]
+        },
+        {
+          "id": "app-server.jsonrpc-envelope",
+          "kind": "jsonrpc_schema",
+          "file": "codex-rs/app-server-protocol/src/rpc.rs",
+          "reason": "Broker mode must preserve JSON-RPC 2.0 request/response/notification envelope semantics.",
+          "file_contains_all": [
+            "JSONRPCMessage",
+            "JSONRPCRequest",
+            "JSONRPCResponse",
+            "JSONRPCNotification",
+            "JSONRPCError",
+            "jsonrpc"
+          ]
+        },
+        {
+          "id": "app-server.lifecycle-methods",
+          "kind": "jsonrpc_methods",
+          "file": "codex-rs/app-server-protocol/src/protocol/common.rs",
+          "reason": "Thread and turn lifecycle method names are the semantic routing contract for a future Prodex app-server broker.",
+          "file_contains_all": [
+            "ThreadStart => \"thread/start\"",
+            "ThreadResume => \"thread/resume\"",
+            "ThreadFork => \"thread/fork\"",
+            "TurnStart => \"turn/start\"",
+            "ThreadStarted => \"thread/started\"",
+            "TurnStarted => \"turn/started\""
+          ]
+        },
+        {
+          "id": "app-server.initialize-handshake",
+          "kind": "jsonrpc_handshake",
+          "file": "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+          "reason": "Broker mode must preserve initialize/initialized ordering and duplicate initialize rejection.",
+          "file_contains_all": [
+            "InitializeRequestProcessor",
+            "Already initialized",
+            "send_initialize_notifications_to_connection"
+          ]
+        },
+        {
+          "id": "app-server.thread-lifecycle-processors",
+          "kind": "thread_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/thread_processor.rs",
+          "reason": "Thread start/resume/fork are the owner-attribution points for profile/session affinity.",
+          "file_contains_all": [
+            "ThreadStartParams",
+            "ThreadResumeParams",
+            "ThreadForkParams",
+            "ConnectionRequestId"
+          ]
+        },
+        {
+          "id": "app-server.turn-start-processor",
+          "kind": "turn_lifecycle",
+          "file": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+          "reason": "turn/start is the safe pre-commit rotation boundary for app-server broker mode.",
+          "file_contains_all": [
+            "TurnStartParams",
+            "TurnStartResponse",
+            "turn/start",
+            "TurnStatus::InProgress"
+          ]
+        },
+        {
+          "id": "app-server.thread-serialization-scope",
+          "kind": "serialization_scope",
+          "file": "codex-rs/app-server/src/request_serialization.rs",
+          "reason": "Broker mode must respect upstream app-server thread serialization scopes.",
+          "file_contains_all": [
+            "ClientRequestSerializationScope",
+            "RequestSerializationQueueKey",
+            "Thread",
+            "ThreadPath",
+            "RequestSerializationAccess"
+          ]
+        }
+      ],
+      "tested_codex_release": "rust-v0.144.1",
+      "app_server_protocol": {
+        "schema_command": "codex app-server generate-json-schema --out DIR",
+        "schema_hash": null,
+        "schema_hash_note": "Generated schema artifacts are version-specific and not vendored in Prodex yet.",
+        "required_methods": [
+          "initialize",
+          "initialized",
+          "thread/start",
+          "thread/resume",
+          "thread/fork",
+          "turn/start",
+          "turn/cancel"
+        ]
+      }
+    },
+    "latestRelease": {
+      "tag_name": "rust-v0.142.4",
+      "name": "0.142.4",
+      "published_at": "2026-06-29T05:04:25Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.4",
+      "body_head": [
+        "## Chores",
+        "- No user-facing changes were identified for this release.",
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.142.3...rust-v0.142.4"
+      ]
+    }
+  },
+  "claude": {
+    "latestRelease": {
+      "tag_name": "v2.1.169",
+      "name": "v2.1.169",
+      "published_at": "2026-06-08T21:57:18Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.169"
+    },
+    "docs": [
+      {
+        "url": "https://docs.anthropic.com/en/docs/claude-code/settings",
+        "title": "Claude Code settings - Claude Code Docs",
+        "description": "Configure Claude Code with global and project-level settings, and environment variables.",
+        "required_contains": [
+          "settings.json",
+          "CLAUDE.md",
+          "hooks",
+          "permissions",
+          "MCP"
+        ]
+      },
+      {
+        "url": "https://docs.anthropic.com/en/docs/claude-code/setup",
+        "title": "Advanced setup - Claude Code Docs",
+        "description": "System requirements, platform-specific installation, version management, and uninstallation for Claude Code.",
+        "required_contains": [
+          "System requirements",
+          "platform-specific installation",
+          "version management",
+          "uninstallation",
+          "Claude Code"
+        ]
+      },
+      {
+        "url": "https://docs.anthropic.com/en/docs/claude-code/github-actions",
+        "title": "Claude Code GitHub Actions - Claude Code Docs",
+        "description": "Learn about integrating Claude Code into your development workflow with Claude Code GitHub Actions",
+        "required_contains": [
+          "GitHub Actions",
+          "workflow",
+          "development workflow",
+          "integrate",
+          "Claude Code"
+        ]
+      }
+    ]
+  }
+}

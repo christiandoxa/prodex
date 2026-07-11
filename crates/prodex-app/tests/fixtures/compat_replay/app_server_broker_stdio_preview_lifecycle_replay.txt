@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":"req-init","method":"initialize","params":{}}
+{"jsonrpc":"2.0","id":"req-cancel","method":"turn/cancel","params":{"threadId":"thr_lifecycle","turnId":"turn_lifecycle"}}

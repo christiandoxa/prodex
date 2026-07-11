@@ -1,0 +1,21 @@
+[package]
+name = "prodex-runtime-claude"
+version.workspace = true
+edition.workspace = true
+description = "Claude Code runtime launch configuration helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_runtime_claude"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+codex_config = { workspace = true }
+dirs = { workspace = true }
+prodex_core = { workspace = true }
+prodex_runtime_launch = { workspace = true }
+prodex_shared_codex_fs = { workspace = true }
+runtime_anthropic_crate = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "prodex-housekeeping"
+version.workspace = true
+edition.workspace = true
+description = "Housekeeping helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_housekeeping"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_core = { workspace = true }
+prodex_state = { workspace = true }

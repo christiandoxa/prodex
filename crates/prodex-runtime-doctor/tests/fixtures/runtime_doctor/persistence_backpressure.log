@@ -1,0 +1,3 @@
+[2026-04-24 09:30:00.000 +07:00] state_save_queue_backpressure backlog=12 reason=channel_full pending=32
+[2026-04-24 09:30:01.000 +07:00] continuation_journal_queue_backpressure backlog=9 reason=channel_full pending=27
+[2026-04-24 09:30:02.000 +07:00] continuation_journal_save_ok lag_ms=215 backlog=4

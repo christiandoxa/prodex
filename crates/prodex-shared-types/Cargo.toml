@@ -1,0 +1,17 @@
+[package]
+name = "prodex-shared-types"
+version.workspace = true
+edition.workspace = true
+description = "Shared internal data types for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_shared_types"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_quota = { workspace = true }
+prodex_runtime_proxy = { workspace = true }
+prodex_state = { workspace = true }
+serde = { workspace = true }

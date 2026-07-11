@@ -1,0 +1,15 @@
+[package]
+name = "prodex-core"
+version.workspace = true
+edition.workspace = true
+description = "Core paths and shared primitives for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_core"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+dirs = { workspace = true }

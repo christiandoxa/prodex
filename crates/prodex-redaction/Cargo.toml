@@ -1,0 +1,14 @@
+[package]
+name = "prodex-redaction"
+version.workspace = true
+edition.workspace = true
+description = "Redaction helpers for prodex logs and diagnostics"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "redaction"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = { workspace = true }

@@ -1,0 +1,20 @@
+[package]
+name = "prodex-session-store"
+version.workspace = true
+edition.workspace = true
+description = "Codex session metadata discovery helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_session_store"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+prodex_app_reports = { workspace = true }
+prodex_core = { workspace = true }
+prodex_state = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }

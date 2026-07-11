@@ -1,0 +1,93 @@
+{
+  "format_version": 1,
+  "kind": "prodex_compat_replay_capture",
+  "source": "codex_sse_capture.jsonl",
+  "records": [
+    {
+      "type": "request",
+      "method": "POST",
+      "path_and_query": "/backend-api/codex/responses?api-version=2026-04-01",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer <redacted>"
+        },
+        {
+          "name": "ChatGPT-Account-Id",
+          "value": "<account_id>"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "User-Agent",
+          "value": "codex-cli/0.138.0"
+        },
+        {
+          "name": "session_id",
+          "value": "<session_id>"
+        },
+        {
+          "name": "x-openai-subagent",
+          "value": "planner"
+        },
+        {
+          "name": "x-codex-turn-state",
+          "value": "<turn_state>"
+        },
+        {
+          "name": "x-codex-turn-metadata",
+          "value": "<turn_metadata>"
+        },
+        {
+          "name": "x-codex-beta-features",
+          "value": "responses-websocket,compact"
+        },
+        {
+          "name": "x-openai-internal-codex-responses-lite",
+          "value": "true"
+        }
+      ],
+      "body": {
+        "model": "gpt-5.3-codex",
+        "stream": true,
+        "previous_response_id": "<previous_response_id>",
+        "client_metadata": {
+          "session_id": "<session_id>",
+          "request_id": "<request_id>",
+          "x-codex-window-id": "<window_id>"
+        },
+        "input": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "List repo files."
+              }
+            ]
+          },
+          {
+            "type": "mcp_approval_request",
+            "approval_request_id": "<approval_request_id>",
+            "server_label": "workspace",
+            "name": "read_file"
+          },
+          {
+            "type": "function_call_output",
+            "call_id": "<call_id>",
+            "output": "ok"
+          }
+        ]
+      },
+      "name": "codex_sse_request"
+    },
+    {
+      "type": "sse_stream",
+      "stream": ": keep-alive\nid: <id>\nevent: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"created_at\":\"<created_at>\",\"response\":{\"id\":\"<id>\",\"headers\":{\"x-codex-turn-state\":\"<turn_state>\",\"x-request-id\":\"<request_id>\"}},\"authorization_token\":\"<redacted>\"}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":1,\"response_id\":\"<response_id>\",\"item\":{\"id\":\"<id>\",\"type\":\"function_call\",\"call_id\":\"<call_id>\",\"name\":\"list_files\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":2,\"created_at\":\"<created_at>\",\"response\":{\"id\":\"<id>\",\"turn_state\":\"<turn_state>\"}}\n\ndata: [DONE]",
+      "name": "codex_sse_stream"
+    }
+  ]
+}

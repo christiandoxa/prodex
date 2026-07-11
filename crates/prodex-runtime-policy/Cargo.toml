@@ -1,0 +1,19 @@
+[package]
+name = "prodex-runtime-policy"
+version.workspace = true
+edition.workspace = true
+description = "Runtime policy parsing and validation for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_runtime_policy"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+prodex_core = { workspace = true }
+prodex_domain = { workspace = true }
+secret_store = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }

@@ -1,0 +1,14 @@
+[package]
+name = "prodex-domain"
+version.workspace = true
+edition.workspace = true
+description = "Pure Prodex domain identifiers and security context types"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

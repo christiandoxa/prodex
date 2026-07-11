@@ -1,0 +1,19 @@
+[package]
+name = "prodex-storage-redis-runtime"
+version.workspace = true
+edition.workspace = true
+description = "Async Redis execution for Prodex distributed rate limiting"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_storage_redis_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_storage_redis = { workspace = true }
+redis = { workspace = true, features = ["connection-manager", "tokio-rustls-comp"] }
+
+[dev-dependencies]
+prodex_domain = { workspace = true }
+tokio = { workspace = true }

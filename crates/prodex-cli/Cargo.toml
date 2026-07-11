@@ -1,0 +1,18 @@
+[package]
+name = "prodex-cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI argument model and parsing helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_cli"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { workspace = true }
+prodex_runtime_gemini = { workspace = true }
+prodex_shared_types = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

@@ -1,0 +1,11 @@
+[package]
+name = "prodex-mcp-stdio"
+version.workspace = true
+edition.workspace = true
+description = "Shared stdio framing helpers for Prodex MCP servers"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,26 @@
+[package]
+name = "prodex-application"
+version.workspace = true
+edition.workspace = true
+description = "Application use-case orchestration boundary for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_application"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_authn = { workspace = true }
+prodex_config = { workspace = true }
+prodex_control_plane = { workspace = true }
+prodex_domain = { workspace = true }
+prodex_gateway_core = { workspace = true }
+prodex_gateway_http = { workspace = true }
+prodex_provider_spi = { workspace = true }
+prodex_provider_core = { workspace = true }
+prodex_observability = { workspace = true }
+prodex_storage = { workspace = true }
+prodex_storage_postgres = { workspace = true }
+prodex_storage_redis = { workspace = true }
+prodex_storage_sqlite = { workspace = true }

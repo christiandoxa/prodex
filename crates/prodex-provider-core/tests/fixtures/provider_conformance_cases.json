@@ -1,0 +1,5924 @@
+[
+  {
+    "name": "deepseek-request-text-input",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {
+      "x-codex-turn-state": "turn-state-a",
+      "session_id": "sess-a"
+    },
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": "hello deepseek",
+      "stream": false,
+      "previous_response_id": "resp_1"
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello deepseek"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": 418,
+    "error_code": "teapot",
+    "error_text": "unclassified provider error",
+    "expected_error_class": "other",
+    "expected_error_cooldown_ms": 0
+  },
+  {
+    "name": "deepseek-request-instructions-prepended",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "instructions": "You are Codex. Keep answers concise.",
+      "input": "hello deepseek"
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are Codex. Keep answers concise."
+        },
+        {
+          "role": "user",
+          "content": "hello deepseek"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-json-schema-degrades",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "role": "user",
+          "content": "return json"
+        }
+      ],
+      "response_format": {
+        "type": "json_schema",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "answer": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "return json"
+        }
+      ],
+      "response_format": {
+        "type": "json_object"
+      }
+    },
+    "expected_loss": "degraded",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-response-format-type-rejected",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": "hello",
+      "response_format": {
+        "type": "xml"
+      }
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-parallel-tool-calls-false-rejected",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": "hello",
+      "parallel_tool_calls": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-primitives-tool-choice-stop-and-user",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "role": "user",
+          "content": "call search then stop"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search",
+            "description": "Search docs",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "search"
+        }
+      },
+      "temperature": 0.2,
+      "top_p": 0.9,
+      "max_output_tokens": 128,
+      "logprobs": true,
+      "top_logprobs": 5,
+      "stop_sequences": [
+        "END"
+      ],
+      "user": "user_123"
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "call search then stop"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search",
+            "description": "Search docs",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "search"
+        }
+      },
+      "temperature": 0.2,
+      "top_p": 0.9,
+      "max_tokens": 128,
+      "logprobs": true,
+      "top_logprobs": 5,
+      "stop": [
+        "END"
+      ],
+      "user_id": "user_123"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-message-content-arrays",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "You are Codex."
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "read commit history"
+            }
+          ]
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are Codex."
+        },
+        {
+          "role": "user",
+          "content": "read commit history"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-assistant-tool-call-and-tool-output-history",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "find the symbol"
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": ""
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "grep",
+                "arguments": "{\"pattern\":\"ProviderTranslator\"}"
+              }
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "{\"match_count\":1}"
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "continue"
+            }
+          ]
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "find the symbol"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "grep",
+                "arguments": "{\"pattern\":\"ProviderTranslator\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "{\"match_count\":1}"
+        },
+        {
+          "role": "user",
+          "content": "continue"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-function-call-and-output-items",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "find the symbol"
+            }
+          ]
+        },
+        {
+          "type": "function_call",
+          "call_id": "call_1",
+          "name": "grep",
+          "arguments": {
+            "pattern": "ProviderTranslator"
+          }
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_1",
+          "output": "{\"match_count\":1}"
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "continue"
+            }
+          ]
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "find the symbol"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "grep",
+                "arguments": "{\"pattern\":\"ProviderTranslator\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "{\"match_count\":1}"
+        },
+        {
+          "role": "user",
+          "content": "continue"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-custom-tool-call-and-output-items",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "apply this patch"
+            }
+          ]
+        },
+        {
+          "type": "custom_tool_call",
+          "call_id": "call_patch_1",
+          "name": "apply_patch",
+          "input": "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
+        },
+        {
+          "type": "custom_tool_call_output",
+          "call_id": "call_patch_1",
+          "output": "applied"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "apply this patch"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_patch_1",
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "{\"input\":\"*** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_patch_1",
+          "content": "applied"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-local-shell-call-and-output-items",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "check repo state"
+            }
+          ]
+        },
+        {
+          "type": "local_shell_call",
+          "call_id": "call_shell_1",
+          "action": {
+            "command": [
+              "git",
+              "status",
+              "--short"
+            ]
+          },
+          "cwd": "/repo",
+          "timeout": 1000
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_shell_1",
+          "output": " M Cargo.toml"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "check repo state"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_shell_1",
+              "type": "function",
+              "function": {
+                "name": "shell_command",
+                "arguments": "{\"command\":\"git status --short\",\"cwd\":\"/repo\",\"timeout\":1000}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_shell_1",
+          "content": " M Cargo.toml"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-mcp-call-and-result-items",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "compress this text"
+            }
+          ]
+        },
+        {
+          "type": "mcp_call",
+          "id": "call_sqz_1",
+          "name": "mcp__prodex_sqz__compress",
+          "arguments": {
+            "text": "large repeated content"
+          },
+          "output": "ref:abc123"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "compress this text"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_sqz_1",
+              "type": "function",
+              "function": {
+                "name": "mcp__prodex_sqz__compress",
+                "arguments": "{\"text\":\"large repeated content\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_sqz_1",
+          "content": "ref:abc123"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-request-top-logprobs-requires-logprobs",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": "hello",
+      "top_logprobs": 2
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-response-chat-to-responses",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_1",
+      "model": "deepseek-chat",
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "deepseek says hi"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18
+      },
+      "created": 1700000000
+    },
+    "expected_body": {
+      "id": "chatcmpl_1",
+      "object": "response",
+      "created_at": 1700000000,
+      "model": "deepseek-chat",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "deepseek says hi"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 7,
+        "total_tokens": 18
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 11,
+      "output_tokens": 7,
+      "total_tokens": 18
+    }
+  },
+  {
+    "name": "deepseek-stream-text-delta",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n",
+    "expected_body": "event: response.output_text.delta\ndata: {\"delta\":\"hel\",\"type\":\"response.output_text.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-stream-done-completes-response",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": "data: [DONE]\n\n",
+    "expected_body": "event: response.completed\ndata: {}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-text-to-generate-content",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini"
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello gemini"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-basic-generation-config-forwarded",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini",
+      "temperature": 0.2,
+      "top_p": 0.9,
+      "max_tokens": 256,
+      "stop_sequences": [
+        "END"
+      ]
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello gemini"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "temperature": 0.2,
+          "topP": 0.9,
+          "maxOutputTokens": 256,
+          "stopSequences": [
+            "END"
+          ],
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-extended-generation-config-forwarded",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini",
+      "top_k": 40,
+      "seed": 7,
+      "text": {
+        "format": {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello gemini"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "topK": 40,
+          "seed": 7,
+          "responseMimeType": "application/json",
+          "responseJsonSchema": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "string"
+              }
+            }
+          },
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-thinking-config-forwarded",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "think carefully",
+      "reasoning": {
+        "effort": "low"
+      }
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "think carefully"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 1024
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-text-input",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {
+      "x-codex-turn-state": "turn-state-a",
+      "session_id": "sess-a"
+    },
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini",
+      "previous_response_id": "resp_1"
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello gemini"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-thinking-level-for-gemini-3",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-3.5-flash",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-3.5-flash",
+      "input": "think carefully",
+      "reasoning": {
+        "effort": "medium"
+      }
+    },
+    "expected_body": {
+      "model": "gemini-3.5-flash",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "think carefully"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingLevel": "MEDIUM"
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-tool-schema-sanitized",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "call tool",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search",
+            "description": "Search docs",
+            "parameters": {
+              "type": "object",
+              "strict": true,
+              "additionalProperties": false,
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "call tool"
+              }
+            ]
+          }
+        ],
+        "tools": [
+          {
+            "functionDeclarations": [
+              {
+                "name": "search",
+                "description": "Search docs",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-builtin-tools-forwarded",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "use tools",
+      "tools": [
+        {
+          "type": "web_search_preview"
+        },
+        {
+          "type": "code_execution"
+        },
+        {
+          "type": "url_context"
+        },
+        {
+          "type": "computer_use",
+          "computer_use": {
+            "environment": "ENVIRONMENT_DESKTOP",
+            "excluded_predefined_functions": [
+              "move"
+            ]
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "use tools"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        },
+        "tools": [
+          {
+            "computerUse": {
+              "environment": "ENVIRONMENT_DESKTOP",
+              "excludedPredefinedFunctions": [
+                "move"
+              ]
+            }
+          },
+          {
+            "codeExecution": {}
+          },
+          {
+            "googleSearch": {}
+          },
+          {
+            "urlContext": {}
+          }
+        ]
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-response-format-type-rejected",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini",
+      "response_format": {
+        "type": "xml"
+      }
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-safety-cache-and-labels-forwarded",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini",
+      "safety_settings": [
+        {
+          "category": "HARM_CATEGORY_HATE_SPEECH",
+          "threshold": "BLOCK_ONLY_HIGH"
+        }
+      ],
+      "cached_content": "cachedContents/abc123",
+      "labels": {
+        "env": "test",
+        "lane": "responses"
+      }
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello gemini"
+              }
+            ]
+          }
+        ],
+        "safetySettings": [
+          {
+            "category": "HARM_CATEGORY_HATE_SPEECH",
+            "threshold": "BLOCK_ONLY_HIGH"
+          }
+        ],
+        "cachedContent": "cachedContents/abc123",
+        "labels": {
+          "env": "test",
+          "lane": "responses"
+        },
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-tool-choice-function-config",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "call tool",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search",
+            "description": "Search docs",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "search"
+        }
+      }
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "call tool"
+              }
+            ]
+          }
+        ],
+        "tools": [
+          {
+            "functionDeclarations": [
+              {
+                "name": "search",
+                "description": "Search docs",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "toolConfig": {
+          "functionCallingConfig": {
+            "mode": "ANY",
+            "allowedFunctionNames": [
+              "search"
+            ]
+          }
+        },
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-system-instruction-and-contextual-user-lifted",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": [
+        {
+          "role": "system",
+          "content": "You are precise."
+        },
+        {
+          "role": "user",
+          "content": "# AGENTS.md instructions for /repo\n<environment_context>\n  <cwd>/repo</cwd>\n</environment_context>"
+        },
+        {
+          "role": "user",
+          "content": "Fix the failing test."
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "systemInstruction": {
+          "parts": [
+            {
+              "text": "You are precise.\n\n# AGENTS.md instructions for /repo\n<environment_context>\n  <cwd>/repo</cwd>\n</environment_context>"
+            }
+          ]
+        },
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Fix the failing test."
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-tool-call-history-shaped-into-contents",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": [
+        {
+          "role": "user",
+          "content": "find the symbol"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "grep",
+                "arguments": "{\"pattern\":\"ProviderTranslator\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "{\"match_count\": 3}"
+        },
+        {
+          "role": "user",
+          "content": "continue"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "find the symbol"
+              }
+            ]
+          },
+          {
+            "role": "model",
+            "parts": [
+              {
+                "functionCall": {
+                  "name": "grep",
+                  "args": {
+                    "pattern": "ProviderTranslator"
+                  },
+                  "id": "call_1"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "functionResponse": {
+                  "name": "grep",
+                  "response": {
+                    "match_count": 3
+                  },
+                  "id": "call_1"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "continue"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-request-multimodal",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Describe"
+          },
+          {
+            "type": "input_image",
+            "image_url": "data:image/png;base64,AAAA"
+          }
+        ]
+      }
+    ]
+  },
+  "expected_body": {
+    "model": "gemini-2.5-pro",
+    "request": {
+      "contents": [
+        {
+          "parts": [
+            { "text": "Describe" },
+            {
+              "inlineData": {
+                "mimeType": "image/png",
+                "data": "AAAA"
+              }
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "generationConfig": {
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": 8192
+        }
+      }
+    }
+  },
+  "expected_loss": "lossless",
+  "expected_usage": null
+  },
+  {
+    "name": "gemini-response-generate-to-responses",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_gem_1",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "gemini says hi"
+              }
+            ]
+          }
+        }
+      ],
+      "usageMetadata": {
+        "promptTokenCount": 23,
+        "candidatesTokenCount": 12,
+        "totalTokenCount": 35
+      }
+    },
+    "expected_body": {
+      "id": "resp_gem_1",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "gemini says hi"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 23,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "tool_tokens": 0
+        },
+        "output_tokens": 12,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 35
+      },
+      "metadata": {
+        "gemini": {
+          "usageMetadata": {
+            "promptTokenCount": 23,
+            "candidatesTokenCount": 12,
+            "totalTokenCount": 35
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 23,
+      "output_tokens": 12,
+      "total_tokens": 35
+    }
+  },
+  {
+    "name": "gemini-stream-text-delta",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"gem\"}]}}]}\n\n",
+    "expected_body": "event: response.output_text.delta\ndata: {\"delta\":\"gem\",\"type\":\"response.output_text.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-request-responses-passthrough",
+    "provider": "openai",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-5.4",
+      "input": "hello openai",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "gpt-5.4",
+      "input": "hello openai",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-response-responses-passthrough",
+    "provider": "openai",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_openai_1",
+      "object": "response",
+      "model": "gpt-5.4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello openai"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15
+      }
+    },
+    "expected_body": {
+      "id": "resp_openai_1",
+      "object": "response",
+      "model": "gpt-5.4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello openai"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  {
+    "name": "openai-stream-responses-passthrough",
+    "provider": "openai",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"oa\"}\n\n",
+    "expected_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"oa\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": "hello anthropic",
+      "stream": true
+    },
+    "expected_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello anthropic"
+        }
+      ],
+      "stream": true
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": 401,
+    "error_code": "authentication_error",
+    "error_text": "invalid api key",
+    "expected_error_class": "auth",
+    "expected_error_cooldown_ms": 0
+  },
+  {
+    "name": "anthropic-response-responses-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_anthropic_1",
+      "object": "chat.completion",
+      "created": 1735689600,
+      "model": "auto",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello anthropic"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 12,
+        "completion_tokens": 6,
+        "total_tokens": 18
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_anthropic_1",
+      "object": "response",
+      "created_at": 1735689600,
+      "model": "auto",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello anthropic"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 6,
+        "total_tokens": 18
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 12,
+      "output_tokens": 6,
+      "total_tokens": 18
+    }
+  },
+  {
+    "name": "anthropic-stream-responses-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": "data: {\"choices\":[{\"delta\":{\"content\":\"an\"},\"finish_reason\":null}]}\n\n",
+    "expected_body": "event: response.output_text.delta\ndata: {\"delta\":\"an\",\"type\":\"response.output_text.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-stream-finish-reason-completes-response",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    "expected_body": "event: response.completed\ndata: {}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-request-responses-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "hello copilot",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "codex",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello copilot"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": 404,
+    "error_code": "model_not_supported",
+    "error_text": "model is not supported",
+    "expected_error_class": "not-found",
+    "expected_error_cooldown_ms": 0
+  },
+  {
+    "name": "copilot-request-responses-compact-passthrough",
+    "provider": "copilot",
+    "endpoint": "responses/compact",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "codex",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-response-responses-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_copilot_1",
+      "object": "chat.completion",
+      "created": 1735689700,
+      "model": "codex",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello copilot"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 17,
+        "completion_tokens": 9,
+        "total_tokens": 26
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_copilot_1",
+      "object": "response",
+      "created_at": 1735689700,
+      "model": "codex",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello copilot"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 17,
+        "output_tokens": 9,
+        "total_tokens": 26
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 17,
+      "output_tokens": 9,
+      "total_tokens": 26
+    }
+  },
+  {
+    "name": "copilot-response-responses-compact-passthrough",
+    "provider": "copilot",
+    "endpoint": "responses/compact",
+    "operation": "response",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_copilot_compact_1",
+      "object": "response",
+      "model": "codex",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted copilot"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "completion_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_body": {
+      "id": "resp_copilot_compact_1",
+      "object": "response",
+      "model": "codex",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted copilot"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 11,
+        "completion_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 11,
+      "output_tokens": 5,
+      "total_tokens": 16
+    }
+  },
+  {
+    "name": "copilot-stream-responses-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": "data: {\"choices\":[{\"delta\":{\"content\":\"co\"},\"finish_reason\":null}]}\n\n",
+    "expected_body": "event: response.output_text.delta\ndata: {\"delta\":\"co\",\"type\":\"response.output_text.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-stream-done-completes-response",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": "data: [DONE]\n\n",
+    "expected_body": "event: response.completed\ndata: {}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-function-history-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": [
+        {
+          "type": "function_call",
+          "call_id": "call_1",
+          "namespace": "functions",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"echo hi\"}"
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_1",
+          "output": "ok"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "functions.exec_command",
+                "arguments": "{\"cmd\":\"echo hi\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "ok"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-response-responses-function-call-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_anthropic_tool_1",
+      "object": "chat.completion",
+      "created": 1735689800,
+      "model": "auto",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "function": {
+                  "name": "functions.exec_command",
+                  "arguments": "{\"cmd\":\"echo hi\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "chatcmpl_anthropic_tool_1",
+      "object": "response",
+      "created_at": 1735689800,
+      "model": "auto",
+      "output": [
+        {
+          "type": "function_call",
+          "call_id": "call_1",
+          "namespace": "functions",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"rtk echo hi\"}"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-stream-function-call-arguments-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"name\":\"functions.exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"echo hi\\\"}\"}}]}}]}\n\n",
+    "expected_body": "event: response.function_call_arguments.delta\ndata: {\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\\\"rtk echo hi\\\"}\",\"type\":\"response.function_call_arguments.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-rejects-response-format-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": "hello anthropic",
+      "response_format": {
+        "type": "json_schema"
+      },
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-request-responses-rejects-custom-tool-call-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": [
+        {
+          "type": "custom_tool_call",
+          "call_id": "call_custom_1",
+          "name": "apply_patch",
+          "input": "*** Begin Patch\n*** End Patch\n"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-rejects-previous-response-id-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": "continue this",
+      "previous_response_id": "resp_prev_1",
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-request-responses-rejects-non-function-tools-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "hello",
+      "tools": [
+        {
+          "type": "web_search_preview"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-rejects-non-function-tool-choice-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": "hello",
+      "tool_choice": {
+        "type": "web_search_preview"
+      },
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-request-responses-rejects-parallel-tool-calls-false-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "hello",
+      "parallel_tool_calls": false,
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-rejects-logprobs-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": "hello",
+      "logprobs": true,
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-request-responses-rejects-stop-sequences-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "hello",
+      "stop_sequences": [
+        "END"
+      ],
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-rejects-messages-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-request-responses-rejects-n-greater-than-one-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "hello",
+      "n": 2,
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-rejects-metadata-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": "hello",
+      "metadata": {
+        "trace": "abc123"
+      },
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-request-responses-rejects-safety-identifier-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "input": "hello",
+      "safety_identifier": "safe_123",
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-rejects-web-search-options-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": "hello",
+      "web_search_options": {
+        "search_context_size": "medium"
+      },
+      "stream": false
+    },
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-response-responses-function-call-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_copilot_tool_1",
+      "object": "chat.completion",
+      "created": 1735689900,
+      "model": "codex",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_2",
+                "function": {
+                  "name": "tools.echo",
+                  "arguments": "{\"text\":\"hello\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "chatcmpl_copilot_tool_1",
+      "object": "response",
+      "created_at": 1735689900,
+      "model": "codex",
+      "output": [
+        {
+          "type": "function_call",
+          "call_id": "call_2",
+          "namespace": "tools",
+          "name": "echo",
+          "arguments": "{\"text\":\"hello\"}"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-request-responses-function-history-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "input": [
+        {
+          "type": "function_call",
+          "call_id": "call_1",
+          "namespace": "functions",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"echo hi\"}"
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_1",
+          "output": "ok"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "functions.exec_command",
+                "arguments": "{\"cmd\":\"echo hi\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "ok"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-response-responses-function-call-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_anthropic_tool_1",
+      "object": "chat.completion",
+      "created": 1735689800,
+      "model": "auto",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "function": {
+                  "name": "functions.exec_command",
+                  "arguments": "{\"cmd\":\"echo hi\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "chatcmpl_anthropic_tool_1",
+      "object": "response",
+      "created_at": 1735689800,
+      "model": "auto",
+      "output": [
+        {
+          "type": "function_call",
+          "call_id": "call_1",
+          "namespace": "functions",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"rtk echo hi\"}"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-stream-function-call-arguments-chat-compat",
+    "provider": "anthropic",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"name\":\"functions.exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"echo hi\\\"}\"}}]}}]}\n\n",
+    "expected_body": "event: response.function_call_arguments.delta\ndata: {\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\\\"rtk echo hi\\\"}\",\"type\":\"response.function_call_arguments.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-response-responses-function-call-chat-compat",
+    "provider": "copilot",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_copilot_tool_1",
+      "object": "chat.completion",
+      "created": 1735689900,
+      "model": "codex",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_2",
+                "function": {
+                  "name": "tools.echo",
+                  "arguments": "{\"text\":\"hello\"}"
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "chatcmpl_copilot_tool_1",
+      "object": "response",
+      "created_at": 1735689900,
+      "model": "codex",
+      "output": [
+        {
+          "type": "function_call",
+          "call_id": "call_2",
+          "namespace": "tools",
+          "name": "echo",
+          "arguments": "{\"text\":\"hello\"}"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-request-responses-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "input": "hello kiro",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "input": "hello kiro",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": 503,
+    "error_code": null,
+    "error_text": "overloaded upstream",
+    "expected_error_class": "transient",
+    "expected_error_cooldown_ms": 10000
+  },
+  {
+    "name": "kiro-request-embeddings-unsupported",
+    "provider": "kiro",
+    "endpoint": "embeddings",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "input": "hello kiro"
+    },
+    "expected_body": null,
+    "expected_loss": "unsupported",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-response-responses-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_kiro_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 4,
+        "total_tokens": 13
+      }
+    },
+    "expected_body": {
+      "id": "resp_kiro_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 4,
+        "total_tokens": 13
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 9,
+      "output_tokens": 4,
+      "total_tokens": 13
+    }
+  },
+  {
+    "name": "kiro-stream-responses-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ki\"}\n\n",
+    "expected_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ki\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-chat-completions-request-translated",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "stream": false,
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "hello kiro chat"
+            }
+          ]
+        }
+      ]
+    },
+    "expected_loss": "degraded",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-chat-completions-request-rejects-parallel-tool-calls-false",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro chat"
+        }
+      ],
+      "parallel_tool_calls": false
+    },
+    "expected_loss": "rejected",
+    "expected_body": null,
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-chat-completions-request-strips-accepted-controls",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro chat"
+        }
+      ],
+      "stream": false,
+      "temperature": 1,
+      "parallel_tool_calls": true,
+      "max_tokens": 32,
+      "user": "user-123"
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "stream": false,
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "hello kiro chat"
+            }
+          ]
+        }
+      ]
+    },
+    "expected_loss": "degraded",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-chat-completions-request-maps-legacy-functions",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "call lookup"
+        },
+        {
+          "role": "assistant",
+          "function_call": {
+            "name": "lookup",
+            "arguments": "{\"query\":\"prodex\"}",
+            "call_id": "call_lookup"
+          }
+        },
+        {
+          "role": "function",
+          "name": "lookup",
+          "content": "lookup result"
+        }
+      ],
+      "functions": [
+        {
+          "name": "lookup",
+          "description": "Search docs",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ],
+      "function_call": {
+        "name": "lookup"
+      }
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "call lookup"
+            }
+          ]
+        },
+        {
+          "type": "function_call",
+          "call_id": "call_lookup",
+          "name": "lookup",
+          "arguments": "{\"query\":\"prodex\"}"
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "lookup",
+          "output": "lookup result"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "description": "Search docs",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "function",
+        "function": {
+          "name": "lookup"
+        }
+      }
+    },
+    "expected_loss": "degraded",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-chat-completions-response-translated",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_kiro_chat_1",
+      "created_at": 123,
+      "model": "claude-sonnet-4",
+      "object": "response",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello kiro chat"
+            }
+          ]
+        },
+        {
+          "type": "function_call",
+          "call_id": "call_lookup",
+          "name": "lookup",
+          "arguments": "{\"query\":\"prodex\"}"
+        }
+      ],
+      "metadata": {
+        "kiro": {
+          "reasoning_content": "thoughts"
+        }
+      },
+      "usage": {
+        "input_tokens": 7,
+        "output_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_resp_kiro_chat_1",
+      "object": "chat.completion",
+      "created": 123,
+      "model": "claude-sonnet-4",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello kiro chat",
+            "tool_calls": [
+              {
+                "id": "call_lookup",
+                "type": "function",
+                "function": {
+                  "name": "lookup",
+                  "arguments": "{\"query\":\"prodex\"}"
+                }
+              }
+            ],
+            "reasoning_content": "thoughts"
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "metadata": {
+        "kiro": {
+          "reasoning_content": "thoughts"
+        }
+      }
+    },
+    "expected_loss": "degraded",
+    "expected_usage": {
+      "input_tokens": 7,
+      "output_tokens": 3,
+      "total_tokens": 10
+    }
+  },
+  {
+    "name": "kiro-chat-completions-response-rejects-invalid-shape",
+    "provider": "kiro",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": "not a response object",
+    "expected_body": null,
+    "expected_loss": "rejected",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-messages-request-passthrough",
+    "provider": "kiro",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro messages"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello kiro messages"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-messages-response-passthrough",
+    "provider": "kiro",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_kiro_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello kiro messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "msg_kiro_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello kiro messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 6,
+      "output_tokens": 2,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "kiro-request-responses-compact-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses/compact",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "model": "claude-sonnet-4",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "claude-sonnet-4",
+      "input": "compact this",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-response-responses-compact-passthrough",
+    "provider": "kiro",
+    "endpoint": "responses/compact",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_kiro_compact_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_body": {
+      "id": "resp_kiro_compact_1",
+      "object": "response",
+      "model": "claude-sonnet-4",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "compacted kiro"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 5,
+        "total_tokens": 16
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 11,
+      "output_tokens": 5,
+      "total_tokens": 16
+    }
+  },
+  {
+    "name": "kiro-models-request-passthrough",
+    "provider": "kiro",
+    "endpoint": "models",
+    "operation": "request",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {},
+    "expected_body": {},
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "kiro-models-response-passthrough",
+    "provider": "kiro",
+    "endpoint": "models",
+    "operation": "response",
+    "model": "claude-sonnet-4",
+    "input_headers": {},
+    "input_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "claude-sonnet-4",
+          "object": "model"
+        }
+      ]
+    },
+    "expected_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "claude-sonnet-4",
+          "object": "model"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": null,
+      "output_tokens": null,
+      "total_tokens": null
+    }
+  },
+  {
+    "name": "local-request-responses-passthrough",
+    "provider": "local",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "model": "local",
+      "input": "hello local",
+      "stream": false
+    },
+    "expected_body": {
+      "model": "local",
+      "input": "hello local",
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-response-responses-passthrough",
+    "provider": "local",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "id": "resp_local_1",
+      "object": "response",
+      "model": "local",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello local"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 5,
+        "output_tokens": 3,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "resp_local_1",
+      "object": "response",
+      "model": "local",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "hello local"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 5,
+        "output_tokens": 3,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 5,
+      "output_tokens": 3,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "local-stream-responses-passthrough",
+    "provider": "local",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "local",
+    "input_headers": {},
+    "input_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n",
+    "expected_body": "data: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-chat-completions-request-passthrough",
+    "provider": "openai",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-5.4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "gpt-5.4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-chat-completions-response-passthrough",
+    "provider": "openai",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_openai_1",
+      "object": "chat.completion",
+      "model": "gpt-5.4",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 8,
+        "completion_tokens": 4,
+        "total_tokens": 12
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_openai_1",
+      "object": "chat.completion",
+      "model": "gpt-5.4",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 8,
+        "completion_tokens": 4,
+        "total_tokens": 12
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "total_tokens": 12
+    }
+  },
+  {
+    "name": "openai-messages-request-passthrough",
+    "provider": "openai",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-5.4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello messages"
+        }
+      ],
+      "max_tokens": 32
+    },
+    "expected_body": {
+      "model": "gpt-5.4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello messages"
+        }
+      ],
+      "max_tokens": 32
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-messages-response-passthrough",
+    "provider": "openai",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_openai_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    },
+    "expected_body": {
+      "id": "msg_openai_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 9,
+      "output_tokens": 3,
+      "total_tokens": 12
+    }
+  },
+  {
+    "name": "local-chat-completions-request-passthrough",
+    "provider": "local",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "model": "local",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello local chat"
+        }
+      ],
+      "stream": true
+    },
+    "expected_body": {
+      "model": "local",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello local chat"
+        }
+      ],
+      "stream": true
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-chat-completions-response-passthrough",
+    "provider": "local",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_local_1",
+      "object": "chat.completion",
+      "model": "local",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello local chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 6,
+        "completion_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_local_1",
+      "object": "chat.completion",
+      "model": "local",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello local chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 6,
+        "completion_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 6,
+      "output_tokens": 2,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "local-messages-request-passthrough",
+    "provider": "local",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "model": "local",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello local messages"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "local",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello local messages"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-messages-response-passthrough",
+    "provider": "local",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_local_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello local messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 4,
+        "output_tokens": 2,
+        "total_tokens": 6
+      }
+    },
+    "expected_body": {
+      "id": "msg_local_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello local messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 4,
+        "output_tokens": 2,
+        "total_tokens": 6
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 4,
+      "output_tokens": 2,
+      "total_tokens": 6
+    }
+  },
+  {
+    "name": "openai-models-request-passthrough",
+    "provider": "openai",
+    "endpoint": "models",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "method": "GET",
+      "path": "/v1/models"
+    },
+    "expected_body": {
+      "method": "GET",
+      "path": "/v1/models"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-models-response-passthrough",
+    "provider": "openai",
+    "endpoint": "models",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "gpt-5.4"
+        }
+      ]
+    },
+    "expected_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "gpt-5.4"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-embeddings-request-passthrough",
+    "provider": "openai",
+    "endpoint": "embeddings",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-5.4",
+      "input": [
+        "hello embeddings"
+      ]
+    },
+    "expected_body": {
+      "model": "gpt-5.4",
+      "input": [
+        "hello embeddings"
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-embeddings-response-passthrough",
+    "provider": "openai",
+    "endpoint": "embeddings",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "object": "list",
+      "data": [
+        {
+          "embedding": [
+            0.1,
+            0.2
+          ],
+          "index": 0
+        }
+      ],
+      "model": "gpt-5.4",
+      "usage": {
+        "prompt_tokens": 3,
+        "total_tokens": 3
+      }
+    },
+    "expected_body": {
+      "object": "list",
+      "data": [
+        {
+          "embedding": [
+            0.1,
+            0.2
+          ],
+          "index": 0
+        }
+      ],
+      "model": "gpt-5.4",
+      "usage": {
+        "prompt_tokens": 3,
+        "total_tokens": 3
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 3,
+      "output_tokens": null,
+      "total_tokens": 3
+    }
+  },
+  {
+    "name": "openai-images-request-passthrough",
+    "provider": "openai",
+    "endpoint": "images",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-image-1",
+      "prompt": "draw a cat"
+    },
+    "expected_body": {
+      "model": "gpt-image-1",
+      "prompt": "draw a cat"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-images-response-passthrough",
+    "provider": "openai",
+    "endpoint": "images",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "created": 123,
+      "data": [
+        {
+          "b64_json": "AAAA"
+        }
+      ]
+    },
+    "expected_body": {
+      "created": 123,
+      "data": [
+        {
+          "b64_json": "AAAA"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-audio-request-passthrough",
+    "provider": "openai",
+    "endpoint": "audio",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-4o-mini-transcribe",
+      "input": "audio-bytes-placeholder"
+    },
+    "expected_body": {
+      "model": "gpt-4o-mini-transcribe",
+      "input": "audio-bytes-placeholder"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-audio-response-passthrough",
+    "provider": "openai",
+    "endpoint": "audio",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "text": "hello audio",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 1,
+        "total_tokens": 3
+      }
+    },
+    "expected_body": {
+      "text": "hello audio",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 1,
+        "total_tokens": 3
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 2,
+      "output_tokens": 1,
+      "total_tokens": 3
+    }
+  },
+  {
+    "name": "openai-batches-request-passthrough",
+    "provider": "openai",
+    "endpoint": "batches",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "input_file_id": "file_123",
+      "endpoint": "/v1/responses",
+      "completion_window": "24h",
+      "model": "gpt-5.4"
+    },
+    "expected_body": {
+      "input_file_id": "file_123",
+      "endpoint": "/v1/responses",
+      "completion_window": "24h",
+      "model": "gpt-5.4"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-batches-response-passthrough",
+    "provider": "openai",
+    "endpoint": "batches",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "id": "batch_1",
+      "status": "completed"
+    },
+    "expected_body": {
+      "id": "batch_1",
+      "status": "completed"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-rerank-request-passthrough",
+    "provider": "openai",
+    "endpoint": "rerank",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "model": "rerank-1",
+      "query": "hello",
+      "documents": [
+        "a",
+        "b"
+      ]
+    },
+    "expected_body": {
+      "model": "rerank-1",
+      "query": "hello",
+      "documents": [
+        "a",
+        "b"
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-rerank-response-passthrough",
+    "provider": "openai",
+    "endpoint": "rerank",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "data": [
+        {
+          "index": 1,
+          "relevance_score": 0.9
+        },
+        {
+          "index": 0,
+          "relevance_score": 0.2
+        }
+      ]
+    },
+    "expected_body": {
+      "data": [
+        {
+          "index": 1,
+          "relevance_score": 0.9
+        },
+        {
+          "index": 0,
+          "relevance_score": 0.2
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-a2a-request-passthrough",
+    "provider": "openai",
+    "endpoint": "a2a",
+    "operation": "request",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "message": "hello agent",
+      "conversation_id": "conv_1",
+      "model": "gpt-5.4"
+    },
+    "expected_body": {
+      "message": "hello agent",
+      "conversation_id": "conv_1",
+      "model": "gpt-5.4"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "openai-a2a-response-passthrough",
+    "provider": "openai",
+    "endpoint": "a2a",
+    "operation": "response",
+    "model": "gpt-5.4",
+    "input_headers": {},
+    "input_body": {
+      "id": "a2a_1",
+      "status": "ok",
+      "message": "hello back"
+    },
+    "expected_body": {
+      "id": "a2a_1",
+      "status": "ok",
+      "message": "hello back"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-models-request-passthrough",
+    "provider": "local",
+    "endpoint": "models",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "method": "GET",
+      "path": "/v1/models"
+    },
+    "expected_body": {
+      "method": "GET",
+      "path": "/v1/models"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-models-response-passthrough",
+    "provider": "local",
+    "endpoint": "models",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "gpt-5.4"
+        }
+      ]
+    },
+    "expected_body": {
+      "object": "list",
+      "data": [
+        {
+          "id": "gpt-5.4"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-embeddings-request-passthrough",
+    "provider": "local",
+    "endpoint": "embeddings",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-5.4",
+      "input": [
+        "hello embeddings"
+      ]
+    },
+    "expected_body": {
+      "model": "gpt-5.4",
+      "input": [
+        "hello embeddings"
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-embeddings-response-passthrough",
+    "provider": "local",
+    "endpoint": "embeddings",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "object": "list",
+      "data": [
+        {
+          "embedding": [
+            0.1,
+            0.2
+          ],
+          "index": 0
+        }
+      ],
+      "model": "gpt-5.4",
+      "usage": {
+        "prompt_tokens": 3,
+        "total_tokens": 3
+      }
+    },
+    "expected_body": {
+      "object": "list",
+      "data": [
+        {
+          "embedding": [
+            0.1,
+            0.2
+          ],
+          "index": 0
+        }
+      ],
+      "model": "gpt-5.4",
+      "usage": {
+        "prompt_tokens": 3,
+        "total_tokens": 3
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 3,
+      "output_tokens": null,
+      "total_tokens": 3
+    }
+  },
+  {
+    "name": "local-images-request-passthrough",
+    "provider": "local",
+    "endpoint": "images",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-image-1",
+      "prompt": "draw a cat"
+    },
+    "expected_body": {
+      "model": "gpt-image-1",
+      "prompt": "draw a cat"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-images-response-passthrough",
+    "provider": "local",
+    "endpoint": "images",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "created": 123,
+      "data": [
+        {
+          "b64_json": "AAAA"
+        }
+      ]
+    },
+    "expected_body": {
+      "created": 123,
+      "data": [
+        {
+          "b64_json": "AAAA"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-audio-request-passthrough",
+    "provider": "local",
+    "endpoint": "audio",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "model": "gpt-4o-mini-transcribe",
+      "input": "audio-bytes-placeholder"
+    },
+    "expected_body": {
+      "model": "gpt-4o-mini-transcribe",
+      "input": "audio-bytes-placeholder"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-audio-response-passthrough",
+    "provider": "local",
+    "endpoint": "audio",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "text": "hello audio",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 1,
+        "total_tokens": 3
+      }
+    },
+    "expected_body": {
+      "text": "hello audio",
+      "usage": {
+        "input_tokens": 2,
+        "output_tokens": 1,
+        "total_tokens": 3
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 2,
+      "output_tokens": 1,
+      "total_tokens": 3
+    }
+  },
+  {
+    "name": "local-batches-request-passthrough",
+    "provider": "local",
+    "endpoint": "batches",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "input_file_id": "file_123",
+      "endpoint": "/v1/responses",
+      "completion_window": "24h",
+      "model": "local"
+    },
+    "expected_body": {
+      "input_file_id": "file_123",
+      "endpoint": "/v1/responses",
+      "completion_window": "24h",
+      "model": "local"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-batches-response-passthrough",
+    "provider": "local",
+    "endpoint": "batches",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "id": "batch_1",
+      "status": "completed"
+    },
+    "expected_body": {
+      "id": "batch_1",
+      "status": "completed"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-rerank-request-passthrough",
+    "provider": "local",
+    "endpoint": "rerank",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "model": "rerank-1",
+      "query": "hello",
+      "documents": [
+        "a",
+        "b"
+      ]
+    },
+    "expected_body": {
+      "model": "rerank-1",
+      "query": "hello",
+      "documents": [
+        "a",
+        "b"
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-rerank-response-passthrough",
+    "provider": "local",
+    "endpoint": "rerank",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "data": [
+        {
+          "index": 1,
+          "relevance_score": 0.9
+        },
+        {
+          "index": 0,
+          "relevance_score": 0.2
+        }
+      ]
+    },
+    "expected_body": {
+      "data": [
+        {
+          "index": 1,
+          "relevance_score": 0.9
+        },
+        {
+          "index": 0,
+          "relevance_score": 0.2
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-a2a-request-passthrough",
+    "provider": "local",
+    "endpoint": "a2a",
+    "operation": "request",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "message": "hello agent",
+      "conversation_id": "conv_1",
+      "model": "local"
+    },
+    "expected_body": {
+      "message": "hello agent",
+      "conversation_id": "conv_1",
+      "model": "local"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "local-a2a-response-passthrough",
+    "provider": "local",
+    "endpoint": "a2a",
+    "operation": "response",
+    "model": "local",
+    "input_headers": {},
+    "input_body": {
+      "id": "a2a_1",
+      "status": "ok",
+      "message": "hello back"
+    },
+    "expected_body": {
+      "id": "a2a_1",
+      "status": "ok",
+      "message": "hello back"
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-chat-completions-request-passthrough",
+    "provider": "anthropic",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello anthropic chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello anthropic chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-chat-completions-response-passthrough",
+    "provider": "anthropic",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_anthropic_1",
+      "object": "chat.completion",
+      "model": "auto",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello anthropic chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_anthropic_1",
+      "object": "chat.completion",
+      "model": "auto",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello anthropic chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 7,
+      "output_tokens": 3,
+      "total_tokens": 10
+    }
+  },
+  {
+    "name": "anthropic-messages-request-passthrough",
+    "provider": "anthropic",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello anthropic messages"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "auto",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello anthropic messages"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "anthropic-messages-response-passthrough",
+    "provider": "anthropic",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "auto",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_anthropic_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello anthropic messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "msg_anthropic_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello anthropic messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 6,
+      "output_tokens": 2,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "copilot-chat-completions-request-passthrough",
+    "provider": "copilot",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello copilot chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "codex",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello copilot chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-chat-completions-response-passthrough",
+    "provider": "copilot",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_copilot_1",
+      "object": "chat.completion",
+      "model": "codex",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello copilot chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_copilot_1",
+      "object": "chat.completion",
+      "model": "codex",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello copilot chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 7,
+      "output_tokens": 3,
+      "total_tokens": 10
+    }
+  },
+  {
+    "name": "copilot-messages-request-passthrough",
+    "provider": "copilot",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "model": "codex",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello copilot messages"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "codex",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello copilot messages"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "copilot-messages-response-passthrough",
+    "provider": "copilot",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "codex",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_copilot_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello copilot messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "msg_copilot_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello copilot messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 6,
+      "output_tokens": 2,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "deepseek-chat-completions-request-passthrough",
+    "provider": "deepseek",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello deepseek chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello deepseek chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-chat-completions-response-passthrough",
+    "provider": "deepseek",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_deepseek_1",
+      "object": "chat.completion",
+      "model": "deepseek-chat",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello deepseek chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_deepseek_1",
+      "object": "chat.completion",
+      "model": "deepseek-chat",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello deepseek chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 7,
+      "output_tokens": 3,
+      "total_tokens": 10
+    }
+  },
+  {
+    "name": "deepseek-messages-request-passthrough",
+    "provider": "deepseek",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "model": "deepseek-chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello deepseek messages"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello deepseek messages"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "deepseek-messages-response-passthrough",
+    "provider": "deepseek",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_deepseek_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello deepseek messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "msg_deepseek_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello deepseek messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 6,
+      "output_tokens": 2,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "gemini-chat-completions-request-passthrough",
+    "provider": "gemini",
+    "endpoint": "chat-completions",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello gemini chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello gemini chat"
+        }
+      ],
+      "stream": false
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-chat-completions-response-passthrough",
+    "provider": "gemini",
+    "endpoint": "chat-completions",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_gemini_1",
+      "object": "chat.completion",
+      "model": "gemini-2.5-pro",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello gemini chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_gemini_1",
+      "object": "chat.completion",
+      "model": "gemini-2.5-pro",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "hello gemini chat"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 7,
+      "output_tokens": 3,
+      "total_tokens": 10
+    }
+  },
+  {
+    "name": "gemini-messages-request-passthrough",
+    "provider": "gemini",
+    "endpoint": "messages",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello gemini messages"
+        }
+      ]
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello gemini messages"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-messages-response-passthrough",
+    "provider": "gemini",
+    "endpoint": "messages",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "id": "msg_gemini_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello gemini messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_body": {
+      "id": "msg_gemini_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello gemini messages"
+        }
+      ],
+      "usage": {
+        "input_tokens": 6,
+        "output_tokens": 2,
+        "total_tokens": 8
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 6,
+      "output_tokens": 2,
+      "total_tokens": 8
+    }
+  },
+  {
+    "name": "gemini-embeddings-request-passthrough",
+    "provider": "gemini",
+    "endpoint": "embeddings",
+    "operation": "request",
+    "model": "gemini-embedding-001",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-embedding-001",
+      "input": [
+        "hello embeddings"
+      ]
+    },
+    "expected_body": {
+      "model": "gemini-embedding-001",
+      "input": [
+        "hello embeddings"
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null
+  },
+  {
+    "name": "gemini-embeddings-response-passthrough",
+    "provider": "gemini",
+    "endpoint": "embeddings",
+    "operation": "response",
+    "model": "gemini-embedding-001",
+    "input_headers": {},
+    "input_body": {
+      "object": "list",
+      "data": [
+        {
+          "embedding": [
+            0.1,
+            0.2
+          ],
+          "index": 0
+        }
+      ],
+      "model": "gemini-embedding-001",
+      "usage": {
+        "prompt_tokens": 3,
+        "total_tokens": 3
+      }
+    },
+    "expected_body": {
+      "object": "list",
+      "data": [
+        {
+          "embedding": [
+            0.1,
+            0.2
+          ],
+          "index": 0
+        }
+      ],
+      "model": "gemini-embedding-001",
+      "usage": {
+        "prompt_tokens": 3,
+        "total_tokens": 3
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 3,
+      "output_tokens": null,
+      "total_tokens": 3
+    }
+  },
+  {
+    "name": "deepseek-response-cache-and-tool-metadata",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": {
+      "id": "chatcmpl_cache_1",
+      "object": "chat.completion",
+      "created": 1700000000,
+      "model": "deepseek-chat",
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "cached hello",
+            "reasoning_content": "think",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "function": {
+                  "name": "functions.exec_command",
+                  "arguments": "{\"cmd\":\"echo hi\"}"
+                },
+                "extra_content": {
+                  "google": {
+                    "thought_signature": "sig_1"
+                  }
+                }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls",
+          "logprobs": {
+            "tokens": []
+          }
+        }
+      ],
+      "system_fingerprint": "fp_1",
+      "usage": {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18,
+        "prompt_cache_hit_tokens": 5,
+        "prompt_cache_miss_tokens": 6,
+        "completion_tokens_details": {
+          "reasoning_tokens": 2
+        }
+      }
+    },
+    "expected_body": {
+      "id": "chatcmpl_cache_1",
+      "object": "response",
+      "created_at": 1700000000,
+      "model": "deepseek-chat",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "cached hello"
+            }
+          ]
+        },
+        {
+          "type": "function_call",
+          "call_id": "call_1",
+          "namespace": "functions",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"rtk echo hi\"}",
+          "gemini_thought_signature": "sig_1"
+        }
+      ],
+      "usage": {
+        "input_tokens": 11,
+        "output_tokens": 7,
+        "total_tokens": 18,
+        "input_tokens_details": {
+          "cached_tokens": 5
+        },
+        "output_tokens_details": {
+          "reasoning_tokens": 2
+        },
+        "metadata": {
+          "deepseek": {
+            "prompt_cache_hit_tokens": 5,
+            "prompt_cache_miss_tokens": 6
+          }
+        }
+      },
+      "metadata": {
+        "deepseek": {
+          "logprobs": {
+            "tokens": []
+          },
+          "reasoning_content": "think",
+          "finish_reason": "tool_calls",
+          "system_fingerprint": "fp_1"
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 11,
+      "output_tokens": 7,
+      "total_tokens": 18
+    }
+  },
+  {
+    "name": "gemini-response-wrapped-generate-to-responses",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "traceId": "resp_wrapped_1",
+      "response": {
+        "modelVersion": "gemini-2.5-pro",
+        "candidates": [
+          {
+            "content": {
+              "parts": [
+                {
+                  "text": "wrapped hi"
+                }
+              ]
+            }
+          }
+        ],
+        "usageMetadata": {
+          "promptTokenCount": 3,
+          "candidatesTokenCount": 4,
+          "totalTokenCount": 7,
+          "cachedContentTokenCount": 1,
+          "thoughtsTokenCount": 2,
+          "toolUsePromptTokenCount": 1
+        }
+      }
+    },
+    "expected_body": {
+      "id": "resp_wrapped_1",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "wrapped hi"
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 3,
+        "input_tokens_details": {
+          "cached_tokens": 1,
+          "tool_tokens": 1
+        },
+        "output_tokens": 4,
+        "output_tokens_details": {
+          "reasoning_tokens": 2
+        },
+        "total_tokens": 7
+      },
+      "metadata": {
+        "gemini": {
+          "usageMetadata": {
+            "promptTokenCount": 3,
+            "candidatesTokenCount": 4,
+            "totalTokenCount": 7,
+            "cachedContentTokenCount": 1,
+            "thoughtsTokenCount": 2,
+            "toolUsePromptTokenCount": 1
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": {
+      "input_tokens": 3,
+      "output_tokens": 4,
+      "total_tokens": 7
+    }
+  },
+  {
+    "name": "gemini-error-resource-exhausted-classified-as-quota",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "model": "gemini-2.5-pro",
+      "input": "hello gemini"
+    },
+    "expected_body": {
+      "model": "gemini-2.5-pro",
+      "request": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "hello gemini"
+              }
+            ]
+          }
+        ],
+        "generationConfig": {
+          "thinkingConfig": {
+            "includeThoughts": true,
+            "thinkingBudget": 8192
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": 429,
+    "error_code": "resource_exhausted",
+    "error_text": "quota exhausted",
+    "expected_error_class": "quota",
+    "expected_error_cooldown_ms": 300000
+  },
+  {
+    "name": "deepseek-error-rate-limit-exceeded-classified-as-rate-limit",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "request",
+    "model": "deepseek-chat",
+    "input_headers": {
+      "x-codex-turn-state": "turn-state-a",
+      "session_id": "sess-a"
+    },
+    "input_body": {
+      "model": "deepseek-chat",
+      "input": "hello deepseek",
+      "stream": false,
+      "previous_response_id": "resp_1"
+    },
+    "expected_body": {
+      "model": "deepseek-chat",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": "hello deepseek"
+        }
+      ]
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": 429,
+    "error_code": "rate_limit_exceeded",
+    "error_text": "Too many requests",
+    "expected_error_class": "rate-limit",
+    "expected_error_cooldown_ms": 60000
+  },
+  {
+    "name": "deepseek-stream-function-call-arguments-delta",
+    "provider": "deepseek",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "deepseek-chat",
+    "input_headers": {},
+    "input_body": "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\",\"function\":{\"arguments\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\"}}]}}]}\n\n",
+    "expected_body": "event: response.function_call_arguments.delta\ndata: {\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\",\"type\":\"response.function_call_arguments.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-stream-function-call-arguments-delta",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": "data: {\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"id\":\"call_1\",\"name\":\"shell\",\"args\":{\"cmd\":\"rtk ls\"}}}]}}]}\n\n",
+    "expected_body": "event: response.function_call_arguments.delta\ndata: {\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\\\"rtk ls\\\"}\",\"type\":\"response.function_call_arguments.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-stream-reasoning-summary-text-delta",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "stream-event",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"internal summary\",\"thought\":true}]}}]}\n\n",
+    "expected_body": "event: response.reasoning_summary_text.delta\ndata: {\"delta\":\"internal summary\",\"type\":\"response.reasoning_summary_text.delta\"}\n\n",
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-prompt-feedback-blocked",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_blocked",
+      "modelVersion": "gemini-2.5-pro",
+      "promptFeedback": {
+        "blockReason": "SAFETY"
+      }
+    },
+    "expected_body": {
+      "id": "resp_blocked",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [],
+      "usage": {},
+      "metadata": {
+        "gemini": {
+          "promptFeedback": {
+            "blockReason": "SAFETY"
+          }
+        }
+      },
+      "status": "failed",
+      "error": {
+        "code": "gemini_prompt_blocked",
+        "message": "Gemini blocked the prompt: SAFETY"
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-max-tokens-incomplete",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_truncated",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "partial"
+              }
+            ]
+          },
+          "finishReason": "MAX_TOKENS"
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "resp_truncated",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "partial"
+            }
+          ]
+        }
+      ],
+      "usage": {},
+      "metadata": {
+        "gemini": {
+          "finishReason": "MAX_TOKENS"
+        }
+      },
+      "status": "incomplete",
+      "incomplete_details": {
+        "reason": "max_output_tokens",
+        "message": "Gemini stopped because it reached the maximum output token limit."
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-function-call-namespace-and-thought-signature",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_sqz_1",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "thoughtSignature": "sig-response-1",
+                "functionCall": {
+                  "id": "call_sqz_1",
+                  "name": "mcp__prodex_sqz__compress",
+                  "args": {
+                    "text": "large content"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "resp_sqz_1",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "function_call",
+          "call_id": "call_sqz_1",
+          "namespace": "mcp__prodex_sqz",
+          "name": "compress",
+          "arguments": "{\"text\":\"large content\"}",
+          "gemini_thought_signature": "sig-response-1"
+        }
+      ],
+      "usage": {},
+      "metadata": {}
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-shell-command-rtk-wrapped",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_shell_1",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "call_shell_1",
+                  "name": "shell",
+                  "args": {
+                    "cmd": "cargo test -q login -- --test-threads=1"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "resp_shell_1",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "function_call",
+          "call_id": "call_shell_1",
+          "name": "shell",
+          "arguments": "{\"cmd\":\"rtk cargo test -q login -- --test-threads=1\"}"
+        }
+      ],
+      "usage": {},
+      "metadata": {}
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-tool-search-call",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_search_1",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "call_search_1",
+                  "name": "tool_search",
+                  "args": {
+                    "query": "provider translator"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "resp_search_1",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "tool_search_call",
+          "call_id": "call_search_1",
+          "execution": "client",
+          "arguments": {
+            "query": "provider translator"
+          }
+        }
+      ],
+      "usage": {},
+      "metadata": {}
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-apply-patch-custom-tool-call",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_patch_1",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "functionCall": {
+                  "id": "call_patch_1",
+                  "name": "apply_patch",
+                  "args": {
+                    "input": "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "resp_patch_1",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "custom_tool_call",
+          "call_id": "call_patch_1",
+          "name": "apply_patch",
+          "input": "*** Begin Patch\n*** Add File: note.txt\n+hello\n*** End Patch"
+        }
+      ],
+      "usage": {},
+      "metadata": {}
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-thought-plus-function-call",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_reason_call",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "internal summary",
+                "thought": true
+              },
+              {
+                "thoughtSignature": "sig-response-1",
+                "functionCall": {
+                  "id": "call_sqz_1",
+                  "name": "mcp__prodex_sqz__compress",
+                  "args": {
+                    "text": "large content"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "resp_reason_call",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "function_call",
+          "call_id": "call_sqz_1",
+          "namespace": "mcp__prodex_sqz",
+          "name": "compress",
+          "arguments": "{\"text\":\"large content\"}",
+          "gemini_thought_signature": "sig-response-1"
+        }
+      ],
+      "usage": {},
+      "metadata": {}
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-grounding-and-citation",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_grounded",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "text": "grounded answer"
+              }
+            ]
+          },
+          "finishReason": "STOP",
+          "citationMetadata": {
+            "citations": [
+              {
+                "uri": "https://citation.example",
+                "title": "Citation"
+              }
+            ]
+          },
+          "groundingMetadata": {
+            "groundingChunks": [
+              {
+                "web": {
+                  "uri": "https://ground.example",
+                  "title": "Ground"
+                }
+              }
+            ]
+          },
+          "urlContextMetadata": {
+            "urlMetadata": [
+              {
+                "retrievedUrl": "https://context.example",
+                "urlRetrievalStatus": "URL_RETRIEVAL_STATUS_SUCCESS"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected_body": {
+      "id": "resp_grounded",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "grounded answer"
+            }
+          ]
+        },
+        {
+          "type": "web_search_call",
+          "id": "ws_resp_grounded",
+          "status": "completed",
+          "action": {
+            "type": "open_page",
+            "url": "https://ground.example",
+            "sources": [
+              {
+                "type": "url",
+                "url": "https://ground.example",
+                "title": "Ground"
+              },
+              {
+                "type": "url",
+                "url": "https://citation.example",
+                "title": "Citation"
+              },
+              {
+                "type": "url",
+                "url": "https://context.example",
+                "status": "URL_RETRIEVAL_STATUS_SUCCESS"
+              }
+            ]
+          }
+        },
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Citations:\n(Citation) https://citation.example"
+            }
+          ]
+        }
+      ],
+      "usage": {},
+      "metadata": {
+        "gemini": {
+          "finishReason": "STOP",
+          "citationMetadata": {
+            "citations": [
+              {
+                "uri": "https://citation.example",
+                "title": "Citation"
+              }
+            ]
+          },
+          "groundingMetadata": {
+            "groundingChunks": [
+              {
+                "web": {
+                  "uri": "https://ground.example",
+                  "title": "Ground"
+                }
+              }
+            ]
+          },
+          "urlContextMetadata": {
+            "urlMetadata": [
+              {
+                "retrievedUrl": "https://context.example",
+                "urlRetrievalStatus": "URL_RETRIEVAL_STATUS_SUCCESS"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  },
+  {
+    "name": "gemini-response-media-and-special-parts",
+    "provider": "gemini",
+    "endpoint": "responses",
+    "operation": "response",
+    "model": "gemini-2.5-pro",
+    "input_headers": {},
+    "input_body": {
+      "responseId": "resp_media",
+      "modelVersion": "gemini-2.5-pro",
+      "candidates": [
+        {
+          "content": {
+            "parts": [
+              {
+                "executableCode": {
+                  "language": "PYTHON",
+                  "code": "print(2 + 2)"
+                }
+              },
+              {
+                "codeExecutionResult": {
+                  "outcome": "OUTCOME_OK",
+                  "output": "4"
+                }
+              },
+              {
+                "videoMetadata": {
+                  "startOffset": "1s",
+                  "endOffset": "3s"
+                }
+              },
+              {
+                "inlineData": {
+                  "mimeType": "image/png",
+                  "data": "aW1hZ2U="
+                }
+              },
+              {
+                "fileData": {
+                  "fileUri": "https://files.example/doc.pdf",
+                  "mimeType": "application/pdf"
+                }
+              }
+            ]
+          },
+          "finishReason": "STOP"
+        }
+      ],
+      "usageMetadata": {
+        "promptTokenCount": 20,
+        "candidatesTokenCount": 8,
+        "totalTokenCount": 32
+      }
+    },
+    "expected_body": {
+      "id": "resp_media",
+      "object": "response",
+      "model": "gemini-2.5-pro",
+      "output": [
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "Gemini executable code (PYTHON):\n```PYTHON\nprint(2 + 2)\n```"
+            },
+            {
+              "type": "output_text",
+              "text": "Gemini code execution result (OUTCOME_OK):\n```text\n4\n```"
+            },
+            {
+              "type": "output_text",
+              "text": "Gemini video metadata: {\"endOffset\":\"3s\",\"startOffset\":\"1s\"}"
+            },
+            {
+              "type": "input_image",
+              "image_url": "data:image/png;base64,aW1hZ2U="
+            },
+            {
+              "type": "output_text",
+              "text": "Gemini returned application/pdf media: https://files.example/doc.pdf"
+            }
+          ]
+        },
+        {
+          "type": "image_generation_call",
+          "id": "ig_resp_media_3",
+          "status": "completed",
+          "result": "aW1hZ2U="
+        }
+      ],
+      "usage": {
+        "input_tokens": 20,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "tool_tokens": 0
+        },
+        "output_tokens": 8,
+        "output_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "total_tokens": 32
+      },
+      "metadata": {
+        "gemini": {
+          "usageMetadata": {
+            "promptTokenCount": 20,
+            "candidatesTokenCount": 8,
+            "totalTokenCount": 32
+          },
+          "finishReason": "STOP"
+        }
+      }
+    },
+    "expected_loss": "lossless",
+    "expected_usage": null,
+    "error_status": null,
+    "error_code": null,
+    "error_text": null,
+    "expected_error_class": null,
+    "expected_error_cooldown_ms": null
+  }
+]

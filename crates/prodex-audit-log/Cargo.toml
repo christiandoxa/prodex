@@ -1,0 +1,17 @@
+[package]
+name = "prodex-audit-log"
+version.workspace = true
+edition.workspace = true
+description = "Audit log helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_audit_log"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

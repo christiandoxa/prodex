@@ -1,0 +1,16 @@
+[package]
+name = "prodex-runtime-capabilities"
+version.workspace = true
+edition.workspace = true
+description = "Runtime request compatibility surface detection for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_runtime_capabilities"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_runtime_proxy = { workspace = true }
+runtime_anthropic = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,364 @@
+{
+  "versionSyncPaths": [
+    "Cargo.toml",
+    "npm",
+    "README.md",
+    "QUICKSTART.md",
+    "scripts/npm"
+  ],
+  "generatedMetadataCheckPaths": [
+    "Cargo.toml",
+    "npm",
+    "README.md",
+    "QUICKSTART.md"
+  ],
+  "docMetadataPaths": [
+    "README.md",
+    "QUICKSTART.md"
+  ],
+  "docVersionMetadataLineSources": [
+    "\\bThe current local version in this repo is\\b",
+    "\\bnpm install -g @christiandoxa/prodex@v?\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?\\b"
+  ],
+  "versionMetadataPatterns": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/*/Cargo.toml",
+    "npm/prodex/package.json",
+    "npm/prodex-gateway-sdk/package.json",
+    "npm/platforms/*/package.json",
+    "package-lock.json",
+    "npm/package-lock.json",
+    "npm/prodex/package-lock.json",
+    "npm/prodex-gateway-sdk/package-lock.json",
+    "npm/platforms/*/package-lock.json",
+    "CHANGELOG.md"
+  ],
+  "releaseMetadataPatterns": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "CHANGELOG.md",
+    "crates/*/Cargo.toml",
+    "package-lock.json",
+    "npm/package-lock.json",
+    "npm/prodex/package.json",
+    "npm/prodex/package-lock.json",
+    "npm/prodex-gateway-sdk/package.json",
+    "npm/prodex-gateway-sdk/package-lock.json",
+    "npm/platforms/*/package.json",
+    "npm/platforms/*/package-lock.json"
+  ],
+  "releaseCommitPaths": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "CHANGELOG.md",
+    "README.md",
+    "QUICKSTART.md",
+    "package.json",
+    "package-lock.json",
+    "npm/prodex/package.json",
+    "npm/prodex-gateway-sdk/package.json",
+    "npm/platforms/linux-x64/package.json",
+    "npm/platforms/linux-arm64/package.json",
+    "npm/platforms/darwin-x64/package.json",
+    "npm/platforms/darwin-arm64/package.json",
+    "npm/platforms/win32-x64/package.json",
+    "npm/platforms/win32-arm64/package.json"
+  ],
+  "knownNpmLockfilePaths": [
+    "package-lock.json",
+    "npm/package-lock.json",
+    "npm/prodex/package-lock.json",
+    "npm/platforms/linux-x64/package-lock.json",
+    "npm/platforms/linux-arm64/package-lock.json",
+    "npm/platforms/darwin-x64/package-lock.json",
+    "npm/platforms/darwin-arm64/package-lock.json",
+    "npm/platforms/win32-x64/package-lock.json",
+    "npm/platforms/win32-arm64/package-lock.json"
+  ],
+  "releaseMessagePatternSources": [
+    "^release(?:\\([^)]*\\))?!?:",
+    "^release\\s+v?\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$",
+    "^chore(?:\\([^)]*\\))?!?:\\s*release\\b",
+    "^chore\\(release\\)!?:",
+    "^bump(?:\\([^)]*\\))?!?:\\s*(?:prodex\\s+)?v?\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$"
+  ],
+  "releaseSubjectPatternSpecs": [
+    {
+      "action": "release",
+      "source": "^chore\\(release\\)!?:\\s*release\\s+${SEMVER_SOURCE}\\s*$"
+    },
+    {
+      "action": "prepare",
+      "source": "^chore\\(release\\)!?:\\s*prepare\\s+${SEMVER_SOURCE}\\s*$"
+    },
+    {
+      "action": "release",
+      "source": "^release(?:\\([^)]*\\))?!?:\\s*${SEMVER_SOURCE}\\s*$"
+    },
+    {
+      "action": "release",
+      "source": "^release\\s+${SEMVER_SOURCE}\\s*$"
+    },
+    {
+      "action": "bump",
+      "source": "^bump(?:\\([^)]*\\))?!?:\\s*${SEMVER_SOURCE}\\s*$"
+    }
+  ],
+  "ciImpactGroups": {
+    "heavy": "ciImpactHeavy",
+    "light": "ciImpactLight"
+  },
+  "upstreamCompatScriptPaths": [
+    "scripts/compat/capture-replay.mjs",
+    "scripts/compat/capture-replay-fixture-tests.mjs",
+    "scripts/compat/check-upstream-baseline.mjs",
+    "scripts/compat/upstream-compat-common.mjs",
+    "scripts/compat/upstream-compat-summary.mjs",
+    "scripts/compat/watch-upstream-ci.mjs",
+    "scripts/compat/watch-upstream.mjs",
+    "scripts/compat/watch-upstream-fixture-tests.mjs"
+  ],
+  "packageScriptAliases": {
+    "ci:changed": "node scripts/ci/changed-tests.mjs",
+    "test:changed": "node scripts/ci/changed-tests.mjs",
+    "ci:impact": "node --test scripts/ci/ci-impact.test.mjs",
+    "ci:allow-guard": "node scripts/ci/allow-attribute-guard.mjs",
+    "ci:env-mutation-guard": "node scripts/ci/env-mutation-guard.mjs",
+    "ci:enterprise-docs-guard": "node scripts/ci/enterprise-docs-guard.mjs --self-test && node scripts/ci/enterprise-docs-guard.mjs",
+    "ci:enterprise-id-boundary-guard": "node scripts/ci/enterprise-id-boundary-guard.mjs --self-test && node scripts/ci/enterprise-id-boundary-guard.mjs",
+    "ci:enterprise-binaries-guard": "node scripts/ci/enterprise-binaries-guard.mjs --self-test && node scripts/ci/enterprise-binaries-guard.mjs",
+    "ci:application-boundary-guard": "node scripts/ci/application-boundary-guard.mjs --self-test && node scripts/ci/application-boundary-guard.mjs",
+    "ci:auth-boundary-guard": "node scripts/ci/auth-boundary-guard.mjs --self-test && node scripts/ci/auth-boundary-guard.mjs",
+    "ci:config-boundary-guard": "node scripts/ci/config-boundary-guard.mjs --self-test && node scripts/ci/config-boundary-guard.mjs",
+    "ci:control-plane-boundary-guard": "node scripts/ci/control-plane-boundary-guard.mjs --self-test && node scripts/ci/control-plane-boundary-guard.mjs",
+    "ci:domain-boundary-guard": "node scripts/ci/domain-boundary-guard.mjs --self-test && node scripts/ci/domain-boundary-guard.mjs",
+    "ci:observability-boundary-guard": "node scripts/ci/observability-boundary-guard.mjs --self-test && node scripts/ci/observability-boundary-guard.mjs",
+    "ci:provider-spi-boundary-guard": "node scripts/ci/provider-spi-boundary-guard.mjs --self-test && node scripts/ci/provider-spi-boundary-guard.mjs",
+    "ci:storage-boundary-guard": "node scripts/ci/storage-boundary-guard.mjs --self-test && node scripts/ci/storage-boundary-guard.mjs",
+    "ci:backup-restore-drill": "node scripts/ci/backup-restore-drill.mjs --self-test && node scripts/ci/backup-restore-drill.mjs",
+    "ci:storage-postgres-proof": "node scripts/ci/storage-postgres-proof.mjs --self-test && node scripts/ci/storage-postgres-proof.mjs",
+    "ci:storage-postgres-boundary-guard": "node scripts/ci/storage-postgres-boundary-guard.mjs --self-test && node scripts/ci/storage-postgres-boundary-guard.mjs",
+    "ci:storage-redis-boundary-guard": "node scripts/ci/storage-redis-boundary-guard.mjs --self-test && node scripts/ci/storage-redis-boundary-guard.mjs",
+    "ci:storage-sqlite-boundary-guard": "node scripts/ci/storage-sqlite-boundary-guard.mjs --self-test && node scripts/ci/storage-sqlite-boundary-guard.mjs",
+    "ci:gateway-core-boundary-guard": "node scripts/ci/gateway-core-boundary-guard.mjs --self-test && node scripts/ci/gateway-core-boundary-guard.mjs",
+    "ci:gateway-http-boundary-guard": "node scripts/ci/gateway-http-boundary-guard.mjs --self-test && node scripts/ci/gateway-http-boundary-guard.mjs",
+    "ci:gateway-security-smoke": "cargo test -q -p prodex-app gateway_admin_auth -- --test-threads=1 && cargo test -q -p prodex-app gateway_usage -- --test-threads=1",
+    "ci:deployment-security-guard": "node scripts/ci/deployment-security-guard.mjs --self-test && node scripts/ci/deployment-security-guard.mjs",
+    "ci:size-guard": "node scripts/ci/size-guard.mjs",
+    "ci:size-guard-fixtures": "node --test scripts/ci/size-guard.test.mjs",
+    "ci:churn-hygiene-fixtures": "node scripts/ci/churn-hygiene-fixture-tests.mjs",
+    "ci:release-hygiene": "node scripts/ci/release-hygiene.mjs",
+    "ci:generated-metadata-clean": "node scripts/ci/generated-metadata-clean.mjs",
+    "ci:release-cut-fixtures": "node scripts/ci/release-cut-fixture-tests.mjs",
+    "release:cut": "node scripts/npm/release-cut.mjs",
+    "release:run": "node scripts/npm/release-run.mjs",
+    "compat:check": "node scripts/compat/check-upstream-baseline.mjs",
+    "compat:replay-fixtures": "node scripts/compat/capture-replay-fixture-tests.mjs",
+    "compat:watch": "node scripts/compat/watch-upstream.mjs",
+    "compat:watch-fixtures": "node scripts/compat/watch-upstream-fixture-tests.mjs",
+    "compat:watch-ci": "node scripts/compat/watch-upstream-ci.mjs",
+    "changelog:test": "node --test scripts/npm/changelog.test.mjs"
+  },
+  "pathGroups": {
+    "ciImpactLight": {
+      "exact": [
+        "README.md",
+        "QUICKSTART.md",
+        "package.json",
+        "package-lock.json",
+        "scripts/ci/ci-impact.mjs",
+        "scripts/ci/ci-impact.test.mjs",
+        "scripts/ci/allow-attribute-guard.test.mjs",
+        "scripts/ci/release-changelog-coupling-guard.mjs",
+        "scripts/ci/release-duplicate-version-guard.mjs",
+        "scripts/ci/release-empty-commit-guard.mjs",
+        "scripts/ci/generated-metadata-clean.mjs",
+        "scripts/ci/preflight.test.mjs",
+        "scripts/ci/storage-postgres-proof.mjs",
+        "scripts/ci/storage-postgres-proof.test.mjs",
+        "scripts/ci/release-hygiene.test.mjs",
+        "scripts/ci/release-metadata-only-guard.mjs",
+        "scripts/ci/release-tag-changelog-guard.mjs",
+        "scripts/ci/size-guard.test.mjs",
+        "scripts/ci/test-impact-manifest.json",
+        "scripts/ci/test-impact-manifest.mjs",
+        "scripts/ci/version-metadata-release-guard.mjs"
+      ],
+      "prefixes": [
+        "docs/",
+        "npm/",
+        "scripts/npm/"
+      ]
+    },
+    "ciImpactHeavy": {
+      "exact": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "scripts/ci/main-internal-core-shard.mjs",
+        "scripts/ci/runtime-env-parallel.mjs",
+        "scripts/ci/runtime-hotpath-guard.mjs",
+        "scripts/ci/runtime-proxy-bench-thresholds.json",
+        "scripts/ci/runtime-proxy-ci-matrix.mjs",
+        "scripts/ci/runtime-proxy-shard.mjs",
+        "scripts/ci/runtime-stress.mjs",
+        "scripts/ci/runtime-test-manifest-guard.mjs",
+        "scripts/ci/runtime-test-manifest.mjs"
+      ],
+      "prefixes": [
+        ".cargo/",
+        ".github/workflows/",
+        "benches/",
+        "crates/",
+        "src/",
+        "tests/",
+        "rust-toolchain"
+      ]
+    },
+    "nodeScript": {
+      "prefixes": [
+        "scripts/",
+        "tests/"
+      ],
+      "suffixes": [
+        ".mjs",
+        ".cjs",
+        ".js"
+      ]
+    },
+    "rootRust": {
+      "exact": [
+        "Cargo.toml",
+        "Cargo.lock"
+      ],
+      "prefixes": [
+        "src/"
+      ]
+    },
+    "smartContext": {
+      "exact": [
+        "crates/prodex-app/src/runtime_proxy/smart_context.rs",
+        "crates/prodex-app/tests/src/runtime_proxy/smart_context.rs"
+      ],
+      "prefixes": [
+        "crates/prodex-app/src/runtime_proxy/smart_context/",
+        "crates/prodex-app/tests/src/runtime_proxy/smart_context/"
+      ]
+    },
+    "runtimeHotPath": {
+      "exact": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup.rs"
+      ],
+      "prefixes": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/",
+        "crates/prodex-app/src/runtime_proxy/",
+        "crates/prodex-runtime-proxy/src/"
+      ]
+    },
+    "versionManaged": {
+      "exact": [
+        "Cargo.toml",
+        "README.md",
+        "QUICKSTART.md"
+      ],
+      "prefixes": [
+        "npm/",
+        "scripts/npm/"
+      ]
+    },
+    "sizeGuardRelevant": {
+      "exact": [
+        "package.json",
+        "scripts/ci/allow-attribute-guard.mjs",
+        "scripts/ci/allow-attribute-guard.test.mjs",
+        "scripts/ci/env-mutation-guard.mjs",
+        "scripts/ci/guard-common.mjs",
+        "scripts/ci/size-guard.mjs",
+        "scripts/ci/size-guard.test.mjs"
+      ],
+      "suffixes": [
+        ".rs"
+      ]
+    },
+    "releaseGuardRelevant": {
+      "exact": [
+        "package.json",
+        ".github/workflows/ci.yml",
+        "scripts/ci/changelog-noise-guard.mjs",
+        "scripts/ci/generated-metadata-clean.mjs",
+        "scripts/ci/preflight.mjs",
+        "scripts/ci/prepush.mjs",
+        "scripts/ci/release-hygiene.mjs",
+        "scripts/ci/release-hygiene.test.mjs",
+        "scripts/ci/release-guard-common.mjs",
+        "scripts/ci/release-guard-fixture-tests.mjs",
+        "scripts/ci/release-cut-fixture-tests.mjs",
+        "scripts/npm/release-cut.mjs",
+        "scripts/ci/test-impact-manifest.json",
+        "scripts/ci/test-impact-manifest.mjs"
+      ],
+      "prefixes": [
+        "scripts/ci/"
+      ],
+      "suffixes": [
+        ".mjs"
+      ],
+      "fileNameIncludesAll": [
+        "release",
+        "guard"
+      ]
+    },
+    "releaseRunRelevant": {
+      "exact": [
+        "scripts/npm/release-run.mjs",
+        "scripts/npm/release-run-lib.mjs",
+        "scripts/npm/release-run.test.mjs"
+      ]
+    },
+    "changelogRelevant": {
+      "exact": [
+        "scripts/npm/changelog.mjs",
+        "scripts/npm/changelog.test.mjs"
+      ]
+    },
+    "upstreamCompatRelevant": {
+      "exact": [
+        "package.json",
+        ".github/workflows/upstream-compat.yml",
+        "scripts/ci/test-impact-manifest.json",
+        "scripts/ci/test-impact-manifest.mjs"
+      ],
+      "prefixes": [
+        "scripts/compat/"
+      ]
+    },
+    "runtimeManifestRelevant": {
+      "exact": [
+        ".github/workflows/ci.yml",
+        "scripts/ci/runtime-test-manifest.mjs",
+        "scripts/ci/runtime-test-manifest-guard.mjs",
+        "scripts/ci/test-impact-manifest.json",
+        "scripts/ci/test-impact-manifest.mjs"
+      ]
+    },
+    "runtimePolicyDocsRelevant": {
+      "exact": [
+        "docs/runtime-policy.md",
+        "scripts/docs/runtime-policy.mjs"
+      ],
+      "prefixes": [
+        "crates/prodex-runtime-policy/"
+      ]
+    },
+    "churnHygieneRelevant": {
+      "exact": [
+        "package.json",
+        "scripts/ci/changed-tests.mjs",
+        "scripts/ci/churn-hygiene.mjs",
+        "scripts/ci/churn-hygiene-fixture-tests.mjs",
+        "scripts/ci/test-impact-manifest.json",
+        "scripts/ci/test-impact-manifest.mjs"
+      ]
+    }
+  }
+}

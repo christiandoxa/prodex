@@ -1,0 +1,20 @@
+[package]
+name = "prodex-gateway-server"
+version.workspace = true
+edition.workspace = true
+description = "Async Hyper compatibility front for the Prodex gateway backend"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_gateway_server"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["client", "http1", "server"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "tokio"] }
+prodex_gateway_http = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
