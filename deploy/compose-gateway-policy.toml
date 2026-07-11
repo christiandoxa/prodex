@@ -1,0 +1,14 @@
+[secrets]
+projected_root = "/run/secrets"
+projected_provider = "compose"
+
+[gateway]
+require_auth = true
+auth_token_ref = { provider = "compose", name = "PRODEX_GATEWAY_TOKEN" }
+provider_api_key_ref = { provider = "compose", name = "OPENAI_API_KEY" }
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+postgres_tls_mode = "disable"
+redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }

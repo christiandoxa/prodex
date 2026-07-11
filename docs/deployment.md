@@ -1,38 +1,71 @@
 # Prodex Gateway Deployment
 
-This page describes the repository-provided container scaffold for running `prodex gateway` as a standalone OpenAI-compatible service.
+This page describes the repository-provided container scaffold for running the
+dedicated `prodex-gateway` data-plane service.
 
 ## Docker Compose
 
-Copy the example environment file, fill in real secrets, then start the gateway.
-The compose scaffold intentionally does not provide fallback production
-credentials; `PRODEX_GATEWAY_TOKEN` must be set explicitly.
+Copy the example environment file, create private secret files, then start the
+gateway. The environment file contains only file paths; Compose projects the
+secret contents into the container instead of exporting them as application or
+provider environment variables.
 
 ```bash
 cp deploy/gateway.env.example deploy/gateway.env
-$EDITOR deploy/gateway.env
-docker compose --env-file deploy/gateway.env up -d --build prodex-gateway
+install -d -m 0700 deploy/secrets
+# Populate the five files named in deploy/gateway.env from your secret manager.
+sudo chown 10001:10001 deploy/secrets/*
+chmod 0600 deploy/secrets/*
+node scripts/ci/deployment-security-guard.mjs --secret-env deploy/gateway.env
+
+docker compose --env-file deploy/gateway.env build prodex-gateway
+docker compose --profile postgres --profile redis \
+  --env-file deploy/gateway.env up -d postgres redis
+docker compose --env-file deploy/gateway.env run --rm prodex-gateway \
+  migrate --backend postgres \
+  --url-ref PRODEX_GATEWAY_POSTGRES_URL \
+  --secret-provider compose --secret-root /run/secrets \
+  --tls-mode disable
+docker compose --env-file deploy/gateway.env up -d prodex-gateway
 ```
 
 The default compose command runs:
 
 ```bash
-prodex gateway --listen 0.0.0.0:4000
+/usr/local/bin/prodex-gateway serve --listen 0.0.0.0:4000
 ```
 
-It expects `PRODEX_GATEWAY_TOKEN` and `OPENAI_API_KEY` in `deploy/gateway.env`. To run a provider bridge, edit the service command, for example:
+`deploy/gateway.env` points at five ignored local files:
 
-```yaml
-command: ["gateway", "--listen", "0.0.0.0:4000", "--provider", "gemini"]
-```
+- `PRODEX_GATEWAY_TOKEN`
+- `OPENAI_API_KEY`
+- `PRODEX_GATEWAY_POSTGRES_URL`
+- `PRODEX_GATEWAY_REDIS_URL`
+- `PRODEX_POSTGRES_PASSWORD`
 
-Then provide the matching provider credential such as `GEMINI_API_KEY`.
+Write each value without a trailing newline and keep the source files private.
+The tracked `deploy/compose-gateway-policy.toml` resolves the first four through
+`SecretRef`s rooted at `/run/secrets`. The Postgres image reads its password
+through `POSTGRES_PASSWORD_FILE`. The Postgres connection URL and password files
+must contain matching credentials; URL-encode the password in the connection
+URL. Run the one-shot migration command above before starting the gateway;
+request-serving containers never perform schema migration.
+
+Docker Compose uses bind mounts for `file:` secret sources and therefore
+silently ignores service-level `uid`, `gid`, and `mode` overrides, as documented
+in the [Docker Compose service secrets reference](https://docs.docker.com/reference/compose-file/services/#secrets).
+The Linux baseline consequently requires the host files to be owned by the
+container UID `10001` and to have mode `0600`; the deployment security guard's
+`--secret-env` check verifies that metadata without reading secret contents.
+The tracked policy disables PostgreSQL TLS only for the bundled local Compose
+database. Use the Kubernetes baseline or an external TLS-enabled database for
+production.
 
 ## Persistent Paths
 
 The compose stack mounts two named volumes:
 
-- `/var/lib/prodex`: `PRODEX_HOME`, including `policy.toml`, file-backed `gateway-virtual-keys.json`, `gateway-virtual-key-usage.json`, and `gateway-billing-ledger.jsonl`, or SQLite-backed `gateway-state.sqlite`. Postgres-backed deployments keep admin keys, usage counters, and billing ledger rows in the configured database instead.
+- `/var/lib/prodex`: `PRODEX_HOME`, including file-backed gateway state when selected. The tracked Compose policy is mounted read-only at `/var/lib/prodex/policy.toml`; the default Postgres-backed deployment keeps admin keys, usage counters, and billing ledger rows in the configured database.
 - `/var/log/prodex`: runtime logs, including the latest-runtime pointer and per-run proxy logs.
 
 The gateway exposes the admin OpenAPI document at:
@@ -100,13 +133,19 @@ budgets, including grouped keys, while Redis enforces distributed RPM/TPM.
 Production policy defaults PostgreSQL transport to certificate and hostname
 verification.
 
-Use `gateway.state.backend = "postgres"` with `postgres_url_env` for shared database-backed admin keys, usage counters, and billing ledger rows:
+The tracked Compose policy uses projected references for shared database-backed
+admin keys, usage counters, billing ledger rows, and Redis coordination:
 
 ```toml
+[secrets]
+projected_root = "/run/secrets"
+projected_provider = "compose"
+
 [gateway.state]
 backend = "postgres"
-postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
+postgres_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_POSTGRES_URL" }
 postgres_tls_mode = "disable" # local Compose only
+redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }
 ```
 
 Production deployments must use `postgres_tls_mode = "verify-full"` (the
@@ -114,19 +153,22 @@ production default). Set `postgres_tls_ca_path` to a PEM CA bundle when native
 roots do not contain the database issuer. The same mode applies to pooled
 accounting, blocking admin/usage/ledger access, and external migrations.
 
-The Compose file includes an optional Postgres service under the `postgres` profile:
+The Compose file includes Postgres under the `postgres` profile. Its password is
+read from the projected file named by `PRODEX_POSTGRES_PASSWORD_FILE`:
 
 ```bash
-openssl rand -base64 32 # use this output as PRODEX_POSTGRES_PASSWORD
-docker compose --profile postgres --env-file deploy/gateway.env up -d --build
+docker compose --profile postgres --profile redis \
+  --env-file deploy/gateway.env up -d postgres redis
 ```
 
-Use `gateway.state.backend = "redis"` with `redis_url_env` for Redis-backed gateway state:
+After the database is healthy, run the one-shot migration and gateway startup
+commands from the initial Compose procedure above.
+
+Redis remains the rebuildable coordination backend beside durable PostgreSQL
+state. The policy reads its URL through:
 
 ```toml
-[gateway.state]
-backend = "redis"
-redis_url_env = "PRODEX_GATEWAY_REDIS_URL"
+redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }
 ```
 
 The Compose file includes an optional Redis service under the `redis` profile:
@@ -172,6 +214,10 @@ gateway bearer token, provider API key references, PostgreSQL, and Redis
 connection references. It must not mount `prodex-control-plane-secrets`; that
 secret is reserved for the placeholder control-plane workload.
 
+The data-plane container starts explicitly with
+`/usr/local/bin/prodex-gateway serve`; it does not route deployment startup
+through the compatibility `prodex gateway` CLI entrypoint.
+
 The migration Job runs the dedicated external `prodex-gateway migrate` command
 with `--url-ref PRODEX_GATEWAY_POSTGRES_URL --secret-provider kubernetes
 --secret-root /run/secrets/prodex --tls-mode verify-full`;
@@ -197,8 +243,9 @@ the gateway workload.
 The gateway ConfigMap sets `PRODEX_GATEWAY_REPLICA_COUNT=3` and
 `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`, and the gateway
 `ExternalSecret` includes both PostgreSQL and Redis URLs. This declares the
-intended production accounting-concurrency topology, but the current legacy
-gateway launch path still rejects startup in that mode until durable
+intended production accounting-concurrency topology, but the compatibility
+runtime behind the dedicated data-plane entrypoint still rejects startup in
+that mode until durable
 reservation admission is wired:
 PostgreSQL remains the durable ledger/counter source of truth while Redis is
 only used for rate limiting, cache, and coordination primitives.
@@ -257,6 +304,7 @@ provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
 backend = "postgres"
 postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
 postgres_tls_mode = "verify-full"
+redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
 [[gateway.admin_tokens]]
 name = "prometheus"
