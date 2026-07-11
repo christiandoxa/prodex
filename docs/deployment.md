@@ -223,18 +223,30 @@ and database/Redis namespaces, or replace the selectors with your private
 endpoint policy before applying the manifest.
 
 The `ServiceMonitor` authenticates with `PRODEX_GATEWAY_METRICS_TOKEN` from
-`prodex-gateway-secrets`, not the gateway root token. The manifest also mounts
-`prodex-gateway-policy` at `/var/lib/prodex/policy.toml` so the same token is
-registered as a viewer admin token:
+`prodex-gateway-secrets`, not the gateway root token. The Secret is projected
+read-only at `/run/secrets/prodex` with mode `0440`; it is not imported through
+`envFrom` and the mount does not use `subPath`, so Kubernetes atomic projection
+updates remain visible. The manifest also mounts `prodex-gateway-policy` at
+`/var/lib/prodex/policy.toml`:
 
 ```toml
+[secrets]
+production = true
+projected_root = "/run/secrets/prodex"
+projected_provider = "kubernetes"
+
+[gateway]
+require_auth = true
+auth_token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_TOKEN" }
+provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
+
 [gateway.state]
 backend = "postgres"
-postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
+postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
 
 [[gateway.admin_tokens]]
 name = "prometheus"
-token_env = "PRODEX_GATEWAY_METRICS_TOKEN"
+token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }
 role = "viewer"
 ```
 

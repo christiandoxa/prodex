@@ -38,13 +38,23 @@ metadata:
   namespace: prodex
 data:
   policy.toml: |
+    [secrets]
+    production = true
+    projected_root = "/run/secrets/prodex"
+    projected_provider = "kubernetes"
+
+    [gateway]
+    require_auth = true
+    auth_token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_TOKEN" }
+    provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
+
     [gateway.state]
     backend = "postgres"
-    postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
+    postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
 
     [[gateway.admin_tokens]]
     name = "prometheus"
-    token_env = "PRODEX_GATEWAY_METRICS_TOKEN"
+    token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }
     role = "viewer"
 ---
 apiVersion: external-secrets.io/v1beta1
@@ -174,8 +184,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: prodex-gateway-config
-            - secretRef:
-                name: prodex-gateway-secrets
           readinessProbe:
             httpGet:
               path: /readyz
@@ -216,6 +224,9 @@ spec:
           volumeMounts:
             - name: prodex-home
               mountPath: /var/lib/prodex
+            - name: prodex-gateway-secrets
+              mountPath: /run/secrets/prodex
+              readOnly: true
             - name: gateway-policy
               mountPath: /var/lib/prodex/policy.toml
               subPath: policy.toml
@@ -227,6 +238,23 @@ spec:
       volumes:
         - name: prodex-home
           emptyDir: {}
+        - name: prodex-gateway-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: prodex-gateway-secrets
+                  items:
+                    - key: PRODEX_GATEWAY_TOKEN
+                      path: PRODEX_GATEWAY_TOKEN
+                    - key: PRODEX_GATEWAY_METRICS_TOKEN
+                      path: PRODEX_GATEWAY_METRICS_TOKEN
+                    - key: OPENAI_API_KEY
+                      path: OPENAI_API_KEY
+                    - key: PRODEX_GATEWAY_POSTGRES_URL
+                      path: PRODEX_GATEWAY_POSTGRES_URL
+                    - key: PRODEX_GATEWAY_REDIS_URL
+                      path: PRODEX_GATEWAY_REDIS_URL
         - name: gateway-policy
           configMap:
             name: prodex-gateway-policy

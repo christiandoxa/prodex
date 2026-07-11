@@ -52,13 +52,23 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ["key: prodex/gateway/redis-url", "Redis secret backend reference"],
   ["PRODEX_GATEWAY_METRICS_TOKEN", "dedicated metrics viewer token secret"],
   ["key: prodex/gateway/metrics-token", "metrics viewer token backend reference"],
+  ["projected_root = \"/run/secrets/prodex\"", "projected gateway secret root"],
+  ["projected_provider = \"kubernetes\"", "projected gateway secret provider"],
+  ["production = true", "projected secret production mode"],
+  ["require_auth = true", "gateway authentication requirement"],
+  ["auth_token_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_TOKEN\" }", "projected gateway auth token reference"],
+  ["provider_api_key_ref = { provider = \"kubernetes\", name = \"OPENAI_API_KEY\" }", "projected provider API key reference"],
+  ["postgres_url_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_POSTGRES_URL\" }", "projected PostgreSQL URL reference"],
+  ["token_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_METRICS_TOKEN\" }", "projected metrics token reference"],
+  ["mountPath: /run/secrets/prodex", "gateway projected secret mount"],
+  ["defaultMode: 0440", "private projected secret file mode"],
   ["name: prodex-gateway-policy", "gateway policy ConfigMap"],
-  ['token_env = "PRODEX_GATEWAY_METRICS_TOKEN"', "metrics viewer admin token policy binding"],
+  ["token_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_METRICS_TOKEN\" }", "metrics viewer admin token policy binding"],
   ['role = "viewer"', "metrics viewer admin token role"],
   ["mountPath: /var/lib/prodex/policy.toml", "gateway policy file mount"],
   ["subPath: policy.toml", "gateway policy ConfigMap subPath"],
   ['backend = "postgres"', "PostgreSQL gateway state backend"],
-  ['postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"', "PostgreSQL gateway state URL env"],
+  ["postgres_url_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_POSTGRES_URL\" }", "PostgreSQL gateway state URL reference"],
   ["name: prodex-default-deny", "namespace default-deny network policy"],
   ["prodex.dev/network-tier: ingress", "restricted ingress namespace selector"],
   ["prodex.dev/network-tier: monitoring", "monitoring namespace selector for metrics scraping"],
@@ -249,13 +259,13 @@ export function validateDeploymentSecurity(inputs) {
     if (!/\[\[gateway\.admin_tokens\]\]/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must define admin token bindings`);
     }
-    if (!/token_env\s*=\s*"PRODEX_GATEWAY_METRICS_TOKEN"/u.test(gatewayPolicyConfig)) {
-      checks.push(`${kubernetesPath}: gateway policy must bind the metrics token env var`);
+    if (!/(?:^|\n)\s*token_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_METRICS_TOKEN"\s*\}/u.test(gatewayPolicyConfig)) {
+      checks.push(`${kubernetesPath}: gateway policy must bind the metrics token projected reference`);
     }
     if (!/role\s*=\s*"viewer"/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must bind metrics token as viewer`);
     }
-    if (/token_env\s*=\s*"PRODEX_GATEWAY_TOKEN"/u.test(gatewayPolicyConfig)) {
+    if (/(?:^|\n)\s*token_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_TOKEN"\s*\}/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must not bind the root token as metrics viewer`);
     }
     if (!/\[gateway\.state\]/u.test(gatewayPolicyConfig)) {
@@ -264,8 +274,11 @@ export function validateDeploymentSecurity(inputs) {
     if (!/backend\s*=\s*"postgres"/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must use the PostgreSQL state backend`);
     }
-    if (!/postgres_url_env\s*=\s*"PRODEX_GATEWAY_POSTGRES_URL"/u.test(gatewayPolicyConfig)) {
-      checks.push(`${kubernetesPath}: gateway policy must read PostgreSQL state URL from PRODEX_GATEWAY_POSTGRES_URL`);
+    if (!/postgres_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_POSTGRES_URL"\s*\}/u.test(gatewayPolicyConfig)) {
+      checks.push(`${kubernetesPath}: gateway policy must read PostgreSQL state URL from a projected secret reference`);
+    }
+    if (/\b(?:postgres_url_env|token_env)\s*=/u.test(gatewayPolicyConfig)) {
+      checks.push(`${kubernetesPath}: gateway policy must not use legacy secret env references`);
     }
   }
   const gatewayDeployment = kubernetesDocumentByKindAndName(kubernetes, "Deployment", "prodex-gateway");
@@ -276,8 +289,11 @@ export function validateDeploymentSecurity(inputs) {
     if (!/^\s*serviceAccountName:\s*prodex-gateway\s*$/mu.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Deployment must use prodex-gateway service account`);
     }
-    if (!/secretRef:\s*\n\s*name:\s*prodex-gateway-secrets/u.test(gatewayDeployment)) {
-      checks.push(`${kubernetesPath}: gateway workload must mount prodex-gateway-secrets`);
+    if (/envFrom:[\s\S]*?secretRef:\s*\n\s*name:\s*prodex-gateway-secrets/u.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway Secret must not be consumed through envFrom`);
+    }
+    if (!/envFrom:\s*\n\s*-\s*configMapRef:\s*\n\s*name:\s*prodex-gateway-config/u.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway workload must keep prodex-gateway-config envFrom`);
     }
     if (/secretRef:\s*\n\s*name:\s*prodex-control-plane-secrets/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway workload must not mount prodex-control-plane-secrets`);
@@ -287,6 +303,35 @@ export function validateDeploymentSecurity(inputs) {
     }
     if (!/configMap:\s*\n\s*name:\s*prodex-gateway-policy/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Deployment must source policy.toml from prodex-gateway-policy`);
+    }
+    const gatewayVolumeMounts =
+      gatewayDeployment.split(/\n\s+volumeMounts:\s*\n/u)[1]?.split(/\n\s+volumes:\s*\n/u)[0] ?? "";
+    const gatewaySecretMount = gatewayVolumeMounts
+      .split(/(?=^\s+-\s+name:\s+)/mu)
+      .find((item) => /name:\s+prodex-gateway-secrets\b/u.test(item));
+    if (!gatewaySecretMount || !/mountPath:\s*\/run\/secrets\/prodex/u.test(gatewaySecretMount)) {
+      checks.push(`${kubernetesPath}: gateway Deployment must mount the Secret at /run/secrets/prodex`);
+    } else {
+      if (/subPath:/u.test(gatewaySecretMount)) {
+        checks.push(`${kubernetesPath}: gateway Secret volume mount must not use subPath`);
+      }
+      if (!/readOnly:\s*true/u.test(gatewaySecretMount)) {
+        checks.push(`${kubernetesPath}: gateway Secret volume mount must be read-only`);
+      }
+    }
+    const gatewayVolumes = gatewayDeployment.split(/\n\s+volumes:\s*\n/u)[1] ?? "";
+    const gatewaySecretVolume = gatewayVolumes
+      .split(/(?=^\s+-\s+name:\s+)/mu)
+      .find((item) => /name:\s+prodex-gateway-secrets\b/u.test(item));
+    if (!gatewaySecretVolume || !/projected:\s*\n/u.test(gatewaySecretVolume)) {
+      checks.push(`${kubernetesPath}: gateway Secret must use a projected volume`);
+    } else {
+      if (!/defaultMode:\s*0440\b/u.test(gatewaySecretVolume)) {
+        checks.push(`${kubernetesPath}: gateway projected Secret volume must use private defaultMode 0440`);
+      }
+      if (!/secret:\s*\n\s*name:\s*prodex-gateway-secrets/u.test(gatewaySecretVolume)) {
+        checks.push(`${kubernetesPath}: gateway projected Secret volume must reference prodex-gateway-secrets`);
+      }
     }
   }
   const controlPlaneDeployment = kubernetesDocumentByKindAndName(kubernetes, "Deployment", "prodex-control-plane");
@@ -459,14 +504,23 @@ spec:
             capabilities:
               drop: ["ALL"]
       envFrom:
-        - secretRef:
-            name: prodex-gateway-secrets
+        - configMapRef:
+            name: prodex-gateway-config
       volumeMounts:
+        - name: prodex-gateway-secrets
+          mountPath: /run/secrets/prodex
+          readOnly: true
         - name: gateway-policy
           mountPath: /var/lib/prodex/policy.toml
           subPath: policy.toml
           readOnly: true
       volumes:
+        - name: prodex-gateway-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: prodex-gateway-secrets
         - name: gateway-policy
           configMap:
             name: prodex-gateway-policy
@@ -498,13 +552,23 @@ metadata:
   name: prodex-gateway-policy
 data:
   policy.toml: |
+    [secrets]
+    production = true
+    projected_root = "/run/secrets/prodex"
+    projected_provider = "kubernetes"
+
+    [gateway]
+    require_auth = true
+    auth_token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_TOKEN" }
+    provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
+
     [gateway.state]
     backend = "postgres"
-    postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
+    postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
 
     [[gateway.admin_tokens]]
     name = "prometheus"
-    token_env = "PRODEX_GATEWAY_METRICS_TOKEN"
+    token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }
     role = "viewer"
 ---
 kind: ExternalSecret
@@ -791,8 +855,11 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace('token_env = "PRODEX_GATEWAY_METRICS_TOKEN"', 'token_env = "PRODEX_GATEWAY_TOKEN"'),
-    }).some((error) => error.includes("gateway policy must bind the metrics token env var")),
+      kubernetes: valid.kubernetes.replace(
+        'token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }',
+        'token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_TOKEN" }',
+      ),
+    }).some((error) => error.includes("gateway policy must bind the metrics token projected reference")),
     "gateway policy root token binding accepted",
   );
   assertSelfTest(
@@ -820,11 +887,11 @@ export function runSelfTest() {
     validateDeploymentSecurity({
       ...valid,
       kubernetes: valid.kubernetes.replace(
-        'postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"',
-        'postgres_url_env = "PRODEX_GATEWAY_WRONG_POSTGRES_URL"',
+        'postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }',
+        'postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_WRONG_POSTGRES_URL" }',
       ),
-    }).some((error) => error.includes("PRODEX_GATEWAY_POSTGRES_URL")),
-    "wrong PostgreSQL state URL env accepted",
+    }).some((error) => error.includes("projected secret reference")),
+    "wrong PostgreSQL state projected reference accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({
@@ -866,19 +933,39 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("secretRef:\n            name: prodex-gateway-secrets", ""),
-    }).some((error) => error.includes("gateway workload must mount")),
-    "missing gateway workload secret binding accepted",
+      kubernetes: valid.kubernetes.replace(
+        "        - configMapRef:\n            name: prodex-gateway-config",
+        "        - configMapRef:\n            name: prodex-gateway-config\n        - secretRef:\n            name: prodex-gateway-secrets",
+      ),
+    }).some((error) => error.includes("Secret must not be consumed through envFrom")),
+    "gateway Secret envFrom accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
       kubernetes: valid.kubernetes.replace(
-        "secretRef:\n            name: prodex-gateway-secrets",
-        "secretRef:\n            name: prodex-control-plane-secrets",
+        "        - name: prodex-gateway-secrets\n          mountPath: /run/secrets/prodex\n          readOnly: true\n",
+        "",
       ),
-    }).some((error) => error.includes("gateway workload must not mount")),
-    "gateway control-plane secret binding accepted",
+    }).some((error) => error.includes("must mount the Secret at /run/secrets/prodex")),
+    "missing gateway projected Secret mount accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "          mountPath: /run/secrets/prodex\n          readOnly: true",
+        "          mountPath: /run/secrets/prodex\n          subPath: PRODEX_GATEWAY_TOKEN\n          readOnly: true",
+      ),
+    }).some((error) => error.includes("Secret volume mount must not use subPath")),
+    "gateway projected Secret subPath accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace("defaultMode: 0440", "defaultMode: 0644"),
+    }).some((error) => error.includes("private defaultMode 0440")),
+    "world-readable projected Secret mode accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({ ...valid, kubernetes: `${valid.kubernetes}\nserviceAccountName: default\n` }).some(
