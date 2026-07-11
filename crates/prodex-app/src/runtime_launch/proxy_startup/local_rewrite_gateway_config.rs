@@ -229,6 +229,23 @@ impl RuntimeGatewayStateStore {
     }
 }
 
+pub(crate) fn runtime_gateway_postgres_repository(
+    state_store: &RuntimeGatewayStateStore,
+    worker_count: usize,
+) -> anyhow::Result<Option<prodex_storage_postgres_runtime::PostgresRepository>> {
+    let RuntimeGatewayStateStore::Postgres { url, .. } = state_store else {
+        return Ok(None);
+    };
+    let config = prodex_storage_postgres_runtime::PostgresRuntimeConfig::new(
+        url.clone(),
+        worker_count.clamp(1, 32),
+    )
+    .map_err(|_| anyhow::anyhow!("failed to configure PostgreSQL gateway accounting pool"))?;
+    prodex_storage_postgres_runtime::PostgresRepository::from_config_explicit_no_tls(&config)
+        .map(Some)
+        .map_err(|_| anyhow::anyhow!("failed to configure PostgreSQL gateway accounting pool"))
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct RuntimeGatewayObservabilityConfig {
     pub(crate) sinks: Vec<String>,
@@ -309,6 +326,42 @@ mod tests {
         for raw in raw_values {
             assert!(!rendered.contains(raw), "{rendered}");
         }
+    }
+
+    #[test]
+    fn postgres_repository_follows_backend_and_redacts_invalid_urls() {
+        let file = RuntimeGatewayStateStore::File {
+            key_store_path: PathBuf::from("keys"),
+            usage_path: PathBuf::from("usage"),
+            ledger_path: PathBuf::from("ledger"),
+        };
+        assert!(
+            runtime_gateway_postgres_repository(&file, 4)
+                .unwrap()
+                .is_none()
+        );
+
+        let postgres = RuntimeGatewayStateStore::postgres(
+            "PRODEX_DATABASE_URL".to_string(),
+            "postgres://localhost/prodex".to_string(),
+        );
+        assert!(
+            runtime_gateway_postgres_repository(&postgres, 0)
+                .unwrap()
+                .is_some()
+        );
+
+        let secret = "not-a-postgres-url-with-secret";
+        let invalid = RuntimeGatewayStateStore::postgres(
+            "PRODEX_DATABASE_URL".to_string(),
+            secret.to_string(),
+        );
+        let error = runtime_gateway_postgres_repository(&invalid, 4).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "failed to configure PostgreSQL gateway accounting pool"
+        );
+        assert!(!error.to_string().contains(secret));
     }
 
     #[test]

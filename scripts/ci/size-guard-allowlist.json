@@ -36,8 +36,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1397,
-    "reason": "Local rewrite and gateway request orchestration now performs header-first admin and virtual-key authentication, tenant conversation scoping, and bounded background-task admission; capped until request admission is split from proxy startup."
+    "maxLines": 1402,
+    "reason": "Local rewrite and gateway request orchestration now performs header-first admin and virtual-key authentication, tenant conversation scoping, bounded background-task admission, and owns one pooled PostgreSQL accounting handle; capped until request admission is split from proxy startup."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
@@ -281,13 +281,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 1027,
+    "maxLines": 1001,
     "reason": "Virtual-key admission and durable reservation accounting remain capped after atomic fail-closed integration."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
-    "maxLines": 893,
-    "reason": "Gateway ledger loading, reconciliation, and durable reservation settlement remain capped until backend reconciliation is split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",

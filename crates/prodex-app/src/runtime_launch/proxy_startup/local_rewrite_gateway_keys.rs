@@ -3,9 +3,7 @@ use super::local_rewrite::{
     RuntimeGatewayVirtualKeyUsageDelta, RuntimeLocalRewriteProxyShared,
     schedule_runtime_gateway_virtual_key_usage_save,
 };
-use super::local_rewrite_gateway_backend_connection::{
-    runtime_gateway_postgres_open, runtime_gateway_sqlite_open,
-};
+use super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
 use super::local_rewrite_gateway_budget::runtime_gateway_budget_group_rejection;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
 use super::local_rewrite_gateway_key_store_backend::{
@@ -470,7 +468,7 @@ fn runtime_gateway_try_durable_reservation(
         storage_key: prodex_storage::TenantStorageKey::virtual_key(tenant_id, virtual_key_id),
         idempotency_key,
         snapshot: BudgetSnapshot::default(),
-        limit: BudgetLimit::new(u64::MAX, key.budget_microusd.unwrap_or(u64::MAX)),
+        limit: BudgetLimit::new(i64::MAX as u64, key.budget_microusd.unwrap_or(u64::MAX)),
         request,
         created_at_unix_ms,
         ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
@@ -488,9 +486,9 @@ fn runtime_gateway_try_durable_reservation(
             prodex_application::ApplicationAtomicReservationStoragePlan::Sqlite(storage),
         ) => runtime_gateway_sqlite_reserve_usage(path, &storage, &command)?,
         (
-            RuntimeGatewayStateStore::Postgres { url, .. },
-            prodex_application::ApplicationAtomicReservationStoragePlan::Postgres(storage),
-        ) => runtime_gateway_postgres_reserve_usage(url, &storage, &command)?,
+            RuntimeGatewayStateStore::Postgres { .. },
+            prodex_application::ApplicationAtomicReservationStoragePlan::Postgres(_),
+        ) => runtime_gateway_postgres_reserve_usage(shared, command.clone())?,
         _ => {}
     }
     let record = ReservationRecord::from_request(
@@ -652,53 +650,29 @@ fn runtime_gateway_sqlite_reserve_usage(
 }
 
 fn runtime_gateway_postgres_reserve_usage(
-    url: &str,
-    storage: &prodex_storage_postgres::PostgresAtomicReservationSqlPlan,
-    command: &prodex_storage::AtomicReservationCommand,
+    shared: &RuntimeLocalRewriteProxyShared,
+    command: prodex_storage::AtomicReservationCommand,
 ) -> Result<(), RuntimeGatewayDurableReservationError> {
-    let mut client = runtime_gateway_postgres_open(url)
-        .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
-    let mut tx = client
-        .transaction()
-        .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
-    let tenant_id_text = storage.tenant_id.to_string();
-    tx.execute(storage.statements[0].sql, &[&tenant_id_text])
-        .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
-    let tenant_id = storage.tenant_id.as_uuid();
-    let virtual_key_id = storage.storage_key.virtual_key_id.map(|id| id.as_uuid());
-    let storage_scope = runtime_gateway_storage_scope(storage.storage_key);
-    let reserved = command.request.estimate;
-    let updated = runtime_gateway_unix_epoch_millis();
-    let expires_at = updated.saturating_add(command.ttl_ms);
-    let ledger_event_id = RequestId::new();
-    let reservation_id = command.request.reservation_id.as_uuid();
-    let call_id = command.request.call_id.as_uuid();
-    let changed = tx
-        .execute(
-            storage.statements[1].sql,
-            &[
-                &tenant_id,
-                &storage.idempotency_key.as_str(),
-                &storage_scope,
-                &virtual_key_id,
-                &runtime_gateway_sqlite_u64_to_i64(reserved.tokens),
-                &runtime_gateway_sqlite_u64_to_i64(reserved.cost_micros),
-                &runtime_gateway_sqlite_u64_to_i64(updated),
-                &runtime_gateway_sqlite_u64_to_i64(command.limit.max.tokens),
-                &runtime_gateway_sqlite_u64_to_i64(command.limit.max.cost_micros),
-                &reservation_id,
-                &call_id,
-                &runtime_gateway_sqlite_u64_to_i64(expires_at),
-                &ledger_event_id.as_uuid(),
-            ],
-        )
-        .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
-    if changed == 0 {
-        return Err(RuntimeGatewayDurableReservationError::Rejected);
+    let repository = shared
+        .gateway_postgres_repository
+        .as_ref()
+        .ok_or(RuntimeGatewayDurableReservationError::Failed)?;
+    match shared
+        .runtime_shared
+        .async_runtime
+        .handle()
+        .block_on(repository.reserve(command))
+        .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?
+    {
+        prodex_storage_postgres_runtime::ReserveOutcome::Reserved(_)
+        | prodex_storage_postgres_runtime::ReserveOutcome::Replayed(_) => Ok(()),
+        prodex_storage_postgres_runtime::ReserveOutcome::Rejected(
+            prodex_storage_postgres_runtime::ReserveRejection::BudgetLimitExceeded,
+        ) => Err(RuntimeGatewayDurableReservationError::Rejected),
+        prodex_storage_postgres_runtime::ReserveOutcome::Rejected(
+            prodex_storage_postgres_runtime::ReserveRejection::Conflict,
+        ) => Err(RuntimeGatewayDurableReservationError::Failed),
     }
-    tx.commit()
-        .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
-    Ok(())
 }
 
 pub(super) fn runtime_local_rewrite_request_is_authorized(

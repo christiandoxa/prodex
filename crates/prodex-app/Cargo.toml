@@ -53,6 +53,7 @@ prodex_runtime_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
 prodex_storage = { workspace = true }
 prodex_storage_postgres = { workspace = true }
+prodex_storage_postgres_runtime = { workspace = true }
 prodex_storage_sqlite = { workspace = true }
 postgres = { workspace = true, features = ["with-uuid-1"] }
 redaction = { workspace = true }

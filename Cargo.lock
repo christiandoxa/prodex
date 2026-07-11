@@ -2301,6 +2301,7 @@ dependencies = [
  "prodex-state",
  "prodex-storage",
  "prodex-storage-postgres",
+ "prodex-storage-postgres-runtime",
  "prodex-storage-sqlite",
  "prodex-terminal-ui",
  "prodex-update-notice",
