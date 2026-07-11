@@ -26,17 +26,61 @@ fn large_body(model: &str, input_tokens: usize) -> Vec<u8> {
     .unwrap()
 }
 
+fn plan(
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    body: &[u8],
+    aliases: &[RuntimeGatewayRouteAlias],
+    policy: ProviderRequestConstraintPolicy,
+    hard_affinity_model: Option<&str>,
+    hard_affinity_required: bool,
+) -> Result<RuntimeGatewayConstraintRoutePlan, ProviderRequestLimitError> {
+    runtime_gateway_plan_route_with_constraints(
+        provider,
+        endpoint,
+        body,
+        RuntimeGatewayConstraintPlanInput {
+            aliases,
+            diagnostic_seed: 1,
+            model_state: &BTreeMap::new(),
+            policy,
+            additional_features: &[],
+            configured_reasoning_reserve_tokens: None,
+            hard_affinity_model,
+            hard_affinity_required,
+        },
+    )
+}
+
+fn plan_with_reasoning_reserve(
+    body: &[u8],
+    configured_reasoning_reserve_tokens: u64,
+) -> Result<RuntimeGatewayConstraintRoutePlan, ProviderRequestLimitError> {
+    runtime_gateway_plan_route_with_constraints(
+        ProviderId::Gemini,
+        ProviderEndpoint::Responses,
+        body,
+        RuntimeGatewayConstraintPlanInput {
+            aliases: &[],
+            diagnostic_seed: 1,
+            model_state: &BTreeMap::new(),
+            policy: strict_policy(),
+            additional_features: &[],
+            configured_reasoning_reserve_tokens: Some(configured_reasoning_reserve_tokens),
+            hard_affinity_model: None,
+            hard_affinity_required: false,
+        },
+    )
+}
+
 #[test]
 fn fallback_skips_small_actual_model_before_ranking() {
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         &large_body("route", 130_000),
         &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -55,15 +99,12 @@ fn fallback_skips_small_actual_model_before_ranking() {
 #[test]
 fn alias_target_is_resolved_to_actual_catalog_model() {
     let body = br#"{"model":"route","input":"hi"}"#;
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         body,
         &[alias(&["spark"])],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -81,15 +122,12 @@ fn alias_target_is_resolved_to_actual_catalog_model() {
 
 #[test]
 fn all_incompatible_candidates_produce_no_route() {
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         &large_body("route", 410_000),
         &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -108,15 +146,12 @@ fn all_incompatible_candidates_produce_no_route() {
 
 #[test]
 fn hard_affinity_owner_is_evaluated_alone_and_never_rotates_to_larger_model() {
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         &large_body("route", 130_000),
         &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         Some("gpt-5.3-codex-spark"),
         true,
     )
@@ -134,15 +169,12 @@ fn hard_affinity_owner_is_evaluated_alone_and_never_rotates_to_larger_model() {
 #[test]
 fn strict_direct_model_encodes_one_exact_upstream_attempt() {
     let body = br#"{"model":"gpt-5.4","input":"hi"}"#;
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         body,
         &[],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -164,15 +196,12 @@ fn strict_direct_model_encodes_one_exact_upstream_attempt() {
 #[test]
 fn compatible_hard_owner_encodes_one_exact_upstream_attempt() {
     let body = br#"{"model":"route","input":"hi"}"#;
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         body,
         &[alias(&["gpt-5.4", "gpt-5.3-codex-spark"])],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         Some("gpt-5.3-codex-spark"),
         true,
     )
@@ -193,15 +222,12 @@ fn compatible_hard_owner_encodes_one_exact_upstream_attempt() {
 
 #[test]
 fn hard_continuation_without_resolved_owner_never_becomes_fresh_fallback() {
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         br#"{"model":"route","previous_response_id":"response-opaque","input":"hi"}"#,
         &[alias(&["gpt-5.3-codex-spark", "gpt-5.4"])],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         true,
     )
@@ -226,15 +252,12 @@ fn disabled_policy_preserves_legacy_alias_and_malformed_limit_behavior() {
     let legacy =
         crate::runtime_gateway_rewrite_route_alias_with_state(body, &aliases, 1, &BTreeMap::new())
             .unwrap();
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         body,
         &aliases,
-        1,
-        &BTreeMap::new(),
         ProviderRequestConstraintPolicy::default(),
-        &[],
         None,
         false,
     )
@@ -263,15 +286,12 @@ fn disabled_direct_and_unmodeled_requests_remain_byte_compatible() {
         br#"{"input":"hi"}"#.as_slice(),
         b"not-json".as_slice(),
     ] {
-        let plan = runtime_gateway_plan_route_with_constraints(
+        let plan = plan(
             ProviderId::OpenAi,
             ProviderEndpoint::Responses,
             body,
             &[],
-            1,
-            &BTreeMap::new(),
             ProviderRequestConstraintPolicy::default(),
-            &[],
             None,
             false,
         )
@@ -287,15 +307,12 @@ fn disabled_direct_and_unmodeled_requests_remain_byte_compatible() {
 
 #[test]
 fn late_apply_preserves_redaction_and_fails_closed_on_invalid_body() {
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         br#"{"model":"gpt-5.4","input":"person@example.com"}"#,
         &[],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -327,15 +344,12 @@ fn non_fallback_strategy_ranks_only_technically_eligible_models() {
         strategy: RuntimeGatewayRouteStrategy::RoundRobin,
         model_metrics: BTreeMap::new(),
     };
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         br#"{"model":"route","input":"hi"}"#,
         &[route],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -346,15 +360,12 @@ fn non_fallback_strategy_ranks_only_technically_eligible_models() {
 
 #[test]
 fn embeddings_never_expand_generic_provider_fallback_chain() {
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::Copilot,
         ProviderEndpoint::Embeddings,
         br#"{"model":"codex","input":"hi"}"#,
         &[],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -419,18 +430,9 @@ fn combo_clamp_uses_one_minimum_adjustment_for_every_retained_candidate() {
 
 #[test]
 fn configured_reasoning_reserve_matches_the_actual_gemini_translation_budget() {
-    let plan = runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
-        ProviderId::Gemini,
-        ProviderEndpoint::Responses,
+    let plan = plan_with_reasoning_reserve(
         br#"{"model":"gemini-2.5-flash","input":"hi","reasoning":{"effort":"high"}}"#,
-        &[],
-        1,
-        &BTreeMap::new(),
-        strict_policy(),
-        &[],
-        Some(12_345),
-        None,
-        false,
+        12_345,
     )
     .unwrap();
 
@@ -443,18 +445,9 @@ fn configured_reasoning_reserve_matches_the_actual_gemini_translation_budget() {
         Some(12_345)
     );
 
-    let disabled = runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
-        ProviderId::Gemini,
-        ProviderEndpoint::Responses,
+    let disabled = plan_with_reasoning_reserve(
         br#"{"model":"gemini-2.5-flash","input":"hi","reasoning":{"effort":"none"}}"#,
-        &[],
-        1,
-        &BTreeMap::new(),
-        strict_policy(),
-        &[],
-        Some(12_345),
-        None,
-        false,
+        12_345,
     )
     .unwrap();
     assert_eq!(disabled.requirements.reasoning_reserve_tokens, None);
@@ -468,20 +461,7 @@ fn configured_reasoning_reserve_matches_the_actual_gemini_translation_budget() {
 
     for model in ["gemini-3.1-pro-preview", "gemma-4-27b-it"] {
         let body = format!(r#"{{"model":"{model}","input":"hi","reasoning":{{"effort":"high"}}}}"#);
-        let plan = runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
-            ProviderId::Gemini,
-            ProviderEndpoint::Responses,
-            body.as_bytes(),
-            &[],
-            1,
-            &BTreeMap::new(),
-            strict_policy(),
-            &[],
-            Some(12_345),
-            None,
-            false,
-        )
-        .unwrap();
+        let plan = plan_with_reasoning_reserve(body.as_bytes(), 12_345).unwrap();
         assert_eq!(
             plan.concrete_candidates[0]
                 .evaluation
@@ -492,18 +472,9 @@ fn configured_reasoning_reserve_matches_the_actual_gemini_translation_budget() {
         );
     }
 
-    let native = runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
-        ProviderId::Gemini,
-        ProviderEndpoint::Responses,
+    let native = plan_with_reasoning_reserve(
         br#"{"model":"gemini-3.1-pro-preview","input":"hi","thinking":{"budget_tokens":12}}"#,
-        &[],
-        1,
-        &BTreeMap::new(),
-        strict_policy(),
-        &[],
-        Some(12_345),
-        None,
-        false,
+        12_345,
     )
     .unwrap();
     assert_eq!(native.requirements.reasoning_reserve_tokens, Some(12));
@@ -529,15 +500,12 @@ fn compatible_candidate_after_trace_limit_is_selected_and_retained() {
         model_metrics: BTreeMap::new(),
     };
 
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         br#"{"model":"route","input":"hi"}"#,
         &[route],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )
@@ -574,15 +542,12 @@ fn hostile_huge_alias_stops_at_the_bounded_selection_pool() {
         model_metrics: BTreeMap::new(),
     };
 
-    let plan = runtime_gateway_plan_route_with_constraints(
+    let plan = plan(
         ProviderId::OpenAi,
         ProviderEndpoint::Responses,
         br#"{"model":"route","input":"hi"}"#,
         &[route],
-        1,
-        &BTreeMap::new(),
         strict_policy(),
-        &[],
         None,
         false,
     )

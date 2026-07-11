@@ -12,7 +12,7 @@ use super::local_rewrite_gateway_admin_response::{
 use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_admin_route_explain_plan, runtime_gateway_http_request_meta,
 };
-use super::*;
+use super::{RuntimeProxyRequest, build_runtime_proxy_json_error_response, path_without_query};
 use prodex_provider_core::{
     ProviderEndpoint, ProviderRequestConstraintDecision, ProviderRequestConstraintPolicy,
     ProviderRequestFeature,
@@ -134,38 +134,41 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
     } else {
         (BTreeMap::new(), false)
     };
-    let plan =
-        match runtime_proxy_crate::runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
-            shared.provider.bridge_kind().provider_id(),
-            input.endpoint,
-            &input.body,
-            &shared.gateway_route_aliases,
-            input.diagnostic_seed,
-            &model_state,
-            input.policy.unwrap_or(shared.gateway_request_constraints),
-            &input.required_capabilities,
-            shared.provider.configured_reasoning_reserve_tokens(),
-            input.owner_model.as_deref(),
-            input.hard_affinity_required,
-        ) {
-            Ok(plan) => plan,
-            Err(_) => {
-                let error = RuntimeGatewayAdminError::new(
-                    422,
-                    "invalid_request_limits",
-                    "request token limits are malformed",
-                );
-                runtime_gateway_audit_admin_request_denied_event(
-                    shared,
-                    &admin_auth.name,
-                    admin_auth.role.as_str(),
-                    error.code(),
-                    &captured.method,
-                    path,
-                );
-                return error.into_response();
-            }
-        };
+    let plan = match runtime_proxy_crate::runtime_gateway_plan_route_with_constraints(
+        shared.provider.bridge_kind().provider_id(),
+        input.endpoint,
+        &input.body,
+        runtime_proxy_crate::RuntimeGatewayConstraintPlanInput {
+            aliases: &shared.gateway_route_aliases,
+            diagnostic_seed: input.diagnostic_seed,
+            model_state: &model_state,
+            policy: input.policy.unwrap_or(shared.gateway_request_constraints),
+            additional_features: &input.required_capabilities,
+            configured_reasoning_reserve_tokens: shared
+                .provider
+                .configured_reasoning_reserve_tokens(),
+            hard_affinity_model: input.owner_model.as_deref(),
+            hard_affinity_required: input.hard_affinity_required,
+        },
+    ) {
+        Ok(plan) => plan,
+        Err(_) => {
+            let error = RuntimeGatewayAdminError::new(
+                422,
+                "invalid_request_limits",
+                "request token limits are malformed",
+            );
+            runtime_gateway_audit_admin_request_denied_event(
+                shared,
+                &admin_auth.name,
+                admin_auth.role.as_str(),
+                error.code(),
+                &captured.method,
+                path,
+            );
+            return error.into_response();
+        }
+    };
 
     let rendered = runtime_gateway_route_explain_response_body(
         &plan,

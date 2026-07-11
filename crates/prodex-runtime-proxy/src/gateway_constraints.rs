@@ -26,7 +26,9 @@ use crate::{
 #[path = "gateway_constraints/trace.rs"]
 mod trace;
 pub use self::trace::runtime_gateway_constraint_error_trace;
-use self::trace::{affinity_owner_unavailable_trace, constraint_trace, legacy_trace};
+use self::trace::{
+    ConstraintTraceInput, affinity_owner_unavailable_trace, constraint_trace, legacy_trace,
+};
 
 pub const RUNTIME_GATEWAY_CONSTRAINT_PLANNER_MAX_CANDIDATES: usize = 256;
 
@@ -56,61 +58,27 @@ pub struct RuntimeGatewayConstraintRoutePlan {
     pub omitted_candidates: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub struct RuntimeGatewayConstraintPlanInput<'a> {
+    pub aliases: &'a [RuntimeGatewayRouteAlias],
+    pub diagnostic_seed: u64,
+    pub model_state: &'a BTreeMap<String, RuntimeGatewayRouteModelState>,
+    pub policy: ProviderRequestConstraintPolicy,
+    pub additional_features: &'a [ProviderRequestFeature],
+    pub configured_reasoning_reserve_tokens: Option<u64>,
+    pub hard_affinity_model: Option<&'a str>,
+    pub hard_affinity_required: bool,
+}
+
 pub fn runtime_gateway_plan_route_with_constraints(
     provider: ProviderId,
     endpoint: ProviderEndpoint,
     body: &[u8],
-    aliases: &[RuntimeGatewayRouteAlias],
-    diagnostic_seed: u64,
-    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
-    policy: ProviderRequestConstraintPolicy,
-    additional_features: &[ProviderRequestFeature],
-    hard_affinity_model: Option<&str>,
-    hard_affinity_required: bool,
+    input: RuntimeGatewayConstraintPlanInput<'_>,
 ) -> Result<RuntimeGatewayConstraintRoutePlan, ProviderRequestLimitError> {
-    runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
-        provider,
-        endpoint,
-        body,
-        aliases,
-        diagnostic_seed,
-        model_state,
-        policy,
-        additional_features,
-        None,
-        hard_affinity_model,
-        hard_affinity_required,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
-    provider: ProviderId,
-    endpoint: ProviderEndpoint,
-    body: &[u8],
-    aliases: &[RuntimeGatewayRouteAlias],
-    diagnostic_seed: u64,
-    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
-    policy: ProviderRequestConstraintPolicy,
-    additional_features: &[ProviderRequestFeature],
-    configured_reasoning_reserve_tokens: Option<u64>,
-    hard_affinity_model: Option<&str>,
-    hard_affinity_required: bool,
-) -> Result<RuntimeGatewayConstraintRoutePlan, ProviderRequestLimitError> {
-    let hard_affinity = hard_affinity_required || hard_affinity_model.is_some();
-    if !policy.enabled {
-        let mut plan = legacy_route_plan(
-            provider,
-            endpoint,
-            body,
-            aliases,
-            diagnostic_seed,
-            model_state,
-            additional_features,
-            hard_affinity,
-        );
-        if hard_affinity_required && hard_affinity_model.is_none() {
+    let hard_affinity = input.hard_affinity_required || input.hard_affinity_model.is_some();
+    if !input.policy.enabled {
+        let mut plan = legacy_route_plan(provider, endpoint, body, &input, hard_affinity);
+        if input.hard_affinity_required && input.hard_affinity_model.is_none() {
             let reason = ProviderRequestConstraintDecision::AffinityOwnerUnavailable;
             plan.alias_chain = vec![plan.requested_model.clone()];
             plan.concrete_candidates.clear();
@@ -123,6 +91,16 @@ pub fn runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
         }
         return Ok(plan);
     }
+    let RuntimeGatewayConstraintPlanInput {
+        aliases,
+        diagnostic_seed,
+        model_state,
+        policy,
+        additional_features,
+        configured_reasoning_reserve_tokens,
+        hard_affinity_model,
+        hard_affinity_required,
+    } = input;
 
     let value = serde_json::from_slice::<serde_json::Value>(body).map_err(|_| {
         ProviderRequestLimitError {
@@ -289,17 +267,17 @@ pub fn runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
             .map(|candidate| candidate.evaluation.decision)
             .unwrap_or(ProviderRequestConstraintDecision::CatalogEntryUnavailable)
     });
-    let mut trace = constraint_trace(
+    let mut trace = constraint_trace(ConstraintTraceInput {
         endpoint,
         provider,
-        &requested_model,
-        &candidates,
-        selected_candidate_index,
-        selected_model.as_deref(),
+        requested_model: &requested_model,
+        candidates: &candidates,
+        selected_index: selected_candidate_index,
+        selected_model: selected_model.as_deref(),
         no_route_reason,
         hard_affinity,
         model_state,
-    );
+    });
     if selection_pool_omitted > 0 {
         trace.truncation.truncated = true;
         trace.truncation.omitted_candidate_records = trace
@@ -471,17 +449,17 @@ fn rewrite_body_once(
     serde_json::to_vec(&value).ok()
 }
 
-#[allow(clippy::too_many_arguments)]
 fn legacy_route_plan(
     provider: ProviderId,
     endpoint: ProviderEndpoint,
     body: &[u8],
-    aliases: &[RuntimeGatewayRouteAlias],
-    diagnostic_seed: u64,
-    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
-    additional_features: &[ProviderRequestFeature],
+    input: &RuntimeGatewayConstraintPlanInput<'_>,
     hard_affinity: bool,
 ) -> RuntimeGatewayConstraintRoutePlan {
+    let aliases = input.aliases;
+    let diagnostic_seed = input.diagnostic_seed;
+    let model_state = input.model_state;
+    let additional_features = input.additional_features;
     let requested_model = runtime_gateway_request_model(body).unwrap_or_default();
     let alias = aliases
         .iter()
