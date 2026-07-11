@@ -46,7 +46,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3798,
+    "maxLines": 3796,
     "reason": "Local rewrite cross-provider regression coverage remains capped while provider-specific cases are split from shared harness coverage."
   },
   {
@@ -66,7 +66,7 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2296,
+    "maxLines": 2292,
     "reason": "Runtime launch command tests cover provider-aware gateway configuration, projected PostgreSQL/Redis coordination, authentication, routing aliases, and process planning; capped until gateway cases move to focused fixtures."
   },
   {
@@ -211,7 +211,7 @@
   },
   {
     "file": "crates/prodex-storage/src/lib.rs",
-    "maxLines": 2393,
+    "maxLines": 2374,
     "reason": "Storage boundary contracts are capped during Phase 2 extraction until accounting, migration, idempotency, and readiness ports move into submodules."
   },
   {
@@ -221,12 +221,12 @@
   },
   {
     "file": "crates/prodex-storage-postgres/src/lib.rs",
-    "maxLines": 1624,
+    "maxLines": 1586,
     "reason": "PostgreSQL SQL-plan contracts are capped until migrations, reservation accounting, idempotency, and RLS plans are split."
   },
   {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
-    "maxLines": 1668,
+    "maxLines": 1665,
     "reason": "PostgreSQL storage characterization is capped while migration, tenant isolation, and accounting tests are split."
   },
   {
@@ -281,7 +281,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 1000,
+    "maxLines": 980,
     "reason": "Virtual-key admission and durable reservation accounting remain capped after atomic fail-closed integration."
   },
   {

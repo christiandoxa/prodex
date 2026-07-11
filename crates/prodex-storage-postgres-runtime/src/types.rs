@@ -22,6 +22,7 @@ impl fmt::Debug for ReserveOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReserveRejection {
     BudgetLimitExceeded,
+    RequestBudgetExceeded,
     Conflict,
 }
 

@@ -5,6 +5,7 @@
 //! database drivers, filesystem access, provider SDKs, and network clients.
 
 mod accounting;
+mod accounting_budget;
 mod api;
 mod audit;
 mod backup;
@@ -41,17 +42,17 @@ pub use security::{
 };
 
 pub use accounting::{
-    AccountingErrorResponsePlan, AccountingErrorStatus, BudgetLimit, BudgetRejection,
-    BudgetRejectionReason, BudgetSnapshot, LedgerEvent, LedgerEventKind, ReservationCommit,
-    ReservationCommitError, ReservationCommitMismatch, ReservationReconciliation,
-    ReservationReconciliationError, ReservationReconciliationReason, ReservationRecord,
-    ReservationRecoveryError, ReservationRequest, UsageAmount, commit_reservation,
-    commit_reservation_checked, plan_budget_rejection_response,
-    plan_reservation_commit_error_response, plan_reservation_commit_mismatch_response,
-    plan_reservation_reconciliation_error_response, plan_reservation_recovery_error_response,
-    reconcile_reserved_usage, release_expired_reservation, reserve_budget,
-    validate_reservation_commit,
+    AccountingErrorResponsePlan, AccountingErrorStatus, BudgetRejection, BudgetRejectionReason,
+    BudgetSnapshot, LedgerEvent, LedgerEventKind, ReservationCommit, ReservationCommitError,
+    ReservationCommitMismatch, ReservationReconciliation, ReservationReconciliationError,
+    ReservationReconciliationReason, ReservationRecord, ReservationRecoveryError,
+    ReservationRequest, UsageAmount, commit_reservation, commit_reservation_checked,
+    plan_budget_rejection_response, plan_reservation_commit_error_response,
+    plan_reservation_commit_mismatch_response, plan_reservation_reconciliation_error_response,
+    plan_reservation_recovery_error_response, reconcile_reserved_usage,
+    release_expired_reservation, reserve_budget, validate_reservation_commit,
 };
+pub use accounting_budget::BudgetLimit;
 pub use secrets::{
     SecretErrorResponsePlan, SecretErrorStatus, SecretMaterial, SecretProvider,
     SecretProviderDescriptor, SecretProviderKind, SecretPurpose, SecretRef, SecretResolutionError,

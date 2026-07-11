@@ -1,5 +1,5 @@
 use postgres::NoTls;
-use prodex_storage_postgres::INITIAL_TENANT_ACCOUNTING_MIGRATION;
+use prodex_storage_postgres::{INITIAL_TENANT_ACCOUNTING_MIGRATION, POSTGRES_MIGRATIONS};
 
 #[test]
 fn migration_creates_only_missing_rls_policies() {
@@ -9,7 +9,7 @@ fn migration_creates_only_missing_rls_policies() {
 }
 
 #[test]
-fn postgres_migration_can_be_applied_twice_without_duplicate_rls_policies() {
+fn postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies() {
     let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
         eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
         return;
@@ -18,12 +18,13 @@ fn postgres_migration_can_be_applied_twice_without_duplicate_rls_policies() {
     client
         .batch_execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
         .expect("postgres schema should reset");
-    client
-        .batch_execute(INITIAL_TENANT_ACCOUNTING_MIGRATION.sql)
-        .expect("first migration should apply");
-    client
-        .batch_execute(INITIAL_TENANT_ACCOUNTING_MIGRATION.sql)
-        .expect("second migration should apply");
+    for _ in 0..2 {
+        for migration in POSTGRES_MIGRATIONS {
+            client
+                .batch_execute(migration.sql)
+                .expect("migration should apply idempotently");
+        }
+    }
 
     let policy_count: i64 = client
         .query_one(
@@ -35,4 +36,17 @@ fn postgres_migration_can_be_applied_twice_without_duplicate_rls_policies() {
         .expect("RLS policy count should load")
         .get(0);
     assert_eq!(policy_count, 12);
+    let request_count_column: bool = client
+        .query_one(
+            "SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'prodex_budget_counters'
+                  AND column_name = 'request_count'
+            )",
+            &[],
+        )
+        .expect("request counter column should be inspectable")
+        .get(0);
+    assert!(request_count_column);
 }

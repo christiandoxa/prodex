@@ -20,9 +20,11 @@ use prodex_domain::{
     CallId, IdempotencyKey, RequestId, ReservationId, ReservationRecord, TenantId, UsageAmount,
     VirtualKeyId,
 };
+#[cfg(test)]
+use prodex_storage::TenantStorageKey;
 use prodex_storage::{
-    AtomicReservationCommand, ExpiredReservationRecoveryCommand, TenantStorageKey,
-    UsageReconciliationCommand, plan_atomic_reservation,
+    AtomicReservationCommand, ExpiredReservationRecoveryCommand, UsageReconciliationCommand,
+    plan_atomic_reservation,
 };
 use prodex_storage_postgres::{
     ATOMIC_RESERVATION_STATEMENT, RECONCILE_USAGE_STATEMENT, RECOVER_EXPIRED_RESERVATION_STATEMENT,
@@ -319,6 +321,7 @@ impl PostgresRepository {
                     &arguments.created_at_unix_ms,
                     &arguments.max_tokens,
                     &arguments.max_cost_micros,
+                    &arguments.max_requests,
                     &command.request.reservation_id.as_uuid(),
                     &command.request.call_id.as_uuid(),
                     &arguments.expires_at_unix_ms,
@@ -349,7 +352,16 @@ impl PostgresRepository {
         {
             classify_existing_reservation(command, record, stored)
         } else {
-            ReserveOutcome::Rejected(ReserveRejection::BudgetLimitExceeded)
+            ReserveOutcome::Rejected(
+                classify_reservation_limit_rejection(
+                    &transaction,
+                    command.request.tenant_id,
+                    &arguments.storage_scope,
+                    arguments.max_requests,
+                )
+                .await
+                .map_err(AttemptError::Runtime)?,
+            )
         };
 
         transaction
@@ -380,7 +392,7 @@ impl PostgresRepository {
         let actual = usage_to_i64(command.actual)?;
         let released = command.record.reserved.saturating_sub(command.actual);
         let released = usage_to_i64(released)?;
-        let storage_scope = storage_scope(command.storage_key);
+        let storage_scope = command.storage_key.storage_scope();
 
         let mut client = self
             .pool
@@ -460,7 +472,7 @@ impl PostgresRepository {
             .map_err(|_| PostgresRuntimeError::Planning)?;
         let now_unix_ms = to_i64(command.now_unix_ms)?;
         let reserved = usage_to_i64(command.record.reserved)?;
-        let storage_scope = storage_scope(command.storage_key);
+        let storage_scope = command.storage_key.storage_scope();
 
         let mut client = self
             .pool
@@ -588,6 +600,7 @@ struct ReserveArguments {
     created_at_unix_ms: i64,
     max_tokens: i64,
     max_cost_micros: i64,
+    max_requests: i64,
     expires_at_unix_ms: i64,
 }
 
@@ -600,12 +613,17 @@ impl ReserveArguments {
             .checked_add(command.ttl_ms)
             .ok_or(PostgresRuntimeError::NumericOverflow)?;
         Ok(Self {
-            storage_scope: storage_scope(command.storage_key),
+            storage_scope: command.storage_key.storage_scope(),
             reserved_tokens: reserved.tokens,
             reserved_cost_micros: reserved.cost_micros,
             created_at_unix_ms: to_i64(command.created_at_unix_ms)?,
             max_tokens: limit.tokens,
             max_cost_micros: limit.cost_micros,
+            max_requests: if command.limit.max_requests == u64::MAX {
+                i64::MAX
+            } else {
+                to_i64(command.limit.max_requests)?
+            },
             expires_at_unix_ms: to_i64(expires_at_unix_ms)?,
         })
     }
@@ -731,6 +749,28 @@ fn stored_reservation_from_row(row: Row) -> Result<StoredReservation, PostgresRu
     })
 }
 
+async fn classify_reservation_limit_rejection(
+    transaction: &tokio_postgres::Transaction<'_>,
+    tenant_id: TenantId,
+    storage_scope: &str,
+    max_requests: i64,
+) -> Result<ReserveRejection, PostgresRuntimeError> {
+    let row = transaction
+        .query_opt(
+            "SELECT request_count FROM prodex_budget_counters WHERE tenant_id = $1 AND storage_scope = $2",
+            &[&tenant_id.as_uuid(), &storage_scope],
+        )
+        .await
+        .map_err(|_| PostgresRuntimeError::Database)?;
+    if row
+        .map(|row| row.get::<_, i64>("request_count"))
+        .is_some_and(|requests| requests.saturating_add(1) > max_requests)
+    {
+        return Ok(ReserveRejection::RequestBudgetExceeded);
+    }
+    Ok(ReserveRejection::BudgetLimitExceeded)
+}
+
 fn optional_usage_from_row(
     row: &Row,
     tokens_column: &str,
@@ -747,12 +787,6 @@ fn optional_usage_from_row(
         (None, None) => Ok(None),
         _ => Err(PostgresRuntimeError::InvalidDatabaseState),
     }
-}
-
-fn storage_scope(key: TenantStorageKey) -> String {
-    key.virtual_key_id
-        .map(|id| format!("virtual_key:{id}"))
-        .unwrap_or_else(|| "tenant-default".to_string())
 }
 
 fn usage_to_i64(amount: UsageAmount) -> Result<SignedUsageAmount, PostgresRuntimeError> {

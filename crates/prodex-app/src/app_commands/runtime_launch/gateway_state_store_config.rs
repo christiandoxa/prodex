@@ -140,16 +140,6 @@ pub(crate) fn gateway_validate_runtime_topology(
         let response = prodex_application::plan_application_runtime_error_response(&error);
         anyhow::anyhow!("{}: {}: {}", response.code, response.message, error)
     })?;
-    if require_multi_replica_accounting_checks {
-        let response =
-            prodex_application::plan_application_runtime_accounting_verification_required_response(
-            );
-        bail!(
-            "{}: {}: durable reservations are wired, but distributed rate and grouped-request admission are not wired yet",
-            response.code,
-            response.message,
-        );
-    }
     Ok(())
 }
 

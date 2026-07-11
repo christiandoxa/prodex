@@ -393,10 +393,7 @@ fn runtime_gateway_durable_actual_usage(
 fn runtime_gateway_reconciliation_storage_scope(
     storage_key: prodex_storage::TenantStorageKey,
 ) -> String {
-    storage_key
-        .virtual_key_id
-        .map(|virtual_key_id| format!("virtual_key:{virtual_key_id}"))
-        .unwrap_or_else(|| "tenant-default".to_string())
+    storage_key.storage_scope()
 }
 
 fn runtime_gateway_sqlite_reconcile_usage(

@@ -603,9 +603,8 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0714-storage-billing-ledger-range-error-redaction.md`, and
   `docs/adr/0715-storage-billing-ledger-limit-error-redaction.md`, and
   `docs/adr/0905-storage-billing-ledger-limit-display-redaction.md`.
-- **Remaining gap:** Replace the single-node temporary Postgres fixture with a
-  repeatable shared-topology CI/readiness fixture so the same proof covers the
-  full multi-replica enterprise readiness gate.
+- **Remaining gap:** PostgreSQL transport still needs verified TLS before the
+  accepted shared topology is production-ready.
 
 ### 5. Read-Modify-Write Budget Updates Can Lose Usage
 
@@ -616,14 +615,18 @@ while moving legacy adapter code behind enterprise boundaries.
 - **Risk:** A read-modify-write update can lose usage under concurrent gateway
   replicas and permit budget overshoot or dropped billing events.
 - **Regression coverage:** `crates/prodex-storage/tests` through the storage
-  boundary, `crates/prodex-storage-postgres/tests/postgres_storage.rs`, and
-  `crates/prodex-storage-redis/tests/redis_storage.rs`.
+  boundary, `crates/prodex-storage-postgres/tests/postgres_storage.rs`,
+  `crates/prodex-storage-postgres-runtime/tests/postgres_runtime.rs`,
+  `crates/prodex-storage-redis/tests/redis_storage.rs`, and
+  `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_grouped_budget.rs`.
 - **Local verification:** `cargo test -q -p prodex-storage atomic_reservation -- --test-threads=1`
   exercises atomic reservation planning,
   `cargo test -q -p prodex-domain accounting -- --test-threads=1` exercises
   reservation/reconciliation invariants, and
   `npm run ci:storage-boundary-guard` runs the guard self-test plus workspace
-  scan to keep the storage boundary wired into local CI.
+  scan to keep the storage boundary wired into local CI. The heavy
+  `npm run ci:storage-postgres-proof` fixture runs the two-repository and
+  two-proxy/two-key grouped-budget races against real PostgreSQL.
 - **Implemented fix or boundary:** Reservation, commit, release, and expiry
   are planned as atomic operations with explicit idempotency. Redis limiter Lua
   results are normalized by `plan_redis_rate_limit_result` so adapters share one
@@ -652,6 +655,15 @@ while moving legacy adapter code behind enterprise boundaries.
   Atomic rate-limit update planning rejects reset windows that are already
   expired at request time, so distributed limiter adapters cannot create
   non-expiring or immediately-expired increments from stale allowance data.
+  PostgreSQL migration v2 adds a non-negative cumulative `request_count` to the
+  budget counter. PostgreSQL-backed admission hashes canonical tenant, budget,
+  team, project, and user scope into one tenant-qualified grouped storage key.
+  Its serializable, idempotent reservation transaction atomically enforces the
+  request-count, token, and cost ceilings before inserting the reservation and
+  reserved ledger event. Reconciliation releases unused token/cost capacity but
+  does not release the accepted request count. Real-PostgreSQL proofs cover two
+  independently pooled repositories and two active proxies using two keys in
+  one budget group.
   Rate-limit rule debug output redacts configured request ceilings and windows;
   see `docs/adr/0845-domain-rate-limit-rule-debug-redaction.md`.
   Rate-limit debug output now redacts tenant IDs, virtual-key IDs, usage counts,
@@ -734,10 +746,11 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0841-domain-rate-limit-response-debug-redaction.md`, and
   `docs/adr/0716-domain-reservation-commit-error-redaction.md`, and
   `docs/adr/0717-domain-reservation-reconciliation-error-redaction.md`, and
-  `docs/adr/0718-domain-budget-rejection-error-redaction.md`.
-- **Remaining gap:** Grouped request budgets still use compatibility usage
-  snapshots and need a durable cross-replica counter contract. Expired
-  reservation recovery also still needs production worker wiring.
+  `docs/adr/0718-domain-budget-rejection-error-redaction.md`, and
+  `docs/adr/1066-grouped-request-budget-accounting.md`.
+- **Remaining gap:** Expired reservation recovery still needs production worker
+  wiring. PostgreSQL transport still needs verified TLS before production
+  readiness is complete.
 
 ### 6. Admission Must Not Use Only Local In-Memory Usage
 
@@ -778,13 +791,14 @@ while moving legacy adapter code behind enterprise boundaries.
   RPM and TPM are checked and incremented together through one tenant-hash-slot
   Lua operation before the durable reservation; a TPM denial cannot consume RPM
   allowance. The local usage mutex is released before Redis I/O and reacquired
-  only for compatibility usage recording. Legacy `prodex gateway` startup also
-  fails closed when
-  `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`: runtime topology
-  planning still runs, and the composition root now emits the shared
-  `runtime_accounting_verification_invalid` application-level failure envelope
-  before refusing to claim full multi-replica readiness while grouped request
-  budgets remain on the local compatibility path. Accounting topology env
+  only for compatibility usage recording. Legacy `prodex gateway` startup now
+  accepts `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true` only when the
+  declared multi-replica topology has PostgreSQL durable state and Redis
+  coordination. Grouped request count, token, and cost admission share one
+  serializable, idempotent PostgreSQL reservation transaction, while Redis
+  enforces atomic RPM/TPM. Policy-defined keys receive a tenant-scoped
+  deterministic UUIDv8 storage identity, and admin-created keys retain their
+  persisted UUIDv7. Accounting topology env
   values are now exact runtime inputs, so
   padded replica-count or accounting-gate values fail closed instead of being
   trim-normalized into active topology intent. Runtime proxy tuning env values
@@ -800,10 +814,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0535-local-gateway-admission-critical-section.md`, and
   `docs/adr/0540-budget-group-tenant-scope.md`, and
   `docs/adr/0979-application-atomic-reservation-storage-boundary.md`, and
-  `docs/adr/0672-budget-group-id-exact-boundary.md`.
-- **Remaining gap:** Grouped request-budget admission still aggregates local
-  compatibility usage. It must move to a durable cross-replica operation before
-  the production accounting gate can open.
+  `docs/adr/0672-budget-group-id-exact-boundary.md`, and
+  `docs/adr/1066-grouped-request-budget-accounting.md`.
+- **Remaining gap:** Production PostgreSQL connections still require verified
+  TLS wiring across pooled accounting, compatibility clients, and migrations.
 
 ### 7. Tenant ID Must Be Mandatory and Keyed
 
@@ -1479,9 +1493,12 @@ while moving legacy adapter code behind enterprise boundaries.
   fields cannot collide; see
   `docs/adr/1003-gateway-ledger-entry-identity.md`. Durable SQLite/PostgreSQL
   per-key cost reservations now take precedence over stale local spend for
-  admin-managed keys with valid tenant and virtual-key IDs while preserving
-  local request-count, RPM/TPM, model, and grouped-budget checks; see
-  `docs/adr/1004-durable-budget-admission-precedence.md`. Durable
+  admin-managed keys with valid tenant and virtual-key IDs. PostgreSQL-backed
+  keys also use durable request-count and grouped-budget admission, while Redis
+  coordination enforces distributed RPM/TPM; local checks remain for
+  compatibility backends. See
+  `docs/adr/1004-durable-budget-admission-precedence.md` and
+  `docs/adr/1066-grouped-request-budget-accounting.md`. Durable
   SQLite/PostgreSQL admin key lifecycle planning now rejects missing or
   malformed key tenant IDs instead of synthesizing a random tenant; see
   `docs/adr/1005-durable-key-lifecycle-tenant-fail-closed.md`. Durable
@@ -2094,8 +2111,10 @@ while moving legacy adapter code behind enterprise boundaries.
   connection secrets deliberately. The legacy `prodex gateway` launch path now
   derives the same prelaunch gate from those deployment env vars, validates the
   production posture through `plan_production_deployment_readiness` first, and
-  still fails closed until the durable reservation backend replaces local
-  admission.
+  now accepts valid two-or-more-replica PostgreSQL+Redis declarations after
+  durable request/token/cost admission and distributed RPM/TPM are configured.
+  Invalid single-replica, non-PostgreSQL, or Redis-free claims still fail before
+  the proxy binds a port.
 - Use `plan_production_deployment_readiness` before claiming production
   horizontal readiness so replica count, accounting gate intent, and shared
   PostgreSQL/Redis dependencies are validated by one domain contract.

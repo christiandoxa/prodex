@@ -48,6 +48,7 @@ mod local_rewrite_gateway_openapi;
 mod local_rewrite_gateway_openapi_components;
 mod local_rewrite_gateway_openapi_paths;
 mod local_rewrite_gateway_redis_ledger;
+mod local_rewrite_gateway_reservation;
 mod local_rewrite_gateway_route_load;
 mod local_rewrite_gateway_scim;
 mod local_rewrite_gateway_scope;

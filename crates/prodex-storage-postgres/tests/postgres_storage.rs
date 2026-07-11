@@ -22,9 +22,9 @@ use prodex_storage_postgres::{
     APPEND_AUDIT_STATEMENT, ATOMIC_RESERVATION_STATEMENT, COMPLETE_IDEMPOTENCY_RECORD_STATEMENT,
     DELETE_USER_LIFECYCLE_STATEMENT, GRANT_ROLE_BINDING_STATEMENT,
     INITIAL_TENANT_ACCOUNTING_MIGRATION, INSERT_IDEMPOTENCY_PENDING_STATEMENT,
-    LOOKUP_IDEMPOTENCY_RECORD_STATEMENT, PURGE_AUDIT_RETENTION_STATEMENT, PostgresBackendOpenMode,
-    PostgresMigrationVersion, PostgresRuntimeMode, PostgresStatement, PostgresStorageErrorStatus,
-    PostgresStoragePlanError, QUERY_AUDIT_EXPORT_DESC_STATEMENT,
+    LOOKUP_IDEMPOTENCY_RECORD_STATEMENT, POSTGRES_MIGRATIONS, PURGE_AUDIT_RETENTION_STATEMENT,
+    PostgresBackendOpenMode, PostgresMigrationVersion, PostgresRuntimeMode, PostgresStatement,
+    PostgresStorageErrorStatus, PostgresStoragePlanError, QUERY_AUDIT_EXPORT_DESC_STATEMENT,
     QUERY_BILLING_LEDGER_DESC_STATEMENT, RECONCILE_USAGE_STATEMENT,
     RECOVER_EXPIRED_RESERVATION_STATEMENT, REQUIRED_POSTGRES_SCHEMA_VERSION,
     REVOKE_ROLE_BINDING_STATEMENT, SET_TENANT_STATEMENT, UPSERT_BUDGET_POLICY_STATEMENT,
@@ -80,11 +80,7 @@ fn execute_postgres_atomic_reservation(
     let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");
     let mut tx = client.transaction()?;
     tx.execute(SET_TENANT_STATEMENT.sql, &[&plan.tenant_id.to_string()])?;
-    let storage_scope = command
-        .storage_key
-        .virtual_key_id
-        .map(|id| format!("virtual_key:{id}"))
-        .unwrap_or_else(|| "tenant-default".to_string());
+    let storage_scope = command.storage_key.storage_scope();
     let reserved = command.request.estimate;
     let updated = command.created_at_unix_ms as i64;
     let expires_at = command.created_at_unix_ms.saturating_add(command.ttl_ms) as i64;
@@ -100,6 +96,7 @@ fn execute_postgres_atomic_reservation(
             &updated,
             &(command.limit.max.tokens as i64),
             &(command.limit.max.cost_micros as i64),
+            &(command.limit.max_requests.min(i64::MAX as u64) as i64),
             &command.request.reservation_id.as_uuid(),
             &command.request.call_id.as_uuid(),
             &expires_at,
@@ -412,7 +409,7 @@ fn assert_request_path_has_tenant_context(statements: &[PostgresStatement]) {
 #[test]
 fn migrations_are_external_only_and_request_path_cannot_plan_ddl() {
     let plan = plan_postgres_migrations(PostgresRuntimeMode::ExternalMigrator).unwrap();
-    assert_eq!(plan.migrations.len(), 1);
+    assert_eq!(plan.migrations.len(), POSTGRES_MIGRATIONS.len());
     assert!(statement_contains_ddl(plan.migrations[0].sql));
 
     assert_eq!(
@@ -463,7 +460,7 @@ fn external_migrator_open_is_the_only_ddl_eligible_mode() {
         REQUIRED_POSTGRES_SCHEMA_VERSION
     );
     assert!(plan.ddl_allowed);
-    assert_eq!(plan.migration_count, 1);
+    assert_eq!(plan.migration_count, POSTGRES_MIGRATIONS.len());
 }
 
 #[test]

@@ -17,16 +17,15 @@ the key budget was exhausted.
 For admin-managed virtual keys whose tenant and virtual-key identifiers allow a
 durable SQLite/PostgreSQL reservation, local admission no longer uses
 `spend_microusd` to enforce the per-key cost budget. Durable reservation remains
-the source of truth for that cost budget. Local request-count, RPM, TPM, model,
-and grouped-budget checks are preserved because they are not yet fully covered
-by the durable reservation path.
+the source of truth for that cost budget. PostgreSQL-backed admission now also
+enforces cumulative per-key or grouped request budgets in the same reservation
+transaction, while Redis enforces distributed RPM/TPM. Local request-count and
+grouped-budget checks remain only for non-PostgreSQL compatibility backends.
 
 ## Consequences
 
-Durable-backed key cost budgets are less likely to fail closed from stale
-process-local spend state in multi-replica deployments. Non-durable file/Redis
-gateways and policy-only keys keep existing local budget behavior. Remaining
-work: move request-count, RPM/TPM, and grouped budget enforcement into durable
-or Redis-backed atomic operations before declaring multi-replica accounting
-complete. Regression coverage lives in
-`crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs`.
+Durable-backed request, token, and cost budgets no longer depend on stale
+process-local usage in multi-replica deployments. Non-durable file/Redis
+gateways and policy-only keys keep existing local budget behavior. Regression
+coverage lives in the gateway key/budget tests and the real-PostgreSQL repository
+and two-proxy proofs described by ADR 1066.

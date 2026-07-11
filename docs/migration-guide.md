@@ -79,6 +79,10 @@ required for security.
    appropriate.
 6. Add PostgreSQL Row-Level Security policies using tenant context as defense in
    depth.
+7. Apply PostgreSQL migration v2 before enabling grouped request budgets. It
+   adds the non-negative cumulative `request_count` column to
+   `prodex_budget_counters`; the migration is repeatable and remains external to
+   request-serving paths.
 
 ### Legacy optional tenant-column contraction
 
@@ -137,6 +141,13 @@ shipping the contract step.
 8. Verify with multi-replica tests sharing PostgreSQL/Redis that there is no lost
    update, duplicate charge, dropped ledger event, request ID collision, or
    undocumented limit overshoot.
+9. Derive grouped storage scope from the canonical tenant, budget, team,
+   project, and user values. Enforce request count, token, and cost in one
+   serializable, idempotent PostgreSQL reservation transaction. Request count is
+   cumulative and is not released during reconciliation.
+10. Open the production multi-replica accounting gate only with at least two
+    replicas, PostgreSQL durable state, Redis coordination, and accounting
+    checks enabled. Keep PostgreSQL TLS as an independent release requirement.
 
 ## Phase 6: Async Gateway Adapter
 

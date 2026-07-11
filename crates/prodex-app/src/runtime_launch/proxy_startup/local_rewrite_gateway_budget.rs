@@ -1,4 +1,37 @@
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+
+pub(super) fn runtime_gateway_budget_storage_key(
+    tenant_id: prodex_domain::TenantId,
+    virtual_key_id: prodex_domain::VirtualKeyId,
+    key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
+) -> prodex_storage::TenantStorageKey {
+    let Some(budget_id) = key.budget_id.as_deref().filter(|value| !value.is_empty()) else {
+        return prodex_storage::TenantStorageKey::virtual_key(tenant_id, virtual_key_id);
+    };
+    let mut digest = Sha256::new();
+    runtime_gateway_hash_budget_scope_part(&mut digest, Some(&tenant_id.to_string()));
+    runtime_gateway_hash_budget_scope_part(&mut digest, Some(budget_id));
+    runtime_gateway_hash_budget_scope_part(&mut digest, key.team_id.as_deref());
+    runtime_gateway_hash_budget_scope_part(&mut digest, key.project_id.as_deref());
+    runtime_gateway_hash_budget_scope_part(&mut digest, key.user_id.as_deref());
+    prodex_storage::TenantStorageKey::budget_group(
+        tenant_id,
+        virtual_key_id,
+        prodex_storage::BudgetStorageScope::from_digest(digest.finalize().into()),
+    )
+}
+
+fn runtime_gateway_hash_budget_scope_part(digest: &mut Sha256, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            digest.update([1]);
+            digest.update((value.len() as u64).to_le_bytes());
+            digest.update(value.as_bytes());
+        }
+        None => digest.update([0]),
+    }
+}
 
 pub(super) fn runtime_gateway_budget_group_rejection(
     key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
@@ -172,5 +205,40 @@ mod tests {
             runtime_gateway_budget_group_rejection(&active_keys[1], &active_keys, &usage, None),
             None
         );
+    }
+
+    #[test]
+    fn budget_group_storage_scope_is_stable_across_virtual_keys_and_tenant_scoped() {
+        let tenant_id = prodex_domain::TenantId::new();
+        let alpha = key(
+            "alpha",
+            Some("shared"),
+            Some(&tenant_id.to_string()),
+            Some(1),
+            None,
+        );
+        let mut beta = alpha.clone();
+        beta.name = "beta".to_string();
+        beta.token_hash = runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("beta");
+        let alpha_scope = runtime_gateway_budget_storage_key(
+            tenant_id,
+            prodex_domain::VirtualKeyId::new(),
+            &alpha,
+        );
+        let beta_scope = runtime_gateway_budget_storage_key(
+            tenant_id,
+            prodex_domain::VirtualKeyId::new(),
+            &beta,
+        );
+        assert_eq!(alpha_scope.budget_scope, beta_scope.budget_scope);
+        assert_ne!(alpha_scope.virtual_key_id, beta_scope.virtual_key_id);
+
+        let other_tenant = prodex_domain::TenantId::new();
+        let other_scope = runtime_gateway_budget_storage_key(
+            other_tenant,
+            prodex_domain::VirtualKeyId::new(),
+            &beta,
+        );
+        assert_ne!(alpha_scope.budget_scope, other_scope.budget_scope);
     }
 }

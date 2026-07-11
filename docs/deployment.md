@@ -94,8 +94,10 @@ backend, and at least two gateway replicas. In that mode
 the application runtime can select the multi-replica accounting concurrency
 spec before adapters start. The legacy `prodex gateway` launch path now enforces
 that prelaunch gate and rejects invalid multi-replica claims before the proxy
-binds a port. Valid multi-replica declarations still fail closed until the
-durable reservation backend replaces the legacy local admission path.
+binds a port. A valid PostgreSQL+Redis declaration with at least two replicas is
+accepted: PostgreSQL atomically enforces cumulative request, token, and cost
+budgets, including grouped keys, while Redis enforces distributed RPM/TPM.
+PostgreSQL TLS remains a separate production requirement.
 
 Use `gateway.state.backend = "postgres"` with `postgres_url_env` for shared database-backed admin keys, usage counters, and billing ledger rows:
 

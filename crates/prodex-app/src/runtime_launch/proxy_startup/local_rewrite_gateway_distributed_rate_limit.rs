@@ -1,6 +1,8 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
-use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
+use super::local_rewrite_gateway_store_types::{
+    RuntimeGatewayVirtualKeyEntry, runtime_gateway_virtual_key_effective_id,
+};
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use prodex_application::distributed_rate_limit::{
     ApplicationDistributedRateLimitRequest, plan_application_distributed_rate_limit,
@@ -13,16 +15,20 @@ pub(super) fn runtime_gateway_durable_budget_enforced(
     key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
     entry: Option<&RuntimeGatewayVirtualKeyEntry>,
 ) -> bool {
-    if !matches!(
-        &shared.gateway_state_store,
-        RuntimeGatewayStateStore::Sqlite { .. } | RuntimeGatewayStateStore::Postgres { .. }
-    ) {
-        return false;
-    }
-    if key.budget_microusd.is_none() || key.budget_id.as_deref().is_some_and(|id| !id.is_empty()) {
-        return false;
-    }
-    entry.and_then(|entry| entry.virtual_key_id).is_some()
+    let supported = match &shared.gateway_state_store {
+        RuntimeGatewayStateStore::Postgres { .. } => {
+            key.budget_microusd.is_some() || key.request_budget.is_some()
+        }
+        RuntimeGatewayStateStore::Sqlite { .. } => {
+            key.budget_microusd.is_some()
+                && !key.budget_id.as_deref().is_some_and(|id| !id.is_empty())
+        }
+        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => false,
+    };
+    supported
+        && entry
+            .and_then(runtime_gateway_virtual_key_effective_id)
+            .is_some()
         && key
             .tenant_id
             .as_deref()
@@ -38,6 +44,9 @@ pub(super) fn runtime_gateway_local_admission_usage(
     let mut usage = usage.cloned().unwrap_or_default();
     if durable_budget_enforced && key.budget_microusd.is_some() {
         usage.spend_microusd = 0;
+    }
+    if durable_budget_enforced && key.request_budget.is_some() {
+        usage.requests_total = 0;
     }
     usage
 }
@@ -69,7 +78,7 @@ pub(super) fn runtime_gateway_distributed_rate_limit_admission(
         .and_then(|value| value.parse::<TenantId>().ok())
         .ok_or(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
     let virtual_key_id = entry
-        .and_then(|entry| entry.virtual_key_id)
+        .and_then(runtime_gateway_virtual_key_effective_id)
         .ok_or(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
     let window_start_unix_ms = minute_epoch
         .checked_mul(60_000)

@@ -18,6 +18,9 @@ use prodex_domain::{
     UsageAmount, VirtualKeyId, reconcile_reserved_usage, release_expired_reservation,
 };
 
+mod tenant_storage_key;
+pub use tenant_storage_key::{BudgetStorageScope, TenantStorageKey};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DurableStoreKind {
     Postgres,
@@ -99,28 +102,6 @@ pub fn plan_storage_topology_error_response(
         status: StoragePlanErrorStatus::InvalidConfiguration,
         code: "storage_topology_invalid",
         message: "storage topology configuration is invalid",
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TenantStorageKey {
-    pub tenant_id: TenantId,
-    pub virtual_key_id: Option<VirtualKeyId>,
-}
-
-impl TenantStorageKey {
-    pub fn tenant(tenant_id: TenantId) -> Self {
-        Self {
-            tenant_id,
-            virtual_key_id: None,
-        }
-    }
-
-    pub fn virtual_key(tenant_id: TenantId, virtual_key_id: VirtualKeyId) -> Self {
-        Self {
-            tenant_id,
-            virtual_key_id: Some(virtual_key_id),
-        }
     }
 }
 

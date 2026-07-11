@@ -9,7 +9,6 @@ use super::local_rewrite_copilot::RuntimeCopilotProviderAuth;
 use super::local_rewrite_kiro::RuntimeKiroProfileAuth;
 use crate::AppState;
 use std::fs;
-use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 mod deepseek;
@@ -19,6 +18,7 @@ mod gateway_admin_governance_headers;
 mod gateway_admin_ledger_query;
 mod gateway_admin_scope;
 mod gateway_admin_tenant_scope;
+mod gateway_grouped_budget;
 mod gateway_health;
 mod gateway_state;
 mod gateway_usage;
@@ -582,8 +582,7 @@ fn kiro_responses_route_supports_buffered_sse_streaming() {
         Some("text/event-stream; charset=utf-8")
     );
     let mut first_chunk = [0_u8; 512];
-    let first_read = response
-        .read(&mut first_chunk)
+    let first_read = std::io::Read::read(&mut response, &mut first_chunk)
         .expect("first stream chunk should be readable");
     let first_body = String::from_utf8_lossy(&first_chunk[..first_read]);
     assert!(first_body.contains("event: response.created"));
@@ -591,8 +590,7 @@ fn kiro_responses_route_supports_buffered_sse_streaming() {
     assert!(!first_body.contains("data: [DONE]"));
 
     let mut rest = String::new();
-    response
-        .read_to_string(&mut rest)
+    std::io::Read::read_to_string(&mut response, &mut rest)
         .expect("remaining stream body should be readable");
     let body = format!("{first_body}{rest}");
     assert!(body.contains("\"type\":\"response.output_item.added\""));

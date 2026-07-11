@@ -4,12 +4,13 @@ use prodex_domain::{
     ReservationReconciliationReason, ReservationRequest, TenantId, UsageAmount, VirtualKeyId,
 };
 use prodex_storage::{
-    AtomicReservationCommand, ExpiredReservationRecoveryCommand, TenantStorageKey,
-    UsageReconciliationCommand,
+    AtomicReservationCommand, BudgetStorageScope, ExpiredReservationRecoveryCommand,
+    TenantStorageKey, UsageReconciliationCommand,
 };
 use prodex_storage_postgres::{SET_TENANT_STATEMENT, UPSERT_TENANT_LIFECYCLE_STATEMENT};
 use prodex_storage_postgres_runtime::{
     IdempotentWriteOutcome, PostgresRepository, PostgresRuntimeConfig, ReserveOutcome,
+    ReserveRejection,
 };
 
 fn reservation_command(tenant_id: TenantId) -> AtomicReservationCommand {
@@ -29,6 +30,16 @@ fn reservation_command(tenant_id: TenantId) -> AtomicReservationCommand {
         created_at_unix_ms: 1_800_000_000_000,
         ttl_ms: 60_000,
     }
+}
+
+fn grouped_request_command(
+    tenant_id: TenantId,
+    scope: BudgetStorageScope,
+) -> AtomicReservationCommand {
+    let mut command = reservation_command(tenant_id);
+    command.storage_key = TenantStorageKey::budget_group(tenant_id, VirtualKeyId::new(), scope);
+    command.limit = BudgetLimit::new(1_000, 10_000).with_max_requests(1);
+    command
 }
 
 async fn create_tenant(pool: &Pool, tenant_id: TenantId) {
@@ -196,5 +207,80 @@ async fn two_repositories_reserve_and_reconcile_idempotently() {
     assert_eq!(counter.get::<_, i64>(1), 0);
     assert_eq!(counter.get::<_, i64>(2), 40);
     assert_eq!(counter.get::<_, i64>(3), 400);
+    transaction.commit().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_repositories_enforce_one_grouped_request_atomically() {
+    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
+        eprintln!(
+            "skipping two_repositories_enforce_one_grouped_request_atomically: \
+             PRODEX_TEST_POSTGRES_URL is not set"
+        );
+        return;
+    };
+    let config = PostgresRuntimeConfig::new(url, 4).expect("test config should be valid");
+    let pool_one = config
+        .create_pool_explicit_no_tls()
+        .expect("first test pool should build");
+    let pool_two = config
+        .create_pool_explicit_no_tls()
+        .expect("second test pool should build");
+    let repository_one = PostgresRepository::from_pool_with_config(pool_one.clone(), &config);
+    let repository_two = PostgresRepository::from_pool_with_config(pool_two, &config);
+    let tenant_id = TenantId::new();
+    create_tenant(&pool_one, tenant_id).await;
+    let scope = BudgetStorageScope::from_digest([7; 32]);
+    let first = grouped_request_command(tenant_id, scope);
+    let second = grouped_request_command(tenant_id, scope);
+
+    let (first, second) = tokio::join!(
+        repository_one.reserve(first),
+        repository_two.reserve(second)
+    );
+    let outcomes = [first.unwrap(), second.unwrap()];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, ReserveOutcome::Reserved(_)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| matches!(
+                outcome,
+                ReserveOutcome::Rejected(ReserveRejection::RequestBudgetExceeded)
+            ))
+            .count(),
+        1
+    );
+
+    let mut client = pool_one
+        .get()
+        .await
+        .expect("verification pool should connect");
+    let transaction = client
+        .transaction()
+        .await
+        .expect("transaction should start");
+    transaction
+        .query_one(SET_TENANT_STATEMENT.sql, &[&tenant_id.to_string()])
+        .await
+        .expect("tenant context should be set");
+    let row = transaction
+        .query_one(
+            "SELECT request_count, \
+                    (SELECT COUNT(*) FROM prodex_reservations WHERE tenant_id = $1), \
+                    (SELECT COUNT(*) FROM prodex_usage_ledger WHERE tenant_id = $1) \
+             FROM prodex_budget_counters WHERE tenant_id = $1",
+            &[&tenant_id.as_uuid()],
+        )
+        .await
+        .expect("grouped request counter should exist");
+    assert_eq!(row.get::<_, i64>(0), 1);
+    assert_eq!(row.get::<_, i64>(1), 1);
+    assert_eq!(row.get::<_, i64>(2), 1);
     transaction.commit().await.unwrap();
 }

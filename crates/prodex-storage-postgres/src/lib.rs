@@ -24,6 +24,9 @@ use prodex_storage::{
     UserLifecycleKind, VirtualKeySecretReferenceCommand, VirtualKeySecretReferenceKind,
 };
 
+mod migration_catalog;
+pub use migration_catalog::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PostgresMigrationVersion(pub u32);
 
@@ -131,13 +134,15 @@ CREATE TABLE IF NOT EXISTS prodex_budget_counters (
     reserved_cost_micros BIGINT NOT NULL DEFAULT 0,
     committed_tokens BIGINT NOT NULL DEFAULT 0,
     committed_cost_micros BIGINT NOT NULL DEFAULT 0,
+    request_count BIGINT NOT NULL DEFAULT 0,
     updated_at_unix_ms BIGINT NOT NULL,
     PRIMARY KEY (tenant_id, storage_scope),
     CHECK (storage_scope <> ''),
     CHECK (reserved_tokens >= 0),
     CHECK (reserved_cost_micros >= 0),
     CHECK (committed_tokens >= 0),
-    CHECK (committed_cost_micros >= 0)
+    CHECK (committed_cost_micros >= 0),
+    CHECK (request_count >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS prodex_budget_policies (
@@ -273,9 +278,6 @@ END $migration$;
 "#,
 };
 
-pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[INITIAL_TENANT_ACCOUNTING_MIGRATION];
-pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(1);
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PostgresRuntimeMode {
     ExternalMigrator,
@@ -407,49 +409,6 @@ pub struct PostgresBackendOpenPlan {
 pub struct PostgresTenantContextSqlPlan {
     pub tenant_id: TenantId,
     pub statement: PostgresStatement,
-}
-
-pub fn plan_postgres_migrations(
-    mode: PostgresRuntimeMode,
-) -> Result<PostgresMigrationPlan, PostgresStoragePlanError> {
-    match mode {
-        PostgresRuntimeMode::ExternalMigrator => Ok(PostgresMigrationPlan {
-            migrations: POSTGRES_MIGRATIONS.to_vec(),
-        }),
-        PostgresRuntimeMode::GatewayRequestPath => {
-            Err(PostgresStoragePlanError::DdlForbiddenOnRequestPath)
-        }
-    }
-}
-
-pub fn plan_postgres_backend_open(
-    mode: PostgresBackendOpenMode,
-    observed_schema_version: Option<PostgresMigrationVersion>,
-) -> Result<PostgresBackendOpenPlan, PostgresStoragePlanError> {
-    match mode {
-        PostgresBackendOpenMode::ExternalMigrator => Ok(PostgresBackendOpenPlan {
-            mode,
-            required_schema_version: REQUIRED_POSTGRES_SCHEMA_VERSION,
-            ddl_allowed: true,
-            migration_count: POSTGRES_MIGRATIONS.len(),
-        }),
-        PostgresBackendOpenMode::GatewayStartup | PostgresBackendOpenMode::GatewayRequestPath => {
-            let observed =
-                observed_schema_version.ok_or(PostgresStoragePlanError::MissingSchemaVersion)?;
-            if observed < REQUIRED_POSTGRES_SCHEMA_VERSION {
-                return Err(PostgresStoragePlanError::SchemaVersionTooOld {
-                    observed,
-                    required: REQUIRED_POSTGRES_SCHEMA_VERSION,
-                });
-            }
-            Ok(PostgresBackendOpenPlan {
-                mode,
-                required_schema_version: REQUIRED_POSTGRES_SCHEMA_VERSION,
-                ddl_allowed: false,
-                migration_count: 0,
-            })
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -978,16 +937,19 @@ WITH existing AS (
         reserved_cost_micros,
         committed_tokens,
         committed_cost_micros,
+        request_count,
         updated_at_unix_ms
-    ) VALUES ($1, $3, $4, $5, $6, 0, 0, $7)
+    ) VALUES ($1, $3, $4, $5, $6, 0, 0, 1, $7)
     ON CONFLICT (tenant_id, storage_scope) DO UPDATE SET
         reserved_tokens = prodex_budget_counters.reserved_tokens + EXCLUDED.reserved_tokens,
         reserved_cost_micros = prodex_budget_counters.reserved_cost_micros + EXCLUDED.reserved_cost_micros,
+        request_count = prodex_budget_counters.request_count + 1,
         updated_at_unix_ms = EXCLUDED.updated_at_unix_ms
     WHERE NOT EXISTS (SELECT 1 FROM existing)
       AND prodex_budget_counters.tenant_id = EXCLUDED.tenant_id
       AND prodex_budget_counters.reserved_tokens + prodex_budget_counters.committed_tokens + EXCLUDED.reserved_tokens <= $8
       AND prodex_budget_counters.reserved_cost_micros + prodex_budget_counters.committed_cost_micros + EXCLUDED.reserved_cost_micros <= $9
+      AND prodex_budget_counters.request_count + 1 <= $10
     RETURNING tenant_id
 ), reservation_insert AS (
     INSERT INTO prodex_reservations (
@@ -1001,7 +963,7 @@ WITH existing AS (
         created_at_unix_ms,
         expires_at_unix_ms
     )
-    SELECT $1, $10, $11, $4, $2, $5, $6, $7, $12
+    SELECT $1, $11, $12, $4, $2, $5, $6, $7, $13
     WHERE EXISTS (SELECT 1 FROM upsert_counter)
     ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
     RETURNING tenant_id
@@ -1016,7 +978,7 @@ INSERT INTO prodex_usage_ledger (
     cost_micros,
     occurred_at_unix_ms
 )
-SELECT $1, $13, $10, $11, 'reserved', $5, $6, $7
+SELECT $1, $14, $11, $12, 'reserved', $5, $6, $7
 WHERE EXISTS (SELECT 1 FROM reservation_insert)
 ON CONFLICT (tenant_id, reservation_id, event_kind) DO NOTHING
 RETURNING tenant_id

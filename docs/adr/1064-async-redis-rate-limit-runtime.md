@@ -21,13 +21,14 @@ typed result parsers. Dual-counter keys use an internal tenant hash tag so both
 keys share one Redis Cluster slot.
 
 Wire the dual plan into active PostgreSQL-backed gateway admission before
-durable reservation and upstream dispatch. Keep the multi-replica production
-gate closed until grouped request budgets have a distributed, durable-safe
-contract. Two independently connected executors prove the Redis primitive does
-not overshoot or consume RPM when TPM denies a request.
+durable reservation and upstream dispatch. Two independently connected
+executors prove the Redis primitive does not overshoot or consume RPM when TPM
+denies a request. ADR 1066 adds durable grouped request-budget admission, so the
+multi-replica production gate now accepts a valid PostgreSQL+Redis topology with
+at least two replicas and accounting checks enabled.
 
 ## Consequences
 
 Redis remains rebuildable coordination rather than durable billing state.
 PostgreSQL remains the source of truth for reservations, counters, and ledger
-events. The runtime crate can be tested independently before gateway wiring.
+events. PostgreSQL TLS remains a separate production-readiness gap.

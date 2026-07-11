@@ -1,5 +1,6 @@
 use super::local_rewrite_gateway_admin_fields::runtime_gateway_validate_virtual_key_name;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::str::FromStr;
 
@@ -12,6 +13,30 @@ pub(super) struct RuntimeGatewayVirtualKeyEntry {
     pub(super) created_at_epoch: Option<u64>,
     pub(super) updated_at_epoch: Option<u64>,
     pub(super) disabled: bool,
+}
+
+pub(super) fn runtime_gateway_virtual_key_effective_id(
+    entry: &RuntimeGatewayVirtualKeyEntry,
+) -> Option<prodex_domain::VirtualKeyId> {
+    if let Some(virtual_key_id) = entry.virtual_key_id {
+        return Some(virtual_key_id);
+    }
+    let tenant_id = entry
+        .tenant_id
+        .as_deref()
+        .and_then(|value| value.parse::<prodex_domain::TenantId>().ok())?;
+    let mut digest = Sha256::new();
+    digest.update(b"prodex-policy-virtual-key-v1");
+    digest.update(tenant_id.as_uuid().as_bytes());
+    digest.update(entry.key.name.to_ascii_lowercase().as_bytes());
+    let digest = digest.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Some(prodex_domain::VirtualKeyId::from_uuid(
+        uuid::Uuid::from_bytes(bytes),
+    ))
 }
 
 impl fmt::Debug for RuntimeGatewayVirtualKeyEntry {
@@ -446,6 +471,45 @@ mod tests {
             created_at_epoch: 1,
             updated_at_epoch: 2,
         }
+    }
+
+    #[test]
+    fn policy_virtual_key_effective_id_is_stable_tenant_scoped_uuid_v8() {
+        let tenant_id = prodex_domain::TenantId::new();
+        let entry = RuntimeGatewayVirtualKeyEntry {
+            virtual_key_id: None,
+            key: runtime_proxy_crate::RuntimeGatewayVirtualKey {
+                name: "Policy-Key".to_string(),
+                tenant_id: Some(tenant_id.to_string()),
+                team_id: None,
+                project_id: None,
+                user_id: None,
+                budget_id: None,
+                token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("secret"),
+                allowed_models: Vec::new(),
+                budget_microusd: None,
+                request_budget: None,
+                rpm_limit: None,
+                tpm_limit: None,
+            },
+            source: RuntimeGatewayVirtualKeySource::Policy,
+            tenant_id: Some(tenant_id.to_string()),
+            created_at_epoch: None,
+            updated_at_epoch: None,
+            disabled: false,
+        };
+        let first = runtime_gateway_virtual_key_effective_id(&entry).unwrap();
+        let mut same = entry.clone();
+        same.key.name = "policy-key".to_string();
+        let second = runtime_gateway_virtual_key_effective_id(&same).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.as_uuid().get_version_num(), 8);
+
+        same.tenant_id = Some(prodex_domain::TenantId::new().to_string());
+        assert_ne!(
+            first,
+            runtime_gateway_virtual_key_effective_id(&same).unwrap()
+        );
     }
 
     #[test]

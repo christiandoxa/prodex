@@ -68,7 +68,7 @@ const OPTIONAL_POSTGRES_MIGRATION_TEST = Object.freeze({
     "-q",
     "-p",
     "prodex-storage-postgres",
-    "postgres_migration_can_be_applied_twice_without_duplicate_rls_policies",
+    "postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies",
     "--",
     "--test-threads=1",
   ],
@@ -85,6 +85,18 @@ const OPTIONAL_POSTGRES_RUNTIME_TEST = Object.freeze({
     "--test-threads=1",
   ],
 });
+const OPTIONAL_POSTGRES_GROUPED_REQUEST_TEST = Object.freeze({
+  command: "cargo",
+  args: [
+    "test",
+    "-q",
+    "-p",
+    "prodex-storage-postgres-runtime",
+    "two_repositories_enforce_one_grouped_request_atomically",
+    "--",
+    "--test-threads=1",
+  ],
+});
 const OPTIONAL_POSTGRES_GATEWAY_ACCOUNTING_TEST = Object.freeze({
   command: "cargo",
   args: [
@@ -94,6 +106,19 @@ const OPTIONAL_POSTGRES_GATEWAY_ACCOUNTING_TEST = Object.freeze({
     "prodex-app",
     "--lib",
     "gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_across_proxies",
+    "--",
+    "--test-threads=1",
+  ],
+});
+const OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST = Object.freeze({
+  command: "cargo",
+  args: [
+    "test",
+    "-q",
+    "-p",
+    "prodex-app",
+    "--lib",
+    "gateway_postgres_grouped_request_budget_is_atomic_across_two_proxies_and_keys",
     "--",
     "--test-threads=1",
   ],
@@ -364,8 +389,18 @@ async function main() {
     { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
   );
   await runCommand(
+    OPTIONAL_POSTGRES_GROUPED_REQUEST_TEST.command,
+    OPTIONAL_POSTGRES_GROUPED_REQUEST_TEST.args,
+    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+  );
+  await runCommand(
     OPTIONAL_POSTGRES_GATEWAY_ACCOUNTING_TEST.command,
     OPTIONAL_POSTGRES_GATEWAY_ACCOUNTING_TEST.args,
+    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+  );
+  await runCommand(
+    OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST.command,
+    OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST.args,
     { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
   );
 }

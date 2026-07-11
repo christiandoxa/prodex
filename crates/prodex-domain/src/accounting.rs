@@ -3,6 +3,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::accounting_budget::BudgetLimit;
 use crate::{CallId, ReservationId, TenantId};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,27 +50,6 @@ impl UsageAmount {
 
     pub fn exceeds(self, limit: Self) -> bool {
         self.tokens > limit.tokens || self.cost_micros > limit.cost_micros
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BudgetLimit {
-    pub max: UsageAmount,
-}
-
-impl fmt::Debug for BudgetLimit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BudgetLimit")
-            .field("max", &"<redacted>")
-            .finish()
-    }
-}
-
-impl BudgetLimit {
-    pub fn new(max_tokens: u64, max_cost_micros: u64) -> Self {
-        Self {
-            max: UsageAmount::new(max_tokens, max_cost_micros),
-        }
     }
 }
 

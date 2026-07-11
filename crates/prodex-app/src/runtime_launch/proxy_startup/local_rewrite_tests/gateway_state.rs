@@ -17,7 +17,7 @@ use std::fs;
 use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
-fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
+pub(super) fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
     let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");
     let has_enterprise_schema: bool = client
         .query_one(

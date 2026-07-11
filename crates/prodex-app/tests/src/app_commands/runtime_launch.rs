@@ -205,7 +205,7 @@ fn gateway_launch_config_rejects_invalid_route_alias_identifiers() {
 }
 
 #[test]
-fn gateway_launch_config_rejects_postgres_accounting_gate_until_distributed_admission_is_wired() {
+fn gateway_launch_config_accepts_postgres_accounting_gate_with_distributed_admission() {
     let root = temp_dir("gateway-runtime-topology-postgres");
     let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let _postgres = TestEnvVarGuard::set(
@@ -222,16 +222,12 @@ fn gateway_launch_config_rejects_postgres_accounting_gate_until_distributed_admi
     policy.state.backend = Some("postgres".to_string());
     policy.state.postgres_url_env = Some("PRODEX_GATEWAY_POSTGRES_URL_TEST".to_string());
 
-    let err = match resolve_gateway_launch_config(&paths, &state, &args, &policy) {
-        Ok(_) => panic!("expected accounting-gated postgres launch to fail closed"),
-        Err(err) => err,
-    };
-
-    assert!(
-        err.to_string()
-            .contains("runtime_accounting_verification_invalid")
-    );
-    assert!(err.to_string().contains("distributed rate"));
+    let config = resolve_gateway_launch_config(&paths, &state, &args, &policy)
+        .expect("distributed accounting topology should be accepted");
+    assert!(matches!(
+        config.state_store,
+        RuntimeGatewayStateStore::Postgres { .. }
+    ));
 }
 
 #[test]

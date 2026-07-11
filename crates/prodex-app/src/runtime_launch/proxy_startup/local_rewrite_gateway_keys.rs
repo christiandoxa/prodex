@@ -4,7 +4,9 @@ use super::local_rewrite::{
     schedule_runtime_gateway_virtual_key_usage_save,
 };
 use super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
-use super::local_rewrite_gateway_budget::runtime_gateway_budget_group_rejection;
+use super::local_rewrite_gateway_budget::{
+    runtime_gateway_budget_group_rejection, runtime_gateway_budget_storage_key,
+};
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
 use super::local_rewrite_gateway_distributed_rate_limit::{
     runtime_gateway_distributed_rate_limit_admission,
@@ -15,11 +17,13 @@ use super::local_rewrite_gateway_key_store_backend::{
     runtime_gateway_postgres_load_key_store, runtime_gateway_redis_load_key_store,
     runtime_gateway_sqlite_load_key_store,
 };
+use super::local_rewrite_gateway_reservation::runtime_gateway_postgres_reserve_usage;
 use super::local_rewrite_gateway_sqlite_utils::runtime_gateway_sqlite_u64_to_i64;
 use super::local_rewrite_gateway_store_file::runtime_gateway_virtual_key_store_file_load;
 use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayVirtualKeyEntry, RuntimeGatewayVirtualKeySource,
-    RuntimeGatewayVirtualKeyStoreFile, runtime_gateway_virtual_key_entry_from_stored,
+    RuntimeGatewayVirtualKeyStoreFile, runtime_gateway_virtual_key_effective_id,
+    runtime_gateway_virtual_key_entry_from_stored,
 };
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
@@ -37,8 +41,8 @@ use std::str::FromStr;
 
 const RUNTIME_GATEWAY_RESERVATION_TTL_MS: u64 = 60_000;
 
-enum RuntimeGatewayDurableReservationError {
-    Rejected,
+pub(super) enum RuntimeGatewayDurableReservationError {
+    Rejected(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection),
     Failed,
 }
 
@@ -304,12 +308,14 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     let usage_snapshot = usage
         .as_deref()
         .ok_or(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
-    if let Some(rejection) = runtime_gateway_budget_group_rejection(
-        key,
-        &active_keys,
-        usage_snapshot,
-        estimated_cost_microusd,
-    ) {
+    if !durable_budget_enforced
+        && let Some(rejection) = runtime_gateway_budget_group_rejection(
+            key,
+            &active_keys,
+            usage_snapshot,
+            estimated_cost_microusd,
+        )
+    {
         return Err(rejection);
     }
     let key_usage = runtime_gateway_local_admission_usage(
@@ -349,7 +355,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
                             runtime_proxy_log_field(
                                 "error_kind",
                                 match error {
-                                    RuntimeGatewayDurableReservationError::Rejected => {
+                                    RuntimeGatewayDurableReservationError::Rejected(_) => {
                                         "gateway_reservation_rejected"
                                     }
                                     RuntimeGatewayDurableReservationError::Failed => {
@@ -362,9 +368,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
                     ),
                 );
                 return Err(match error {
-                    RuntimeGatewayDurableReservationError::Rejected => {
-                        runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::BudgetExceeded
-                    }
+                    RuntimeGatewayDurableReservationError::Rejected(rejection) => rejection,
                     RuntimeGatewayDurableReservationError::Failed => {
                         runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
                     }
@@ -468,7 +472,7 @@ fn runtime_gateway_try_durable_reservation(
     else {
         return Ok(None);
     };
-    let Some(virtual_key_id) = entry.virtual_key_id else {
+    let Some(virtual_key_id) = runtime_gateway_virtual_key_effective_id(entry) else {
         return Ok(None);
     };
     let Some(tenant_id) = key
@@ -497,11 +501,16 @@ fn runtime_gateway_try_durable_reservation(
     let created_at_unix_ms = runtime_gateway_unix_epoch_millis();
     let idempotency_key =
         IdempotencyKey::from_call_reservation(request.call_id, request.reservation_id);
+    let storage_key = runtime_gateway_budget_storage_key(tenant_id, virtual_key_id, key);
     let command = prodex_storage::AtomicReservationCommand {
-        storage_key: prodex_storage::TenantStorageKey::virtual_key(tenant_id, virtual_key_id),
+        storage_key,
         idempotency_key,
         snapshot: BudgetSnapshot::default(),
-        limit: BudgetLimit::new(i64::MAX as u64, key.budget_microusd.unwrap_or(u64::MAX)),
+        limit: BudgetLimit::new(
+            i64::MAX as u64,
+            key.budget_microusd.unwrap_or(i64::MAX as u64),
+        )
+        .with_max_requests(key.request_budget.unwrap_or(i64::MAX as u64)),
         request,
         created_at_unix_ms,
         ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
@@ -531,16 +540,9 @@ fn runtime_gateway_try_durable_reservation(
     )
     .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
     Ok(Some(RuntimeGatewayDurableReservationState {
-        storage_key: prodex_storage::TenantStorageKey::virtual_key(tenant_id, virtual_key_id),
+        storage_key,
         record,
     }))
-}
-
-fn runtime_gateway_storage_scope(storage_key: prodex_storage::TenantStorageKey) -> String {
-    storage_key
-        .virtual_key_id
-        .map(|virtual_key_id| format!("virtual_key:{virtual_key_id}"))
-        .unwrap_or_else(|| "tenant-default".to_string())
 }
 
 fn runtime_gateway_sqlite_reserve_usage(
@@ -568,7 +570,7 @@ fn runtime_gateway_sqlite_reserve_usage(
             .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
         return Ok(());
     }
-    let storage_scope = runtime_gateway_storage_scope(storage.storage_key);
+    let storage_scope = storage.storage_key.storage_scope();
     let virtual_key_id = storage.storage_key.virtual_key_id.map(|id| id.to_string());
     let reserved = command.request.estimate;
     let updated = runtime_gateway_unix_epoch_millis();
@@ -604,7 +606,9 @@ fn runtime_gateway_sqlite_reserve_usage(
         )
         .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
     if changed == 0 {
-        return Err(RuntimeGatewayDurableReservationError::Rejected);
+        return Err(RuntimeGatewayDurableReservationError::Rejected(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::BudgetExceeded,
+        ));
     }
     tx.execute(
         r#"
@@ -646,32 +650,6 @@ fn runtime_gateway_sqlite_reserve_usage(
     tx.commit()
         .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
     Ok(())
-}
-
-fn runtime_gateway_postgres_reserve_usage(
-    shared: &RuntimeLocalRewriteProxyShared,
-    command: prodex_storage::AtomicReservationCommand,
-) -> Result<(), RuntimeGatewayDurableReservationError> {
-    let repository = shared
-        .gateway_postgres_repository
-        .as_ref()
-        .ok_or(RuntimeGatewayDurableReservationError::Failed)?;
-    match shared
-        .runtime_shared
-        .async_runtime
-        .handle()
-        .block_on(repository.reserve(command))
-        .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?
-    {
-        prodex_storage_postgres_runtime::ReserveOutcome::Reserved(_)
-        | prodex_storage_postgres_runtime::ReserveOutcome::Replayed(_) => Ok(()),
-        prodex_storage_postgres_runtime::ReserveOutcome::Rejected(
-            prodex_storage_postgres_runtime::ReserveRejection::BudgetLimitExceeded,
-        ) => Err(RuntimeGatewayDurableReservationError::Rejected),
-        prodex_storage_postgres_runtime::ReserveOutcome::Rejected(
-            prodex_storage_postgres_runtime::ReserveRejection::Conflict,
-        ) => Err(RuntimeGatewayDurableReservationError::Failed),
-    }
 }
 
 pub(super) fn runtime_local_rewrite_request_is_authorized(
@@ -964,7 +942,9 @@ mod tests {
                 .iter()
                 .filter(|result| matches!(
                     result,
-                    Err(RuntimeGatewayDurableReservationError::Rejected)
+                    Err(RuntimeGatewayDurableReservationError::Rejected(
+                        runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::BudgetExceeded
+                    ))
                 ))
                 .count(),
             1
