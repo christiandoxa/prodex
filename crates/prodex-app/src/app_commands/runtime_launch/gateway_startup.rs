@@ -15,32 +15,50 @@ mod tests;
 pub(super) fn start_policy_gateway_backend(
     preferred_listen_addr: Option<String>,
 ) -> Result<GatewayBackend> {
-    start_gateway_backend(GatewayArgs {
-        command: None,
-        listen: preferred_listen_addr,
-        provider: None,
-        base_url: None,
-        api_key: None,
-        auth_token: None,
-        smart_context: false,
-        presidio: false,
-        no_presidio: false,
-    })
+    let service_mode = prodex_runtime_policy::runtime_policy_service_mode()?;
+    start_gateway_backend_for_service_mode(
+        GatewayArgs {
+            command: None,
+            listen: preferred_listen_addr,
+            provider: None,
+            base_url: None,
+            api_key: None,
+            auth_token: None,
+            smart_context: false,
+            presidio: false,
+            no_presidio: false,
+        },
+        service_mode,
+    )
 }
 
 pub(super) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend> {
+    prodex_runtime_policy::ensure_runtime_policy_service_mode(
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+    )?;
+    start_gateway_backend_for_service_mode(
+        args,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+    )
+}
+
+fn start_gateway_backend_for_service_mode(
+    args: GatewayArgs,
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+) -> Result<GatewayBackend> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(&paths)?);
     let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
     let secrets = prodex_runtime_policy::runtime_policy_secrets().unwrap_or_default();
-    let gateway = gateway_config::resolve_gateway_launch_config_with_runtime_config(
+    let gateway = gateway_config::resolve_gateway_launch_config_for_service_mode(
         &paths,
         &state,
         &args,
         &policy,
         &secrets,
         &runtime_config,
+        service_mode,
     )?;
     let secret_refresh = secrets.projected_root.is_some().then(|| {
         let refresh_paths = paths.clone();
@@ -52,13 +70,14 @@ pub(super) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend>
         RuntimeGatewayCredentialRefreshPlan::new(
             gateway.credential_fingerprint,
             Arc::new(move || {
-                let refreshed = gateway_config::resolve_gateway_launch_config_with_runtime_config(
+                let refreshed = gateway_config::resolve_gateway_launch_config_for_service_mode(
                     &refresh_paths,
                     &refresh_state,
                     &refresh_args,
                     &refresh_policy,
                     &refresh_secrets,
                     &refresh_runtime_config,
+                    service_mode,
                 )?;
                 Ok(gateway_refresh_candidate(&refreshed))
             }),

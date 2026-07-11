@@ -7,6 +7,23 @@ pub const PRODEX_POLICY_FILE_NAME: &str = "policy.toml";
 pub const PRODEX_POLICY_VERSION: u32 = 1;
 pub const PRODEX_RUNTIME_PROXY_PRESET_ENV: &str = "PRODEX_RUNTIME_PROXY_PRESET";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimePolicyServiceMode {
+    #[default]
+    Gateway,
+    ControlPlane,
+}
+
+impl RuntimePolicyServiceMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gateway => "gateway",
+            Self::ControlPlane => "control-plane",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeLogFormat {
@@ -41,6 +58,7 @@ pub struct RuntimePolicySummary {
 pub struct RuntimePolicyConfig {
     pub path: PathBuf,
     pub version: u32,
+    pub service_mode: RuntimePolicyServiceMode,
     pub runtime: RuntimePolicyRuntimeSettings,
     pub runtime_proxy: RuntimePolicyProxySettings,
     pub gateway: RuntimePolicyGatewaySettings,
@@ -506,6 +524,8 @@ impl RuntimePolicyProxySettings {
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyFile {
     pub version: u32,
+    #[serde(default)]
+    pub service_mode: RuntimePolicyServiceMode,
     #[serde(default)]
     pub runtime: RuntimePolicyRuntimeFile,
     #[serde(default)]

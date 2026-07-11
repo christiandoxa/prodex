@@ -5,6 +5,7 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimePolicyValidationSection {
     Version,
+    ServiceMode,
     Runtime,
     Secrets,
     RuntimeProxy,
@@ -22,6 +23,7 @@ impl fmt::Display for RuntimePolicyValidationSection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
             Self::Version => "version",
+            Self::ServiceMode => "service_mode",
             Self::Runtime => "runtime",
             Self::Secrets => "secrets",
             Self::RuntimeProxy => "runtime_proxy",

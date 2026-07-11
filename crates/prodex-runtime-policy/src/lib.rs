@@ -24,14 +24,15 @@ pub use self::types::{
     RuntimePolicyGatewayRouteModelMetrics, RuntimePolicyGatewaySettings,
     RuntimePolicyGatewayVirtualKey, RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection,
     RuntimePolicyProxySettings, RuntimePolicyRuntimeFile, RuntimePolicyRuntimeSettings,
-    RuntimePolicySecretsFile, RuntimePolicySecretsSettings, RuntimePolicySummary,
+    RuntimePolicySecretsFile, RuntimePolicySecretsSettings, RuntimePolicyServiceMode,
+    RuntimePolicySummary,
 };
 pub use self::validate::{
     RuntimePolicyValidationErrors, RuntimePolicyValidationIssue, RuntimePolicyValidationSection,
     parse_secret_backend_kind, validate_runtime_policy_file, validate_runtime_proxy_policy,
 };
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use prodex_core::AppPaths;
 
 pub fn ensure_runtime_policy_valid() -> Result<()> {
@@ -54,6 +55,28 @@ pub fn runtime_policy_summary() -> Result<Option<RuntimePolicySummary>> {
             version: config.version,
         }),
     )
+}
+
+pub fn runtime_policy_service_mode() -> Result<RuntimePolicyServiceMode> {
+    if !runtime_policy_enabled_for_current_process() {
+        return Ok(RuntimePolicyServiceMode::default());
+    }
+    let paths = AppPaths::discover()?;
+    Ok(load_runtime_policy_cached(&paths.root)?
+        .map(|config| config.service_mode)
+        .unwrap_or_default())
+}
+
+pub fn ensure_runtime_policy_service_mode(expected: RuntimePolicyServiceMode) -> Result<()> {
+    let actual = runtime_policy_service_mode()?;
+    if actual != expected {
+        bail!(
+            "runtime policy service_mode={} cannot start {} service",
+            actual.as_str(),
+            expected.as_str()
+        );
+    }
+    Ok(())
 }
 
 pub fn runtime_policy_runtime() -> Option<RuntimePolicyRuntimeSettings> {

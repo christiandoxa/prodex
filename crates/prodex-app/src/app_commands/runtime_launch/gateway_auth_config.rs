@@ -56,6 +56,18 @@ pub(crate) fn resolve_gateway_auth_config_with_resolver(
     })
 }
 
+pub(crate) fn resolve_control_plane_auth_config_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<ResolvedGatewayAuthConfig> {
+    Ok(ResolvedGatewayAuthConfig {
+        auth_token_hash: None,
+        auth_required: false,
+        admin_tokens: gateway_admin_tokens_config_with_resolver(policy, resolver)?,
+        virtual_keys: Vec::new(),
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn gateway_admin_tokens_config(
     _legacy_admin_token: Option<&str>,

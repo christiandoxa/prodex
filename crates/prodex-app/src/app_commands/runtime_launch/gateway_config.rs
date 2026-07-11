@@ -20,9 +20,11 @@ mod gateway_sso_config;
 mod gateway_state_store_config;
 #[cfg(test)]
 pub(super) use gateway_auth_config::resolve_gateway_auth_config;
-use gateway_auth_config::resolve_gateway_auth_config_with_resolver;
 #[cfg(test)]
 pub(super) use gateway_auth_config::{gateway_admin_tokens_config, gateway_virtual_keys_config};
+use gateway_auth_config::{
+    resolve_control_plane_auth_config_with_resolver, resolve_gateway_auth_config_with_resolver,
+};
 pub(super) use gateway_config_helpers::gateway_api_keys_from_list;
 use gateway_config_helpers::gateway_validate_listen_auth;
 #[cfg(test)]
@@ -114,8 +116,30 @@ pub(super) fn resolve_gateway_launch_config_with_runtime_config(
     secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
     runtime_config: &RuntimeConfig,
 ) -> Result<ResolvedGatewayLaunchConfig> {
+    resolve_gateway_launch_config_for_service_mode(
+        paths,
+        state,
+        args,
+        policy,
+        secrets,
+        runtime_config,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+    )
+}
+
+pub(super) fn resolve_gateway_launch_config_for_service_mode(
+    paths: &AppPaths,
+    state: &AppState,
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+    runtime_config: &RuntimeConfig,
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+) -> Result<ResolvedGatewayLaunchConfig> {
     let secret_resolver = GatewaySecretResolver::from_policy(secrets)?;
-    if secret_resolver.production() {
+    if secret_resolver.production()
+        && service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway
+    {
         if policy.require_auth != Some(true) {
             bail!("production gateway requires gateway.require_auth=true");
         }
@@ -126,22 +150,59 @@ pub(super) fn resolve_gateway_launch_config_with_runtime_config(
             bail!("production gateway requires gateway.auth_token_ref or a virtual key reference");
         }
     }
-    gateway_validate_upstream_base_url_input(args, policy)?;
-    let provider =
-        resolve_gateway_provider_config_with_resolver(state, args, policy, &secret_resolver)?;
-    let auth = resolve_gateway_auth_config_with_resolver(args, policy, &secret_resolver)?;
-    if auth.auth_required
-        && provider.provider_credential.is_none()
-        && matches!(
-            &provider.provider_options,
-            RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }
-                if api_keys.is_empty()
-        )
-    {
-        bail!(
-            "OpenAI-compatible gateway auth requires a separate upstream key; set --api-key, OPENAI_API_KEY, or OPENAI_API_KEYS"
-        );
-    }
+    let (provider_name, upstream_base_url, provider_options, auth, route_aliases) =
+        match service_mode {
+            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway => {
+                gateway_validate_upstream_base_url_input(args, policy)?;
+                let provider = resolve_gateway_provider_config_with_resolver(
+                    state,
+                    args,
+                    policy,
+                    &secret_resolver,
+                )?;
+                let auth =
+                    resolve_gateway_auth_config_with_resolver(args, policy, &secret_resolver)?;
+                if auth.auth_required
+                    && provider.provider_credential.is_none()
+                    && matches!(
+                        &provider.provider_options,
+                        RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }
+                            if api_keys.is_empty()
+                    )
+                {
+                    bail!(
+                        "OpenAI-compatible gateway auth requires a separate upstream key; set --api-key, OPENAI_API_KEY, or OPENAI_API_KEYS"
+                    );
+                }
+                let route_aliases = gateway_route_aliases_config(policy, provider.provider)?;
+                let provider_options = match provider.provider_credential {
+                    Some(credential) => provider
+                        .provider_options
+                        .with_projected_credential(credential),
+                    None => provider.provider_options,
+                };
+                (
+                    provider.provider.map(SuperExternalProvider::as_str),
+                    provider.upstream_base_url,
+                    provider_options,
+                    auth,
+                    route_aliases,
+                )
+            }
+            prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane => {
+                // ponytail: the isolated compatibility backend requires a provider-shaped value;
+                // remove it when the control plane no longer uses the loopback gateway backend.
+                (
+                    Some("control-plane"),
+                    "http://127.0.0.1:9".to_string(),
+                    RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                        api_keys: Vec::new(),
+                    },
+                    resolve_control_plane_auth_config_with_resolver(policy, &secret_resolver)?,
+                    Vec::new(),
+                )
+            }
+        };
 
     let listen_addr = match args.listen.as_deref().or(policy.listen_addr.as_deref()) {
         Some(value) if gateway_exact_policy_identifier(value) => value.to_string(),
@@ -150,7 +211,6 @@ pub(super) fn resolve_gateway_launch_config_with_runtime_config(
     };
     gateway_validate_listen_auth(&listen_addr, auth.auth_required)?;
 
-    let route_aliases = gateway_route_aliases_config(policy, provider.provider)?;
     let guardrail = resolve_gateway_guardrail_config_with_resolver(args, policy, &secret_resolver)?;
     let call_id_header = gateway_call_id_header_config(policy)?;
     let state_store = gateway_state_store_config_with_resolver(paths, policy, &secret_resolver)?;
@@ -160,16 +220,10 @@ pub(super) fn resolve_gateway_launch_config_with_runtime_config(
     let observability =
         gateway_observability_config_with_resolver(paths, policy, &secret_resolver)?;
     let credential_fingerprint = secret_resolver.fingerprint()?;
-    let provider_options = match provider.provider_credential {
-        Some(credential) => provider
-            .provider_options
-            .with_projected_credential(credential),
-        None => provider.provider_options,
-    };
 
     Ok(ResolvedGatewayLaunchConfig {
-        provider_name: provider.provider.map(SuperExternalProvider::as_str),
-        upstream_base_url: provider.upstream_base_url,
+        provider_name,
+        upstream_base_url,
         provider_options,
         auth_token_hash: auth.auth_token_hash,
         auth_required: auth.auth_required,
@@ -246,7 +300,7 @@ fn gateway_exact_policy_identifier(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{KIRO_MODEL_CATALOG_FILE, ProfileEntry, ProfileProvider};
+    use crate::{KIRO_MODEL_CATALOG_FILE, ProfileEntry, ProfileProvider, TestEnvVarGuard};
     use std::collections::BTreeMap;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -262,6 +316,51 @@ mod tests {
         ));
         fs::create_dir_all(&dir).expect("temp dir should exist");
         dir
+    }
+
+    #[test]
+    fn control_plane_config_does_not_read_data_plane_fallback_environment() {
+        let root = temp_dir("control-plane-no-data-plane-env");
+        let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let _provider_key = TestEnvVarGuard::set("OPENAI_API_KEY", "provider-secret-sentinel");
+        let _gateway_token =
+            TestEnvVarGuard::set("PRODEX_GATEWAY_TOKEN", "gateway-secret-sentinel");
+        let paths = AppPaths::discover().unwrap();
+        let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths).unwrap();
+        let args = GatewayArgs {
+            command: None,
+            listen: Some("127.0.0.1:0".to_string()),
+            provider: None,
+            base_url: None,
+            api_key: None,
+            auth_token: None,
+            smart_context: false,
+            presidio: false,
+            no_presidio: false,
+        };
+
+        let config = resolve_gateway_launch_config_for_service_mode(
+            &paths,
+            &AppState::default(),
+            &args,
+            &Default::default(),
+            &Default::default(),
+            &runtime_config,
+            prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane,
+        )
+        .unwrap();
+
+        assert_eq!(config.provider_name, Some("control-plane"));
+        assert_eq!(config.upstream_base_url, "http://127.0.0.1:9");
+        assert!(!config.auth_required);
+        assert!(config.auth_token_hash.is_none());
+        assert!(config.virtual_keys.is_empty());
+        let RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys } =
+            config.provider_options
+        else {
+            panic!("control-plane compatibility backend must stay provider-neutral");
+        };
+        assert!(api_keys.is_empty());
     }
 
     #[test]

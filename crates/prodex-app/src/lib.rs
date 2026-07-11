@@ -155,7 +155,9 @@ pub fn migrate_gateway_compatibility_state_postgres(
 ) -> anyhow::Result<()> {
     runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url, tls)
 }
-pub use gateway_backend::{GatewayBackend, start_policy_gateway_backend};
+pub use gateway_backend::{
+    GatewayBackend, start_policy_gateway_backend, start_policy_gateway_backend_for_mode,
+};
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;
