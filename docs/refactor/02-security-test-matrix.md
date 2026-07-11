@@ -79,7 +79,7 @@ all-feature `cargo check` and all-target Clippy. Test linking could not start be
 | Unused direct dependencies | pinned `cargo-machete 0.9.2 --with-metadata`; root `postgres` and `prodex-cli` `prodex_shared_types` removed | pass |
 | Release integrity | SPDX JSON SBOM and binaries attested; release job verifies attestations, generates `SHA256SUMS`, and verifies it before publishing | pass |
 | Credential leak scan | digest-pinned Gitleaks job plus self-testing CLI/URL capability guard | pass |
-| Production secret projection | gateway resolves Kubernetes `SecretRef` files under `/run/secrets/prodex` | partial: projected-provider lifecycle boundary passes; migration remains `--url-env` and the zero-replica control plane remains a placeholder pending typed-secret adapter work |
+| Production secret projection | gateway and migration Job resolve Kubernetes `SecretRef` files under `/run/secrets/prodex` | partial: gateway and migrator projected-provider paths pass; the zero-replica control plane remains a placeholder pending its dedicated typed-secret adapter |
 
 ## Characterization Order
 

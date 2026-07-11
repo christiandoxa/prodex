@@ -173,11 +173,12 @@ connection references. It must not mount `prodex-control-plane-secrets`; that
 secret is reserved for the placeholder control-plane workload.
 
 The migration Job runs the dedicated external `prodex-gateway migrate` command
-with `--tls-mode verify-full`;
+with `--url-ref PRODEX_GATEWAY_POSTGRES_URL --secret-provider kubernetes
+--secret-root /run/secrets/prodex --tls-mode verify-full`;
 gateway request-serving pods do not run schema migration during startup. The
 Job is labeled separately, uses the dedicated `prodex-gateway-migration`
-ServiceAccount, reads only `prodex-gateway-migration-secrets` containing the
-PostgreSQL URL, and has a dedicated egress-only NetworkPolicy that permits DNS
+ServiceAccount, mounts only `prodex-gateway-migration-secrets` as private projected files, and has
+a dedicated egress-only NetworkPolicy that permits DNS
 and PostgreSQL but not Redis, provider HTTPS, or ingress. The current migrator
 ensures the compatibility schema; migration status/history, advisory locking,
 and the complete versioned expand/contract workflow remain required before the
