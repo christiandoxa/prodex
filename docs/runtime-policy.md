@@ -12,6 +12,12 @@ before the listener is bound. Changing these inputs therefore requires a
 restart. Legacy lenient inputs keep their documented/default behavior and emit
 `runtime_config_compatibility_default` with the key name only.
 
+Policy-file validation also evaluates independent runtime, secret, proxy, and
+gateway sections before returning. A single invalid setting keeps its existing
+error text; multiple invalid sections are reported in deterministic section
+order without including configured values. Rust callers that need structured
+diagnostics can downcast the error to `RuntimePolicyValidationErrors`.
+
 Relative `runtime.log_dir` values are resolved under the Prodex root. `PRODEX_RUNTIME_LOG_DIR` is used as provided.
 Use `prodex info` for effective tuning values and `prodex doctor --runtime --json` for the resolved runtime log directory, format, and current `log_path`.
 

@@ -27,6 +27,7 @@ pub use self::types::{
     RuntimePolicySecretsFile, RuntimePolicySecretsSettings, RuntimePolicySummary,
 };
 pub use self::validate::{
+    RuntimePolicyValidationErrors, RuntimePolicyValidationIssue, RuntimePolicyValidationSection,
     parse_secret_backend_kind, validate_runtime_policy_file, validate_runtime_proxy_policy,
 };
 

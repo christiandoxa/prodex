@@ -1,4 +1,7 @@
-use super::{RuntimePolicyFile, validate_runtime_policy_file};
+use super::{
+    RuntimePolicyFile, RuntimePolicyValidationErrors, RuntimePolicyValidationSection,
+    validate_runtime_policy_file,
+};
 use std::path::Path;
 
 fn parse_policy(input: &str) -> RuntimePolicyFile {
@@ -309,4 +312,181 @@ webhook_phases = ["middle"]
         err.to_string()
             .contains("gateway.guardrails.webhook_phases[0]")
     );
+}
+
+#[test]
+fn runtime_policy_validation_aggregates_sections_in_stable_order() {
+    let policy = parse_policy(
+        r#"
+version = 2
+
+[runtime]
+log_dir = " "
+
+[secrets]
+backend = "policy-secret-sentinel"
+
+[runtime_proxy]
+worker_count = 0
+
+[gateway]
+base_url = ""
+
+[gateway.state]
+backend = "unknown"
+
+[[gateway.admin_tokens]]
+name = ""
+token_env = "PRODEX_GATEWAY_ADMIN_TOKEN"
+
+[gateway.sso]
+oidc_audience = "prodex"
+
+[[gateway.route_aliases]]
+alias = "prodex-fast"
+models = []
+
+[[gateway.virtual_keys]]
+name = ""
+token_env = "PRODEX_GATEWAY_VIRTUAL_KEY"
+
+[gateway.observability]
+http_endpoint = "ftp://example.com/events"
+
+[gateway.guardrails]
+blocked_keywords = [""]
+"#,
+    );
+
+    let first = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("independent invalid sections should be aggregated");
+    let second = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("validation order should be deterministic");
+    assert_eq!(first.to_string(), second.to_string());
+
+    let errors = first
+        .downcast_ref::<RuntimePolicyValidationErrors>()
+        .expect("validation should expose structured errors");
+    let sections = errors
+        .issues()
+        .iter()
+        .map(|issue| issue.section())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sections,
+        [
+            RuntimePolicyValidationSection::Version,
+            RuntimePolicyValidationSection::Runtime,
+            RuntimePolicyValidationSection::Secrets,
+            RuntimePolicyValidationSection::RuntimeProxy,
+            RuntimePolicyValidationSection::Gateway,
+            RuntimePolicyValidationSection::GatewayState,
+            RuntimePolicyValidationSection::GatewayAdminTokens,
+            RuntimePolicyValidationSection::GatewaySso,
+            RuntimePolicyValidationSection::GatewayRouting,
+            RuntimePolicyValidationSection::GatewayVirtualKeys,
+            RuntimePolicyValidationSection::GatewayObservability,
+            RuntimePolicyValidationSection::GatewayGuardrails,
+        ]
+    );
+    assert!(
+        errors
+            .issues()
+            .iter()
+            .all(|issue| issue.message().contains("policy.toml"))
+    );
+}
+
+#[test]
+fn runtime_policy_validation_single_error_rendering_stays_compatible() {
+    for (name, input, expected) in [
+        (
+            "version",
+            "version = 2",
+            "unsupported prodex policy version 2 in policy.toml; expected 1",
+        ),
+        (
+            "runtime",
+            "version = 1\n[runtime]\nlog_dir = \" \"",
+            "runtime.log_dir in policy.toml cannot be empty",
+        ),
+        (
+            "secrets",
+            "version = 1\n[secrets]\nbackend = \"unknown\"",
+            "invalid secrets.backend in policy.toml",
+        ),
+        (
+            "runtime proxy",
+            "version = 1\n[runtime_proxy]\nworker_count = 0",
+            "runtime_proxy.worker_count in policy.toml must be greater than 0",
+        ),
+        (
+            "gateway",
+            "version = 1\n[gateway]\nbase_url = \"\"",
+            "gateway.base_url in policy.toml cannot be empty",
+        ),
+        (
+            "gateway state",
+            "version = 1\n[gateway.state]\nbackend = \"unknown\"",
+            "gateway.state.backend in policy.toml is invalid",
+        ),
+        (
+            "gateway admin",
+            "version = 1\n[[gateway.admin_tokens]]\nname = \"\"\ntoken_env = \"TOKEN\"",
+            "gateway.admin_tokens[0].name in policy.toml must be non-empty without whitespace",
+        ),
+        (
+            "gateway sso",
+            "version = 1\n[gateway.sso]\ndefault_role = \"unknown\"",
+            "gateway.sso.default_role in policy.toml is invalid",
+        ),
+        (
+            "gateway routing",
+            "version = 1\n[[gateway.route_aliases]]\nalias = \"alias\"\nmodels = []",
+            "gateway.route_aliases[0].models in policy.toml cannot be empty",
+        ),
+        (
+            "gateway virtual key",
+            "version = 1\n[[gateway.virtual_keys]]\nname = \"\"\ntoken_env = \"TOKEN\"",
+            "gateway.virtual_keys[0].name in policy.toml must be non-empty without whitespace",
+        ),
+        (
+            "gateway observability",
+            "version = 1\n[gateway.observability]\nhttp_endpoint = \"ftp://example.com\"",
+            "gateway.observability.http_endpoint in policy.toml must be an http(s) URL with host",
+        ),
+        (
+            "gateway guardrails",
+            "version = 1\n[gateway.guardrails]\nblocked_keywords = [\"\"]",
+            "gateway.guardrails.blocked_keywords[0] in policy.toml cannot be empty",
+        ),
+    ] {
+        let policy = parse_policy(input);
+        let error = validate_runtime_policy_file(&policy, Path::new("policy.toml")).unwrap_err();
+        assert_eq!(error.to_string(), expected, "{name}");
+    }
+}
+
+#[test]
+fn runtime_policy_validation_formatting_redacts_invalid_values() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[secrets]
+backend = "policy-secret-sentinel"
+
+[gateway]
+base_url = "https://policy-secret-sentinel invalid"
+"#,
+    );
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml")).unwrap_err();
+
+    for formatted in [
+        error.to_string(),
+        format!("{error:?}"),
+        format!("{error:#}"),
+    ] {
+        assert!(!formatted.contains("policy-secret-sentinel"), "{formatted}");
+    }
 }
