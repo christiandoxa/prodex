@@ -1580,6 +1580,16 @@
     "display_name": "Gemini 2.5 Pro",
     "description": "Gemini CLI stable Pro model routed through the Prodex Responses adapter.",
     "context_window_tokens": 1048576,
+    "supported_reasoning_efforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+    "default_reasoning_effort": "high",
+    "reasoning_reserve_tokens": {
+      "none": 0,
+      "minimal": 0,
+      "low": 1024,
+      "medium": 8192,
+      "high": 8192,
+      "xhigh": 24576
+    },
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
@@ -1607,6 +1617,16 @@
     "display_name": "Gemini 2.5 Flash",
     "description": "Gemini CLI stable Flash model routed through the Prodex Responses adapter.",
     "context_window_tokens": 1048576,
+    "supported_reasoning_efforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+    "default_reasoning_effort": "high",
+    "reasoning_reserve_tokens": {
+      "none": 0,
+      "minimal": 0,
+      "low": 1024,
+      "medium": 8192,
+      "high": 8192,
+      "xhigh": 24576
+    },
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
@@ -1634,6 +1654,16 @@
     "display_name": "Gemini 2.5 Flash Lite",
     "description": "Gemini CLI Flash-Lite model routed through the Prodex Responses adapter.",
     "context_window_tokens": 1048576,
+    "supported_reasoning_efforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+    "default_reasoning_effort": "high",
+    "reasoning_reserve_tokens": {
+      "none": 0,
+      "minimal": 0,
+      "low": 1024,
+      "medium": 8192,
+      "high": 8192,
+      "xhigh": 24576
+    },
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [

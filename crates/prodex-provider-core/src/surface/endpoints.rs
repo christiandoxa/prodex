@@ -40,6 +40,7 @@ pub(crate) const OPENAI_ENDPOINTS: &[ProviderEndpoint] = &[
 
 pub(crate) const GEMINI_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::Responses,
+    ProviderEndpoint::ResponsesCompact,
     ProviderEndpoint::ChatCompletions,
     ProviderEndpoint::Messages,
     ProviderEndpoint::Models,

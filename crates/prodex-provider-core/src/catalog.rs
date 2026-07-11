@@ -1,5 +1,6 @@
-use crate::{ProviderEndpoint, ProviderId};
+use crate::{ProviderEndpoint, ProviderId, ProviderReasoningEffort};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +21,18 @@ pub struct ProviderCatalogEntry {
     pub display_name: String,
     pub description: String,
     pub context_window_tokens: Option<u64>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
+    #[serde(default)]
+    pub default_output_reserve_tokens: Option<u64>,
+    #[serde(default)]
+    pub supported_reasoning_efforts: Option<Vec<ProviderReasoningEffort>>,
+    #[serde(default)]
+    pub default_reasoning_effort: Option<ProviderReasoningEffort>,
+    #[serde(default)]
+    pub reasoning_reserve_tokens: Option<BTreeMap<ProviderReasoningEffort, u64>>,
+    #[serde(default)]
+    pub embedding_compatible: Option<bool>,
     pub input_cost_per_million_microusd: Option<u64>,
     pub output_cost_per_million_microusd: Option<u64>,
     pub supported_endpoints: Vec<ProviderEndpoint>,
@@ -80,6 +93,12 @@ pub fn provider_catalog_entry_json(entry: &ProviderCatalogEntry) -> serde_json::
         "display_name": entry.display_name,
         "description": entry.description,
         "context_window": entry.context_window_tokens,
+        "max_output_tokens": entry.max_output_tokens,
+        "default_output_reserve_tokens": entry.default_output_reserve_tokens,
+        "supported_reasoning_efforts": entry.supported_reasoning_efforts,
+        "default_reasoning_effort": entry.default_reasoning_effort,
+        "reasoning_reserve_tokens": entry.reasoning_reserve_tokens,
+        "embedding_compatible": entry.embedding_compatible,
         "input_cost_per_million_microusd": entry.input_cost_per_million_microusd,
         "output_cost_per_million_microusd": entry.output_cost_per_million_microusd,
         "endpoints": entry.supported_endpoints.iter().map(|endpoint| endpoint.label()).collect::<Vec<_>>(),
@@ -102,6 +121,12 @@ pub fn provider_model_json(provider: ProviderId, model: &str) -> Option<serde_js
             "display_name": model.display_name,
             "description": model.description,
             "context_window": model.context_window_tokens,
+            "max_output_tokens": null,
+            "default_output_reserve_tokens": null,
+            "supported_reasoning_efforts": null,
+            "default_reasoning_effort": null,
+            "reasoning_reserve_tokens": null,
+            "embedding_compatible": null,
             "input_cost_per_million_microusd": model.input_cost_per_million_microusd,
             "output_cost_per_million_microusd": model.output_cost_per_million_microusd,
             "endpoints": model.endpoints.iter().map(|endpoint| endpoint.label()).collect::<Vec<_>>(),
@@ -126,6 +151,12 @@ pub fn provider_model_catalog_json(provider: ProviderId) -> Vec<serde_json::Valu
                 "display_name": model.display_name,
                 "description": model.description,
                 "context_window": model.context_window_tokens,
+                "max_output_tokens": null,
+                "default_output_reserve_tokens": null,
+                "supported_reasoning_efforts": null,
+                "default_reasoning_effort": null,
+                "reasoning_reserve_tokens": null,
+                "embedding_compatible": null,
                 "input_cost_per_million_microusd": model.input_cost_per_million_microusd,
                 "output_cost_per_million_microusd": model.output_cost_per_million_microusd,
                 "endpoints": model.endpoints.iter().map(|endpoint| endpoint.label()).collect::<Vec<_>>(),

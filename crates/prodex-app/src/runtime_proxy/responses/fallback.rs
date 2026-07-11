@@ -57,6 +57,19 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
     else {
         return Ok(None);
     };
+    let requested_model = runtime_smart_context_model_name_from_body(&fallback.request.body);
+    runtime_selection_trace_log_direct(
+        fallback.shared,
+        fallback.request_id,
+        RuntimeSelectionTraceDirect {
+            requested_model: requested_model.as_deref(),
+            route_kind: RuntimeRouteKind::Responses,
+            candidate_key: &current_profile,
+            class: runtime_proxy_crate::RuntimeRouteCandidateClass::Fallback,
+            affinity_kind: None,
+            hard_affinity: false,
+        },
+    );
     runtime_proxy_log(
         fallback.shared,
         format!(

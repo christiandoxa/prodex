@@ -7,12 +7,12 @@ pub fn estimate_request_input_tokens(body: &[u8]) -> u64 {
     let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
     let estimated = parsed
         .as_ref()
-        .and_then(estimate_semantic_request_tokens)
+        .and_then(estimate_request_input_tokens_value)
         .unwrap_or_else(|| estimate_text_tokens(&String::from_utf8_lossy(body)));
     estimated.max(1)
 }
 
-fn estimate_semantic_request_tokens(value: &serde_json::Value) -> Option<u64> {
+pub fn estimate_request_input_tokens_value(value: &serde_json::Value) -> Option<u64> {
     let mut total = 0_u64;
     if let Some(object) = value.as_object() {
         for key in [

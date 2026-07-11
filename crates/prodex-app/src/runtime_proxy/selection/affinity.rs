@@ -13,7 +13,9 @@ use super::{
     runtime_proxy_current_profile, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_structured_log_message, runtime_route_kind_label,
     runtime_selection_log_fields_with_quota, runtime_selection_quota_source_label,
-    runtime_soft_affinity_allowed, runtime_soft_affinity_rejection_reason,
+    runtime_selection_trace_affinity_kind, runtime_selection_trace_candidate,
+    runtime_selection_trace_reject, runtime_soft_affinity_allowed,
+    runtime_soft_affinity_rejection_reason,
 };
 
 pub(crate) fn runtime_previous_response_affinity_is_trusted(
@@ -88,16 +90,48 @@ pub(super) fn runtime_affinity_selection_decision(
     shared: &RuntimeRotationProxyShared,
     selection: RuntimeResponseCandidateSelection<'_>,
     affinity_kind: RuntimeAffinitySelectionKind,
+    trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<RuntimeAffinitySelectionDecision> {
     let Some(profile_name) = runtime_affinity_selection_profile(affinity_kind, selection) else {
         return Ok(RuntimeAffinitySelectionDecision::Continue);
     };
     if selection.excluded_profiles.contains(profile_name) {
-        return Ok(if affinity_kind.excluded_is_terminal() {
+        let outcome = if affinity_kind.excluded_is_terminal() {
             RuntimeAffinitySelectionDecision::Exhausted
         } else {
             RuntimeAffinitySelectionDecision::Continue
-        });
+        };
+        let hard = matches!(
+            affinity_kind,
+            RuntimeAffinitySelectionKind::Strict | RuntimeAffinitySelectionKind::TurnState
+        ) || (affinity_kind == RuntimeAffinitySelectionKind::Session
+            && selection.route_kind == RuntimeRouteKind::Compact);
+        let mut candidate = runtime_selection_trace_candidate(
+            0,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+            None,
+            None,
+            None,
+            None,
+        );
+        candidate.hard_affinity = hard;
+        runtime_selection_trace_reject(
+            &mut candidate,
+            runtime_proxy_crate::RuntimeRouteDecisionReasonKind::Excluded.as_str(),
+            Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Affinity),
+        );
+        trace.record_candidate(profile_name, candidate);
+        trace.record_affinity(
+            runtime_selection_trace_affinity_kind(affinity_kind),
+            Some(profile_name),
+            hard,
+            if affinity_kind.excluded_is_terminal() {
+                runtime_proxy_crate::RuntimeRouteAffinityOutcome::Exhausted
+            } else {
+                runtime_proxy_crate::RuntimeRouteAffinityOutcome::Rejected
+            },
+        );
+        return Ok(outcome);
     }
 
     if affinity_kind == RuntimeAffinitySelectionKind::Pinned
@@ -107,6 +141,22 @@ pub(super) fn runtime_affinity_selection_decision(
             selection.pinned_profile,
         )?
     {
+        let mut candidate = runtime_selection_trace_candidate(
+            0,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+            None,
+            None,
+            None,
+            None,
+        );
+        candidate.hard_affinity = true;
+        trace.record_candidate(profile_name, candidate);
+        trace.record_affinity(
+            runtime_proxy_crate::RuntimeRouteAffinityKind::PreviousResponse,
+            Some(profile_name),
+            true,
+            runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained,
+        );
         return Ok(RuntimeAffinitySelectionDecision::Selected(
             profile_name.to_string(),
         ));
@@ -131,6 +181,22 @@ pub(super) fn runtime_affinity_selection_decision(
         session_profile: selection.session_profile,
         trusted_previous_response_affinity,
     }) {
+        let mut candidate = runtime_selection_trace_candidate(
+            0,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+            None,
+            None,
+            None,
+            None,
+        );
+        candidate.hard_affinity = true;
+        trace.record_candidate(profile_name, candidate);
+        trace.record_affinity(
+            runtime_selection_trace_affinity_kind(affinity_kind),
+            Some(profile_name),
+            true,
+            runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained,
+        );
         return Ok(RuntimeAffinitySelectionDecision::Selected(
             profile_name.to_string(),
         ));
@@ -161,12 +227,47 @@ pub(super) fn runtime_affinity_selection_decision(
         has_route_eligible_quota_fallback,
     };
     if runtime_soft_affinity_allowed(soft_policy) {
+        let candidate = runtime_selection_trace_candidate(
+            0,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+            Some(quota_summary),
+            None,
+            None,
+            None,
+        );
+        trace.record_candidate(profile_name, candidate);
+        trace.record_affinity(
+            runtime_selection_trace_affinity_kind(affinity_kind),
+            Some(profile_name),
+            false,
+            runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained,
+        );
         return Ok(RuntimeAffinitySelectionDecision::Selected(
             profile_name.to_string(),
         ));
     }
 
     let reason = runtime_soft_affinity_rejection_reason(soft_policy);
+    let mut candidate = runtime_selection_trace_candidate(
+        0,
+        runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+        Some(quota_summary),
+        None,
+        None,
+        None,
+    );
+    runtime_selection_trace_reject(
+        &mut candidate,
+        reason,
+        Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Quota),
+    );
+    trace.record_candidate(profile_name, candidate);
+    trace.record_affinity(
+        runtime_selection_trace_affinity_kind(affinity_kind),
+        Some(profile_name),
+        false,
+        runtime_proxy_crate::RuntimeRouteAffinityOutcome::Rejected,
+    );
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(

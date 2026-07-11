@@ -56,7 +56,9 @@ Hot path invariants:
 Runtime proxy edit points:
 
 - Live orchestration: `crates/prodex-app/src/runtime_proxy`.
-- Side-effect-free proxy helpers and tests: `crates/prodex-runtime-proxy`.
+- Side-effect-free proxy helpers, the bounded route-decision trace, and gateway request-constraint planning: `crates/prodex-runtime-proxy`.
+- Provider catalog limits, request-requirement parsing, token estimation, and pure model constraint evaluation: `crates/prodex-provider-core`.
+- Gateway live-plan orchestration and the authenticated, side-effect-free route-explain HTTP/dashboard edge: `crates/prodex-app/src/runtime_launch/proxy_startup`.
 - Launch planning: `crates/prodex-app/src/runtime_launch`, `prodex-runtime-launch`, `prodex-runtime-claude`, `prodex-runtime-anthropic`.
 - Policy and tuning: `prodex-runtime-policy`, `prodex-runtime-tuning`, `crates/prodex-app/src/runtime_policy.rs`, and ADR 1055.
 - Benchmark support: `prodex-bench-support`, root `benches/`.

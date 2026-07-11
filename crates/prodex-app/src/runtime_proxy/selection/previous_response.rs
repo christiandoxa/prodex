@@ -18,11 +18,29 @@ use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+#[cfg(any(test, feature = "bench-support"))]
 pub(crate) fn next_runtime_previous_response_candidate(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
     previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
+) -> Result<Option<String>> {
+    let mut trace = super::runtime_selection_trace_builder(route_kind, None);
+    next_runtime_previous_response_candidate_with_trace(
+        shared,
+        excluded_profiles,
+        previous_response_id,
+        route_kind,
+        &mut trace,
+    )
+}
+
+pub(super) fn next_runtime_previous_response_candidate_with_trace(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    previous_response_id: Option<&str>,
+    route_kind: RuntimeRouteKind,
+    trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
     let allow_disk_auth_fallback =
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
@@ -30,6 +48,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
     struct RuntimePreviousResponseDiskFallbackEntry {
         name: String,
         codex_home: PathBuf,
+        order_index: usize,
     }
 
     let disk_fallback_entries = {
@@ -56,11 +75,30 @@ pub(crate) fn next_runtime_previous_response_candidate(
                 )
             })
         {
+            let mut candidate = super::runtime_selection_trace_candidate(
+                0,
+                runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+                None,
+                None,
+                None,
+                None,
+            );
+            candidate.hard_affinity = true;
+            candidate.selected = true;
+            trace.record_candidate(owner, candidate);
+            trace.record_affinity(
+                runtime_proxy_crate::RuntimeRouteAffinityKind::PreviousResponse,
+                Some(owner),
+                true,
+                runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained,
+            );
             return Ok(Some(owner.to_string()));
         }
         let mut disk_fallback_entries = Vec::new();
-        for profile in
+        for (order_index, profile) in
             runtime_previous_response_ordered_profiles(&selection_catalog, &runtime.current_profile)
+                .into_iter()
+                .enumerate()
         {
             let name = profile.name.as_str();
             if excluded_profiles.contains(name) {
@@ -75,6 +113,20 @@ pub(crate) fn next_runtime_previous_response_candidate(
                     now,
                 )
             {
+                let mut candidate = super::runtime_selection_trace_candidate(
+                    order_index,
+                    runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+                super::runtime_selection_trace_reject(
+                    &mut candidate,
+                    "negative_cache",
+                    Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Affinity),
+                );
+                trace.record_candidate(name, candidate);
                 runtime_proxy_log(
                     shared,
                     runtime_proxy_structured_log_message(
@@ -96,6 +148,21 @@ pub(crate) fn next_runtime_previous_response_candidate(
                 name,
                 now,
             ) {
+                let mut candidate = super::runtime_selection_trace_candidate(
+                    order_index,
+                    runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+                super::runtime_selection_trace_reject(
+                    &mut candidate,
+                    runtime_proxy_crate::RuntimeRouteDecisionReasonKind::AuthFailureBackoff
+                        .as_str(),
+                    None,
+                );
+                trace.record_candidate(name, candidate);
                 runtime_proxy_log(
                     shared,
                     runtime_proxy_structured_log_message(
@@ -115,6 +182,24 @@ pub(crate) fn next_runtime_previous_response_candidate(
             if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
                 || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
             {
+                let reason = runtime_quota_precommit_guard_reason(quota_summary, route_kind)
+                    .unwrap_or_else(|| {
+                        runtime_quota_pressure_band_reason(quota_summary.route_band)
+                    });
+                let mut candidate = super::runtime_selection_trace_candidate(
+                    order_index,
+                    runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+                    Some(quota_summary),
+                    None,
+                    None,
+                    None,
+                );
+                super::runtime_selection_trace_reject(
+                    &mut candidate,
+                    reason,
+                    Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Quota),
+                );
+                trace.record_candidate(name, candidate);
                 runtime_proxy_log(
                     shared,
                     runtime_proxy_structured_log_message(
@@ -127,15 +212,7 @@ pub(crate) fn next_runtime_previous_response_candidate(
                                 ),
                                 runtime_proxy_log_field("affinity", "previous_response_discovery"),
                                 runtime_proxy_log_field("profile", name),
-                                runtime_proxy_log_field(
-                                    "reason",
-                                    runtime_quota_precommit_guard_reason(quota_summary, route_kind)
-                                        .unwrap_or_else(|| {
-                                            runtime_quota_pressure_band_reason(
-                                                quota_summary.route_band,
-                                            )
-                                        }),
-                                ),
+                                runtime_proxy_log_field("reason", reason),
                                 runtime_proxy_log_field(
                                     "quota_source",
                                     runtime_selection_quota_source_label(quota_source),
@@ -152,12 +229,47 @@ pub(crate) fn next_runtime_previous_response_candidate(
                 &runtime.profile_usage_auth,
                 &runtime.profile_probe_cache,
             ) {
-                Some(summary) if summary.quota_compatible => return Ok(Some(profile.name.clone())),
-                Some(_) => {}
+                Some(summary) if summary.quota_compatible => {
+                    let mut candidate = super::runtime_selection_trace_candidate(
+                        order_index,
+                        runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+                        Some(quota_summary),
+                        None,
+                        None,
+                        None,
+                    );
+                    candidate.selected = true;
+                    trace.record_candidate(name, candidate);
+                    trace.record_affinity(
+                        runtime_proxy_crate::RuntimeRouteAffinityKind::PreviousResponse,
+                        Some(name),
+                        false,
+                        runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained,
+                    );
+                    return Ok(Some(profile.name.clone()));
+                }
+                Some(_) => {
+                    let mut candidate = super::runtime_selection_trace_candidate(
+                        order_index,
+                        runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+                        Some(quota_summary),
+                        None,
+                        None,
+                        None,
+                    );
+                    super::runtime_selection_trace_reject(
+                        &mut candidate,
+                        runtime_proxy_crate::RuntimeRouteDecisionReasonKind::AuthNotQuotaCompatible
+                            .as_str(),
+                        None,
+                    );
+                    trace.record_candidate(name, candidate);
+                }
                 None if allow_disk_auth_fallback => {
                     disk_fallback_entries.push(RuntimePreviousResponseDiskFallbackEntry {
                         name: profile.name.clone(),
                         codex_home: profile.codex_home.clone(),
+                        order_index,
                     });
                 }
                 None => {}
@@ -168,6 +280,22 @@ pub(crate) fn next_runtime_previous_response_candidate(
 
     for entry in disk_fallback_entries {
         if read_auth_summary(&entry.codex_home).quota_compatible {
+            let mut candidate = super::runtime_selection_trace_candidate(
+                entry.order_index,
+                runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
+                None,
+                None,
+                None,
+                None,
+            );
+            candidate.selected = true;
+            trace.record_candidate(&entry.name, candidate);
+            trace.record_affinity(
+                runtime_proxy_crate::RuntimeRouteAffinityKind::PreviousResponse,
+                Some(&entry.name),
+                false,
+                runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained,
+            );
             return Ok(Some(entry.name));
         }
     }

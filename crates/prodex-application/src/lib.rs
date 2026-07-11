@@ -2352,6 +2352,7 @@ fn control_plane_operation_from_gateway_route(
 ) -> ControlPlaneOperation {
     match operation {
         GatewayControlPlaneOperation::GatewayAdminRead => ControlPlaneOperation::GatewayAdminRead,
+        GatewayControlPlaneOperation::RouteExplain => ControlPlaneOperation::RouteExplain,
         GatewayControlPlaneOperation::TenantCreate => ControlPlaneOperation::TenantCreate,
         GatewayControlPlaneOperation::TenantUpdate => ControlPlaneOperation::TenantUpdate,
         GatewayControlPlaneOperation::UserInvite => ControlPlaneOperation::UserInvite,
@@ -2396,6 +2397,7 @@ fn control_plane_operations_share_route_family(
     matches!(
         (route_operation, action_operation),
         (GatewayAdminRead, GatewayAdminRead)
+            | (RouteExplain, RouteExplain)
             | (TenantCreate | TenantUpdate, TenantCreate | TenantUpdate)
             | (UserInvite, UserInvite)
             | (
@@ -2436,6 +2438,7 @@ fn gateway_operation_from_control_plane_action(
 ) -> GatewayControlPlaneOperation {
     match operation {
         ControlPlaneOperation::GatewayAdminRead => GatewayControlPlaneOperation::GatewayAdminRead,
+        ControlPlaneOperation::RouteExplain => GatewayControlPlaneOperation::RouteExplain,
         ControlPlaneOperation::TenantCreate => GatewayControlPlaneOperation::TenantCreate,
         ControlPlaneOperation::TenantUpdate => GatewayControlPlaneOperation::TenantUpdate,
         ControlPlaneOperation::UserInvite => GatewayControlPlaneOperation::UserInvite,
@@ -2482,7 +2485,8 @@ fn control_plane_operation_allows_http_method(
         | ControlPlaneOperation::ScimUserRead
         | ControlPlaneOperation::VirtualKeyRead
         | ControlPlaneOperation::BillingRead => method == Get,
-        ControlPlaneOperation::TenantCreate
+        ControlPlaneOperation::RouteExplain
+        | ControlPlaneOperation::TenantCreate
         | ControlPlaneOperation::UserInvite
         | ControlPlaneOperation::ScimUserCreate
         | ControlPlaneOperation::RoleBindingGrant
@@ -3016,7 +3020,6 @@ pub fn plan_application_audit_export(
             query_tenant,
         });
     }
-
     let decision = decide_control_plane_action(request.action);
     let audit_write = control_plane_audit_write(&decision);
     let audit_command = AppendOnlyAuditCommand {
@@ -3051,7 +3054,6 @@ pub fn plan_application_audit_export(
     } else {
         None
     };
-
     Ok(ApplicationAuditExportPlan {
         decision,
         audit_storage,
@@ -3250,7 +3252,6 @@ pub fn plan_application_billing_read(
             query_tenant: request.query.tenant_id,
         });
     }
-
     let decision = decide_control_plane_action(request.action);
     let audit_write = control_plane_audit_write(&decision);
     let audit_command = AppendOnlyAuditCommand {
@@ -6294,7 +6295,6 @@ pub fn plan_application_runtime_accounting_verification(
         .ok_or(ApplicationRuntimeAccountingVerificationError::AccountingNotRequired)?;
     let verification = plan_multi_replica_accounting_verification(spec, request.evidence)
         .map_err(ApplicationRuntimeAccountingVerificationError::AccountingConcurrency)?;
-
     Ok(ApplicationRuntimeAccountingVerificationPlan { verification })
 }
 

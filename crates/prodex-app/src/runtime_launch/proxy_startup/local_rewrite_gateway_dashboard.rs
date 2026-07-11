@@ -44,4 +44,21 @@ mod tests {
         assert!(!html.contains(r#"body.name=$("keyName").value.trim()"#));
         assert!(!html.contains(r#"userName:$("userName").value.trim()"#));
     }
+
+    #[test]
+    fn dashboard_route_workbench_renders_trace_data_safely() {
+        let html = include_str!("gateway_admin_dashboard.html");
+
+        assert!(html.contains("Route Workbench"));
+        assert!(html.contains(r#"api("/routes/explain"#));
+        assert!(html.contains("hard_affinity_required"));
+        assert!(html.contains("owner_model"));
+        assert!(html.contains("function renderRoute(result)"));
+        assert!(html.contains(".grid,.workbench,.route-summary{grid-template-columns:1fr}"));
+        assert!(html.contains(".route-candidates th:nth-child(4)"));
+        assert!(html.contains("textContent"));
+        assert!(!html.contains("innerHTML"));
+        assert!(!html.contains("localStorage"));
+        assert!(!html.contains("prodex_gateway_route_request"));
+    }
 }

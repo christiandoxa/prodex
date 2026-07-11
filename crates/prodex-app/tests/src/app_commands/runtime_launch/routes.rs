@@ -1,6 +1,45 @@
 use super::*;
 
 #[test]
+fn resolved_gateway_request_constraints_map_defaults_and_strict_policy() {
+    let default_config = resolve_gateway_guardrail_config(
+        &gateway_args(),
+        &prodex_runtime_policy::RuntimePolicyGatewaySettings::default(),
+    )
+    .unwrap();
+    assert!(!default_config.request_constraints.enabled);
+    assert_eq!(
+        default_config.request_constraints.unknown_context,
+        prodex_provider_core::ProviderUnknownContextPolicy::Allow
+    );
+    assert_eq!(
+        default_config.request_constraints.safe_window_tokens,
+        prodex_provider_core::PROVIDER_REQUEST_SAFE_WINDOW_TOKENS_DEFAULT
+    );
+    assert_eq!(
+        default_config.request_constraints.oversized_output,
+        prodex_provider_core::ProviderOversizedOutputPolicy::Passthrough
+    );
+
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.request_constraints.enabled = Some(true);
+    policy.request_constraints.unknown_context = Some("reject".to_string());
+    policy.request_constraints.safe_window_tokens = Some(65_536);
+    policy.request_constraints.oversized_output = Some("reject".to_string());
+    let strict_config = resolve_gateway_guardrail_config(&gateway_args(), &policy).unwrap();
+    assert!(strict_config.request_constraints.enabled);
+    assert_eq!(
+        strict_config.request_constraints.unknown_context,
+        prodex_provider_core::ProviderUnknownContextPolicy::Reject
+    );
+    assert_eq!(strict_config.request_constraints.safe_window_tokens, 65_536);
+    assert_eq!(
+        strict_config.request_constraints.oversized_output,
+        prodex_provider_core::ProviderOversizedOutputPolicy::Reject
+    );
+}
+
+#[test]
 fn run_launch_route_sends_command_server_subcommands_directly() {
     let mcp_args = test_run_args(vec![
         OsString::from("mcp-server"),

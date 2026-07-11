@@ -2,7 +2,9 @@ use crate::ProviderModelCost;
 
 mod estimate;
 
-pub use self::estimate::{estimate_request_input_tokens, estimate_text_tokens};
+pub use self::estimate::{
+    estimate_request_input_tokens, estimate_request_input_tokens_value, estimate_text_tokens,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderTokenUsage {

@@ -4,6 +4,7 @@ mod paths;
 mod types;
 mod validate;
 mod validate_helpers;
+mod validate_request_constraints;
 mod validate_secrets;
 
 pub use self::cache::{
@@ -19,11 +20,11 @@ pub use self::types::{
     PRODEX_POLICY_FILE_NAME, PRODEX_POLICY_VERSION, PRODEX_RUNTIME_PROXY_PRESET_ENV,
     RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyGatewayAdminToken,
     RuntimePolicyGatewayGuardrailsSettings, RuntimePolicyGatewayObservabilitySettings,
-    RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewayRouteModelMetrics,
-    RuntimePolicyGatewaySettings, RuntimePolicyGatewayVirtualKey, RuntimePolicyProxyPreset,
-    RuntimePolicyProxyPresetSelection, RuntimePolicyProxySettings, RuntimePolicyRuntimeFile,
-    RuntimePolicyRuntimeSettings, RuntimePolicySecretsFile, RuntimePolicySecretsSettings,
-    RuntimePolicySummary,
+    RuntimePolicyGatewayRequestConstraintSettings, RuntimePolicyGatewayRouteAlias,
+    RuntimePolicyGatewayRouteModelMetrics, RuntimePolicyGatewaySettings,
+    RuntimePolicyGatewayVirtualKey, RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection,
+    RuntimePolicyProxySettings, RuntimePolicyRuntimeFile, RuntimePolicyRuntimeSettings,
+    RuntimePolicySecretsFile, RuntimePolicySecretsSettings, RuntimePolicySummary,
 };
 pub use self::validate::{
     parse_secret_backend_kind, validate_runtime_policy_file, validate_runtime_proxy_policy,

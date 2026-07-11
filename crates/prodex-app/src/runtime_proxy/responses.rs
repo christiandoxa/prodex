@@ -173,13 +173,15 @@ pub(crate) fn proxy_runtime_responses_request(
             ));
         }
 
-        let Some(candidate_name) = select_runtime_response_candidate_for_route(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
             shared,
             affinity_state.candidate_selection(
                 &excluded_profiles,
                 previous_response_id.as_deref(),
                 prompt_cache_key.as_deref(),
             ),
+            Some(request_id),
+            request_model_name.as_deref(),
         )?
         else {
             runtime_proxy_log(

@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug)]
 pub(super) struct RuntimeGatewayAdminError {
     status: u16,
     code: &'static str,
@@ -13,6 +14,10 @@ impl RuntimeGatewayAdminError {
             code,
             message: message.into(),
         }
+    }
+
+    pub(super) fn code(&self) -> &'static str {
+        self.code
     }
 
     #[cfg(test)]

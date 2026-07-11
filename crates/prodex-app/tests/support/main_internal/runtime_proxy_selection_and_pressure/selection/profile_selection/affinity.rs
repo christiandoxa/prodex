@@ -19,7 +19,10 @@ fn response_selection_preserves_bound_previous_response_affinity_despite_quota()
         RuntimeResponseCandidateSelection {
             pinned_profile: Some("main"),
             previous_response_id: Some("resp_123"),
-            ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), RuntimeRouteKind::Responses)
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
         },
     )
     .expect("selection should succeed");
@@ -317,5 +320,34 @@ fn hard_affinity_selection_matrix_ignores_local_penalties() {
             "{} hard affinity should beat transport backoff, health, and inflight heuristics",
             case.label
         );
+        runtime_proxy_flush_logs_for_path(&shared.log_path);
+        let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+        let trace_lines = log
+            .lines()
+            .filter(|line| line.contains(" route_decision "))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            trace_lines.len(),
+            1,
+            "{} selection must emit exactly one trace: {log}",
+            case.label
+        );
+        let trace_json = runtime_proxy_crate::runtime_proxy_log_fields(trace_lines[0])
+            .remove("trace")
+            .expect("hard-affinity selection should emit a route decision trace");
+        let trace =
+            serde_json::from_str::<runtime_proxy_crate::RuntimeRouteDecisionTrace>(&trace_json)
+                .expect("route decision trace should be typed JSON");
+        assert!(
+            trace.affinity.hard,
+            "{} trace must retain hard affinity",
+            case.label
+        );
+        assert_eq!(
+            trace.affinity.outcome,
+            runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained
+        );
+        assert!(trace.candidates.iter().any(|candidate| candidate.selected));
+        assert!(!trace_json.contains("main"));
     }
 }

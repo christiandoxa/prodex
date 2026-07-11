@@ -16,9 +16,11 @@ use super::super::{
     runtime_proxy_profile_inflight_hard_limit, runtime_proxy_structured_log_message,
     runtime_quota_blocked_affinity_is_releasable, runtime_request_explicit_session_id,
     runtime_request_turn_state, runtime_response_bound_profile,
-    runtime_smart_context_effective_websocket_prompt_cache_key, runtime_turn_state_bound_profile,
+    runtime_smart_context_effective_websocket_prompt_cache_key,
+    runtime_smart_context_model_name_from_body, runtime_turn_state_bound_profile,
     runtime_websocket_request_requires_locked_previous_response_affinity,
-    select_runtime_response_candidate_for_route, send_runtime_proxy_final_websocket_failure,
+    select_runtime_response_candidate_for_route_with_request,
+    send_runtime_proxy_final_websocket_failure,
 };
 use super::{
     RuntimeWebsocketTextMessageFlow, RuntimeWebsocketTextMessageInput,
@@ -189,7 +191,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     pub(super) fn select_candidate(&self) -> Result<Option<String>> {
-        select_runtime_response_candidate_for_route(
+        let requested_model =
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes());
+        select_runtime_response_candidate_for_route_with_request(
             self.shared,
             RuntimeResponseCandidateSelection {
                 excluded_profiles: &self.excluded_profiles,
@@ -205,6 +209,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 previous_response_id: self.previous_response_id.as_deref(),
                 route_kind: RuntimeRouteKind::Websocket,
             },
+            Some(self.request_id),
+            requested_model.as_deref(),
         )
     }
 
