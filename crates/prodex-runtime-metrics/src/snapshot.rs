@@ -44,6 +44,7 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             runtime_state_lock_wait: Self::build_wait_metrics(self.metrics.runtime_state_lock_wait),
             admission_wait: Self::build_wait_metrics(self.metrics.admission_wait),
             long_lived_queue_wait: Self::build_wait_metrics(self.metrics.long_lived_queue_wait),
+            allocation: self.metrics.allocation.map(Self::build_allocation_metrics),
             traffic: self.build_traffic(),
             profile_inflight: self.build_profile_inflight(),
             active_request_release_underflows_total: self
@@ -170,6 +171,21 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             wait_total_ns: metrics.wait_total_ns,
             wait_count: metrics.wait_count,
             wait_max_ns: metrics.wait_max_ns,
+        }
+    }
+
+    fn build_allocation_metrics(
+        metrics: broker::RuntimeBrokerAllocationMetrics,
+    ) -> RuntimeBrokerAllocationMetrics {
+        RuntimeBrokerAllocationMetrics {
+            alloc_calls: metrics.alloc_calls,
+            realloc_calls: metrics.realloc_calls,
+            dealloc_calls: metrics.dealloc_calls,
+            allocated_bytes: metrics.allocated_bytes,
+            reallocated_bytes: metrics.reallocated_bytes,
+            deallocated_bytes: metrics.deallocated_bytes,
+            live_bytes: metrics.live_bytes,
+            peak_live_bytes: metrics.peak_live_bytes,
         }
     }
 

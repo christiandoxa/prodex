@@ -100,6 +100,7 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "Maximum observed long-lived request queue wait.",
             self.snapshot.long_lived_queue_wait.wait_max_ns as f64 / 1_000_000_000.0,
         );
+        self.render_allocation_metrics();
         self.render_guard_counters();
         self.render_broker_gauge(
             "prodex_runtime_broker_retry_backoffs",
@@ -378,6 +379,52 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "prodex_runtime_broker_profile_inflight_release_underflows_total",
             "Cumulative profile in-flight guard release underflows.",
             self.snapshot.profile_inflight_release_underflows_total as f64,
+        );
+    }
+
+    fn render_allocation_metrics(&mut self) {
+        let Some(allocation) = self.snapshot.allocation else {
+            return;
+        };
+        self.render_broker_counter(
+            "prodex_runtime_broker_allocation_alloc_calls_total",
+            "Cumulative successful allocation calls in an instrumented broker process.",
+            allocation.alloc_calls as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_allocation_realloc_calls_total",
+            "Cumulative successful reallocation calls in an instrumented broker process.",
+            allocation.realloc_calls as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_allocation_dealloc_calls_total",
+            "Cumulative deallocation calls in an instrumented broker process.",
+            allocation.dealloc_calls as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_allocation_allocated_bytes_total",
+            "Cumulative bytes requested by successful allocation calls in an instrumented broker process.",
+            allocation.allocated_bytes as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_allocation_reallocated_bytes_total",
+            "Cumulative bytes requested by successful reallocation calls in an instrumented broker process.",
+            allocation.reallocated_bytes as f64,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_allocation_deallocated_bytes_total",
+            "Cumulative bytes released by deallocation calls in an instrumented broker process.",
+            allocation.deallocated_bytes as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_allocation_live_bytes",
+            "Current live bytes observed by the instrumented broker allocator.",
+            allocation.live_bytes as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_allocation_peak_live_bytes",
+            "Peak live bytes observed by the instrumented broker allocator.",
+            allocation.peak_live_bytes as f64,
         );
     }
 

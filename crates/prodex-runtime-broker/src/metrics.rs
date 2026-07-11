@@ -21,6 +21,18 @@ pub struct RuntimeBrokerTrafficMetrics {
     pub standard: RuntimeBrokerLaneMetrics,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeBrokerAllocationMetrics {
+    pub alloc_calls: u64,
+    pub realloc_calls: u64,
+    pub dealloc_calls: u64,
+    pub allocated_bytes: u64,
+    pub reallocated_bytes: u64,
+    pub deallocated_bytes: u64,
+    pub live_bytes: u64,
+    pub peak_live_bytes: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RuntimeBrokerContinuationSignalMetrics {
     pub response: usize,
@@ -80,6 +92,8 @@ pub struct RuntimeBrokerMetrics {
     pub admission_wait: RuntimeWaitDurationMetrics,
     #[serde(default)]
     pub long_lived_queue_wait: RuntimeWaitDurationMetrics,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allocation: Option<RuntimeBrokerAllocationMetrics>,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: BTreeMap<String, usize>,
     #[serde(default)]
@@ -113,6 +127,7 @@ pub struct RuntimeBrokerMetricsSnapshotInput<'a> {
     pub runtime_state_lock_wait: RuntimeStateLockWaitMetrics,
     pub admission_wait: RuntimeWaitDurationMetrics,
     pub long_lived_queue_wait: RuntimeWaitDurationMetrics,
+    pub allocation: Option<RuntimeBrokerAllocationMetrics>,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: &'a BTreeMap<String, usize>,
     pub profile_retry_backoff_until: &'a BTreeMap<String, i64>,
@@ -148,6 +163,7 @@ pub fn runtime_broker_metrics_from_snapshot_input(
         runtime_state_lock_wait: input.runtime_state_lock_wait,
         admission_wait: input.admission_wait,
         long_lived_queue_wait: input.long_lived_queue_wait,
+        allocation: input.allocation,
         traffic: input.traffic,
         profile_inflight: input.profile_inflight.clone(),
         active_request_release_underflows_total: 0,

@@ -19,6 +19,18 @@ pub struct RuntimeBrokerTrafficMetrics {
     pub standard: RuntimeBrokerLaneMetrics,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RuntimeBrokerAllocationMetrics {
+    pub alloc_calls: u64,
+    pub realloc_calls: u64,
+    pub dealloc_calls: u64,
+    pub allocated_bytes: u64,
+    pub reallocated_bytes: u64,
+    pub deallocated_bytes: u64,
+    pub live_bytes: u64,
+    pub peak_live_bytes: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeBrokerContinuationMetrics {
     pub response_bindings: u64,
@@ -79,6 +91,7 @@ pub struct RuntimeBrokerSnapshot {
     pub runtime_state_lock_wait: RuntimeBrokerStateLockWaitMetrics,
     pub admission_wait: RuntimeBrokerWaitDurationMetrics,
     pub long_lived_queue_wait: RuntimeBrokerWaitDurationMetrics,
+    pub allocation: Option<RuntimeBrokerAllocationMetrics>,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: BTreeMap<String, u64>,
     pub active_request_release_underflows_total: u64,
