@@ -1023,24 +1023,22 @@ fn gateway_disabled_last_virtual_key_does_not_open_gateway() {
     let client = reqwest::blocking::Client::new();
 
     let created = client
-        .post(format!(
+        .idempotent_post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "disabled-last-key-create")
         .json(&serde_json::json!({"name": "alpha"}))
         .send()
         .expect("admin create key request should be sent");
     assert_eq!(created.status().as_u16(), 201);
 
     let disabled = client
-        .patch(format!(
+        .idempotent_patch(format!(
             "http://{}/v1/prodex/gateway/keys/alpha",
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "disabled-last-key-update")
         .json(&serde_json::json!({"disabled": true}))
         .send()
         .expect("admin disable key request should be sent");

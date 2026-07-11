@@ -41,7 +41,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3782,
+    "maxLines": 3770,
     "reason": "Local rewrite cross-provider regression coverage includes the focused application-boundary module registration and remains capped while provider-specific cases split from the shared harness."
   },
   {
@@ -136,7 +136,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
-    "maxLines": 1187,
+    "maxLines": 1171,
     "reason": "Gateway admin CRUD compatibility coverage remains capped while tenant, key, SCIM, and audit fixtures are split by resource."
   },
   {
