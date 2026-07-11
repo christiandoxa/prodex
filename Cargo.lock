@@ -1177,6 +1177,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -2471,6 +2472,19 @@ dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
  "prodex-observability",
+]
+
+[[package]]
+name = "prodex-gateway-server"
+version = "0.273.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "prodex-gateway-http",
+ "tokio",
 ]
 
 [[package]]
