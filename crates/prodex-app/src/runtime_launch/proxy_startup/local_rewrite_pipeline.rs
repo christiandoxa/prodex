@@ -22,8 +22,7 @@ use super::local_rewrite::{
 use super::local_rewrite_application_boundary::{
     RuntimeGatewayAdminPreauthorization, RuntimeGatewayApplicationBoundaryError,
     runtime_gateway_admin_preauthorization, runtime_gateway_application_data_plane_authorization,
-    runtime_gateway_application_request_context,
-    runtime_gateway_data_plane_compatibility_credential,
+    runtime_gateway_application_request_context, runtime_gateway_data_plane_credential,
 };
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationAdmission, runtime_gateway_application_local_admission,
@@ -327,15 +326,16 @@ fn runtime_local_rewrite_preauthorize_admin<'target>(
         return Ok(None);
     }
     let header_request = capture_runtime_proxy_websocket_request(&state.request);
-    let Some(admin_auth) = runtime_gateway_admin_auth(&header_request, shared) else {
+    let Some(authentication) = runtime_gateway_admin_auth(&header_request, shared) else {
         return Err(runtime_local_rewrite_admin_auth_rejection(state, shared));
     };
+    let admin_auth = &authentication.auth;
     let http = runtime_gateway_http_request_meta(
         &header_request,
         path_without_query(state.context.target().path_and_query()),
     );
     let application =
-        match runtime_gateway_admin_preauthorization(state.context, &http, &admin_auth) {
+        match runtime_gateway_admin_preauthorization(state.context, &http, &authentication) {
             Ok(application) => application,
             Err(RuntimeGatewayApplicationBoundaryError::Authorization(_)) => {
                 return Err(runtime_gateway_admin_authorization_rejection_response(
@@ -343,7 +343,7 @@ fn runtime_local_rewrite_preauthorize_admin<'target>(
                     state.request.method().as_str(),
                     path_without_query(&state.path),
                     shared,
-                    &admin_auth,
+                    admin_auth,
                 ));
             }
             Err(RuntimeGatewayApplicationBoundaryError::Authentication(_))
@@ -356,7 +356,7 @@ fn runtime_local_rewrite_preauthorize_admin<'target>(
             }
         };
     Ok(Some(RuntimeGatewayAdminPreauthorization {
-        auth: admin_auth,
+        auth: authentication.auth,
         application,
     }))
 }
@@ -427,7 +427,7 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
     if state.context.plane() != prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
         return Ok(None);
     }
-    let credential = runtime_gateway_data_plane_compatibility_credential(
+    let credential = runtime_gateway_data_plane_credential(
         virtual_key.as_ref(),
         legacy_authorized,
         shared.gateway_auth_token_hash.is_some() || admin_configured,

@@ -3,6 +3,9 @@ use super::super::local_rewrite_application_boundary::{
     runtime_gateway_application_control_plane_authorization,
     runtime_gateway_application_request_context,
 };
+use super::super::local_rewrite_gateway_admin_auth::{
+    RuntimeGatewayAdminAuthentication, RuntimeGatewayAdminCredentialEvidence,
+};
 use super::{
     ControlPlaneDecision, GatewayHttpMethod, GatewayHttpRequestMeta, RuntimeGatewayAdminAuth,
     RuntimeGatewayAdminRole, RuntimeProxyRequest, plan_application_control_plane,
@@ -45,25 +48,31 @@ fn runtime_gateway_admin_authorization_uses_the_application_boundary() {
         body_len: 0,
         headers: Vec::new(),
     };
-    let viewer = RuntimeGatewayAdminAuth {
-        name: "viewer".to_string(),
-        role: RuntimeGatewayAdminRole::Viewer,
-        tenant_id: None,
-        team_id: None,
-        project_id: None,
-        user_id: None,
-        budget_id: None,
-        allowed_key_prefixes: Vec::new(),
+    let viewer = RuntimeGatewayAdminAuthentication {
+        evidence: RuntimeGatewayAdminCredentialEvidence::Principal,
+        auth: RuntimeGatewayAdminAuth {
+            name: "viewer".to_string(),
+            role: RuntimeGatewayAdminRole::Viewer,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        },
     };
-    let admin = RuntimeGatewayAdminAuth {
-        name: "admin".to_string(),
-        role: RuntimeGatewayAdminRole::Admin,
-        tenant_id: None,
-        team_id: None,
-        project_id: None,
-        user_id: None,
-        budget_id: None,
-        allowed_key_prefixes: Vec::new(),
+    let admin = RuntimeGatewayAdminAuthentication {
+        evidence: RuntimeGatewayAdminCredentialEvidence::Principal,
+        auth: RuntimeGatewayAdminAuth {
+            name: "admin".to_string(),
+            role: RuntimeGatewayAdminRole::Admin,
+            tenant_id: None,
+            team_id: None,
+            project_id: None,
+            user_id: None,
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+        },
     };
 
     let target = CanonicalRequestTarget::parse("/v1/prodex/gateway/keys").unwrap();
@@ -81,8 +90,8 @@ fn runtime_gateway_admin_authorization_uses_the_application_boundary() {
         body_len: 2,
         headers: Vec::new(),
     };
-    assert!(runtime_gateway_admin_route_explain_plan(&explain_http, &viewer).is_some());
-    assert!(runtime_gateway_admin_route_explain_plan(&explain_http, &admin).is_some());
+    assert!(runtime_gateway_admin_route_explain_plan(&explain_http, &viewer.auth).is_some());
+    assert!(runtime_gateway_admin_route_explain_plan(&explain_http, &admin.auth).is_some());
 }
 
 fn admin_auth_named(name: &str, tenant_id: Option<String>) -> RuntimeGatewayAdminAuth {
