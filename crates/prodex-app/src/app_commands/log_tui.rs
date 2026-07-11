@@ -483,7 +483,7 @@ mod tests {
             weekly_reset_at: 1_783_527_200,
         };
         let detail = LogTuiHeaderDetail::quota(
-            "christiandoxahamansiah_gmail.com".to_string(),
+            "very_long_profile_name_example.com".to_string(),
             &snapshot,
             Duration::from_secs(1),
         );

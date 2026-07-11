@@ -65,7 +65,7 @@ Notes:
 pub const CLI_REDEEM_AFTER_HELP: &str = "\
 Examples:
   prodex redeem main
-  prodex redeem iandoxa_yahoo.com
+  prodex redeem user_example.com
   prodex redeem main --yes
   prodex redeem main --base-url https://chatgpt.com/backend-api
 

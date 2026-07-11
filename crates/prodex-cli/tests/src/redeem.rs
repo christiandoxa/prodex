@@ -13,7 +13,7 @@ fn redeem_command_parses_profile_and_base_url() {
     let command = parse_cli_command_from([
         "prodex",
         "redeem",
-        "iandoxa_yahoo.com",
+        "user_example.com",
         "--base-url",
         "http://127.0.0.1:8080",
         "--no-proxy",
@@ -23,7 +23,7 @@ fn redeem_command_parses_profile_and_base_url() {
     let Commands::Redeem(args) = command else {
         panic!("expected redeem command");
     };
-    assert_eq!(args.profile, "iandoxa_yahoo.com");
+    assert_eq!(args.profile, "user_example.com");
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8080"));
     assert!(args.no_proxy);
     assert!(args.yes);

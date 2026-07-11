@@ -82,6 +82,11 @@ When changing `prodex`, keep these invariants intact:
    - Live views may also adapt to terminal height when that improves readability without hiding critical state silently.
    - If a live view refreshes in place, keep the previous snapshot visible until the next snapshot is ready to render.
 
+8. Tracked content must not contain real personal or operational identifiers.
+   - Use reserved domains such as `example.com`, generic paths such as `/home/test-user`, generic profile names, and synthetic UUIDs or tokens in docs, tests, fixtures, and examples.
+   - Never copy real email-derived profile names, home or `CODEX_HOME` paths, overlay IDs, attachment IDs, session IDs, logs, auth data, or credentials into the repository.
+   - Preserve intentional public project ownership metadata, but use a non-personal Git author address for new commits and scan the tracked diff for secrets and PII before release.
+
 ## Runtime Proxy Rules
 
 The runtime proxy is the most sensitive part of the project.

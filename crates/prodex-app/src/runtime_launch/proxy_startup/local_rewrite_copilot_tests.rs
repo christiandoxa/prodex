@@ -109,7 +109,11 @@ fn copilot_workspace_custom_instructions_reads_github_files_only() {
         "Review risky diffs first.",
     )
     .unwrap();
-    std::fs::write(root.join("AGENTS.md"), "@/home/doxa/.prodex/private/RTK.md").unwrap();
+    std::fs::write(
+        root.join("AGENTS.md"),
+        "@/home/test-user/.prodex/private/RTK.md",
+    )
+    .unwrap();
 
     let instructions = runtime_copilot_workspace_custom_instructions(&root)
         .unwrap()

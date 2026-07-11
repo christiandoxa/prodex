@@ -20,13 +20,13 @@ mod tests {
     fn deepseek_wraps_noisy_shell_segment_after_cd() {
         let arguments = deepseek_provider_core_rtk_wrapped_tool_arguments(
             "exec",
-            r#"{"cmd":"cd /home/doxa/IdeaProjects/prodex && cargo check -q"}"#,
+            r#"{"cmd":"cd /home/test-user/workspace/prodex && cargo check -q"}"#,
         );
         let arguments: serde_json::Value = serde_json::from_str(&arguments).unwrap();
 
         assert_eq!(
             arguments["cmd"],
-            "rtk cd /home/doxa/IdeaProjects/prodex && cargo check -q"
+            "rtk cd /home/test-user/workspace/prodex && cargo check -q"
         );
     }
 

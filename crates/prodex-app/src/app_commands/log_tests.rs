@@ -133,7 +133,7 @@ fn parses_turn_context_reasoning_and_custom_tool_events() {
 
 #[test]
 fn skips_internal_overlay_attachment_paths_from_message_content() {
-    let user = r#"{"timestamp":"2026-07-03T09:26:44.748Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"image file: /home/doxa/.prodex/profiles/.prodex-overlay-436790-1783050493329574433-0/attachments/0ecd43b8-31d8-4c81-8c9f-2c5409f573ed/image-1.png"}]}}"#;
+    let user = r#"{"timestamp":"2026-07-03T09:26:44.748Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"image file: /home/test-user/.prodex/profiles/.prodex-overlay-1234-1700000000000-0/attachments/00000000-0000-4000-8000-000000000001/image-1.png"}]}}"#;
 
     assert!(
         transcript_events_from_session_line(user).is_empty(),
@@ -143,7 +143,7 @@ fn skips_internal_overlay_attachment_paths_from_message_content() {
 
 #[test]
 fn keeps_readable_message_lines_while_dropping_internal_attachment_paths() {
-    let user = r#"{"timestamp":"2026-07-03T09:26:44.748Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"please compare these screenshots\nimage file: /home/doxa/.prodex/profiles/.prodex-overlay-436790-1783050493329574433-0/attachments/0ecd43b8-31d8-4c81-8c9f-2c5409f573ed/image-1.png\nthen summarize the bug"}]}}"#;
+    let user = r#"{"timestamp":"2026-07-03T09:26:44.748Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"please compare these screenshots\nimage file: /home/test-user/.prodex/profiles/.prodex-overlay-1234-1700000000000-0/attachments/00000000-0000-4000-8000-000000000001/image-1.png\nthen summarize the bug"}]}}"#;
 
     assert_eq!(
         transcript_events_from_session_line(user),
