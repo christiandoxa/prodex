@@ -362,18 +362,22 @@ pub(super) fn runtime_gateway_constraint_plan(
     } else {
         (None, false)
     };
-    runtime_proxy_crate::runtime_gateway_plan_route_with_constraints_and_reasoning_reserve(
+    runtime_proxy_crate::runtime_gateway_plan_route_with_constraints(
         provider,
         endpoint,
         &request.body,
-        &shared.gateway_route_aliases,
-        request_id,
-        model_state,
-        policy,
-        &[] as &[ProviderRequestFeature],
-        shared.provider.configured_reasoning_reserve_tokens(),
-        owner_model.as_deref(),
-        continuation_required,
+        runtime_proxy_crate::RuntimeGatewayConstraintPlanInput {
+            aliases: &shared.gateway_route_aliases,
+            diagnostic_seed: request_id,
+            model_state,
+            policy,
+            additional_features: &[] as &[ProviderRequestFeature],
+            configured_reasoning_reserve_tokens: shared
+                .provider
+                .configured_reasoning_reserve_tokens(),
+            hard_affinity_model: owner_model.as_deref(),
+            hard_affinity_required: continuation_required,
+        },
     )
     .map(Some)
 }
