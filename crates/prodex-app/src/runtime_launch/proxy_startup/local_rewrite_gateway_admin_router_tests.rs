@@ -13,12 +13,26 @@ use super::{
     runtime_gateway_http_headers, runtime_gateway_request_body_sha256,
 };
 use prodex_application::{
+    ApplicationRequestContext, ApplicationRequestDeadline,
     plan_application_control_plane_audit_from_http,
     plan_application_control_plane_idempotency_from_http_digest,
     plan_application_control_plane_idempotency_replay,
 };
-use prodex_domain::{IdempotencyEntry, IdempotencyReplayDecision, TenantId};
+use prodex_domain::{IdempotencyEntry, IdempotencyReplayDecision, RequestId, TenantId};
 use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpHeader};
+use std::time::{Duration, Instant};
+
+fn application_request_context<'a>(
+    target: &'a CanonicalRequestTarget,
+) -> ApplicationRequestContext<'a> {
+    runtime_gateway_application_request_context(
+        target,
+        RequestId::new(),
+        ApplicationRequestDeadline::at(Instant::now() + Duration::from_secs(30)),
+        &[],
+    )
+    .unwrap()
+}
 
 #[test]
 fn runtime_gateway_http_headers_preserve_exact_header_order_and_values() {
@@ -76,12 +90,12 @@ fn runtime_gateway_admin_authorization_uses_the_application_boundary() {
     };
 
     let target = CanonicalRequestTarget::parse("/v1/prodex/gateway/keys").unwrap();
-    let request = runtime_gateway_application_request_context(&target).unwrap();
+    let request = application_request_context(&target);
     assert!(
-        runtime_gateway_application_control_plane_authorization(request, &http, &viewer).is_err()
+        runtime_gateway_application_control_plane_authorization(&request, &http, &viewer).is_err()
     );
     assert!(
-        runtime_gateway_application_control_plane_authorization(request, &http, &admin).is_ok()
+        runtime_gateway_application_control_plane_authorization(&request, &http, &admin).is_ok()
     );
 
     let explain_http = GatewayHttpRequestMeta {

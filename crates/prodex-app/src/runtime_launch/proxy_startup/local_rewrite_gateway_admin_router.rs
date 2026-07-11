@@ -128,7 +128,7 @@ pub(super) fn runtime_gateway_admin_response(
     request_id: u64,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-    _request_context: prodex_application::ApplicationRequestContext<'_>,
+    _request_context: &prodex_application::ApplicationRequestContext<'_>,
     preauthorized: Option<RuntimeGatewayAdminPreauthorization<'_>>,
 ) -> Option<tiny_http::ResponseBox> {
     let path = path_without_query(&captured.path_and_query);
