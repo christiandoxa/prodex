@@ -5,10 +5,12 @@ use prodex_storage_redis::RedisStorageUse::{
     DurableConfiguration, DurableUsageAccounting, ShortLivedCache,
 };
 use prodex_storage_redis::{
-    ATOMIC_RATE_LIMIT_LUA, RECOVERY_LEASE_ACQUIRE_LUA, RECOVERY_LEASE_RELEASE_LUA,
-    RedisCachePurpose, RedisPlanError, RedisPlanErrorStatus, RedisRateLimitDecision, RedisScript,
-    SHORT_LIVED_LOCK_LUA, plan_policy_revision_cache, plan_recovery_lease_acquire,
-    plan_recovery_lease_release, plan_redis_error_response, plan_redis_rate_limit,
+    ATOMIC_DUAL_RATE_LIMIT_LUA, ATOMIC_RATE_LIMIT_LUA, RECOVERY_LEASE_ACQUIRE_LUA,
+    RECOVERY_LEASE_RELEASE_LUA, REDIS_LUA_SAFE_INTEGER, RedisCachePurpose,
+    RedisDualRateLimitDecision, RedisPlanError, RedisPlanErrorStatus, RedisRateLimitDecision,
+    RedisRateLimitDimension, RedisScript, SHORT_LIVED_LOCK_LUA, plan_policy_revision_cache,
+    plan_recovery_lease_acquire, plan_recovery_lease_release, plan_redis_dual_rate_limit,
+    plan_redis_dual_rate_limit_result, plan_redis_error_response, plan_redis_rate_limit,
     plan_redis_rate_limit_result, plan_redis_storage_use, plan_short_lived_coordination_lock,
     script_avoids_whole_map_json, script_uses_atomic_operations,
 };
@@ -87,6 +89,131 @@ fn rate_limit_result_rejects_invalid_lua_tuple() {
         plan_redis_rate_limit_result(1, 1, -3),
         Err(RedisPlanError::InvalidRateLimitResult)
     );
+}
+
+#[test]
+fn dual_rate_limit_plan_checks_both_dimensions_before_incrementing() {
+    let tenant_id = TenantId::new();
+    let bucket = RateLimitBucketKey::new(tenant_id, Some(VirtualKeyId::new()), 1_900_000_000_000);
+    let plan =
+        plan_redis_dual_rate_limit(bucket, 60, Some(10), Some(1_000), 250, 1_900_000_000_001)
+            .unwrap();
+
+    assert_ne!(plan.request_key, plan.token_key);
+    assert!(
+        plan.request_key
+            .as_str()
+            .contains(&format!("{{{tenant_id}}}"))
+    );
+    assert!(
+        plan.token_key
+            .as_str()
+            .contains(&format!("{{{tenant_id}}}"))
+    );
+    assert!(plan.request_key.as_str().contains(":rpm:"));
+    assert!(plan.token_key.as_str().contains(":tpm:"));
+    assert!(
+        plan.script.lua.find("current_requests + 1").unwrap()
+            < plan.script.lua.find("INCRBY', KEYS[1]").unwrap()
+    );
+    assert!(
+        plan.script
+            .lua
+            .find("current_tokens + increment_tokens")
+            .unwrap()
+            < plan.script.lua.find("INCRBY', KEYS[2]").unwrap()
+    );
+    assert!(script_uses_atomic_operations(ATOMIC_DUAL_RATE_LIMIT_LUA));
+    assert!(script_avoids_whole_map_json(ATOMIC_DUAL_RATE_LIMIT_LUA));
+}
+
+#[test]
+fn dual_rate_limit_result_identifies_the_limited_dimension() {
+    assert_eq!(
+        plan_redis_dual_rate_limit_result(1, 0, 2, 300, 50_000).unwrap(),
+        RedisDualRateLimitDecision::Allowed {
+            current_requests: 2,
+            current_tokens: 300,
+            ttl_ms: Some(50_000),
+        }
+    );
+    assert_eq!(
+        plan_redis_dual_rate_limit_result(0, 1, 10, 300, 12_000).unwrap(),
+        RedisDualRateLimitDecision::Limited {
+            dimension: RedisRateLimitDimension::RequestsPerMinute,
+            current_requests: 10,
+            current_tokens: 300,
+            retry_after_ms: Some(12_000),
+        }
+    );
+    assert_eq!(
+        plan_redis_dual_rate_limit_result(0, 2, 2, 1_000, -2).unwrap(),
+        RedisDualRateLimitDecision::Limited {
+            dimension: RedisRateLimitDimension::TokensPerMinute,
+            current_requests: 2,
+            current_tokens: 1_000,
+            retry_after_ms: None,
+        }
+    );
+}
+
+#[test]
+fn dual_rate_limit_rejects_empty_rules_invalid_results_and_unsafe_numbers() {
+    let bucket = RateLimitBucketKey::new(TenantId::new(), None, 0);
+    assert_eq!(
+        plan_redis_dual_rate_limit(bucket, 60, None, None, 1, 0),
+        Err(RedisPlanError::ZeroLimit)
+    );
+    assert_eq!(
+        plan_redis_dual_rate_limit(bucket, 0, Some(1), None, 1, 0),
+        Err(RedisPlanError::ZeroWindow)
+    );
+    assert_eq!(
+        plan_redis_dual_rate_limit(bucket, 60, Some(REDIS_LUA_SAFE_INTEGER + 1), None, 1, 0,),
+        Err(RedisPlanError::NumericRange)
+    );
+    assert_eq!(
+        plan_redis_dual_rate_limit_result(1, 1, 0, 0, 1),
+        Err(RedisPlanError::InvalidRateLimitResult)
+    );
+    assert_eq!(
+        plan_redis_dual_rate_limit_result(0, 3, 0, 0, 1),
+        Err(RedisPlanError::InvalidRateLimitResult)
+    );
+    assert_eq!(
+        plan_redis_dual_rate_limit_result(0, 1, -1, 0, 1),
+        Err(RedisPlanError::InvalidRateLimitResult)
+    );
+}
+
+#[test]
+fn rate_limit_debug_redacts_keys_limits_counts_and_timing() {
+    let tenant_id = TenantId::new();
+    let bucket = RateLimitBucketKey::new(tenant_id, Some(VirtualKeyId::new()), 1_900_000_000_000);
+    let plan =
+        plan_redis_dual_rate_limit(bucket, 61, Some(117), Some(12_345), 678, 1_900_000_000_001)
+            .unwrap();
+    let rendered = format!("{plan:?}");
+    for secret in [
+        tenant_id.to_string(),
+        "1900000000001".to_string(),
+        "12345".to_string(),
+        "678".to_string(),
+    ] {
+        assert!(!rendered.contains(&secret), "{rendered}");
+    }
+    assert!(rendered.contains("<redacted>"));
+
+    let decision = RedisDualRateLimitDecision::Limited {
+        dimension: RedisRateLimitDimension::TokensPerMinute,
+        current_requests: 117,
+        current_tokens: 12_345,
+        retry_after_ms: Some(54_321),
+    };
+    let rendered = format!("{decision:?}");
+    for secret in ["117", "12345", "54321"] {
+        assert!(!rendered.contains(secret), "{rendered}");
+    }
 }
 
 #[test]

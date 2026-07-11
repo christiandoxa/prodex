@@ -146,8 +146,8 @@
   },
   {
     "file": "crates/prodex-application/src/lib.rs",
-    "maxLines": 6301,
-    "reason": "Application orchestration boundary is a Phase 1 mechanical extraction cap; split use-case groups as ports stabilize."
+    "maxLines": 6303,
+    "reason": "Application orchestration boundary is a Phase 1 mechanical extraction cap; new distributed rate-limit work lives in a focused module while remaining use-case groups split as ports stabilize."
   },
   {
     "file": "crates/prodex-application/tests/application_boundary.rs",

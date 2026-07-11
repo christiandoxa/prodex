@@ -7,6 +7,8 @@
 //! SDK dependency. `prodex-app` and future binaries should become composition
 //! roots that adapt real transports and storage clients into these plans.
 
+pub mod distributed_rate_limit;
+
 use std::error::Error;
 use std::fmt;
 

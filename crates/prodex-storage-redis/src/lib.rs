@@ -11,8 +11,16 @@ use std::fmt;
 use prodex_domain::{PolicyRevisionId, RateLimitBucketKey, RateLimitRule, TenantId, VirtualKeyId};
 use prodex_storage::TenantStorageKey;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub const REDIS_LUA_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RedisKey(String);
+
+impl fmt::Debug for RedisKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("RedisKey").field(&"<redacted>").finish()
+    }
+}
 
 impl RedisKey {
     pub fn new(value: impl Into<String>) -> Result<Self, RedisPlanError> {
@@ -29,6 +37,10 @@ impl RedisKey {
 
     pub fn tenant_scoped(prefix: &str, tenant_id: TenantId, suffix: &str) -> Self {
         Self(format!("prodex:tenant:{tenant_id}:{prefix}:{suffix}"))
+    }
+
+    fn tenant_hash_scoped(prefix: &str, tenant_id: TenantId, suffix: &str) -> Self {
+        Self(format!("prodex:tenant:{{{tenant_id}}}:{prefix}:{suffix}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -50,6 +62,7 @@ pub enum RedisPlanError {
     MissingTtl,
     EmptyLeaseOwner,
     InvalidRateLimitResult,
+    NumericRange,
 }
 
 impl fmt::Display for RedisPlanError {
@@ -74,6 +87,7 @@ impl fmt::Display for RedisPlanError {
             Self::InvalidRateLimitResult => {
                 write!(f, "Redis rate-limit script returned an invalid result")
             }
+            Self::NumericRange => write!(f, "Redis rate-limit value is out of range"),
         }
     }
 }
@@ -152,7 +166,7 @@ pub struct RedisScript {
     pub lua: &'static str,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct RedisRateLimitArguments {
     pub now_unix_ms: u64,
     pub window_seconds: u64,
@@ -160,7 +174,18 @@ pub struct RedisRateLimitArguments {
     pub increment_requests: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl fmt::Debug for RedisRateLimitArguments {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedisRateLimitArguments")
+            .field("now_unix_ms", &"<redacted>")
+            .field("window_seconds", &"<redacted>")
+            .field("max_requests", &"<redacted>")
+            .field("increment_requests", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub enum RedisRateLimitDecision {
     Allowed {
         current_requests: u64,
@@ -170,6 +195,23 @@ pub enum RedisRateLimitDecision {
         current_requests: u64,
         retry_after_ms: Option<u64>,
     },
+}
+
+impl fmt::Debug for RedisRateLimitDecision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Allowed { .. } => f
+                .debug_struct("Allowed")
+                .field("current_requests", &"<redacted>")
+                .field("ttl_ms", &"<redacted>")
+                .finish(),
+            Self::Limited { .. } => f
+                .debug_struct("Limited")
+                .field("current_requests", &"<redacted>")
+                .field("retry_after_ms", &"<redacted>")
+                .finish(),
+        }
+    }
 }
 
 pub fn plan_redis_rate_limit_result(
@@ -240,6 +282,11 @@ pub fn plan_redis_rate_limit(
     if increment_requests == 0 {
         return Err(RedisPlanError::ZeroLimit);
     }
+    validate_lua_rate_limit_values(
+        now_unix_ms,
+        rule.window_seconds,
+        &[rule.max_requests, increment_requests],
+    )?;
     let key = RedisKey::tenant_scoped("rate_limit", bucket.tenant_id, &bucket.cache_key());
     Ok(RedisRateLimitPlan {
         tenant_id: bucket.tenant_id,
@@ -253,6 +300,225 @@ pub fn plan_redis_rate_limit(
             increment_requests,
         },
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RedisRateLimitDimension {
+    RequestsPerMinute,
+    TokensPerMinute,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct RedisDualRateLimitArguments {
+    pub now_unix_ms: u64,
+    pub window_seconds: u64,
+    pub max_requests: Option<u64>,
+    pub max_tokens: Option<u64>,
+    pub increment_tokens: u64,
+}
+
+impl fmt::Debug for RedisDualRateLimitArguments {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedisDualRateLimitArguments")
+            .field("now_unix_ms", &"<redacted>")
+            .field("window_seconds", &"<redacted>")
+            .field("max_requests", &"<redacted>")
+            .field("max_tokens", &"<redacted>")
+            .field("increment_tokens", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RedisDualRateLimitPlan {
+    pub tenant_id: TenantId,
+    pub bucket: RateLimitBucketKey,
+    pub request_key: RedisKey,
+    pub token_key: RedisKey,
+    pub script: RedisScript,
+    pub arguments: RedisDualRateLimitArguments,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum RedisDualRateLimitDecision {
+    Allowed {
+        current_requests: u64,
+        current_tokens: u64,
+        ttl_ms: Option<u64>,
+    },
+    Limited {
+        dimension: RedisRateLimitDimension,
+        current_requests: u64,
+        current_tokens: u64,
+        retry_after_ms: Option<u64>,
+    },
+}
+
+impl fmt::Debug for RedisDualRateLimitDecision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Allowed { .. } => f
+                .debug_struct("Allowed")
+                .field("current_requests", &"<redacted>")
+                .field("current_tokens", &"<redacted>")
+                .field("ttl_ms", &"<redacted>")
+                .finish(),
+            Self::Limited { dimension, .. } => f
+                .debug_struct("Limited")
+                .field("dimension", dimension)
+                .field("current_requests", &"<redacted>")
+                .field("current_tokens", &"<redacted>")
+                .field("retry_after_ms", &"<redacted>")
+                .finish(),
+        }
+    }
+}
+
+pub const ATOMIC_DUAL_RATE_LIMIT_LUA: RedisScript = RedisScript {
+    name: "prodex_atomic_dual_rate_limit_v1",
+    lua: r#"
+local now_ms = tonumber(ARGV[1])
+local window_seconds = tonumber(ARGV[2])
+local max_requests = tonumber(ARGV[3])
+local max_tokens = tonumber(ARGV[4])
+local increment_tokens = tonumber(ARGV[5])
+local current_requests = tonumber(redis.call('GET', KEYS[1]) or '0')
+local current_tokens = tonumber(redis.call('GET', KEYS[2]) or '0')
+if max_requests > 0 and current_requests + 1 > max_requests then
+  return {0, 1, current_requests, current_tokens, redis.call('PTTL', KEYS[1])}
+end
+if max_tokens > 0 and current_tokens + increment_tokens > max_tokens then
+  return {0, 2, current_requests, current_tokens, redis.call('PTTL', KEYS[2])}
+end
+local next_requests = current_requests
+local next_tokens = current_tokens
+if max_requests > 0 then
+  next_requests = redis.call('INCRBY', KEYS[1], 1)
+  if next_requests == 1 then
+    redis.call('PEXPIREAT', KEYS[1], now_ms + (window_seconds * 1000))
+  end
+end
+if max_tokens > 0 and increment_tokens > 0 then
+  next_tokens = redis.call('INCRBY', KEYS[2], increment_tokens)
+  if next_tokens == increment_tokens then
+    redis.call('PEXPIREAT', KEYS[2], now_ms + (window_seconds * 1000))
+  end
+end
+local ttl_ms = redis.call('PTTL', max_requests > 0 and KEYS[1] or KEYS[2])
+return {1, 0, next_requests, next_tokens, ttl_ms}
+"#,
+};
+
+pub fn plan_redis_dual_rate_limit(
+    bucket: RateLimitBucketKey,
+    window_seconds: u64,
+    max_requests: Option<u64>,
+    max_tokens: Option<u64>,
+    increment_tokens: u64,
+    now_unix_ms: u64,
+) -> Result<RedisDualRateLimitPlan, RedisPlanError> {
+    if window_seconds == 0 {
+        return Err(RedisPlanError::ZeroWindow);
+    }
+    if max_requests.is_some_and(|limit| limit == 0)
+        || max_tokens.is_some_and(|limit| limit == 0)
+        || (max_requests.is_none() && max_tokens.is_none())
+    {
+        return Err(RedisPlanError::ZeroLimit);
+    }
+    validate_lua_rate_limit_values(
+        now_unix_ms,
+        window_seconds,
+        &[
+            max_requests.unwrap_or_default(),
+            max_tokens.unwrap_or_default(),
+            increment_tokens,
+        ],
+    )?;
+    let cache_key = bucket.cache_key();
+    Ok(RedisDualRateLimitPlan {
+        tenant_id: bucket.tenant_id,
+        bucket,
+        request_key: RedisKey::tenant_hash_scoped(
+            "rate_limit",
+            bucket.tenant_id,
+            &format!("rpm:{cache_key}"),
+        ),
+        token_key: RedisKey::tenant_hash_scoped(
+            "rate_limit",
+            bucket.tenant_id,
+            &format!("tpm:{cache_key}"),
+        ),
+        script: ATOMIC_DUAL_RATE_LIMIT_LUA,
+        arguments: RedisDualRateLimitArguments {
+            now_unix_ms,
+            window_seconds,
+            max_requests,
+            max_tokens,
+            increment_tokens,
+        },
+    })
+}
+
+pub fn plan_redis_dual_rate_limit_result(
+    allowed_flag: i64,
+    limited_dimension: i64,
+    current_requests: i64,
+    current_tokens: i64,
+    ttl_ms: i64,
+) -> Result<RedisDualRateLimitDecision, RedisPlanError> {
+    let current_requests = redis_rate_limit_result_count(current_requests)?;
+    let current_tokens = redis_rate_limit_result_count(current_tokens)?;
+    let ttl_ms = redis_rate_limit_result_ttl(ttl_ms)?;
+    match (allowed_flag, limited_dimension) {
+        (1, 0) => Ok(RedisDualRateLimitDecision::Allowed {
+            current_requests,
+            current_tokens,
+            ttl_ms,
+        }),
+        (0, 1 | 2) => Ok(RedisDualRateLimitDecision::Limited {
+            dimension: if limited_dimension == 1 {
+                RedisRateLimitDimension::RequestsPerMinute
+            } else {
+                RedisRateLimitDimension::TokensPerMinute
+            },
+            current_requests,
+            current_tokens,
+            retry_after_ms: ttl_ms,
+        }),
+        _ => Err(RedisPlanError::InvalidRateLimitResult),
+    }
+}
+
+fn validate_lua_rate_limit_values(
+    now_unix_ms: u64,
+    window_seconds: u64,
+    values: &[u64],
+) -> Result<(), RedisPlanError> {
+    let expires_at = window_seconds
+        .checked_mul(1_000)
+        .and_then(|window_ms| now_unix_ms.checked_add(window_ms))
+        .ok_or(RedisPlanError::NumericRange)?;
+    if expires_at > REDIS_LUA_SAFE_INTEGER
+        || values.iter().any(|value| *value > REDIS_LUA_SAFE_INTEGER)
+    {
+        return Err(RedisPlanError::NumericRange);
+    }
+    Ok(())
+}
+
+fn redis_rate_limit_result_count(value: i64) -> Result<u64, RedisPlanError> {
+    u64::try_from(value).map_err(|_| RedisPlanError::InvalidRateLimitResult)
+}
+
+fn redis_rate_limit_result_ttl(value: i64) -> Result<Option<u64>, RedisPlanError> {
+    match value {
+        value if value >= 0 => u64::try_from(value)
+            .map(Some)
+            .map_err(|_| RedisPlanError::InvalidRateLimitResult),
+        -1 | -2 => Ok(None),
+        _ => Err(RedisPlanError::InvalidRateLimitResult),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

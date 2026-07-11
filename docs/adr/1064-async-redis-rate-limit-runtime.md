@@ -15,14 +15,15 @@ process-local RPM and TPM checks.
 Add `prodex-storage-redis-runtime` as the Redis driver boundary. It owns one
 reconnecting async connection manager, bounded connection and response
 timeouts, `redis://` and rustls-backed `rediss://` support, checked integer
-conversion, and stable redacted errors. It executes the existing atomic
-single-counter plan and maps results through the planning crate's typed result
-parser.
+conversion, and stable redacted errors. It executes both atomic single-counter
+and all-or-nothing RPM/TPM plans and maps results through the planning crate's
+typed result parsers. Dual-counter keys use an internal tenant hash tag so both
+keys share one Redis Cluster slot.
 
-Keep the multi-replica production gate closed. Separate RPM, TPM, and grouped
-budget scripts could consume partial allowance, so active enterprise admission
-must wait for one atomic multi-counter Lua plan and two independently connected
-gateway instances proving no overshoot.
+Keep the multi-replica production gate closed until the dual plan is wired into
+active gateway admission and grouped request budgets have a distributed,
+durable-safe contract. Two independently connected executors prove the Redis
+primitive does not overshoot or consume RPM when TPM denies a request.
 
 ## Consequences
 
