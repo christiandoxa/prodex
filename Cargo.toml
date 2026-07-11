@@ -65,6 +65,7 @@ members = [
     "crates/prodex-storage-postgres",
     "crates/prodex-storage-postgres-runtime",
     "crates/prodex-storage-redis",
+    "crates/prodex-storage-redis-runtime",
     "crates/prodex-storage-sqlite",
     "crates/prodex-runtime-proxy",
     "crates/prodex-terminal-ui",
@@ -149,6 +150,7 @@ prodex_storage = { package = "prodex-storage", path = "crates/prodex-storage", v
 prodex_storage_postgres = { package = "prodex-storage-postgres", path = "crates/prodex-storage-postgres", version = "0.273.0" }
 prodex_storage_postgres_runtime = { package = "prodex-storage-postgres-runtime", path = "crates/prodex-storage-postgres-runtime", version = "0.273.0" }
 prodex_storage_redis = { package = "prodex-storage-redis", path = "crates/prodex-storage-redis", version = "0.273.0" }
+prodex_storage_redis_runtime = { package = "prodex-storage-redis-runtime", path = "crates/prodex-storage-redis-runtime", version = "0.273.0" }
 prodex_storage_sqlite = { package = "prodex-storage-sqlite", path = "crates/prodex-storage-sqlite", version = "0.273.0" }
 prodex_update_notice = { package = "prodex-update-notice", path = "crates/prodex-update-notice", version = "0.273.0" }
 redaction = { package = "prodex-redaction", path = "crates/prodex-redaction", version = "0.273.0" }
