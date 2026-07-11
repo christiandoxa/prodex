@@ -118,23 +118,18 @@ fn control_plane_binary_exposes_dedicated_help_and_version() {
 }
 
 #[test]
-fn enterprise_serve_commands_are_explicitly_gated_until_adapters_are_ready() {
-    for (name, expected_stderr) in [
-        (
-            "prodex-gateway",
-            "prodex-gateway serve is not wired yet; use the legacy `prodex gateway` path until the async adapter migration is complete\n",
-        ),
-        (
-            "prodex-control-plane",
-            "prodex-control-plane serve is not wired yet; use the legacy `prodex gateway` admin path until control-plane adapter migration is complete\n",
-        ),
-    ] {
+fn enterprise_serve_commands_reject_invalid_listen_addresses_before_startup() {
+    for name in ["prodex-gateway", "prodex-control-plane"] {
         let output = Command::new(bin(name))
-            .arg("serve")
+            .args(["serve", "--listen", "invalid"])
             .output()
-            .expect("run gated serve command");
+            .expect("run serve command with invalid listen address");
         assert_eq!(output.status.code(), Some(2));
-        assert!(String::from_utf8(output.stderr).unwrap() == expected_stderr);
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .starts_with("invalid serve listen address\n")
+        );
     }
 }
 

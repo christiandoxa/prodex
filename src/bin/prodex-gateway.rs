@@ -1,15 +1,12 @@
 //! Prodex data-plane gateway entrypoint.
 //!
-//! Serving remains gated while async HTTP/storage/provider adapters are migrated
-//! behind boundary crates. The external migrator subcommand is wired now so DDL
-//! has a production entrypoint outside request-serving gateway opens. Shared
-//! config-publication transport consumption is also exposed as an operational
-//! gateway-side command.
+//! The public listener uses the bounded async compatibility front while the
+//! existing gateway backend remains isolated on loopback.
 
 use prodex::{
-    GatewayMigrationTarget, OtlpLogAttribute,
-    deliver_pending_config_publication_events_to_gateway_runtime, exit_staged_serve_gate,
-    otlp_http_log_export_status, run_gateway_migrate,
+    DedicatedServerMode, GatewayMigrationTarget, OtlpLogAttribute,
+    deliver_pending_config_publication_events_to_gateway_runtime, otlp_http_log_export_status,
+    run_enterprise_serve_or_exit, run_gateway_migrate,
 };
 use std::path::PathBuf;
 
@@ -22,12 +19,12 @@ USAGE:
     prodex-gateway --version
     prodex-gateway migrate --backend sqlite --path <PATH>
     prodex-gateway migrate --backend postgres --url-env <ENV>
+    prodex-gateway serve [--listen <ADDR>]
     prodex-gateway consume-config-publication --transport <PATH> --replica <ID> --root <PATH>
 
 STATUS:
-    The enterprise gateway binary is present as a dedicated composition root.
-    Serving traffic is intentionally gated until the async adapter is wired to
-    prodex-application, prodex-gateway-http, and prodex-gateway-core.
+    The dedicated data-plane composition root uses an async, route-isolated
+    listener. Compatibility execution remains on a bounded loopback backend.
 ";
 
 const GATEWAY_SERVICE_NAME: &str = "prodex-gateway";
@@ -117,9 +114,7 @@ fn main() {
             println!("prodex-gateway {}", env!("CARGO_PKG_VERSION"));
         }
         Some("serve") => {
-            exit_staged_serve_gate(
-                "prodex-gateway serve is not wired yet; use the legacy `prodex gateway` path until the async adapter migration is complete",
-            );
+            run_enterprise_serve_or_exit(DedicatedServerMode::DataPlane, args, HELP);
         }
         Some("migrate") => {
             if let Err(err) = run_migrate(parse_migrate_args(args)) {

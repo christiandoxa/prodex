@@ -2226,6 +2226,7 @@ dependencies = [
  "prodex-control-plane",
  "prodex-domain",
  "prodex-gateway-http",
+ "prodex-gateway-server",
  "prodex-storage",
  "prodex-storage-postgres",
  "prodex-storage-sqlite",

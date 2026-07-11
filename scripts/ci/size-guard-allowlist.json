@@ -301,8 +301,8 @@
   },
   {
     "file": "src/bin/prodex-control-plane.rs",
-    "maxLines": 1290,
-    "reason": "Enterprise control-plane composition, storage setup, publication, and observability remain capped while service wiring is split."
+    "maxLines": 1286,
+    "reason": "Enterprise control-plane composition, storage setup, publication, observability, and the thin route-isolated serve dispatch remain capped while command handlers are split."
   },
   {
     "file": "src/enterprise_observability.rs",
@@ -311,7 +311,7 @@
   },
   {
     "file": "tests/enterprise_binaries.rs",
-    "maxLines": 8398,
+    "maxLines": 8393,
     "reason": "Enterprise binary characterization remains capped while control-plane, gateway, migration, and observability fixtures are split."
   }
 ]

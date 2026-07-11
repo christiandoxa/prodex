@@ -9,11 +9,11 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const BINARIES = [
   {
     path: "src/bin/prodex-gateway.rs",
-    required: ["Data-plane gateway entrypoint", "composition root", "serve is not wired yet"],
+    required: ["Data-plane gateway entrypoint", "DedicatedServerMode::DataPlane"],
   },
   {
     path: "src/bin/prodex-control-plane.rs",
-    required: ["Control-plane entrypoint", "composition root", "serve is not wired yet"],
+    required: ["Control-plane entrypoint", "DedicatedServerMode::ControlPlane"],
   },
 ];
 const FORBIDDEN_PATTERNS = [

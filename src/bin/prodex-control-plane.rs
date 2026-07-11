@@ -1,16 +1,14 @@
 //! Prodex control-plane entrypoint.
 //!
 //! This binary stays a thin composition root. It exposes one-shot publication
-//! planning, local delivery, and shared-transport publication commands while
-//! long-lived admin serving remains gated until adapters are wired behind the
-//! enterprise boundaries.
+//! commands and a route-isolated async control-plane compatibility listener.
 
 use std::path::PathBuf;
 
 use prodex::{
-    OtlpLogAttribute, compact_config_publication_transport,
-    deliver_config_publication_event_to_gateway_runtime, exit_staged_serve_gate,
-    otlp_http_log_export_status, publish_config_publication_event_to_gateway_transport,
+    DedicatedServerMode, OtlpLogAttribute, compact_config_publication_transport,
+    deliver_config_publication_event_to_gateway_runtime, otlp_http_log_export_status,
+    publish_config_publication_event_to_gateway_transport, run_enterprise_serve_or_exit,
 };
 use prodex_application::{
     ApplicationControlPlaneAuditCorrelationErrorStatus,
@@ -58,6 +56,7 @@ Control-plane entrypoint.
 USAGE:
     prodex-control-plane --help
     prodex-control-plane --version
+    prodex-control-plane serve [--listen <ADDR>]
     prodex-control-plane plan-config-publication --request <path>
     prodex-control-plane plan-http-control-plane --request <path>
     prodex-control-plane deliver-config-publication --event <path> --root <path>
@@ -65,9 +64,8 @@ USAGE:
     prodex-control-plane compact-config-publication --transport <path> [--retain <n>]
 
 STATUS:
-    The enterprise control-plane binary is present as a dedicated composition
-    root. Long-lived admin serving remains intentionally gated until adapters
-    are wired to prodex-application and prodex-control-plane.
+    The dedicated control-plane composition root uses an async listener that
+    rejects data-plane routes. Execution remains on a bounded loopback backend.
 ";
 
 const CONTROL_PLANE_SERVICE_NAME: &str = "prodex-control-plane";
@@ -141,9 +139,7 @@ fn main() {
             println!("prodex-control-plane {}", env!("CARGO_PKG_VERSION"));
         }
         Some("serve") => {
-            exit_staged_serve_gate(
-                "prodex-control-plane serve is not wired yet; use the legacy `prodex gateway` admin path until control-plane adapter migration is complete",
-            );
+            run_enterprise_serve_or_exit(DedicatedServerMode::ControlPlane, args, HELP);
         }
         Some("plan-config-publication") => match run_plan_config_publication(args) {
             Ok(output) => println!("{output}"),

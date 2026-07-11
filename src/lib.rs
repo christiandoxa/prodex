@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 mod enterprise_observability;
+mod enterprise_serve;
 
 use prodex_storage_postgres::{PostgresRuntimeMode, plan_postgres_migrations};
 use prodex_storage_sqlite::{SqliteRuntimeMode, plan_sqlite_migrations};
@@ -8,17 +9,13 @@ use prodex_storage_sqlite::{SqliteRuntimeMode, plan_sqlite_migrations};
 pub use enterprise_observability::{
     OtlpLogAttribute, export_otlp_http_log_if_configured, otlp_http_log_export_status,
 };
+pub use enterprise_serve::{DedicatedServerMode, run_enterprise_serve_or_exit};
 pub use prodex_app::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GatewayMigrationTarget {
     Sqlite { path: PathBuf },
     Postgres { url_env: String },
-}
-
-pub fn exit_staged_serve_gate(message: &str) -> ! {
-    eprintln!("{message}");
-    std::process::exit(2);
 }
 
 pub fn run_gateway_migrate(target: GatewayMigrationTarget) -> Result<String, String> {
