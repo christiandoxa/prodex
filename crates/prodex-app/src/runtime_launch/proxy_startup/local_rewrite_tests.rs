@@ -1,7 +1,7 @@
 use super::local_rewrite::{
     RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
-    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig,
-    RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
+    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySecret,
+    RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_gateway_rewrite_proxy,
     start_runtime_local_rewrite_proxy,
 };
@@ -30,6 +30,13 @@ mod provider_routes;
 mod request_constraints;
 mod support;
 use support::*;
+
+fn runtime_gateway_test_secret(value: &str) -> RuntimeGatewaySecret {
+    RuntimeGatewaySecret::development_compatibility(prodex_domain::SecretMaterial::new(
+        value.as_bytes().to_vec(),
+        None::<String>,
+    ))
+}
 
 fn write_fake_kiro_runtime_agent(root: &Path) -> std::path::PathBuf {
     let script = root.join("fake-kiro-runtime");
@@ -3489,7 +3496,7 @@ fn gateway_pre_guardrail_webhook_denial_is_audited_without_secret_leakage() {
         gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
             url: Some(format!("http://{}", webhook.addr)),
             phases: vec!["pre".to_string()],
-            bearer_token: Some(webhook_token.to_string()),
+            bearer_token: Some(runtime_gateway_test_secret(webhook_token)),
             fail_closed: true,
         },
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
@@ -3565,7 +3572,7 @@ fn gateway_post_guardrail_webhook_denial_is_audited_without_secret_leakage() {
         gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
             url: Some(format!("http://{}", webhook.addr)),
             phases: vec!["post".to_string()],
-            bearer_token: Some(webhook_token.to_string()),
+            bearer_token: Some(runtime_gateway_test_secret(webhook_token)),
             fail_closed: true,
         },
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
@@ -3641,7 +3648,7 @@ fn gateway_pre_guardrail_webhook_failure_redacts_url_and_is_audited() {
                 "http://127.0.0.1:9/deny?token={webhook_url_secret}"
             )),
             phases: vec!["pre".to_string()],
-            bearer_token: Some("failure-webhook-bearer-secret".to_string()),
+            bearer_token: Some(runtime_gateway_test_secret("failure-webhook-bearer-secret")),
             fail_closed: true,
         },
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),

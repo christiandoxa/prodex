@@ -1,6 +1,8 @@
-use super::RuntimeProjectedProviderCredential;
+use super::{RuntimeGatewaySecret, RuntimeProjectedProviderCredential};
 use anyhow::{Context as _, Result, bail};
-use prodex_domain::{SecretProvider as _, SecretPurpose, SecretRef, SecretResolutionRequest};
+use prodex_domain::{
+    SecretMaterial, SecretProvider as _, SecretPurpose, SecretRef, SecretResolutionRequest,
+};
 use secret_store::ProjectedSecretProvider;
 use sha2::{Digest, Sha256};
 use std::env;
@@ -80,6 +82,37 @@ impl GatewaySecretResolver {
             reference.clone(),
             provider.clone(),
         )))
+    }
+
+    pub(crate) fn runtime_secret(
+        &self,
+        context: &str,
+        reference: Option<&SecretRef>,
+        env_name: Option<&str>,
+        direct: Option<&str>,
+        purpose: SecretPurpose,
+    ) -> Result<Option<RuntimeGatewaySecret>> {
+        if reference.is_some() && (env_name.is_some() || direct.is_some()) {
+            bail!("{context} must use exactly one secret source");
+        }
+        if self.production && (env_name.is_some() || direct.is_some()) {
+            bail!("{context} raw CLI/environment credentials are forbidden in production");
+        }
+        if let Some(reference) = reference {
+            let credential = self
+                .projected_provider_credential(context, Some(reference), None)?
+                .expect("projected credential should exist for a secret reference");
+            return Ok(Some(RuntimeGatewaySecret::projected(credential, purpose)));
+        }
+        self.resolve_with_rotation_tracking(context, None, env_name, direct, purpose, true)
+            .map(|value| {
+                value.map(|value| {
+                    RuntimeGatewaySecret::development_compatibility(SecretMaterial::new(
+                        value.into_bytes(),
+                        None::<String>,
+                    ))
+                })
+            })
     }
 
     pub(crate) fn resolve(

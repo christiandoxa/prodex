@@ -1,3 +1,4 @@
+use super::local_rewrite_options::RuntimeGatewaySecret;
 use super::*;
 use std::{
     fmt,
@@ -317,7 +318,7 @@ pub(crate) struct RuntimeGatewayObservabilityConfig {
     pub(crate) jsonl_path: Option<PathBuf>,
     pub(crate) http_endpoint: Option<String>,
     pub(crate) http_schema: String,
-    pub(crate) http_bearer_token: Option<String>,
+    pub(crate) http_bearer_token: Option<RuntimeGatewaySecret>,
 }
 
 impl fmt::Debug for RuntimeGatewayObservabilityConfig {
@@ -345,7 +346,7 @@ impl fmt::Debug for RuntimeGatewayObservabilityConfig {
 pub(crate) struct RuntimeGatewayGuardrailWebhookConfig {
     pub(crate) url: Option<String>,
     pub(crate) phases: Vec<String>,
-    pub(crate) bearer_token: Option<String>,
+    pub(crate) bearer_token: Option<RuntimeGatewaySecret>,
     pub(crate) fail_closed: bool,
 }
 
@@ -510,7 +511,12 @@ mod tests {
             jsonl_path: Some(PathBuf::from("/var/log/prodex/runtime.jsonl")),
             http_endpoint: Some("https://otel.example.test/v1/logs".to_string()),
             http_schema: "otlp-http-json".to_string(),
-            http_bearer_token: Some("otlp-bearer-secret".to_string()),
+            http_bearer_token: Some(RuntimeGatewaySecret::development_compatibility(
+                prodex_domain::SecretMaterial::new(
+                    "otlp-bearer-secret".as_bytes().to_vec(),
+                    None::<String>,
+                ),
+            )),
         };
         assert_redacted(
             &format!("{observability:?}"),
@@ -524,7 +530,12 @@ mod tests {
         let webhook = RuntimeGatewayGuardrailWebhookConfig {
             url: Some("https://guardrail.example.test/check".to_string()),
             phases: vec!["pre".to_string()],
-            bearer_token: Some("guardrail-bearer-secret".to_string()),
+            bearer_token: Some(RuntimeGatewaySecret::development_compatibility(
+                prodex_domain::SecretMaterial::new(
+                    "guardrail-bearer-secret".as_bytes().to_vec(),
+                    None::<String>,
+                ),
+            )),
             fail_closed: true,
         };
         assert_redacted(
