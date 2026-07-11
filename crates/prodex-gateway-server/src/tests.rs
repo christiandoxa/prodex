@@ -10,7 +10,11 @@ use std::{
 
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full};
-use hyper::{Request, Response, StatusCode, body::Body, body::Incoming, service::service_fn};
+use hyper::{
+    Request, Response, StatusCode,
+    body::{Body, Incoming},
+    service::service_fn,
+};
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::{TokioExecutor, TokioIo},
@@ -23,10 +27,21 @@ use tokio::{
     time::timeout,
 };
 
-use super::{GatewayServerConfig, GatewayServerMode, run};
+use super::{
+    GatewayHandlerRequest, GatewayHandlerResponse, GatewayServerConfig, GatewayServerMode,
+    LoopbackBackend, run_with_handler,
+};
+use prodex_gateway_http::GatewayHttpRouteKind;
+
+mod direct_support;
+use direct_support::{DropSignal, GatedBody, full_response, spawn_direct_frontend};
 
 type TestClient = Client<HttpConnector, Full<Bytes>>;
-
+type TestFrontend = (
+    std::net::SocketAddr,
+    oneshot::Sender<()>,
+    JoinHandle<anyhow::Result<()>>,
+);
 #[tokio::test]
 async fn route_isolation_keeps_data_and_control_planes_separate() {
     let calls = Arc::new(AtomicUsize::new(0));
@@ -155,6 +170,74 @@ async fn canonical_target_is_forwarded_exactly_and_ambiguous_targets_never_reach
 }
 
 #[tokio::test]
+async fn direct_handler_receives_the_parsed_target_and_typed_route_without_rewrite() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let handler_seen = Arc::clone(&seen);
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        move |request: GatewayHandlerRequest| {
+            let seen = Arc::clone(&handler_seen);
+            async move {
+                seen.lock().unwrap().push((
+                    request.target.path_and_query().to_string(),
+                    request.route,
+                    request.request.uri().to_string(),
+                ));
+                full_response(b"ok")
+            }
+        },
+    )
+    .await;
+    let target = "/v1/responses?cursor=a%2Fb&limit=1";
+    let response = request(&test_client(), front_addr, target, Bytes::new()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        [(
+            target.to_string(),
+            GatewayHttpRouteKind::DataPlaneResponses,
+            target.to_string(),
+        )]
+    );
+    stop_frontend(stop, front).await;
+}
+
+#[tokio::test]
+async fn direct_handler_stream_preserves_order_and_producer_backpressure() {
+    let (release_tx, release_rx) = oneshot::channel();
+    let release_rx = Arc::new(Mutex::new(Some(release_rx)));
+    let handler_release = Arc::clone(&release_rx);
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        move |_| {
+            let release = handler_release.lock().unwrap().take().unwrap();
+            async move {
+                Ok(GatewayHandlerResponse::new(Response::new(GatedBody::new(
+                    release, None,
+                ))))
+            }
+        },
+    )
+    .await;
+    let response = request(&test_client(), front_addr, "/responses", Bytes::new()).await;
+    let mut body = response.into_body();
+    let first = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    assert_eq!(first, "first");
+    assert!(
+        timeout(Duration::from_millis(50), body.frame())
+            .await
+            .is_err()
+    );
+    release_tx.send(()).unwrap();
+    let second = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    assert_eq!(second, "second");
+    assert!(body.frame().await.is_none());
+    stop_frontend(stop, front).await;
+}
+
+#[tokio::test]
 async fn response_body_streams_without_waiting_for_completion() {
     let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = backend.local_addr().unwrap();
@@ -260,6 +343,86 @@ async fn client_disconnect_cancels_backend_stream() {
 }
 
 #[tokio::test]
+async fn direct_handler_is_dropped_when_client_disconnects_before_headers() {
+    let started = Arc::new(Notify::new());
+    let handler_started = Arc::clone(&started);
+    let (dropped_tx, dropped_rx) = oneshot::channel();
+    let dropped_tx = Arc::new(Mutex::new(Some(dropped_tx)));
+    let handler_dropped = Arc::clone(&dropped_tx);
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |config| config.response_header_timeout = Duration::from_secs(5),
+        move |_| {
+            let started = Arc::clone(&handler_started);
+            let dropped = handler_dropped.lock().unwrap().take().unwrap();
+            async move {
+                let _drop_signal = DropSignal::new(dropped);
+                started.notify_one();
+                std::future::pending::<()>().await;
+                full_response(b"")
+            }
+        },
+    )
+    .await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(b"GET /responses HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    started.notified().await;
+    drop(client);
+    timeout(Duration::from_secs(1), dropped_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    stop_frontend(stop, front).await;
+}
+
+#[tokio::test]
+async fn direct_handler_stream_is_dropped_when_client_disconnects_mid_body() {
+    let (release_tx, release_rx) = oneshot::channel();
+    let _release_tx = release_tx;
+    let release_rx = Arc::new(Mutex::new(Some(release_rx)));
+    let handler_release = Arc::clone(&release_rx);
+    let (dropped_tx, dropped_rx) = oneshot::channel();
+    let dropped_tx = Arc::new(Mutex::new(Some(dropped_tx)));
+    let handler_dropped = Arc::clone(&dropped_tx);
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        move |_| {
+            let release = handler_release.lock().unwrap().take().unwrap();
+            let dropped = handler_dropped.lock().unwrap().take().unwrap();
+            async move {
+                Ok(GatewayHandlerResponse::new(Response::new(GatedBody::new(
+                    release,
+                    Some(dropped),
+                ))))
+            }
+        },
+    )
+    .await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(b"GET /responses HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    read_headers(&mut client).await;
+    let mut chunk = [0_u8; 32];
+    let size = timeout(Duration::from_secs(1), client.read(&mut chunk))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&chunk[..size]).contains("first"));
+    drop(client);
+    timeout(Duration::from_secs(1), dropped_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    stop_frontend(stop, front).await;
+}
+
+#[tokio::test]
 async fn content_length_over_limit_is_rejected_before_backend() {
     let calls = Arc::new(AtomicUsize::new(0));
     let backend_calls = Arc::clone(&calls);
@@ -295,26 +458,80 @@ async fn content_length_over_limit_is_rejected_before_backend() {
 }
 
 #[tokio::test]
-async fn shutdown_drains_an_inflight_response() {
-    let started = Arc::new(Notify::new());
-    let release = Arc::new(Notify::new());
-    let backend_started = Arc::clone(&started);
-    let backend_release = Arc::clone(&release);
-    let (backend_addr, backend) = spawn_backend(move |_| {
-        let started = Arc::clone(&backend_started);
-        let release = Arc::clone(&backend_release);
-        async move {
-            started.notify_one();
-            release.notified().await;
-            Response::new(Full::new(Bytes::from_static(b"done")))
+async fn direct_handler_respects_the_connection_limit() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler_calls = Arc::clone(&calls);
+    let first_started = Arc::new(Notify::new());
+    let handler_started = Arc::clone(&first_started);
+    let release_first = Arc::new(Notify::new());
+    let handler_release = Arc::clone(&release_first);
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |config| config.max_connections = 1,
+        move |_| {
+            let call = handler_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            let started = Arc::clone(&handler_started);
+            let release = Arc::clone(&handler_release);
+            async move {
+                if call == 1 {
+                    started.notify_one();
+                    release.notified().await;
+                }
+                full_response(b"ok")
+            }
+        },
+    )
+    .await;
+    let mut first = TcpStream::connect(front_addr).await.unwrap();
+    first
+        .write_all(b"GET /responses HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    first_started.notified().await;
+    let mut second = TcpStream::connect(front_addr).await.unwrap();
+    second
+        .write_all(b"GET /responses HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    release_first.notify_one();
+    let mut first_response = Vec::new();
+    first.read_to_end(&mut first_response).await.unwrap();
+    assert!(first_response.starts_with(b"HTTP/1.1 200"));
+    timeout(Duration::from_secs(1), async {
+        while calls.load(Ordering::SeqCst) != 2 {
+            tokio::task::yield_now().await;
         }
     })
+    .await
+    .unwrap();
+    let mut second_response = Vec::new();
+    second.read_to_end(&mut second_response).await.unwrap();
+    assert!(second_response.starts_with(b"HTTP/1.1 200"));
+    stop_frontend(stop, front).await;
+}
+
+#[tokio::test]
+async fn direct_handler_shutdown_closes_listener_before_draining_response() {
+    let started = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let handler_started = Arc::clone(&started);
+    let handler_release = Arc::clone(&release);
+    let (front_addr, stop, mut front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |config| config.drain_timeout = Duration::from_secs(1),
+        move |_| {
+            let started = Arc::clone(&handler_started);
+            let release = Arc::clone(&handler_release);
+            async move {
+                started.notify_one();
+                release.notified().await;
+                full_response(b"done")
+            }
+        },
+    )
     .await;
-    let (front_addr, stop, mut front) =
-        spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |config| {
-            config.drain_timeout = Duration::from_secs(1)
-        })
-        .await;
     let pending = tokio::spawn(async move {
         request(&test_client(), front_addr, "/responses", Bytes::new()).await
     });
@@ -339,7 +556,6 @@ async fn shutdown_drains_an_inflight_response() {
         .unwrap()
         .unwrap()
         .unwrap();
-    backend.abort();
 }
 
 #[tokio::test]
@@ -382,7 +598,7 @@ async fn websocket_upgrade_tunnels_bytes_until_connection_closes() {
 }
 
 #[tokio::test]
-async fn shutdown_closes_upgrades_before_drain_completes() {
+async fn direct_handler_upgrade_handoff_closes_before_drain_completes() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = listener.local_addr().unwrap();
     let (closed_tx, closed_rx) = oneshot::channel();
@@ -399,8 +615,16 @@ async fn shutdown_closes_upgrades_before_drain_completes() {
         assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
         closed_tx.send(()).unwrap();
     });
-    let (front_addr, stop, mut front) =
-        spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |_| {}).await;
+    let backend_handler = LoopbackBackend::new(backend_addr).unwrap();
+    let (front_addr, stop, mut front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        move |request| {
+            let backend = backend_handler.clone();
+            async move { backend.handle(request).await }
+        },
+    )
+    .await;
     let mut client = TcpStream::connect(front_addr).await.unwrap();
     client
         .write_all(
@@ -464,11 +688,7 @@ async fn spawn_frontend(
     mode: GatewayServerMode,
     backend_addr: std::net::SocketAddr,
     configure: impl FnOnce(&mut GatewayServerConfig),
-) -> (
-    std::net::SocketAddr,
-    oneshot::Sender<()>,
-    JoinHandle<anyhow::Result<()>>,
-) {
+) -> TestFrontend {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let mut config = GatewayServerConfig::production(addr, mode);
@@ -476,9 +696,16 @@ async fn spawn_frontend(
     config.drain_timeout = Duration::from_secs(1);
     configure(&mut config);
     let (stop_tx, stop_rx) = oneshot::channel();
-    let task = tokio::spawn(run(listener, config, backend_addr, async move {
-        stop_rx.await.map_err(anyhow::Error::from)
-    }));
+    let backend = LoopbackBackend::new(backend_addr).unwrap();
+    let task = tokio::spawn(run_with_handler(
+        listener,
+        config,
+        move |request| {
+            let backend = backend.clone();
+            async move { backend.handle(request).await }
+        },
+        async move { stop_rx.await.map_err(anyhow::Error::from) },
+    ));
     (addr, stop_tx, task)
 }
 
