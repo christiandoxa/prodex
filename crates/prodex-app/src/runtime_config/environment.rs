@@ -2,6 +2,7 @@ use super::ConfigError;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 const RUNTIME_CONFIG_ENV_KEYS: &[&str] = &[
     prodex_runtime_policy::PRODEX_RUNTIME_PROXY_PRESET_ENV,
@@ -58,6 +59,12 @@ const RUNTIME_CONFIG_ENV_KEYS: &[&str] = &[
     "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS",
     "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS",
     "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",
+    "PRODEX_GATEWAY_REPLICA_COUNT",
+    "PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS",
+    "HOME",
+    "GEMINI_CLI_HOME",
+    "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+    "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
     "PRODEX_GEMINI_EXTENSION_DIRS",
     "PRODEX_GEMINI_EXTENSIONS",
     "PRODEX_GEMINI_EXPORT_FILE",
@@ -107,6 +114,16 @@ impl RuntimeConfigEnvironment {
 
     pub(super) fn get(&self, key: &'static str) -> Option<&OsString> {
         self.0.get(key).and_then(Option::as_ref)
+    }
+
+    pub(super) fn path(&self, key: &'static str) -> Option<PathBuf> {
+        self.get(key).map(PathBuf::from)
+    }
+
+    pub(super) fn nonempty_path(&self, key: &'static str) -> Option<PathBuf> {
+        self.get(key)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
     }
 }
 
@@ -175,6 +192,46 @@ impl RuntimeConfigParser {
                     message: "must be an unsigned integer",
                 });
                 policy.filter(|value| *value > 0).unwrap_or(default)
+            }
+        }
+    }
+
+    pub(super) fn positive_u16(&mut self, key: &'static str, default: u16) -> u16 {
+        let Some(value) = self.strict_text(key) else {
+            return default;
+        };
+        match value.parse::<u16>() {
+            Ok(value) if value > 0 => value,
+            Ok(_) => {
+                self.errors.push(ConfigError {
+                    key,
+                    message: "must be at least 1",
+                });
+                default
+            }
+            Err(_) => {
+                self.errors.push(ConfigError {
+                    key,
+                    message: "must be a positive integer",
+                });
+                default
+            }
+        }
+    }
+
+    pub(super) fn strict_bool(&mut self, key: &'static str, default: bool) -> bool {
+        let Some(value) = self.strict_text(key) else {
+            return default;
+        };
+        match value.to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => {
+                self.errors.push(ConfigError {
+                    key,
+                    message: "must be one of true,false,1,0,yes,no,on,off",
+                });
+                default
             }
         }
     }

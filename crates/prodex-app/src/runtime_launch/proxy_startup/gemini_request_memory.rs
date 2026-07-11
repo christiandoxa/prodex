@@ -1,7 +1,7 @@
 use super::super::gemini_request_extensions::runtime_gemini_extension_context_files;
 use super::super::gemini_request_io::runtime_gemini_read_text_limited;
+use super::RUNTIME_GEMINI_MEMORY_BYTE_LIMIT;
 use super::gemini_request_util::runtime_gemini_bool_value;
-use super::{RUNTIME_GEMINI_MEMORY_BYTE_LIMIT, runtime_gemini_config_dir};
 use crate::RuntimeGeminiConfig;
 use prodex_provider_core::{
     gemini_provider_core_collect_path_values, gemini_provider_core_truncate_to_bytes,
@@ -17,7 +17,7 @@ pub(super) fn runtime_gemini_hierarchical_memory(
     let mut budget = RUNTIME_GEMINI_MEMORY_BYTE_LIMIT;
     runtime_gemini_collect_inline_memory_sections(original, &mut sections, &mut budget);
     if runtime_gemini_memory_files_enabled_with_config(original, config) {
-        runtime_gemini_collect_standard_memory_files(&mut sections, &mut budget);
+        runtime_gemini_collect_standard_memory_files(config, &mut sections, &mut budget);
     }
     runtime_gemini_collect_extension_memory_files(config, &mut sections, &mut budget);
     (!sections.is_empty()).then(|| sections.join("\n\n"))
@@ -109,8 +109,12 @@ pub(super) fn runtime_gemini_memory_files_enabled(original: &serde_json::Value) 
     runtime_gemini_memory_files_enabled_with_config(original, &config.gemini)
 }
 
-fn runtime_gemini_collect_standard_memory_files(sections: &mut Vec<String>, budget: &mut usize) {
-    if let Some(gemini_home) = runtime_gemini_config_dir() {
+fn runtime_gemini_collect_standard_memory_files(
+    config: &RuntimeGeminiConfig,
+    sections: &mut Vec<String>,
+    budget: &mut usize,
+) {
+    if let Some(gemini_home) = &config.config_dir {
         runtime_gemini_push_memory_file_section(
             "Global",
             &gemini_home.join("GEMINI.md"),

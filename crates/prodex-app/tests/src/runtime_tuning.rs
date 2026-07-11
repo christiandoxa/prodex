@@ -134,6 +134,32 @@ fn runtime_config_aggregates_oidc_timing_errors() {
 }
 
 #[test]
+fn runtime_config_aggregates_gateway_topology_errors() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let values = BTreeMap::from([
+        ("PRODEX_GATEWAY_REPLICA_COUNT", OsString::from("0")),
+        (
+            "PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS",
+            OsString::from("sometimes"),
+        ),
+    ]);
+    let environment = RuntimeConfigEnvironment::read_with(|key| values.get(key).cloned());
+
+    let rendered = RuntimeConfig::from_environment(&paths, environment)
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        rendered,
+        "runtime configuration is invalid; \
+         PRODEX_GATEWAY_REPLICA_COUNT must be at least 1; \
+         PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS must be one of true,false,1,0,yes,no,on,off"
+    );
+    assert!(!rendered.contains("sometimes"));
+}
+
+#[test]
 fn runtime_config_oidc_snapshot_ignores_post_start_environment_changes() {
     let policy_dir = with_test_policy_dir("version = 1\n");
     let paths = test_app_paths(policy_dir.root.clone());
@@ -175,6 +201,16 @@ fn runtime_config_snapshots_gemini_hot_path_environment() {
     let policy_dir = with_test_policy_dir("version = 1\n");
     let paths = test_app_paths(policy_dir.root.clone());
     let values = BTreeMap::from([
+        ("HOME", OsString::from("/tmp/home-a")),
+        ("GEMINI_CLI_HOME", OsString::from("/tmp/gemini-home-a")),
+        (
+            "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+            OsString::from("/tmp/system-a/settings.json"),
+        ),
+        (
+            "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
+            OsString::from("/tmp/system-a/defaults.json"),
+        ),
         (
             "PRODEX_GEMINI_EXTENSION_DIRS",
             std::env::join_paths(["/tmp/extensions-a", "/tmp/extensions-b"]).unwrap(),
@@ -220,6 +256,22 @@ fn runtime_config_snapshots_gemini_hot_path_environment() {
     let config = RuntimeConfig::from_environment(&paths, environment).unwrap();
 
     assert_eq!(
+        config.gemini.home_dir.as_deref(),
+        Some(std::path::Path::new("/tmp/home-a"))
+    );
+    assert_eq!(
+        config.gemini.config_dir.as_deref(),
+        Some(std::path::Path::new("/tmp/gemini-home-a/.gemini"))
+    );
+    assert_eq!(
+        config.gemini.system_settings_path.as_deref(),
+        Some(std::path::Path::new("/tmp/system-a/settings.json"))
+    );
+    assert_eq!(
+        config.gemini.system_defaults_path.as_deref(),
+        Some(std::path::Path::new("/tmp/system-a/defaults.json"))
+    );
+    assert_eq!(
         config.gemini.extension_dirs,
         ["/tmp/extensions-a", "/tmp/extensions-b"]
             .into_iter()
@@ -252,6 +304,78 @@ fn runtime_config_snapshots_gemini_hot_path_environment() {
         Some("gemini-live-test")
     );
     assert!(!config.gemini.sticky_fresh_oauth);
+}
+
+#[test]
+fn runtime_config_gemini_paths_ignore_post_start_environment_changes() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let _home = TestEnvVarGuard::set("HOME", "/tmp/home-before-start");
+    let _gemini_home = TestEnvVarGuard::set("GEMINI_CLI_HOME", "/tmp/gemini-before-start");
+    let _system = TestEnvVarGuard::set(
+        "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+        "/tmp/system-before-start/settings.json",
+    );
+    let _defaults = TestEnvVarGuard::set(
+        "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
+        "/tmp/system-before-start/defaults.json",
+    );
+    let config = RuntimeConfig::from_env_policy_and_cli(&paths).unwrap();
+
+    let _changed_home = TestEnvVarGuard::set("HOME", "/tmp/home-after-start");
+    let _changed_gemini_home = TestEnvVarGuard::set("GEMINI_CLI_HOME", "/tmp/gemini-after-start");
+    let _changed_system = TestEnvVarGuard::set(
+        "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+        "/tmp/system-after-start/settings.json",
+    );
+    let _changed_defaults = TestEnvVarGuard::set(
+        "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
+        "/tmp/system-after-start/defaults.json",
+    );
+
+    assert_eq!(
+        config.gemini.home_dir.as_deref(),
+        Some(std::path::Path::new("/tmp/home-before-start"))
+    );
+    let planned = gemini_settings_source_paths_for_config_home(
+        config.gemini.config_dir.as_deref(),
+        None,
+        config.gemini.system_settings_path.as_deref(),
+        config.gemini.system_defaults_path.as_deref(),
+    );
+    assert_eq!(
+        planned,
+        vec![
+            (
+                "system-defaults".to_string(),
+                PathBuf::from("/tmp/system-before-start/defaults.json"),
+            ),
+            (
+                "global".to_string(),
+                PathBuf::from("/tmp/gemini-before-start/.gemini/settings.json"),
+            ),
+            (
+                "system".to_string(),
+                PathBuf::from("/tmp/system-before-start/settings.json"),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn runtime_config_gateway_topology_ignores_post_start_environment_changes() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let _replicas = TestEnvVarGuard::set("PRODEX_GATEWAY_REPLICA_COUNT", "3");
+    let _gate = TestEnvVarGuard::set("PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS", "true");
+    let config = RuntimeConfig::from_env_policy_and_cli(&paths).unwrap();
+
+    let _changed_replicas = TestEnvVarGuard::set("PRODEX_GATEWAY_REPLICA_COUNT", "1");
+    let _changed_gate =
+        TestEnvVarGuard::set("PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS", "false");
+
+    assert_eq!(config.gateway.replica_count, 3);
+    assert!(config.gateway.require_multi_replica_accounting_checks);
 }
 
 #[test]

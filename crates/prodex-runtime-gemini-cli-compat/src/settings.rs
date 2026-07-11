@@ -59,6 +59,23 @@ pub fn gemini_settings_source_paths_for(
     home: Option<&Path>,
     cwd: Option<&Path>,
 ) -> Vec<(String, PathBuf)> {
+    let config_home = gemini_cli_config_home_for(home);
+    let system_settings = env::var_os("GEMINI_CLI_SYSTEM_SETTINGS_PATH").map(PathBuf::from);
+    let system_defaults = env::var_os("GEMINI_CLI_SYSTEM_DEFAULTS_PATH").map(PathBuf::from);
+    gemini_settings_source_paths_for_config_home(
+        config_home.as_deref(),
+        cwd,
+        system_settings.as_deref(),
+        system_defaults.as_deref(),
+    )
+}
+
+pub fn gemini_settings_source_paths_for_config_home(
+    config_home: Option<&Path>,
+    cwd: Option<&Path>,
+    system_settings: Option<&Path>,
+    system_defaults: Option<&Path>,
+) -> Vec<(String, PathBuf)> {
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
     let mut push_unique = |name: String, path: PathBuf| {
@@ -67,8 +84,17 @@ pub fn gemini_settings_source_paths_for(
             paths.push((name, path));
         }
     };
-    push_unique("system-defaults".to_string(), gemini_system_defaults_path());
-    if let Some(gemini_home) = gemini_cli_config_home_for(home) {
+    let system_settings = system_settings
+        .map(Path::to_path_buf)
+        .unwrap_or_else(gemini_default_system_settings_path);
+    let system_defaults = system_defaults.map(Path::to_path_buf).unwrap_or_else(|| {
+        system_settings
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join("system-defaults.json")
+    });
+    push_unique("system-defaults".to_string(), system_defaults);
+    if let Some(gemini_home) = config_home {
         push_unique("global".to_string(), gemini_home.join("settings.json"));
     }
     if let Some(cwd) = cwd {
@@ -85,14 +111,11 @@ pub fn gemini_settings_source_paths_for(
             cwd.join(".gemini").join("settings.local.json"),
         );
     }
-    push_unique("system".to_string(), gemini_system_settings_path());
+    push_unique("system".to_string(), system_settings);
     paths
 }
 
-fn gemini_system_settings_path() -> PathBuf {
-    if let Some(path) = env::var_os("GEMINI_CLI_SYSTEM_SETTINGS_PATH") {
-        return PathBuf::from(path);
-    }
+fn gemini_default_system_settings_path() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         return PathBuf::from("/Library/Application Support/GeminiCli/settings.json");
@@ -105,16 +128,6 @@ fn gemini_system_settings_path() -> PathBuf {
     {
         PathBuf::from("/etc/gemini-cli/settings.json")
     }
-}
-
-fn gemini_system_defaults_path() -> PathBuf {
-    if let Some(path) = env::var_os("GEMINI_CLI_SYSTEM_DEFAULTS_PATH") {
-        return PathBuf::from(path);
-    }
-    gemini_system_settings_path()
-        .parent()
-        .unwrap_or(Path::new(""))
-        .join("system-defaults.json")
 }
 
 pub fn gemini_cli_config_home_for(home: Option<&Path>) -> Option<PathBuf> {

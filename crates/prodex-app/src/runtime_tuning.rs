@@ -464,6 +464,11 @@ impl RuntimeConfig {
             .filter_map(|key| parser.environment.get(key))
             .map(|value| value.to_string_lossy().into_owned())
             .collect();
+        let gateway = RuntimeGatewayConfig {
+            replica_count: parser.positive_u16("PRODEX_GATEWAY_REPLICA_COUNT", 1),
+            require_multi_replica_accounting_checks: parser
+                .strict_bool("PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS", false),
+        };
         let gemini = Self::parse_gemini(parser);
         Self {
             tuning,
@@ -591,12 +596,21 @@ impl RuntimeConfig {
                     MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
                 )),
             },
+            gateway,
             gemini,
             compatibility_defaults: Vec::new(),
         }
     }
 
     fn parse_gemini(parser: &mut RuntimeConfigParser) -> RuntimeGeminiConfig {
+        let home_dir = parser.environment.nonempty_path("HOME");
+        let config_dir = parser
+            .environment
+            .nonempty_path("GEMINI_CLI_HOME")
+            .map(|path| path.join(".gemini"))
+            .or_else(|| home_dir.as_ref().map(|home| home.join(".gemini")));
+        let system_settings_path = parser.environment.path("GEMINI_CLI_SYSTEM_SETTINGS_PATH");
+        let system_defaults_path = parser.environment.path("GEMINI_CLI_SYSTEM_DEFAULTS_PATH");
         let split_paths = |key| {
             parser
                 .environment
@@ -669,6 +683,10 @@ impl RuntimeConfig {
                 )
             });
         RuntimeGeminiConfig {
+            home_dir,
+            config_dir,
+            system_settings_path,
+            system_defaults_path,
             extension_dirs,
             extension_selection,
             export_checkpoint_path,

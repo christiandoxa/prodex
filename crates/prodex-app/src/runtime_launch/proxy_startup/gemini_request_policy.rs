@@ -1,5 +1,5 @@
 use super::gemini_request::{
-    RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT, runtime_gemini_home_dir,
+    RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT,
 };
 use super::gemini_request_extensions::runtime_gemini_active_extension_manifests;
 use super::gemini_request_io::runtime_gemini_read_text_limited;
@@ -31,7 +31,7 @@ impl RuntimeGeminiPolicyCompat {
         config: &RuntimeGeminiConfig,
     ) -> Self {
         let mut policy = Self::default();
-        for path in runtime_gemini_settings_paths() {
+        for path in runtime_gemini_settings_paths(config) {
             if let Some(text) =
                 runtime_gemini_read_text_limited(&path, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT)
                 && let Some(value) = crate::parse_gemini_settings_json(&text)
@@ -263,18 +263,25 @@ fn runtime_gemini_policy_command_pattern_from_rule(rule: &toml::Value) -> Option
     None
 }
 
-fn runtime_gemini_settings_paths() -> Vec<PathBuf> {
-    runtime_gemini_settings_paths_for(
-        runtime_gemini_home_dir().as_deref(),
+fn runtime_gemini_settings_paths(config: &RuntimeGeminiConfig) -> Vec<PathBuf> {
+    crate::gemini_settings_source_paths_for_config_home(
+        config.config_dir.as_deref(),
         env::current_dir().ok().as_deref(),
+        config.system_settings_path.as_deref(),
+        config.system_defaults_path.as_deref(),
     )
+    .into_iter()
+    .map(|(_, path)| path)
+    .collect()
 }
 
+#[cfg(test)]
 pub(super) fn runtime_gemini_settings_paths_for(
     home: Option<&Path>,
     cwd: Option<&Path>,
 ) -> Vec<PathBuf> {
-    crate::gemini_settings_source_paths_for(home, cwd)
+    let config_home = home.map(|home| home.join(".gemini"));
+    crate::gemini_settings_source_paths_for_config_home(config_home.as_deref(), cwd, None, None)
         .into_iter()
         .map(|(_, path)| path)
         .collect()

@@ -11,6 +11,8 @@ const CONFIG_SRC_DIR = "crates/prodex-config/src";
 const CONFIG_LIB = "crates/prodex-config/src/lib.rs";
 const RUNTIME_CONFIG_ENVIRONMENT = "crates/prodex-app/src/runtime_config/environment.rs";
 const RUNTIME_GEMINI_HOT_PATH_FILES = Object.freeze([
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_util.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_policy.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_extensions.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_memory.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_session.rs",
@@ -21,6 +23,10 @@ const RUNTIME_GEMINI_HOT_PATH_FILES = Object.freeze([
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool.rs",
 ]);
 const RUNTIME_GEMINI_ENV_KEYS = Object.freeze([
+  "HOME",
+  "GEMINI_CLI_HOME",
+  "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+  "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
   "PRODEX_GEMINI_EXTENSION_DIRS",
   "PRODEX_GEMINI_EXTENSIONS",
   "PRODEX_GEMINI_EXPORT_FILE",
@@ -38,6 +44,20 @@ const RUNTIME_GEMINI_ENV_KEYS = Object.freeze([
   "PRODEX_GEMINI_LIVE_URL",
   "PRODEX_GEMINI_LIVE_MODEL",
   "PRODEX_GEMINI_STICKY_FRESH_OAUTH",
+]);
+const RUNTIME_GEMINI_POLICY =
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_policy.rs";
+const RUNTIME_GATEWAY_TOPOLOGY_HOT_PATH_FILES = Object.freeze([
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_state_store_config.rs",
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_startup.rs",
+]);
+const RUNTIME_GATEWAY_TOPOLOGY =
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_state_store_config.rs";
+const RUNTIME_GATEWAY_STARTUP =
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_startup.rs";
+const RUNTIME_GATEWAY_TOPOLOGY_ENV_KEYS = Object.freeze([
+  "PRODEX_GATEWAY_REPLICA_COUNT",
+  "PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS",
 ]);
 const RUNTIME_OIDC_HOT_PATH_FILES = Object.freeze([
   "crates/prodex-app/src/app_commands/runtime_launch/gateway_sso_config.rs",
@@ -229,12 +249,29 @@ function validateRuntimeSnapshotBoundary(environmentSource, hotPathSources, envi
 }
 
 export function validateRuntimeGeminiConfigBoundary(environmentSource, hotPathSources) {
-  return validateRuntimeSnapshotBoundary(
+  const errors = validateRuntimeSnapshotBoundary(
     environmentSource,
     hotPathSources,
     RUNTIME_GEMINI_ENV_KEYS,
     "runtime Gemini",
   );
+  const policy = hotPathSources.find(([file]) => file === RUNTIME_GEMINI_POLICY)?.[1] ?? "";
+  if (!policy.includes("gemini_settings_source_paths_for_config_home(")) {
+    errors.push(`${RUNTIME_GEMINI_POLICY}: Gemini policy must use the explicit pure settings path planner`);
+  }
+  if (/\bgemini_settings_source_paths_for\s*\(/u.test(policy)) {
+    errors.push(`${RUNTIME_GEMINI_POLICY}: Gemini policy must not call the environment-reading compatibility planner`);
+  }
+  for (const field of [
+    "config.config_dir",
+    "config.system_defaults_path",
+    "config.system_settings_path",
+  ]) {
+    if (!policy.includes(field)) {
+      errors.push(`${RUNTIME_GEMINI_POLICY}: Gemini policy must consume snapshotted ${field}`);
+    }
+  }
+  return errors;
 }
 
 export function validateRuntimeOidcConfigBoundary(environmentSource, hotPathSources) {
@@ -244,6 +281,40 @@ export function validateRuntimeOidcConfigBoundary(environmentSource, hotPathSour
     RUNTIME_OIDC_ENV_KEYS,
     "runtime OIDC",
   );
+}
+
+export function validateRuntimeGatewayTopologyConfigBoundary(environmentSource, hotPathSources) {
+  const errors = [];
+  for (const key of RUNTIME_GATEWAY_TOPOLOGY_ENV_KEYS) {
+    const count = environmentSource.split(`"${key}"`).length - 1;
+    if (count !== 1) {
+      errors.push(`${RUNTIME_CONFIG_ENVIRONMENT}: expected exactly one startup read entry for ${key}, found ${count}`);
+    }
+    for (const [file, source] of hotPathSources) {
+      if (source.includes(`"${key}"`)) {
+        errors.push(`${file}: runtime gateway topology must use RuntimeConfig, not ${key}`);
+      }
+    }
+  }
+  const topology = hotPathSources.find(([file]) => file === RUNTIME_GATEWAY_TOPOLOGY)?.[1] ?? "";
+  for (const field of [
+    "config.replica_count",
+    "config.require_multi_replica_accounting_checks",
+  ]) {
+    if (!topology.includes(field)) {
+      errors.push(`${RUNTIME_GATEWAY_TOPOLOGY}: gateway topology must consume ${field}`);
+    }
+  }
+  const startup = hotPathSources.find(([file]) => file === RUNTIME_GATEWAY_STARTUP)?.[1] ?? "";
+  const snapshot = startup.indexOf("RuntimeConfig::from_env_policy_and_cli(&paths)");
+  const resolution = startup.indexOf("resolve_gateway_launch_config_with_runtime_config(");
+  if (snapshot < 0 || resolution < 0 || snapshot >= resolution) {
+    errors.push(`${RUNTIME_GATEWAY_STARTUP}: RuntimeConfig snapshot must precede gateway config resolution`);
+  }
+  if ((startup.match(/Arc::clone\(&runtime_config\)/gu) ?? []).length < 2) {
+    errors.push(`${RUNTIME_GATEWAY_STARTUP}: refresh and proxy workers must share the gateway RuntimeConfig Arc`);
+  }
+  return errors;
 }
 
 async function rustFilesUnder(dir) {
@@ -285,6 +356,17 @@ async function validateRuntimeOidcConfigSources() {
     RUNTIME_OIDC_HOT_PATH_FILES.map(async (file) => [file, await fs.readFile(path.join(repoRoot, file), "utf8")]),
   );
   return validateRuntimeOidcConfigBoundary(environmentSource, hotPathSources);
+}
+
+async function validateRuntimeGatewayTopologyConfigSources() {
+  const environmentSource = await fs.readFile(path.join(repoRoot, RUNTIME_CONFIG_ENVIRONMENT), "utf8");
+  const hotPathSources = await Promise.all(
+    RUNTIME_GATEWAY_TOPOLOGY_HOT_PATH_FILES.map(async (file) => [
+      file,
+      await fs.readFile(path.join(repoRoot, file), "utf8"),
+    ]),
+  );
+  return validateRuntimeGatewayTopologyConfigBoundary(environmentSource, hotPathSources);
 }
 
 function assertSelfTest(condition, message) {
@@ -415,21 +497,37 @@ message: "configuration is not currently available"
     "missing config unsafe forbid accepted",
   );
   const runtimeEnvironment = RUNTIME_GEMINI_ENV_KEYS.map((key) => `"${key}",`).join("\n");
+  const geminiPolicy = `gemini_settings_source_paths_for_config_home(
+    config.config_dir,
+    config.system_settings_path,
+    config.system_defaults_path,
+  );`;
   assertSelfTest(
-    validateRuntimeGeminiConfigBoundary(runtimeEnvironment, [["good.rs", "env::current_dir();"]]).length === 0,
+    validateRuntimeGeminiConfigBoundary(runtimeEnvironment, [
+      [RUNTIME_GEMINI_POLICY, geminiPolicy],
+      ["good.rs", "env::current_dir();"],
+    ]).length === 0,
     "typed Gemini runtime config rejected",
   );
   assertSelfTest(
-    validateRuntimeGeminiConfigBoundary(runtimeEnvironment, [["bad.rs", "let value = std::env::var(\"KEY\");"]]).some(
-      (error) => error.includes("RuntimeConfig"),
-    ),
+    validateRuntimeGeminiConfigBoundary(runtimeEnvironment, [
+      [RUNTIME_GEMINI_POLICY, geminiPolicy],
+      ["bad.rs", "let value = std::env::var(\"KEY\");"],
+    ]).some((error) => error.includes("RuntimeConfig")),
     "Gemini request-path environment read accepted",
   );
   assertSelfTest(
-    validateRuntimeGeminiConfigBoundary(runtimeEnvironment.replace('"PRODEX_GEMINI_LIVE_MODEL",', ""), []).some(
-      (error) => error.includes("PRODEX_GEMINI_LIVE_MODEL"),
-    ),
+    validateRuntimeGeminiConfigBoundary(
+      runtimeEnvironment.replace('"PRODEX_GEMINI_LIVE_MODEL",', ""),
+      [[RUNTIME_GEMINI_POLICY, geminiPolicy]],
+    ).some((error) => error.includes("PRODEX_GEMINI_LIVE_MODEL")),
     "missing Gemini startup key accepted",
+  );
+  assertSelfTest(
+    validateRuntimeGeminiConfigBoundary(runtimeEnvironment, [
+      [RUNTIME_GEMINI_POLICY, `${geminiPolicy}\ngemini_settings_source_paths_for(home, cwd);`],
+    ]).some((error) => error.includes("compatibility planner")),
+    "environment-reading Gemini compatibility planner accepted in request path",
   );
   const oidcEnvironment = RUNTIME_OIDC_ENV_KEYS.map((key) => `"${key}",`).join("\n");
   assertSelfTest(
@@ -449,6 +547,29 @@ message: "configuration is not currently available"
     ).some((error) => error.includes("PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS")),
     "missing OIDC startup key accepted",
   );
+  const topologyEnvironment = RUNTIME_GATEWAY_TOPOLOGY_ENV_KEYS.map((key) => `"${key}",`).join("\n");
+  const topologySource =
+    "let replicas = config.replica_count; let gate = config.require_multi_replica_accounting_checks;";
+  const gatewayStartupSource = `
+    let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(&paths));
+    resolve_gateway_launch_config_with_runtime_config();
+    let refresh_runtime_config = Arc::clone(&runtime_config);
+    start_runtime_gateway_rewrite_proxy_with_runtime_config(Arc::clone(&runtime_config));`;
+  const topologyHotPaths = [
+    [RUNTIME_GATEWAY_TOPOLOGY, topologySource],
+    [RUNTIME_GATEWAY_STARTUP, gatewayStartupSource],
+  ];
+  assertSelfTest(
+    validateRuntimeGatewayTopologyConfigBoundary(topologyEnvironment, topologyHotPaths).length === 0,
+    "typed gateway topology config rejected",
+  );
+  assertSelfTest(
+    validateRuntimeGatewayTopologyConfigBoundary(topologyEnvironment, [
+      [RUNTIME_GATEWAY_TOPOLOGY, `${topologySource} env::var(\"PRODEX_GATEWAY_REPLICA_COUNT\");`],
+      [RUNTIME_GATEWAY_STARTUP, gatewayStartupSource],
+    ]).some((error) => error.includes("must use RuntimeConfig")),
+    "gateway topology environment read accepted",
+  );
 }
 
 async function main() {
@@ -462,6 +583,7 @@ async function main() {
     ...(await validateConfigSources()),
     ...(await validateRuntimeGeminiConfigSources()),
     ...(await validateRuntimeOidcConfigSources()),
+    ...(await validateRuntimeGatewayTopologyConfigSources()),
   ];
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);

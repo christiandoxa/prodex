@@ -216,7 +216,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-    "maxLines": 860,
+    "maxLines": 859,
     "reason": "Gemini request translation remains capped while multimodal and tool request fixtures are split by protocol concern."
   },
   {
