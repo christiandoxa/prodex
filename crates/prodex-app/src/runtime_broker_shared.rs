@@ -27,6 +27,12 @@ pub(super) fn save_runtime_broker_test_capability(
     instance_id: &str,
     value: &str,
 ) {
+    fs::create_dir_all(&paths.root).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&paths.root, fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let secret = prodex_runtime_broker::RuntimeBrokerSecret::new(value).unwrap();
     crate::save_runtime_broker_capability(paths, broker_key, instance_id, &secret).unwrap();
 }

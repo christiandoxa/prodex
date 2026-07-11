@@ -424,7 +424,7 @@ fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
                 "private secret is not owned by this user",
             ));
         }
-    } else if !principal_is_private(owner, user.sid())? {
+    } else if !principal_is_trusted(owner, user.sid(), usage)? {
         return Err(permission_denied("secret object owner is not trusted"));
     }
 
@@ -466,7 +466,7 @@ fn validate_acl(file: &File, usage: AclUse) -> io::Result<()> {
             continue;
         }
         let sid = std::ptr::addr_of!(allowed.SidStart).cast_mut().cast();
-        if !principal_is_private(sid, user.sid())? {
+        if !principal_is_trusted(sid, user.sid(), usage)? {
             return Err(permission_denied(
                 "secret object grants sensitive access to an untrusted principal",
             ));
@@ -500,10 +500,12 @@ fn sensitive_access(usage: AclUse) -> u32 {
     }
 }
 
-fn principal_is_private(candidate: PSID, user: PSID) -> io::Result<bool> {
+fn principal_is_trusted(candidate: PSID, user: PSID, usage: AclUse) -> io::Result<bool> {
     // SAFETY: both SID pointers come from validated Windows security structures.
-    if unsafe { EqualSid(candidate, user) } != 0
-        || is_well_known(candidate, WinLocalSystemSid)
+    if unsafe { EqualSid(candidate, user) } != 0 {
+        return Ok(true);
+    }
+    if is_well_known(candidate, WinLocalSystemSid)
         || is_well_known(candidate, WinBuiltinAdministratorsSid)
     {
         return Ok(true);
@@ -518,6 +520,9 @@ fn principal_is_private(candidate: PSID, user: PSID) -> io::Result<bool> {
     .into_iter()
     .any(|kind| is_well_known(candidate, kind))
     {
+        return Ok(false);
+    }
+    if !matches!(usage, AclUse::ProjectedFile) {
         return Ok(false);
     }
     let mut member = 0;
@@ -628,6 +633,9 @@ fn permission_denied(message: &'static str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows_sys::Win32::Security::{
+        CreateWellKnownSid, SECURITY_MAX_SID_SIZE, WinInteractiveSid,
+    };
 
     #[test]
     fn private_acl_round_trip_is_handle_verified() {
@@ -641,5 +649,88 @@ mod tests {
         validate_acl(&file, AclUse::PrivateFile).unwrap();
         drop(file);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn private_acl_rejects_sensitive_access_for_a_process_group() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-secret-windows-group-acl-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let directory = Directory::open_path(&root, false).unwrap();
+        let file = directory
+            .create_private_file(OsStr::new("private.tmp"))
+            .unwrap();
+        let user = CurrentUserSid::load().unwrap();
+        let mut group_storage =
+            vec![0usize; (SECURITY_MAX_SID_SIZE as usize).div_ceil(size_of::<usize>())];
+        let mut group_len = SECURITY_MAX_SID_SIZE;
+        // SAFETY: the aligned buffer contains `SECURITY_MAX_SID_SIZE` writable
+        // bytes and remains live while its SID is added to the ACL.
+        assert_ne!(
+            unsafe {
+                CreateWellKnownSid(
+                    WinInteractiveSid,
+                    std::ptr::null_mut(),
+                    group_storage.as_mut_ptr().cast(),
+                    &mut group_len,
+                )
+            },
+            0
+        );
+        let group = group_storage.as_mut_ptr().cast();
+        set_test_acl_with_group(&file, user.sid(), group);
+
+        let error = validate_acl(&file, AclUse::PrivateFile).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+
+        drop(file);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn set_test_acl_with_group(file: &File, user: PSID, group: PSID) {
+        // SAFETY: both SIDs point into live aligned buffers owned by the caller.
+        let user_len = unsafe { GetLengthSid(user) };
+        // SAFETY: same as above.
+        let group_len = unsafe { GetLengthSid(group) };
+        let acl_len = size_of::<ACL>()
+            + 2 * (size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>())
+            + usize::try_from(user_len).unwrap_or(0)
+            + usize::try_from(group_len).unwrap_or(0);
+        let mut storage = vec![0usize; acl_len.div_ceil(size_of::<usize>())];
+        let acl = storage.as_mut_ptr().cast::<ACL>();
+        // SAFETY: `storage` is aligned and large enough for both allow ACEs;
+        // the SIDs and file handle remain live for the complete operation.
+        unsafe {
+            assert_ne!(
+                InitializeAcl(
+                    acl,
+                    u32::try_from(acl_len).unwrap_or(u32::MAX),
+                    ACL_REVISION,
+                ),
+                0
+            );
+            assert_ne!(
+                AddAccessAllowedAceEx(acl, ACL_REVISION, 0, FILE_ALL_ACCESS, user),
+                0
+            );
+            assert_ne!(
+                AddAccessAllowedAceEx(acl, ACL_REVISION, 0, FILE_GENERIC_READ, group),
+                0
+            );
+            assert_eq!(
+                SetSecurityInfo(
+                    file.as_raw_handle().cast(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    acl,
+                    std::ptr::null_mut(),
+                ),
+                ERROR_SUCCESS
+            );
+        }
     }
 }
