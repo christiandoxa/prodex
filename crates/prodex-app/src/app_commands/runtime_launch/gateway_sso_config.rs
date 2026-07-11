@@ -2,17 +2,6 @@ use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
 use prodex_authn::{OidcEndpointPolicy, ValidatedOidcIssuer};
 use prodex_domain::SecretPurpose;
-use std::env;
-
-const PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV: &str = "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS";
-const PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV: &str = "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS";
-const PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV: &str =
-    "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS";
-const PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV: &str = "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS";
-const MAX_PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS: u64 = 10_000;
-const MAX_PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 86_400;
-const MAX_PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 3_600_000;
-const MAX_PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 604_800;
 
 #[cfg(test)]
 pub(crate) fn gateway_sso_config(
@@ -42,9 +31,6 @@ pub(crate) fn gateway_sso_config_with_resolver(
         .as_deref()
         .map(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token);
     let oidc = gateway_sso_oidc_config(policy)?;
-    if oidc.is_some() {
-        gateway_validate_oidc_runtime_env()?;
-    }
     Ok(RuntimeGatewaySsoConfig {
         proxy_token_hash,
         require_tenant: policy.sso.require_tenant.unwrap_or(false),
@@ -75,51 +61,6 @@ pub(crate) fn gateway_sso_config_with_resolver(
         )?,
         oidc,
     })
-}
-
-fn gateway_validate_oidc_runtime_env() -> Result<()> {
-    gateway_validate_oidc_duration_env(
-        PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV,
-        false,
-        MAX_PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
-    )?;
-    gateway_validate_oidc_duration_env(
-        PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV,
-        true,
-        MAX_PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
-    )?;
-    gateway_validate_oidc_duration_env(
-        PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV,
-        false,
-        MAX_PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
-    )?;
-    gateway_validate_oidc_duration_env(
-        PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV,
-        true,
-        MAX_PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
-    )
-}
-
-fn gateway_validate_oidc_duration_env(env_name: &str, allow_zero: bool, max: u64) -> Result<()> {
-    let Ok(value) = env::var(env_name) else {
-        return Ok(());
-    };
-    if value.is_empty() {
-        bail!("{env_name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{env_name} must not contain whitespace");
-    }
-    let parsed = value
-        .parse::<u64>()
-        .with_context(|| format!("{env_name} must be an unsigned integer"))?;
-    if !allow_zero && parsed == 0 {
-        bail!("{env_name} must be greater than zero");
-    }
-    if parsed > max {
-        bail!("{env_name} must not exceed {max}");
-    }
-    Ok(())
 }
 
 fn gateway_sso_oidc_config(
@@ -221,47 +162,8 @@ mod tests {
     }
 
     #[test]
-    fn gateway_sso_config_rejects_invalid_oidc_runtime_env_values() {
-        for (env_name, value, message) in [
-            (
-                PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV,
-                "",
-                "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS cannot be empty",
-            ),
-            (
-                PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV,
-                " 25 ",
-                "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS must not contain whitespace",
-            ),
-            (
-                PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV,
-                "not-a-number",
-                "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS must be an unsigned integer",
-            ),
-            (
-                PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV,
-                "0",
-                "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS must be greater than zero",
-            ),
-        ] {
-            let _prefetch = TestEnvVarGuard::unset(PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV);
-            let _ttl = TestEnvVarGuard::unset(PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV);
-            let _backoff = TestEnvVarGuard::unset(PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV);
-            let _lkg = TestEnvVarGuard::unset(PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV);
-            let _target = TestEnvVarGuard::set(env_name, value);
-
-            let err = gateway_sso_config(&gateway_oidc_policy()).unwrap_err();
-
-            assert!(err.to_string().contains(message));
-        }
-    }
-
-    #[test]
-    fn gateway_sso_config_accepts_valid_oidc_runtime_env_values() {
-        let _prefetch = TestEnvVarGuard::set(PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV, "1");
-        let _ttl = TestEnvVarGuard::set(PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV, "0");
-        let _backoff = TestEnvVarGuard::set(PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV, "1");
-        let _lkg = TestEnvVarGuard::set(PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV, "0");
+    fn gateway_sso_config_does_not_reread_runtime_timing_environment() {
+        let _prefetch = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS", "invalid");
 
         assert!(
             gateway_sso_config(&gateway_oidc_policy())
@@ -300,13 +202,6 @@ mod tests {
             let error = gateway_sso_config(&policy).unwrap_err();
             assert!(error.to_string().contains("gateway.sso.oidc_jwks_url"));
         }
-    }
-
-    #[test]
-    fn gateway_sso_config_bounds_oidc_runtime_durations() {
-        let _prefetch = TestEnvVarGuard::set(PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV, "10001");
-        let error = gateway_sso_config(&gateway_oidc_policy()).unwrap_err();
-        assert!(error.to_string().contains("must not exceed"));
     }
 
     #[test]

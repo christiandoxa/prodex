@@ -179,6 +179,42 @@ impl RuntimeConfigParser {
         }
     }
 
+    pub(super) fn bounded_u64(
+        &mut self,
+        key: &'static str,
+        default: u64,
+        allow_zero: bool,
+        maximum: u64,
+    ) -> u64 {
+        let Some(value) = self.strict_text(key) else {
+            return default;
+        };
+        match value.parse::<u64>() {
+            Ok(value) if !allow_zero && value == 0 => {
+                self.errors.push(ConfigError {
+                    key,
+                    message: "must be greater than zero",
+                });
+                default
+            }
+            Ok(value) if value > maximum => {
+                self.errors.push(ConfigError {
+                    key,
+                    message: "must not exceed maximum",
+                });
+                default
+            }
+            Ok(value) => value,
+            Err(_) => {
+                self.errors.push(ConfigError {
+                    key,
+                    message: "must be an unsigned integer",
+                });
+                default
+            }
+        }
+    }
+
     pub(super) fn positive_usize(
         &mut self,
         key: &'static str,

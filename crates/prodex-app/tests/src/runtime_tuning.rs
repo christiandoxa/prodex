@@ -94,6 +94,83 @@ fn runtime_config_aggregates_errors_without_values() {
 }
 
 #[test]
+fn runtime_config_aggregates_oidc_timing_errors() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let values = BTreeMap::from([
+        (
+            "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS",
+            OsString::from("0"),
+        ),
+        (
+            "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS",
+            OsString::from(" 250 "),
+        ),
+        (
+            "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS",
+            OsString::from("credential-secret"),
+        ),
+        (
+            "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",
+            OsString::from("604801"),
+        ),
+    ]);
+    let environment = RuntimeConfigEnvironment::read_with(|key| values.get(key).cloned());
+
+    let rendered = RuntimeConfig::from_environment(&paths, environment)
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        rendered,
+        "runtime configuration is invalid; \
+         PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS must be greater than zero; \
+         PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS must not contain whitespace; \
+         PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS must be an unsigned integer; \
+         PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS must not exceed maximum"
+    );
+    assert!(!rendered.contains("credential-secret"));
+    assert!(!rendered.contains("604801"));
+}
+
+#[test]
+fn runtime_config_oidc_snapshot_ignores_post_start_environment_changes() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let _prefetch = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS", "125");
+    let _cache = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS", "250");
+    let _backoff = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS", "375");
+    let _last_known_good =
+        TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS", "500");
+
+    let config = RuntimeConfig::from_env_policy_and_cli(&paths).unwrap();
+
+    let _changed_prefetch = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS", "625");
+    let _changed_cache = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS", "750");
+    let _changed_backoff =
+        TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS", "875");
+    let _changed_last_known_good =
+        TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS", "1000");
+
+    assert_eq!(
+        config.oidc.prefetch_timeout,
+        std::time::Duration::from_millis(125)
+    );
+    assert_eq!(
+        config.oidc.http_cache_ttl,
+        std::time::Duration::from_secs(250)
+    );
+    assert_eq!(
+        config.oidc.refresh_failure_backoff,
+        std::time::Duration::from_millis(375)
+    );
+    assert_eq!(
+        config.oidc.last_known_good_window,
+        std::time::Duration::from_secs(500)
+    );
+}
+
+#[test]
 fn runtime_config_snapshots_gemini_hot_path_environment() {
     let policy_dir = with_test_policy_dir("version = 1\n");
     let paths = test_app_paths(policy_dir.root.clone());
