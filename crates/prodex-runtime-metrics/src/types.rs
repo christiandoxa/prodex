@@ -77,6 +77,8 @@ pub struct RuntimeBrokerSnapshot {
     pub active_request_limit: u64,
     pub local_overload_backoff_remaining_seconds: u64,
     pub runtime_state_lock_wait: RuntimeBrokerStateLockWaitMetrics,
+    pub admission_wait: RuntimeBrokerWaitDurationMetrics,
+    pub long_lived_queue_wait: RuntimeBrokerWaitDurationMetrics,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: BTreeMap<String, u64>,
     pub active_request_release_underflows_total: u64,
@@ -94,11 +96,14 @@ pub struct RuntimeBrokerSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct RuntimeBrokerStateLockWaitMetrics {
+pub struct RuntimeBrokerWaitDurationMetrics {
     pub wait_total_ns: u64,
     pub wait_count: u64,
     pub wait_max_ns: u64,
 }
+
+/// Compatibility name retained for runtime-state lock metric snapshots.
+pub type RuntimeBrokerStateLockWaitMetrics = RuntimeBrokerWaitDurationMetrics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrometheusTextOptions {

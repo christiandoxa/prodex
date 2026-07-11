@@ -70,6 +70,36 @@ impl<'a> RuntimeBrokerPrometheusRenderer<'a> {
             "Maximum observed wait for the runtime state lock.",
             self.snapshot.runtime_state_lock_wait.wait_max_ns as f64 / 1_000_000_000.0,
         );
+        self.render_broker_counter(
+            "prodex_runtime_broker_admission_wait_total_seconds",
+            "Cumulative time spent waiting for runtime proxy admission.",
+            self.snapshot.admission_wait.wait_total_ns as f64 / 1_000_000_000.0,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_admission_waits_total",
+            "Cumulative runtime proxy admission waits.",
+            self.snapshot.admission_wait.wait_count as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_admission_wait_max_seconds",
+            "Maximum observed runtime proxy admission wait.",
+            self.snapshot.admission_wait.wait_max_ns as f64 / 1_000_000_000.0,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_long_lived_queue_wait_total_seconds",
+            "Cumulative time spent waiting for long-lived request queue capacity.",
+            self.snapshot.long_lived_queue_wait.wait_total_ns as f64 / 1_000_000_000.0,
+        );
+        self.render_broker_counter(
+            "prodex_runtime_broker_long_lived_queue_waits_total",
+            "Cumulative long-lived request queue waits.",
+            self.snapshot.long_lived_queue_wait.wait_count as f64,
+        );
+        self.render_broker_gauge(
+            "prodex_runtime_broker_long_lived_queue_wait_max_seconds",
+            "Maximum observed long-lived request queue wait.",
+            self.snapshot.long_lived_queue_wait.wait_max_ns as f64 / 1_000_000_000.0,
+        );
         self.render_guard_counters();
         self.render_broker_gauge(
             "prodex_runtime_broker_retry_backoffs",

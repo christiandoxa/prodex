@@ -338,7 +338,7 @@ function selfTestScenarios(scenarios) {
   );
   assert.throws(() => clientConfig({ client: { readDelayMs: MAX_CLIENT_READ_DELAY_MS + 1 } }, {}));
   assert.deepEqual(
-    lockWaitEvidence(
+    waitDurationEvidence(
       { waitTotalNs: 100, waitCount: 2, waitMaxNs: 80 },
       { waitTotalNs: 175, waitCount: 5, waitMaxNs: 90 },
       true,
@@ -347,9 +347,35 @@ function selfTestScenarios(scenarios) {
       status: "captured",
       start: { waitTotalNs: 100, waitCount: 2, waitMaxNs: 80 },
       end: { waitTotalNs: 175, waitCount: 5, waitMaxNs: 90 },
-      delta: { waitTotalNs: 75, waitCount: 3 },
+      delta: { waitTotalNs: 75, waitCount: 3, waitMaxNs: 90, waitMeanNs: 25 },
     },
   );
+  const performance = performanceEvidence(
+    true,
+    {
+      admissionWait: { waitTotalNs: 10, waitCount: 1, waitMaxNs: 10 },
+      longLivedQueueWait: { waitTotalNs: 20, waitCount: 2, waitMaxNs: 12 },
+      runtimeStateLockWait: { waitTotalNs: 30, waitCount: 3, waitMaxNs: 15 },
+    },
+    {
+      admissionWait: { waitTotalNs: 50, waitCount: 3, waitMaxNs: 25 },
+      longLivedQueueWait: { waitTotalNs: 70, waitCount: 4, waitMaxNs: 30 },
+      runtimeStateLockWait: { waitTotalNs: 90, waitCount: 6, waitMaxNs: 35 },
+    },
+  );
+  assert.equal(performance.allocationPerRequest.status, "unsupported");
+  assert.deepEqual(performance.admissionWait.delta, {
+    waitTotalNs: 40,
+    waitCount: 2,
+    waitMaxNs: 25,
+    waitMeanNs: 20,
+  });
+  assert.deepEqual(performance.longLivedQueueWait.delta, {
+    waitTotalNs: 50,
+    waitCount: 2,
+    waitMaxNs: 30,
+    waitMeanNs: 25,
+  });
 }
 
 function routeForRequest(scenario, args, id) {
@@ -514,7 +540,7 @@ async function scanPressureMarkers(args) {
   };
 }
 
-function lockWaitEvidence(start, end, proxyStarted) {
+function waitDurationEvidence(start, end, proxyStarted) {
   if (!proxyStarted) {
     return { status: "not_captured", reason: "runtime broker was not launched by the harness" };
   }
@@ -522,20 +548,44 @@ function lockWaitEvidence(start, end, proxyStarted) {
     return { status: "not_captured", reason: "read-only broker metrics were unavailable" };
   }
   if (end.waitTotalNs < start.waitTotalNs || end.waitCount < start.waitCount) {
-    return { status: "not_captured", reason: "broker lock-wait counters reset during the run" };
+    return {
+      status: "not_captured",
+      reason: "broker wait-duration counters reset during the run",
+    };
   }
+  const waitTotalNs = end.waitTotalNs - start.waitTotalNs;
+  const waitCount = end.waitCount - start.waitCount;
   return {
     status: "captured",
     start,
     end,
     delta: {
-      waitTotalNs: end.waitTotalNs - start.waitTotalNs,
-      waitCount: end.waitCount - start.waitCount,
+      waitTotalNs,
+      waitCount,
+      waitMaxNs: end.waitMaxNs,
+      waitMeanNs: waitCount > 0 ? round(waitTotalNs / waitCount) : 0,
     },
   };
 }
 
-async function readBrokerLockWait(proxy) {
+function brokerWaitDuration(metrics, field) {
+  const wait = metrics[field];
+  if (
+    !wait ||
+    ![wait.wait_total_ns, wait.wait_count, wait.wait_max_ns].every(
+      (value) => Number.isSafeInteger(value) && value >= 0,
+    )
+  ) {
+    return null;
+  }
+  return {
+    waitTotalNs: wait.wait_total_ns,
+    waitCount: wait.wait_count,
+    waitMaxNs: wait.wait_max_ns,
+  };
+}
+
+async function readBrokerWaitDurations(proxy) {
   if (!proxy) return null;
   try {
     const response = await fetch(`${proxy.root}${BROKER_METRICS_PATH}`, {
@@ -543,36 +593,37 @@ async function readBrokerLockWait(proxy) {
     });
     if (!response.ok) return null;
     const metrics = await response.json();
-    const lockWait = metrics.runtime_state_lock_wait;
-    if (
-      !lockWait ||
-      ![lockWait.wait_total_ns, lockWait.wait_count, lockWait.wait_max_ns].every(
-        (value) => Number.isSafeInteger(value) && value >= 0,
-      )
-    ) {
-      return null;
-    }
     return {
-      waitTotalNs: lockWait.wait_total_ns,
-      waitCount: lockWait.wait_count,
-      waitMaxNs: lockWait.wait_max_ns,
+      admissionWait: brokerWaitDuration(metrics, "admission_wait"),
+      longLivedQueueWait: brokerWaitDuration(metrics, "long_lived_queue_wait"),
+      runtimeStateLockWait: brokerWaitDuration(metrics, "runtime_state_lock_wait"),
     };
   } catch {
     return null;
   }
 }
 
-function performanceEvidence(proxyStarted, lockWaitStart, lockWaitEnd) {
+function performanceEvidence(proxyStarted, waitStart, waitEnd) {
   return {
     allocationPerRequest: {
       status: "unsupported",
       reason: "the harness has no allocation counter",
     },
-    queueWait: {
-      status: "unsupported",
-      reason: "runtime logs do not capture every successful queue wait",
-    },
-    runtimeStateLockWait: lockWaitEvidence(lockWaitStart, lockWaitEnd, proxyStarted),
+    admissionWait: waitDurationEvidence(
+      waitStart?.admissionWait,
+      waitEnd?.admissionWait,
+      proxyStarted,
+    ),
+    longLivedQueueWait: waitDurationEvidence(
+      waitStart?.longLivedQueueWait,
+      waitEnd?.longLivedQueueWait,
+      proxyStarted,
+    ),
+    runtimeStateLockWait: waitDurationEvidence(
+      waitStart?.runtimeStateLockWait,
+      waitEnd?.runtimeStateLockWait,
+      proxyStarted,
+    ),
   };
 }
 
@@ -842,7 +893,7 @@ async function main() {
     if (!target) {
       throw new Error("target required: pass --target or --start-mock");
     }
-    const lockWaitStart = await readBrokerLockWait(proxy);
+    const waitStart = await readBrokerWaitDurations(proxy);
 
     const stages = [];
     const state = { sequence: 0 };
@@ -853,7 +904,7 @@ async function main() {
       stages.push(await runStage(stage, scenario, args, target, state));
     }
     const results = stages.flatMap((stage) => stage.results);
-    const lockWaitEnd = await readBrokerLockWait(proxy);
+    const waitEnd = await readBrokerWaitDurations(proxy);
     const pressureMarkers = await scanPressureMarkers(args);
     const summary = summarize(results, pressureMarkers);
     const thresholds = thresholdsFor(scenario, args);
@@ -864,7 +915,7 @@ async function main() {
       runtimeLogDir: proxy?.runtimeLogDir ?? args.runtimeLogDir,
       stages,
       summary,
-      evidence: performanceEvidence(Boolean(proxy), lockWaitStart, lockWaitEnd),
+      evidence: performanceEvidence(Boolean(proxy), waitStart, waitEnd),
       thresholds,
       failures,
     };

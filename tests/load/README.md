@@ -21,13 +21,16 @@ npm run load:runtime-proxy -- --scenario long-stream --dry-run
 The driver reports request error rate, TTFT percentiles, latency percentiles, status mix, route mix, and admission-pressure evidence from local responses plus runtime log markers when `--runtime-log-dir` or `--start-proxy` is used. The slow-client case delays response-body reads, slow-upstream delays every first byte and chunk, and long-stream emits 64 ordered output deltas. Scenario validation caps concurrency, duration/request count, delays, per-request timeout, chunk count, chunk size, and total mock stream bytes.
 
 Every summary also reports `performance_evidence`. Allocation/request is
-unsupported because the harness has no allocation counter. Queue-wait duration
-is unsupported because runtime logs do not record every successful wait, so
-pressure-marker counts are not presented as queue latency. With `--start-proxy`,
-the harness reads the existing authenticated broker metrics endpoint before and
-after the load and reports cumulative runtime-state lock-wait snapshots plus the
-total-wait/count delta. That delta is process-level and includes the final
-read-only metrics snapshot; it is not a per-request lock-wait distribution.
+unsupported because the harness has no allocation counter. With `--start-proxy`,
+the harness reads the authenticated broker metrics endpoint before and after the
+load and reports admission wait, long-lived queue wait, and runtime-state lock
+wait separately. Each captured item includes cumulative start/end snapshots and
+a process-level delta with total nanoseconds, wait count, the cumulative maximum
+at the end of the run, and mean nanoseconds per newly observed wait. The maximum
+counter cannot be differenced into an interval maximum, and the final read-only
+metrics snapshot contributes to runtime-state lock wait. Direct-target and
+mock-only runs report these broker-only durations as not captured; pressure
+markers remain pressure evidence rather than queue-latency estimates.
 
 CI smoke:
 
