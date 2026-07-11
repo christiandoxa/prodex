@@ -1,0 +1,135 @@
+[
+  {
+    "provider": "openai",
+    "client_request_format": "openai-responses",
+    "upstream_request_format": "openai-responses",
+    "response_format": "openai-responses",
+    "canonical_client_endpoint": "/v1/responses",
+    "model_list_endpoint": "/v1/models",
+    "supports_streaming": true,
+    "supports_model_fallback": false,
+    "transform_status": "passthrough",
+    "required_endpoints": [
+      "responses",
+      "chat-completions",
+      "messages",
+      "models",
+      "embeddings",
+      "images",
+      "audio",
+      "batches",
+      "rerank",
+      "a2a"
+    ]
+  },
+  {
+    "provider": "anthropic",
+    "client_request_format": "openai-responses",
+    "upstream_request_format": "openai-chat-completions",
+    "response_format": "openai-responses",
+    "canonical_client_endpoint": "/v1/responses",
+    "model_list_endpoint": "/v1/models",
+    "supports_streaming": true,
+    "supports_model_fallback": true,
+    "transform_status": "translated",
+    "required_endpoints": [
+      "responses",
+      "chat-completions",
+      "messages",
+      "models"
+    ]
+  },
+  {
+    "provider": "copilot",
+    "client_request_format": "openai-responses",
+    "upstream_request_format": "openai-chat-completions",
+    "response_format": "openai-responses",
+    "canonical_client_endpoint": "/v1/responses",
+    "model_list_endpoint": "/v1/models",
+    "supports_streaming": true,
+    "supports_model_fallback": true,
+    "transform_status": "translated",
+    "required_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "messages",
+      "models"
+    ]
+  },
+  {
+    "provider": "deepseek",
+    "client_request_format": "openai-responses",
+    "upstream_request_format": "openai-chat-completions",
+    "response_format": "openai-responses",
+    "canonical_client_endpoint": "/v1/responses",
+    "model_list_endpoint": "/v1/models",
+    "supports_streaming": true,
+    "supports_model_fallback": true,
+    "transform_status": "translated",
+    "required_endpoints": [
+      "responses",
+      "chat-completions",
+      "messages",
+      "models"
+    ]
+  },
+  {
+    "provider": "gemini",
+    "client_request_format": "openai-responses",
+    "upstream_request_format": "gemini-generate-content",
+    "response_format": "openai-responses",
+    "canonical_client_endpoint": "/v1/responses",
+    "model_list_endpoint": "/v1/models",
+    "supports_streaming": true,
+    "supports_model_fallback": true,
+    "transform_status": "translated",
+    "required_endpoints": [
+      "responses",
+      "chat-completions",
+      "messages",
+      "models",
+      "embeddings"
+    ]
+  },
+  {
+    "provider": "kiro",
+    "client_request_format": "openai-responses",
+    "upstream_request_format": "passthrough",
+    "response_format": "openai-responses",
+    "canonical_client_endpoint": "/v1/responses",
+    "model_list_endpoint": "/v1/models",
+    "supports_streaming": true,
+    "supports_model_fallback": false,
+    "transform_status": "translated",
+    "required_endpoints": [
+      "responses",
+      "responses/compact",
+      "chat-completions",
+      "models"
+    ]
+  },
+  {
+    "provider": "local",
+    "client_request_format": "openai-responses",
+    "upstream_request_format": "openai-responses",
+    "response_format": "openai-responses",
+    "canonical_client_endpoint": "/v1/responses",
+    "model_list_endpoint": "/v1/models",
+    "supports_streaming": true,
+    "supports_model_fallback": false,
+    "transform_status": "passthrough",
+    "required_endpoints": [
+      "responses",
+      "chat-completions",
+      "messages",
+      "models",
+      "embeddings",
+      "images",
+      "audio",
+      "batches",
+      "rerank",
+      "a2a"
+    ]
+  }
+]

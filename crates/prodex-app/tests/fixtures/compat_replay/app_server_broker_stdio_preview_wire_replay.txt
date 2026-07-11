@@ -1,0 +1,5 @@
+{"id":"req-wire","method":"thread/start","params":{"sessionId":"sess-wire","thread":{"id":"thread-wire"}}}
+
+{"id":"resp-wire","result":{"ok":true}}
+{"method":"notifications/initialized","params":{}}
+{"jsonrpc":"1.0","method":"turn/start","params":{}}

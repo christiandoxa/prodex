@@ -1,0 +1,16 @@
+[package]
+name = "prodex-terminal-ui"
+version.workspace = true
+edition.workspace = true
+description = "Terminal rendering helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "terminal_ui"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+ratatui = { workspace = true }
+unicode-width = { workspace = true }

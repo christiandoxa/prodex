@@ -1,0 +1,80 @@
+services:
+  prodex-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prodex-gateway:local
+    restart: unless-stopped
+    environment:
+      PRODEX_HOME: /var/lib/prodex
+      PRODEX_RUNTIME_LOG_DIR: /var/log/prodex
+      PRODEX_GATEWAY_TOKEN: ${PRODEX_GATEWAY_TOKEN:?set PRODEX_GATEWAY_TOKEN}
+      PRODEX_GATEWAY_SSO_PROXY_TOKEN: ${PRODEX_GATEWAY_SSO_PROXY_TOKEN:-}
+      PRODEX_GATEWAY_POSTGRES_URL: ${PRODEX_GATEWAY_POSTGRES_URL:-}
+      PRODEX_GATEWAY_REDIS_URL: ${PRODEX_GATEWAY_REDIS_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GITHUB_COPILOT_API_KEY: ${GITHUB_COPILOT_API_KEY:-}
+    command: ["gateway", "--listen", "0.0.0.0:4000"]
+    ports:
+      - "4000:4000"
+    volumes:
+      - prodex-data:/var/lib/prodex
+      - prodex-runtime-logs:/var/log/prodex
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:4000/readyz >/dev/null",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PRODEX_POSTGRES_DB:-prodex}
+      POSTGRES_USER: ${PRODEX_POSTGRES_USER:-prodex}
+      POSTGRES_PASSWORD: ${PRODEX_POSTGRES_PASSWORD:?set PRODEX_POSTGRES_PASSWORD}
+    volumes:
+      - prodex-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["redis"]
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - prodex-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  prodex-data:
+  prodex-runtime-logs:
+  prodex-postgres:
+  prodex-redis:

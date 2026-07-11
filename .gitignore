@@ -1,0 +1,20 @@
+# Rust build artifacts
+/target/
+/node_modules/
+/release/
+
+# JetBrains / IntelliJ
+/.idea/
+*.iml
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Local Codex workspace markers/state
+/.codex
+/.token-savior-cache.json
+/deploy/gateway.env

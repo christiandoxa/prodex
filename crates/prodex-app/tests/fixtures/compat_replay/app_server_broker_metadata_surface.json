@@ -1,0 +1,183 @@
+{
+  "fields": ["session_id", "thread_id", "turn_id", "item_id"],
+  "cases": [
+    {
+      "name": "direct_snake_case_fields",
+      "payload": {
+        "jsonrpc": "2.0",
+        "params": {
+          "session_id": "sess-1",
+          "thread_id": "thread-1",
+          "turn_id": "turn-1",
+          "item_id": "item-1"
+        }
+      },
+      "expect": {
+        "session_id": "sess-1",
+        "thread_id": "thread-1",
+        "turn_id": "turn-1",
+        "item_id": "item-1"
+      }
+    },
+    {
+      "name": "direct_camel_case_fields",
+      "payload": {
+        "jsonrpc": "2.0",
+        "params": {
+          "sessionId": "sess-2",
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "itemId": "item-2"
+        }
+      },
+      "expect": {
+        "session_id": "sess-2",
+        "thread_id": "thread-2",
+        "turn_id": "turn-2",
+        "item_id": "item-2"
+      }
+    },
+    {
+      "name": "client_metadata_fields",
+      "payload": {
+        "jsonrpc": "2.0",
+        "params": {
+          "client_metadata": {
+            "session_id": "sess-3",
+            "threadId": "thread-3",
+            "turn_id": "turn-3",
+            "itemId": "item-3"
+          }
+        }
+      },
+      "expect": {
+        "session_id": "sess-3",
+        "thread_id": "thread-3",
+        "turn_id": "turn-3",
+        "item_id": "item-3"
+      }
+    },
+    {
+      "name": "nested_entity_ids",
+      "payload": {
+        "jsonrpc": "2.0",
+        "params": {
+          "thread": { "id": "thread-4" },
+          "turn": { "id": "turn-4" },
+          "item": { "id": "item-4" }
+        }
+      },
+      "expect": {
+        "session_id": null,
+        "thread_id": "thread-4",
+        "turn_id": "turn-4",
+        "item_id": "item-4"
+      }
+    },
+    {
+      "name": "context_fields",
+      "payload": {
+        "jsonrpc": "2.0",
+        "params": {
+          "context": {
+            "sessionId": "sess-5",
+            "thread_id": "thread-5",
+            "turnId": "turn-5",
+            "item_id": "item-5"
+          }
+        }
+      },
+      "expect": {
+        "session_id": "sess-5",
+        "thread_id": "thread-5",
+        "turn_id": "turn-5",
+        "item_id": "item-5"
+      }
+    },
+    {
+      "name": "response_result_fields",
+      "payload": {
+        "jsonrpc": "2.0",
+        "id": "resp-6",
+        "result": {
+          "thread": { "id": "thread-6", "sessionId": "sess-6" },
+          "turn": { "id": "turn-6" },
+          "item": { "id": "item-6" }
+        }
+      },
+      "expect": {
+        "session_id": "sess-6",
+        "thread_id": "thread-6",
+        "turn_id": "turn-6",
+        "item_id": "item-6"
+      }
+    },
+    {
+      "name": "direct_fields_win_precedence",
+      "payload": {
+        "jsonrpc": "2.0",
+        "params": {
+          "session_id": "sess-direct",
+          "threadId": "thread-direct",
+          "turn_id": "turn-direct",
+          "itemId": "item-direct",
+          "client_metadata": {
+            "session_id": "sess-client",
+            "threadId": "thread-client",
+            "turn_id": "turn-client",
+            "itemId": "item-client"
+          },
+          "context": {
+            "sessionId": "sess-context",
+            "thread_id": "thread-context",
+            "turnId": "turn-context",
+            "item_id": "item-context"
+          },
+          "thread": { "id": "thread-nested" },
+          "turn": { "id": "turn-nested" },
+          "item": { "id": "item-nested" }
+        }
+      },
+      "expect": {
+        "session_id": "sess-direct",
+        "thread_id": "thread-direct",
+        "turn_id": "turn-direct",
+        "item_id": "item-direct"
+      }
+    },
+    {
+      "name": "trims_whitespace_and_skips_empty_strings",
+      "payload": {
+        "jsonrpc": "2.0",
+        "params": {
+          "session_id": "  sess-6  ",
+          "threadId": "   ",
+          "turn": { "id": " turn-6 " },
+          "context": { "itemId": "  item-6  " }
+        }
+      },
+      "expect": {
+        "session_id": "sess-6",
+        "thread_id": null,
+        "turn_id": "turn-6",
+        "item_id": "item-6"
+      }
+    },
+    {
+      "name": "non_jsonrpc_payload_ignored",
+      "payload": {
+        "jsonrpc": "1.0",
+        "params": {
+          "session_id": "sess-bad",
+          "thread_id": "thread-bad"
+        }
+      },
+      "expect": {
+        "session_id": null,
+        "thread_id": null,
+        "turn_id": null,
+        "item_id": null
+      }
+    }
+  ]
+}

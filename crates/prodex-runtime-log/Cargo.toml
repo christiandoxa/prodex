@@ -1,0 +1,11 @@
+[package]
+name = "prodex-runtime-log"
+version.workspace = true
+edition.workspace = true
+description = "Runtime log path and marker helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+runtime_proxy = { workspace = true }
+serde_json = { workspace = true }

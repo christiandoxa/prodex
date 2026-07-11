@@ -1,0 +1,2 @@
+{"timestamp":"2026-04-24T02:20:00Z","message":"request=17 stream_read_error profile=alpha route=responses","fields":{"request":17,"profile":"alpha","route":"responses","reason":"body_read_timeout"}}
+{"timestamp":"2026-04-24T02:20:01Z","message":"profile_health","fields":{"request":17,"profile":"alpha","route":"responses","score":43,"reason":"stream_read_error"}}

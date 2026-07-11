@@ -1,0 +1,21 @@
+[package]
+name = "prodex-profile-export"
+version.workspace = true
+edition.workspace = true
+description = "Profile export envelope crypto helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_profile_export"
+path = "src/lib.rs"
+
+[dependencies]
+aes-gcm-siv = { workspace = true }
+anyhow = { workspace = true }
+base64 = { workspace = true }
+getrandom = { workspace = true }
+pbkdf2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

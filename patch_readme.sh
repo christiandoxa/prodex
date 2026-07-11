@@ -1,0 +1,4 @@
+#!/bin/bash
+sed -i '/prodex presidio enable/a prodex presidio redact --language-mode auto --languages en,id --text "Nama saya Budi dan nomor telepon saya adalah 0812-3456-7890."\nprodex presidio enable --language-mode auto --languages en,id\nprodex presidio status\nprodex presidio doctor --json' README.md
+
+sed -i '/fail_mode = "open" or "closed"./a \nProdex now supports multi-language Presidio redaction. The default Presidio Docker images typically support English (`en`). For other languages like Indonesian (`id`), you might need a custom Presidio Analyzer with appropriate recognizers and models. For example, a `presidio.toml` config might look like this:\n```toml\nenabled = true\nanalyzer_url = "http://localhost:5002"\nanonymizer_url = "http://localhost:5001"\nlanguage_mode = "auto"\nlanguages = ["en", "id"]\nfail_mode = "open"\n```\nThis config would allow `prodex` to automatically detect between English and Indonesian for redaction.\n' README.md

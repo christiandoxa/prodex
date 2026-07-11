@@ -1,0 +1,14 @@
+[package]
+name = "prodex-observability"
+version.workspace = true
+edition.workspace = true
+description = "Observability boundary primitives for Prodex traces, spans, and metric labels"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_observability"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }

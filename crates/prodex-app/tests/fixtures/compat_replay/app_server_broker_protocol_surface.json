@@ -1,0 +1,82 @@
+{
+  "accepted_lifecycle_aliases": [
+    "notifications/initialized",
+    "turn/cancel"
+  ],
+  "affinity": {
+    "commit_boundaries": [
+      "precommit",
+      "turn-committed"
+    ],
+    "continuation_affinity_wins": true,
+    "decision_kinds": [
+      "fresh",
+      "continue-session",
+      "continue-thread",
+      "continue-turn"
+    ],
+    "policy_modes": [
+      "fresh-selection-ok",
+      "preserve-session-affinity",
+      "preserve-thread-affinity",
+      "preserve-turn-affinity"
+    ],
+    "rotate_only_before_turn_commit": true,
+    "rotation_windows": [
+      "open",
+      "closed"
+    ],
+    "routing_hints": [
+      "fresh-select-ok",
+      "preserve-session-owner",
+      "preserve-thread-owner",
+      "preserve-turn-owner"
+    ],
+    "thread_session_owner_required": true
+  },
+  "canonical_lifecycle_methods": [
+    "initialize",
+    "initialized",
+    "thread/start",
+    "thread/started",
+    "thread/resume",
+    "thread/fork",
+    "turn/start",
+    "turn/started",
+    "turn/completed",
+    "turn/interrupt"
+  ],
+  "example_other_methods": [
+    "custom/ping",
+    "rpc.internal"
+  ],
+  "frame_kinds": [
+    "request",
+    "notification",
+    "response",
+    "invalid"
+  ],
+  "invalid_reasons": [
+    "non_jsonrpc_version",
+    "batch_frame_unsupported",
+    "non_object_frame",
+    "non_scalar_id",
+    "non_container_params",
+    "non_object_error",
+    "non_integer_error_code",
+    "non_string_error_message",
+    "non_string_method",
+    "invalid_method_name",
+    "result_with_error",
+    "missing_response_id",
+    "method_with_result_or_error",
+    "missing_method_and_response_payload"
+  ],
+  "jsonrpc_version": "2.0",
+  "method_kinds": [
+    "lifecycle",
+    "other",
+    "absent"
+  ],
+  "wire_omits_jsonrpc_header": true
+}

@@ -1,0 +1,15 @@
+[package]
+name = "prodex-provider-spi"
+version.workspace = true
+edition.workspace = true
+description = "Transport-neutral provider service-provider interface primitives for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_provider_spi"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }
+prodex_provider_core = { workspace = true }

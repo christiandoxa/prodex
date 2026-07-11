@@ -1,0 +1,14 @@
+[package]
+name = "prodex-proxy-config"
+version.workspace = true
+edition.workspace = true
+description = "Upstream proxy and client configuration helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+
+[dev-dependencies]
+tokio = { workspace = true }

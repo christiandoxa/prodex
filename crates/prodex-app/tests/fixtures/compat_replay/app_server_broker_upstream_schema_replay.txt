@@ -1,0 +1,13 @@
+{"id":"req-thread-start","method":"thread/start","params":{"cwd":"/workspace","model":"gpt-5","modelProvider":"openai","approvalPolicy":"never","approvalsReviewer":"user","ephemeral":false}}
+{"id":"req-thread-start","result":{"approvalPolicy":"never","approvalsReviewer":"user","cwd":"/workspace","model":"gpt-5","modelProvider":"openai","sandbox":{"type":"dangerFullAccess"},"thread":{"cliVersion":"0.0.0-test","createdAt":1,"cwd":"/workspace","ephemeral":false,"id":"thr_123","modelProvider":"openai","preview":"","sessionId":"sess_123","source":"cli","status":{"type":"idle"},"turns":[],"updatedAt":1}}}
+{"method":"thread/started","params":{"thread":{"cliVersion":"0.0.0-test","createdAt":1,"cwd":"/workspace","ephemeral":false,"id":"thr_123","modelProvider":"openai","preview":"","sessionId":"sess_123","source":"cli","status":{"type":"idle"},"turns":[],"updatedAt":1}}}
+{"id":"req-thread-resume","method":"thread/resume","params":{"threadId":"thr_123"}}
+{"id":"req-thread-resume","result":{"approvalPolicy":"never","approvalsReviewer":"user","cwd":"/workspace","model":"gpt-5","modelProvider":"openai","sandbox":{"type":"dangerFullAccess"},"thread":{"cliVersion":"0.0.0-test","createdAt":1,"cwd":"/workspace","ephemeral":false,"id":"thr_123","modelProvider":"openai","preview":"","sessionId":"sess_123","source":"cli","status":{"type":"idle"},"turns":[],"updatedAt":1}}}
+{"id":"req-thread-fork","method":"thread/fork","params":{"threadId":"thr_123"}}
+{"id":"req-thread-fork","result":{"approvalPolicy":"never","approvalsReviewer":"user","cwd":"/workspace","model":"gpt-5","modelProvider":"openai","sandbox":{"type":"dangerFullAccess"},"thread":{"cliVersion":"0.0.0-test","createdAt":1,"cwd":"/workspace","ephemeral":false,"id":"thr_forked","modelProvider":"openai","preview":"","sessionId":"sess_123","source":"cli","status":{"type":"idle"},"turns":[],"updatedAt":1}}}
+{"id":"req-turn-start","method":"turn/start","params":{"threadId":"thr_123","input":[{"type":"text","text":"Run tests"}]}}
+{"id":"req-turn-start","result":{"turn":{"id":"turn_123","items":[],"status":"inProgress"}}}
+{"method":"turn/started","params":{"threadId":"thr_123","turn":{"id":"turn_123","items":[],"status":"inProgress"}}}
+{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"turn_123","items":[],"status":"completed"}}}
+{"id":"req-turn-interrupt","method":"turn/interrupt","params":{"threadId":"thr_123","turnId":"turn_123"}}
+{"id":"req-turn-interrupt","result":{}}

@@ -1,0 +1,21 @@
+[package]
+name = "prodex-update-notice"
+version.workspace = true
+edition.workspace = true
+description = "Prodex update notice and version check helpers"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_update_notice"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+prodex_cli = { workspace = true }
+prodex_core = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+terminal_ui = { workspace = true }

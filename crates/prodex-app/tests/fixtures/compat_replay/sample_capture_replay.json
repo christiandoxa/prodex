@@ -1,0 +1,68 @@
+{
+  "format_version": 1,
+  "kind": "prodex_compat_replay_capture",
+  "source": "sample-capture.jsonl",
+  "records": [
+    {
+      "type": "request",
+      "method": "POST",
+      "path_and_query": "/backend-api/codex/responses",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer <redacted>"
+        },
+        {
+          "name": "ChatGPT-Account-Id",
+          "value": "<account_id>"
+        },
+        {
+          "name": "x-api-key",
+          "value": "<redacted>"
+        },
+        {
+          "name": "x-codex-turn-state",
+          "value": "<turn_state>"
+        },
+        {
+          "name": "session_id",
+          "value": "<session_id>"
+        },
+        {
+          "name": "User-Agent",
+          "value": "codex-cli/fixture"
+        }
+      ],
+      "body": {
+        "model": "gpt-5.3-codex",
+        "stream": true,
+        "previous_response_id": "<previous_response_id>",
+        "client_metadata": {
+          "session_id": "<session_id>",
+          "api_key": "<redacted>"
+        }
+      },
+      "name": "codex_live_request"
+    },
+    {
+      "type": "sse_stream",
+      "stream": "event: response.created\ndata: {\"created_at\":\"<created_at>\",\"response_id\":\"<response_id>\",\"response\":{\"id\":\"<id>\"},\"authorization_token\":\"<redacted>\"}\n\n",
+      "name": "codex_live_sse"
+    },
+    {
+      "type": "websocket_message",
+      "direction": "client_to_upstream",
+      "message": {
+        "previous_response_id": "<previous_response_id>",
+        "session_id": "<session_id>",
+        "input": [
+          {
+            "type": "function_call",
+            "call_id": "<call_id>"
+          }
+        ]
+      },
+      "name": "codex_live_ws"
+    }
+  ]
+}

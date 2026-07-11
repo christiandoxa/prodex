@@ -1,0 +1,644 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prodex
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodex-default-deny
+  namespace: prodex
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodex-gateway-config
+  namespace: prodex
+data:
+  PRODEX_HOME: /var/lib/prodex
+  PRODEX_RUNTIME_LOG_DIR: /var/log/prodex
+  PRODEX_GATEWAY_REPLICA_COUNT: "3"
+  PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS: "true"
+  RUST_LOG: info
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodex-gateway-policy
+  namespace: prodex
+data:
+  policy.toml: |
+    [secrets]
+    production = true
+    projected_root = "/run/secrets/prodex"
+    projected_provider = "kubernetes"
+
+    [gateway]
+    require_auth = true
+    auth_token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_TOKEN" }
+    provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
+
+    [gateway.state]
+    backend = "postgres"
+    postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+    postgres_tls_mode = "verify-full"
+    redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
+
+    [[gateway.admin_tokens]]
+    name = "prometheus"
+    token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }
+    role = "viewer"
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: prodex-gateway-secrets
+  namespace: prodex
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: prodex-secret-store
+    kind: ClusterSecretStore
+  target:
+    name: prodex-gateway-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: PRODEX_GATEWAY_TOKEN
+      remoteRef:
+        key: prodex/gateway/token
+    - secretKey: PRODEX_GATEWAY_METRICS_TOKEN
+      remoteRef:
+        key: prodex/gateway/metrics-token
+    - secretKey: OPENAI_API_KEY
+      remoteRef:
+        key: prodex/providers/openai-api-key
+    - secretKey: PRODEX_GATEWAY_POSTGRES_URL
+      remoteRef:
+        key: prodex/gateway/postgres-url
+    - secretKey: PRODEX_GATEWAY_REDIS_URL
+      remoteRef:
+        key: prodex/gateway/redis-url
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: prodex-control-plane-secrets
+  namespace: prodex
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: prodex-secret-store
+    kind: ClusterSecretStore
+  target:
+    name: prodex-control-plane-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: PRODEX_GATEWAY_POSTGRES_URL
+      remoteRef:
+        key: prodex/gateway/postgres-url
+    - secretKey: PRODEX_GATEWAY_REDIS_URL
+      remoteRef:
+        key: prodex/gateway/redis-url
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: prodex-gateway-migration-secrets
+  namespace: prodex
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: prodex-secret-store
+    kind: ClusterSecretStore
+  target:
+    name: prodex-gateway-migration-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: PRODEX_GATEWAY_POSTGRES_URL
+      remoteRef:
+        key: prodex/gateway/postgres-url
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+  labels:
+    app.kubernetes.io/name: prodex-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodex-gateway
+    spec:
+      serviceAccountName: prodex-gateway
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: prodex-gateway
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: prodex-gateway
+      containers:
+        - name: prodex-gateway
+          image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
+          imagePullPolicy: IfNotPresent
+          args: ["gateway", "--listen", "0.0.0.0:4000"]
+          ports:
+            - name: http
+              containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: prodex-gateway-config
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /startupz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 15"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-home
+              mountPath: /var/lib/prodex
+            - name: prodex-gateway-secrets
+              mountPath: /run/secrets/prodex
+              readOnly: true
+            - name: gateway-policy
+              mountPath: /var/lib/prodex/policy.toml
+              subPath: policy.toml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: runtime-logs
+              mountPath: /var/log/prodex
+      volumes:
+        - name: prodex-home
+          emptyDir: {}
+        - name: prodex-gateway-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: prodex-gateway-secrets
+                  items:
+                    - key: PRODEX_GATEWAY_TOKEN
+                      path: PRODEX_GATEWAY_TOKEN
+                    - key: PRODEX_GATEWAY_METRICS_TOKEN
+                      path: PRODEX_GATEWAY_METRICS_TOKEN
+                    - key: OPENAI_API_KEY
+                      path: OPENAI_API_KEY
+                    - key: PRODEX_GATEWAY_POSTGRES_URL
+                      path: PRODEX_GATEWAY_POSTGRES_URL
+                    - key: PRODEX_GATEWAY_REDIS_URL
+                      path: PRODEX_GATEWAY_REDIS_URL
+        - name: gateway-policy
+          configMap:
+            name: prodex-gateway-policy
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: runtime-logs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+  labels:
+    app.kubernetes.io/name: prodex-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: prodex-gateway
+  ports:
+    - name: http
+      port: 4000
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-gateway
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+spec:
+  minReplicas: 3
+  maxReplicas: 12
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: prodex-gateway
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-gateway
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              prodex.dev/network-tier: ingress
+      ports:
+        - protocol: TCP
+          port: 4000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              prodex.dev/network-tier: monitoring
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              prodex.dev/network-tier: data-store
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-gateway
+  endpoints:
+    - port: http
+      path: /v1/prodex/gateway/metrics
+      interval: 30s
+      authorization:
+        type: Bearer
+        credentials:
+          name: prodex-gateway-secrets
+          key: PRODEX_GATEWAY_METRICS_TOKEN
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prodex-gateway-migration
+  namespace: prodex
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prodex-gateway-migration
+  namespace: prodex
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodex-gateway-migration
+    spec:
+      serviceAccountName: prodex-gateway-migration
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migration
+          image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
+          command: ["prodex-gateway", "migrate"]
+          args:
+            - "--backend"
+            - "postgres"
+            - "--url-env"
+            - "PRODEX_GATEWAY_POSTGRES_URL"
+            - "--tls-mode"
+            - "verify-full"
+          envFrom:
+            - secretRef:
+                name: prodex-gateway-migration-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodex-gateway-migration
+  namespace: prodex
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-gateway-migration
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              prodex.dev/network-tier: data-store
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prodex-control-plane
+  namespace: prodex
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodex-control-plane
+  namespace: prodex
+  annotations:
+    prodex.dev/status: placeholder-until-control-plane-adapter-exists
+  labels:
+    app.kubernetes.io/name: prodex-control-plane
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodex-control-plane
+        app.kubernetes.io/component: control-plane
+    spec:
+      serviceAccountName: prodex-control-plane
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prodex-control-plane
+          image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/prodex-control-plane"]
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 4100
+          envFrom:
+            - configMapRef:
+                name: prodex-gateway-config
+            - secretRef:
+                name: prodex-control-plane-secrets
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /startupz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-home
+              mountPath: /var/lib/prodex
+            - name: gateway-policy
+              mountPath: /var/lib/prodex/policy.toml
+              subPath: policy.toml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: runtime-logs
+              mountPath: /var/log/prodex
+      volumes:
+        - name: prodex-home
+          emptyDir: {}
+        - name: gateway-policy
+          configMap:
+            name: prodex-gateway-policy
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: runtime-logs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodex-control-plane
+  namespace: prodex
+  labels:
+    app.kubernetes.io/name: prodex-control-plane
+    app.kubernetes.io/component: control-plane
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: prodex-control-plane
+  ports:
+    - name: http
+      port: 4100
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodex-control-plane
+  namespace: prodex
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-control-plane
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              prodex.dev/network-tier: ingress
+      ports:
+        - protocol: TCP
+          port: 4100
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              prodex.dev/network-tier: data-store
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379

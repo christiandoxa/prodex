@@ -1,0 +1,16 @@
+[package]
+name = "prodex-runtime-cookies"
+version.workspace = true
+edition.workspace = true
+description = "Runtime proxy cookie relay helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_runtime_cookies"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = { workspace = true }
+reqwest = { workspace = true }
+tungstenite = { workspace = true }

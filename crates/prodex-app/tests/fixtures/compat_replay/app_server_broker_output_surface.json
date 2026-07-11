@@ -1,0 +1,138 @@
+{
+  "preview_event": {
+    "error_required_fields": [
+      "error",
+      "message"
+    ],
+    "metadata_required_fields": [
+      "session_id",
+      "thread_id",
+      "turn_id",
+      "item_id"
+    ],
+    "object": "app_server_broker.preview_event",
+    "policy_hint_required_fields": [
+      "mode",
+      "routing_hint",
+      "preserved_owner_kind",
+      "commit_boundary",
+      "rotation_window",
+      "turn_committed",
+      "affinity_required",
+      "rotation_allowed",
+      "preserves_owner"
+    ],
+    "preview_required_fields": [
+      "parse_ok"
+    ],
+    "required_fields": [
+      "object",
+      "line",
+      "preview"
+    ],
+    "summary_required_fields": [
+      "valid_jsonrpc",
+      "frame_kind",
+      "id",
+      "method",
+      "method_kind",
+      "is_lifecycle_method",
+      "lifecycle_stage",
+      "lifecycle_schema_file",
+      "continuation_affinity",
+      "continuation_decision",
+      "policy_hint",
+      "primary_affinity",
+      "affinity_keys",
+      "invalid_reason",
+      "metadata"
+    ]
+  },
+  "preview_report": {
+    "commit_boundary_count_fields": [
+      "precommit",
+      "turn-committed"
+    ],
+    "continuation_decision_count_fields": [
+      "fresh",
+      "continue-session",
+      "continue-thread",
+      "continue-turn"
+    ],
+    "frame_kind_count_fields": [
+      "request",
+      "notification",
+      "response",
+      "invalid"
+    ],
+    "invalid_reason_count_fields": [
+      "non_jsonrpc_version",
+      "batch_frame_unsupported",
+      "non_object_frame",
+      "non_scalar_id",
+      "non_container_params",
+      "non_object_error",
+      "non_integer_error_code",
+      "non_string_error_message",
+      "non_string_method",
+      "invalid_method_name",
+      "result_with_error",
+      "missing_response_id",
+      "method_with_result_or_error",
+      "missing_method_and_response_payload"
+    ],
+    "method_kind_count_fields": [
+      "lifecycle",
+      "other",
+      "absent"
+    ],
+    "object": "app_server_broker.preview_report",
+    "owner_kind_count_fields": [
+      "none",
+      "session",
+      "thread",
+      "turn"
+    ],
+    "policy_flag_count_fields": [
+      "affinity_required",
+      "rotation_allowed",
+      "preserves_owner"
+    ],
+    "policy_mode_count_fields": [
+      "fresh-selection-ok",
+      "preserve-session-affinity",
+      "preserve-thread-affinity",
+      "preserve-turn-affinity"
+    ],
+    "report_required_fields": [
+      "line_count",
+      "parsed_count",
+      "error_count",
+      "frame_kind_counts",
+      "method_kind_counts",
+      "continuation_decision_counts",
+      "policy_mode_counts",
+      "commit_boundary_counts",
+      "rotation_window_counts",
+      "routing_hint_counts",
+      "policy_flag_counts",
+      "owner_kind_counts",
+      "invalid_reason_counts",
+      "previews"
+    ],
+    "required_fields": [
+      "object",
+      "report"
+    ],
+    "rotation_window_count_fields": [
+      "open",
+      "closed"
+    ],
+    "routing_hint_count_fields": [
+      "fresh-select-ok",
+      "preserve-session-owner",
+      "preserve-thread-owner",
+      "preserve-turn-owner"
+    ]
+  }
+}

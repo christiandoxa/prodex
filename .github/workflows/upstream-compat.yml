@@ -1,0 +1,56 @@
+name: upstream compatibility watchdog
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      baseline_path:
+        description: Baseline path for the watchdog report
+        required: false
+        default: scripts/compat/upstream-baseline.json
+        type: string
+      fail_on_drift:
+        description: Fail the workflow when upstream drift is detected
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-compat-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Run upstream compatibility watchdog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PRODEX_UPSTREAM_COMPAT_ARTIFACT_DIR: ${{ runner.temp }}/upstream-compat
+          PRODEX_UPSTREAM_BASELINE_PATH: ${{ github.event.inputs.baseline_path }}
+          PRODEX_UPSTREAM_FAIL_ON_DRIFT: ${{ github.event.inputs.fail_on_drift }}
+        run: node scripts/compat/watch-upstream-ci.mjs
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: upstream-compat-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/upstream-compat
+          if-no-files-found: error
+          retention-days: 14

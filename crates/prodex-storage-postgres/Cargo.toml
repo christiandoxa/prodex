@@ -1,0 +1,18 @@
+[package]
+name = "prodex-storage-postgres"
+version.workspace = true
+edition.workspace = true
+description = "PostgreSQL migration and atomic accounting SQL plans for Prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_storage_postgres"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }
+prodex_storage = { workspace = true }
+
+[dev-dependencies]
+postgres = { workspace = true, features = ["with-uuid-1"] }

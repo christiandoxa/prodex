@@ -1,0 +1,98 @@
+{
+  "canonical_methods": [
+    "initialize",
+    "initialized",
+    "thread/start",
+    "thread/started",
+    "thread/resume",
+    "thread/fork",
+    "turn/start",
+    "turn/started",
+    "turn/completed",
+    "turn/interrupt"
+  ],
+  "accepted_aliases": [
+    "notifications/initialized",
+    "turn/cancel"
+  ],
+  "lifecycle_schema_files": [
+    {
+      "method": "thread/start",
+      "file": "ThreadStartParams.json",
+      "title": "ThreadStartParams",
+      "required": null
+    },
+    {
+      "method": "thread/start",
+      "file": "ThreadStartResponse.json",
+      "title": "ThreadStartResponse",
+      "required": ["approvalPolicy", "approvalsReviewer", "cwd", "model", "modelProvider", "sandbox", "thread"]
+    },
+    {
+      "method": "thread/start",
+      "file": "ThreadStartedNotification.json",
+      "title": "ThreadStartedNotification",
+      "required": ["thread"]
+    },
+    {
+      "method": "thread/resume",
+      "file": "ThreadResumeParams.json",
+      "title": "ThreadResumeParams",
+      "required": ["threadId"]
+    },
+    {
+      "method": "thread/resume",
+      "file": "ThreadResumeResponse.json",
+      "title": "ThreadResumeResponse",
+      "required": ["approvalPolicy", "approvalsReviewer", "cwd", "model", "modelProvider", "sandbox", "thread"]
+    },
+    {
+      "method": "thread/fork",
+      "file": "ThreadForkParams.json",
+      "title": "ThreadForkParams",
+      "required": ["threadId"]
+    },
+    {
+      "method": "thread/fork",
+      "file": "ThreadForkResponse.json",
+      "title": "ThreadForkResponse",
+      "required": ["approvalPolicy", "approvalsReviewer", "cwd", "model", "modelProvider", "sandbox", "thread"]
+    },
+    {
+      "method": "turn/start",
+      "file": "TurnStartParams.json",
+      "title": "TurnStartParams",
+      "required": ["input", "threadId"]
+    },
+    {
+      "method": "turn/start",
+      "file": "TurnStartResponse.json",
+      "title": "TurnStartResponse",
+      "required": ["turn"]
+    },
+    {
+      "method": "turn/start",
+      "file": "TurnStartedNotification.json",
+      "title": "TurnStartedNotification",
+      "required": ["threadId", "turn"]
+    },
+    {
+      "method": "turn/start",
+      "file": "TurnCompletedNotification.json",
+      "title": "TurnCompletedNotification",
+      "required": ["threadId", "turn"]
+    },
+    {
+      "method": "turn/interrupt",
+      "file": "TurnInterruptParams.json",
+      "title": "TurnInterruptParams",
+      "required": ["threadId", "turnId"]
+    },
+    {
+      "method": "turn/interrupt",
+      "file": "TurnInterruptResponse.json",
+      "title": "TurnInterruptResponse",
+      "required": null
+    }
+  ]
+}

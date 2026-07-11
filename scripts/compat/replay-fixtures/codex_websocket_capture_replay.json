@@ -1,0 +1,99 @@
+{
+  "format_version": 1,
+  "kind": "prodex_compat_replay_capture",
+  "source": "codex_websocket_capture.jsonl",
+  "records": [
+    {
+      "type": "request",
+      "method": "GET",
+      "path_and_query": "/backend-api/codex/responses?transport=websocket",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer <redacted>"
+        },
+        {
+          "name": "ChatGPT-Account-Id",
+          "value": "<account_id>"
+        },
+        {
+          "name": "User-Agent",
+          "value": "codex-cli/0.138.0"
+        },
+        {
+          "name": "session_id",
+          "value": "<session_id>"
+        },
+        {
+          "name": "x-codex-turn-state",
+          "value": "<turn_state>"
+        },
+        {
+          "name": "x-codex-turn-metadata",
+          "value": "<turn_metadata>"
+        },
+        {
+          "name": "Sec-WebSocket-Protocol",
+          "value": "codex.realtime"
+        },
+        {
+          "name": "Sec-WebSocket-Key",
+          "value": "<websocket_key>"
+        }
+      ],
+      "body": null,
+      "name": "codex_websocket_handshake"
+    },
+    {
+      "type": "websocket_message",
+      "direction": "client_to_upstream",
+      "message": {
+        "model": "gpt-5.3-codex",
+        "previous_response_id": "<previous_response_id>",
+        "session_id": "<session_id>",
+        "client_metadata": {
+          "ws_request_header_x_openai_internal_codex_responses_lite": true
+        },
+        "input": [
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Continue with prior plan."
+              }
+            ]
+          },
+          {
+            "type": "function_call",
+            "call_id": "<call_id>",
+            "name": "bash",
+            "arguments": {
+              "cmd": "pwd",
+              "token": "<redacted>"
+            }
+          }
+        ]
+      },
+      "name": "codex_websocket_client_message"
+    },
+    {
+      "type": "websocket_message",
+      "direction": "upstream_to_client",
+      "message": {
+        "type": "response.created",
+        "sequence_number": 0,
+        "created_at": "<created_at>",
+        "response": {
+          "id": "<id>",
+          "headers": {
+            "x-codex-turn-state": "<turn_state>",
+            "x-request-id": "<request_id>"
+          }
+        }
+      },
+      "name": "codex_websocket_server_message"
+    }
+  ]
+}

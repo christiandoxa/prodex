@@ -1,0 +1,72 @@
+#!/usr/bin/env node
+// caveman - shared configuration resolver
+//
+// Resolution order for default mode:
+//   1. CAVEMAN_DEFAULT_MODE environment variable
+//   2. Config file defaultMode field:
+//      - $XDG_CONFIG_HOME/caveman/config.json (any platform, if set)
+//      - ~/.config/caveman/config.json (macOS / Linux fallback)
+//      - %APPDATA%\caveman\config.json (Windows fallback)
+//   3. 'full'
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const VALID_MODES = [
+  'off', 'lite', 'full', 'ultra',
+  'wenyan-lite', 'wenyan', 'wenyan-full', 'wenyan-ultra',
+  'commit', 'review', 'compress'
+];
+
+function getConfigDir() {
+  if (process.env.XDG_CONFIG_HOME) {
+    return path.join(process.env.XDG_CONFIG_HOME, 'caveman');
+  }
+  if (process.platform === 'win32') {
+    return path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'caveman'
+    );
+  }
+  return path.join(os.homedir(), '.config', 'caveman');
+}
+
+function getConfigPath() {
+  return path.join(getConfigDir(), 'config.json');
+}
+
+function getClaudeConfigDir() {
+  const configured = process.env.CLAUDE_CONFIG_DIR;
+  if (configured && configured.trim()) {
+    return configured;
+  }
+  return path.join(os.homedir(), '.claude');
+}
+
+function getDefaultMode() {
+  const envMode = process.env.CAVEMAN_DEFAULT_MODE;
+  if (envMode && VALID_MODES.includes(envMode.toLowerCase())) {
+    return envMode.toLowerCase();
+  }
+
+  try {
+    const configPath = getConfigPath();
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (config.defaultMode && VALID_MODES.includes(config.defaultMode.toLowerCase())) {
+      return config.defaultMode.toLowerCase();
+    }
+  } catch (e) {
+    // Config file doesn't exist or is invalid - fall through.
+  }
+
+  return 'full';
+}
+
+module.exports = {
+  VALID_MODES,
+  getClaudeConfigDir,
+  getConfigDir,
+  getConfigPath,
+  getDefaultMode,
+};

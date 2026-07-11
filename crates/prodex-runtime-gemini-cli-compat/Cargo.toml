@@ -1,0 +1,13 @@
+[package]
+name = "prodex-runtime-gemini-cli-compat"
+version.workspace = true
+edition.workspace = true
+description = "Gemini CLI compatibility projection helpers for Prodex runtime homes"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+dirs = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }

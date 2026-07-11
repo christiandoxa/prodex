@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "scenarios": {
+    "baseline": {
+      "description": "Short steady-state smoke load against Responses.",
+      "route": "responses",
+      "stages": [
+        {
+          "name": "baseline",
+          "requests": 120,
+          "concurrency": 8
+        }
+      ],
+      "mock": {
+        "firstByteMs": 45,
+        "chunkDelayMs": 15,
+        "jitterMs": 10,
+        "errorRate": 0,
+        "quotaRate": 0,
+        "generic429Rate": 0
+      },
+      "thresholds": {
+        "maxErrorRate": 0.01,
+        "maxTtftP95Ms": 500,
+        "maxAdmissionPressureRate": 0
+      }
+    },
+    "stress": {
+      "description": "High concurrency pressure with mixed Responses and compact traffic.",
+      "route": "mixed",
+      "compactEvery": 5,
+      "stages": [
+        {
+          "name": "stress",
+          "requests": 800,
+          "concurrency": 64
+        }
+      ],
+      "mock": {
+        "firstByteMs": 75,
+        "chunkDelayMs": 25,
+        "jitterMs": 50,
+        "errorRate": 0.005,
+        "quotaRate": 0,
+        "generic429Rate": 0
+      },
+      "thresholds": {
+        "maxErrorRate": 0.03,
+        "maxTtftP95Ms": 1500,
+        "maxAdmissionPressureRate": 0.05
+      }
+    },
+    "spike": {
+      "description": "Warmup, sharp concurrency spike, then recovery.",
+      "route": "responses",
+      "stages": [
+        {
+          "name": "warmup",
+          "requests": 100,
+          "concurrency": 12
+        },
+        {
+          "name": "spike",
+          "requests": 300,
+          "concurrency": 96
+        },
+        {
+          "name": "recovery",
+          "requests": 100,
+          "concurrency": 12
+        }
+      ],
+      "mock": {
+        "firstByteMs": 60,
+        "chunkDelayMs": 20,
+        "jitterMs": 150,
+        "errorRate": 0.01,
+        "quotaRate": 0,
+        "generic429Rate": 0,
+        "slowEvery": 25,
+        "slowDelayMs": 700
+      },
+      "thresholds": {
+        "maxErrorRate": 0.05,
+        "maxTtftP95Ms": 2500,
+        "maxAdmissionPressureRate": 0.08
+      }
+    },
+    "soak": {
+      "description": "Longer steady run for leak and drift checks.",
+      "route": "responses",
+      "stages": [
+        {
+          "name": "soak",
+          "durationSec": 300,
+          "concurrency": 16
+        }
+      ],
+      "mock": {
+        "firstByteMs": 80,
+        "chunkDelayMs": 20,
+        "jitterMs": 40,
+        "errorRate": 0.002,
+        "quotaRate": 0,
+        "generic429Rate": 0
+      },
+      "thresholds": {
+        "maxErrorRate": 0.02,
+        "maxTtftP95Ms": 1200,
+        "maxAdmissionPressureRate": 0.02
+      }
+    }
+  }
+}

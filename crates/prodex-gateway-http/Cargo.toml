@@ -1,0 +1,16 @@
+[package]
+name = "prodex-gateway-http"
+version.workspace = true
+edition.workspace = true
+description = "HTTP data-plane policy boundary for Prodex gateway adapters"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_gateway_http"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }
+prodex_gateway_core = { workspace = true }
+prodex_observability = { workspace = true }

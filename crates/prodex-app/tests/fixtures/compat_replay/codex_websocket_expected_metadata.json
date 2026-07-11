@@ -1,0 +1,6 @@
+{
+  "previous_response_id": "<previous_response_id>",
+  "session_id": "<session_id>",
+  "requires_previous_response_affinity": false,
+  "fresh_fallback_shape": "continuation_only"
+}

@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":"req-1","method":"thread/start","params":{"sessionId":"sess-1","thread":{"id":"thread-1"}}}
+
+{"jsonrpc":"2.0","id":"resp-1","result":{"ok":true}}
+{"jsonrpc":"2.0","method":"turn/start","result":{"ok":true}}
+{"jsonrpc":"2.0","method":"custom/ping","params":{"context":{"turnId":"turn-5","itemId":"item-5"}}}

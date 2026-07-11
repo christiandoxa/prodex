@@ -1,0 +1,456 @@
+[
+  {
+    "name": "initialize_request",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {}
+    },
+    "expect": {
+      "id": 1,
+      "raw_method": "initialize",
+      "method": "initialize",
+      "method_kind": "lifecycle",
+      "lifecycle_stage": "initialize_request",
+      "continuation_affinity": {
+        "stage": "initialize_request",
+        "owner_kind": "none",
+        "owner": null,
+        "primary": null,
+        "key_count": 0,
+        "has_turn": false,
+        "has_thread": false,
+        "has_session": false
+      },
+      "continuation_decision": "fresh",
+      "primary_affinity": null,
+      "affinity_keys": [],
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "item_id": null,
+      "policy_hint": {
+        "mode": "fresh-selection-ok",
+        "routing_hint": "fresh-select-ok",
+        "commit_boundary": "precommit",
+        "rotation_window": "open",
+        "turn_committed": false,
+        "affinity_required": false,
+        "rotation_allowed": true
+      }
+    }
+  },
+  {
+    "name": "initialized_notification",
+    "payload": {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized",
+      "params": {}
+    },
+    "expect": {
+      "id": null,
+      "raw_method": "notifications/initialized",
+      "method": "initialized",
+      "method_kind": "lifecycle",
+      "lifecycle_stage": "initialized_notification",
+      "continuation_affinity": {
+        "stage": "initialized_notification",
+        "owner_kind": "none",
+        "owner": null,
+        "primary": null,
+        "key_count": 0,
+        "has_turn": false,
+        "has_thread": false,
+        "has_session": false
+      },
+      "continuation_decision": "fresh",
+      "primary_affinity": null,
+      "affinity_keys": [],
+      "session_id": null,
+      "thread_id": null,
+      "turn_id": null,
+      "item_id": null,
+      "policy_hint": {
+        "mode": "fresh-selection-ok",
+        "routing_hint": "fresh-select-ok",
+        "commit_boundary": "precommit",
+        "rotation_window": "open",
+        "turn_committed": false,
+        "affinity_required": false,
+        "rotation_allowed": true
+      }
+    }
+  },
+  {
+    "name": "thread_start_with_context_ids",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": "req-thread",
+      "method": "thread/start",
+      "params": {
+        "context": {
+          "sessionId": "sess-ctx",
+          "threadId": "thread-ctx"
+        }
+      }
+    },
+    "expect": {
+      "id": "req-thread",
+      "raw_method": "thread/start",
+      "method": "thread/start",
+      "method_kind": "lifecycle",
+      "lifecycle_stage": "thread_start_request",
+      "continuation_affinity": {
+        "stage": "thread_start_request",
+        "owner_kind": "thread",
+        "owner": {
+          "kind": "thread",
+          "value": "thread-ctx"
+        },
+        "primary": {
+          "kind": "thread",
+          "value": "thread-ctx"
+        },
+        "key_count": 2,
+        "has_turn": false,
+        "has_thread": true,
+        "has_session": true
+      },
+      "continuation_decision": "continue-thread",
+      "primary_affinity": {
+        "kind": "thread",
+        "value": "thread-ctx"
+      },
+      "affinity_keys": [
+        {
+          "kind": "thread",
+          "value": "thread-ctx"
+        },
+        {
+          "kind": "session",
+          "value": "sess-ctx"
+        }
+      ],
+      "session_id": "sess-ctx",
+      "thread_id": "thread-ctx",
+      "turn_id": null,
+      "item_id": null,
+      "policy_hint": {
+        "mode": "preserve-thread-affinity",
+        "routing_hint": "preserve-thread-owner",
+        "commit_boundary": "precommit",
+        "rotation_window": "closed",
+        "turn_committed": false,
+        "affinity_required": true,
+        "rotation_allowed": false
+      }
+    }
+  },
+  {
+    "name": "turn_start_with_nested_ids",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": "req-turn",
+      "method": "turn/start",
+      "params": {
+        "sessionId": "sess-1",
+        "thread": {
+          "id": "thread-1"
+        },
+        "turn": {
+          "id": "turn-1"
+        },
+        "item": {
+          "id": "item-1"
+        }
+      }
+    },
+    "expect": {
+      "id": "req-turn",
+      "raw_method": "turn/start",
+      "method": "turn/start",
+      "method_kind": "lifecycle",
+      "lifecycle_stage": "turn_start_request",
+      "continuation_affinity": {
+        "stage": "turn_start_request",
+        "owner_kind": "turn",
+        "owner": {
+          "kind": "turn",
+          "value": "turn-1"
+        },
+        "primary": {
+          "kind": "turn",
+          "value": "turn-1"
+        },
+        "key_count": 3,
+        "has_turn": true,
+        "has_thread": true,
+        "has_session": true
+      },
+      "continuation_decision": "continue-turn",
+      "primary_affinity": {
+        "kind": "turn",
+        "value": "turn-1"
+      },
+      "affinity_keys": [
+        {
+          "kind": "turn",
+          "value": "turn-1"
+        },
+        {
+          "kind": "thread",
+          "value": "thread-1"
+        },
+        {
+          "kind": "session",
+          "value": "sess-1"
+        }
+      ],
+      "session_id": "sess-1",
+      "thread_id": "thread-1",
+      "turn_id": "turn-1",
+      "item_id": "item-1",
+      "policy_hint": {
+        "mode": "preserve-turn-affinity",
+        "routing_hint": "preserve-turn-owner",
+        "commit_boundary": "precommit",
+        "rotation_window": "closed",
+        "turn_committed": false,
+        "affinity_required": true,
+        "rotation_allowed": false
+      }
+    }
+  },
+  {
+    "name": "thread_resume_with_client_metadata",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": "req-resume",
+      "method": "thread/resume",
+      "params": {
+        "client_metadata": {
+          "session_id": "sess-2",
+          "thread_id": "thread-2",
+          "turn_id": "turn-2"
+        }
+      }
+    },
+    "expect": {
+      "id": "req-resume",
+      "raw_method": "thread/resume",
+      "method": "thread/resume",
+      "method_kind": "lifecycle",
+      "lifecycle_stage": "thread_resume_request",
+      "continuation_affinity": {
+        "stage": "thread_resume_request",
+        "owner_kind": "thread",
+        "owner": {
+          "kind": "thread",
+          "value": "thread-2"
+        },
+        "primary": {
+          "kind": "thread",
+          "value": "thread-2"
+        },
+        "key_count": 2,
+        "has_turn": false,
+        "has_thread": true,
+        "has_session": true
+      },
+      "continuation_decision": "continue-thread",
+      "primary_affinity": {
+        "kind": "thread",
+        "value": "thread-2"
+      },
+      "affinity_keys": [
+        {
+          "kind": "thread",
+          "value": "thread-2"
+        },
+        {
+          "kind": "session",
+          "value": "sess-2"
+        }
+      ],
+      "session_id": "sess-2",
+      "thread_id": "thread-2",
+      "turn_id": "turn-2",
+      "item_id": null,
+      "policy_hint": {
+        "mode": "preserve-thread-affinity",
+        "routing_hint": "preserve-thread-owner",
+        "commit_boundary": "precommit",
+        "rotation_window": "closed",
+        "turn_committed": false,
+        "affinity_required": true,
+        "rotation_allowed": false
+      }
+    }
+  },
+  {
+    "name": "thread_fork_request",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": "req-fork",
+      "method": "thread/fork",
+      "params": {
+        "threadId": "thread-fork"
+      }
+    },
+    "expect": {
+      "id": "req-fork",
+      "raw_method": "thread/fork",
+      "method": "thread/fork",
+      "method_kind": "lifecycle",
+      "lifecycle_stage": "thread_fork_request",
+      "continuation_affinity": {
+        "stage": "thread_fork_request",
+        "owner_kind": "thread",
+        "owner": {
+          "kind": "thread",
+          "value": "thread-fork"
+        },
+        "primary": {
+          "kind": "thread",
+          "value": "thread-fork"
+        },
+        "key_count": 1,
+        "has_turn": false,
+        "has_thread": true,
+        "has_session": false
+      },
+      "continuation_decision": "continue-thread",
+      "primary_affinity": {
+        "kind": "thread",
+        "value": "thread-fork"
+      },
+      "affinity_keys": [
+        {
+          "kind": "thread",
+          "value": "thread-fork"
+        }
+      ],
+      "session_id": null,
+      "thread_id": "thread-fork",
+      "turn_id": null,
+      "item_id": null,
+      "policy_hint": {
+        "mode": "preserve-thread-affinity",
+        "routing_hint": "preserve-thread-owner",
+        "commit_boundary": "precommit",
+        "rotation_window": "closed",
+        "turn_committed": false,
+        "affinity_required": true,
+        "rotation_allowed": false
+      }
+    }
+  },
+  {
+    "name": "turn_cancel_alias_request",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": "req-cancel",
+      "method": "turn/cancel",
+      "params": {
+        "threadId": "thread-cancel",
+        "turnId": "turn-cancel"
+      }
+    },
+    "expect": {
+      "id": "req-cancel",
+      "raw_method": "turn/cancel",
+      "method": "turn/interrupt",
+      "method_kind": "lifecycle",
+      "lifecycle_stage": "turn_interrupt_request",
+      "continuation_affinity": {
+        "stage": "turn_interrupt_request",
+        "owner_kind": "turn",
+        "owner": {
+          "kind": "turn",
+          "value": "turn-cancel"
+        },
+        "primary": {
+          "kind": "turn",
+          "value": "turn-cancel"
+        },
+        "key_count": 2,
+        "has_turn": true,
+        "has_thread": true,
+        "has_session": false
+      },
+      "continuation_decision": "continue-turn",
+      "primary_affinity": {
+        "kind": "turn",
+        "value": "turn-cancel"
+      },
+      "affinity_keys": [
+        {
+          "kind": "turn",
+          "value": "turn-cancel"
+        },
+        {
+          "kind": "thread",
+          "value": "thread-cancel"
+        }
+      ],
+      "session_id": null,
+      "thread_id": "thread-cancel",
+      "turn_id": "turn-cancel",
+      "item_id": null,
+      "policy_hint": {
+        "mode": "preserve-turn-affinity",
+        "routing_hint": "preserve-turn-owner",
+        "commit_boundary": "turn-committed",
+        "rotation_window": "closed",
+        "turn_committed": true,
+        "affinity_required": true,
+        "rotation_allowed": false
+      }
+    }
+  },
+  {
+    "name": "unknown_method_request",
+    "payload": {
+      "jsonrpc": "2.0",
+      "id": "req-custom",
+      "method": "custom/ping",
+      "params": {
+        "sessionId": "sess-custom"
+      }
+    },
+    "expect": {
+      "id": "req-custom",
+      "raw_method": "custom/ping",
+      "method": "other",
+      "method_kind": "other",
+      "lifecycle_stage": null,
+      "continuation_affinity": {
+        "stage": null,
+        "owner_kind": "none",
+        "owner": null,
+        "primary": null,
+        "key_count": 0,
+        "has_turn": false,
+        "has_thread": false,
+        "has_session": false
+      },
+      "continuation_decision": "fresh",
+      "primary_affinity": null,
+      "affinity_keys": [],
+      "session_id": "sess-custom",
+      "thread_id": null,
+      "turn_id": null,
+      "item_id": null,
+      "policy_hint": {
+        "mode": "fresh-selection-ok",
+        "routing_hint": "fresh-select-ok",
+        "commit_boundary": "precommit",
+        "rotation_window": "open",
+        "turn_committed": false,
+        "affinity_required": false,
+        "rotation_allowed": true
+      }
+    }
+  }
+]

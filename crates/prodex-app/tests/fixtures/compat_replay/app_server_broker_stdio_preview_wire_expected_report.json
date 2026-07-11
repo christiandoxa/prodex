@@ -1,0 +1,281 @@
+{
+  "commit_boundary_counts": {
+    "precommit": 4,
+    "turn-committed": 0
+  },
+  "continuation_decision_counts": {
+    "continue-session": 0,
+    "continue-thread": 1,
+    "continue-turn": 0,
+    "fresh": 3
+  },
+  "error_count": 0,
+  "frame_kind_counts": {
+    "invalid": 1,
+    "notification": 1,
+    "request": 1,
+    "response": 1
+  },
+  "invalid_reason_counts": {
+    "batch_frame_unsupported": 0,
+    "invalid_method_name": 0,
+    "method_with_result_or_error": 0,
+    "missing_method_and_response_payload": 0,
+    "missing_response_id": 0,
+    "non_container_params": 0,
+    "non_integer_error_code": 0,
+    "non_jsonrpc_version": 1,
+    "non_object_error": 0,
+    "non_object_frame": 0,
+    "non_scalar_id": 0,
+    "non_string_error_message": 0,
+    "non_string_method": 0,
+    "result_with_error": 0
+  },
+  "line_count": 4,
+  "method_kind_counts": {
+    "absent": 1,
+    "lifecycle": 3,
+    "other": 0
+  },
+  "owner_kind_counts": {
+    "none": 3,
+    "session": 0,
+    "thread": 1,
+    "turn": 0
+  },
+  "parsed_count": 4,
+  "policy_flag_counts": {
+    "affinity_required": 1,
+    "preserves_owner": 1,
+    "rotation_allowed": 3
+  },
+  "policy_mode_counts": {
+    "fresh-selection-ok": 3,
+    "preserve-session-affinity": 0,
+    "preserve-thread-affinity": 1,
+    "preserve-turn-affinity": 0
+  },
+  "previews": [
+    {
+      "line": 1,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [
+            {
+              "kind": "thread",
+              "value": "thread-wire"
+            },
+            {
+              "kind": "session",
+              "value": "sess-wire"
+            }
+          ],
+          "continuation_affinity": {
+            "has_session": true,
+            "has_thread": true,
+            "has_turn": false,
+            "key_count": 2,
+            "owner": {
+              "kind": "thread",
+              "value": "thread-wire"
+            },
+            "owner_kind": "thread",
+            "primary": {
+              "kind": "thread",
+              "value": "thread-wire"
+            },
+            "stage": "thread_start_request"
+          },
+          "continuation_decision": "continue-thread",
+          "frame_kind": "request",
+          "id": "req-wire",
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": "ThreadStartParams.json",
+          "lifecycle_stage": "thread_start_request",
+          "metadata": {
+            "item_id": null,
+            "session_id": "sess-wire",
+            "thread_id": "thread-wire",
+            "turn_id": null
+          },
+          "method": "thread/start",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": true,
+            "commit_boundary": "precommit",
+            "mode": "preserve-thread-affinity",
+            "preserved_owner_kind": "thread",
+            "preserves_owner": true,
+            "rotation_allowed": false,
+            "rotation_window": "closed",
+            "routing_hint": "preserve-thread-owner",
+            "turn_committed": false
+          },
+          "primary_affinity": {
+            "kind": "thread",
+            "value": "thread-wire"
+          },
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 3,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": false,
+            "has_turn": false,
+            "key_count": 0,
+            "owner": null,
+            "owner_kind": "none",
+            "primary": null,
+            "stage": null
+          },
+          "continuation_decision": "fresh",
+          "frame_kind": "response",
+          "id": "resp-wire",
+          "invalid_reason": null,
+          "is_lifecycle_method": false,
+          "lifecycle_schema_file": null,
+          "lifecycle_stage": null,
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": null,
+            "turn_id": null
+          },
+          "method": null,
+          "method_kind": "absent",
+          "policy_hint": {
+            "affinity_required": false,
+            "commit_boundary": "precommit",
+            "mode": "fresh-selection-ok",
+            "preserved_owner_kind": null,
+            "preserves_owner": false,
+            "rotation_allowed": true,
+            "rotation_window": "open",
+            "routing_hint": "fresh-select-ok",
+            "turn_committed": false
+          },
+          "primary_affinity": null,
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 4,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": false,
+            "has_turn": false,
+            "key_count": 0,
+            "owner": null,
+            "owner_kind": "none",
+            "primary": null,
+            "stage": "initialized_notification"
+          },
+          "continuation_decision": "fresh",
+          "frame_kind": "notification",
+          "id": null,
+          "invalid_reason": null,
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": null,
+          "lifecycle_stage": "initialized_notification",
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": null,
+            "turn_id": null
+          },
+          "method": "notifications/initialized",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": false,
+            "commit_boundary": "precommit",
+            "mode": "fresh-selection-ok",
+            "preserved_owner_kind": null,
+            "preserves_owner": false,
+            "rotation_allowed": true,
+            "rotation_window": "open",
+            "routing_hint": "fresh-select-ok",
+            "turn_committed": false
+          },
+          "primary_affinity": null,
+          "valid_jsonrpc": true
+        }
+      }
+    },
+    {
+      "line": 5,
+      "object": "app_server_broker.preview_event",
+      "preview": {
+        "parse_ok": true,
+        "summary": {
+          "affinity_keys": [],
+          "continuation_affinity": {
+            "has_session": false,
+            "has_thread": false,
+            "has_turn": false,
+            "key_count": 0,
+            "owner": null,
+            "owner_kind": "none",
+            "primary": null,
+            "stage": null
+          },
+          "continuation_decision": "fresh",
+          "frame_kind": "invalid",
+          "id": null,
+          "invalid_reason": "non_jsonrpc_version",
+          "is_lifecycle_method": true,
+          "lifecycle_schema_file": null,
+          "lifecycle_stage": null,
+          "metadata": {
+            "item_id": null,
+            "session_id": null,
+            "thread_id": null,
+            "turn_id": null
+          },
+          "method": "turn/start",
+          "method_kind": "lifecycle",
+          "policy_hint": {
+            "affinity_required": false,
+            "commit_boundary": "precommit",
+            "mode": "fresh-selection-ok",
+            "preserved_owner_kind": null,
+            "preserves_owner": false,
+            "rotation_allowed": true,
+            "rotation_window": "open",
+            "routing_hint": "fresh-select-ok",
+            "turn_committed": false
+          },
+          "primary_affinity": null,
+          "valid_jsonrpc": false
+        }
+      }
+    }
+  ],
+  "rotation_window_counts": {
+    "closed": 1,
+    "open": 3
+  },
+  "routing_hint_counts": {
+    "fresh-select-ok": 3,
+    "preserve-session-owner": 0,
+    "preserve-thread-owner": 1,
+    "preserve-turn-owner": 0
+  }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "prodex-state"
+version.workspace = true
+edition.workspace = true
+description = "State models and merge helpers for prodex"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_state"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }

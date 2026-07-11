@@ -1,0 +1,26 @@
+{
+  "name": "@christiandoxa/prodex-gateway-sdk",
+  "version": "0.274.0",
+  "description": "JavaScript client for the Prodex gateway admin and Responses API",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "index.mjs",
+  "types": "index.d.ts",
+  "files": [
+    "index.mjs",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/christiandoxa/prodex.git",
+    "directory": "npm/prodex-gateway-sdk"
+  }
+}

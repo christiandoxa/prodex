@@ -1,0 +1,960 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  SCCACHE_CACHE_SIZE: 2G
+  SCCACHE_GHA_ENABLED: "true"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      heavy: ${{ steps.impact.outputs.heavy }}
+      reason: ${{ steps.impact.outputs.reason }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Classify CI impact
+        id: impact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [ -z "${base}" ] || [ "${base}" = "0000000000000000000000000000000000000000" ]; then
+              base="${head}^"
+            fi
+          fi
+
+          if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null ||
+             ! git rev-parse --verify --quiet "${head}^{commit}" >/dev/null; then
+            {
+              echo "heavy=true"
+              echo "reason=missing git base/head; running full CI"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          node scripts/ci/ci-impact.mjs \
+            --base "${base}" \
+            --head "${head}" \
+            --event-name "${{ github.event_name }}" \
+            --ref "${{ github.ref }}" \
+            --github-output
+
+      - name: Report CI impact
+        run: |
+          echo "heavy=${{ steps.impact.outputs.heavy }}"
+          echo "reason=${{ steps.impact.outputs.reason }}"
+
+  fmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+  docs-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Lint markdown docs
+        run: npm run docs:lint
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Scan repository for leaked credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${PWD}:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /repo --no-git --redact --no-banner --config /repo/.gitleaks.toml
+
+  process-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Enforce churn hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run ci:churn-hygiene:check -- --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          after="${{ github.sha }}"
+          if [ -n "${before}" ] &&
+             [ "${before}" != "0000000000000000000000000000000000000000" ] &&
+             git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
+             git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
+            mapfile -t commits < <(git rev-list --reverse "${before}..${after}")
+            if [ "${#commits[@]}" -eq 0 ]; then
+              npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"
+              exit 0
+            fi
+            for commit in "${commits[@]}"; do
+              parent="$(git rev-parse "${commit}^")"
+              npm run ci:churn-hygiene:check -- --base "${parent}" --head "${commit}"
+            done
+          else
+            npm run ci:churn-hygiene:check
+          fi
+
+      - name: Enforce release hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+            npm run ci:release-hygiene -- --base "${base}" --head "${head}"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          after="${{ github.sha }}"
+          if [ -n "${before}" ] &&
+             [ "${before}" != "0000000000000000000000000000000000000000" ] &&
+             git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
+             git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
+            npm run ci:release-hygiene -- --base "${before}" --head "${after}"
+          else
+            npm run ci:release-hygiene
+          fi
+
+      - name: Enforce Rust file size guard
+        run: npm run ci:size-guard
+
+      - name: Check Rust file size guard fixtures
+        run: npm run ci:size-guard-fixtures
+
+      - name: Enforce Rust allow attribute guard
+        run: npm run ci:allow-guard
+
+      - name: Enforce Rust super wildcard guard
+        run: npm run ci:super-wildcard-guard
+
+      - name: Enforce Rust env mutation guard
+        run: npm run ci:env-mutation-guard
+
+      - name: Enforce crate boundaries
+        run: npm run ci:crate-boundary
+
+      - name: Enforce domain crate boundary
+        run: npm run ci:domain-boundary-guard
+
+      - name: Enforce enterprise boundary guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run ci:enterprise-docs-guard
+          npm run ci:enterprise-id-boundary-guard
+          npm run ci:enterprise-binaries-guard
+          npm run ci:application-boundary-guard
+          npm run ci:auth-boundary-guard
+          npm run ci:config-boundary-guard
+          npm run ci:control-plane-boundary-guard
+          npm run ci:observability-boundary-guard
+          npm run ci:provider-spi-boundary-guard
+          npm run ci:storage-boundary-guard
+          npm run ci:storage-postgres-boundary-guard
+          npm run ci:storage-redis-boundary-guard
+          npm run ci:storage-sqlite-boundary-guard
+          npm run ci:gateway-core-boundary-guard
+          npm run ci:gateway-http-boundary-guard
+          npm run ci:deployment-security-guard
+
+      - name: Enforce dependency duplicate budget
+        run: npm run ci:dependency-duplicates
+
+      - name: Check dependency duplicate budget fixtures
+        run: npm run ci:dependency-duplicates-fixtures
+
+      - name: Check CI impact classifier
+        run: npm run ci:impact
+
+      - name: Check CI duration telemetry
+        run: node --test scripts/ci/github-job-durations.test.mjs
+
+  backup-restore-drill:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+
+      - name: Run PostgreSQL accounting concurrency proof
+        run: npm run ci:storage-postgres-proof
+
+      - name: Run PostgreSQL backup and restore drill
+        run: npm run ci:backup-restore-drill
+
+      - name: Upload redacted backup and restore evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backup-restore-drill-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/backup-restore-drill/evidence.json
+          if-no-files-found: error
+          retention-days: 14
+
+  compat-replay-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Run offline upstream compat replay gate
+        run: npm run compat:offline-gate
+
+  supply-chain:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+
+      - name: Cache cargo supply-chain tools
+        id: cargo-supply-chain-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/bin/cargo-deny
+          key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0
+
+      - name: Run clippy warning gate
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Install cargo-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-audit >/dev/null 2>&1; then
+            cargo install cargo-audit --locked --version 0.22.1
+          fi
+
+      - name: Run cargo audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo audit; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+
+      - name: Install cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-deny >/dev/null 2>&1; then
+            cargo install cargo-deny --locked --version 0.19.0
+          fi
+
+      - name: Run cargo deny checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo deny check advisories sources; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+
+  release-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify release/version sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run changelog:ci-check
+          npm run npm:sync-version
+          npm run ci:generated-metadata-clean
+
+  npm-package-smoke:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Build host release binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Smoke staged npm package
+        run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release
+
+  auto-rotate:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Prebuild auto-rotate integration tests
+        run: cargo test --test auto_rotate --no-run
+
+      - name: Run auto-rotate integration test shards
+        run: node scripts/ci/auto-rotate-shards.mjs --jobs 6 --timings --timings-json
+
+  profile-commands-internal:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run profile command internal tests
+        run: |
+          cargo test -p prodex-app --lib profile_commands_internal_tests:: -- --test-threads=1
+
+  main-internal-core:
+    name: Main internal core (${{ matrix.label }})
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 0
+            shard_count: 5
+            label: weighted shard 1 of 5
+          - shard: 1
+            shard_count: 5
+            label: weighted shard 2 of 5
+          - shard: 2
+            shard_count: 5
+            label: weighted shard 3 of 5
+          - shard: 3
+            shard_count: 5
+            label: weighted shard 4 of 5
+          - shard: 4
+            shard_count: 5
+            label: weighted shard 5 of 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run main internal core tests ${{ matrix.label }}
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+          CARGO_TERM_COLOR: always
+        run: |
+          set -euo pipefail
+          node scripts/ci/main-internal-core-shard.mjs \
+            --shard-index "${{ matrix.shard }}" \
+            --shard-count "${{ matrix.shard_count }}"
+
+  env-sensitive-parallel-guard:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run env-sensitive parallel guard
+        run: node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
+
+  runtime-proxy-shard-matrix:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Generate runtime proxy shard matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/ci/runtime-proxy-ci-matrix.mjs --github-matrix)"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+
+  main-internal-runtime-proxy:
+    name: Main internal runtime proxy (${{ matrix.label }})
+    needs:
+      - changes
+      - runtime-proxy-shard-matrix
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.runtime-proxy-shard-matrix.outputs.matrix) }}
+    env:
+      RUNTIME_PROXY_ARTIFACT_DIR: target/ci/runtime-proxy/${{ matrix.suite }}
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate runtime CI manifest
+        if: matrix.validate_manifest == 'true'
+        run: npm run ci:runtime-manifest
+
+      - name: Run runtime proxy internal test shard ${{ matrix.label }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r shard; do
+            if [ -z "${shard}" ]; then
+              continue
+            fi
+            shard_label="${shard%%|*}"
+            filter="${shard#*|}"
+            if [ -z "${shard_label}" ] || [ -z "${filter}" ] || [ "${shard_label}" = "${filter}" ]; then
+              echo "Invalid runtime proxy shard entry: ${shard}"
+              exit 1
+            fi
+            node scripts/ci/runtime-proxy-shard.mjs \
+              --filter "${filter}" \
+              --test-threads 1 \
+              --artifact-dir "${RUNTIME_PROXY_ARTIFACT_DIR}/${shard_label}"
+          done <<< "${{ matrix.filters }}"
+
+      - name: Upload runtime proxy shard diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-proxy-${{ matrix.suite }}-diagnostics
+          path: ${{ env.RUNTIME_PROXY_ARTIFACT_DIR }}
+          if-no-files-found: ignore
+
+  runtime-proxy-bench-smoke:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check runtime proxy benchmark regression thresholds
+        env:
+          PRODEX_RUNTIME_PROXY_BENCH_CHECK: "1"
+          PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE: scripts/ci/runtime-proxy-bench-thresholds.json
+        run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
+
+  runtime-load-smoke:
+    needs: changes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Run lightweight runtime load smoke
+        run: npm run ci:runtime-load-smoke
+
+  runtime-stress:
+    name: Runtime stress (${{ matrix.label }})
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: stress
+            id: stress-1
+            label: weighted broad shard 1 of 5
+            shard: 0
+            shard_count: 5
+          - suite: stress
+            id: stress-2
+            label: weighted broad shard 2 of 5
+            shard: 1
+            shard_count: 5
+          - suite: stress
+            id: stress-3
+            label: weighted broad shard 3 of 5
+            shard: 2
+            shard_count: 5
+          - suite: stress
+            id: stress-4
+            label: weighted broad shard 4 of 5
+            shard: 3
+            shard_count: 5
+          - suite: stress
+            id: stress-5
+            label: weighted broad shard 5 of 5
+            shard: 4
+            shard_count: 5
+          - suite: serialized
+            id: serialized-1
+            label: serialized shard 1 of 2
+            shard: 0
+            shard_count: 2
+          - suite: serialized
+            id: serialized-2
+            label: serialized shard 2 of 2
+            shard: 1
+            shard_count: 2
+          - suite: continuation
+            id: continuation-1
+            label: continuation shard 1 of 2
+            shard: 0
+            shard_count: 2
+          - suite: continuation
+            id: continuation-2
+            label: continuation shard 2 of 2
+            shard: 1
+            shard_count: 2
+    env:
+      RUNTIME_STRESS_ARTIFACT_DIR: target/ci/runtime-stress/${{ matrix.id }}
+      PRODEX_RUNTIME_LOG_DIR: target/ci/runtime-stress/${{ matrix.id }}/runtime-logs
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      RUSTC_WRAPPER: sccache
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Prepare runtime stress diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${RUNTIME_STRESS_ARTIFACT_DIR}"
+          mkdir -p "${PRODEX_RUNTIME_LOG_DIR}"
+          {
+            echo "suite=${{ matrix.suite }}"
+            echo "label=${{ matrix.label }}"
+            echo "artifact_dir=${RUNTIME_STRESS_ARTIFACT_DIR}"
+            echo "runtime_log_dir=${PRODEX_RUNTIME_LOG_DIR}"
+            echo "started_at=$(date -u +%FT%TZ)"
+            echo "command=npm run ci:runtime-stress -- --suite ${{ matrix.suite }} --shard-index ${{ matrix.shard }} --shard-count ${{ matrix.shard_count }}"
+          } > "${RUNTIME_STRESS_ARTIFACT_DIR}/metadata.txt"
+
+      - name: Run runtime stress ${{ matrix.label }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run ci:runtime-stress -- \
+            --suite "${{ matrix.suite }}" \
+            --shard-index "${{ matrix.shard }}" \
+            --shard-count "${{ matrix.shard_count }}" \
+            2>&1 | tee "${RUNTIME_STRESS_ARTIFACT_DIR}/runtime-stress.log"
+
+      - name: Collect runtime stress diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNTIME_STRESS_ARTIFACT_DIR}" "${PRODEX_RUNTIME_LOG_DIR}"
+          diagnostics_path="${RUNTIME_STRESS_ARTIFACT_DIR}/diagnostics.txt"
+          pointer_path="${PRODEX_RUNTIME_LOG_DIR}/prodex-runtime-latest.path"
+          latest_log_path=""
+          {
+            echo "suite=${{ matrix.suite }}"
+            echo "label=${{ matrix.label }}"
+            echo "shard=${{ matrix.shard }}"
+            echo "shard_count=${{ matrix.shard_count }}"
+            echo "artifact_dir=${RUNTIME_STRESS_ARTIFACT_DIR}"
+            echo "runtime_log_dir=${PRODEX_RUNTIME_LOG_DIR}"
+            echo "finished_at=$(date -u +%FT%TZ)"
+            echo "runtime_log_pointer=${pointer_path}"
+          } > "${diagnostics_path}"
+          if [[ -f "${pointer_path}" ]]; then
+            latest_log_path="$(tr -d '\r\n' < "${pointer_path}")"
+            echo "runtime_log_pointer_target=${latest_log_path}" >> "${diagnostics_path}"
+          else
+            echo "runtime_log_pointer_target=missing" >> "${diagnostics_path}"
+          fi
+          if [[ -z "${latest_log_path}" || ! -f "${latest_log_path}" ]]; then
+            latest_log_path="$(
+              find "${PRODEX_RUNTIME_LOG_DIR}" -maxdepth 1 -type f -name 'prodex-runtime*.log' -printf '%T@ %p\n' \
+                | sort -nr \
+                | head -n 1 \
+                | cut -d' ' -f2-
+            )"
+          fi
+          find "${PRODEX_RUNTIME_LOG_DIR}" -maxdepth 1 -type f -print \
+            | sort \
+            | sed 's/^/log_entry=/' >> "${diagnostics_path}"
+          if [[ -n "${latest_log_path}" && -f "${latest_log_path}" ]]; then
+            echo "latest_runtime_log=${latest_log_path}" >> "${diagnostics_path}"
+            cp "${latest_log_path}" "${RUNTIME_STRESS_ARTIFACT_DIR}/latest-runtime.log"
+            tail -n 200 "${latest_log_path}" | tee "${RUNTIME_STRESS_ARTIFACT_DIR}/latest-runtime-log-tail.txt"
+          else
+            echo "latest_runtime_log=missing" >> "${diagnostics_path}"
+          fi
+
+      - name: Upload runtime stress diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-stress-${{ matrix.id }}-diagnostics
+          path: ${{ env.RUNTIME_STRESS_ARTIFACT_DIR }}
+          if-no-files-found: ignore
+
+  ci-duration-telemetry:
+    name: CI duration telemetry
+    needs:
+      - changes
+      - fmt
+      - docs-lint
+      - secret-scan
+      - process-guard
+      - compat-replay-gate
+      - supply-chain
+      - release-sync
+      - npm-package-smoke
+      - auto-rotate
+      - profile-commands-internal
+      - main-internal-core
+      - env-sensitive-parallel-guard
+      - runtime-proxy-shard-matrix
+      - main-internal-runtime-proxy
+      - runtime-proxy-bench-smoke
+      - runtime-load-smoke
+      - runtime-stress
+    if: ${{ always() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Summarize CI job durations
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jobs_json="${RUNNER_TEMP}/ci-jobs.json"
+          summary_path="${RUNNER_TEMP}/ci-job-durations.txt"
+          json_path="${RUNNER_TEMP}/ci-job-durations.json"
+          gh run view "${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --attempt "${{ github.run_attempt }}" \
+            --json jobs > "${jobs_json}"
+          set +e
+          node scripts/ci/github-job-durations.mjs \
+            --max-wall-minutes 6 \
+            --max-runner-minutes 75 \
+            --run-id "${{ github.run_id }}" \
+            --exclude-name "CI duration telemetry" \
+            --limit 12 < "${jobs_json}" \
+            | tee "${summary_path}"
+          text_status="${PIPESTATUS[0]}"
+          node scripts/ci/github-job-durations.mjs \
+            --max-wall-minutes 6 \
+            --max-runner-minutes 75 \
+            --run-id "${{ github.run_id }}" \
+            --exclude-name "CI duration telemetry" \
+            --limit 12 \
+            --json < "${jobs_json}" > "${json_path}"
+          json_status="$?"
+          set -e
+          {
+            echo "### CI job durations"
+            echo
+            echo '```text'
+            cat "${summary_path}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${text_status}" -ne 0 ] || [ "${json_status}" -ne 0 ]; then
+            echo "CI duration budget exceeded; telemetry uploaded without failing this run."
+          fi
+
+      - name: Upload CI duration telemetry
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-duration-telemetry
+          path: |
+            ${{ runner.temp }}/ci-job-durations.txt
+            ${{ runner.temp }}/ci-job-durations.json
+          if-no-files-found: ignore
+          retention-days: 14

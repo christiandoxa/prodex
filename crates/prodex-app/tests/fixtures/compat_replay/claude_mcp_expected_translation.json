@@ -1,0 +1,52 @@
+{
+  "method": "POST",
+  "path_and_query": "/backend-api/codex/responses",
+  "headers": [
+    {
+      "name": "Content-Type",
+      "value": "application/json"
+    },
+    {
+      "name": "User-Agent",
+      "value": "claude-code/2.1.90"
+    },
+    {
+      "name": "session_id",
+      "value": "<session_id>"
+    },
+    {
+      "name": "X-Prodex-Internal-Request-Origin",
+      "value": "anthropic_messages"
+    }
+  ],
+  "body": {
+    "model": "gpt-5.3-codex",
+    "input": [
+      {
+        "role": "user",
+        "content": "List files in the repository root."
+      }
+    ],
+    "stream": true,
+    "store": false,
+    "instructions": "You are a compatibility replay harness.",
+    "tools": [
+      {
+        "type": "mcp",
+        "server_label": "workspace",
+        "server_url": "https://mcp.example.invalid/sse",
+        "require_approval": "never",
+        "allowed_tools": [
+          "<tool_name>",
+          "<tool_name>"
+        ],
+        "defer_loading": true,
+        "authorization": "<redacted>",
+        "headers": {
+          "X-Mcp-Trace": "trace_20260428"
+        },
+        "server_description": "Workspace MCP server"
+      }
+    ]
+  }
+}

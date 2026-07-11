@@ -1,0 +1,29 @@
+[
+  {
+    "type": "response.created",
+    "sequence_number": 0,
+    "created_at": "<created_at>",
+    "response": {
+      "id": "<id>",
+      "headers": {
+        "x-codex-turn-state": "turn_child_20260428"
+      }
+    }
+  },
+  {
+    "type": "response.output_text.delta",
+    "sequence_number": 1,
+    "created_at": "<created_at>",
+    "response_id": "<response_id>",
+    "delta": "ok"
+  },
+  {
+    "type": "response.completed",
+    "sequence_number": 2,
+    "created_at": "<created_at>",
+    "response": {
+      "id": "<id>",
+      "turn_state": "turn_child_20260428"
+    }
+  }
+]
