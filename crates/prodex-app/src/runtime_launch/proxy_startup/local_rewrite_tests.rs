@@ -3036,6 +3036,8 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
     })
     .expect("gateway proxy should start");
     let client = reqwest::blocking::Client::new();
+    let keys_url = format!("http://{}/v1/prodex/gateway/keys", proxy.listen_addr);
+    let key_url = format!("{keys_url}/team-rbac");
 
     let admin_data_plane = client
         .post(format!("http://{}/v1/responses", proxy.listen_addr))
@@ -3046,22 +3048,14 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
     assert_eq!(admin_data_plane.status().as_u16(), 401);
 
     let viewed = client
-        .get(format!(
-            "http://{}/v1/prodex/gateway/keys",
-            proxy.listen_addr
-        ))
+        .get(&keys_url)
         .bearer_auth(viewer_token)
         .send()
         .expect("viewer list keys request should be sent");
     assert_eq!(viewed.status().as_u16(), 200);
-
     let viewer_create = client
-        .post(format!(
-            "http://{}/v1/prodex/gateway/keys",
-            proxy.listen_addr
-        ))
+        .idempotent_post(&keys_url)
         .bearer_auth(viewer_token)
-        .header("Idempotency-Key", "viewer-create-denied")
         .json(&serde_json::json!({"name": "team-rbac"}))
         .send()
         .expect("viewer create key request should be sent");
@@ -3072,36 +3066,24 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
     );
 
     let created = client
-        .post(format!(
-            "http://{}/v1/prodex/gateway/keys",
-            proxy.listen_addr
-        ))
+        .idempotent_post(&keys_url)
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "rbac-admin-create")
         .json(&serde_json::json!({"name": "team-rbac"}))
         .send()
         .expect("admin create key request should be sent");
     assert_eq!(created.status().as_u16(), 201);
 
     let viewer_patch = client
-        .patch(format!(
-            "http://{}/v1/prodex/gateway/keys/team-rbac",
-            proxy.listen_addr
-        ))
+        .idempotent_patch(&key_url)
         .bearer_auth(viewer_token)
-        .header("Idempotency-Key", "viewer-patch-denied")
         .json(&serde_json::json!({"disabled": true}))
         .send()
         .expect("viewer patch key request should be sent");
     assert_eq!(viewer_patch.status().as_u16(), 403);
 
     let viewer_delete = client
-        .delete(format!(
-            "http://{}/v1/prodex/gateway/keys/team-rbac",
-            proxy.listen_addr
-        ))
+        .idempotent_delete(&key_url)
         .bearer_auth(viewer_token)
-        .header("Idempotency-Key", "viewer-delete-denied")
         .send()
         .expect("viewer delete key request should be sent");
     assert_eq!(viewer_delete.status().as_u16(), 403);

@@ -3,6 +3,7 @@ use crate::runtime_launch::proxy_startup::local_rewrite::{
     RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use reqwest::{IntoUrl, blocking::RequestBuilder};
 use std::fs;
 use std::net::SocketAddr;
 #[cfg(unix)]
@@ -12,6 +13,34 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
+
+pub(super) trait IdempotentClient {
+    fn idempotent_post(&self, url: impl IntoUrl) -> RequestBuilder;
+    fn idempotent_patch(&self, url: impl IntoUrl) -> RequestBuilder;
+    fn idempotent_delete(&self, url: impl IntoUrl) -> RequestBuilder;
+}
+
+impl IdempotentClient for reqwest::blocking::Client {
+    fn idempotent_post(&self, url: impl IntoUrl) -> RequestBuilder {
+        idempotent(self.post(url))
+    }
+
+    fn idempotent_patch(&self, url: impl IntoUrl) -> RequestBuilder {
+        idempotent(self.patch(url))
+    }
+
+    fn idempotent_delete(&self, url: impl IntoUrl) -> RequestBuilder {
+        idempotent(self.delete(url))
+    }
+}
+
+fn idempotent(request: RequestBuilder) -> RequestBuilder {
+    static NEXT_KEY: AtomicUsize = AtomicUsize::new(1);
+    request.header(
+        "Idempotency-Key",
+        format!("test-{}", NEXT_KEY.fetch_add(1, Ordering::Relaxed)),
+    )
+}
 
 pub(super) fn runtime_gateway_test_admin_token(token: &str) -> RuntimeGatewayAdminToken {
     RuntimeGatewayAdminToken {

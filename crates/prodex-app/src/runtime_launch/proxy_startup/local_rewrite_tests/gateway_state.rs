@@ -380,12 +380,11 @@ fn gateway_sqlite_state_store_persists_admin_keys_and_usage() {
     .expect("sqlite gateway proxy should start");
     let client = reqwest::blocking::Client::new();
     let created = client
-        .post(format!(
+        .idempotent_post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "sqlite-state-create")
         .json(&serde_json::json!({
             "name": "team-sqlite",
             "tenant_id": prodex_domain::TenantId::new().to_string()
@@ -610,12 +609,11 @@ fn gateway_sqlite_state_store_rotates_admin_keys() {
     let client = reqwest::blocking::Client::new();
 
     let created = client
-        .post(format!(
+        .idempotent_post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "sqlite-rotate-create")
         .json(&serde_json::json!({
             "name": "team-sqlite-rotate",
             "tenant_id": prodex_domain::TenantId::new().to_string()
@@ -642,12 +640,11 @@ fn gateway_sqlite_state_store_rotates_admin_keys() {
         .expect("upstream should receive sqlite request before rotate");
 
     let rotated = client
-        .patch(format!(
+        .idempotent_patch(format!(
             "http://{}/v1/prodex/gateway/keys/team-sqlite-rotate",
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "sqlite-rotate-update")
         .json(&serde_json::json!({"rotate": true}))
         .send()
         .expect("sqlite rotate key request should be sent");
@@ -732,12 +729,11 @@ fn gateway_sqlite_shared_backend_allows_only_one_budget_limited_reservation_acro
     .expect("first sqlite gateway proxy should start");
     let client = reqwest::blocking::Client::new();
     let created = client
-        .post(format!(
+        .idempotent_post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy_a.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "sqlite-shared-create")
         .json(&serde_json::json!({
             "name": "team-shared",
             "tenant_id": prodex_domain::TenantId::new().to_string(),
@@ -973,12 +969,11 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         create_payload["rpm_limit"] = serde_json::json!(1_u64);
     }
     let created = client
-        .post(format!(
+        .idempotent_post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy_a.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "postgres-shared-create")
         .json(&create_payload)
         .send()
         .expect("shared postgres create key request should be sent");
@@ -1222,12 +1217,11 @@ fn gateway_postgres_state_store_rotates_admin_keys() {
     );
 
     let created = client
-        .post(format!(
+        .idempotent_post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "postgres-rotate-create")
         .json(&serde_json::json!({"name": key_name}))
         .send()
         .expect("postgres create key request should be sent");
@@ -1259,12 +1253,11 @@ fn gateway_postgres_state_store_rotates_admin_keys() {
         .expect("upstream should receive postgres request before rotate");
 
     let rotated = client
-        .patch(format!(
+        .idempotent_patch(format!(
             "http://{}/v1/prodex/gateway/keys/{}",
             proxy.listen_addr, key_name
         ))
         .bearer_auth(admin_token)
-        .header("Idempotency-Key", "postgres-rotate-update")
         .json(&serde_json::json!({"rotate": true}))
         .send()
         .expect("postgres rotate key request should be sent");
