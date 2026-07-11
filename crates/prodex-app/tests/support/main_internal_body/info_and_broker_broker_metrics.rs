@@ -91,6 +91,14 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
     assert_eq!(metrics.traffic.responses.global_limit_rejections_total, 0);
     assert_eq!(metrics.traffic.responses.lane_limit_rejections_total, 0);
     assert_eq!(metrics.local_overload_backoff_remaining_seconds, 0);
+    assert_eq!(
+        metrics.admission_wait,
+        RuntimeStateLockWaitMetrics::default()
+    );
+    assert_eq!(
+        metrics.long_lived_queue_wait,
+        RuntimeStateLockWaitMetrics::default()
+    );
     assert_eq!(metrics.continuations.response_bindings, 0);
     assert_eq!(
         metrics.continuity_failure_reasons.stale_continuation,
@@ -193,6 +201,12 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("prodex_version=\""));
     assert!(body.contains("executable_sha256=\""));
     assert!(body.contains("prodex_runtime_broker_lane_admissions_total"));
+    assert!(body.contains("prodex_runtime_broker_admission_wait_total_seconds"));
+    assert!(body.contains("prodex_runtime_broker_admission_waits_total"));
+    assert!(body.contains("prodex_runtime_broker_admission_wait_max_seconds"));
+    assert!(body.contains("prodex_runtime_broker_long_lived_queue_wait_total_seconds"));
+    assert!(body.contains("prodex_runtime_broker_long_lived_queue_waits_total"));
+    assert!(body.contains("prodex_runtime_broker_long_lived_queue_wait_max_seconds"));
     assert!(body.contains("prodex_runtime_broker_lane_releases_total"));
     assert!(body.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
     assert!(body.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
@@ -263,6 +277,14 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
     )
     .expect("responses admission should succeed");
     drop(guard);
+    shared
+        .lane_admission
+        .admission_wait_metrics
+        .record_wait(Duration::from_nanos(13));
+    shared
+        .lane_admission
+        .long_lived_queue_wait_metrics
+        .record_wait(Duration::from_nanos(29));
 
     shared
         .active_request_count
@@ -327,6 +349,10 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
     assert_eq!(metrics.profile_inflight_admissions_total, 0);
     assert_eq!(metrics.profile_inflight_releases_total, 0);
     assert_eq!(metrics.profile_inflight_release_underflows_total, 0);
+    assert_eq!(metrics.admission_wait.wait_total_ns, 13);
+    assert_eq!(metrics.admission_wait.wait_count, 1);
+    assert_eq!(metrics.long_lived_queue_wait.wait_total_ns, 29);
+    assert_eq!(metrics.long_lived_queue_wait.wait_count, 1);
 }
 
 #[test]

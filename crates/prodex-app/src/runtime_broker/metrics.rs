@@ -116,6 +116,11 @@ pub(crate) fn runtime_broker_metrics_snapshot(
                     .load(Ordering::SeqCst)
                     .saturating_sub(now_u64),
                 runtime_state_lock_wait: shared.runtime_state_lock_wait_metrics(),
+                admission_wait: shared.lane_admission.admission_wait_metrics.snapshot(),
+                long_lived_queue_wait: shared
+                    .lane_admission
+                    .long_lived_queue_wait_metrics
+                    .snapshot(),
                 traffic: RuntimeBrokerTrafficMetrics {
                     responses: runtime_broker_live_lane_metrics(
                         shared,

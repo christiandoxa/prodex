@@ -1,14 +1,15 @@
 use crate::{
     RuntimeBackgroundQueueEnqueuePlan, RuntimeBackgroundQueueKind,
     RuntimeBackgroundQueuePressureThresholds, RuntimeDueJobs, RuntimeProbeUsageSnapshotApplyInput,
-    RuntimeProfileUsageSnapshot, RuntimeQuotaWindowStatus, RuntimeScheduledSaveJob,
-    RuntimeStartupProbeRefreshCandidate, RuntimeStartupProbeRefreshInput,
-    RuntimeStartupProbeRefreshPlan, RuntimeStateLockWaitMetricCounters,
-    RuntimeStateLockWaitMetrics, RuntimeStateSaveSections, RuntimeStateSaveStateSection,
-    runtime_background_enqueue_backlog, runtime_background_queue_enqueue_plan,
-    runtime_continuation_journal_save_debounce, runtime_continuation_journal_save_enqueue_plan,
-    runtime_probe_usage_snapshot_apply_plan, runtime_profile_usage_snapshot_is_usable,
-    runtime_profile_usage_snapshot_should_persist, runtime_profiles_needing_startup_probe_refresh,
+    RuntimeProfileUsageSnapshot, RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits,
+    RuntimeQuotaWindowStatus, RuntimeScheduledSaveJob, RuntimeStartupProbeRefreshCandidate,
+    RuntimeStartupProbeRefreshInput, RuntimeStartupProbeRefreshPlan,
+    RuntimeStateLockWaitMetricCounters, RuntimeStateLockWaitMetrics, RuntimeStateSaveSections,
+    RuntimeStateSaveStateSection, RuntimeWaitDurationMetrics, runtime_background_enqueue_backlog,
+    runtime_background_queue_enqueue_plan, runtime_continuation_journal_save_debounce,
+    runtime_continuation_journal_save_enqueue_plan, runtime_probe_usage_snapshot_apply_plan,
+    runtime_profile_usage_snapshot_is_usable, runtime_profile_usage_snapshot_should_persist,
+    runtime_profiles_needing_startup_probe_refresh,
     runtime_profiles_needing_startup_probe_refresh_from_snapshots,
     runtime_proxy_queue_pressure_active, runtime_state_save_debounce,
     runtime_state_save_enqueue_plan, runtime_state_save_sections_for_reason,
@@ -388,7 +389,7 @@ fn runtime_state_lock_wait_counters_track_totals_and_max() {
 
     assert_eq!(
         counters.snapshot(),
-        RuntimeStateLockWaitMetrics {
+        RuntimeWaitDurationMetrics {
             wait_total_ns: 35,
             wait_count: 2,
             wait_max_ns: 25,
@@ -398,4 +399,38 @@ fn runtime_state_lock_wait_counters_track_totals_and_max() {
     counters.reset();
 
     assert_eq!(counters.snapshot(), RuntimeStateLockWaitMetrics::default());
+}
+
+#[test]
+fn runtime_proxy_lane_admission_owns_distinct_shared_wait_metrics() {
+    let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+        responses: 4,
+        compact: 2,
+        websocket: 2,
+        standard: 1,
+    });
+    admission
+        .admission_wait_metrics
+        .record_wait(Duration::from_nanos(11));
+    admission
+        .long_lived_queue_wait_metrics
+        .record_wait(Duration::from_nanos(17));
+
+    let cloned = admission.clone();
+    assert_eq!(
+        cloned.admission_wait_metrics.snapshot(),
+        RuntimeWaitDurationMetrics {
+            wait_total_ns: 11,
+            wait_count: 1,
+            wait_max_ns: 11,
+        }
+    );
+    assert_eq!(
+        cloned.long_lived_queue_wait_metrics.snapshot(),
+        RuntimeWaitDurationMetrics {
+            wait_total_ns: 17,
+            wait_count: 1,
+            wait_max_ns: 17,
+        }
+    );
 }

@@ -153,8 +153,49 @@ fn response_lane_limit_still_rejects_fresh_request() {
             "/backend-api/codex/responses",
             Some(&request),
         ),
-        Err(RuntimeProxyAdmissionRejection::LaneLimit(RuntimeRouteKind::Responses))
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(
+            RuntimeRouteKind::Responses
+        ))
     ));
+    let wait = shared.lane_admission.admission_wait_metrics.snapshot();
+    assert_eq!(wait.wait_count, 1);
+    assert!(wait.wait_total_ns > 0);
+}
+
+#[test]
+fn active_request_admission_wait_metric_records_recovery_once() {
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(100, 250);
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .active_request_limit(1)
+    .build();
+    let shared = harness.shared();
+    let held = try_acquire_runtime_proxy_active_request_slot(
+        shared,
+        "http",
+        "/backend-api/codex/responses",
+    )
+    .expect("first request should hold admission capacity");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        drop(held);
+    });
+
+    let recovered = acquire_runtime_proxy_active_request_slot_with_wait(
+        shared,
+        "http",
+        "/backend-api/codex/responses",
+    )
+    .expect("admission should recover after the held request exits");
+    release.join().expect("release thread should join");
+
+    let wait = shared.lane_admission.admission_wait_metrics.snapshot();
+    assert_eq!(wait.wait_count, 1);
+    assert!(wait.wait_total_ns > 0);
+    drop(recovered);
 }
 
 #[test]
@@ -203,10 +244,110 @@ fn response_lane_limit_does_not_override_owned_previous_response_affinity() {
         "global active counter should still be enforced"
     );
     assert_eq!(
-        shared.lane_admission.responses_active.load(Ordering::SeqCst),
+        shared
+            .lane_admission
+            .responses_active
+            .load(Ordering::SeqCst),
         limit + 1
     );
+    assert_eq!(
+        shared
+            .lane_admission
+            .admission_wait_metrics
+            .snapshot()
+            .wait_count,
+        0
+    );
     drop(guard);
+}
+
+#[test]
+fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
+    let _budget_guard =
+        TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS", "5");
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .build();
+    let shared = harness.shared();
+    let path = "/backend-api/codex/responses";
+    let wait_count = || {
+        shared
+            .lane_admission
+            .long_lived_queue_wait_metrics
+            .snapshot()
+            .wait_count
+    };
+
+    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |_| Ok(()))
+        .expect("immediate queue capacity should not wait");
+    assert_eq!(wait_count(), 0);
+
+    let mut attempts = 0;
+    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
+        attempts += 1;
+        if attempts == 1 {
+            Err((RuntimeProxyQueueRejection::Full, item))
+        } else {
+            Ok(())
+        }
+    })
+    .expect("second queue probe should recover");
+    assert_eq!(wait_count(), 1);
+
+    let mut attempts = 0;
+    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
+        attempts += 1;
+        if attempts <= 2 {
+            Err((RuntimeProxyQueueRejection::Full, item))
+        } else {
+            Ok(())
+        }
+    })
+    .expect("queue should recover after its bounded wait");
+    assert_eq!(wait_count(), 2);
+
+    let mut attempts = 0;
+    assert!(matches!(
+        wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
+            attempts += 1;
+            if attempts == 1 {
+                Err((RuntimeProxyQueueRejection::Full, item))
+            } else {
+                Err((RuntimeProxyQueueRejection::Disconnected, item))
+            }
+        }),
+        Err((RuntimeProxyQueueRejection::Disconnected, ()))
+    ));
+    assert_eq!(wait_count(), 3);
+
+    assert!(matches!(
+        wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| Err((
+            RuntimeProxyQueueRejection::Full,
+            item,
+        ))),
+        Err((RuntimeProxyQueueRejection::Full, ()))
+    ));
+    assert_eq!(wait_count(), 4);
+
+    assert!(matches!(
+        wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| Err((
+            RuntimeProxyQueueRejection::Disconnected,
+            item,
+        ))),
+        Err((RuntimeProxyQueueRejection::Disconnected, ()))
+    ));
+    assert_eq!(wait_count(), 4);
+
+    let wait = shared
+        .lane_admission
+        .long_lived_queue_wait_metrics
+        .snapshot();
+    assert_eq!(wait.wait_count, 4);
+    assert!(wait.wait_total_ns > 0);
+    assert!(wait.wait_max_ns > 0);
 }
 
 #[test]
@@ -247,7 +388,9 @@ fn response_lane_limit_retry_bypasses_owned_previous_response_affinity() {
             "http",
             "/backend-api/codex/responses",
         ),
-        Err(RuntimeProxyAdmissionRejection::LaneLimit(RuntimeRouteKind::Responses))
+        Err(RuntimeProxyAdmissionRejection::LaneLimit(
+            RuntimeRouteKind::Responses
+        ))
     ));
 
     let guard = acquire_runtime_proxy_active_request_slot_with_wait_for_request(
@@ -264,7 +407,10 @@ fn response_lane_limit_retry_bypasses_owned_previous_response_affinity() {
         "global active counter should still be enforced"
     );
     assert_eq!(
-        shared.lane_admission.responses_active.load(Ordering::SeqCst),
+        shared
+            .lane_admission
+            .responses_active
+            .load(Ordering::SeqCst),
         limit + 1
     );
     drop(guard);

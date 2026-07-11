@@ -12,20 +12,20 @@ pub enum RuntimeRouteKind {
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RuntimeStateLockWaitMetrics {
+pub struct RuntimeWaitDurationMetrics {
     pub wait_total_ns: u64,
     pub wait_count: u64,
     pub wait_max_ns: u64,
 }
 
 #[derive(Debug, Default)]
-pub struct RuntimeStateLockWaitMetricCounters {
+pub struct RuntimeWaitDurationMetricCounters {
     wait_total_ns: AtomicU64,
     wait_count: AtomicU64,
     wait_max_ns: AtomicU64,
 }
 
-impl RuntimeStateLockWaitMetricCounters {
+impl RuntimeWaitDurationMetricCounters {
     pub fn record_wait(&self, wait: Duration) {
         let wait_ns = wait.as_nanos().min(u128::from(u64::MAX)) as u64;
         self.wait_total_ns.fetch_add(wait_ns, Ordering::Relaxed);
@@ -44,8 +44,8 @@ impl RuntimeStateLockWaitMetricCounters {
         }
     }
 
-    pub fn snapshot(&self) -> RuntimeStateLockWaitMetrics {
-        RuntimeStateLockWaitMetrics {
+    pub fn snapshot(&self) -> RuntimeWaitDurationMetrics {
+        RuntimeWaitDurationMetrics {
             wait_total_ns: self.wait_total_ns.load(Ordering::Relaxed),
             wait_count: self.wait_count.load(Ordering::Relaxed),
             wait_max_ns: self.wait_max_ns.load(Ordering::Relaxed),
@@ -58,6 +58,11 @@ impl RuntimeStateLockWaitMetricCounters {
         self.wait_max_ns.store(0, Ordering::Relaxed);
     }
 }
+
+/// Compatibility name retained for runtime-state lock metrics consumers.
+pub type RuntimeStateLockWaitMetrics = RuntimeWaitDurationMetrics;
+/// Compatibility name retained for runtime-state lock counter consumers.
+pub type RuntimeStateLockWaitMetricCounters = RuntimeWaitDurationMetricCounters;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeProxyLaneLimits {
@@ -97,6 +102,8 @@ pub struct RuntimeProxyLaneAdmission {
     pub profile_inflight_admissions_total: Arc<AtomicU64>,
     pub profile_inflight_releases_total: Arc<AtomicU64>,
     pub profile_inflight_release_underflows_total: Arc<AtomicU64>,
+    pub admission_wait_metrics: Arc<RuntimeWaitDurationMetricCounters>,
+    pub long_lived_queue_wait_metrics: Arc<RuntimeWaitDurationMetricCounters>,
     pub wait: Arc<(Mutex<()>, Condvar)>,
     pub inflight_release_revision: Arc<AtomicU64>,
     pub limits: RuntimeProxyLaneLimits,
@@ -133,6 +140,8 @@ impl RuntimeProxyLaneAdmission {
             profile_inflight_admissions_total: Arc::new(AtomicU64::new(0)),
             profile_inflight_releases_total: Arc::new(AtomicU64::new(0)),
             profile_inflight_release_underflows_total: Arc::new(AtomicU64::new(0)),
+            admission_wait_metrics: Arc::new(RuntimeWaitDurationMetricCounters::default()),
+            long_lived_queue_wait_metrics: Arc::new(RuntimeWaitDurationMetricCounters::default()),
             wait: Arc::new((Mutex::new(()), Condvar::new())),
             inflight_release_revision: Arc::new(AtomicU64::new(0)),
             limits,

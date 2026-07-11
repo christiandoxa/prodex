@@ -1,5 +1,6 @@
 use super::*;
 use crate::runtime_broker_test_secret;
+use std::time::Duration;
 
 fn temp_log_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -98,6 +99,14 @@ fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_cou
         .expect("test log should write");
 
     let shared = test_runtime_broker_shared(log_path.clone());
+    shared
+        .lane_admission
+        .admission_wait_metrics
+        .record_wait(Duration::from_nanos(21));
+    shared
+        .lane_admission
+        .long_lived_queue_wait_metrics
+        .record_wait(Duration::from_nanos(34));
     runtime_proxy_record_continuity_failure_reason(
         &shared,
         "chain_dead_upstream_confirmed",
@@ -133,6 +142,10 @@ fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_cou
             .chain_dead_upstream_confirmed,
         BTreeMap::from([("previous_response_not_found_locked_affinity".to_string(), 1,)])
     );
+    assert_eq!(metrics.admission_wait.wait_total_ns, 21);
+    assert_eq!(metrics.admission_wait.wait_count, 1);
+    assert_eq!(metrics.long_lived_queue_wait.wait_total_ns, 34);
+    assert_eq!(metrics.long_lived_queue_wait.wait_count, 1);
     assert_eq!(
         metrics.continuity_failure_reasons.stale_continuation,
         BTreeMap::from([

@@ -41,11 +41,9 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             local_overload_backoff_remaining_seconds: self
                 .metrics
                 .local_overload_backoff_remaining_seconds,
-            runtime_state_lock_wait: RuntimeBrokerStateLockWaitMetrics {
-                wait_total_ns: self.metrics.runtime_state_lock_wait.wait_total_ns,
-                wait_count: self.metrics.runtime_state_lock_wait.wait_count,
-                wait_max_ns: self.metrics.runtime_state_lock_wait.wait_max_ns,
-            },
+            runtime_state_lock_wait: Self::build_wait_metrics(self.metrics.runtime_state_lock_wait),
+            admission_wait: Self::build_wait_metrics(self.metrics.admission_wait),
+            long_lived_queue_wait: Self::build_wait_metrics(self.metrics.long_lived_queue_wait),
             traffic: self.build_traffic(),
             profile_inflight: self.build_profile_inflight(),
             active_request_release_underflows_total: self
@@ -162,6 +160,16 @@ impl<'a> RuntimeBrokerSnapshotBuilder<'a> {
             global_limit_rejections_total: lane.global_limit_rejections_total,
             lane_limit_rejections_total: lane.lane_limit_rejections_total,
             release_underflows_total: lane.release_underflows_total,
+        }
+    }
+
+    fn build_wait_metrics(
+        metrics: broker::RuntimeWaitDurationMetrics,
+    ) -> RuntimeBrokerWaitDurationMetrics {
+        RuntimeBrokerWaitDurationMetrics {
+            wait_total_ns: metrics.wait_total_ns,
+            wait_count: metrics.wait_count,
+            wait_max_ns: metrics.wait_max_ns,
         }
     }
 
