@@ -1,0 +1,2972 @@
+{
+  "components": {
+    "responses": {
+      "GatewayError": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GatewayError"
+            }
+          }
+        },
+        "description": "Gateway JSON error"
+      }
+    },
+    "schemas": {
+      "GatewayBillingLedger": {
+        "properties": {
+          "ledger_path": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "object": {
+            "type": "string"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingLedgerEntry"
+            },
+            "type": "array"
+          },
+          "state_backend": {
+            "enum": [
+              "file",
+              "sqlite",
+              "postgres",
+              "redis"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "records"
+        ],
+        "type": "object"
+      },
+      "GatewayBillingLedgerEntry": {
+        "properties": {
+          "budget_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "call_id": {
+            "type": "string"
+          },
+          "created_at_epoch": {
+            "type": "integer"
+          },
+          "estimated_cost_microusd": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "estimated_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "final_cost_microusd": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "final_cost_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "key_name": {
+            "type": "string"
+          },
+          "minute_epoch": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "phase": {
+            "enum": [
+              "request"
+            ],
+            "type": "string"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reconciled_at_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "request": {
+            "type": "integer"
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "response_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "response_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "team_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "phase",
+          "request",
+          "call_id",
+          "key_name",
+          "model",
+          "minute_epoch",
+          "input_tokens",
+          "created_at_epoch"
+        ],
+        "type": "object"
+      },
+      "GatewayBillingSummary": {
+        "properties": {
+          "by_budget": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "by_key": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "by_key_model": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "by_project": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "by_team": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "by_tenant": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "by_user": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+            },
+            "type": "array"
+          },
+          "ledger_path": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "record_count": {
+            "type": "integer"
+          },
+          "state_backend": {
+            "enum": [
+              "file",
+              "sqlite",
+              "postgres",
+              "redis"
+            ],
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/GatewayBillingSummaryBucket"
+          }
+        },
+        "required": [
+          "object",
+          "totals",
+          "by_key",
+          "by_model",
+          "by_key_model"
+        ],
+        "type": "object"
+      },
+      "GatewayBillingSummaryBucket": {
+        "properties": {
+          "budget_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "estimated_cost_microusd": {
+            "type": "integer"
+          },
+          "estimated_cost_usd": {
+            "type": "number"
+          },
+          "failed_requests": {
+            "type": "integer"
+          },
+          "final_cost_microusd": {
+            "type": "integer"
+          },
+          "final_cost_usd": {
+            "type": "number"
+          },
+          "first_created_at_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "key_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_created_at_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_reconciled_at_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requests": {
+            "type": "integer"
+          },
+          "response_bytes": {
+            "type": "integer"
+          },
+          "successful_requests": {
+            "type": "integer"
+          },
+          "team_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unreconciled_requests": {
+            "type": "integer"
+          },
+          "user_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "requests",
+          "successful_requests",
+          "failed_requests",
+          "unreconciled_requests",
+          "input_tokens",
+          "output_tokens",
+          "response_bytes",
+          "estimated_cost_microusd",
+          "estimated_cost_usd",
+          "final_cost_microusd",
+          "final_cost_usd"
+        ],
+        "type": "object"
+      },
+      "GatewayError": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "GatewayExactIdentifier": {
+        "description": "Exact non-empty identifier; whitespace is not normalized.",
+        "minLength": 1,
+        "pattern": "^\\S+$",
+        "type": "string"
+      },
+      "GatewayGuardrails": {
+        "properties": {
+          "allowed_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "blocked_keywords_count": {
+            "type": "integer"
+          },
+          "blocked_output_keywords_count": {
+            "type": "integer"
+          },
+          "object": {
+            "type": "string"
+          },
+          "pii_redaction": {
+            "type": "boolean"
+          },
+          "prompt_injection_detection": {
+            "type": "boolean"
+          },
+          "webhook": {
+            "properties": {
+              "bearer_token_configured": {
+                "type": "boolean"
+              },
+              "configured": {
+                "type": "boolean"
+              },
+              "fail_closed": {
+                "type": "boolean"
+              },
+              "phases": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "configured",
+              "phases",
+              "bearer_token_configured",
+              "fail_closed"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "object",
+          "blocked_keywords_count",
+          "blocked_output_keywords_count",
+          "allowed_models",
+          "prompt_injection_detection",
+          "pii_redaction",
+          "webhook"
+        ],
+        "type": "object"
+      },
+      "GatewayHealth": {
+        "properties": {
+          "active_request_limit": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "active_requests": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "draining": {
+            "type": "boolean"
+          },
+          "local_overload": {
+            "type": "boolean"
+          },
+          "object": {
+            "const": "gateway.health",
+            "type": "string"
+          },
+          "policy_version": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "probe": {
+            "enum": [
+              "livez",
+              "readyz",
+              "startupz"
+            ],
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "overloaded",
+              "draining",
+              "method_not_allowed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "probe",
+          "status",
+          "ready",
+          "local_overload",
+          "draining",
+          "policy_version",
+          "active_requests",
+          "active_request_limit"
+        ],
+        "type": "object"
+      },
+      "GatewayKey": {
+        "properties": {
+          "allowed_models": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayExactIdentifier"
+            },
+            "type": "array"
+          },
+          "budget_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "budget_microusd": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "budget_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "created_at_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/GatewayExactIdentifier"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "request_budget": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "rpm_limit": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source": {
+            "enum": [
+              "policy",
+              "admin"
+            ],
+            "type": "string"
+          },
+          "team_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "tpm_limit": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at_epoch": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "usage": {
+            "$ref": "#/components/schemas/GatewayUsage"
+          },
+          "user_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "disabled",
+          "editable",
+          "usage"
+        ],
+        "type": "object"
+      },
+      "GatewayKeyCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_models": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayExactIdentifier"
+            },
+            "type": "array"
+          },
+          "budget_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "budget_microusd": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "budget_usd": {
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/GatewayExactIdentifier"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "request_budget": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "rpm_limit": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "team_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "token": {
+            "description": "Optional caller-supplied bearer token. Omit to have Prodex generate one.",
+            "type": "string"
+          },
+          "tpm_limit": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "user_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "GatewayKeyDeleted": {
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "name",
+          "deleted"
+        ],
+        "type": "object"
+      },
+      "GatewayKeyList": {
+        "properties": {
+          "key_store_path": {
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayKey"
+            },
+            "type": "array"
+          },
+          "object": {
+            "type": "string"
+          },
+          "state_backend": {
+            "enum": [
+              "file",
+              "sqlite",
+              "postgres",
+              "redis"
+            ],
+            "type": "string"
+          },
+          "state_path": {
+            "type": "string"
+          },
+          "unknown_persisted_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "usage_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "keys"
+        ],
+        "type": "object"
+      },
+      "GatewayKeyMutationResponse": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/GatewayKey"
+          },
+          "object": {
+            "type": "string"
+          },
+          "token": {
+            "description": "Returned only when Prodex generated or rotated the token for this request.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "object",
+          "key"
+        ],
+        "type": "object"
+      },
+      "GatewayKeyPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_models": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayExactIdentifier"
+            },
+            "type": "array"
+          },
+          "budget_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "budget_microusd": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "budget_usd": {
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "request_budget": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "rotate": {
+            "description": "Generate and return a new bearer token once.",
+            "type": "boolean"
+          },
+          "rpm_limit": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "team_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "token": {
+            "description": "Optional replacement bearer token. The stored file only keeps its hash.",
+            "type": "string"
+          },
+          "tpm_limit": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "user_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          }
+        },
+        "type": "object"
+      },
+      "GatewayKeyResponse": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/GatewayKey"
+          },
+          "object": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "key"
+        ],
+        "type": "object"
+      },
+      "GatewayNullableExactIdentifier": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/GatewayExactIdentifier"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "GatewayNullableRouteModelIdentifier": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "GatewayObservability": {
+        "properties": {
+          "call_id_header": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "http_bearer_token_configured": {
+            "type": "boolean"
+          },
+          "http_endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "http_schema": {
+            "type": "string"
+          },
+          "jsonl_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "object": {
+            "type": "string"
+          },
+          "sinks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "object",
+          "sinks",
+          "http_bearer_token_configured"
+        ],
+        "type": "object"
+      },
+      "GatewayProviderContract": {
+        "properties": {
+          "canonical_client_endpoint": {
+            "type": "string"
+          },
+          "client_request_format": {
+            "type": "string"
+          },
+          "model_count": {
+            "type": "integer"
+          },
+          "model_list_endpoint": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "replay_case_count": {
+            "type": "integer"
+          },
+          "response_format": {
+            "type": "string"
+          },
+          "supported_endpoints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "supports_model_fallback": {
+            "type": "boolean"
+          },
+          "supports_streaming": {
+            "type": "boolean"
+          },
+          "upstream_request_format": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "client_request_format",
+          "upstream_request_format",
+          "response_format",
+          "canonical_client_endpoint",
+          "model_list_endpoint",
+          "supports_streaming",
+          "supports_model_fallback",
+          "supported_endpoints",
+          "model_count",
+          "replay_case_count"
+        ],
+        "type": "object"
+      },
+      "GatewayProviders": {
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayProviderContract"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "object",
+          "providers"
+        ],
+        "type": "object"
+      },
+      "GatewayRouteCandidateDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "type": "string"
+          },
+          "circuit_state": {
+            "enum": [
+              "closed",
+              "open",
+              "half_open_wait",
+              "unknown",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "class": {
+            "enum": [
+              "affinity",
+              "current",
+              "ready",
+              "fallback",
+              "auto_redeem"
+            ],
+            "type": "string"
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/GatewayRouteDecisionDiagnostics"
+          },
+          "eligibility": {
+            "enum": [
+              "eligible",
+              "rejected",
+              "deferred",
+              "not_evaluated"
+            ],
+            "type": "string"
+          },
+          "hard_affinity": {
+            "type": "boolean"
+          },
+          "health_band": {
+            "enum": [
+              "healthy",
+              "penalized",
+              "unknown",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inflight_count": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "original_order": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quota_band": {
+            "enum": [
+              "healthy",
+              "thin",
+              "critical",
+              "exhausted",
+              "unknown",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatewayRouteDecisionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rejection_stage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatewayRouteDecisionStage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "selected": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "original_order",
+          "provider",
+          "model",
+          "hard_affinity",
+          "class",
+          "eligibility",
+          "rejection_stage",
+          "reason",
+          "selected",
+          "quota_band",
+          "circuit_state",
+          "health_band",
+          "inflight_count",
+          "diagnostics"
+        ],
+        "type": "object"
+      },
+      "GatewayRouteConstraintPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "oversized_output": {
+            "default": "passthrough",
+            "enum": [
+              "passthrough",
+              "reject",
+              "clamp_with_notice"
+            ],
+            "type": "string"
+          },
+          "safe_window_tokens": {
+            "default": 128000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "unknown_context": {
+            "default": "allow",
+            "enum": [
+              "allow",
+              "safe_window",
+              "reject"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "GatewayRouteDecisionDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "available_context_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reasoning_reserve_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requested_output_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_required_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "GatewayRouteDecisionReason": {
+        "description": "Stable snake_case reason label from the canonical versioned route-decision trace.",
+        "pattern": "^[a-z0-9_]+$",
+        "type": "string"
+      },
+      "GatewayRouteDecisionStage": {
+        "enum": [
+          "affinity",
+          "model_resolution",
+          "endpoint_capability",
+          "request_constraints",
+          "governance",
+          "authentication",
+          "quota",
+          "circuit_and_backoff",
+          "admission",
+          "ranking",
+          "final_selection"
+        ],
+        "type": "string"
+      },
+      "GatewayRouteDecisionTrace": {
+        "additionalProperties": false,
+        "properties": {
+          "affinity": {
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hard": {
+                "type": "boolean"
+              },
+              "kind": {
+                "enum": [
+                  "none",
+                  "strict",
+                  "previous_response",
+                  "turn_state",
+                  "session",
+                  "prompt_cache"
+                ],
+                "type": "string"
+              },
+              "outcome": {
+                "enum": [
+                  "not_applicable",
+                  "retained",
+                  "rejected",
+                  "exhausted"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "candidate_id",
+              "hard",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayRouteCandidateDecision"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "commit_state": {
+            "enum": [
+              "pre_commit",
+              "committed"
+            ],
+            "type": "string"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolved_model": {
+            "$ref": "#/components/schemas/GatewayNullableRouteModelIdentifier"
+          },
+          "route": {
+            "enum": [
+              "responses",
+              "responses_compact",
+              "chat_completions",
+              "messages",
+              "embeddings",
+              "websocket",
+              "standard"
+            ],
+            "type": "string"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "selected_candidate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stages": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "outcome": {
+                  "enum": [
+                    "passed",
+                    "skipped",
+                    "rejected",
+                    "selected"
+                  ],
+                  "type": "string"
+                },
+                "stage": {
+                  "$ref": "#/components/schemas/GatewayRouteDecisionStage"
+                }
+              },
+              "required": [
+                "stage",
+                "outcome"
+              ],
+              "type": "object"
+            },
+            "maxItems": 11,
+            "type": "array"
+          },
+          "terminal_outcome": {
+            "enum": [
+              "selected",
+              "no_candidate",
+              "affinity_exhausted",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "terminal_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatewayRouteDecisionReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "truncation": {
+            "additionalProperties": false,
+            "properties": {
+              "omitted_candidate_records": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "omitted_stages": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "truncated_identifiers": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "truncated",
+              "omitted_stages",
+              "omitted_candidate_records",
+              "truncated_identifiers"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "route",
+          "requested_model",
+          "resolved_model",
+          "affinity",
+          "stages",
+          "candidates",
+          "selected_candidate",
+          "terminal_outcome",
+          "terminal_reason",
+          "commit_state",
+          "truncation"
+        ],
+        "type": "object"
+      },
+      "GatewayRouteExplainRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostic_seed": {
+            "default": 1,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "endpoint": {
+            "enum": [
+              "responses",
+              "responses/compact",
+              "chat-completions",
+              "messages",
+              "embeddings"
+            ],
+            "type": "string"
+          },
+          "hard_affinity_required": {
+            "default": false,
+            "type": "boolean"
+          },
+          "include_current_state": {
+            "default": false,
+            "description": "Include the bounded global model-load snapshot. Available only to unscoped principals; scoped callers receive 403.",
+            "type": "boolean"
+          },
+          "owner_model": {
+            "$ref": "#/components/schemas/GatewayNullableRouteModelIdentifier"
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GatewayRouteConstraintPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request": {
+            "additionalProperties": true,
+            "description": "Optional request shape used only for pure planning. Prompt and tool content are never returned or audited.",
+            "type": "object"
+          },
+          "requested_model": {
+            "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+          },
+          "required_capabilities": {
+            "items": {
+              "enum": [
+                "tools",
+                "json_schema",
+                "vision",
+                "audio",
+                "web_search",
+                "reasoning",
+                "streaming",
+                "compact",
+                "websocket"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "endpoint",
+          "requested_model"
+        ],
+        "type": "object"
+      },
+      "GatewayRouteExplainResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "alias_resolution_chain": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "candidate_matrix": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayRouteCandidateDecision"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "concrete_candidate_models": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "current_load_included": {
+            "description": "Whether the current read-only in-flight/model-load snapshot was included in diagnostic planning.",
+            "type": "boolean"
+          },
+          "diagnostic_seed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "final_no_route_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hard_affinity_applied": {
+            "type": "boolean"
+          },
+          "hard_affinity_required": {
+            "type": "boolean"
+          },
+          "health_quota_included": {
+            "type": "boolean"
+          },
+          "object": {
+            "const": "gateway.route_explanation",
+            "type": "string"
+          },
+          "omitted_candidates": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "owner_model": {
+            "$ref": "#/components/schemas/GatewayNullableRouteModelIdentifier"
+          },
+          "policy_adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayRouteOutputAdjustment"
+            },
+            "maxItems": 1,
+            "type": "array"
+          },
+          "request_requirements": {
+            "$ref": "#/components/schemas/GatewayRouteRequestRequirements"
+          },
+          "requested_model": {
+            "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+          },
+          "resolved_model": {
+            "$ref": "#/components/schemas/GatewayNullableRouteModelIdentifier"
+          },
+          "schema_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "selected_candidate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trace": {
+            "$ref": "#/components/schemas/GatewayRouteDecisionTrace"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          }
+        },
+        "required": [
+          "object",
+          "schema_version",
+          "diagnostic_seed",
+          "hard_affinity_required",
+          "hard_affinity_applied",
+          "owner_model",
+          "requested_model",
+          "resolved_model",
+          "alias_resolution_chain",
+          "concrete_candidate_models",
+          "request_requirements",
+          "candidate_matrix",
+          "selected_candidate",
+          "policy_adjustments",
+          "current_load_included",
+          "health_quota_included",
+          "warnings",
+          "final_no_route_reason",
+          "truncated",
+          "omitted_candidates",
+          "trace"
+        ],
+        "type": "object"
+      },
+      "GatewayRouteModelIdentifier": {
+        "maxLength": 256,
+        "minLength": 1,
+        "pattern": "^\\S+$",
+        "type": "string"
+      },
+      "GatewayRouteOutputAdjustment": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "field": {
+            "enum": [
+              "max_output_tokens",
+              "max_completion_tokens",
+              "max_tokens"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/GatewayRouteDecisionReason"
+          },
+          "requested_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "field",
+          "requested_tokens",
+          "applied_tokens",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "GatewayRouteRequestRequirements": {
+        "additionalProperties": false,
+        "properties": {
+          "default_output_reserve_tokens": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "endpoint": {
+            "enum": [
+              "responses",
+              "responses/compact",
+              "chat-completions",
+              "messages",
+              "embeddings"
+            ],
+            "type": "string"
+          },
+          "estimated_input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "explicit_output_tokens": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_limit_field": {
+            "enum": [
+              "max_output_tokens",
+              "max_completion_tokens",
+              "max_tokens",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasoning_effort": {
+            "enum": [
+              "none",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "unknown",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reasoning_reserve_tokens": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "requested_model": {
+            "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+          },
+          "required_features": {
+            "items": {
+              "enum": [
+                "tools",
+                "json_schema",
+                "vision",
+                "audio",
+                "web_search",
+                "reasoning",
+                "streaming",
+                "compact",
+                "websocket"
+              ],
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "resolved_upstream_model": {
+            "$ref": "#/components/schemas/GatewayNullableRouteModelIdentifier"
+          },
+          "total_required_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "endpoint",
+          "requested_model",
+          "resolved_upstream_model",
+          "estimated_input_tokens",
+          "explicit_output_tokens",
+          "output_limit_field",
+          "default_output_reserve_tokens",
+          "reasoning_effort",
+          "reasoning_reserve_tokens",
+          "total_required_tokens",
+          "required_features"
+        ],
+        "type": "object"
+      },
+      "GatewayScimUser": {
+        "additionalProperties": true,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "budget_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "externalId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "schemas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "team_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "userName": {
+            "$ref": "#/components/schemas/GatewayExactIdentifier"
+          },
+          "user_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          }
+        },
+        "required": [
+          "schemas",
+          "id",
+          "userName",
+          "active"
+        ],
+        "type": "object"
+      },
+      "GatewayScimUserList": {
+        "properties": {
+          "Resources": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayScimUser"
+            },
+            "type": "array"
+          },
+          "itemsPerPage": {
+            "type": "integer"
+          },
+          "schemas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "startIndex": {
+            "type": "integer"
+          },
+          "totalResults": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schemas",
+          "totalResults",
+          "Resources"
+        ],
+        "type": "object"
+      },
+      "GatewayScimUserWrite": {
+        "additionalProperties": true,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "allowed_key_prefixes": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayExactIdentifier"
+            },
+            "type": "array"
+          },
+          "budget_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "externalId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "viewer",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "team_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "tenant_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          },
+          "userName": {
+            "$ref": "#/components/schemas/GatewayExactIdentifier"
+          },
+          "user_id": {
+            "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
+          }
+        },
+        "required": [
+          "userName"
+        ],
+        "type": "object"
+      },
+      "GatewayUsage": {
+        "properties": {
+          "minute_epoch": {
+            "type": "integer"
+          },
+          "requests_this_minute": {
+            "type": "integer"
+          },
+          "requests_total": {
+            "type": "integer"
+          },
+          "spend_microusd": {
+            "type": "integer"
+          },
+          "spend_usd": {
+            "type": "number"
+          },
+          "tokens_this_minute": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "minute_epoch",
+          "requests_this_minute",
+          "tokens_this_minute",
+          "requests_total",
+          "spend_microusd",
+          "spend_usd"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "GatewayBearerAuth": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Local Prodex gateway admin and OpenAI-compatible response surface.",
+    "title": "Prodex Gateway API",
+    "version": "__PRODEX_VERSION__"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/livez": {
+      "get": {
+        "operationId": "getGatewayLivez",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Gateway operational health snapshot"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Health probe method is not allowed",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Gateway is alive but not locally ready"
+          }
+        },
+        "security": [],
+        "summary": "Check that the local gateway process is alive"
+      },
+      "head": {
+        "operationId": "headGatewayLivez",
+        "responses": {
+          "200": {
+            "description": "Gateway operational health snapshot without a body"
+          },
+          "503": {
+            "description": "Gateway is alive but not locally ready"
+          }
+        },
+        "security": [],
+        "summary": "Check that the local gateway process is alive"
+      }
+    },
+    "/readyz": {
+      "get": {
+        "operationId": "getGatewayReadyz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Gateway operational health snapshot"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Health probe method is not allowed",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Gateway is alive but not locally ready"
+          }
+        },
+        "security": [],
+        "summary": "Check that the gateway is ready to admit local traffic"
+      },
+      "head": {
+        "operationId": "headGatewayReadyz",
+        "responses": {
+          "200": {
+            "description": "Gateway operational health snapshot without a body"
+          },
+          "503": {
+            "description": "Gateway is alive but not locally ready"
+          }
+        },
+        "security": [],
+        "summary": "Check that the gateway is ready to admit local traffic"
+      }
+    },
+    "/startupz": {
+      "get": {
+        "operationId": "getGatewayStartupz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Gateway operational health snapshot"
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Health probe method is not allowed",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayHealth"
+                }
+              }
+            },
+            "description": "Gateway is alive but not locally ready"
+          }
+        },
+        "security": [],
+        "summary": "Check that the gateway startup path completed"
+      },
+      "head": {
+        "operationId": "headGatewayStartupz",
+        "responses": {
+          "200": {
+            "description": "Gateway operational health snapshot without a body"
+          },
+          "503": {
+            "description": "Gateway is alive but not locally ready"
+          }
+        },
+        "security": [],
+        "summary": "Check that the gateway startup path completed"
+      }
+    },
+    "/v1/prodex/gateway/admin": {
+      "get": {
+        "operationId": "getProdexGatewayAdminDashboard",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Authenticated HTML dashboard shell for gateway administration."
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get the authenticated built-in Prodex gateway admin dashboard shell"
+      }
+    },
+    "/v1/prodex/gateway/guardrails": {
+      "get": {
+        "operationId": "getGatewayGuardrails",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayGuardrails"
+                }
+              }
+            },
+            "description": "Gateway guardrail configuration"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get active gateway guardrail configuration"
+      }
+    },
+    "/v1/prodex/gateway/keys": {
+      "get": {
+        "operationId": "listGatewayVirtualKeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayKeyList"
+                }
+              }
+            },
+            "description": "Gateway virtual key list"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "List gateway virtual keys and usage counters"
+      },
+      "post": {
+        "operationId": "createGatewayVirtualKey",
+        "parameters": [
+          {
+            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayKeyCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayKeyMutationResponse"
+                }
+              }
+            },
+            "description": "Created virtual key. token is returned once when generated by Prodex."
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "409": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Create an admin-managed gateway virtual key"
+      }
+    },
+    "/v1/prodex/gateway/keys/{name}": {
+      "delete": {
+        "operationId": "deleteGatewayVirtualKey",
+        "parameters": [
+          {
+            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional optimistic-concurrency guard. Use the current ETag from GET, or * to bypass the guard.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayKeyDeleted"
+                }
+              }
+            },
+            "description": "Deleted virtual key marker"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "412": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Delete an admin-managed gateway virtual key"
+      },
+      "get": {
+        "operationId": "getGatewayVirtualKey",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayKeyResponse"
+                }
+              }
+            },
+            "description": "Gateway virtual key",
+            "headers": {
+              "ETag": {
+                "description": "Opaque virtual-key version token for If-Match concurrency guards.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get one gateway virtual key"
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "operationId": "updateGatewayVirtualKey",
+        "parameters": [
+          {
+            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional optimistic-concurrency guard. Use the current ETag from GET, or * to bypass the guard.",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayKeyPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayKeyMutationResponse"
+                }
+              }
+            },
+            "description": "Updated virtual key. token is returned once when rotated."
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "412": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Update, disable, or rotate an admin-managed gateway virtual key"
+      }
+    },
+    "/v1/prodex/gateway/ledger": {
+      "get": {
+        "operationId": "getGatewayBillingLedger",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayBillingLedger"
+                }
+              }
+            },
+            "description": "Gateway billing ledger records"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get recent gateway virtual-key billing ledger records"
+      }
+    },
+    "/v1/prodex/gateway/ledger.csv": {
+      "get": {
+        "operationId": "exportGatewayBillingLedgerCsv",
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Gateway billing ledger CSV export"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Export recent gateway virtual-key billing ledger records as CSV"
+      }
+    },
+    "/v1/prodex/gateway/ledger/summary": {
+      "get": {
+        "operationId": "getGatewayBillingSummary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayBillingSummary"
+                }
+              }
+            },
+            "description": "Gateway billing summary grouped by key and model"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get aggregated gateway virtual-key billing totals"
+      }
+    },
+    "/v1/prodex/gateway/ledger/summary.csv": {
+      "get": {
+        "operationId": "exportGatewayBillingSummaryCsv",
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Gateway billing summary CSV export"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Export aggregated gateway virtual-key billing totals as CSV"
+      }
+    },
+    "/v1/prodex/gateway/metrics": {
+      "get": {
+        "operationId": "getGatewayPrometheusMetrics",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Prometheus text metrics"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get gateway virtual-key usage metrics in Prometheus text format"
+      }
+    },
+    "/v1/prodex/gateway/observability": {
+      "get": {
+        "operationId": "getGatewayObservability",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayObservability"
+                }
+              }
+            },
+            "description": "Gateway observability configuration"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get active gateway observability configuration"
+      }
+    },
+    "/v1/prodex/gateway/openapi.json": {
+      "get": {
+        "operationId": "getProdexGatewayOpenApi",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OpenAPI document"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get the Prodex gateway OpenAPI document"
+      }
+    },
+    "/v1/prodex/gateway/providers": {
+      "get": {
+        "operationId": "getGatewayProviders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayProviders"
+                }
+              }
+            },
+            "description": "Gateway provider adapter contracts"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get gateway provider adapter contract matrix"
+      }
+    },
+    "/v1/prodex/gateway/routes/explain": {
+      "post": {
+        "operationId": "explainGatewayRoute",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayRouteExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayRouteExplainResponse"
+                }
+              }
+            },
+            "description": "Versioned, bounded, side-effect-free route explanation"
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "405": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "413": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "422": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "503": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Explain a gateway route decision without sending an upstream request or mutating runtime state"
+      }
+    },
+    "/v1/prodex/gateway/scim/v2/Users": {
+      "get": {
+        "operationId": "listGatewayScimUsers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayScimUserList"
+                }
+              }
+            },
+            "description": "SCIM ListResponse of users"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "List gateway SCIM-provisioned admin users"
+      },
+      "post": {
+        "operationId": "createGatewayScimUser",
+        "parameters": [
+          {
+            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GatewayScimUserWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayScimUser"
+                }
+              }
+            },
+            "description": "Created SCIM user"
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "409": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Provision a gateway admin user for trusted-proxy SSO"
+      }
+    },
+    "/v1/prodex/gateway/scim/v2/Users/{id}": {
+      "delete": {
+        "operationId": "deleteGatewayScimUser",
+        "parameters": [
+          {
+            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted SCIM user marker"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Delete one gateway SCIM user"
+      },
+      "get": {
+        "operationId": "getGatewayScimUser",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayScimUser"
+                }
+              }
+            },
+            "description": "SCIM user"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Get one gateway SCIM user"
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "operationId": "patchGatewayScimUser",
+        "parameters": [
+          {
+            "description": "Optional printable ASCII idempotency key for admin mutations. Reusing the same method/path/key returns 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayScimUser"
+                }
+              }
+            },
+            "description": "Updated SCIM user"
+          },
+          "400": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "403": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "404": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "409": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Patch one gateway SCIM user"
+      }
+    },
+    "/v1/prodex/gateway/usage": {
+      "get": {
+        "operationId": "getGatewayVirtualKeyUsage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayKeyList"
+                }
+              }
+            },
+            "description": "Gateway virtual key usage"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "List gateway virtual keys with persisted usage counters"
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "operationId": "createGatewayResponse",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OpenAI-compatible response payload or stream"
+          },
+          "401": {
+            "$ref": "#/components/responses/GatewayError"
+          },
+          "429": {
+            "$ref": "#/components/responses/GatewayError"
+          }
+        },
+        "security": [
+          {
+            "GatewayBearerAuth": []
+          }
+        ],
+        "summary": "Create an OpenAI-compatible response through the Prodex gateway"
+      }
+    }
+  },
+  "security": [
+    {
+      "GatewayBearerAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "/v1"
+    }
+  ]
+}
