@@ -1,31 +1,14 @@
 use super::*;
+#[path = "gateway_auth_evidence.rs"]
+mod evidence;
+use crate::TestEnvVarGuard;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_migrate_compatibility_state,
     runtime_gateway_sqlite_create_current_schema_for_tests,
 };
-use crate::{RuntimeRotationProxy, TestEnvVarGuard};
 use postgres::NoTls;
 use prodex_storage_postgres::{PostgresRuntimeMode, plan_postgres_migrations};
 use std::fs;
-
-fn wait_for_oidc_cache(proxy: &RuntimeRotationProxy, minimum_entries: usize) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    loop {
-        let entries = proxy
-            .gateway_side_effect_snapshot
-            .as_ref()
-            .map(|snapshot| snapshot().oidc_cache_entries)
-            .unwrap_or_default();
-        if entries >= minimum_entries {
-            return;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "OIDC background cache did not reach {minimum_entries} entries"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-}
 
 fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
     let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");

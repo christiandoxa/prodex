@@ -34,6 +34,28 @@ impl RuntimeGatewayOidcJwksSnapshot {
         now.saturating_duration_since(self.fetched_at)
             < self.fresh_for.saturating_add(self.stale_for)
     }
+
+    pub(super) fn domain_snapshot_at(
+        &self,
+        now: Instant,
+        now_unix_ms: u64,
+    ) -> prodex_domain::JwksCacheSnapshot {
+        let age_ms = duration_millis(now.saturating_duration_since(self.fetched_at));
+        let fetched_at_unix_ms = now_unix_ms.saturating_sub(age_ms);
+        let expires_at_unix_ms = fetched_at_unix_ms.saturating_add(duration_millis(self.fresh_for));
+        prodex_domain::JwksCacheSnapshot {
+            fetched_at_unix_ms,
+            expires_at_unix_ms,
+            stale_until_unix_ms: expires_at_unix_ms.saturating_add(duration_millis(self.stale_for)),
+            key_count: self.jwks.keys.len().min(usize::from(u16::MAX)) as u16,
+            last_refresh_error_at_unix_ms: None,
+            retry_after_unix_ms: None,
+        }
+    }
+}
+
+fn duration_millis(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 pub(in super::super) fn runtime_gateway_prefetch_oidc_cache(

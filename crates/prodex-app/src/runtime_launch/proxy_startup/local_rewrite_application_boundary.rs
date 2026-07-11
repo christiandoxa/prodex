@@ -1,30 +1,37 @@
 use prodex_application::{
     ApplicationAuthenticatedRequestContext, ApplicationAuthorizedRequestContext,
     ApplicationRequestAuthorizationError, ApplicationRequestContext,
-    ApplicationRequestContextError,
-    plan_application_control_plane_authorization_from_compatibility,
-    plan_application_data_plane_authorization_from_compatibility,
-    plan_application_request_authentication_from_compatibility, plan_application_request_context,
+    ApplicationRequestContextError, plan_application_control_plane_authorization,
+    plan_application_data_plane_authorization,
+    plan_application_request_authentication_from_evidence, plan_application_request_context,
 };
-use prodex_authn::CompatibilityAuthenticationError;
+use prodex_authn::{
+    VerifiedCredentialAuthenticationError, VerifiedCredentialEvidence,
+    VerifiedOidcCredentialEvidence, VerifiedOidcRoleEvidence,
+};
 use prodex_control_plane::{ControlPlaneActionRequest, ControlPlaneResourceRef};
-use prodex_domain::{CredentialScope, Principal, PrincipalId, PrincipalKind, Role, TenantId};
+use prodex_domain::{
+    CredentialScope, ExplicitRoleMapper, Principal, PrincipalId, PrincipalKind, Role, TenantId,
+};
 use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpRequestMeta};
 use sha2::{Digest, Sha256};
 
-use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
+use super::local_rewrite_gateway_admin_auth::{
+    RuntimeGatewayAdminAuth, RuntimeGatewayAdminAuthentication,
+    RuntimeGatewayAdminCredentialEvidence, RuntimeGatewayOidcAdminCredentialEvidence,
+};
 use super::local_rewrite_gateway_config::RuntimeGatewayAdminRole;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct RuntimeGatewayCompatibilityCredential {
-    pub(super) principal: Option<Principal>,
+pub(super) struct RuntimeGatewayVerifiedCredential {
+    pub(super) evidence: Option<VerifiedCredentialEvidence>,
     pub(super) anonymous_allowed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum RuntimeGatewayApplicationBoundaryError {
     Route,
-    Authentication(CompatibilityAuthenticationError),
+    Authentication(VerifiedCredentialAuthenticationError),
     Authorization(ApplicationRequestAuthorizationError),
 }
 
@@ -41,79 +48,144 @@ pub(super) fn runtime_gateway_application_request_context(
 
 pub(super) fn runtime_gateway_application_authentication(
     request: ApplicationRequestContext<'_>,
-    credential: RuntimeGatewayCompatibilityCredential,
-) -> Result<ApplicationAuthenticatedRequestContext<'_>, CompatibilityAuthenticationError> {
-    plan_application_request_authentication_from_compatibility(
+    credential: RuntimeGatewayVerifiedCredential,
+) -> Result<ApplicationAuthenticatedRequestContext<'_>, VerifiedCredentialAuthenticationError> {
+    plan_application_request_authentication_from_evidence(
         request,
-        credential.principal,
+        credential.evidence,
         credential.anonymous_allowed,
     )
 }
 
 pub(super) fn runtime_gateway_application_data_plane_authorization(
     request: ApplicationRequestContext<'_>,
-    credential: RuntimeGatewayCompatibilityCredential,
+    credential: RuntimeGatewayVerifiedCredential,
 ) -> Result<ApplicationAuthorizedRequestContext<'_>, RuntimeGatewayApplicationBoundaryError> {
     let authenticated = runtime_gateway_application_authentication(request, credential)
         .map_err(RuntimeGatewayApplicationBoundaryError::Authentication)?;
-    plan_application_data_plane_authorization_from_compatibility(authenticated)
+    plan_application_data_plane_authorization(authenticated)
         .map_err(RuntimeGatewayApplicationBoundaryError::Authorization)
 }
 
 pub(super) fn runtime_gateway_application_control_plane_authorization<'a>(
     request: ApplicationRequestContext<'a>,
     http: &GatewayHttpRequestMeta,
-    admin_auth: &RuntimeGatewayAdminAuth,
+    authentication: &RuntimeGatewayAdminAuthentication,
 ) -> Result<ApplicationAuthorizedRequestContext<'a>, RuntimeGatewayApplicationBoundaryError> {
+    let admin_auth = &authentication.auth;
     let action = runtime_gateway_admin_control_plane_action(http, admin_auth)
         .ok_or(RuntimeGatewayApplicationBoundaryError::Route)?;
     let authenticated = runtime_gateway_application_authentication(
         request,
-        runtime_gateway_control_plane_compatibility_credential(admin_auth),
+        runtime_gateway_control_plane_credential(authentication),
     )
     .map_err(RuntimeGatewayApplicationBoundaryError::Authentication)?;
-    plan_application_control_plane_authorization_from_compatibility(authenticated, action)
+    plan_application_control_plane_authorization(authenticated, action)
         .map_err(RuntimeGatewayApplicationBoundaryError::Authorization)
 }
 
 pub(super) fn runtime_gateway_admin_preauthorization<'a>(
     request: ApplicationRequestContext<'a>,
     http: &GatewayHttpRequestMeta,
-    auth: &RuntimeGatewayAdminAuth,
+    authentication: &RuntimeGatewayAdminAuthentication,
 ) -> Result<Option<ApplicationAuthorizedRequestContext<'a>>, RuntimeGatewayApplicationBoundaryError>
 {
-    let application =
-        match runtime_gateway_application_control_plane_authorization(request, http, auth) {
-            Ok(application) => Some(application),
-            Err(RuntimeGatewayApplicationBoundaryError::Route) => None,
-            Err(error) => return Err(error),
-        };
+    let application = match runtime_gateway_application_control_plane_authorization(
+        request,
+        http,
+        authentication,
+    ) {
+        Ok(application) => Some(application),
+        Err(RuntimeGatewayApplicationBoundaryError::Route) => None,
+        Err(error) => return Err(error),
+    };
     Ok(application)
 }
 
-pub(super) fn runtime_gateway_data_plane_compatibility_credential(
+pub(super) fn runtime_gateway_data_plane_credential(
     virtual_key: Option<&runtime_proxy_crate::RuntimeGatewayVirtualKey>,
     legacy_data_plane_authorized: bool,
     authentication_configured: bool,
-) -> RuntimeGatewayCompatibilityCredential {
+) -> RuntimeGatewayVerifiedCredential {
     let principal = virtual_key
         .map(runtime_gateway_virtual_key_principal)
         .or_else(|| legacy_data_plane_authorized.then(runtime_gateway_bearer_principal));
-    RuntimeGatewayCompatibilityCredential {
-        principal,
+    RuntimeGatewayVerifiedCredential {
+        evidence: principal.map(VerifiedCredentialEvidence::Principal),
         anonymous_allowed: virtual_key.is_none()
             && !legacy_data_plane_authorized
             && !authentication_configured,
     }
 }
 
-pub(super) fn runtime_gateway_control_plane_compatibility_credential(
-    admin_auth: &RuntimeGatewayAdminAuth,
-) -> RuntimeGatewayCompatibilityCredential {
-    RuntimeGatewayCompatibilityCredential {
-        principal: Some(runtime_gateway_admin_principal(admin_auth)),
+pub(super) fn runtime_gateway_control_plane_credential(
+    authentication: &RuntimeGatewayAdminAuthentication,
+) -> RuntimeGatewayVerifiedCredential {
+    RuntimeGatewayVerifiedCredential {
+        evidence: Some(runtime_gateway_admin_credential_evidence(authentication)),
         anonymous_allowed: false,
     }
+}
+
+fn runtime_gateway_admin_credential_evidence(
+    authentication: &RuntimeGatewayAdminAuthentication,
+) -> VerifiedCredentialEvidence {
+    let principal = runtime_gateway_admin_principal(&authentication.auth);
+    match &authentication.evidence {
+        RuntimeGatewayAdminCredentialEvidence::Principal => {
+            VerifiedCredentialEvidence::Principal(principal)
+        }
+        RuntimeGatewayAdminCredentialEvidence::Oidc(evidence) => {
+            let RuntimeGatewayOidcAdminCredentialEvidence {
+                token,
+                subject_name,
+                claimed_tenant_id,
+                role_claim,
+            } = evidence.as_ref();
+            let tenant_id = claimed_tenant_id
+                .as_deref()
+                .map(runtime_gateway_control_plane_tenant_id_from_text);
+            let resolved_tenant_id =
+                runtime_gateway_admin_control_plane_tenant_id(&authentication.auth);
+            let resolved_tenant_text = resolved_tenant_id.to_string();
+            let oidc_name = format!("oidc:{subject_name}");
+            let principal_id = PrincipalId::from_uuid(runtime_gateway_stable_id(
+                "prodex:gateway-admin-control-plane-principal:v1",
+                &[resolved_tenant_text.as_bytes(), oidc_name.as_bytes()],
+            ));
+            VerifiedCredentialEvidence::Oidc(Box::new(VerifiedOidcCredentialEvidence {
+                policy: token.policy(),
+                jwks_snapshot: token.jwks_snapshot(),
+                claims: token.canonical_claims(principal_id, tenant_id, role_claim.clone()),
+                role_evidence: runtime_gateway_oidc_role_evidence(
+                    role_claim.as_deref(),
+                    authentication.auth.role,
+                ),
+                resolved_principal: principal,
+                now_unix_ms: token.now_unix_ms(),
+            }))
+        }
+    }
+}
+
+fn runtime_gateway_oidc_role_evidence(
+    role_claim: Option<&str>,
+    resolved_role: RuntimeGatewayAdminRole,
+) -> VerifiedOidcRoleEvidence {
+    if role_claim.is_none() {
+        return VerifiedOidcRoleEvidence::TrustedMissingClaimFallback(
+            runtime_gateway_admin_domain_role(resolved_role),
+        );
+    }
+    VerifiedOidcRoleEvidence::Claim(ExplicitRoleMapper::new([
+        ("admin", Role::Admin),
+        ("write", Role::Admin),
+        ("writer", Role::Admin),
+        ("viewer", Role::Viewer),
+        ("read", Role::Viewer),
+        ("readonly", Role::Viewer),
+        ("read-only", Role::Viewer),
+    ]))
 }
 
 pub(super) fn runtime_gateway_admin_control_plane_action(
@@ -138,16 +210,22 @@ pub(super) fn runtime_gateway_admin_control_plane_action(
 pub(super) fn runtime_gateway_admin_control_plane_tenant_id(
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> TenantId {
-    admin_auth
-        .tenant_id
-        .as_deref()
-        .and_then(|value| value.parse::<TenantId>().ok())
-        .unwrap_or_else(|| {
-            TenantId::from_uuid(runtime_gateway_stable_id(
-                "prodex:gateway-admin-control-plane-tenant:v1",
-                &[admin_auth.name.as_bytes()],
-            ))
-        })
+    match admin_auth.tenant_id.as_deref() {
+        Some(value) => runtime_gateway_control_plane_tenant_id_from_text(value),
+        None => TenantId::from_uuid(runtime_gateway_stable_id(
+            "prodex:gateway-admin-control-plane-tenant:v1",
+            &[admin_auth.name.as_bytes()],
+        )),
+    }
+}
+
+fn runtime_gateway_control_plane_tenant_id_from_text(value: &str) -> TenantId {
+    value.parse::<TenantId>().unwrap_or_else(|_| {
+        TenantId::from_uuid(runtime_gateway_stable_id(
+            "prodex:gateway-admin-control-plane-tenant-text:v1",
+            &[value.as_bytes()],
+        ))
+    })
 }
 
 fn runtime_gateway_admin_principal(admin_auth: &RuntimeGatewayAdminAuth) -> Principal {
@@ -160,12 +238,16 @@ fn runtime_gateway_admin_principal(admin_auth: &RuntimeGatewayAdminAuth) -> Prin
         )),
         Some(tenant_id),
         PrincipalKind::User,
-        match admin_auth.role {
-            RuntimeGatewayAdminRole::Admin => Role::Admin,
-            RuntimeGatewayAdminRole::Viewer => Role::Viewer,
-        },
+        runtime_gateway_admin_domain_role(admin_auth.role),
         CredentialScope::ControlPlane,
     )
+}
+
+fn runtime_gateway_admin_domain_role(role: RuntimeGatewayAdminRole) -> Role {
+    match role {
+        RuntimeGatewayAdminRole::Admin => Role::Admin,
+        RuntimeGatewayAdminRole::Viewer => Role::Viewer,
+    }
 }
 
 fn runtime_gateway_virtual_key_principal(
@@ -228,6 +310,7 @@ fn runtime_gateway_stable_id(namespace: &str, parts: &[&[u8]]) -> uuid::Uuid {
 
 #[cfg(test)]
 mod tests {
+    use super::super::local_rewrite_gateway_admin_auth::runtime_gateway_test_verified_oidc_token;
     use super::*;
     use prodex_gateway_http::GatewayHttpMethod;
 
@@ -263,6 +346,33 @@ mod tests {
         }
     }
 
+    fn admin_authentication(role: RuntimeGatewayAdminRole) -> RuntimeGatewayAdminAuthentication {
+        RuntimeGatewayAdminAuthentication {
+            auth: admin(role),
+            evidence: RuntimeGatewayAdminCredentialEvidence::Principal,
+        }
+    }
+
+    fn oidc_admin_authentication(
+        resolved_tenant: &str,
+        claimed_tenant: &str,
+    ) -> RuntimeGatewayAdminAuthentication {
+        let mut auth = admin(RuntimeGatewayAdminRole::Admin);
+        auth.name = "oidc:boundary-admin".to_string();
+        auth.tenant_id = Some(resolved_tenant.to_string());
+        RuntimeGatewayAdminAuthentication {
+            auth,
+            evidence: RuntimeGatewayAdminCredentialEvidence::Oidc(Box::new(
+                RuntimeGatewayOidcAdminCredentialEvidence {
+                    token: runtime_gateway_test_verified_oidc_token(),
+                    subject_name: "boundary-admin".to_string(),
+                    claimed_tenant_id: Some(claimed_tenant.to_string()),
+                    role_claim: Some("admin".to_string()),
+                },
+            )),
+        }
+    }
+
     #[test]
     fn application_gate_matches_the_legacy_data_plane_decision_matrix() {
         let target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
@@ -275,7 +385,7 @@ mod tests {
                         || legacy_data_plane_authorized
                         || !authentication_configured;
                     let virtual_key = (!virtual_keys_empty).then(virtual_key);
-                    let credential = runtime_gateway_data_plane_compatibility_credential(
+                    let credential = runtime_gateway_data_plane_credential(
                         virtual_key.as_ref(),
                         legacy_data_plane_authorized,
                         authentication_configured,
@@ -298,7 +408,7 @@ mod tests {
         let key = virtual_key();
         let authorized = runtime_gateway_application_data_plane_authorization(
             data,
-            runtime_gateway_data_plane_compatibility_credential(Some(&key), false, true),
+            runtime_gateway_data_plane_credential(Some(&key), false, true),
         )
         .unwrap();
         assert_eq!(
@@ -325,7 +435,7 @@ mod tests {
             runtime_gateway_application_control_plane_authorization(
                 control,
                 &read,
-                &admin(RuntimeGatewayAdminRole::Viewer),
+                &admin_authentication(RuntimeGatewayAdminRole::Viewer),
             )
             .is_ok(),
             "legacy viewer reads must remain authorized",
@@ -334,7 +444,7 @@ mod tests {
             runtime_gateway_application_control_plane_authorization(
                 control,
                 &write,
-                &admin(RuntimeGatewayAdminRole::Viewer),
+                &admin_authentication(RuntimeGatewayAdminRole::Viewer),
             )
             .is_err(),
             "legacy viewer mutations must remain denied",
@@ -343,10 +453,74 @@ mod tests {
             runtime_gateway_application_control_plane_authorization(
                 control,
                 &write,
-                &admin(RuntimeGatewayAdminRole::Admin),
+                &admin_authentication(RuntimeGatewayAdminRole::Admin),
             )
             .is_ok(),
             "legacy admin mutations must remain authorized",
         );
+    }
+
+    #[test]
+    fn non_uuid_oidc_tenant_claim_must_match_the_resolved_tenant_text() {
+        let target = CanonicalRequestTarget::parse("/admin/keys").unwrap();
+        let request = runtime_gateway_application_request_context(&target).unwrap();
+        let matched = oidc_admin_authentication("tenant-a", "tenant-a");
+        let authenticated = runtime_gateway_application_authentication(
+            request,
+            runtime_gateway_control_plane_credential(&matched),
+        )
+        .unwrap();
+        assert_eq!(
+            authenticated.principal().unwrap().tenant_id,
+            Some(runtime_gateway_control_plane_tenant_id_from_text(
+                "tenant-a"
+            )),
+        );
+
+        let mismatched = oidc_admin_authentication("tenant-b", "tenant-a");
+        assert_eq!(
+            runtime_gateway_application_authentication(
+                request,
+                runtime_gateway_control_plane_credential(&mismatched),
+            ),
+            Err(VerifiedCredentialAuthenticationError::OidcPrincipalMismatch),
+        );
+        assert_ne!(
+            runtime_gateway_control_plane_tenant_id_from_text("tenant-a"),
+            runtime_gateway_control_plane_tenant_id_from_text("tenant-b"),
+        );
+    }
+
+    #[test]
+    fn oidc_role_claim_must_match_resolved_admin_and_unknown_is_rejected() {
+        let target = CanonicalRequestTarget::parse("/admin/keys").unwrap();
+        let request = runtime_gateway_application_request_context(&target).unwrap();
+        for (role_claim, expected) in [
+            (
+                "viewer",
+                VerifiedCredentialAuthenticationError::OidcPrincipalMismatch,
+            ),
+            (
+                "owner",
+                VerifiedCredentialAuthenticationError::Oidc(
+                    prodex_authn::AuthenticationError::Role(prodex_domain::RoleClaimError::Unknown),
+                ),
+            ),
+        ] {
+            let mut authentication = oidc_admin_authentication("tenant-a", "tenant-a");
+            let RuntimeGatewayAdminCredentialEvidence::Oidc(evidence) =
+                &mut authentication.evidence
+            else {
+                unreachable!();
+            };
+            evidence.role_claim = Some(role_claim.to_string());
+            assert_eq!(
+                runtime_gateway_application_authentication(
+                    request,
+                    runtime_gateway_control_plane_credential(&authentication),
+                ),
+                Err(expected),
+            );
+        }
     }
 }

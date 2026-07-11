@@ -1,7 +1,7 @@
-use crate::AppPaths;
 use crate::runtime_launch::proxy_startup::local_rewrite::{
     RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
 };
+use crate::{AppPaths, RuntimeRotationProxy};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::{IntoUrl, blocking::RequestBuilder};
 use std::fs;
@@ -40,6 +40,25 @@ fn idempotent(request: RequestBuilder) -> RequestBuilder {
         "Idempotency-Key",
         format!("test-{}", NEXT_KEY.fetch_add(1, Ordering::Relaxed)),
     )
+}
+
+pub(super) fn wait_for_oidc_cache(proxy: &RuntimeRotationProxy, minimum_entries: usize) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let entries = proxy
+            .gateway_side_effect_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot().oidc_cache_entries)
+            .unwrap_or_default();
+        if entries >= minimum_entries {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "OIDC background cache did not reach {minimum_entries} entries"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 pub(super) fn runtime_gateway_test_admin_token(token: &str) -> RuntimeGatewayAdminToken {
@@ -293,6 +312,34 @@ pub(super) fn gateway_oidc_test_token(
         .as_secs()
         + 3600;
     gateway_oidc_test_token_with_exp(issuer, audience, email, role, prefixes, exp)
+}
+
+pub(super) fn gateway_oidc_test_token_without_scope_claims(
+    issuer: &str,
+    audience: &str,
+    email: &str,
+) -> String {
+    let exp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let claims = serde_json::json!({
+        "iss": issuer,
+        "aud": audience,
+        "sub": email,
+        "email": email,
+        "exp": exp,
+    });
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some("rsa01".to_string());
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_rsa_pem(GATEWAY_OIDC_TEST_PRIVATE_KEY.as_bytes())
+            .expect("test RSA key should parse"),
+    )
+    .expect("test OIDC token should sign")
 }
 
 pub(super) fn gateway_oidc_test_token_with_exp(

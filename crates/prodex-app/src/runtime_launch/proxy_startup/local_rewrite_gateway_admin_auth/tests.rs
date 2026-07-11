@@ -253,6 +253,23 @@ fn oidc_cache_entry_usable_is_bounded_by_lkg_window() {
 }
 
 #[test]
+fn oidc_domain_snapshot_preserves_immutable_cache_deadlines() {
+    let fetched_at = Instant::now();
+    let runtime = RuntimeGatewayOidcJwksSnapshot {
+        jwks: jsonwebtoken::jwk::JwkSet { keys: Vec::new() },
+        fetched_at,
+        fresh_for: Duration::from_secs(10),
+        stale_for: Duration::from_secs(20),
+    };
+    let snapshot = runtime.domain_snapshot_at(fetched_at + Duration::from_secs(5), 100_000);
+
+    assert_eq!(snapshot.fetched_at_unix_ms, 95_000);
+    assert_eq!(snapshot.expires_at_unix_ms, 105_000);
+    assert_eq!(snapshot.stale_until_unix_ms, 125_000);
+    assert_eq!(snapshot.key_count, 0);
+}
+
+#[test]
 fn oidc_runtime_limits_clamp_untrusted_env_and_cache_headers() {
     let _timeout = crate::TestEnvVarGuard::set(
         RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV,
@@ -460,6 +477,18 @@ fn oidc_algorithm_allowlist_rejects_symmetric_and_unknown_families() {
         assert_eq!(
             runtime_gateway_oidc_algorithm(algorithm).unwrap(),
             algorithm
+        );
+    }
+    for (algorithm, domain) in [
+        (Algorithm::RS256, prodex_domain::JwtAlgorithm::Rs256),
+        (Algorithm::RS384, prodex_domain::JwtAlgorithm::Rs384),
+        (Algorithm::RS512, prodex_domain::JwtAlgorithm::Rs512),
+        (Algorithm::ES256, prodex_domain::JwtAlgorithm::Es256),
+        (Algorithm::ES384, prodex_domain::JwtAlgorithm::Es384),
+    ] {
+        assert_eq!(
+            runtime_gateway_domain_oidc_algorithm(algorithm).unwrap(),
+            domain
         );
     }
 }
