@@ -1,5 +1,18 @@
 [
   {
+    "id": "pooled-postgres-accounting-runtime-20260711",
+    "requiredSubjects": [
+      "feat(storage): add pooled postgres runtime"
+    ],
+    "caps": {
+      "maxFiles": 9,
+      "maxBehaviorFiles": 6,
+      "maxLines": 1120,
+      "maxFileLines": 774
+    },
+    "reason": "Reviewed atomic introduction of the bounded async PostgreSQL accounting adapter with multi-agent implementation review, checked numeric conversions, explicit TLS selection and timeouts, serializable reservation retries, redacted errors, focused unit tests, real two-client PostgreSQL proof, clippy, size, dependency, and architecture boundary guards."
+  },
+  {
     "id": "enterprise-gateway-integration-20260710",
     "requiredSubjects": [
       "feat: harden enterprise gateway runtime"
