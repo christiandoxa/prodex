@@ -47,7 +47,6 @@ const ALLOWED_RUNTIME_DEPENDENCIES = new Set([
   "prodex_storage_postgres",
   "rustls",
   "rustls-native-certs",
-  "rustls-pemfile",
   "tokio",
   "tokio-postgres",
   "tokio-postgres-rustls",
@@ -245,7 +244,7 @@ prodex_storage = { workspace = true }
   );
   assertSelfTest(
     validateRuntimeManifest(
-      "[dependencies]\ndeadpool-postgres = \"0.14\"\npostgres = \"0.19\"\nrustls = \"0.23\"\nrustls-native-certs = \"0.8\"\nrustls-pemfile = \"2\"\ntokio-postgres = \"0.7\"\ntokio-postgres-rustls = \"0.14\"\n",
+      "[dependencies]\ndeadpool-postgres = \"0.14\"\npostgres = \"0.19\"\nrustls = \"0.23\"\nrustls-native-certs = \"0.8\"\ntokio-postgres = \"0.7\"\ntokio-postgres-rustls = \"0.14\"\n",
       "runtime/Cargo.toml",
     ).length === 0,
     "valid runtime adapter manifest rejected",

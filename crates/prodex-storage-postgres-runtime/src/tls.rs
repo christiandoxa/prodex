@@ -1,11 +1,10 @@
-use std::{
-    fs::File,
-    io::BufReader,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use postgres::config::SslMode;
-use rustls::{ClientConfig, RootCertStore};
+use rustls::{
+    ClientConfig, RootCertStore,
+    pki_types::{CertificateDer, pem::PemObject},
+};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 use crate::PostgresRuntimeError;
@@ -50,9 +49,8 @@ impl PostgresTlsConfig {
         let mut roots = RootCertStore::empty();
         roots.add_parsable_certificates(native.certs);
         if let Some(path) = self.ca_path() {
-            let file = File::open(path).map_err(|_| PostgresRuntimeError::Configuration)?;
-            let mut reader = BufReader::new(file);
-            let certs = rustls_pemfile::certs(&mut reader)
+            let certs = CertificateDer::pem_file_iter(path)
+                .map_err(|_| PostgresRuntimeError::Configuration)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| PostgresRuntimeError::Configuration)?;
             if certs.is_empty() {

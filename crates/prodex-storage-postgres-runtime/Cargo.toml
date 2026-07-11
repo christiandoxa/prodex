@@ -18,7 +18,6 @@ prodex_storage = { workspace = true }
 prodex_storage_postgres = { workspace = true }
 rustls = { workspace = true }
 rustls-native-certs = { workspace = true }
-rustls-pemfile = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 tokio-postgres = { workspace = true, features = ["with-uuid-1"] }
 tokio-postgres-rustls = { workspace = true }
