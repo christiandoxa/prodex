@@ -115,7 +115,8 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
     .quota_compatible;
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
-    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let inflight_soft_limit =
+        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let trace_candidate = || {
         runtime_selection_trace_candidate(
             0,

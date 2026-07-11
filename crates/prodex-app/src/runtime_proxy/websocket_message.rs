@@ -14,7 +14,6 @@ use super::{
     runtime_proxy_log, runtime_proxy_log_chain_dead_upstream_confirmed,
     runtime_proxy_log_chain_retried_owner, runtime_proxy_log_field,
     runtime_proxy_record_continuity_failure_reason, runtime_proxy_structured_log_message,
-    runtime_proxy_websocket_previous_response_reuse_stale_ms,
     runtime_smart_context_model_name_from_body,
     runtime_websocket_previous_response_reuse_is_nonreplayable,
     runtime_websocket_previous_response_reuse_is_stale,
@@ -233,6 +232,7 @@ pub(super) mod test_support {
         };
 
         RuntimeRotationProxyShared {
+            runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
             upstream_no_proxy: false,
             auto_redeem_enabled: false,
             async_client: reqwest::Client::new(),

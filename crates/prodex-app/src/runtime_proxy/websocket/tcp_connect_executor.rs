@@ -1,8 +1,5 @@
 use crate::{
     RuntimeRotationProxyShared, RuntimeWebsocketTcpAttemptResult, runtime_proxy_log_to_path,
-    runtime_websocket_dns_resolve_overflow_capacity, runtime_websocket_dns_resolve_queue_capacity,
-    runtime_websocket_dns_resolve_worker_count, runtime_websocket_tcp_connect_overflow_capacity,
-    runtime_websocket_tcp_connect_queue_capacity, runtime_websocket_tcp_connect_worker_count,
 };
 use std::io;
 use std::net::{SocketAddr, TcpStream};
@@ -17,13 +14,20 @@ pub(super) use runtime_proxy_crate::{
     runtime_websocket_local_pressure_io_error, runtime_websocket_local_pressure_kind_from_io_error,
 };
 
-fn runtime_websocket_tcp_connect_executor() -> &'static RuntimeWebsocketTcpConnectExecutor {
+fn runtime_websocket_tcp_connect_executor(
+    shared: &RuntimeRotationProxyShared,
+) -> &'static RuntimeWebsocketTcpConnectExecutor {
     static EXECUTOR: OnceLock<RuntimeWebsocketTcpConnectExecutor> = OnceLock::new();
     EXECUTOR.get_or_init(|| {
-        let worker_count = runtime_websocket_tcp_connect_worker_count();
-        let queue_capacity = runtime_websocket_tcp_connect_queue_capacity(worker_count);
-        let overflow_capacity =
-            runtime_websocket_tcp_connect_overflow_capacity(worker_count, queue_capacity);
+        let worker_count = shared.runtime_config.tuning.websocket_connect_worker_count;
+        let queue_capacity = shared
+            .runtime_config
+            .tuning
+            .websocket_connect_queue_capacity;
+        let overflow_capacity = shared
+            .runtime_config
+            .tuning
+            .websocket_connect_overflow_capacity;
         RuntimeWebsocketTcpConnectExecutor::new_with_overflow_capacity(
             worker_count,
             queue_capacity,
@@ -32,14 +36,14 @@ fn runtime_websocket_tcp_connect_executor() -> &'static RuntimeWebsocketTcpConne
     })
 }
 
-pub(super) fn runtime_websocket_dns_resolve_executor() -> &'static RuntimeWebsocketDnsResolveExecutor
-{
+pub(super) fn runtime_websocket_dns_resolve_executor(
+    shared: &RuntimeRotationProxyShared,
+) -> &'static RuntimeWebsocketDnsResolveExecutor {
     static EXECUTOR: OnceLock<RuntimeWebsocketDnsResolveExecutor> = OnceLock::new();
     EXECUTOR.get_or_init(|| {
-        let worker_count = runtime_websocket_dns_resolve_worker_count();
-        let queue_capacity = runtime_websocket_dns_resolve_queue_capacity(worker_count);
-        let overflow_capacity =
-            runtime_websocket_dns_resolve_overflow_capacity(worker_count, queue_capacity);
+        let worker_count = shared.runtime_config.tuning.websocket_dns_worker_count;
+        let queue_capacity = shared.runtime_config.tuning.websocket_dns_queue_capacity;
+        let overflow_capacity = shared.runtime_config.tuning.websocket_dns_overflow_capacity;
         RuntimeWebsocketDnsResolveExecutor::new_with_overflow_capacity(
             worker_count,
             queue_capacity,
@@ -82,7 +86,7 @@ pub(super) fn runtime_launch_websocket_tcp_connect_attempt(
     connect_timeout: Duration,
 ) {
     let result_sender = sender.clone();
-    let accepted = runtime_websocket_tcp_connect_executor().spawn_observed(
+    let accepted = runtime_websocket_tcp_connect_executor(shared).spawn_observed(
         Some(shared.log_path.as_path()),
         Some(request_id),
         Some(addr),

@@ -22,12 +22,10 @@ use runtime_proxy_crate::{
     runtime_translate_precommit_previous_response_websocket_text_frame,
     runtime_translate_previous_response_websocket_text_frame, runtime_websocket_authority,
     runtime_websocket_error_payload_from_http_body, runtime_websocket_http_connect_request,
-    runtime_websocket_no_proxy_value_matches, runtime_websocket_normalize_host,
-    runtime_websocket_precommit_hold_promotion_allowed,
+    runtime_websocket_normalize_host, runtime_websocket_precommit_hold_promotion_allowed,
     runtime_websocket_precommit_hold_promotion_event_seen,
     runtime_websocket_precommit_transport_retry_allowed,
-    runtime_websocket_proxy_authorization_header, runtime_websocket_proxy_env_keys,
-    runtime_websocket_proxy_url_candidate, runtime_websocket_read_http_connect_response,
+    runtime_websocket_proxy_authorization_header, runtime_websocket_read_http_connect_response,
     runtime_websocket_target_from_parts,
 };
 
@@ -219,7 +217,10 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 ],
             ),
         );
-        if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
+        if runtime_take_fault_injection_budget(
+            "PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE",
+            shared.runtime_config.fault_upstream_connect_error_once,
+        ) {
             let transport_error = anyhow::anyhow!("injected runtime websocket connect failure");
             note_runtime_profile_transport_failure(
                 shared,

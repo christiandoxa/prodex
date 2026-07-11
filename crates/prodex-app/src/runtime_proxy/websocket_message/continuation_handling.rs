@@ -28,6 +28,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let stale_previous_response_reuse = runtime_websocket_previous_response_reuse_is_stale(
             nonreplayable_previous_response_reuse,
             reuse_terminal_idle,
+            self.shared
+                .runtime_config
+                .tuning
+                .websocket_previous_response_reuse_stale_ms,
         );
         runtime_proxy_log(
             self.shared,
@@ -184,7 +188,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                             ),
                             runtime_proxy_log_field(
                                 "threshold_ms",
-                                runtime_proxy_websocket_previous_response_reuse_stale_ms()
+                                self.shared
+                                    .runtime_config
+                                    .tuning
+                                    .websocket_previous_response_reuse_stale_ms
                                     .to_string(),
                             ),
                         ],

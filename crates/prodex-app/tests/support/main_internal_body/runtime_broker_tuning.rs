@@ -100,7 +100,7 @@ pressure_long_lived_queue_wait_budget_ms = 44
     ];
 
     clear_runtime_policy_cache();
-    let snapshot = collect_runtime_tuning_snapshot();
+    let snapshot = collect_runtime_tuning_snapshot(&RuntimeConfig::compatibility_current());
     clear_runtime_policy_cache();
 
     assert_eq!(snapshot.worker_count, 12);
@@ -276,8 +276,7 @@ fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
         upstream_no_proxy: false,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
-        instance_token: "old-instance".to_string(),
-        admin_token: "secret".to_string(),
+        instance_id: "old-instance".to_string(),
         prodex_version: Some("0.0.0-old".to_string()),
         executable_path: None,
         executable_sha256: None,
@@ -298,116 +297,13 @@ fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
 }
 
 #[test]
-fn runtime_broker_process_args_encode_optional_boolean_switches() {
-    let without_review = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
-        current_profile: "main",
-        upstream_base_url: "https://chatgpt.com/backend-api",
-        include_code_review: false,
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        model_context_window_tokens: None,
-        broker_key: "broker-key",
-        instance_token: "instance",
-        admin_token: "admin",
-        listen_addr: None,
-    });
-    let without_review: Vec<String> = without_review
+fn runtime_broker_process_args_expose_only_the_hidden_subcommand() {
+    let args: Vec<String> = runtime_broker_process_args()
         .into_iter()
         .map(|value| value.to_string_lossy().into_owned())
         .collect();
-    assert!(
-        !without_review
-            .iter()
-            .any(|value| value == "--include-code-review"),
-        "false should not emit a stray boolean value for the review flag"
-    );
 
-    let with_review = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
-        current_profile: "main",
-        upstream_base_url: "https://chatgpt.com/backend-api",
-        include_code_review: true,
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        model_context_window_tokens: None,
-        broker_key: "broker-key",
-        instance_token: "instance",
-        admin_token: "admin",
-        listen_addr: Some("127.0.0.1:33475"),
-    });
-    let with_review: Vec<String> = with_review
-        .into_iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect();
-    assert!(
-        with_review
-            .iter()
-            .any(|value| value == "--include-code-review"),
-        "true should emit the review flag"
-    );
-    assert!(
-        !with_review
-            .iter()
-            .any(|value| value == "true" || value == "false"),
-        "review flag must be encoded as a clap boolean switch"
-    );
-    assert!(
-        with_review
-            .windows(2)
-            .any(|pair| pair == ["--listen-addr", "127.0.0.1:33475"]),
-        "listen addr should be forwarded when requested"
-    );
-
-    let without_proxy = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
-        current_profile: "main",
-        upstream_base_url: "https://chatgpt.com/backend-api",
-        include_code_review: false,
-        upstream_no_proxy: true,
-        smart_context_enabled: false,
-        model_context_window_tokens: None,
-        broker_key: "broker-key",
-        instance_token: "instance",
-        admin_token: "admin",
-        listen_addr: None,
-    });
-    let without_proxy: Vec<String> = without_proxy
-        .into_iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect();
-    assert!(
-        without_proxy
-            .iter()
-            .any(|value| value == "--upstream-no-proxy"),
-        "upstream no-proxy mode should be encoded as a clap boolean switch"
-    );
-
-    let with_smart_context = runtime_broker_process_args(RuntimeBrokerSpawnConfig {
-        current_profile: "main",
-        upstream_base_url: "https://chatgpt.com/backend-api",
-        include_code_review: false,
-        upstream_no_proxy: false,
-        smart_context_enabled: true,
-        model_context_window_tokens: Some(65_536),
-        broker_key: "broker-key",
-        instance_token: "instance",
-        admin_token: "admin",
-        listen_addr: None,
-    });
-    let with_smart_context: Vec<String> = with_smart_context
-        .into_iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect();
-    assert!(
-        with_smart_context
-            .iter()
-            .any(|value| value == "--smart-context"),
-        "smart context mode should be encoded as a clap boolean switch"
-    );
-    assert!(
-        with_smart_context
-            .windows(2)
-            .any(|pair| pair == ["--model-context-window-tokens", "65536"]),
-        "smart context model window should be forwarded when known"
-    );
+    assert_eq!(args, ["__runtime-broker"]);
 }
 
 #[test]

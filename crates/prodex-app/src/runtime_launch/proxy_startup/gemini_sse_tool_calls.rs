@@ -2,7 +2,7 @@ use super::super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_stream_function_call_arguments_delta_event,
 };
 use super::RuntimeGeminiSseState;
-use super::runtime_gemini_blocked_tool_call_message;
+use super::runtime_gemini_blocked_tool_call_message_with_config;
 use prodex_domain::CallId;
 use prodex_provider_core::{
     gemini_provider_core_function_call_arguments_delta_event,
@@ -189,9 +189,11 @@ impl RuntimeGeminiSseState {
                 let raw_arguments_value = gemini_provider_core_stream_tool_call_arguments_value(
                     &stream_tool_call.arguments,
                 );
-                if let Some(blocked) =
-                    runtime_gemini_blocked_tool_call_message(&name, &raw_arguments_value)
-                {
+                if let Some(blocked) = runtime_gemini_blocked_tool_call_message_with_config(
+                    &name,
+                    &raw_arguments_value,
+                    &self.gemini_config,
+                ) {
                     return Some((
                         call_id,
                         name,

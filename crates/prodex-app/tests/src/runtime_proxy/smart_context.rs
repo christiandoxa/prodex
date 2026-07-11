@@ -74,6 +74,7 @@ fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {
     };
 
     RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,
         async_client: reqwest::Client::new(),

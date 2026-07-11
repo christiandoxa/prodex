@@ -1,7 +1,7 @@
-#[path = "../test_wait.rs"]
-mod test_wait;
 #[path = "runtime_broker_registry/dead_registry.rs"]
 mod dead_registry;
+#[path = "../test_wait.rs"]
+mod test_wait;
 
 use std::os::unix::fs::PermissionsExt;
 use std::process::Child;
@@ -50,6 +50,16 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
     let _request_method_guard = TestEnvVarGuard::unset("REQUEST_METHOD");
     let _no_proxy_guard = TestEnvVarGuard::unset("NO_PROXY");
     let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "local-control";
+    save_runtime_broker_test_capability(&paths, broker_key, "instance", "secret");
 
     let target = TinyServer::http("127.0.0.1:0").expect("target server should bind");
     let target_addr = target
@@ -68,7 +78,7 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
             current_profile: "main".to_string(),
             include_code_review: false,
             active_requests: 0,
-            instance_token: "instance".to_string(),
+            instance_id: "instance".to_string(),
             persistence_role: "owner".to_string(),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
             executable_path: None,
@@ -115,15 +125,14 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
         upstream_no_proxy: false,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
-        instance_token: "instance".to_string(),
-        admin_token: "secret".to_string(),
+        instance_id: "instance".to_string(),
         prodex_version: None,
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
 
-    let health = probe_runtime_broker_health(&client, &registry)
+    let health = probe_runtime_broker_health(&client, &paths, broker_key, &registry)
         .expect("broker health probe should succeed through direct local connection");
 
     target_thread
@@ -133,7 +142,7 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
         .join()
         .expect("proxy trap thread should finish");
     assert_eq!(
-        health.as_ref().map(|health| health.instance_token.as_str()),
+        health.as_ref().map(|health| health.instance_id.as_str()),
         Some("instance")
     );
     assert!(
@@ -176,8 +185,7 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
         upstream_no_proxy: false,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
-        instance_token: "instance".to_string(),
-        admin_token: "secret".to_string(),
+        instance_id: "instance".to_string(),
         prodex_version: None,
         executable_path: None,
         executable_sha256: None,
@@ -228,8 +236,7 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
         .expect("owner lock should be held by the existing broker");
 
     let broker_key = "follower-ready-broker".to_string();
-    let admin_token = "follower-ready-admin".to_string();
-    let args = RuntimeBrokerArgs {
+    let bootstrap = prodex_runtime_broker::RuntimeBrokerBootstrap {
         current_profile: "main".to_string(),
         upstream_base_url: "http://127.0.0.1:9/backend-api".to_string(),
         include_code_review: false,
@@ -237,41 +244,51 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
         smart_context_enabled: true,
         model_context_window_tokens: None,
         broker_key: broker_key.clone(),
-        instance_token: "follower-ready-instance".to_string(),
-        admin_token,
+        instance_id: "follower-ready-instance".to_string(),
+        admin_token: runtime_broker_test_secret("follower-ready-admin"),
         listen_addr: None,
     };
 
     let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
         paths: &paths,
         state: &state,
-        current_profile: &args.current_profile,
-        upstream_base_url: args.upstream_base_url.clone(),
-        include_code_review: args.include_code_review,
-        upstream_no_proxy: args.upstream_no_proxy,
+        current_profile: &bootstrap.current_profile,
+        upstream_base_url: bootstrap.upstream_base_url.clone(),
+        include_code_review: bootstrap.include_code_review,
+        upstream_no_proxy: bootstrap.upstream_no_proxy,
         auto_redeem: false,
-        smart_context_enabled: args.smart_context_enabled,
+        smart_context_enabled: bootstrap.smart_context_enabled,
         presidio_redaction_enabled: false,
-        model_context_window_tokens: args.model_context_window_tokens,
-        preferred_listen_addr: args.listen_addr.as_deref(),
+        model_context_window_tokens: bootstrap.model_context_window_tokens,
+        preferred_listen_addr: bootstrap.listen_addr.as_deref(),
     })
     .expect("follower runtime broker proxy should start");
     assert!(
         proxy.owner_lock.is_none(),
         "held owner lock should force follower persistence mode"
     );
-    runtime_broker_publish_start(&paths, &args, &proxy)
+    runtime_broker_publish_start(&paths, &bootstrap, &proxy)
         .expect("follower runtime broker should publish registry");
     let registry = load_runtime_broker_registry(&paths, &broker_key)
         .expect("runtime broker registry should load")
         .expect("follower runtime broker registry should be present");
     let client = runtime_broker_client().expect("runtime broker client should build");
-    let health = probe_runtime_broker_health(&client, &registry)
+    let health = probe_runtime_broker_health(&client, &paths, &broker_key, &registry)
         .expect("follower runtime broker health probe should succeed")
         .expect("follower runtime broker should respond");
 
     assert_eq!(health.persistence_role, "follower");
-    assert_eq!(health.instance_token, "follower-ready-instance");
+    assert_eq!(health.instance_id, "follower-ready-instance");
+    assert!(
+        !serde_json::to_string(&health)
+            .unwrap()
+            .contains("follower-ready-admin")
+    );
+    assert!(
+        !fs::read_to_string(&proxy.log_path)
+            .unwrap()
+            .contains("follower-ready-admin")
+    );
 }
 
 #[test]
@@ -317,8 +334,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         upstream_no_proxy: false,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
-        instance_token: "instance".to_string(),
-        admin_token: "secret".to_string(),
+        instance_id: "instance".to_string(),
         prodex_version: None,
         executable_path: None,
         executable_sha256: None,
@@ -326,6 +342,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("mismatched broker registry should save");
+    save_runtime_broker_test_capability(&paths, broker_key, "instance", "secret");
     let client = runtime_broker_client().expect("broker client should build");
 
     let recovered = wait_for_existing_runtime_broker_recovery_or_exit(
@@ -404,7 +421,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
                 current_profile: "main".to_string(),
                 include_code_review: false,
                 active_requests: 2,
-                instance_token: "instance".to_string(),
+                instance_id: "instance".to_string(),
                 persistence_role: "owner".to_string(),
                 prodex_version: Some("0.0.1".to_string()),
                 executable_path: Some("/tmp/busy-mismatched-broker.sh".to_string()),
@@ -427,8 +444,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         upstream_no_proxy: false,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
-        instance_token: "instance".to_string(),
-        admin_token: "secret".to_string(),
+        instance_id: "instance".to_string(),
         prodex_version: Some("0.0.1".to_string()),
         executable_path: Some(script_path.display().to_string()),
         executable_sha256: None,
@@ -436,6 +452,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("busy mismatched broker registry should save");
+    save_runtime_broker_test_capability(&paths, broker_key, "instance", "secret");
     let client = runtime_broker_client().expect("broker client should build");
 
     let started_at = Instant::now();
@@ -523,8 +540,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         upstream_no_proxy: false,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
-        instance_token: "legacy-instance".to_string(),
-        admin_token: "secret".to_string(),
+        instance_id: "legacy-instance".to_string(),
         prodex_version: None,
         executable_path: None,
         executable_sha256: None,
@@ -532,6 +548,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
     };
     save_runtime_broker_registry(&paths, "legacy-key", &registry)
         .expect("legacy broker registry should save");
+    save_runtime_broker_test_capability(&paths, "legacy-key", "legacy-instance", "secret");
 
     let health_thread = thread::spawn(move || {
         let request = server.recv().expect("health request should arrive");
@@ -541,7 +558,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
             current_profile: "main".to_string(),
             include_code_review: false,
             active_requests: 0,
-            instance_token: "legacy-instance".to_string(),
+            instance_id: "legacy-instance".to_string(),
             persistence_role: "owner".to_string(),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
             executable_path: None,
@@ -572,7 +589,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
     let _ = child.kill();
     let _ = child.wait();
     assert_eq!(discovered.0, "legacy-key");
-    assert_eq!(discovered.1.instance_token, "legacy-instance");
+    assert_eq!(discovered.1.instance_id, "legacy-instance");
 }
 
 #[test]
@@ -619,8 +636,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         upstream_no_proxy: false,
         smart_context_enabled: false,
         current_profile: "main".to_string(),
-        instance_token: "instance".to_string(),
-        admin_token: "secret".to_string(),
+        instance_id: "instance".to_string(),
         prodex_version: None,
         executable_path: None,
         executable_sha256: None,
@@ -628,17 +644,18 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("registry should save for wait test");
+    save_runtime_broker_test_capability(&paths, broker_key, "instance", "secret");
 
     let paths_for_clear = paths.clone();
-    let instance_token = registry.instance_token.clone();
+    let instance_id = registry.instance_id.clone();
     let upstream_base_url = registry.upstream_base_url.clone();
     let include_code_review = registry.include_code_review;
     let clear_thread = thread::spawn(move || {
         thread::sleep(Duration::from_millis(75));
-        remove_runtime_broker_registry_if_token_matches(
+        remove_runtime_broker_registry_if_instance_matches(
             &paths_for_clear,
             broker_key,
-            &instance_token,
+            &instance_id,
         );
     });
     let client = runtime_broker_client().expect("broker client should build");

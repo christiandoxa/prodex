@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use serde::Serialize;
 
 pub(super) fn running_in_ci() -> bool {
@@ -109,7 +111,12 @@ impl TestDir {
             );
             let path = std::env::temp_dir().join(unique);
             match fs::create_dir(&path) {
-                Ok(()) => return Self { path },
+                Ok(()) => {
+                    #[cfg(unix)]
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+                        .expect("failed to secure test temp dir");
+                    return Self { path };
+                }
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(err) => panic!("failed to create test temp dir: {err}"),
             }
@@ -242,6 +249,7 @@ pub(super) fn runtime_rotation_proxy_shared_with_auto_redeem(
 ) -> RuntimeRotationProxyShared {
     let active_request_limit = active_request_limit.max(1);
     RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled,
         async_client: reqwest::Client::builder().build().expect("async client"),

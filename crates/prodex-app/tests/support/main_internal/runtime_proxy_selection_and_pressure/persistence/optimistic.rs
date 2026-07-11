@@ -58,6 +58,7 @@ fn optimistic_current_candidate_skips_persisted_exhausted_snapshot() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -149,6 +150,7 @@ fn optimistic_current_candidate_allows_single_profile_persisted_snapshot_fast_pa
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -321,6 +323,7 @@ fn optimistic_current_candidate_skips_route_performance_penalty() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -492,6 +495,7 @@ fn optimistic_current_candidate_ignores_auth_failure_backoff_after_auth_json_cha
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),

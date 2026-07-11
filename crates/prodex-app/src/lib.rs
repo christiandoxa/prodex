@@ -57,6 +57,7 @@ mod profile_identity;
 mod profile_local_config;
 mod proxy_config;
 mod quota_support;
+mod runtime_allocator;
 mod runtime_anthropic;
 mod runtime_background;
 mod runtime_broker;
@@ -192,6 +193,7 @@ struct RuntimeGatewaySideEffectSnapshot {
 }
 
 struct RuntimeRotationProxy {
+    runtime_config: Arc<RuntimeConfig>,
     server: Arc<TinyServer>,
     shutdown: Arc<AtomicBool>,
     worker_threads: Vec<thread::JoinHandle<()>>,

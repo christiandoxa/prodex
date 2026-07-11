@@ -4,6 +4,8 @@ use base64::Engine;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -27,7 +29,7 @@ fn fetch_profile_email_uses_auth_email_for_non_openai_model_provider() {
         "model_provider = 'amazon-bedrock'\n",
     )
     .unwrap();
-    fs::write(
+    write_auth_json(
         secret_store::auth_json_path(&root),
         format!(
             r#"{{"tokens":{{"id_token":"{}","access_token":"test-token"}}}}"#,
@@ -50,7 +52,7 @@ fn fetch_profile_email_skips_usage_fallback_for_non_openai_model_provider() {
         "model_provider = 'amazon-bedrock'\n",
     )
     .unwrap();
-    fs::write(
+    write_auth_json(
         secret_store::auth_json_path(&root),
         r#"{"tokens":{"access_token":"test-token"}}"#,
     )
@@ -68,7 +70,7 @@ fn find_profile_by_identity_does_not_match_different_workspace_with_same_email()
     let root = temp_dir("identity-different-workspace");
     let first_home = root.join("first");
     fs::create_dir_all(&first_home).unwrap();
-    fs::write(
+    write_auth_json(
             secret_store::auth_json_path(&first_home),
             format!(
                 r#"{{"tokens":{{"id_token":"{}","access_token":"test-token","account_id":"acct-one"}}}}"#,
@@ -109,7 +111,7 @@ fn find_profile_by_identity_matches_same_workspace_account_id_and_email() {
     let root = temp_dir("identity-same-workspace");
     let first_home = root.join("first");
     fs::create_dir_all(&first_home).unwrap();
-    fs::write(
+    write_auth_json(
             secret_store::auth_json_path(&first_home),
             format!(
                 r#"{{"tokens":{{"id_token":"{}","access_token":"test-token","account_id":"acct-one"}}}}"#,
@@ -150,7 +152,7 @@ fn find_profile_by_identity_does_not_match_same_workspace_with_different_email()
     let root = temp_dir("identity-same-workspace-different-email");
     let first_home = root.join("first");
     fs::create_dir_all(&first_home).unwrap();
-    fs::write(
+    write_auth_json(
             secret_store::auth_json_path(&first_home),
             format!(
                 r#"{{"tokens":{{"id_token":"{}","access_token":"test-token","account_id":"acct-one"}}}}"#,
@@ -191,7 +193,7 @@ fn find_profile_by_identity_rejects_email_derived_name_for_other_account_email()
     let root = temp_dir("identity-email-derived-name-mismatch");
     let first_home = root.join("first");
     fs::create_dir_all(&first_home).unwrap();
-    fs::write(
+    write_auth_json(
         secret_store::auth_json_path(&first_home),
         format!(
             r#"{{"tokens":{{"id_token":"{}","access_token":"test-token","account_id":"acct-one"}}}}"#,
@@ -249,6 +251,20 @@ fn chatgpt_id_token(email: &str, account_id: Option<&str>) -> String {
     format!("{header}.{payload}.sig")
 }
 
+fn write_auth_json(
+    path: PathBuf,
+    text: impl Into<String>,
+) -> Result<(), secret_store::SecretError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("failed to create auth parent");
+        #[cfg(unix)]
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .expect("failed to secure auth parent");
+    }
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(&secret_store::SecretLocation::file(path), text)
+}
+
 fn temp_dir(name: &str) -> PathBuf {
     let dir = env::temp_dir().join(format!(
         "prodex-profile-identity-{name}-{}-{}",
@@ -261,5 +277,8 @@ fn temp_dir(name: &str) -> PathBuf {
     if dir.exists() {
         fs::remove_dir_all(&dir).unwrap();
     }
+    fs::create_dir_all(&dir).unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     dir
 }

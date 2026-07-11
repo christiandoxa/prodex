@@ -103,17 +103,19 @@ fn prepare_runtime_launch_uses_gemini_oauth_profile_without_api_key() {
     let root = temp_dir("gemini-oauth-smart-context-proxy");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let gemini_home = root.join("gemini-home");
-    fs::create_dir_all(&gemini_home).unwrap();
-    fs::write(
-        gemini_home.join("gemini_oauth.json"),
-        r#"{
-            "auth_mode": "gemini_oauth",
-            "access_token": "google-access-token",
-            "refresh_token": "google-refresh-token",
-            "expiry_date": 4102444800000,
-            "email": "dev@example.com",
-            "project_id": "dev-project"
-        }"#,
+    create_codex_home_if_missing(&root).unwrap();
+    crate::runtime_gemini_auth::write_gemini_oauth_secret(
+        &gemini_home,
+        &crate::runtime_gemini_auth::GeminiOAuthSecret {
+            auth_mode: "gemini_oauth".to_string(),
+            access_token: "google-access-token".to_string(),
+            refresh_token: Some("google-refresh-token".to_string()),
+            token_type: None,
+            scope: None,
+            expiry_date: Some(4_102_444_800_000),
+            email: "dev@example.com".to_string(),
+            project_id: Some("dev-project".to_string()),
+        },
     )
     .unwrap();
     write_state(

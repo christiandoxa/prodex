@@ -1,9 +1,6 @@
 use super::*;
-use std::env;
 use std::fmt;
 use std::io::Read;
-
-const RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
 
 const RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE: &str = "proxied request could not be captured";
 const RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE: &str = "proxied request could not be prepared";
@@ -129,7 +126,10 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
             return;
         }
         Err(RuntimeProxyAdmissionRejection::LaneLimit(_lane)) if !websocket => {
-            let captured = match capture_runtime_proxy_request(&mut request) {
+            let captured = match capture_runtime_proxy_request(
+                &mut request,
+                shared.runtime_config.max_request_body_bytes,
+            ) {
                 Ok(captured) => captured,
                 Err(err) => {
                     reject_runtime_proxy_capture_error(request, shared, request_id, &err);
@@ -202,7 +202,10 @@ fn dispatch_runtime_http_proxy_request(
 ) {
     let mut captured = match captured {
         Some(captured) => captured,
-        None => match capture_runtime_proxy_request(&mut request) {
+        None => match capture_runtime_proxy_request(
+            &mut request,
+            shared.runtime_config.max_request_body_bytes,
+        ) {
             Ok(captured) => captured,
             Err(err) => {
                 reject_runtime_proxy_capture_error(request, shared, request_id, &err);
@@ -249,7 +252,7 @@ fn dispatch_runtime_http_proxy_request(
     let compat_surface = runtime_detect_request_compatibility_surface(&captured, "request", "http");
     runtime_proxy_log_request_compatibility(shared, request_id, &compat_surface);
     if is_runtime_anthropic_messages_path(&captured.path_and_query)
-        && std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some()
+        && shared.runtime_config.debug_anthropic_compat
     {
         runtime_proxy_log(
             shared,
@@ -380,16 +383,17 @@ pub(crate) fn respond_runtime_responses_reply(
 
 pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
+    max_body_bytes: u64,
 ) -> Result<RuntimeProxyRequest> {
-    let max_body_bytes = runtime_proxy_max_request_body_bytes()?;
     capture_runtime_proxy_request_with_max(request, max_body_bytes)
 }
 
 pub(crate) fn capture_runtime_proxy_request_with_limit(
     request: &mut tiny_http::Request,
+    configured_max_body_bytes: u64,
     limit: u64,
 ) -> Result<RuntimeProxyRequest> {
-    let max_body_bytes = runtime_proxy_max_request_body_bytes()?.min(limit);
+    let max_body_bytes = configured_max_body_bytes.min(limit);
     capture_runtime_proxy_request_with_max(request, max_body_bytes)
 }
 
@@ -429,23 +433,12 @@ fn capture_runtime_proxy_request_with_max(
     })
 }
 
+#[cfg(test)]
 fn runtime_proxy_max_request_body_bytes() -> Result<u64> {
-    let Ok(value) = env::var("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES") else {
-        return Ok(RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES);
-    };
-    if value.is_empty() {
-        bail!("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must not contain whitespace");
-    }
-    let parsed = value
-        .parse::<u64>()
-        .context("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must be an unsigned integer")?;
-    if parsed == 0 {
-        bail!("PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES must be greater than zero");
-    }
-    Ok(parsed)
+    let paths = AppPaths::discover()?;
+    Ok(RuntimeConfig::from_env_policy_and_cli(&paths)
+        .map_err(anyhow::Error::new)?
+        .max_request_body_bytes)
 }
 
 fn runtime_proxy_request_content_length(request: &tiny_http::Request) -> Option<u64> {
@@ -487,7 +480,7 @@ pub(crate) fn proxy_runtime_anthropic_messages_request(
             ));
         }
     };
-    if std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some() {
+    if shared.runtime_config.debug_anthropic_compat {
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(

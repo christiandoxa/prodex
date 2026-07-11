@@ -16,6 +16,7 @@ use super::gemini_request_policy::runtime_gemini_settings_paths_for;
 use super::gemini_request_session::{
     runtime_gemini_export_checkpoint, runtime_gemini_imported_session_contents,
 };
+use crate::RuntimeGeminiConfig;
 use prodex_provider_core::{
     gemini_provider_core_contextual_user_instruction_text as runtime_gemini_contextual_user_instruction_text,
     gemini_provider_core_generation_config_from_request as runtime_gemini_generation_config,
@@ -25,6 +26,7 @@ use prodex_provider_core::{
     gemini_provider_core_structured_command_tool_response as runtime_gemini_structured_command_tool_response,
     gemini_provider_core_tool_config_from_request as runtime_gemini_tool_config_from_chat,
 };
+mod gemini_request_chat_source;
 mod gemini_request_context;
 mod gemini_request_instruction;
 mod gemini_request_local_context;
@@ -33,6 +35,7 @@ mod gemini_request_tools;
 mod gemini_request_util;
 use super::gemini_request_tool_output::runtime_gemini_mask_tool_response_for_history;
 use anyhow::{Context, Result};
+use gemini_request_chat_source::runtime_gemini_chat_source_request;
 use gemini_request_context::{
     runtime_gemini_collect_at_path_parts, runtime_gemini_collect_explicit_file_parts,
 };
@@ -43,7 +46,9 @@ use gemini_request_local_context::{
 use gemini_request_memory::runtime_gemini_hierarchical_memory;
 #[cfg(test)]
 use gemini_request_memory::runtime_gemini_memory_files_enabled;
+#[cfg(test)]
 pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message;
+pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message_with_config;
 use gemini_request_tools::runtime_gemini_tools_from_requests;
 pub(super) use gemini_request_util::{runtime_gemini_config_dir, runtime_gemini_home_dir};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
@@ -85,9 +90,11 @@ Final success, latest-version, up-to-date, or no-blocker claims must be backed b
 pub(super) const RUNTIME_GEMINI_MEMORY_BYTE_LIMIT: usize = 64 * 1024;
 pub(super) const RUNTIME_GEMINI_IMPORT_BYTE_LIMIT: usize = 256 * 1024;
 pub(super) const RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT: usize = 64;
-pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD: usize = 50_000;
+pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD: usize =
+    RuntimeGeminiConfig::DEFAULT_TOOL_OUTPUT_MASK_THRESHOLD;
 pub(super) const RUNTIME_GEMINI_TOOL_OUTPUT_PREVIEW_CHARS: usize = 1_000;
 
+#[cfg(test)]
 pub(in super::super) fn runtime_gemini_generate_request_body(
     body: &[u8],
     conversations: &RuntimeChatCompatibleConversationStore,
@@ -95,16 +102,37 @@ pub(in super::super) fn runtime_gemini_generate_request_body(
     project_id: Option<&str>,
     thinking_budget_tokens: Option<u64>,
 ) -> Result<RuntimeGeminiTranslatedRequest> {
-    runtime_gemini_generate_request_body_with_local_file_access(
+    let config = crate::RuntimeConfig::compatibility_current();
+    runtime_gemini_generate_request_body_with_config(
+        body,
+        conversations,
+        code_assist,
+        project_id,
+        thinking_budget_tokens,
+        &config.gemini,
+    )
+}
+
+pub(in super::super) fn runtime_gemini_generate_request_body_with_config(
+    body: &[u8],
+    conversations: &RuntimeChatCompatibleConversationStore,
+    code_assist: bool,
+    project_id: Option<&str>,
+    thinking_budget_tokens: Option<u64>,
+    config: &RuntimeGeminiConfig,
+) -> Result<RuntimeGeminiTranslatedRequest> {
+    runtime_gemini_generate_request_body_with_local_file_access_and_config(
         body,
         conversations,
         code_assist,
         project_id,
         thinking_budget_tokens,
         true,
+        config,
     )
 }
 
+#[cfg(test)]
 pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_access(
     body: &[u8],
     conversations: &RuntimeChatCompatibleConversationStore,
@@ -112,6 +140,27 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_acc
     project_id: Option<&str>,
     thinking_budget_tokens: Option<u64>,
     allow_local_file_access: bool,
+) -> Result<RuntimeGeminiTranslatedRequest> {
+    let config = crate::RuntimeConfig::compatibility_current();
+    runtime_gemini_generate_request_body_with_local_file_access_and_config(
+        body,
+        conversations,
+        code_assist,
+        project_id,
+        thinking_budget_tokens,
+        allow_local_file_access,
+        &config.gemini,
+    )
+}
+
+fn runtime_gemini_generate_request_body_with_local_file_access_and_config(
+    body: &[u8],
+    conversations: &RuntimeChatCompatibleConversationStore,
+    code_assist: bool,
+    project_id: Option<&str>,
+    thinking_budget_tokens: Option<u64>,
+    allow_local_file_access: bool,
+    config: &RuntimeGeminiConfig,
 ) -> Result<RuntimeGeminiTranslatedRequest> {
     let original: serde_json::Value =
         serde_json::from_slice(body).context("failed to parse Codex Responses request JSON")?;
@@ -146,7 +195,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_acc
 
     let mut request = serde_json::Map::new();
     if let Some(system_instruction) =
-        runtime_gemini_system_instruction(&chat_value, &original, allow_local_file_access)
+        runtime_gemini_system_instruction(&chat_value, &original, allow_local_file_access, config)
     {
         request.insert("systemInstruction".to_string(), system_instruction);
     }
@@ -156,9 +205,11 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_acc
             &chat_value,
             &original,
             allow_local_file_access,
+            config,
         )),
     );
-    if let Some(tools) = runtime_gemini_tools_from_requests(&original, &chat_value, &model) {
+    if let Some(tools) = runtime_gemini_tools_from_requests(&original, &chat_value, &model, config)
+    {
         request.insert("tools".to_string(), tools);
     }
     if let Some(tool_config) = runtime_gemini_tool_config_from_chat(&chat_value) {
@@ -185,7 +236,7 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_acc
         request.insert("labels".to_string(), labels.clone());
     }
     if allow_local_file_access {
-        runtime_gemini_export_checkpoint(&original, &request)
+        runtime_gemini_export_checkpoint(&original, &request, config)
             .context("failed to export Gemini session checkpoint")?;
     }
 
@@ -208,81 +259,14 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_local_file_acc
     })
 }
 
-fn runtime_gemini_chat_source_request(original: &serde_json::Value) -> serde_json::Value {
-    let mut value = original.clone();
-    let Some(object) = value.as_object_mut() else {
-        return value;
-    };
-    for field in [
-        "tools",
-        "tool_choice",
-        "web_search_options",
-        "frequency_penalty",
-        "presence_penalty",
-        "n",
-        "seed",
-        "service_tier",
-        "prediction",
-        "logit_bias",
-        "functions",
-        "function_call",
-    ] {
-        object.remove(field);
-    }
-    if let Some(input) = object.get_mut("input") {
-        runtime_gemini_sanitize_chat_source_input(input);
-    }
-    value
-}
-
-fn runtime_gemini_sanitize_chat_source_input(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                runtime_gemini_sanitize_chat_source_item(item);
-            }
-        }
-        serde_json::Value::Object(_) => runtime_gemini_sanitize_chat_source_item(value),
-        _ => {}
-    }
-}
-
-fn runtime_gemini_sanitize_chat_source_item(value: &mut serde_json::Value) {
-    let Some(object) = value.as_object_mut() else {
-        return;
-    };
-    if object.get("type").and_then(serde_json::Value::as_str) != Some("message") {
-        return;
-    }
-    let Some(content) = object.get_mut("content") else {
-        return;
-    };
-    let serde_json::Value::Array(parts) = content else {
-        return;
-    };
-    parts.retain(runtime_gemini_chat_source_content_part_supported);
-}
-
-fn runtime_gemini_chat_source_content_part_supported(part: &serde_json::Value) -> bool {
-    let Some(object) = part.as_object() else {
-        return true;
-    };
-    object
-        .get("text")
-        .or_else(|| object.get("input_text"))
-        .or_else(|| object.get("output_text"))
-        .or_else(|| object.get("content"))
-        .and_then(serde_json::Value::as_str)
-        .is_some()
-}
-
 fn runtime_gemini_contents_from_chat(
     chat: &serde_json::Value,
     original: &serde_json::Value,
     allow_local_file_access: bool,
+    config: &RuntimeGeminiConfig,
 ) -> Vec<serde_json::Value> {
     let mut contents = if allow_local_file_access {
-        runtime_gemini_imported_session_contents(original)
+        runtime_gemini_imported_session_contents(original, config)
     } else {
         Vec::new()
     };
@@ -378,6 +362,7 @@ fn runtime_gemini_contents_from_chat(
                             &messages[index],
                             &tool_names_by_call_id,
                             allow_local_file_access,
+                            config,
                         ),
                     }));
                     index += 1;
@@ -558,6 +543,7 @@ fn runtime_gemini_function_response_from_tool_message(
     message: &serde_json::Value,
     tool_names_by_call_id: &BTreeMap<String, String>,
     persist_tool_output: bool,
+    config: &RuntimeGeminiConfig,
 ) -> serde_json::Value {
     let call_id = message
         .get("tool_call_id")
@@ -578,7 +564,7 @@ fn runtime_gemini_function_response_from_tool_message(
             })
         });
     let response = if persist_tool_output {
-        runtime_gemini_mask_tool_response_for_history(&name, call_id, response)
+        runtime_gemini_mask_tool_response_for_history(&name, call_id, response, config)
     } else {
         prodex_provider_core::gemini_provider_core_mask_tool_response_for_history(
             response,

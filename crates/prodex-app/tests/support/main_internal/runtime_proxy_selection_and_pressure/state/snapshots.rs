@@ -142,6 +142,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         ),
     ]);
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),

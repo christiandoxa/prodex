@@ -1,10 +1,5 @@
 use super::*;
 
-#[cfg(all(target_os = "linux", target_env = "gnu", not(test)))]
-unsafe extern "C" {
-    fn malloc_trim(pad: usize) -> i32;
-}
-
 const RUNTIME_PROXY_DROPPED_LOG_EVENT: &str = runtime_log::RUNTIME_ASYNC_LOG_DROPPED_EVENT;
 
 fn runtime_proxy_log_queue_capacity() -> usize {
@@ -43,6 +38,11 @@ pub(super) fn runtime_proxy_log_dir() -> PathBuf {
 }
 
 pub(super) fn runtime_proxy_log_format() -> RuntimeLogFormat {
+    match RUNTIME_PROXY_LOG_FORMAT.load(Ordering::Relaxed) {
+        1 => return RuntimeLogFormat::Text,
+        2 => return RuntimeLogFormat::Json,
+        _ => {}
+    }
     env::var("PRODEX_RUNTIME_LOG_FORMAT")
         .ok()
         .and_then(|value| RuntimeLogFormat::parse(&value))
@@ -50,14 +50,29 @@ pub(super) fn runtime_proxy_log_format() -> RuntimeLogFormat {
         .unwrap_or(RuntimeLogFormat::Text)
 }
 
+static RUNTIME_PROXY_LOG_FORMAT: AtomicUsize = AtomicUsize::new(0);
+
+fn set_runtime_proxy_log_format(format: RuntimeLogFormat) {
+    RUNTIME_PROXY_LOG_FORMAT.store(
+        match format {
+            RuntimeLogFormat::Text => 1,
+            RuntimeLogFormat::Json => 2,
+        },
+        Ordering::Relaxed,
+    );
+}
+
 pub(super) fn create_runtime_proxy_log_path() -> PathBuf {
+    create_runtime_proxy_log_path_in_dir(&runtime_proxy_log_dir())
+}
+
+fn create_runtime_proxy_log_path_in_dir(dir: &Path) -> PathBuf {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
     let sequence = RUNTIME_PROXY_LOG_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let dir = runtime_proxy_log_dir();
-    let _ = fs::create_dir_all(&dir);
+    let _ = fs::create_dir_all(dir);
     dir.join(format!(
         "{RUNTIME_PROXY_LOG_FILE_PREFIX}-{}-{millis}-{sequence}.log",
         std::process::id()
@@ -103,11 +118,26 @@ pub(crate) fn runtime_proxy_latest_log_path_from_pointer_text(
 }
 
 pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
+    let format = runtime_proxy_log_format();
+    set_runtime_proxy_log_format(format);
     let log_path = create_runtime_proxy_log_path();
     let _ = write_runtime_proxy_latest_log_pointer(&log_path);
+    initialize_runtime_proxy_log_contents(&log_path);
+    log_path
+}
+
+pub(super) fn initialize_runtime_proxy_log_path_from_config(config: &RuntimeConfig) -> PathBuf {
+    set_runtime_proxy_log_format(config.log_format);
+    let log_path = create_runtime_proxy_log_path_in_dir(&config.log_dir);
+    let _ = write_runtime_proxy_latest_log_pointer_in_dir(&log_path, &config.log_dir);
+    initialize_runtime_proxy_log_contents(&log_path);
+    log_path
+}
+
+fn initialize_runtime_proxy_log_contents(log_path: &Path) {
     let (executable_path, executable_sha256) = runtime_current_binary_identity();
     runtime_proxy_log_to_path(
-        &log_path,
+        log_path,
         &format!(
             "runtime proxy log initialized pid={} cwd={} prodex_version={} executable_path={} executable_sha256={}",
             std::process::id(),
@@ -120,11 +150,17 @@ pub(super) fn initialize_runtime_proxy_log_path() -> PathBuf {
             executable_sha256.unwrap_or_else(|| "-".to_string())
         ),
     );
-    log_path
 }
 
 fn write_runtime_proxy_latest_log_pointer(log_path: &Path) -> io::Result<()> {
-    let pointer_path = runtime_proxy_latest_log_pointer_path();
+    write_runtime_proxy_latest_log_pointer_in_dir(log_path, &runtime_proxy_log_dir())
+}
+
+fn write_runtime_proxy_latest_log_pointer_in_dir(
+    log_path: &Path,
+    log_dir: &Path,
+) -> io::Result<()> {
+    let pointer_path = log_dir.join(RUNTIME_PROXY_LATEST_LOG_POINTER);
     if let Some(parent) = pointer_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -179,6 +215,7 @@ fn open_runtime_proxy_private_file(path: &Path) -> io::Result<fs::File> {
         .open(path)
 }
 
+#[cfg(test)]
 pub(super) fn runtime_proxy_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
@@ -191,30 +228,7 @@ pub(super) fn runtime_proxy_worker_count() -> usize {
     .clamp(1, 64)
 }
 
-pub(super) fn runtime_proxy_long_lived_worker_count() -> usize {
-    let parallelism = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(4);
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
-        runtime_policy_proxy().and_then(|policy| policy.long_lived_worker_count),
-        runtime_proxy_long_lived_worker_count_default(parallelism),
-    )
-    .clamp(1, 256)
-}
-
-pub(super) fn runtime_probe_refresh_worker_count() -> usize {
-    let parallelism = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(4);
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
-        runtime_policy_proxy().and_then(|policy| policy.probe_refresh_worker_count),
-        runtime_probe_refresh_worker_count_default(parallelism),
-    )
-    .clamp(1, 8)
-}
-
+#[cfg(test)]
 pub(super) fn runtime_proxy_async_worker_count() -> usize {
     let parallelism = thread::available_parallelism()
         .map(|count| count.get())
@@ -227,23 +241,12 @@ pub(super) fn runtime_proxy_async_worker_count() -> usize {
     .clamp(2, 8)
 }
 
+#[cfg(test)]
 pub(super) fn runtime_proxy_long_lived_queue_capacity(worker_count: usize) -> usize {
     usize_override_with_policy(
         "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
         runtime_policy_proxy().and_then(|policy| policy.long_lived_queue_capacity),
         runtime_proxy_long_lived_queue_capacity_default(worker_count),
-    )
-    .max(1)
-}
-
-pub(super) fn runtime_proxy_active_request_limit(
-    worker_count: usize,
-    long_lived_worker_count: usize,
-) -> usize {
-    usize_override_with_policy(
-        "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
-        runtime_policy_proxy().and_then(|policy| policy.active_request_limit),
-        runtime_proxy_active_request_limit_default(worker_count, long_lived_worker_count),
     )
     .max(1)
 }
@@ -297,8 +300,8 @@ pub(crate) fn runtime_maybe_trim_process_heap(released_bytes: usize) -> bool {
     }
 
     #[cfg(all(target_os = "linux", target_env = "gnu", not(test)))]
-    unsafe {
-        let _ = malloc_trim(0);
+    {
+        let _ = crate::runtime_allocator::runtime_allocator_trim_best_effort();
         true
     }
 
@@ -321,6 +324,7 @@ pub(crate) fn runtime_heap_trim_request_count() -> usize {
 
 pub(crate) use prodex_runtime_state::{RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits};
 
+#[cfg(any(test, feature = "bench-support"))]
 pub(super) fn runtime_proxy_lane_limits(
     global_limit: usize,
     worker_count: usize,

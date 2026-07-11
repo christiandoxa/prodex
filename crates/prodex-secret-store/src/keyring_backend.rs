@@ -3,6 +3,8 @@ use crate::{
 };
 use std::fmt;
 
+/// Metadata-only placeholder for the explicitly unsupported keyring backend.
+/// Runtime selection rejects this backend before any secret operation.
 #[derive(Clone, PartialEq, Eq)]
 pub struct KeyringSecretBackend {
     service: String,

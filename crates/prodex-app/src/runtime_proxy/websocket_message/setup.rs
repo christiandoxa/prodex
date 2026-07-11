@@ -13,10 +13,9 @@ use super::super::{
     runtime_previous_response_fresh_fallback_shape_with_session,
     runtime_previous_response_turn_state, runtime_profile_inflight_hard_limited_for_context,
     runtime_proxy_has_continuation_priority, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_profile_inflight_hard_limit, runtime_proxy_structured_log_message,
-    runtime_quota_blocked_affinity_is_releasable, runtime_request_explicit_session_id,
-    runtime_request_turn_state, runtime_response_bound_profile,
-    runtime_smart_context_effective_websocket_prompt_cache_key,
+    runtime_proxy_structured_log_message, runtime_quota_blocked_affinity_is_releasable,
+    runtime_request_explicit_session_id, runtime_request_turn_state,
+    runtime_response_bound_profile, runtime_smart_context_effective_websocket_prompt_cache_key,
     runtime_smart_context_model_name_from_body, runtime_turn_state_bound_profile,
     runtime_websocket_request_requires_locked_previous_response_affinity,
     select_runtime_response_candidate_for_route_with_request,
@@ -260,7 +259,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                         runtime_proxy_log_field("profile", candidate_name),
                         runtime_proxy_log_field(
                             "hard_limit",
-                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                            self.shared
+                                .runtime_config
+                                .tuning
+                                .profile_inflight_hard_limit
+                                .to_string(),
                         ),
                     ],
                 ),

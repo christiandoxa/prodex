@@ -450,6 +450,9 @@ mod tests {
                 input_tokens: Some(1),
                 output_tokens: Some(2),
                 cost_usd: Some(0.25),
+                reconciliation_reason: Some(
+                    prodex_domain::ReservationReconciliationReason::Completed,
+                ),
                 sink: "runtime-log".to_string(),
             },
             30,

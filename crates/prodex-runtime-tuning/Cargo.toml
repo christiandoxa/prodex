@@ -9,3 +9,6 @@ repository.workspace = true
 [lib]
 name = "prodex_runtime_tuning"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -1,5 +1,5 @@
 use crate::{
-    AppPaths, AppState, ResponseProfileBinding, RuntimeProxyLaneAdmission,
+    AppPaths, AppState, ResponseProfileBinding, RuntimeConfig, RuntimeProxyLaneAdmission,
     RuntimeQuotaWindowStatus, UsageAuth,
 };
 use std::fs;
@@ -46,6 +46,7 @@ pub(crate) type RuntimeProfileUsageSnapshot =
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeRotationProxyShared {
+    pub(crate) runtime_config: Arc<RuntimeConfig>,
     pub(crate) upstream_no_proxy: bool,
     pub(crate) auto_redeem_enabled: bool,
     pub(crate) async_client: reqwest::Client,

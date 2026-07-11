@@ -152,6 +152,17 @@ fn health_probe_response_plan_is_stable_and_redacted() {
     assert!(!readyz.message.contains("database"));
     assert!(!readyz.message.contains("postgres"));
     assert!(!readyz.message.contains(&policy_revision.to_string()));
+    assert_eq!(
+        serde_json::to_value(&readyz).unwrap(),
+        serde_json::json!({
+            "probe": "readyz",
+            "state": "failing",
+            "ready": false,
+            "active_policy_revision": policy_revision,
+            "code": "health_readyz_failing",
+            "message": "service is not ready"
+        })
+    );
     let rendered = format!("{readyz:?}");
     assert!(!rendered.contains(&policy_revision.to_string()));
     assert!(rendered.contains("active_policy_revision: Some(\"<redacted>\")"));

@@ -120,6 +120,7 @@ pub(super) fn bench_runtime_shared(
     active_request_limit: usize,
 ) -> RuntimeRotationProxyShared {
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,
         async_client: reqwest::Client::builder()

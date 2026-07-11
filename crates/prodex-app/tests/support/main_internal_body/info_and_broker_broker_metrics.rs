@@ -40,8 +40,8 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
             current_profile: "main".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
+            admin_token: runtime_broker_test_secret("secret"),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
             executable_path: None,
             executable_sha256: None,
@@ -79,7 +79,7 @@ fn runtime_proxy_broker_metrics_endpoint_reports_live_runtime_snapshot() {
         .json::<RuntimeBrokerMetrics>()
         .expect("runtime broker metrics should decode");
     assert_eq!(metrics.health.current_profile, "main");
-    assert_eq!(metrics.health.instance_token, "instance");
+    assert_eq!(metrics.health.instance_id, "instance");
     assert_eq!(metrics.health.persistence_role, "owner");
     assert_eq!(
         metrics.health.prodex_version.as_deref(),
@@ -144,8 +144,8 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
             current_profile: "main".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
+            admin_token: runtime_broker_test_secret("secret"),
             prodex_version: Some(runtime_current_prodex_version().to_string()),
             executable_path: None,
             executable_sha256: None,
@@ -196,15 +196,9 @@ fn runtime_proxy_broker_prometheus_metrics_endpoint_reports_text_snapshot() {
     assert!(body.contains("prodex_runtime_broker_lane_releases_total"));
     assert!(body.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
     assert!(body.contains("prodex_runtime_broker_lane_lane_limit_rejections_total"));
-    assert!(body.contains(
-        "prodex_runtime_broker_lane_release_underflows_total"
-    ));
-    assert!(body.contains(
-        "prodex_runtime_broker_active_request_release_underflows_total"
-    ));
-    assert!(body.contains(
-        "prodex_runtime_broker_profile_inflight_release_underflows_total"
-    ));
+    assert!(body.contains("prodex_runtime_broker_lane_release_underflows_total"));
+    assert!(body.contains("prodex_runtime_broker_active_request_release_underflows_total"));
+    assert!(body.contains("prodex_runtime_broker_profile_inflight_release_underflows_total"));
     assert!(body.contains("prodex_runtime_broker_continuation_binding_counts"));
     assert!(body.contains("prodex_runtime_broker_continuity_failures_total"));
     assert!(body.contains("binding_kind=\"response\""));
@@ -311,8 +305,8 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
             current_profile: "main".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-            instance_token: "instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "instance".to_string(),
+            admin_token: runtime_broker_test_secret("secret"),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,
@@ -398,8 +392,8 @@ fn runtime_broker_metrics_snapshot_records_runtime_state_lock_wait() {
                 current_profile: "main".to_string(),
                 include_code_review: false,
                 upstream_no_proxy: false,
-                instance_token: "instance".to_string(),
-                admin_token: "secret".to_string(),
+                instance_id: "instance".to_string(),
+                admin_token: runtime_broker_test_secret("secret"),
                 prodex_version: None,
                 executable_path: None,
                 executable_sha256: None,

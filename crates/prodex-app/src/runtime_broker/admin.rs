@@ -30,7 +30,7 @@ impl std::fmt::Display for RuntimeBrokerActivationBodyTooLarge {
 
 impl std::error::Error for RuntimeBrokerActivationBodyTooLarge {}
 
-pub(crate) fn runtime_proxy_admin_token(request: &tiny_http::Request) -> Option<String> {
+pub(crate) fn runtime_proxy_admin_token(request: &tiny_http::Request) -> Option<&str> {
     request
         .headers()
         .iter()
@@ -39,7 +39,7 @@ pub(crate) fn runtime_proxy_admin_token(request: &tiny_http::Request) -> Option<
                 .field
                 .equiv(prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER)
         })
-        .map(|header| header.value.as_str().trim().to_string())
+        .map(|header| header.value.as_str().trim())
         .filter(|value| !value.is_empty())
 }
 
@@ -244,8 +244,8 @@ pub(crate) fn handle_runtime_proxy_admin_request(
         ));
     };
     if let Err(error) = prodex_runtime_broker::runtime_broker_validate_admin_token(
-        runtime_proxy_admin_token(request).as_deref(),
-        metadata.admin_token.as_str(),
+        runtime_proxy_admin_token(request),
+        metadata.admin_token.as_ref(),
     ) {
         return Some(runtime_broker_admin_error_response(error));
     }

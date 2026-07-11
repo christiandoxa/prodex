@@ -13,6 +13,24 @@ pub(super) use prodex_runtime_broker::{
     runtime_prodex_binary_identity_matches, runtime_registry_prodex_binary_identity,
 };
 
+#[cfg(test)]
+pub(super) fn runtime_broker_test_secret(
+    value: &str,
+) -> std::sync::Arc<prodex_runtime_broker::RuntimeBrokerSecret> {
+    std::sync::Arc::new(prodex_runtime_broker::RuntimeBrokerSecret::new(value).unwrap())
+}
+
+#[cfg(test)]
+pub(super) fn save_runtime_broker_test_capability(
+    paths: &prodex_core::AppPaths,
+    broker_key: &str,
+    instance_id: &str,
+    value: &str,
+) {
+    let secret = prodex_runtime_broker::RuntimeBrokerSecret::new(value).unwrap();
+    crate::save_runtime_broker_capability(paths, broker_key, instance_id, &secret).unwrap();
+}
+
 #[derive(Debug)]
 pub(super) struct RuntimeBrokerLease {
     pub(super) path: PathBuf,

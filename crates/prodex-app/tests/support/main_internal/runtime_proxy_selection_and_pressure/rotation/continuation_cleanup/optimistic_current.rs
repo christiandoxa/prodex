@@ -152,6 +152,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -231,6 +232,7 @@ fn optimistic_current_candidate_skips_busy_profile() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -318,6 +320,7 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -404,6 +407,7 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -493,6 +497,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         )]),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),
@@ -576,6 +581,7 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
         async_client: reqwest::Client::builder().build().expect("async client"),

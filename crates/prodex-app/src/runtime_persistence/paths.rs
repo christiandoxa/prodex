@@ -61,6 +61,12 @@ pub(crate) fn runtime_broker_registry_last_good_file_path(
     last_good_file_path(&runtime_broker_registry_file_path(paths, broker_key))
 }
 
+pub(crate) fn runtime_broker_capability_file_path(paths: &AppPaths, broker_key: &str) -> PathBuf {
+    paths
+        .root
+        .join(format!("runtime-broker-{broker_key}.capability"))
+}
+
 pub(crate) fn runtime_broker_lease_dir(paths: &AppPaths, broker_key: &str) -> PathBuf {
     paths
         .root

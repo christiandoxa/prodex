@@ -3,6 +3,7 @@ use super::gemini_request::{
 };
 use super::gemini_request_extensions::runtime_gemini_active_extension_manifests;
 use super::gemini_request_io::runtime_gemini_read_text_limited;
+use crate::RuntimeGeminiConfig;
 use prodex_provider_core::{
     gemini_provider_core_collect_string_values,
     gemini_provider_core_normalize_tool_name as runtime_gemini_normalize_tool_name,
@@ -25,7 +26,10 @@ pub(super) struct RuntimeGeminiPolicyCompat {
 }
 
 impl RuntimeGeminiPolicyCompat {
-    pub(super) fn from_request_and_files(original: &serde_json::Value) -> Self {
+    pub(super) fn from_request_and_files(
+        original: &serde_json::Value,
+        config: &RuntimeGeminiConfig,
+    ) -> Self {
         let mut policy = Self::default();
         for path in runtime_gemini_settings_paths() {
             if let Some(text) =
@@ -35,7 +39,7 @@ impl RuntimeGeminiPolicyCompat {
                 policy.apply_settings_value(&value);
             }
         }
-        for extension in runtime_gemini_active_extension_manifests() {
+        for extension in runtime_gemini_active_extension_manifests(config) {
             policy.apply_settings_value(&extension.value);
             policy.apply_extension_policy_files(&extension.directory);
         }

@@ -13,6 +13,8 @@ mod gemini_rewrite;
 mod gemini_sse;
 mod gemini_thought_signatures;
 mod local_rewrite;
+mod local_rewrite_application_boundary;
+mod local_rewrite_application_data_plane;
 mod local_rewrite_constraints;
 mod local_rewrite_copilot;
 mod local_rewrite_copilot_bindings;
@@ -51,6 +53,8 @@ mod local_rewrite_gateway_openapi;
 mod local_rewrite_gateway_openapi_components;
 mod local_rewrite_gateway_openapi_paths;
 mod local_rewrite_gateway_openapi_route_explain;
+mod local_rewrite_gateway_reconciliation_audit;
+mod local_rewrite_gateway_reconciliation_runtime;
 mod local_rewrite_gateway_redis_ledger;
 mod local_rewrite_gateway_reservation;
 mod local_rewrite_gateway_route_load;
@@ -77,6 +81,7 @@ mod local_rewrite_gemini_thought_signatures;
 mod local_rewrite_kiro;
 mod local_rewrite_model_memory;
 mod local_rewrite_options;
+mod local_rewrite_pipeline;
 mod local_rewrite_rate_limits;
 mod local_rewrite_response;
 mod local_rewrite_response_guardrails;
@@ -194,7 +199,17 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         model_context_window_tokens,
         preferred_listen_addr,
     } = options;
-    let log_path = initialize_runtime_proxy_log_path();
+    let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(paths)?);
+    let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config);
+    for key in runtime_config.compatibility_defaults() {
+        runtime_proxy_log_to_path(
+            &log_path,
+            &runtime_proxy_structured_log_message(
+                "runtime_config_compatibility_default",
+                [runtime_proxy_log_field("key", *key)],
+            ),
+        );
+    }
     let (server, listen_addr) = match preferred_listen_addr {
         Some(preferred) => match TinyServer::http(preferred) {
             Ok(server) => {
@@ -235,9 +250,10 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
             (server, listen_addr)
         }
     };
+    initialize_runtime_probe_refresh_queue(runtime_config.tuning.probe_refresh_worker_count);
     let owner_lock = try_acquire_runtime_owner_lock(paths)?;
     let persistence_enabled = owner_lock.is_some();
-    let async_worker_count = runtime_proxy_async_worker_count();
+    let async_worker_count = runtime_config.tuning.async_worker_count;
     let async_runtime = Arc::new(
         TokioRuntimeBuilder::new_multi_thread()
             .worker_threads(async_worker_count)
@@ -245,17 +261,16 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
             .build()
             .context("failed to build runtime auto-rotate async runtime")?,
     );
-    let worker_count = runtime_proxy_worker_count();
-    let long_lived_worker_count = runtime_proxy_long_lived_worker_count();
-    let long_lived_queue_capacity =
-        runtime_proxy_long_lived_queue_capacity(long_lived_worker_count);
-    let active_request_limit =
-        runtime_proxy_active_request_limit(worker_count, long_lived_worker_count);
-    let lane_admission = RuntimeProxyLaneAdmission::new(runtime_proxy_lane_limits(
-        active_request_limit,
-        worker_count,
-        long_lived_worker_count,
-    ));
+    let worker_count = runtime_config.tuning.worker_count;
+    let long_lived_worker_count = runtime_config.tuning.long_lived_worker_count;
+    let long_lived_queue_capacity = runtime_config.tuning.long_lived_queue_capacity;
+    let active_request_limit = runtime_config.tuning.active_request_limit;
+    let lane_admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+        responses: runtime_config.tuning.lane_limits.responses,
+        compact: runtime_config.tuning.lane_limits.compact,
+        websocket: runtime_config.tuning.lane_limits.websocket,
+        standard: runtime_config.tuning.lane_limits.standard,
+    });
     let persisted_state = AppState::load_with_recovery(paths).unwrap_or(RecoveredLoad {
         value: state.clone(),
         recovered_from_backup: false,
@@ -367,9 +382,10 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         .filter(|key| key.starts_with("__route_success__"))
         .count();
     let shared = RuntimeRotationProxyShared {
+        runtime_config: Arc::clone(&runtime_config),
         upstream_no_proxy,
         auto_redeem_enabled: auto_redeem,
-        async_client: build_runtime_upstream_async_http_client(upstream_no_proxy)?,
+        async_client: build_runtime_upstream_async_http_client(upstream_no_proxy, &runtime_config)?,
         async_runtime,
         log_path: log_path.clone(),
         request_sequence: Arc::new(AtomicU64::new(runtime_proxy_request_sequence_seed(
@@ -493,6 +509,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     );
 
     Ok(RuntimeRotationProxy {
+        runtime_config: Arc::clone(&runtime_config),
         server,
         shutdown,
         worker_threads,

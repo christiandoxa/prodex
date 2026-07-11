@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,7 +25,12 @@ impl TestDir {
             );
             let path = std::env::temp_dir().join(unique);
             match fs::create_dir(&path) {
-                Ok(()) => return Self { path },
+                Ok(()) => {
+                    #[cfg(unix)]
+                    fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+                        .expect("failed to secure temp dir");
+                    return Self { path };
+                }
                 Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(err) => panic!("failed to create temp dir: {err}"),
             }

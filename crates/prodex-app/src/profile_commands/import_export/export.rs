@@ -2,6 +2,7 @@ use super::super::kiro::{KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE};
 use super::super::manage::print_profile_panel;
 use super::passwords::{resolve_export_password, resolve_export_password_mode};
 use super::*;
+use zeroize::Zeroizing;
 
 pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
@@ -16,8 +17,10 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
         true => Some(resolve_export_password()?),
         false => None,
     };
-    let encoded =
-        prodex_profile_export::serialize_profile_export_payload(&payload, password.as_deref())?;
+    let encoded = Zeroizing::new(prodex_profile_export::serialize_profile_export_payload(
+        &payload,
+        password.as_ref().map(|password| password.as_str()),
+    )?);
     let output_path = args
         .output
         .map(absolutize)

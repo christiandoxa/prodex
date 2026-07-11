@@ -1,12 +1,31 @@
 use super::*;
-use crate::TestEnvVarGuard;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_migrate_compatibility_state,
     runtime_gateway_sqlite_create_current_schema_for_tests,
 };
+use crate::{RuntimeRotationProxy, TestEnvVarGuard};
 use postgres::NoTls;
 use prodex_storage_postgres::{PostgresRuntimeMode, plan_postgres_migrations};
 use std::fs;
+
+fn wait_for_oidc_cache(proxy: &RuntimeRotationProxy, minimum_entries: usize) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let entries = proxy
+            .gateway_side_effect_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot().oidc_cache_entries)
+            .unwrap_or_default();
+        if entries >= minimum_entries {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "OIDC background cache did not reach {minimum_entries} entries"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
 
 fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
     let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");
@@ -457,6 +476,7 @@ fn gateway_oidc_jwt_can_authenticate_scoped_admin() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -472,6 +492,10 @@ fn gateway_oidc_jwt_can_authenticate_scoped_admin() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    wait_for_oidc_cache(&proxy, 1);
+    let _request_path_ttl = TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS", "0");
+    let _request_path_lkg =
+        TestEnvVarGuard::set("PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS", "0");
     let client = reqwest::blocking::Client::new();
 
     let created = client
@@ -550,6 +574,7 @@ fn gateway_oidc_requires_tenant_when_configured() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -565,6 +590,7 @@ fn gateway_oidc_requires_tenant_when_configured() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    wait_for_oidc_cache(&proxy, 1);
     let client = reqwest::blocking::Client::new();
 
     let rejected = client
@@ -634,6 +660,7 @@ fn gateway_oidc_rejects_malformed_and_expired_tokens() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -649,6 +676,7 @@ fn gateway_oidc_rejects_malformed_and_expired_tokens() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    wait_for_oidc_cache(&proxy, 1);
     let client = reqwest::blocking::Client::new();
 
     for token in [
@@ -712,6 +740,7 @@ fn gateway_oidc_jwt_can_discover_jwks_uri() {
                 issuer: issuer.clone(),
                 audience: audience.to_string(),
                 jwks_url: None,
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -727,6 +756,7 @@ fn gateway_oidc_jwt_can_discover_jwks_uri() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    wait_for_oidc_cache(&proxy, 2);
     let client = reqwest::blocking::Client::new();
 
     let created = client
@@ -788,6 +818,7 @@ fn authenticates_with_stale_while_revalidate_jwks_without_request_path_fetch() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -803,6 +834,7 @@ fn authenticates_with_stale_while_revalidate_jwks_without_request_path_fetch() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    wait_for_oidc_cache(&proxy, 1);
     let client = reqwest::blocking::Client::new();
 
     let first = client
@@ -892,6 +924,7 @@ fn expired_oidc_jwks_cache_fails_closed_without_request_path_fetch() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -907,6 +940,7 @@ fn expired_oidc_jwks_cache_fails_closed_without_request_path_fetch() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    wait_for_oidc_cache(&proxy, 1);
     let client = reqwest::blocking::Client::new();
 
     let first = client
@@ -986,6 +1020,7 @@ fn oidc_background_refresh_uses_jwks_cache_control_max_age() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -1001,6 +1036,7 @@ fn oidc_background_refresh_uses_jwks_cache_control_max_age() {
         gateway_observability: RuntimeGatewayObservabilityConfig::default(),
     })
     .expect("gateway proxy should start");
+    wait_for_oidc_cache(&proxy, 1);
 
     let first = reqwest::blocking::Client::new()
         .post(format!(
@@ -1072,6 +1108,7 @@ fn oidc_background_refresh_retries_failed_jwks_after_backoff() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -1110,7 +1147,7 @@ fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
     let root = temp_root("gateway-oidc-missing-jwks-cache");
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(0);
-    let jwks = TestJwksServer::start_with_success_count(0);
+    let jwks = TestJwksServer::start_with_delay(std::time::Duration::from_millis(500));
     let issuer = "https://idp.example";
     let audience = "prodex-gateway";
     let token =
@@ -1141,6 +1178,7 @@ fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
                 issuer: issuer.to_string(),
                 audience: audience.to_string(),
                 jwks_url: Some(format!("http://{}/jwks.json", jwks.addr)),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
@@ -1158,6 +1196,12 @@ fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
     .expect("gateway proxy should start");
     let client = reqwest::blocking::Client::new();
 
+    let fetch_deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while jwks.request_count() == 0 && std::time::Instant::now() < fetch_deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(jwks.request_count(), 1);
+    let request_started = std::time::Instant::now();
     let rejected = client
         .get(format!(
             "http://{}/v1/prodex/gateway/keys",
@@ -1168,13 +1212,27 @@ fn gateway_oidc_missing_jwks_cache_does_not_fetch_on_request_path() {
         .expect("OIDC request with missing JWKS cache should be sent");
 
     assert_eq!(rejected.status().as_u16(), 401);
+    assert!(
+        request_started.elapsed() < std::time::Duration::from_millis(250),
+        "request path must not spin-wait for background OIDC refresh"
+    );
     assert_eq!(
         jwks.request_count(),
         1,
         "request path must not fetch JWKS when startup prefetch failed"
     );
 
-    let runtime_log = fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+    let log_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let runtime_log = loop {
+        let runtime_log =
+            fs::read_to_string(&proxy.log_path).expect("runtime log should be readable");
+        if runtime_log.contains("oidc_refresh_result=failed")
+            || std::time::Instant::now() >= log_deadline
+        {
+            break runtime_log;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
     assert!(runtime_log.contains("gateway_oidc_refresh_metric"));
     assert!(runtime_log.contains("metric_name=prodex_oidc_refresh_events_total"));
     assert!(runtime_log.contains("oidc_refresh_operation=fetch_jwks"));

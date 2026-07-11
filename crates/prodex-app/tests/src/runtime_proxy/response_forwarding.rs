@@ -62,6 +62,7 @@ fn test_runtime_streaming_shared(log_path: PathBuf) -> RuntimeRotationProxyShare
     };
 
     RuntimeRotationProxyShared {
+        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,
         async_client: reqwest::Client::new(),

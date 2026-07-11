@@ -11,5 +11,20 @@ name = "secret_store"
 path = "src/lib.rs"
 
 [dependencies]
+libc = { workspace = true }
 prodex_domain = { workspace = true }
 sha2 = { workspace = true }
+zeroize = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
+
+[lints]
+workspace = true

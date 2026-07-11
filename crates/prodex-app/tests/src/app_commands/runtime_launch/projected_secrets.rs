@@ -5,6 +5,12 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
     let root = temp_dir("gateway-projected-secrets");
     let secret_root = root.join("projected");
     std::fs::create_dir_all(&secret_root).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&secret_root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     for (name, value) in [
         ("gateway-token", "gateway-secret-value"),
         ("provider-key", "provider-secret-value"),

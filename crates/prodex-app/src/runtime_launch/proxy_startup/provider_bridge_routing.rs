@@ -3,6 +3,7 @@ use super::super::provider_models::{
 };
 use super::{RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_openai_contract};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use prodex_gateway_http::{GatewayHttpRouteKind, classify_route};
 use prodex_provider_core::{
     ProviderAdapterContract, ProviderCapabilityStatus, ProviderEndpoint, ProviderModelCost,
     provider_adapter, provider_model_cost, provider_model_fallback_chain,
@@ -221,33 +222,22 @@ fn runtime_provider_route_endpoint(
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_route_kind(
     path: &str,
 ) -> Option<RuntimeProviderRouteKind<'_>> {
-    let path = path_without_query(path).trim_end_matches('/');
-    if path.ends_with("/responses/compact") {
-        return Some(RuntimeProviderRouteKind::ResponsesCompact);
-    }
-    if path.ends_with("/responses") {
-        return Some(RuntimeProviderRouteKind::Responses);
-    }
-    if path.ends_with("/chat/completions") {
-        return Some(RuntimeProviderRouteKind::ChatCompletions);
-    }
-    if path.ends_with("/messages") {
-        return Some(RuntimeProviderRouteKind::Messages);
-    }
-    if path.ends_with("/embeddings") {
-        return Some(RuntimeProviderRouteKind::Embeddings);
-    }
-    for prefix in ["/v1/models", "/models"] {
-        if path == prefix {
-            return Some(RuntimeProviderRouteKind::ModelsList);
+    let path = path_without_query(path);
+    match classify_route(path) {
+        GatewayHttpRouteKind::DataPlaneResponses => Some(RuntimeProviderRouteKind::Responses),
+        GatewayHttpRouteKind::DataPlaneCompact => Some(RuntimeProviderRouteKind::ResponsesCompact),
+        GatewayHttpRouteKind::DataPlaneChatCompletions => {
+            Some(RuntimeProviderRouteKind::ChatCompletions)
         }
-        if let Some(model_id) = path.strip_prefix(&format!("{prefix}/"))
-            && !model_id.trim().is_empty()
-        {
-            return Some(RuntimeProviderRouteKind::ModelsSingle(model_id));
-        }
+        GatewayHttpRouteKind::DataPlaneMessages => Some(RuntimeProviderRouteKind::Messages),
+        GatewayHttpRouteKind::DataPlaneEmbeddings => Some(RuntimeProviderRouteKind::Embeddings),
+        GatewayHttpRouteKind::DataPlaneModels => Some(RuntimeProviderRouteKind::ModelsList),
+        GatewayHttpRouteKind::DataPlaneModel => ["/v1/models/", "/models/"]
+            .into_iter()
+            .find_map(|prefix| path.strip_prefix(prefix))
+            .map(RuntimeProviderRouteKind::ModelsSingle),
+        _ => None,
     }
-    None
 }
 
 fn runtime_provider_json_response(

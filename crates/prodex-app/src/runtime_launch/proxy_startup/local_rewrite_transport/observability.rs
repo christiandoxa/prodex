@@ -2,7 +2,7 @@
 
 use super::super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, runtime_gateway_try_reserve_background_task,
-    schedule_runtime_gateway_billing_ledger_reconcile, schedule_runtime_gateway_durable_reconcile,
+    schedule_runtime_gateway_billing_ledger_reconcile,
 };
 use super::super::provider_bridge::{
     RuntimeProviderGatewaySpendEvent, runtime_provider_gateway_spend_apply_admission_ids,
@@ -53,7 +53,6 @@ pub(in crate::runtime_launch::proxy_startup) fn emit_runtime_gateway_spend_event
             .and_then(|scope| scope.tenant_id.as_deref()),
     );
     runtime_proxy_log(&shared.runtime_shared, event.log_message());
-    schedule_runtime_gateway_durable_reconcile(shared, event.clone());
     schedule_runtime_gateway_billing_ledger_reconcile(shared, event.clone());
     if !shared.gateway_observability.sink_enabled("jsonl")
         && !shared.gateway_observability.sink_enabled("http")

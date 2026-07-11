@@ -286,10 +286,7 @@ fn provider_route_kind_normalizes_bridge_surface_paths() {
         runtime_provider_route_kind("/v1/responses?trace=1"),
         Some(RuntimeProviderRouteKind::Responses)
     );
-    assert_eq!(
-        runtime_provider_route_kind("/v1/responses/compact/"),
-        Some(RuntimeProviderRouteKind::ResponsesCompact)
-    );
+    assert_eq!(runtime_provider_route_kind("/v1/responses/compact/"), None);
     assert_eq!(
         runtime_provider_route_kind("/v1/chat/completions"),
         Some(RuntimeProviderRouteKind::ChatCompletions)
@@ -310,6 +307,14 @@ fn provider_route_kind_normalizes_bridge_surface_paths() {
         runtime_provider_route_kind("/v1/models"),
         Some(RuntimeProviderRouteKind::ModelsList)
     );
+    for path in [
+        "/tenant/v1/responses",
+        "/v1//responses",
+        "/v1/%2e%2e/responses",
+        "/v1/responses#fragment",
+    ] {
+        assert_eq!(runtime_provider_route_kind(path), None, "{path}");
+    }
 }
 
 #[test]

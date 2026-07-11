@@ -59,7 +59,8 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
 ) -> Result<BTreeSet<String>> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let inflight_soft_limit =
+        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let state = {
         let mut runtime = shared
             .runtime
@@ -141,7 +142,8 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
     }
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let inflight_soft_limit =
+        runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
     let state = {
         let mut runtime = shared
             .runtime
@@ -235,7 +237,8 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     } = wait;
 
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
-    let wait_budget = runtime_proxy_request_inflight_wait_budget(request, pressure_mode);
+    let wait_budget =
+        runtime_proxy_request_inflight_wait_budget(request, pressure_mode, &shared.runtime_config);
     if wait_budget.is_zero() {
         return Ok(false);
     }
