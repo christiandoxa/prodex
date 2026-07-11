@@ -369,12 +369,35 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
         .expect("unauthenticated admin API request should be sent");
     assert_eq!(unauthenticated_keys.status().as_u16(), 401);
 
+    let missing_idempotency_key = client
+        .post(format!(
+            "http://{}/v1/prodex/gateway/keys",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .json(&serde_json::json!({"name": "team-missing-idempotency"}))
+        .send()
+        .expect("create key request without idempotency should be sent");
+    assert_eq!(missing_idempotency_key.status().as_u16(), 400);
+    let missing_idempotency_key: serde_json::Value = missing_idempotency_key
+        .json()
+        .expect("missing idempotency response should be json");
+    assert_eq!(
+        missing_idempotency_key["error"]["code"],
+        "control_plane_idempotency_key_required"
+    );
+    assert_eq!(
+        missing_idempotency_key["error"]["message"],
+        "control-plane idempotency key is required"
+    );
+
     let created = client
         .post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "crud-create-team")
         .json(&serde_json::json!({
             "name": "team-crud",
             "allowed_models": ["gpt-5.4"],
@@ -418,6 +441,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "crud-disable-team")
         .json(&serde_json::json!({"disabled": true}))
         .send()
         .expect("disable key request should be sent");
@@ -441,6 +465,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "crud-rotate-team")
         .json(&serde_json::json!({"disabled": false, "rotate": true}))
         .send()
         .expect("rotate key request should be sent");
@@ -477,6 +502,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "crud-delete-team")
         .send()
         .expect("delete key request should be sent");
     assert_eq!(deleted.status().as_u16(), 200);
@@ -730,6 +756,7 @@ fn gateway_admin_key_mutations_honor_if_match_etag() {
     let created = client
         .post(&keys_url)
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "etag-create-team")
         .json(&serde_json::json!({"name": "team-etag"}))
         .send()
         .expect("create key should be sent");
@@ -766,6 +793,7 @@ fn gateway_admin_key_mutations_honor_if_match_etag() {
     let patched = client
         .patch(&key_url)
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "etag-patch-team")
         .header("If-Match", &etag)
         .json(&serde_json::json!({"disabled": true}))
         .send()
@@ -775,6 +803,7 @@ fn gateway_admin_key_mutations_honor_if_match_etag() {
     let stale_delete = client
         .delete(&key_url)
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "etag-delete-stale")
         .header("If-Match", "\"gateway-key-0\"")
         .send()
         .expect("stale delete should be sent");
@@ -869,6 +898,7 @@ fn gateway_admin_policy_backed_key_mutation_denials_are_audited() {
     let patch = client
         .patch(&key_url)
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "read-only-patch")
         .json(&serde_json::json!({"disabled": true}))
         .send()
         .expect("policy-backed key patch should be sent");
@@ -879,6 +909,7 @@ fn gateway_admin_policy_backed_key_mutation_denials_are_audited() {
     let delete = client
         .delete(&key_url)
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "read-only-delete")
         .send()
         .expect("policy-backed key delete should be sent");
     assert_eq!(delete.status().as_u16(), 403);
@@ -946,6 +977,7 @@ fn gateway_admin_invalid_json_uses_stable_error_without_parser_details() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "invalid-json-create")
         .header("content-type", "application/json")
         .body(r#"{"name":"broken""#)
         .send()
@@ -1013,6 +1045,7 @@ fn gateway_admin_corrupt_key_store_uses_stable_error_without_parser_details() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "corrupt-store-create")
         .json(&serde_json::json!({
             "name": "new-key",
             "tenant_id": "tenant-a"
@@ -1166,6 +1199,7 @@ fn gateway_admin_key_store_lock_errors_use_stable_response_without_path_details(
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "store-lock-create")
         .json(&serde_json::json!({
             "name": "new-key",
             "tenant_id": "tenant-a"

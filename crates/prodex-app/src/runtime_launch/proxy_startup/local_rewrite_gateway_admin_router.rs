@@ -579,7 +579,6 @@ fn runtime_gateway_admin_idempotency_response(
         runtime_gateway_request_body_sha256(&captured.body),
     ) {
         Ok(plan) => plan.operation?,
-        Err(ApplicationControlPlaneIdempotencyError::IdempotencyKeyRequired) => return None,
         Err(error) => {
             let response = plan_application_control_plane_idempotency_error_response(&error);
             runtime_gateway_audit_admin_request_denied_event(

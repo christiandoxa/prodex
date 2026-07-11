@@ -1028,6 +1028,7 @@ fn gateway_disabled_last_virtual_key_does_not_open_gateway() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "disabled-last-key-create")
         .json(&serde_json::json!({"name": "alpha"}))
         .send()
         .expect("admin create key request should be sent");
@@ -1039,6 +1040,7 @@ fn gateway_disabled_last_virtual_key_does_not_open_gateway() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "disabled-last-key-update")
         .json(&serde_json::json!({"disabled": true}))
         .send()
         .expect("admin disable key request should be sent");

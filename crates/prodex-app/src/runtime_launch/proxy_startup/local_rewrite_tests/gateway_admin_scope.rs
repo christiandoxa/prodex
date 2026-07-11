@@ -70,6 +70,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "scope-admin-create-team-a")
         .json(&serde_json::json!({"name": "team-a-main"}))
         .send()
         .expect("admin create team-a key request should be sent");
@@ -88,6 +89,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "scope-admin-create-team-b")
         .json(&serde_json::json!({"name": "team-b-main"}))
         .send()
         .expect("admin create team-b key request should be sent");
@@ -172,6 +174,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
             proxy.listen_addr
         ))
         .bearer_auth(scoped_token)
+        .header("Idempotency-Key", "scope-create-team-b-forbidden")
         .json(&serde_json::json!({"name": "team-b-new"}))
         .send()
         .expect("scoped forbidden create key request should be sent");
@@ -183,6 +186,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
             proxy.listen_addr
         ))
         .bearer_auth(scoped_token)
+        .header("Idempotency-Key", "scope-create-team-a")
         .json(&serde_json::json!({"name": "team-a-new"}))
         .send()
         .expect("scoped allowed create key request should be sent");
@@ -194,6 +198,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
             proxy.listen_addr
         ))
         .bearer_auth(scoped_token)
+        .header("Idempotency-Key", "scope-patch-team-b-forbidden")
         .json(&serde_json::json!({"disabled": true}))
         .send()
         .expect("scoped forbidden patch key request should be sent");
@@ -205,6 +210,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
             proxy.listen_addr
         ))
         .bearer_auth(scoped_token)
+        .header("Idempotency-Key", "scope-delete-team-b-forbidden")
         .send()
         .expect("scoped forbidden delete key request should be sent");
     assert_eq!(scoped_delete_forbidden.status().as_u16(), 403);
@@ -339,6 +345,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "team-scope-admin-create-alpha")
         .json(&serde_json::json!({"name": "alpha-main", "team_id": "team-a"}))
         .send()
         .expect("admin create alpha key request should be sent");
@@ -352,6 +359,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "team-scope-admin-create-beta")
         .json(&serde_json::json!({"name": "beta-main", "team_id": "team-b"}))
         .send()
         .expect("admin create beta key request should be sent");
@@ -365,6 +373,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(team_a_token)
+        .header("Idempotency-Key", "team-scope-create-gamma")
         .json(&serde_json::json!({"name": "gamma-main"}))
         .send()
         .expect("team-scoped create key request should be sent");
@@ -379,6 +388,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(team_a_token)
+        .header("Idempotency-Key", "team-scope-create-delta-forbidden")
         .json(&serde_json::json!({"name": "delta-main", "team_id": "team-b"}))
         .send()
         .expect("team-scoped forbidden create key request should be sent");
@@ -390,6 +400,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(team_a_token)
+        .header("Idempotency-Key", "team-scope-patch-alpha-forbidden")
         .json(&serde_json::json!({"team_id": "team-b"}))
         .send()
         .expect("team-scoped forbidden patch key request should be sent");
@@ -401,6 +412,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(team_a_token)
+        .header("Idempotency-Key", "team-scope-clear-alpha-forbidden")
         .json(&serde_json::json!({"team_id": null}))
         .send()
         .expect("team-scoped scope-clearing patch key request should be sent");
@@ -412,6 +424,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(team_a_token)
+        .header("Idempotency-Key", "team-scope-scim-create-alice")
         .json(&serde_json::json!({"userName": "alice-team@example.com"}))
         .send()
         .expect("team-scoped SCIM create request should be sent");
@@ -430,6 +443,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "team-scope-scim-create-bob")
         .json(&serde_json::json!({"userName": "bob-team@example.com", "team_id": "team-b"}))
         .send()
         .expect("admin SCIM team-b create request should be sent");
@@ -448,6 +462,10 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(team_a_token)
+        .header(
+            "Idempotency-Key",
+            "team-scope-scim-create-charlie-forbidden",
+        )
         .json(&serde_json::json!({
             "userName": "charlie-team@example.com",
             "team_id": "team-b"
@@ -462,6 +480,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr, team_b_scim_user_id
         ))
         .bearer_auth(team_a_token)
+        .header("Idempotency-Key", "team-scope-scim-patch-bob-forbidden")
         .json(&serde_json::json!({"displayName": "blocked"}))
         .send()
         .expect("team-scoped forbidden SCIM patch request should be sent");
@@ -473,6 +492,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
             proxy.listen_addr, team_b_scim_user_id
         ))
         .bearer_auth(team_a_token)
+        .header("Idempotency-Key", "team-scope-scim-delete-bob-forbidden")
         .send()
         .expect("team-scoped forbidden SCIM delete request should be sent");
     assert_eq!(forbidden_scim_delete.status().as_u16(), 403);

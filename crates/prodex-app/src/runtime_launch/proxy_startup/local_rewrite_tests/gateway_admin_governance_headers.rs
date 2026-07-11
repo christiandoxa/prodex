@@ -165,6 +165,7 @@ fn gateway_admin_key_mutations_reject_duplicate_if_match_headers() {
     let created = client
         .post(&keys_url)
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "duplicate-etag-create")
         .json(&serde_json::json!({"name": "team-etag-dup"}))
         .send()
         .expect("create key should be sent");
@@ -173,6 +174,7 @@ fn gateway_admin_key_mutations_reject_duplicate_if_match_headers() {
     let response = client
         .patch(&key_url)
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "duplicate-etag-patch")
         .header("If-Match", "\"gateway-key-1\"")
         .header("If-Match", "\"gateway-key-2\"")
         .json(&serde_json::json!({"disabled": true}))
