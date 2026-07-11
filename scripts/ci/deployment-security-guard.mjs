@@ -14,6 +14,31 @@ const REQUIRED_KINDS = Object.freeze([
   "Job",
 ]);
 
+const COMPOSE_PROJECTED_SECRETS = Object.freeze([
+  ["prodex_gateway_token", "PRODEX_GATEWAY_TOKEN", "PRODEX_GATEWAY_TOKEN_FILE"],
+  ["openai_api_key", "OPENAI_API_KEY", "OPENAI_API_KEY_FILE"],
+  ["prodex_gateway_postgres_url", "PRODEX_GATEWAY_POSTGRES_URL", "PRODEX_GATEWAY_POSTGRES_URL_FILE"],
+  ["prodex_gateway_redis_url", "PRODEX_GATEWAY_REDIS_URL", "PRODEX_GATEWAY_REDIS_URL_FILE"],
+]);
+
+const FORBIDDEN_COMPOSE_SECRET_ENV = Object.freeze([
+  "PRODEX_GATEWAY_TOKEN",
+  "PRODEX_GATEWAY_SSO_PROXY_TOKEN",
+  "PRODEX_GATEWAY_POSTGRES_URL",
+  "PRODEX_GATEWAY_REDIS_URL",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "GITHUB_COPILOT_API_KEY",
+  "POSTGRES_PASSWORD",
+]);
+
+const COMPOSE_SECRET_FILE_ENVIRONMENTS = Object.freeze([
+  ...COMPOSE_PROJECTED_SECRETS.map(([, , fileEnvironment]) => fileEnvironment),
+  "PRODEX_POSTGRES_PASSWORD_FILE",
+]);
+
 const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ["runAsNonRoot: true", "non-root pod security context"],
   ["serviceAccountName: prodex-gateway", "explicit gateway service account"],
@@ -115,6 +140,17 @@ const REQUIRED_BACKUP_MARKERS = Object.freeze([
   ["RTO", "recovery-time objective gate"],
 ]);
 
+const REQUIRED_DEPLOYMENT_GUIDE_MARKERS = Object.freeze([
+  ["--secret-env deploy/gateway.env", "Compose secret source metadata preflight"],
+  ["run --rm prodex-gateway", "one-shot gateway migration invocation"],
+  ["migrate --backend postgres", "explicit PostgreSQL migration command"],
+  ["--url-ref PRODEX_GATEWAY_POSTGRES_URL", "projected migration URL reference"],
+  ["--secret-provider compose --secret-root /run/secrets", "Compose migration secret provider"],
+  ["--tls-mode disable", "local Compose migration TLS mode"],
+  ["request-serving containers never perform schema migration", "request-path migration prohibition"],
+  ["https://docs.docker.com/reference/compose-file/services/#secrets", "official Compose file-secret limitation source"],
+]);
+
 function requireIncludes(checks, text, needle, path, description) {
   if (!text.includes(needle)) {
     checks.push(`${path}: missing ${description} (${needle})`);
@@ -131,6 +167,30 @@ function requireWorkloadHardening(checks, document, path, workload) {
     ['drop: ["ALL"]', "dropped Linux capabilities"],
   ]) {
     requireIncludes(checks, document, needle, path, `${workload} ${description}`);
+  }
+}
+
+function validateComposeSecretFiles(checks, files, envPath) {
+  if (!files) return;
+  for (const environment of COMPOSE_SECRET_FILE_ENVIRONMENTS) {
+    const file = files[environment];
+    if (!file) {
+      checks.push(`${envPath}: missing ${environment} source metadata`);
+      continue;
+    }
+    if (file.error) {
+      checks.push(`${envPath}: ${environment} ${file.error}`);
+      continue;
+    }
+    if (!file.isFile || file.isSymbolicLink) {
+      checks.push(`${envPath}: ${environment} must reference a regular non-symlink secret file`);
+    }
+    if (file.uid !== 10001) {
+      checks.push(`${envPath}: ${environment} secret file must be owned by container UID 10001`);
+    }
+    if ((file.mode & 0o077) !== 0) {
+      checks.push(`${envPath}: ${environment} secret file must not grant group or other permissions`);
+    }
   }
 }
 
@@ -153,16 +213,24 @@ export function validateDeploymentSecurity(inputs) {
   const checks = [];
   const {
     composePath = "compose.yaml",
+    composePolicyPath = "deploy/compose-gateway-policy.toml",
     envExamplePath = "deploy/gateway.env.example",
+    composeSecretEnvPath = envExamplePath,
     dockerfilePath = "Dockerfile",
     kubernetesPath = "deploy/kubernetes/prodex-gateway.yaml",
+    deploymentGuidePath = "docs/deployment.md",
     backupRunbookPath = "docs/backup-restore.md",
     compose,
+    composePolicy,
+    composeSecretFiles,
     envExample,
     dockerfile,
     kubernetes,
+    deploymentGuide,
     backupRunbook,
   } = inputs;
+
+  validateComposeSecretFiles(checks, composeSecretFiles, composeSecretEnvPath);
 
   for (const [path, text] of [
     [composePath, compose],
@@ -176,14 +244,92 @@ export function validateDeploymentSecurity(inputs) {
     }
   }
 
-  if (/\$\{PRODEX_GATEWAY_TOKEN:-/u.test(compose)) {
-    checks.push(`${composePath}: PRODEX_GATEWAY_TOKEN must be required, not defaulted`);
+  for (const name of FORBIDDEN_COMPOSE_SECRET_ENV) {
+    if (new RegExp(`^\\s+${name}:`, "mu").test(compose)) {
+      checks.push(`${composePath}: ${name} must use a Compose secret file, not an environment variable`);
+    }
+    if (new RegExp(`^${name}=`, "mu").test(envExample)) {
+      checks.push(`${envExamplePath}: ${name} must not contain a secret value; configure ${name}_FILE`);
+    }
   }
-  if (/POSTGRES_PASSWORD:\s*\$\{PRODEX_POSTGRES_PASSWORD:-/u.test(compose)) {
-    checks.push(`${composePath}: POSTGRES_PASSWORD must not default to a static value`);
+  if (/\benv_file\s*:/u.test(compose)) {
+    checks.push(`${composePath}: gateway secrets must not be imported through env_file`);
   }
-  if (!/POSTGRES_PASSWORD:\s*\$\{PRODEX_POSTGRES_PASSWORD:\?/u.test(compose)) {
-    checks.push(`${composePath}: POSTGRES_PASSWORD must require PRODEX_POSTGRES_PASSWORD`);
+  requireIncludes(
+    checks,
+    compose,
+    'entrypoint: ["/usr/local/bin/prodex-gateway"]',
+    composePath,
+    "dedicated gateway entrypoint",
+  );
+  requireIncludes(
+    checks,
+    compose,
+    'command: ["serve", "--listen", "0.0.0.0:4000"]',
+    composePath,
+    "dedicated gateway serve command",
+  );
+  requireIncludes(
+    checks,
+    compose,
+    "./deploy/compose-gateway-policy.toml:/var/lib/prodex/policy.toml:ro",
+    composePath,
+    "tracked gateway policy mount",
+  );
+  for (const [source, target, fileEnvironment] of COMPOSE_PROJECTED_SECRETS) {
+    if (
+      !new RegExp(`- source: ${source}\\s+target: ${target}(?:\\s|$)`, "u").test(compose)
+    ) {
+      checks.push(`${composePath}: ${target} must be projected into the gateway container`);
+    }
+    requireIncludes(
+      checks,
+      compose,
+      `file: \${${fileEnvironment}:?set ${fileEnvironment}}`,
+      composePath,
+      `${target} Compose secret file source`,
+    );
+    requireIncludes(checks, envExample, `${fileEnvironment}=`, envExamplePath, `${target} secret file path`);
+  }
+  requireIncludes(
+    checks,
+    compose,
+    "POSTGRES_PASSWORD_FILE: /run/secrets/PRODEX_POSTGRES_PASSWORD",
+    composePath,
+    "Postgres password file environment",
+  );
+  if (!/- source: prodex_postgres_password\s+target: PRODEX_POSTGRES_PASSWORD/u.test(compose)) {
+    checks.push(`${composePath}: Postgres password must be projected into the database container`);
+  }
+  requireIncludes(
+    checks,
+    compose,
+    "file: ${PRODEX_POSTGRES_PASSWORD_FILE:?set PRODEX_POSTGRES_PASSWORD_FILE}",
+    composePath,
+    "Postgres password secret file source",
+  );
+  requireIncludes(
+    checks,
+    envExample,
+    "PRODEX_POSTGRES_PASSWORD_FILE=",
+    envExamplePath,
+    "Postgres password secret file path",
+  );
+  for (const [needle, description] of [
+    ['projected_root = "/run/secrets"', "Compose projected secret root"],
+    ['projected_provider = "compose"', "Compose projected secret provider"],
+    ["require_auth = true", "gateway authentication requirement"],
+    ['auth_token_ref = { provider = "compose", name = "PRODEX_GATEWAY_TOKEN" }', "gateway token SecretRef"],
+    ['provider_api_key_ref = { provider = "compose", name = "OPENAI_API_KEY" }', "OpenAI API key SecretRef"],
+    ['backend = "postgres"', "PostgreSQL gateway state backend"],
+    ['postgres_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_POSTGRES_URL" }', "PostgreSQL URL SecretRef"],
+    ['postgres_tls_mode = "disable"', "local Compose PostgreSQL TLS mode"],
+    ['redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }', "Redis URL SecretRef"],
+  ]) {
+    requireIncludes(checks, composePolicy, needle, composePolicyPath, description);
+  }
+  if (/\b(?:postgres_url_env|redis_url_env|token_env|provider_api_key_env|auth_token_env)\s*=/u.test(composePolicy)) {
+    checks.push(`${composePolicyPath}: Compose policy must use SecretRef fields, not secret environment references`);
   }
   if (/serviceAccountName:\s*default\b/u.test(kubernetes)) {
     checks.push(`${kubernetesPath}: workloads must not use the default service account`);
@@ -297,6 +443,12 @@ export function validateDeploymentSecurity(inputs) {
     requireWorkloadHardening(checks, gatewayDeployment, kubernetesPath, "gateway Deployment");
     if (!/^\s*serviceAccountName:\s*prodex-gateway\s*$/mu.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Deployment must use prodex-gateway service account`);
+    }
+    if (!/^\s*command:\s*\["\/usr\/local\/bin\/prodex-gateway"\]\s*$/mu.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway Deployment must use the dedicated prodex-gateway entrypoint`);
+    }
+    if (!/^\s*args:\s*\["serve",\s*"--listen",\s*"0\.0\.0\.0:4000"\]\s*$/mu.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway Deployment must run the dedicated serve command`);
     }
     if (/envFrom:[\s\S]*?secretRef:\s*\n\s*name:\s*prodex-gateway-secrets/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway Secret must not be consumed through envFrom`);
@@ -462,6 +614,9 @@ export function validateDeploymentSecurity(inputs) {
   for (const [needle, description] of REQUIRED_CONTROL_PLANE_MARKERS) {
     requireIncludes(checks, kubernetes, needle, kubernetesPath, description);
   }
+  for (const [needle, description] of REQUIRED_DEPLOYMENT_GUIDE_MARKERS) {
+    requireIncludes(checks, deploymentGuide, needle, deploymentGuidePath, description);
+  }
   for (const [needle, description] of REQUIRED_BACKUP_MARKERS) {
     requireIncludes(checks, backupRunbook, needle, backupRunbookPath, description);
   }
@@ -472,6 +627,8 @@ export function validateDeploymentSecurity(inputs) {
 function validFixture() {
   return {
     compose: `
+entrypoint: ["/usr/local/bin/prodex-gateway"]
+command: ["serve", "--listen", "0.0.0.0:4000"]
 read_only: true
 cap_drop:
   - ALL
@@ -482,10 +639,58 @@ tmpfs:
 healthcheck:
   test: ["CMD", "curl", "http://127.0.0.1:4000/readyz"]
 environment:
-  PRODEX_GATEWAY_TOKEN: \${PRODEX_GATEWAY_TOKEN:?required}
-  POSTGRES_PASSWORD: \${PRODEX_POSTGRES_PASSWORD:?required}
+  PRODEX_HOME: /var/lib/prodex
+  POSTGRES_PASSWORD_FILE: /run/secrets/PRODEX_POSTGRES_PASSWORD
+secrets:
+  - source: prodex_gateway_token
+    target: PRODEX_GATEWAY_TOKEN
+  - source: openai_api_key
+    target: OPENAI_API_KEY
+  - source: prodex_gateway_postgres_url
+    target: PRODEX_GATEWAY_POSTGRES_URL
+  - source: prodex_gateway_redis_url
+    target: PRODEX_GATEWAY_REDIS_URL
+  - source: prodex_postgres_password
+    target: PRODEX_POSTGRES_PASSWORD
+volumes:
+  - ./deploy/compose-gateway-policy.toml:/var/lib/prodex/policy.toml:ro
+prodex_gateway_token:
+  file: \${PRODEX_GATEWAY_TOKEN_FILE:?set PRODEX_GATEWAY_TOKEN_FILE}
+openai_api_key:
+  file: \${OPENAI_API_KEY_FILE:?set OPENAI_API_KEY_FILE}
+prodex_gateway_postgres_url:
+  file: \${PRODEX_GATEWAY_POSTGRES_URL_FILE:?set PRODEX_GATEWAY_POSTGRES_URL_FILE}
+prodex_gateway_redis_url:
+  file: \${PRODEX_GATEWAY_REDIS_URL_FILE:?set PRODEX_GATEWAY_REDIS_URL_FILE}
+prodex_postgres_password:
+  file: \${PRODEX_POSTGRES_PASSWORD_FILE:?set PRODEX_POSTGRES_PASSWORD_FILE}
 `,
-    envExample: "PRODEX_GATEWAY_TOKEN=\nPRODEX_GATEWAY_POSTGRES_URL=\n",
+    composePolicy: `
+[secrets]
+projected_root = "/run/secrets"
+projected_provider = "compose"
+
+[gateway]
+require_auth = true
+auth_token_ref = { provider = "compose", name = "PRODEX_GATEWAY_TOKEN" }
+provider_api_key_ref = { provider = "compose", name = "OPENAI_API_KEY" }
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+postgres_tls_mode = "disable"
+redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }
+`,
+    composeSecretFiles: Object.fromEntries(
+      COMPOSE_SECRET_FILE_ENVIRONMENTS.map((environment) => [
+        environment,
+        { isFile: true, isSymbolicLink: false, mode: 0o600, uid: 10001 },
+      ]),
+    ),
+    envExample: COMPOSE_SECRET_FILE_ENVIRONMENTS.map(
+      (environment) => `${environment}=./deploy/secrets/${environment}`,
+    ).join("\n"),
+    deploymentGuide: REQUIRED_DEPLOYMENT_GUIDE_MARKERS.map(([needle]) => needle).join("\n"),
     dockerfile: `
 COPY --from=builder /workspace/target/release/prodex-gateway /usr/local/bin/prodex-gateway
 COPY --from=builder /workspace/target/release/prodex-control-plane /usr/local/bin/prodex-control-plane
@@ -516,6 +721,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: prodex-gateway
+          command: ["/usr/local/bin/prodex-gateway"]
+          args: ["serve", "--listen", "0.0.0.0:4000"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -781,6 +988,13 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
+      deploymentGuide: valid.deploymentGuide.replace("run --rm prodex-gateway", "up prodex-gateway"),
+    }).some((error) => error.includes("one-shot gateway migration invocation")),
+    "deployment guide without one-shot migration accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
       kubernetes: valid.kubernetes.replace("kind: Namespace", "kind: NamespaceMissing"),
     }).some((error) => error.includes("missing prodex Namespace")),
     "missing prodex Namespace accepted",
@@ -949,19 +1163,93 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
+      compose: valid.compose.replace('entrypoint: ["/usr/local/bin/prodex-gateway"]', ""),
+    }).some((error) => error.includes("dedicated gateway entrypoint")),
+    "legacy Compose gateway entrypoint accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      compose: valid.compose.replace("target: OPENAI_API_KEY", "target: OPENAI_API_KEY_MISSING"),
+    }).some((error) => error.includes("OPENAI_API_KEY must be projected")),
+    "missing Compose provider secret projection accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      composePolicy: valid.composePolicy.replace(
+        'auth_token_ref = { provider = "compose", name = "PRODEX_GATEWAY_TOKEN" }',
+        'auth_token_env = "PRODEX_GATEWAY_TOKEN"',
+      ),
+    }).some((error) => error.includes("Compose policy must use SecretRef fields")),
+    "Compose policy secret environment reference accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      composeSecretFiles: {
+        ...valid.composeSecretFiles,
+        OPENAI_API_KEY_FILE: {
+          ...valid.composeSecretFiles.OPENAI_API_KEY_FILE,
+          mode: 0o644,
+        },
+      },
+    }).some((error) => error.includes("must not grant group or other permissions")),
+    "public Compose secret source accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      composeSecretFiles: {
+        ...valid.composeSecretFiles,
+        PRODEX_GATEWAY_TOKEN_FILE: {
+          ...valid.composeSecretFiles.PRODEX_GATEWAY_TOKEN_FILE,
+          uid: 1000,
+        },
+      },
+    }).some((error) => error.includes("must be owned by container UID 10001")),
+    "wrong Compose secret source owner accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      envExample: `${valid.envExample}\nOPENAI_API_KEY=inline-secret\n`,
+    }).some((error) => error.includes("OPENAI_API_KEY must not contain a secret value")),
+    "secret value field in Compose environment example accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace('command: ["/usr/local/bin/prodex-gateway"]', ""),
+    }).some((error) => error.includes("dedicated prodex-gateway entrypoint")),
+    "legacy Kubernetes data-plane entrypoint accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        'args: ["serve", "--listen", "0.0.0.0:4000"]',
+        'args: ["gateway", "--listen", "0.0.0.0:4000"]',
+      ),
+    }).some((error) => error.includes("dedicated serve command")),
+    "legacy Kubernetes gateway arguments accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
       compose: `${valid.compose}\nPRODEX_GATEWAY_TOKEN: \${PRODEX_GATEWAY_TOKEN:-dev}\n`,
-    }).some((error) => error.includes("PRODEX_GATEWAY_TOKEN must be required")),
-    "defaulted gateway token accepted",
+    }).some((error) => error.includes("PRODEX_GATEWAY_TOKEN must use a Compose secret file")),
+    "gateway token environment variable accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
       compose: valid.compose.replace(
-        "POSTGRES_PASSWORD: ${PRODEX_POSTGRES_PASSWORD:?required}",
+        "POSTGRES_PASSWORD_FILE: /run/secrets/PRODEX_POSTGRES_PASSWORD",
         "POSTGRES_PASSWORD: ${PRODEX_POSTGRES_PASSWORD}",
       ),
-    }).some((error) => error.includes("POSTGRES_PASSWORD must require")),
-    "optional Postgres password accepted",
+    }).some((error) => error.includes("POSTGRES_PASSWORD must use a Compose secret file")),
+    "Postgres password environment variable accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({ ...valid, envExample: `${valid.envExample}\nPASSWORD=change-me\n` }).some(
@@ -1181,12 +1469,57 @@ export function runSelfTest() {
   );
 }
 
-function readInputs() {
+function readComposeSecretFiles(envPath) {
+  const values = {};
+  for (const rawLine of fs.readFileSync(envPath, "utf8").split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator < 1) continue;
+    const name = line.slice(0, separator).trim();
+    let value = line.slice(separator + 1).trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    values[name] = value;
+  }
+
+  return Object.fromEntries(
+    COMPOSE_SECRET_FILE_ENVIRONMENTS.map((environment) => {
+      const filePath = values[environment];
+      if (!filePath) return [environment, { error: "path is missing" }];
+      try {
+        const stat = fs.lstatSync(filePath);
+        return [
+          environment,
+          {
+            isFile: stat.isFile(),
+            isSymbolicLink: stat.isSymbolicLink(),
+            mode: stat.mode & 0o777,
+            uid: stat.uid,
+          },
+        ];
+      } catch {
+        return [environment, { error: "path cannot be inspected" }];
+      }
+    }),
+  );
+}
+
+function readInputs(secretEnvPath) {
   return {
     compose: fs.readFileSync("compose.yaml", "utf8"),
+    composePolicy: fs.readFileSync("deploy/compose-gateway-policy.toml", "utf8"),
+    composeSecretFiles: secretEnvPath ? readComposeSecretFiles(secretEnvPath) : undefined,
+    composeSecretEnvPath: secretEnvPath,
     envExample: fs.readFileSync("deploy/gateway.env.example", "utf8"),
     dockerfile: fs.readFileSync("Dockerfile", "utf8"),
     kubernetes: fs.readFileSync("deploy/kubernetes/prodex-gateway.yaml", "utf8"),
+    deploymentGuide: fs.readFileSync("docs/deployment.md", "utf8"),
     backupRunbook: fs.readFileSync("docs/backup-restore.md", "utf8"),
   };
 }
@@ -1196,7 +1529,14 @@ function main() {
     runSelfTest();
     return;
   }
-  const checks = validateDeploymentSecurity(readInputs());
+  const secretEnvIndex = process.argv.indexOf("--secret-env");
+  const secretEnvPath = secretEnvIndex >= 0 ? process.argv[secretEnvIndex + 1] : undefined;
+  if (secretEnvIndex >= 0 && !secretEnvPath) {
+    process.stderr.write("--secret-env requires a Compose environment file path\n");
+    process.exitCode = 2;
+    return;
+  }
+  const checks = validateDeploymentSecurity(readInputs(secretEnvPath));
   if (checks.length > 0) {
     for (const check of checks) process.stderr.write(`${check}\n`);
     process.exitCode = 1;

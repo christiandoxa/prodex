@@ -179,7 +179,8 @@ spec:
         - name: prodex-gateway
           image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
           imagePullPolicy: IfNotPresent
-          args: ["gateway", "--listen", "0.0.0.0:4000"]
+          command: ["/usr/local/bin/prodex-gateway"]
+          args: ["serve", "--listen", "0.0.0.0:4000"]
           ports:
             - name: http
               containerPort: 4000

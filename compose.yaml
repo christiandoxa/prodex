@@ -5,25 +5,26 @@ services:
       dockerfile: Dockerfile
     image: prodex-gateway:local
     restart: unless-stopped
+    entrypoint: ["/usr/local/bin/prodex-gateway"]
     environment:
       PRODEX_HOME: /var/lib/prodex
       PRODEX_RUNTIME_LOG_DIR: /var/log/prodex
-      PRODEX_GATEWAY_TOKEN: ${PRODEX_GATEWAY_TOKEN:?set PRODEX_GATEWAY_TOKEN}
-      PRODEX_GATEWAY_SSO_PROXY_TOKEN: ${PRODEX_GATEWAY_SSO_PROXY_TOKEN:-}
-      PRODEX_GATEWAY_POSTGRES_URL: ${PRODEX_GATEWAY_POSTGRES_URL:-}
-      PRODEX_GATEWAY_REDIS_URL: ${PRODEX_GATEWAY_REDIS_URL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      GITHUB_COPILOT_API_KEY: ${GITHUB_COPILOT_API_KEY:-}
-    command: ["gateway", "--listen", "0.0.0.0:4000"]
+    command: ["serve", "--listen", "0.0.0.0:4000"]
     ports:
       - "4000:4000"
+    secrets:
+      - source: prodex_gateway_token
+        target: PRODEX_GATEWAY_TOKEN
+      - source: openai_api_key
+        target: OPENAI_API_KEY
+      - source: prodex_gateway_postgres_url
+        target: PRODEX_GATEWAY_POSTGRES_URL
+      - source: prodex_gateway_redis_url
+        target: PRODEX_GATEWAY_REDIS_URL
     volumes:
       - prodex-data:/var/lib/prodex
       - prodex-runtime-logs:/var/log/prodex
+      - ./deploy/compose-gateway-policy.toml:/var/lib/prodex/policy.toml:ro
     read_only: true
     cap_drop:
       - ALL
@@ -50,7 +51,10 @@ services:
     environment:
       POSTGRES_DB: ${PRODEX_POSTGRES_DB:-prodex}
       POSTGRES_USER: ${PRODEX_POSTGRES_USER:-prodex}
-      POSTGRES_PASSWORD: ${PRODEX_POSTGRES_PASSWORD:?set PRODEX_POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/PRODEX_POSTGRES_PASSWORD
+    secrets:
+      - source: prodex_postgres_password
+        target: PRODEX_POSTGRES_PASSWORD
     volumes:
       - prodex-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -80,3 +84,15 @@ volumes:
   prodex-runtime-logs:
   prodex-postgres:
   prodex-redis:
+
+secrets:
+  prodex_gateway_token:
+    file: ${PRODEX_GATEWAY_TOKEN_FILE:?set PRODEX_GATEWAY_TOKEN_FILE}
+  openai_api_key:
+    file: ${OPENAI_API_KEY_FILE:?set OPENAI_API_KEY_FILE}
+  prodex_gateway_postgres_url:
+    file: ${PRODEX_GATEWAY_POSTGRES_URL_FILE:?set PRODEX_GATEWAY_POSTGRES_URL_FILE}
+  prodex_gateway_redis_url:
+    file: ${PRODEX_GATEWAY_REDIS_URL_FILE:?set PRODEX_GATEWAY_REDIS_URL_FILE}
+  prodex_postgres_password:
+    file: ${PRODEX_POSTGRES_PASSWORD_FILE:?set PRODEX_POSTGRES_PASSWORD_FILE}
