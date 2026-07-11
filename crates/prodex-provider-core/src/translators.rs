@@ -46,7 +46,6 @@ pub use deepseek::{
 pub(crate) use deepseek::{
     deepseek_rtk_wrapped_tool_arguments, deepseek_tool_call_thought_signature_object,
 };
-pub use gemini::GeminiTranslator;
 pub(crate) use gemini::gemini_builtin_tools_from_request;
 pub(crate) use gemini::gemini_citation_text;
 pub(crate) use gemini::gemini_contents_from_request;
@@ -94,6 +93,7 @@ pub use gemini::{
     gemini_provider_core_stream_tool_call_arguments_value,
     gemini_provider_core_stream_tool_call_ids,
 };
+pub use gemini::{GeminiTranslator, gemini_provider_core_model_uses_thinking_level};
 pub(crate) use gemini::{
     gemini_chat_assistant_messages_from_generate_value,
     gemini_chat_assistant_tool_call_item_with_call_id, gemini_finish_reason,

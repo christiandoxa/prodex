@@ -13,16 +13,19 @@ mod gemini_rewrite;
 mod gemini_sse;
 mod gemini_thought_signatures;
 mod local_rewrite;
+mod local_rewrite_constraints;
 mod local_rewrite_copilot;
 mod local_rewrite_copilot_bindings;
 mod local_rewrite_deepseek;
 mod local_rewrite_gateway_admin_audit;
 mod local_rewrite_gateway_admin_auth;
+mod local_rewrite_gateway_admin_dispatch;
 mod local_rewrite_gateway_admin_fields;
 mod local_rewrite_gateway_admin_keys;
 mod local_rewrite_gateway_admin_ledger;
 mod local_rewrite_gateway_admin_payloads;
 mod local_rewrite_gateway_admin_response;
+mod local_rewrite_gateway_admin_route_explain;
 mod local_rewrite_gateway_admin_router;
 mod local_rewrite_gateway_admin_scim;
 mod local_rewrite_gateway_admin_store_mutation;
@@ -47,11 +50,16 @@ mod local_rewrite_gateway_metrics;
 mod local_rewrite_gateway_openapi;
 mod local_rewrite_gateway_openapi_components;
 mod local_rewrite_gateway_openapi_paths;
+mod local_rewrite_gateway_openapi_route_explain;
 mod local_rewrite_gateway_redis_ledger;
 mod local_rewrite_gateway_reservation;
 mod local_rewrite_gateway_route_load;
 mod local_rewrite_gateway_scim;
 mod local_rewrite_gateway_scope;
+#[cfg(test)]
+mod local_rewrite_gateway_side_effect_snapshot;
+#[cfg(test)]
+use local_rewrite_gateway_side_effect_snapshot::gateway_snapshot_handle;
 mod local_rewrite_gateway_sql_ledger;
 mod local_rewrite_gateway_sqlite_utils;
 mod local_rewrite_gateway_store_file;
@@ -494,6 +502,16 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         gemini_live_sidecar_model: None,
         log_path,
         active_request_count: Arc::clone(&shared.active_request_count),
+        #[cfg(test)]
+        request_sequence: Arc::clone(&shared.request_sequence),
+        #[cfg(test)]
+        lane_admission: shared.lane_admission.clone(),
+        #[cfg(test)]
+        gateway_route_load: None,
+        #[cfg(test)]
+        gateway_usage: None,
+        #[cfg(test)]
+        gateway_side_effect_snapshot: None,
         owner_lock,
     })
 }

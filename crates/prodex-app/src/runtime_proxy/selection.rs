@@ -9,6 +9,7 @@ mod dispatch;
 mod next;
 mod policy;
 mod previous_response;
+mod trace;
 
 use self::policy::{
     RuntimeAffinitySelectionKind, RuntimeSoftAffinityPolicyInput,
@@ -42,7 +43,15 @@ pub(crate) use self::dispatch::*;
 #[cfg(test)]
 pub(crate) use self::next::next_runtime_response_candidate_for_route;
 use self::next::next_runtime_response_candidate_for_route_with_prompt_cache_key;
+#[cfg(any(test, feature = "bench-support"))]
 pub(crate) use self::previous_response::next_runtime_previous_response_candidate;
+use self::previous_response::next_runtime_previous_response_candidate_with_trace;
+pub(crate) use self::trace::{RuntimeSelectionTraceDirect, runtime_selection_trace_log_direct};
+use self::trace::{
+    runtime_selection_trace_affinity_kind, runtime_selection_trace_builder,
+    runtime_selection_trace_candidate, runtime_selection_trace_log,
+    runtime_selection_trace_planned_candidate, runtime_selection_trace_reject,
+};
 
 fn runtime_selection_quota_source_label(source: Option<RuntimeQuotaSource>) -> &'static str {
     source.map(runtime_quota_source_label).unwrap_or("unknown")

@@ -2,9 +2,9 @@ use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
 use crate::{
-    RuntimeRouteKind, RuntimeSelectionQuotaPressureBand, RuntimeSelectionQuotaSource,
-    RuntimeSelectionQuotaSummary, runtime_quota_precommit_guard_reason,
-    runtime_selection_quota_pressure_band_reason,
+    RuntimeRouteDecisionReasonKind, RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
+    RuntimeSelectionQuotaSource, RuntimeSelectionQuotaSummary,
+    runtime_quota_precommit_guard_reason, runtime_selection_quota_pressure_band_reason,
 };
 
 pub type RuntimeResponseBackoffSortKey = (usize, i64, i64, i64);
@@ -109,8 +109,12 @@ pub fn runtime_response_candidate_ready_skip_reason(
     quota_guard_reason: Option<&'static str>,
     inflight_soft_limited: bool,
 ) -> Option<&'static str> {
-    runtime_response_candidate_common_skip_reason(auth_failure_active, quota_guard_reason)
-        .or_else(|| inflight_soft_limited.then_some("profile_inflight_soft_limit"))
+    runtime_response_candidate_common_skip_reason(auth_failure_active, quota_guard_reason).or_else(
+        || {
+            inflight_soft_limited
+                .then_some(RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit.as_str())
+        },
+    )
 }
 
 pub fn runtime_response_candidate_fallback_skip_reason(
@@ -125,7 +129,7 @@ pub fn runtime_response_candidate_common_skip_reason(
     quota_guard_reason: Option<&'static str>,
 ) -> Option<&'static str> {
     if auth_failure_active {
-        Some("auth_failure_backoff")
+        Some(RuntimeRouteDecisionReasonKind::AuthFailureBackoff.as_str())
     } else {
         quota_guard_reason
     }
@@ -189,17 +193,27 @@ pub enum RuntimeOptimisticCurrentCandidateSkipReason {
 impl RuntimeOptimisticCurrentCandidateSkipReason {
     pub fn reason_label(self) -> &'static str {
         match self {
-            Self::AuthFailureBackoff => "auth_failure_backoff",
-            Self::SelectionBackoff => "selection_backoff",
-            Self::RouteCircuitOpen => "route_circuit_open",
-            Self::ProfileHealth => "profile_health",
-            Self::ProfilePerformance => "profile_performance",
-            Self::QuotaProbeUnavailable => "quota_probe_unavailable",
-            Self::StalePersistedQuota => "stale_persisted_quota",
+            Self::AuthFailureBackoff => RuntimeRouteDecisionReasonKind::AuthFailureBackoff.as_str(),
+            Self::SelectionBackoff => RuntimeRouteDecisionReasonKind::SelectionBackoff.as_str(),
+            Self::RouteCircuitOpen => RuntimeRouteDecisionReasonKind::RouteCircuitOpen.as_str(),
+            Self::ProfileHealth => RuntimeRouteDecisionReasonKind::ProfileHealth.as_str(),
+            Self::ProfilePerformance => RuntimeRouteDecisionReasonKind::ProfilePerformance.as_str(),
+            Self::QuotaProbeUnavailable => {
+                RuntimeRouteDecisionReasonKind::QuotaProbeUnavailable.as_str()
+            }
+            Self::StalePersistedQuota => {
+                RuntimeRouteDecisionReasonKind::StalePersistedQuota.as_str()
+            }
             Self::QuotaPressureBand(band) => runtime_selection_quota_pressure_band_reason(band),
-            Self::ProfileInflightSoftLimit => "profile_inflight_soft_limit",
-            Self::AuthNotQuotaCompatible => "auth_not_quota_compatible",
-            Self::PromptCacheAffinity => "prompt_cache_affinity",
+            Self::ProfileInflightSoftLimit => {
+                RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit.as_str()
+            }
+            Self::AuthNotQuotaCompatible => {
+                RuntimeRouteDecisionReasonKind::AuthNotQuotaCompatible.as_str()
+            }
+            Self::PromptCacheAffinity => {
+                RuntimeRouteDecisionReasonKind::PromptCacheAffinity.as_str()
+            }
         }
     }
 

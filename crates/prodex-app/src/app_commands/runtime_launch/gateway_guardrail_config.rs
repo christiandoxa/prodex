@@ -4,6 +4,7 @@ use prodex_domain::SecretPurpose;
 
 pub(crate) struct ResolvedGatewayGuardrailConfig {
     pub(crate) guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig,
+    pub(crate) request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
     pub(crate) webhook: RuntimeGatewayGuardrailWebhookConfig,
     pub(crate) presidio_redaction_enabled: bool,
 }
@@ -32,6 +33,7 @@ pub(crate) fn resolve_gateway_guardrail_config_with_resolver(
     };
     Ok(ResolvedGatewayGuardrailConfig {
         guardrails,
+        request_constraints: gateway_request_constraint_config(policy)?,
         webhook: gateway_guardrail_webhook_config_with_resolver(policy, resolver)?,
         presidio_redaction_enabled,
     })
@@ -64,6 +66,28 @@ pub(crate) fn gateway_guardrail_config(
             .prompt_injection_detection
             .unwrap_or(false),
         pii_redaction: policy.guardrails.pii_redaction.unwrap_or(false),
+    })
+}
+
+fn gateway_request_constraint_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<prodex_provider_core::ProviderRequestConstraintPolicy> {
+    Ok(prodex_provider_core::ProviderRequestConstraintPolicy {
+        enabled: policy.request_constraints.enabled.unwrap_or(false),
+        unknown_context: match policy.request_constraints.unknown_context.as_deref() {
+            Some(value) => prodex_provider_core::ProviderUnknownContextPolicy::parse(value)
+                .context("gateway.request_constraints.unknown_context is invalid")?,
+            None => Default::default(),
+        },
+        safe_window_tokens: policy
+            .request_constraints
+            .safe_window_tokens
+            .unwrap_or(prodex_provider_core::PROVIDER_REQUEST_SAFE_WINDOW_TOKENS_DEFAULT),
+        oversized_output: match policy.request_constraints.oversized_output.as_deref() {
+            Some(value) => prodex_provider_core::ProviderOversizedOutputPolicy::parse(value)
+                .context("gateway.request_constraints.oversized_output is invalid")?,
+            None => Default::default(),
+        },
     })
 }
 

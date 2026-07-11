@@ -1,5 +1,7 @@
+use super::local_rewrite_gateway_openapi_route_explain::runtime_gateway_openapi_route_explain_schemas;
+
 pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
-    serde_json::json!({
+    let mut components = serde_json::json!({
         "securitySchemes": {
             "GatewayBearerAuth": {
                 "type": "http",
@@ -26,6 +28,18 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                 "GatewayNullableExactIdentifier": {
                     "anyOf": [
                         {"$ref": "#/components/schemas/GatewayExactIdentifier"},
+                        {"type": "null"}
+                    ]
+                },
+                "GatewayRouteModelIdentifier": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^\\S+$"
+                },
+                "GatewayNullableRouteModelIdentifier": {
+                    "anyOf": [
+                        {"$ref": "#/components/schemas/GatewayRouteModelIdentifier"},
                         {"type": "null"}
                     ]
                 },
@@ -499,5 +513,10 @@ pub(super) fn runtime_gateway_openapi_components() -> serde_json::Value {
                     }
                 }
             }
-    })
+    });
+    components["schemas"]
+        .as_object_mut()
+        .expect("gateway OpenAPI schemas must be an object")
+        .extend(runtime_gateway_openapi_route_explain_schemas());
+    components
 }

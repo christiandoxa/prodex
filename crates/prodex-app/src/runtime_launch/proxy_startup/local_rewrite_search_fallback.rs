@@ -1,4 +1,5 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite_model_memory::runtime_local_rewrite_model_scope;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
@@ -61,6 +62,7 @@ where
     )?;
     let mut status = response.status().as_u16();
     if status < 400 {
+        runtime_local_rewrite_remember_accepted_model(shared, provider_kind, request, model);
         return Ok(RuntimeLocalRewritePreparedSendResult::Live(response));
     }
 
@@ -87,6 +89,7 @@ where
         )?;
         status = fallback_response.status().as_u16();
         if status < 400 {
+            runtime_local_rewrite_remember_accepted_model(shared, provider_kind, request, model);
             return Ok(RuntimeLocalRewritePreparedSendResult::Live(
                 fallback_response,
             ));
@@ -100,6 +103,22 @@ where
         parts,
         class,
     })
+}
+
+pub(super) fn runtime_local_rewrite_remember_accepted_model(
+    shared: &RuntimeLocalRewriteProxyShared,
+    provider_kind: RuntimeProviderBridgeKind,
+    request: &RuntimeProxyRequest,
+    model: &str,
+) {
+    if !shared.gateway_request_constraints.enabled {
+        return;
+    }
+    if let Some(scope) = runtime_local_rewrite_model_scope(provider_kind, request, &request.body)
+        && let Ok(mut memory) = shared.model_memory.lock()
+    {
+        memory.remember_selected_model(&scope, model);
+    }
 }
 
 fn runtime_local_rewrite_log_chat_search_fallback(

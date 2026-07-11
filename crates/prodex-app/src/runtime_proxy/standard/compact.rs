@@ -8,7 +8,8 @@ use super::super::{
     runtime_proxy_sync_probe_pressure_pause,
     runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_request_session_id,
     runtime_request_turn_state, runtime_session_bound_profile,
-    select_runtime_response_candidate_for_route,
+    runtime_smart_context_model_name_from_body,
+    select_runtime_response_candidate_for_route_with_request,
 };
 use super::attempt_runtime_standard_request;
 use crate::runtime_proxy_shared::RuntimeStandardAttempt;
@@ -45,6 +46,7 @@ pub(super) fn proxy_runtime_compact_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
+    let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
     let request_session_id = runtime_request_session_id(request);
     let request_turn_state = runtime_request_turn_state(request);
     let mut session_profile = request_session_id
@@ -135,7 +137,7 @@ pub(super) fn proxy_runtime_compact_request(
             );
         }
         selection_attempts = selection_attempts.saturating_add(1);
-        let Some(candidate_name) = select_runtime_response_candidate_for_route(
+        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
             shared,
             RuntimeResponseCandidateSelection {
                 strict_affinity_profile: compact_followup_profile
@@ -147,6 +149,8 @@ pub(super) fn proxy_runtime_compact_request(
                     RuntimeRouteKind::Compact,
                 )
             },
+            Some(request_id),
+            request_model_name.as_deref(),
         )?
         else {
             runtime_proxy_log(

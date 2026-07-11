@@ -94,6 +94,8 @@ That split is deliberate:
 
 This keeps endpoint routing, parameter admission, and body rewriting auditable as separate steps instead of hiding all three behind one opaque helper.
 
+Model-aware gateway admission adds a catalog check between adapter/parameter support and ranking. Catalog rows may declare a context window, maximum output, default output reserve, supported reasoning efforts, and known reasoning reservation. Every added limit is optional: absent data remains `unknown`, is handled by the configured unknown-limit policy, and must never be filled with a guessed zero or a runtime scrape. Alias and combo routes are evaluated as concrete models one at a time. Direct embedding requests may use a catalog-declared embeddings endpoint, but embedding fallback remains disabled without explicit vector-space, dimensions, and normalization compatibility.
+
 ## Loss states in runtime behavior
 
 Provider-core exposes concrete transform outcomes with `TransformStatus` and `TransformOutcome<T>`.

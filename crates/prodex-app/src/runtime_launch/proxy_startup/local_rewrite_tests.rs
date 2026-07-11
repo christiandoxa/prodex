@@ -2,7 +2,7 @@ use super::local_rewrite::{
     RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig,
     RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyStartOptions, runtime_local_rewrite_remote_compact_unsupported_message,
+    RuntimeLocalRewriteProxyStartOptions, start_runtime_gateway_rewrite_proxy,
     start_runtime_local_rewrite_proxy,
 };
 use super::local_rewrite_copilot::RuntimeCopilotProviderAuth;
@@ -23,25 +23,10 @@ mod gateway_health;
 mod gateway_state;
 mod gateway_usage;
 mod model_memory;
+mod provider_routes;
+mod request_constraints;
 mod support;
 use support::*;
-
-#[test]
-fn deepseek_remote_compact_reports_clear_unsupported_message() {
-    let message = runtime_local_rewrite_remote_compact_unsupported_message(
-        &RuntimeLocalRewriteProviderOptions::DeepSeek {
-            api_keys: vec!["deepseek-key".to_string()],
-            strict_tools: false,
-            beta_base_url: "https://api.deepseek.com/beta".to_string(),
-            web_search_mode: super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode::Auto,
-        },
-    );
-
-    assert_eq!(
-        message,
-        "DeepSeek provider does not support Codex remote compact yet"
-    );
-}
 
 fn write_fake_kiro_runtime_agent(root: &Path) -> std::path::PathBuf {
     let script = root.join("fake-kiro-runtime");

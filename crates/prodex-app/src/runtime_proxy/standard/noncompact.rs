@@ -5,6 +5,7 @@ pub(super) fn proxy_runtime_noncompact_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<tiny_http::ResponseBox> {
+    let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
     let request_session_id = runtime_request_session_id(request);
     let mut session_profile = request_session_id
         .as_deref()
@@ -13,6 +14,18 @@ pub(super) fn proxy_runtime_noncompact_request(
         .flatten();
     let current_profile = runtime_proxy_current_profile(shared)?;
     if is_runtime_realtime_call_path(&request.path_and_query) {
+        runtime_selection_trace_log_direct(
+            shared,
+            request_id,
+            RuntimeSelectionTraceDirect {
+                requested_model: request_model_name.as_deref(),
+                route_kind: RuntimeRouteKind::Standard,
+                candidate_key: &current_profile,
+                class: runtime_proxy_crate::RuntimeRouteCandidateClass::Current,
+                affinity_kind: Some(runtime_proxy_crate::RuntimeRouteAffinityKind::Strict),
+                hard_affinity: true,
+            },
+        );
         runtime_proxy_log(
             shared,
             format!(
@@ -169,14 +182,35 @@ pub(super) fn proxy_runtime_noncompact_request(
         }
 
         let candidate_name = if excluded_profiles.is_empty() {
+            runtime_selection_trace_log_direct(
+                shared,
+                request_id,
+                RuntimeSelectionTraceDirect {
+                    requested_model: request_model_name.as_deref(),
+                    route_kind: RuntimeRouteKind::Standard,
+                    candidate_key: &preferred_profile,
+                    class: if preferred_is_session {
+                        runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity
+                    } else {
+                        runtime_proxy_crate::RuntimeRouteCandidateClass::Current
+                    },
+                    affinity_kind: preferred_is_session
+                        .then_some(runtime_proxy_crate::RuntimeRouteAffinityKind::Session),
+                    hard_affinity: false,
+                },
+            );
             preferred_profile.clone()
-        } else if let Some(candidate_name) = select_runtime_response_candidate_for_route(
-            shared,
-            RuntimeResponseCandidateSelection::fresh(
-                &excluded_profiles,
-                RuntimeRouteKind::Standard,
-            ),
-        )? {
+        } else if let Some(candidate_name) =
+            select_runtime_response_candidate_for_route_with_request(
+                shared,
+                RuntimeResponseCandidateSelection::fresh(
+                    &excluded_profiles,
+                    RuntimeRouteKind::Standard,
+                ),
+                Some(request_id),
+                request_model_name.as_deref(),
+            )?
+        {
             candidate_name
         } else {
             let remaining_cold_start_profiles =
@@ -229,8 +263,22 @@ pub(super) fn proxy_runtime_noncompact_request(
                     ],
                 ),
             );
-            excluded_profiles.insert(candidate_name);
             saw_inflight_saturation = true;
+            if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+                RuntimeInflightReliefWait {
+                    request_id,
+                    request,
+                    shared,
+                    excluded_profiles: &excluded_profiles,
+                    route_kind: RuntimeRouteKind::Standard,
+                    selection_started_at,
+                    continuation: session_profile.is_some(),
+                    wait_affinity_owner: session_profile.as_deref(),
+                },
+            )? {
+                continue;
+            }
+            excluded_profiles.insert(candidate_name);
             continue;
         }
 

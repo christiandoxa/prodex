@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "gateway_admin_route_explain.rs"]
+mod gateway_admin_route_explain;
+
 #[test]
 fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
     let root = temp_root("gateway-admin-tenant-scope");

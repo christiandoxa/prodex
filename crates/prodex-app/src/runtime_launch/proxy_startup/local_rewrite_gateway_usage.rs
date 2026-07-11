@@ -28,6 +28,28 @@ const RUNTIME_GATEWAY_REDIS_USAGE_KEY: &str = "prodex:gateway:virtual_key_usage"
 const RUNTIME_GATEWAY_REDIS_USAGE_LOCK: &str = "prodex:gateway:virtual_key_usage:lock";
 const RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT: usize = 4_096;
 
+pub(super) struct RuntimeGatewayUsageRequestGuard {
+    pub(super) request_ids: Arc<Mutex<BTreeSet<u64>>>,
+    pub(super) request_id: u64,
+}
+
+impl RuntimeGatewayUsageRequestGuard {
+    pub(super) fn new(shared: &RuntimeLocalRewriteProxyShared, request_id: u64) -> Self {
+        Self {
+            request_ids: Arc::clone(&shared.gateway_usage.request_ids),
+            request_id,
+        }
+    }
+}
+
+impl Drop for RuntimeGatewayUsageRequestGuard {
+    fn drop(&mut self) {
+        if let Ok(mut request_ids) = self.request_ids.lock() {
+            request_ids.remove(&self.request_id);
+        }
+    }
+}
+
 fn runtime_gateway_enqueue_usage_delta(
     pending: &mut Vec<RuntimeGatewayVirtualKeyUsageDelta>,
     delta: RuntimeGatewayVirtualKeyUsageDelta,

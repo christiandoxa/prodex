@@ -28,6 +28,7 @@ const catalog = JSON.parse(
 
 const endpointColumns = [
   "responses",
+  "responses/compact",
   "chat-completions",
   "messages",
   "models",
@@ -44,6 +45,7 @@ const providerCountKeys = {
   copilot: "Copilot",
   deepseek: "DeepSeek",
   gemini: "Gemini",
+  kiro: "Kiro",
   local: "Local",
 };
 const claimedStatuses = new Set(["native", "passthrough", "translated"]);
@@ -160,7 +162,7 @@ function render() {
     );
   }
   lines.push("");
-  lines.push("Status values: `native`, `translated`, `passthrough`, `unsupported`, `partial`, `untested`.");
+  lines.push("Status values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `untested`, `unsupported`.");
   lines.push("");
   lines.push("Fixture summary counts are `request/response/stream-event` conformance cases per provider.");
   lines.push("");

@@ -82,11 +82,22 @@ pub struct RuntimePolicyGatewaySettings {
     #[serde(default)]
     pub route_aliases: Vec<RuntimePolicyGatewayRouteAlias>,
     #[serde(default)]
+    pub request_constraints: RuntimePolicyGatewayRequestConstraintSettings,
+    #[serde(default)]
     pub virtual_keys: Vec<RuntimePolicyGatewayVirtualKey>,
     #[serde(default)]
     pub observability: RuntimePolicyGatewayObservabilitySettings,
     #[serde(default)]
     pub guardrails: RuntimePolicyGatewayGuardrailsSettings,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayRequestConstraintSettings {
+    pub enabled: Option<bool>,
+    pub unknown_context: Option<String>,
+    pub safe_window_tokens: Option<u64>,
+    pub oversized_output: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]

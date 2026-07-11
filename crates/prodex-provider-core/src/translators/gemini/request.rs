@@ -17,6 +17,7 @@ mod tools;
 
 pub(super) use self::continuation::gemini_continuation_metadata;
 pub(crate) use self::generation_config::gemini_generation_config_from_request;
+pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
 pub(super) use self::generation_config::{
     gemini_apply_text_format, gemini_insert_basic_generation_config,
     gemini_insert_extended_generation_config, gemini_thinking_config_from_request,

@@ -36,7 +36,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1265,
+    "maxLines": 1247,
     "reason": "Local rewrite and gateway request orchestration now performs header-first admin and virtual-key authentication, tenant conversation scoping, bounded background-task admission, and owns pooled PostgreSQL accounting plus Redis rate-limit handles; capped until request admission is split from proxy startup."
   },
   {
@@ -46,7 +46,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3796,
+    "maxLines": 3781,
     "reason": "Local rewrite cross-provider regression coverage remains capped while provider-specific cases are split from shared harness coverage."
   },
   {
@@ -263,11 +263,6 @@
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_keys.rs",
     "maxLines": 914,
     "reason": "Gateway key lifecycle, durable tenant identity, rotation, and authorization remain capped until lifecycle storage is split from HTTP responses."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_router.rs",
-    "maxLines": 898,
-    "reason": "Gateway admin routing and control-plane authorization remain capped until route dispatch is split by resource family."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",

@@ -1,6 +1,7 @@
-use super::super::local_rewrite::{
-    RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT, RuntimeLocalRewriteModelMemoryState,
-    runtime_local_rewrite_model_allows_session_memory, runtime_local_rewrite_model_scope,
+use super::super::local_rewrite::RuntimeLocalRewriteModelMemoryState;
+use super::super::local_rewrite_model_memory::{
+    RUNTIME_LOCAL_REWRITE_MODEL_MEMORY_LIMIT, runtime_local_rewrite_model_allows_session_memory,
+    runtime_local_rewrite_model_scope,
 };
 use super::super::provider_bridge::RuntimeProviderBridgeKind;
 use crate::RuntimeProxyRequest;

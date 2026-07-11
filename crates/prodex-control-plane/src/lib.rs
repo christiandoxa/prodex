@@ -23,6 +23,7 @@ use prodex_domain::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlPlaneOperation {
     GatewayAdminRead,
+    RouteExplain,
     TenantCreate,
     TenantUpdate,
     UserInvite,
@@ -48,8 +49,9 @@ pub enum ControlPlaneOperation {
 }
 
 impl ControlPlaneOperation {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::GatewayAdminRead,
+        Self::RouteExplain,
         Self::TenantCreate,
         Self::TenantUpdate,
         Self::UserInvite,
@@ -77,6 +79,9 @@ impl ControlPlaneOperation {
     pub fn requirement(self) -> ControlPlaneRequirement {
         match self {
             Self::GatewayAdminRead => {
+                ControlPlaneRequirement::viewer(ResourceKind::Configuration, ResourceAction::Read)
+            }
+            Self::RouteExplain => {
                 ControlPlaneRequirement::viewer(ResourceKind::Configuration, ResourceAction::Read)
             }
             Self::TenantCreate => {
@@ -156,6 +161,7 @@ impl ControlPlaneOperation {
     pub fn audit_action(self) -> AuditAction {
         AuditAction::new(match self {
             Self::GatewayAdminRead => "control_plane.gateway_admin.read",
+            Self::RouteExplain => "control_plane.route.explain",
             Self::TenantCreate => "control_plane.tenant.create",
             Self::TenantUpdate => "control_plane.tenant.update",
             Self::UserInvite => "control_plane.user.invite",
@@ -185,6 +191,7 @@ impl ControlPlaneOperation {
         !matches!(
             self,
             Self::GatewayAdminRead
+                | Self::RouteExplain
                 | Self::ScimUserRead
                 | Self::VirtualKeyRead
                 | Self::BillingRead

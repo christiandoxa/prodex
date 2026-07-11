@@ -52,6 +52,7 @@ pub(super) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend>
             }),
         )
     });
+    let request_constraints = gateway.request_constraints;
     let options = RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &state,
@@ -74,10 +75,12 @@ pub(super) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend>
         gateway_observability: gateway.observability,
     };
     let proxy = match secret_refresh {
-        Some(secret_refresh) => {
-            start_runtime_gateway_rewrite_proxy_with_secret_refresh(options, secret_refresh)?
-        }
-        None => start_runtime_gateway_rewrite_proxy(options)?,
+        Some(secret_refresh) => start_runtime_gateway_rewrite_proxy_with_secret_refresh(
+            options,
+            secret_refresh,
+            request_constraints,
+        )?,
+        None => start_runtime_gateway_rewrite_proxy(options, request_constraints)?,
     };
     Ok(GatewayBackend::new(
         proxy,

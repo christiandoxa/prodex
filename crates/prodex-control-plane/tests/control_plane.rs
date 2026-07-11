@@ -45,7 +45,6 @@ fn control_plane_mutation_requires_control_plane_admin_and_emits_success_audit()
         ControlPlaneOperation::PolicyPublish,
         ResourceKind::Policy,
     ));
-
     let ControlPlaneDecision::Authorized(plan) = decision else {
         panic!("expected authorized decision");
     };
@@ -74,7 +73,6 @@ fn data_plane_credential_cannot_call_control_plane_and_denial_is_audited() {
         ControlPlaneOperation::VirtualKeyCreate,
         ResourceKind::VirtualKey,
     ));
-
     let ControlPlaneDecision::Denied {
         error,
         audit_write,
@@ -112,7 +110,6 @@ fn viewer_cannot_perform_vertical_privilege_escalation() {
         ControlPlaneOperation::BudgetUpdate,
         ResourceKind::Budget,
     ));
-
     assert!(matches!(
         decision,
         ControlPlaneDecision::Denied {
@@ -132,7 +129,6 @@ fn cross_tenant_control_plane_access_is_denied() {
         ControlPlaneOperation::AuditExport,
         ResourceKind::AuditLog,
     ));
-
     assert!(matches!(
         decision,
         ControlPlaneDecision::Denied {
@@ -151,7 +147,6 @@ fn audit_retention_purge_requires_admin_delete_and_emits_audit() {
         ControlPlaneOperation::AuditRetentionPurge,
         ResourceKind::AuditLog,
     ));
-
     let ControlPlaneDecision::Authorized(plan) = decision else {
         panic!("expected authorized audit retention purge");
     };
@@ -183,6 +178,7 @@ fn mutating_control_plane_operations_require_idempotency() {
     assert!(ControlPlaneOperation::RoleBindingGrant.requires_idempotency());
     assert!(ControlPlaneOperation::RoleBindingRevoke.requires_idempotency());
     assert!(!ControlPlaneOperation::GatewayAdminRead.requires_idempotency());
+    assert!(!ControlPlaneOperation::RouteExplain.requires_idempotency());
     assert!(!ControlPlaneOperation::ScimUserRead.requires_idempotency());
     assert!(!ControlPlaneOperation::VirtualKeyRead.requires_idempotency());
     assert!(!ControlPlaneOperation::BillingRead.requires_idempotency());
@@ -191,8 +187,7 @@ fn mutating_control_plane_operations_require_idempotency() {
 
 #[test]
 fn all_control_plane_operations_require_immutable_audit_on_success_and_denial() {
-    assert_eq!(ControlPlaneOperation::ALL.len(), 23);
-
+    assert_eq!(ControlPlaneOperation::ALL.len(), 24);
     for operation in ControlPlaneOperation::ALL {
         let audit = operation.audit_requirement();
         assert_eq!(audit.operation, operation);
@@ -212,6 +207,12 @@ fn all_control_plane_operations_have_explicit_lifecycle_requirements() {
     let expected = [
         (
             ControlPlaneOperation::GatewayAdminRead,
+            ResourceKind::Configuration,
+            ResourceAction::Read,
+            Role::Viewer,
+        ),
+        (
+            ControlPlaneOperation::RouteExplain,
             ResourceKind::Configuration,
             ResourceAction::Read,
             Role::Viewer,
@@ -349,7 +350,6 @@ fn all_control_plane_operations_have_explicit_lifecycle_requirements() {
             Role::Admin,
         ),
     ];
-
     assert_eq!(expected.len(), ControlPlaneOperation::ALL.len());
     for (operation, resource, action, role) in expected {
         let requirement = operation.requirement();

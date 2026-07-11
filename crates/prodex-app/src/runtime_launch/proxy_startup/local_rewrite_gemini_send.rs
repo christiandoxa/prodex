@@ -9,6 +9,7 @@ use super::super::local_rewrite::{
     runtime_local_rewrite_model_selection,
 };
 use super::super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
+use super::super::local_rewrite_search_fallback::runtime_local_rewrite_remember_accepted_model;
 use super::super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
 };
@@ -479,6 +480,12 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                     &requested_model,
                     &translated.model,
                     model_index,
+                );
+                runtime_local_rewrite_remember_accepted_model(
+                    shared,
+                    RuntimeProviderBridgeKind::Gemini,
+                    request,
+                    &translated.model,
                 );
                 let gemini_context = responses_route.then(|| RuntimeGeminiRequestContext {
                     profile_name: selected.profile_name.clone(),

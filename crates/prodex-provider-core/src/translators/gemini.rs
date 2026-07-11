@@ -2,6 +2,7 @@ pub(crate) use self::request::gemini_builtin_tools_from_request;
 pub(crate) use self::request::gemini_function_declaration_from_openai_tool;
 pub(crate) use self::request::gemini_generation_config_from_request;
 pub(crate) use self::request::gemini_preserve_tool_call_signatures;
+pub use self::request::gemini_provider_core_model_uses_thinking_level;
 pub(crate) use self::request::gemini_request_body_without_tool;
 pub(crate) use self::request::gemini_tool_config_from_request;
 pub(crate) use self::request::sanitize_function_schema as gemini_sanitize_function_schema;
@@ -102,6 +103,7 @@ impl ProviderTranslator for GeminiTranslator {
         if matches!(
             endpoint,
             ProviderEndpoint::Responses
+                | ProviderEndpoint::ResponsesCompact
                 | ProviderEndpoint::ChatCompletions
                 | ProviderEndpoint::Messages
                 | ProviderEndpoint::Embeddings

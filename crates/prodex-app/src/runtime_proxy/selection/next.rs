@@ -6,11 +6,13 @@ pub(crate) fn next_runtime_response_candidate_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
+    let mut trace = runtime_selection_trace_builder(route_kind, None);
     next_runtime_response_candidate_for_route_with_prompt_cache_key(
         shared,
         excluded_profiles,
         route_kind,
         None,
+        &mut trace,
     )
 }
 
@@ -19,6 +21,7 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     prompt_cache_key: Option<&str>,
+    trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
     let now = Local::now().timestamp();
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
@@ -215,8 +218,53 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
         ),
     );
 
+    let candidate_record_count = candidate_plan
+        .ready_candidates
+        .len()
+        .saturating_add(candidate_plan.fallback_candidates.len());
+    let ready_names = candidate_plan
+        .ready_candidates
+        .iter()
+        .map(|candidate| candidate.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for candidate in &candidate_plan.ready_candidates {
+        let mut trace_candidate = runtime_selection_trace_planned_candidate(
+            candidate,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Ready,
+        );
+        trace_candidate.eligibility =
+            runtime_proxy_crate::RuntimeRouteCandidateEligibility::Deferred;
+        if let Some(reason) = candidate.ready_skip_reason() {
+            runtime_selection_trace_reject(&mut trace_candidate, reason, None);
+        }
+        trace.record_candidate(&candidate.name, trace_candidate);
+    }
+    for candidate in &candidate_plan.fallback_candidates {
+        if ready_names.contains(candidate.name.as_str()) {
+            continue;
+        }
+        let mut trace_candidate = runtime_selection_trace_planned_candidate(
+            candidate,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Fallback,
+        );
+        trace_candidate.eligibility =
+            runtime_proxy_crate::RuntimeRouteCandidateEligibility::Deferred;
+        trace.record_candidate(&candidate.name, trace_candidate);
+    }
+    drop(ready_names);
+    trace.record_stage(
+        runtime_proxy_crate::RuntimeRouteDecisionStage::Ranking,
+        runtime_proxy_crate::RuntimeRouteDecisionStageOutcome::Passed,
+    );
+
     for candidate in candidate_plan.ready_candidates {
         if let Some(reason) = candidate.ready_skip_reason() {
+            let mut trace_candidate = runtime_selection_trace_planned_candidate(
+                &candidate,
+                runtime_proxy_crate::RuntimeRouteCandidateClass::Ready,
+            );
+            runtime_selection_trace_reject(&mut trace_candidate, reason, None);
+            trace.record_candidate(&candidate.name, trace_candidate);
             if reason == "profile_inflight_soft_limit" {
                 runtime_proxy_log(
                     shared,
@@ -289,6 +337,19 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             &candidate.name,
             route_kind,
         )? {
+            let mut trace_candidate = runtime_selection_trace_planned_candidate(
+                &candidate,
+                runtime_proxy_crate::RuntimeRouteCandidateClass::Ready,
+            );
+            trace_candidate.circuit_state =
+                Some(runtime_proxy_crate::RuntimeRouteCircuitState::HalfOpenWait);
+            runtime_selection_trace_reject(
+                &mut trace_candidate,
+                runtime_proxy_crate::RuntimeRouteDecisionReasonKind::RouteCircuitHalfOpenProbeWait
+                    .as_str(),
+                None,
+            );
+            trace.record_candidate(&candidate.name, trace_candidate);
             runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -317,6 +378,12 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             );
             continue;
         }
+        let mut trace_candidate = runtime_selection_trace_planned_candidate(
+            &candidate,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Ready,
+        );
+        trace_candidate.selected = true;
+        trace.record_candidate(&candidate.name, trace_candidate);
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -344,6 +411,12 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
     let mut fallback = None;
     for candidate in candidate_plan.fallback_candidates {
         if let Some(reason) = candidate.fallback_skip_reason() {
+            let mut trace_candidate = runtime_selection_trace_planned_candidate(
+                &candidate,
+                runtime_proxy_crate::RuntimeRouteCandidateClass::Fallback,
+            );
+            runtime_selection_trace_reject(&mut trace_candidate, reason, None);
+            trace.record_candidate(&candidate.name, trace_candidate);
             runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -377,6 +450,19 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             &candidate.name,
             route_kind,
         )? {
+            let mut trace_candidate = runtime_selection_trace_planned_candidate(
+                &candidate,
+                runtime_proxy_crate::RuntimeRouteCandidateClass::Fallback,
+            );
+            trace_candidate.circuit_state =
+                Some(runtime_proxy_crate::RuntimeRouteCircuitState::HalfOpenWait);
+            runtime_selection_trace_reject(
+                &mut trace_candidate,
+                runtime_proxy_crate::RuntimeRouteDecisionReasonKind::RouteCircuitHalfOpenProbeWait
+                    .as_str(),
+                None,
+            );
+            trace.record_candidate(&candidate.name, trace_candidate);
             runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -405,6 +491,12 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             );
             continue;
         }
+        let mut trace_candidate = runtime_selection_trace_planned_candidate(
+            &candidate,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Fallback,
+        );
+        trace_candidate.selected = true;
+        trace.record_candidate(&candidate.name, trace_candidate);
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -458,6 +550,16 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
                     ),
                 ),
             );
+            let mut trace_candidate = runtime_selection_trace_candidate(
+                candidate_record_count,
+                runtime_proxy_crate::RuntimeRouteCandidateClass::AutoRedeem,
+                Some(quota_summary),
+                None,
+                None,
+                None,
+            );
+            trace_candidate.selected = true;
+            trace.record_candidate(&auto_redeem_profile, trace_candidate);
             return Ok(Some(auto_redeem_profile));
         }
         runtime_proxy_log(

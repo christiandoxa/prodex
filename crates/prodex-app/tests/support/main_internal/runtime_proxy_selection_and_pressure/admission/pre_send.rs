@@ -129,6 +129,62 @@ fn usage_workspace_credits_error_rotates_to_ready_profile() {
 }
 
 #[test]
+fn standard_get_waits_for_ready_profile_inflight_relief() {
+    let backend = RuntimeProxyBackend::start_http_buffered_json();
+    let usage = usage_with_main_windows(90, 3600, 90, 604_800);
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .upstream_base_url(backend.base_url())
+    .profile_usage_snapshot("main", runtime_profile_usage_snapshot_from_usage(&usage))
+    .build();
+    harness
+        .shared()
+        .runtime
+        .lock()
+        .expect("runtime should lock")
+        .profile_probe_cache
+        .insert(
+            "main".to_string(),
+            RuntimeProfileProbeCacheEntry {
+                checked_at: Local::now().timestamp(),
+                auth: AuthSummary {
+                    label: "chatgpt".to_string(),
+                    quota_compatible: true,
+                },
+                result: Ok(usage),
+            },
+        );
+    let inflight = (0..runtime_proxy_profile_inflight_hard_limit())
+        .map(|_| acquire_runtime_profile_inflight_guard(harness.shared(), "main", "standard_http"))
+        .collect::<Result<Vec<_>>>()
+        .expect("inflight guards should be acquired");
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(25));
+        drop(inflight);
+    });
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/status".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let response = proxy_runtime_standard_request(14, &request, harness.shared())
+        .expect("standard GET should retry after inflight relief");
+    let (status, _) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 200);
+    release.join().expect("release thread should join");
+    let log = fs::read_to_string(&harness.shared().log_path).expect("runtime log should be readable");
+    assert!(log.contains("inflight_wait_started route=standard"));
+    assert!(log.contains("inflight_wait_finished route=standard"));
+    assert!(log.contains("useful=true"));
+}
+
+#[test]
 fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
     let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
         [RuntimeProxyBackendFaultStep::explicit_quota_429(

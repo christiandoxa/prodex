@@ -99,6 +99,7 @@ impl ProviderAdapterContract for StaticProviderAdapter {
             },
             ProviderId::Gemini => match endpoint {
                 ProviderEndpoint::Responses => ProviderCapabilityStatus::Translated,
+                ProviderEndpoint::ResponsesCompact => ProviderCapabilityStatus::Emulated,
                 ProviderEndpoint::ChatCompletions
                 | ProviderEndpoint::Messages
                 | ProviderEndpoint::Embeddings => ProviderCapabilityStatus::Passthrough,

@@ -8,7 +8,7 @@ Generated from `prodex_provider_core::provider_adapter_contract_matrix()`, `crat
 | anthropic | 9 | translated | true | true | 12/5/4 | translated | unsupported | passthrough | passthrough | untested | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | copilot | 25 | translated | true | true | 10/6/2 | translated | passthrough | passthrough | passthrough | untested | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | deepseek | 4 | translated | true | true | 16/4/3 | translated | unsupported | passthrough | passthrough | untested | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| gemini | 19 | translated | true | true | 18/14/3 | translated | unsupported | passthrough | passthrough | untested | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
+| gemini | 19 | translated | true | true | 18/14/3 | translated | untested | passthrough | passthrough | untested | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
 | kiro | 2 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | local | 1 | passthrough | true | false | 10/10/1 | passthrough | unsupported | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough |
 

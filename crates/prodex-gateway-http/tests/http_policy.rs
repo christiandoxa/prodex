@@ -48,14 +48,12 @@ fn api_version_planner_extracts_versioned_paths_and_uses_legacy_default() {
             },
         },
     ];
-
     let legacy =
         plan_gateway_http_api_version("/responses", default_version, &policies, 1_800_000_000_000)
             .unwrap();
     assert_eq!(legacy.requested, default_version);
     assert_eq!(legacy.decision, ApiVersionDecision::Allowed);
     assert!(!legacy.explicit_path_version);
-
     let versioned = plan_gateway_http_api_version(
         "/v2/admin/keys?cursor=opaque#fragment",
         default_version,
@@ -72,7 +70,6 @@ fn api_version_planner_extracts_versioned_paths_and_uses_legacy_default() {
         }
     );
     assert!(versioned.explicit_path_version);
-
     assert_eq!(
         plan_gateway_http_api_version(
             "/v9/responses",
@@ -104,7 +101,6 @@ fn api_version_error_responses_delegate_to_stable_domain_envelope() {
         sunset_at_unix_ms: 1_700_000_000_000,
     };
     let response = plan_gateway_http_api_version_error_response(&error);
-
     assert_eq!(response.status, GatewayHttpApiVersionErrorStatus::Gone);
     assert_eq!(response.code, "api_version_sunset");
     assert_eq!(response.message, "API version is no longer available");
@@ -118,9 +114,7 @@ fn data_plane_response_route_requires_post_trace_and_body_limit() {
         max_body_bytes: 256,
         ..GatewayHttpPolicy::production_default()
     };
-
     let plan = plan_gateway_http_request(policy, request("/v1/responses")).unwrap();
-
     assert_eq!(plan.route, GatewayHttpRouteKind::DataPlaneResponses);
     assert!(plan.trace_context.is_some());
     assert_eq!(plan.trace_propagation_metrics.len(), 3);
@@ -717,6 +711,12 @@ fn control_plane_route_planner_maps_admin_paths_to_explicit_operations() {
             GatewayHttpMethod::Get,
             "/prodex/gateway/metrics",
             GatewayControlPlaneOperation::GatewayAdminRead,
+            false,
+        ),
+        (
+            GatewayHttpMethod::Post,
+            "/prodex/gateway/routes/explain",
+            GatewayControlPlaneOperation::RouteExplain,
             false,
         ),
         (

@@ -30,6 +30,7 @@ mod continuation;
 mod error_policy;
 mod failure_response;
 mod gateway_adaptive_routing;
+mod gateway_constraints;
 mod gateway_guardrails;
 mod gateway_policy;
 mod health;
@@ -42,6 +43,7 @@ mod previous_response_orchestration;
 mod quota;
 mod response_forwarding;
 mod route_affinity_log;
+mod route_decision_trace;
 mod selection_plan;
 mod selection_policy;
 mod smart_context;
@@ -60,6 +62,7 @@ pub use self::continuation::*;
 pub use self::error_policy::*;
 pub use self::failure_response::*;
 pub use self::gateway_adaptive_routing::*;
+pub use self::gateway_constraints::*;
 pub use self::gateway_guardrails::*;
 pub use self::gateway_policy::*;
 pub use self::health::*;
@@ -72,6 +75,7 @@ pub use self::previous_response_orchestration::*;
 pub use self::quota::*;
 pub use self::response_forwarding::*;
 pub use self::route_affinity_log::*;
+pub use self::route_decision_trace::*;
 pub use self::selection_plan::*;
 pub use self::selection_policy::*;
 pub use self::smart_context::*;
@@ -233,7 +237,8 @@ pub fn runtime_proxy_request_prefers_interactive_inflight_wait(
 }
 
 pub fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
-    is_runtime_responses_path(&request.path_and_query)
+    request.method.eq_ignore_ascii_case("GET")
+        || is_runtime_responses_path(&request.path_and_query)
         || is_runtime_chat_completions_path(&request.path_and_query)
         || runtime_proxy_request_prefers_interactive_inflight_wait(request)
 }
