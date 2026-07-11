@@ -19,3 +19,4 @@ Thumbs.db
 /.codex
 /.token-savior-cache.json
 /deploy/gateway.env
+/deploy/secrets/
