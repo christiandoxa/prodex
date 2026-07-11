@@ -2,7 +2,6 @@ use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
-use super::*;
 use prodex_application::distributed_rate_limit::{
     ApplicationDistributedRateLimitRequest, plan_application_distributed_rate_limit,
 };
