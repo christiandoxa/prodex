@@ -1,9 +1,21 @@
+use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
-use std::{env, path::PathBuf};
+use prodex_domain::SecretPurpose;
+use std::path::PathBuf;
 
+#[cfg(test)]
 pub(crate) fn gateway_observability_config(
     paths: &AppPaths,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<RuntimeGatewayObservabilityConfig> {
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    gateway_observability_config_with_resolver(paths, policy, &resolver)
+}
+
+pub(crate) fn gateway_observability_config_with_resolver(
+    paths: &AppPaths,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
 ) -> Result<RuntimeGatewayObservabilityConfig> {
     let mut sinks = Vec::new();
     for sink in &policy.observability.sinks {
@@ -69,18 +81,18 @@ pub(crate) fn gateway_observability_config(
         })
         .transpose()?
         .unwrap_or_else(|| "generic".to_string());
-    let http_bearer_token = match policy.observability.http_bearer_token_env.as_deref() {
-        Some(env_name) if !gateway_exact_policy_identifier(env_name) => {
-            bail!(
-                "gateway.observability.http_bearer_token_env must be non-empty without whitespace"
-            );
-        }
-        Some(env_name) => Some(gateway_secret_value_from_env(
-            "gateway.observability.http_bearer_token_env",
-            env_name,
-        )?),
-        None => None,
+    let token_context = if policy.observability.http_bearer_token_ref.is_some() {
+        "gateway.observability.http_bearer_token_ref"
+    } else {
+        "gateway.observability.http_bearer_token_env"
     };
+    let http_bearer_token = resolver.resolve(
+        token_context,
+        policy.observability.http_bearer_token_ref.as_ref(),
+        policy.observability.http_bearer_token_env.as_deref(),
+        None,
+        SecretPurpose::TelemetryExportCredential,
+    )?;
     Ok(RuntimeGatewayObservabilityConfig {
         sinks,
         jsonl_path,
@@ -107,17 +119,6 @@ fn gateway_observability_http_endpoint(field: &str, value: &str) -> Result<Strin
         bail!("{field} must be an http(s) URL with host");
     }
     Ok(value.to_string())
-}
-
-fn gateway_secret_value_from_env(context: &str, env_name: &str) -> Result<String> {
-    let value = env::var(env_name).with_context(|| format!("{context} requires {env_name}"))?;
-    if value.is_empty() {
-        bail!("{context} env {env_name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{context} env {env_name} must not contain whitespace");
-    }
-    Ok(value)
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {

@@ -87,7 +87,7 @@ paths.
 | DDL during request handling | Availability impact and lock contention | External migrator-only DDL; request paths reject migration planning |
 | Redis whole-map JSON state | Lost updates and global lock contention | Atomic Lua/hash/counter operations only; durable ledger remains in PostgreSQL |
 | JWKS fetch on request path | Request stalls and identity availability coupling | Cached JWKS decisions, stale-while-revalidate/LKG semantics, no network in auth boundary |
-| Secret value leaks in domain, logs, or projected paths | Credential compromise | `SecretRef` in domain, redacted secret material and provider debug output, canonical projected-root containment, private file modes, and log/error redaction |
+| Secret value leaks in domain, logs, environment, or projected paths | Credential compromise | `SecretRef` in domain, production rejection of CLI/environment credential sources, redacted secret material and provider debug output, canonical projected-root containment, private file modes, and log/error redaction |
 | Upstream provider error rewriting | Compatibility breakage and debugging loss | Pass-through upstream status/body/stream after upstream response exists |
 | Mid-stream rotation | Broken transport semantics and affinity | Rotation only pre-commit; continuation bindings preserved |
 | High-cardinality telemetry labels | Metrics cardinality explosion | Telemetry attribute validation and bounded labels |

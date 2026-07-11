@@ -1,6 +1,7 @@
 use super::gateway_config_helpers::gateway_budget_usd_to_microusd;
+use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
-use std::env;
+use prodex_domain::SecretPurpose;
 
 #[derive(Debug)]
 pub(crate) struct ResolvedGatewayAuthConfig {
@@ -10,24 +11,37 @@ pub(crate) struct ResolvedGatewayAuthConfig {
     pub(crate) virtual_keys: Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>,
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_gateway_auth_config(
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<ResolvedGatewayAuthConfig> {
-    let auth_token = match args.auth_token.as_deref() {
-        Some(value) => Some(gateway_exact_secret_value("gateway --auth-token", value)?),
-        None => match env::var("PRODEX_GATEWAY_TOKEN") {
-            Ok(value) => Some(gateway_exact_secret_value("PRODEX_GATEWAY_TOKEN", &value)?),
-            Err(_) => None,
-        },
-    };
-    let admin_tokens = gateway_admin_tokens_config(auth_token.as_deref(), policy)?;
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    resolve_gateway_auth_config_with_resolver(args, policy, &resolver)
+}
+
+pub(crate) fn resolve_gateway_auth_config_with_resolver(
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<ResolvedGatewayAuthConfig> {
+    let token_env = (args.auth_token.is_none()
+        && std::env::var_os("PRODEX_GATEWAY_TOKEN").is_some())
+    .then_some("PRODEX_GATEWAY_TOKEN");
+    let auth_token = resolver.resolve(
+        "gateway authentication token",
+        policy.auth_token_ref.as_ref(),
+        token_env,
+        args.auth_token.as_deref(),
+        SecretPurpose::DataPlaneCredential,
+    )?;
+    let admin_tokens = gateway_admin_tokens_config_with_resolver(policy, resolver)?;
     if policy.require_auth == Some(true) && auth_token.is_none() && policy.virtual_keys.is_empty() {
         bail!(
             "gateway auth is required by policy.toml; set --auth-token, PRODEX_GATEWAY_TOKEN, or [[gateway.virtual_keys]]; [[gateway.admin_tokens]] only protects admin endpoints"
         );
     }
-    let virtual_keys = gateway_virtual_keys_config(policy)?;
+    let virtual_keys = gateway_virtual_keys_config_with_resolver(policy, resolver)?;
     let auth_required = auth_token.is_some() || !virtual_keys.is_empty();
     if policy.require_auth == Some(true) && !auth_required {
         bail!("gateway auth is required by policy.toml; configured virtual key env vars are empty");
@@ -42,20 +56,31 @@ pub(crate) fn resolve_gateway_auth_config(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn gateway_admin_tokens_config(
     _legacy_admin_token: Option<&str>,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<Vec<RuntimeGatewayAdminToken>> {
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    gateway_admin_tokens_config_with_resolver(policy, &resolver)
+}
+
+fn gateway_admin_tokens_config_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<Vec<RuntimeGatewayAdminToken>> {
     let mut tokens = Vec::new();
     for configured in &policy.admin_tokens {
-        if !gateway_exact_policy_identifier(&configured.token_env) {
-            bail!(
-                "gateway.admin_tokens token_env for {:?} must be non-empty without whitespace",
-                configured.name
-            );
-        }
         let context = format!("gateway.admin_tokens token_env for {:?}", configured.name);
-        let token = gateway_secret_value_from_env(&context, &configured.token_env)?;
+        let token = resolver
+            .resolve(
+                &context,
+                configured.token_ref.as_ref(),
+                (!configured.token_env.is_empty()).then_some(configured.token_env.as_str()),
+                None,
+                SecretPurpose::ControlPlaneCredential,
+            )?
+            .with_context(|| format!("{context} requires a secret source"))?;
         let role = match configured.role.as_deref() {
             Some(role) => RuntimeGatewayAdminRole::parse(role).with_context(|| {
                 format!(
@@ -116,19 +141,32 @@ pub(crate) fn gateway_admin_tokens_config(
     Ok(tokens)
 }
 
+#[cfg(test)]
 pub(crate) fn gateway_virtual_keys_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>> {
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    gateway_virtual_keys_config_with_resolver(policy, &resolver)
+}
+
+fn gateway_virtual_keys_config_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
 ) -> Result<Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>> {
     policy
         .virtual_keys
         .iter()
         .map(|key| {
-            let token_env = key.token_env.as_str();
-            if !gateway_exact_policy_identifier(token_env) {
-                bail!("gateway virtual key '{}' token_env is invalid", key.name);
-            }
             let context = format!("gateway virtual key '{}'", key.name);
-            let token = gateway_secret_value_from_env(&context, token_env)?;
+            let token = resolver
+                .resolve(
+                    &context,
+                    key.token_ref.as_ref(),
+                    (!key.token_env.is_empty()).then_some(key.token_env.as_str()),
+                    None,
+                    SecretPurpose::DataPlaneCredential,
+                )?
+                .with_context(|| format!("{context} requires a secret source"))?;
             for model in &key.allowed_models {
                 if !gateway_exact_policy_identifier(model) {
                     anyhow::bail!(
@@ -198,27 +236,6 @@ fn gateway_policy_optional_scope(
         );
     }
     Ok(Some(value.to_string()))
-}
-
-fn gateway_secret_value_from_env(context: &str, env_name: &str) -> Result<String> {
-    let value = env::var(env_name).with_context(|| format!("{context} requires {env_name}"))?;
-    if value.is_empty() {
-        bail!("{context} env {env_name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{context} env {env_name} must not contain whitespace");
-    }
-    Ok(value)
-}
-
-fn gateway_exact_secret_value(name: &str, value: &str) -> Result<String> {
-    if value.is_empty() {
-        bail!("{name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{name} must not contain whitespace");
-    }
-    Ok(value.to_string())
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {

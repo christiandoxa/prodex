@@ -7,6 +7,8 @@ mod openai_spark_context;
 mod preflight;
 #[path = "runtime_launch/profile_selection.rs"]
 mod profile_selection;
+#[path = "runtime_launch/projected_secrets.rs"]
+mod projected_secrets;
 #[path = "runtime_launch/provider_rewrite.rs"]
 mod provider_rewrite;
 #[path = "runtime_launch/proxy_state.rs"]
@@ -1605,16 +1607,9 @@ fn resolve_gateway_auth_config_requires_non_empty_virtual_key_env_when_policy_de
         .push(prodex_runtime_policy::RuntimePolicyGatewayVirtualKey {
             name: "tenant-key".to_string(),
             token_env: "PRODEX_GATEWAY_VKEY_EMPTY_TEST".to_string(),
+            token_ref: None,
             tenant_id: Some("tenant-a".to_string()),
-            team_id: None,
-            project_id: None,
-            user_id: None,
-            budget_id: None,
-            allowed_models: Vec::new(),
-            budget_usd: None,
-            request_budget: None,
-            rpm_limit: None,
-            tpm_limit: None,
+            ..Default::default()
         });
     let err = resolve_gateway_auth_config(&args, &policy).unwrap_err();
     let message = format!("{err:#}");

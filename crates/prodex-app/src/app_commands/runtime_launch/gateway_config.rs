@@ -12,27 +12,32 @@ mod gateway_observability_config;
 mod gateway_provider_config;
 #[path = "gateway_route_alias_config.rs"]
 mod gateway_route_alias_config;
+#[path = "gateway_secret_config.rs"]
+mod gateway_secret_config;
 #[path = "gateway_sso_config.rs"]
 mod gateway_sso_config;
 #[path = "gateway_state_store_config.rs"]
 mod gateway_state_store_config;
+#[cfg(test)]
 pub(super) use gateway_auth_config::resolve_gateway_auth_config;
+use gateway_auth_config::resolve_gateway_auth_config_with_resolver;
 #[cfg(test)]
 pub(super) use gateway_auth_config::{gateway_admin_tokens_config, gateway_virtual_keys_config};
 pub(super) use gateway_config_helpers::gateway_api_keys_from_list;
 use gateway_config_helpers::gateway_validate_listen_auth;
+#[cfg(test)]
 pub(super) use gateway_guardrail_config::resolve_gateway_guardrail_config;
+use gateway_guardrail_config::resolve_gateway_guardrail_config_with_resolver;
 #[cfg(test)]
 pub(super) use gateway_guardrail_config::{
     gateway_guardrail_config, gateway_guardrail_webhook_config,
 };
-pub(super) use gateway_observability_config::gateway_observability_config;
-#[cfg(not(test))]
-pub(super) use gateway_provider_config::resolve_gateway_provider_config;
 #[cfg(test)]
-pub(super) use gateway_provider_config::{
-    gateway_openai_api_keys, gateway_upstream_base_url, resolve_gateway_provider_config,
-};
+pub(super) use gateway_observability_config::gateway_observability_config;
+use gateway_observability_config::gateway_observability_config_with_resolver;
+use gateway_provider_config::resolve_gateway_provider_config_with_resolver;
+#[cfg(test)]
+pub(super) use gateway_provider_config::{gateway_openai_api_keys, gateway_upstream_base_url};
 #[cfg(test)]
 pub(super) use gateway_provider_config::{gateway_policy_provider, gateway_provider_options};
 #[cfg(not(test))]
@@ -41,9 +46,15 @@ pub(super) use gateway_route_alias_config::gateway_route_aliases_config;
 pub(super) use gateway_route_alias_config::{
     gateway_route_alias_model_metrics, gateway_route_aliases_config,
 };
+use gateway_secret_config::GatewaySecretResolver;
+#[cfg(test)]
 pub(super) use gateway_sso_config::gateway_sso_config;
+use gateway_sso_config::gateway_sso_config_with_resolver;
+#[cfg(test)]
 pub(super) use gateway_state_store_config::gateway_state_store_config;
-use gateway_state_store_config::gateway_validate_runtime_topology;
+use gateway_state_store_config::{
+    gateway_state_store_config_with_resolver, gateway_validate_runtime_topology,
+};
 
 pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) provider_name: Option<&'static str>,
@@ -64,15 +75,49 @@ pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) presidio_redaction_enabled: bool,
 }
 
+pub(super) fn resolve_current_gateway_launch_config(
+    paths: &AppPaths,
+    state: &AppState,
+    args: &GatewayArgs,
+) -> Result<ResolvedGatewayLaunchConfig> {
+    let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
+    let secrets = prodex_runtime_policy::runtime_policy_secrets().unwrap_or_default();
+    resolve_gateway_launch_config_with_secrets(paths, state, args, &policy, &secrets)
+}
+
+#[cfg(test)]
 pub(super) fn resolve_gateway_launch_config(
     paths: &AppPaths,
     state: &AppState,
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<ResolvedGatewayLaunchConfig> {
+    resolve_gateway_launch_config_with_secrets(paths, state, args, policy, &Default::default())
+}
+
+pub(super) fn resolve_gateway_launch_config_with_secrets(
+    paths: &AppPaths,
+    state: &AppState,
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+) -> Result<ResolvedGatewayLaunchConfig> {
+    let secret_resolver = GatewaySecretResolver::from_policy(secrets)?;
+    if secret_resolver.production() {
+        if policy.require_auth != Some(true) {
+            bail!("production gateway requires gateway.require_auth=true");
+        }
+        if policy.provider_api_key_ref.is_none() {
+            bail!("production gateway requires gateway.provider_api_key_ref");
+        }
+        if policy.auth_token_ref.is_none() && policy.virtual_keys.is_empty() {
+            bail!("production gateway requires gateway.auth_token_ref or a virtual key reference");
+        }
+    }
     gateway_validate_upstream_base_url_input(args, policy)?;
-    let provider = resolve_gateway_provider_config(state, args, policy)?;
-    let auth = resolve_gateway_auth_config(args, policy)?;
+    let provider =
+        resolve_gateway_provider_config_with_resolver(state, args, policy, &secret_resolver)?;
+    let auth = resolve_gateway_auth_config_with_resolver(args, policy, &secret_resolver)?;
     if auth.auth_required
         && matches!(
             &provider.provider_options,
@@ -93,9 +138,9 @@ pub(super) fn resolve_gateway_launch_config(
     gateway_validate_listen_auth(&listen_addr, auth.auth_required)?;
 
     let route_aliases = gateway_route_aliases_config(policy, provider.provider)?;
-    let guardrail = resolve_gateway_guardrail_config(args, policy)?;
+    let guardrail = resolve_gateway_guardrail_config_with_resolver(args, policy, &secret_resolver)?;
     let call_id_header = gateway_call_id_header_config(policy)?;
-    let state_store = gateway_state_store_config(paths, policy)?;
+    let state_store = gateway_state_store_config_with_resolver(paths, policy, &secret_resolver)?;
     gateway_validate_runtime_topology(&state_store)?;
 
     Ok(ResolvedGatewayLaunchConfig {
@@ -106,14 +151,14 @@ pub(super) fn resolve_gateway_launch_config(
         auth_required: auth.auth_required,
         listen_addr,
         admin_tokens: auth.admin_tokens,
-        sso: gateway_sso_config(policy)?,
+        sso: gateway_sso_config_with_resolver(policy, &secret_resolver)?,
         state_store,
         virtual_keys: auth.virtual_keys,
         route_aliases,
         guardrails: guardrail.guardrails,
         guardrail_webhook: guardrail.webhook,
         call_id_header,
-        observability: gateway_observability_config(paths, policy)?,
+        observability: gateway_observability_config_with_resolver(paths, policy, &secret_resolver)?,
         presidio_redaction_enabled: guardrail.presidio_redaction_enabled,
     })
 }

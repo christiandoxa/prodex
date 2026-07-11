@@ -8,7 +8,6 @@ mod resume_provider;
 mod resume_repair;
 mod selection;
 mod session_delete;
-use gateway_config::resolve_gateway_launch_config;
 #[cfg(test)]
 use gateway_config::{
     gateway_admin_tokens_config, gateway_call_id_header_config, gateway_guardrail_config,
@@ -17,6 +16,8 @@ use gateway_config::{
     gateway_state_store_config, gateway_upstream_base_url, gateway_virtual_keys_config,
     resolve_gateway_auth_config, resolve_gateway_guardrail_config,
 };
+#[cfg(test)]
+use gateway_config::{resolve_gateway_launch_config, resolve_gateway_launch_config_with_secrets};
 use gateway_status::print_gateway_status;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
 use rusqlite::OptionalExtension;
@@ -370,8 +371,7 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
 pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
-    let gateway = resolve_gateway_launch_config(&paths, &state, &args, &policy)?;
+    let gateway = gateway_config::resolve_current_gateway_launch_config(&paths, &state, &args)?;
     let proxy = start_runtime_gateway_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &state,

@@ -1,3 +1,4 @@
+use prodex_domain::SecretRef;
 use secret_store::SecretBackendKind;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use std::path::PathBuf;
@@ -56,6 +57,9 @@ pub struct RuntimePolicyRuntimeSettings {
 pub struct RuntimePolicySecretsSettings {
     pub backend: Option<SecretBackendKind>,
     pub keyring_service: Option<String>,
+    pub production: bool,
+    pub projected_root: Option<PathBuf>,
+    pub projected_provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -65,6 +69,8 @@ pub struct RuntimePolicyGatewaySettings {
     pub provider: Option<String>,
     pub base_url: Option<String>,
     pub require_auth: Option<bool>,
+    pub auth_token_ref: Option<SecretRef>,
+    pub provider_api_key_ref: Option<SecretRef>,
     #[serde(default)]
     pub adaptive_routing: RuntimePolicyAdaptiveRoutingSettings,
     #[serde(default)]
@@ -100,13 +106,17 @@ pub struct RuntimePolicyGatewayStateSettings {
     pub sqlite_path: Option<String>,
     pub postgres_url_env: Option<String>,
     pub redis_url_env: Option<String>,
+    pub postgres_url_ref: Option<SecretRef>,
+    pub redis_url_ref: Option<SecretRef>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewayAdminToken {
     pub name: String,
+    #[serde(default)]
     pub token_env: String,
+    pub token_ref: Option<SecretRef>,
     pub role: Option<String>,
     pub tenant_id: Option<String>,
     pub team_id: Option<String>,
@@ -121,6 +131,7 @@ pub struct RuntimePolicyGatewayAdminToken {
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewaySsoSettings {
     pub proxy_token_env: Option<String>,
+    pub proxy_token_ref: Option<SecretRef>,
     pub require_tenant: Option<bool>,
     pub token_header: Option<String>,
     pub user_header: Option<String>,
@@ -163,7 +174,9 @@ pub struct RuntimePolicyGatewayRouteModelMetrics {
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewayVirtualKey {
     pub name: String,
+    #[serde(default)]
     pub token_env: String,
+    pub token_ref: Option<SecretRef>,
     pub tenant_id: Option<String>,
     pub team_id: Option<String>,
     pub project_id: Option<String>,
@@ -187,6 +200,7 @@ pub struct RuntimePolicyGatewayObservabilitySettings {
     pub http_endpoint: Option<String>,
     pub http_schema: Option<String>,
     pub http_bearer_token_env: Option<String>,
+    pub http_bearer_token_ref: Option<SecretRef>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -205,6 +219,7 @@ pub struct RuntimePolicyGatewayGuardrailsSettings {
     #[serde(default)]
     pub webhook_phases: Vec<String>,
     pub webhook_bearer_token_env: Option<String>,
+    pub webhook_bearer_token_ref: Option<SecretRef>,
     pub webhook_fail_closed: Option<bool>,
 }
 
@@ -498,4 +513,8 @@ pub struct RuntimePolicyRuntimeFile {
 pub struct RuntimePolicySecretsFile {
     pub backend: Option<String>,
     pub keyring_service: Option<String>,
+    #[serde(default)]
+    pub production: bool,
+    pub projected_root: Option<String>,
+    pub projected_provider: Option<String>,
 }

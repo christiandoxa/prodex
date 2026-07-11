@@ -1,4 +1,6 @@
+use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
+use prodex_domain::SecretPurpose;
 use std::{env, path::Path};
 
 pub(crate) struct ResolvedGatewayProviderConfig {
@@ -7,10 +9,11 @@ pub(crate) struct ResolvedGatewayProviderConfig {
     pub(crate) upstream_base_url: String,
 }
 
-pub(crate) fn resolve_gateway_provider_config(
+pub(crate) fn resolve_gateway_provider_config_with_resolver(
     state: &AppState,
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
 ) -> Result<ResolvedGatewayProviderConfig> {
     let provider = match args.provider {
         Some(provider) => Some(provider),
@@ -19,7 +22,19 @@ pub(crate) fn resolve_gateway_provider_config(
             None => None,
         },
     };
-    let provider_options = gateway_provider_options(state, provider, args.api_key.as_deref())?;
+    if resolver.production() && matches!(provider, Some(SuperExternalProvider::Kiro)) {
+        bail!(
+            "gateway Kiro profile credentials are forbidden in production; use a provider with projected credentials"
+        );
+    }
+    let api_key = resolver.resolve(
+        "gateway provider API key",
+        policy.provider_api_key_ref.as_ref(),
+        None,
+        args.api_key.as_deref(),
+        SecretPurpose::ProviderCredential,
+    )?;
+    let provider_options = gateway_provider_options(state, provider, api_key.as_deref())?;
     let upstream_base_url = gateway_upstream_base_url(args, policy, provider)?;
     Ok(ResolvedGatewayProviderConfig {
         provider,

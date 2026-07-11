@@ -9,6 +9,9 @@ use crate::validate_helpers::{
     validate_gateway_route_strategy, validate_gateway_state_backend, validate_optional_i64_percent,
     validate_optional_u64, validate_optional_usize, validate_optional_usize_allow_zero,
 };
+use crate::validate_secrets::{
+    validate_gateway_secret_ref, validate_gateway_secret_source, validate_secret_policy,
+};
 
 pub fn parse_secret_backend_kind(value: &str) -> Result<SecretBackendKind> {
     value
@@ -59,6 +62,7 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
             path.display()
         );
     }
+    validate_secret_policy(policy, path)?;
 
     validate_runtime_proxy_policy(policy, path)?;
     validate_gateway_policy(policy, path)?;
@@ -67,6 +71,38 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
 }
 
 pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    validate_gateway_secret_ref(
+        policy,
+        path,
+        "gateway.auth_token_ref",
+        policy.gateway.auth_token_ref.as_ref(),
+    )?;
+    validate_gateway_secret_ref(
+        policy,
+        path,
+        "gateway.provider_api_key_ref",
+        policy.gateway.provider_api_key_ref.as_ref(),
+    )?;
+    if policy.secrets.production {
+        if policy.gateway.require_auth != Some(true) {
+            bail!(
+                "gateway.require_auth in {} must be true when secrets.production=true",
+                path.display()
+            );
+        }
+        if policy.gateway.provider_api_key_ref.is_none() {
+            bail!(
+                "gateway.provider_api_key_ref in {} is required when secrets.production=true",
+                path.display()
+            );
+        }
+        if policy.gateway.auth_token_ref.is_none() && policy.gateway.virtual_keys.is_empty() {
+            bail!(
+                "gateway.auth_token_ref or [[gateway.virtual_keys]] in {} is required when secrets.production=true",
+                path.display()
+            );
+        }
+    }
     if let Some(listen_addr) = policy.gateway.listen_addr.as_deref() {
         validate_gateway_exact_identifier(listen_addr, path, "gateway.listen_addr")?;
     }
@@ -123,12 +159,22 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             path.display()
         );
     }
-    if let Some(value) = policy.gateway.state.postgres_url_env.as_deref() {
-        validate_gateway_exact_identifier(value, path, "gateway.state.postgres_url_env")?;
-    }
-    if let Some(value) = policy.gateway.state.redis_url_env.as_deref() {
-        validate_gateway_exact_identifier(value, path, "gateway.state.redis_url_env")?;
-    }
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.state.postgres_url",
+        policy.gateway.state.postgres_url_env.as_deref(),
+        policy.gateway.state.postgres_url_ref.as_ref(),
+        false,
+    )?;
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.state.redis_url",
+        policy.gateway.state.redis_url_env.as_deref(),
+        policy.gateway.state.redis_url_ref.as_ref(),
+        false,
+    )?;
     match policy
         .gateway
         .state
@@ -138,15 +184,21 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("postgres") if policy.gateway.state.postgres_url_env.is_none() => {
+        Some("postgres")
+            if policy.gateway.state.postgres_url_env.is_none()
+                && policy.gateway.state.postgres_url_ref.is_none() =>
+        {
             bail!(
-                "gateway.state.postgres_url_env in {} is required when gateway.state.backend=postgres",
+                "gateway.state.postgres_url_env or gateway.state.postgres_url_ref in {} is required when gateway.state.backend=postgres",
                 path.display()
             );
         }
-        Some("redis") if policy.gateway.state.redis_url_env.is_none() => {
+        Some("redis")
+            if policy.gateway.state.redis_url_env.is_none()
+                && policy.gateway.state.redis_url_ref.is_none() =>
+        {
             bail!(
-                "gateway.state.redis_url_env in {} is required when gateway.state.backend=redis",
+                "gateway.state.redis_url_env or gateway.state.redis_url_ref in {} is required when gateway.state.backend=redis",
                 path.display()
             );
         }
@@ -155,7 +207,14 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     for (index, token) in policy.gateway.admin_tokens.iter().enumerate() {
         let field = format!("gateway.admin_tokens[{index}]");
         validate_gateway_exact_identifier(&token.name, path, &format!("{field}.name"))?;
-        validate_gateway_exact_identifier(&token.token_env, path, &format!("{field}.token_env"))?;
+        validate_gateway_secret_source(
+            policy,
+            path,
+            &format!("{field}.token"),
+            (!token.token_env.is_empty()).then_some(token.token_env.as_str()),
+            token.token_ref.as_ref(),
+            true,
+        )?;
         if let Some(role) = token.role.as_deref() {
             validate_gateway_admin_role(role)
                 .with_context(|| format!("{field}.role in {} is invalid", path.display()))?;
@@ -231,7 +290,14 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
     for (index, key) in policy.gateway.virtual_keys.iter().enumerate() {
         let field = format!("gateway.virtual_keys[{index}]");
         validate_gateway_exact_identifier(&key.name, path, &format!("{field}.name"))?;
-        validate_gateway_exact_identifier(&key.token_env, path, &format!("{field}.token_env"))?;
+        validate_gateway_secret_source(
+            policy,
+            path,
+            &format!("{field}.token"),
+            (!key.token_env.is_empty()).then_some(key.token_env.as_str()),
+            key.token_ref.as_ref(),
+            true,
+        )?;
         validate_gateway_optional_scope(key.tenant_id.as_deref(), path, &field, "tenant_id")?;
         for (name, value) in [
             ("team_id", key.team_id.as_deref()),
@@ -305,18 +371,18 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             );
         }
     }
-    if let Some(value) = policy
-        .gateway
-        .observability
-        .http_bearer_token_env
-        .as_deref()
-    {
-        validate_gateway_exact_identifier(
-            value,
-            path,
-            "gateway.observability.http_bearer_token_env",
-        )?;
-    }
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.observability.http_bearer_token",
+        policy
+            .gateway
+            .observability
+            .http_bearer_token_env
+            .as_deref(),
+        policy.gateway.observability.http_bearer_token_ref.as_ref(),
+        false,
+    )?;
     if let Some(schema) = policy.gateway.observability.http_schema.as_deref() {
         validate_gateway_observability_http_schema(schema).with_context(|| {
             format!(
@@ -388,18 +454,18 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             )
         })?;
     }
-    if let Some(value) = policy
-        .gateway
-        .guardrails
-        .webhook_bearer_token_env
-        .as_deref()
-    {
-        validate_gateway_exact_identifier(
-            value,
-            path,
-            "gateway.guardrails.webhook_bearer_token_env",
-        )?;
-    }
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.guardrails.webhook_bearer_token",
+        policy
+            .gateway
+            .guardrails
+            .webhook_bearer_token_env
+            .as_deref(),
+        policy.gateway.guardrails.webhook_bearer_token_ref.as_ref(),
+        false,
+    )?;
     Ok(())
 }
 
@@ -433,9 +499,14 @@ fn validate_gateway_exact_identifier(value: &str, path: &Path, field: &str) -> R
 
 fn validate_gateway_sso_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let sso = &policy.gateway.sso;
-    if let Some(value) = sso.proxy_token_env.as_deref() {
-        validate_gateway_exact_identifier(value, path, "gateway.sso.proxy_token_env")?;
-    }
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.sso.proxy_token",
+        sso.proxy_token_env.as_deref(),
+        sso.proxy_token_ref.as_ref(),
+        false,
+    )?;
     for (field, value) in [
         ("gateway.sso.token_header", sso.token_header.as_deref()),
         ("gateway.sso.user_header", sso.user_header.as_deref()),

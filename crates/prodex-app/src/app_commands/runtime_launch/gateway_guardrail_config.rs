@@ -1,5 +1,6 @@
+use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
-use std::env;
+use prodex_domain::SecretPurpose;
 
 pub(crate) struct ResolvedGatewayGuardrailConfig {
     pub(crate) guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig,
@@ -7,9 +8,19 @@ pub(crate) struct ResolvedGatewayGuardrailConfig {
     pub(crate) presidio_redaction_enabled: bool,
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_gateway_guardrail_config(
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<ResolvedGatewayGuardrailConfig> {
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    resolve_gateway_guardrail_config_with_resolver(args, policy, &resolver)
+}
+
+pub(crate) fn resolve_gateway_guardrail_config_with_resolver(
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
 ) -> Result<ResolvedGatewayGuardrailConfig> {
     let guardrails = gateway_guardrail_config(policy)?;
     let presidio_redaction_enabled = if args.presidio {
@@ -21,7 +32,7 @@ pub(crate) fn resolve_gateway_guardrail_config(
     };
     Ok(ResolvedGatewayGuardrailConfig {
         guardrails,
-        webhook: gateway_guardrail_webhook_config(policy)?,
+        webhook: gateway_guardrail_webhook_config_with_resolver(policy, resolver)?,
         presidio_redaction_enabled,
     })
 }
@@ -56,8 +67,17 @@ pub(crate) fn gateway_guardrail_config(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn gateway_guardrail_webhook_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<RuntimeGatewayGuardrailWebhookConfig> {
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    gateway_guardrail_webhook_config_with_resolver(policy, &resolver)
+}
+
+fn gateway_guardrail_webhook_config_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
 ) -> Result<RuntimeGatewayGuardrailWebhookConfig> {
     let url = policy
         .guardrails
@@ -98,35 +118,32 @@ pub(crate) fn gateway_guardrail_webhook_config(
             }
         });
     }
-    let bearer_token = match policy.guardrails.webhook_bearer_token_env.as_deref() {
-        Some(env_name) if !gateway_exact_policy_identifier(env_name) => {
-            bail!(
-                "gateway.guardrails.webhook_bearer_token_env must be non-empty without whitespace"
-            );
-        }
-        Some(env_name) => Some(gateway_secret_value_from_env(
-            "gateway.guardrails.webhook",
-            env_name,
-        )?),
-        None => None,
+    if policy
+        .guardrails
+        .webhook_bearer_token_env
+        .as_deref()
+        .is_some_and(|value| !gateway_exact_policy_identifier(value))
+    {
+        bail!("gateway.guardrails.webhook_bearer_token_env must be non-empty without whitespace");
+    }
+    let token_context = if policy.guardrails.webhook_bearer_token_ref.is_some() {
+        "gateway.guardrails.webhook_bearer_token_ref"
+    } else {
+        "gateway.guardrails.webhook"
     };
+    let bearer_token = resolver.resolve(
+        token_context,
+        policy.guardrails.webhook_bearer_token_ref.as_ref(),
+        policy.guardrails.webhook_bearer_token_env.as_deref(),
+        None,
+        SecretPurpose::WebhookSigningSecret,
+    )?;
     Ok(RuntimeGatewayGuardrailWebhookConfig {
         url,
         phases,
         bearer_token,
         fail_closed: policy.guardrails.webhook_fail_closed.unwrap_or(false),
     })
-}
-
-fn gateway_secret_value_from_env(context: &str, env_name: &str) -> Result<String> {
-    let value = env::var(env_name).with_context(|| format!("{context} requires {env_name}"))?;
-    if value.is_empty() {
-        bail!("{context} env {env_name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{context} env {env_name} must not contain whitespace");
-    }
-    Ok(value)
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {

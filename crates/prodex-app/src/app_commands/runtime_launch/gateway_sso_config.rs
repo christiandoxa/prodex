@@ -1,4 +1,6 @@
+use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
+use prodex_domain::SecretPurpose;
 use std::env;
 
 const PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV: &str = "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS";
@@ -7,21 +9,33 @@ const PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV: &str =
     "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS";
 const PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV: &str = "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS";
 
+#[cfg(test)]
 pub(crate) fn gateway_sso_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<RuntimeGatewaySsoConfig> {
-    let proxy_token_hash = match policy.sso.proxy_token_env.as_deref() {
-        Some(env_name) if !gateway_exact_policy_identifier(env_name) => {
-            bail!("gateway.sso.proxy_token_env must be non-empty without whitespace");
-        }
-        Some(env_name) => {
-            let token = gateway_secret_value_from_env("gateway.sso.proxy_token_env", env_name)?;
-            Some(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-                &token,
-            ))
-        }
-        None => None,
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    gateway_sso_config_with_resolver(policy, &resolver)
+}
+
+pub(crate) fn gateway_sso_config_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<RuntimeGatewaySsoConfig> {
+    let proxy_token_context = if policy.sso.proxy_token_ref.is_some() {
+        "gateway.sso.proxy_token_ref"
+    } else {
+        "gateway.sso.proxy_token_env"
     };
+    let proxy_token_hash = resolver
+        .resolve(
+            proxy_token_context,
+            policy.sso.proxy_token_ref.as_ref(),
+            policy.sso.proxy_token_env.as_deref(),
+            None,
+            SecretPurpose::ControlPlaneCredential,
+        )?
+        .as_deref()
+        .map(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token);
     let oidc = gateway_sso_oidc_config(policy)?;
     if oidc.is_some() {
         gateway_validate_oidc_runtime_env()?;
@@ -166,17 +180,6 @@ fn gateway_sso_header(field: &str, value: &Option<String>, default: &str) -> Res
         Some(value) => Ok(value.to_string()),
         None => Ok(default.to_string()),
     }
-}
-
-fn gateway_secret_value_from_env(context: &str, env_name: &str) -> Result<String> {
-    let value = env::var(env_name).with_context(|| format!("{context} requires {env_name}"))?;
-    if value.is_empty() {
-        bail!("{context} env {env_name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{context} env {env_name} must not contain whitespace");
-    }
-    Ok(value)
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {

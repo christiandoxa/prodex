@@ -1,6 +1,7 @@
+use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
 use prodex_domain::{
-    ProductionReadinessTopology, plan_deployment_security_error_response,
+    ProductionReadinessTopology, SecretPurpose, plan_deployment_security_error_response,
     plan_production_deployment_readiness,
 };
 use std::{env, path::PathBuf};
@@ -10,9 +11,19 @@ const PRODEX_GATEWAY_REDIS_URL_ENV: &str = "PRODEX_GATEWAY_REDIS_URL";
 const PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS_ENV: &str =
     "PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS";
 
+#[cfg(test)]
 pub(crate) fn gateway_state_store_config(
     paths: &AppPaths,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<RuntimeGatewayStateStore> {
+    let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
+    gateway_state_store_config_with_resolver(paths, policy, &resolver)
+}
+
+pub(crate) fn gateway_state_store_config_with_resolver(
+    paths: &AppPaths,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
 ) -> Result<RuntimeGatewayStateStore> {
     let backend = match policy.state.backend.as_deref() {
         Some(value) if gateway_exact_policy_identifier(value) => value,
@@ -43,55 +54,63 @@ pub(crate) fn gateway_state_store_config(
             Ok(RuntimeGatewayStateStore::sqlite(path))
         }
         "postgres" => {
-            let env_name = policy
+            if policy
                 .state
                 .postgres_url_env
                 .as_deref()
-                .map(|value| {
-                    gateway_exact_policy_identifier(value)
-                        .then_some(value)
-                        .context(
-                            "gateway.state.postgres_url_env must be non-empty without whitespace",
-                        )
-                })
-                .transpose()?
-                .unwrap_or("PRODEX_GATEWAY_POSTGRES_URL");
-            let url = gateway_state_url_from_env("gateway.state.backend=postgres", env_name)?;
+                .is_some_and(|value| !gateway_exact_policy_identifier(value))
+            {
+                bail!("gateway.state.postgres_url_env must be non-empty without whitespace");
+            }
+            let env_name = policy.state.postgres_url_env.as_deref().or_else(|| {
+                (!resolver.production() && policy.state.postgres_url_ref.is_none())
+                    .then_some("PRODEX_GATEWAY_POSTGRES_URL")
+            });
+            let url = resolver
+                .resolve(
+                    "gateway.state.backend=postgres",
+                    policy.state.postgres_url_ref.as_ref(),
+                    env_name,
+                    None,
+                    SecretPurpose::DataPlaneCredential,
+                )?
+                .context("gateway.state.backend=postgres requires a secret source")?;
             Ok(RuntimeGatewayStateStore::postgres(
-                env_name.to_string(),
+                env_name.unwrap_or("projected-secret").to_string(),
                 url,
             ))
         }
         "redis" => {
-            let env_name = policy
+            if policy
                 .state
                 .redis_url_env
                 .as_deref()
-                .map(|value| {
-                    gateway_exact_policy_identifier(value)
-                        .then_some(value)
-                        .context("gateway.state.redis_url_env must be non-empty without whitespace")
-                })
-                .transpose()?
-                .unwrap_or("PRODEX_GATEWAY_REDIS_URL");
-            let url = gateway_state_url_from_env("gateway.state.backend=redis", env_name)?;
-            Ok(RuntimeGatewayStateStore::redis(env_name.to_string(), url))
+                .is_some_and(|value| !gateway_exact_policy_identifier(value))
+            {
+                bail!("gateway.state.redis_url_env must be non-empty without whitespace");
+            }
+            let env_name = policy.state.redis_url_env.as_deref().or_else(|| {
+                (!resolver.production() && policy.state.redis_url_ref.is_none())
+                    .then_some(PRODEX_GATEWAY_REDIS_URL_ENV)
+            });
+            let url = resolver
+                .resolve(
+                    "gateway.state.backend=redis",
+                    policy.state.redis_url_ref.as_ref(),
+                    env_name,
+                    None,
+                    SecretPurpose::DataPlaneCredential,
+                )?
+                .context("gateway.state.backend=redis requires a secret source")?;
+            Ok(RuntimeGatewayStateStore::redis(
+                env_name.unwrap_or("projected-secret").to_string(),
+                url,
+            ))
         }
         other => {
             bail!("gateway.state.backend must be file, sqlite, postgres, or redis, got {other:?}")
         }
     }
-}
-
-fn gateway_state_url_from_env(context: &str, env_name: &str) -> Result<String> {
-    let url = env::var(env_name).with_context(|| format!("{context} requires {env_name}"))?;
-    if url.is_empty() {
-        bail!("{context} env {env_name} cannot be empty");
-    }
-    if url.chars().any(char::is_whitespace) {
-        bail!("{context} env {env_name} must not contain whitespace");
-    }
-    Ok(url)
 }
 
 pub(crate) fn gateway_validate_runtime_topology(

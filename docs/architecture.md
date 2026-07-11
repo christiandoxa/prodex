@@ -79,7 +79,10 @@ Key crates:
 - `prodex-runtime-store`: merge and compaction helpers for persisted runtime state.
 - `prodex-session-store`: persisted shared Codex session metadata helpers.
 - `prodex-secret-store`: development storage primitives and the bounded,
-  read-only projected external-secret provider described by ADR 1058.
+  read-only projected external-secret provider described by ADR 1058. Explicit
+  production gateway policy resolves typed credential references through that
+  provider at startup and rejects raw CLI/environment sources as described by
+  ADR 1059.
 - `prodex-profile-export`: encrypted import/export envelopes.
 
 Persistence rules:

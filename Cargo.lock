@@ -2653,6 +2653,7 @@ version = "0.273.0"
 dependencies = [
  "anyhow",
  "prodex-core",
+ "prodex-domain",
  "prodex-secret-store",
  "serde",
  "toml",

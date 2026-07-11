@@ -4,6 +4,7 @@ mod paths;
 mod types;
 mod validate;
 mod validate_helpers;
+mod validate_secrets;
 
 pub use self::cache::{
     RuntimePolicyCacheInvalidationPlan, clear_runtime_policy_cache,

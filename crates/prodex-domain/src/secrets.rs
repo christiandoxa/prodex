@@ -91,6 +91,7 @@ pub enum SecretPurpose {
     DataPlaneCredential,
     ControlPlaneCredential,
     ProviderCredential,
+    TelemetryExportCredential,
     OidcClientSecret,
     WebhookSigningSecret,
     BreakGlassCredential,

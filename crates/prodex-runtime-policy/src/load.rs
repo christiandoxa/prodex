@@ -71,6 +71,14 @@ pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicy
             .as_deref()
             .filter(|value| !value.is_empty())
             .map(str::to_string),
+        production: parsed.secrets.production,
+        projected_root: parsed
+            .secrets
+            .projected_root
+            .as_deref()
+            .map(|value| resolve_runtime_policy_path(root, value))
+            .transpose()?,
+        projected_provider: parsed.secrets.projected_provider,
     };
 
     Ok(Some(RuntimePolicyConfig {

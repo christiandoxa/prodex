@@ -1377,8 +1377,13 @@ while moving legacy adapter code behind enterprise boundaries.
   canonical root containment, bounded private files, exact version sidecars,
   redacted debug output, and rotation-visible rereads; see
   `docs/adr/1058-projected-external-secret-provider.md`. Runtime policy and the
-  gateway composition root still need to select this provider and reject raw
-  production credentials before the secret-provider target is complete.
+  gateway composition root now select it through typed `SecretRef` values and
+  reject CLI/environment credentials in explicit production mode; the
+  Kubernetes workload uses a private read-only projected volume rather than
+  Secret `envFrom`; see
+  `docs/adr/1059-production-gateway-secretref-wiring.md`. Live credential
+  rotation still needs a bounded background refresh that atomically preserves
+  last-known-good material.
   Gateway runtime launch
   config debug output redacts admin-token hashes, SSO/OIDC metadata, state-store
   URLs, local paths, observability bearer tokens, and guardrail webhook tokens
