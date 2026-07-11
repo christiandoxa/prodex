@@ -303,23 +303,6 @@ where
     serde_json::from_slice(&plaintext).map_err(redacted_decrypted_payload_parse_error)
 }
 
-/// Derives a legacy version-1 PBKDF2 key.
-///
-/// This remains source-compatible for callers that inspect old envelopes. New
-/// code should use the encrypt/decode APIs, whose key buffers zeroize on drop.
-#[deprecated(
-    note = "legacy v1 compatibility helper returns a raw key; use profile export encrypt/decode APIs"
-)]
-pub fn derive_profile_export_key(
-    password: &str,
-    salt: &[u8],
-    iterations: u32,
-) -> [u8; PROFILE_EXPORT_KEY_BYTES] {
-    let mut key = [0_u8; PROFILE_EXPORT_KEY_BYTES];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, iterations, &mut key);
-    key
-}
-
 fn derive_profile_export_key_into(
     password: &str,
     salt: &[u8],
