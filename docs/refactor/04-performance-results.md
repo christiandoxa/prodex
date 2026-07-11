@@ -5,7 +5,8 @@
 These results compare the clean `14e862f72a7a5cfd1a6c5828271c52cd13962bce` worktree with
 the completed refactor on the same host. The CPU governor was `performance`, frequency boost was
 enabled, and unrelated builds were stopped during samples. Each comparison uses five independent
-runs and the default 5% no-regression guard after variance analysis.
+runs and the default 5% no-regression guard after variance analysis for the metrics actually
+captured below.
 
 | Item | Value |
 | --- | --- |
@@ -86,6 +87,23 @@ teardown, so CPU/request and RSS are comparative harness metrics rather than iso
 | Throughput | 7.371 requests/s | 7.417 requests/s | +0.62% | 0.13% | 0.33% | improved |
 | CPU/request | 122.67 ms | 120.58 ms | -1.70% | 0.58% | 0.32% | improved |
 | Peak harness RSS | 92,784 KiB | 92,368 KiB | -0.45% | 0.75% | 1.02% | improved |
+
+### Matched evidence completeness
+
+The before/after commands did not capture allocation/request, queue-wait
+duration, or runtime-state lock-wait counters. Their absence is explicit and
+the measured table above must not be used as a proxy for them.
+
+| Required metric | Before | After | Available source | Result |
+| --- | --- | --- | --- | --- |
+| Allocation/request | unsupported; not captured | unsupported; not captured | no allocation counter in the benchmark or load harness | no no-regression claim |
+| Queue wait | unsupported; not captured | unsupported; not captured | log markers cover only some recovered/exhausted waits | pressure rate is not queue-wait latency; no no-regression claim |
+| Runtime-state lock wait | not captured | not captured | broker metrics expose cumulative total/count/max read-only | neither five-run output snapshotted the endpoint; no no-regression claim |
+
+The current harness now snapshots the existing broker lock-wait DTO before and
+after new internally launched proxy runs. No post-auth benchmark was rerun for
+this documentation change, so those new fields do not supply after-the-fact
+numbers for the table above. The 5% guard applies only to captured metrics.
 
 All 600 baseline requests succeeded. One run emitted one `profile_inflight_saturated` marker without
 an error response; the other four emitted no admission-pressure marker.
@@ -168,5 +186,14 @@ PRODEX_RUNTIME_PROXY_COMPACT_ACTIVE_LIMIT=12 \
 
 This is capacity evidence, not a default change: the production defaults remain conservative and
 bounded. The matched five-run baseline scenario above is the authoritative no-regression
-comparison. Slow upstreams, cancellation, partial streams, upgrade drain, and deterministic
-shutdown are additionally covered by focused gateway/runtime/storage tests.
+comparison for its captured metrics.
+
+| Scenario or behavior | Coverage type | Evidence in this report | Interpretation |
+| --- | --- | --- | --- |
+| Baseline | real load scenario | matched five-run before/after samples | authoritative only for captured latency, throughput, CPU/request, RSS, errors, and pressure markers |
+| Stress and spike | real load scenarios | listed single runs, including failures and one calibrated stress pass | capacity evidence; not matched no-regression evidence |
+| Slow client | real load scenario | implemented and load-self-tested; not run for this final comparison | no performance claim |
+| Slow upstream | real load scenario | implemented and load-self-tested; not run for this final comparison | no performance claim |
+| Long stream | real load scenario | implemented and load-self-tested; not run for this final comparison | no performance claim |
+| Soak | real load scenario | defined but not sampled here | no leak, drift, or performance claim |
+| Cancellation, partial streams, upgrade drain, deterministic shutdown | focused unit/integration coverage | correctness tests only | correctness evidence, not load-performance evidence |
