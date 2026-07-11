@@ -1,6 +1,11 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+mod allocation;
+pub use allocation::{
+    CountingGlobalAllocator, RuntimeAllocationSnapshot, runtime_allocation_snapshot,
+};
+
 pub const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_SAMPLES: usize = 7;
 pub const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_WARMUP_ITERATIONS: usize = 64;
 pub const DEFAULT_RUNTIME_PROXY_HOT_PATH_BENCH_MIN_MEASURE_ITERATIONS: usize = 32;
