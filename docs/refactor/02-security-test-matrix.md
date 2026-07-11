@@ -9,26 +9,26 @@ Status meanings:
 
 ## Phase 1 Mandatory Controls
 
-| Threat | Required control | Authoritative test/evidence | Current status |
-| --- | --- | --- | --- |
-| Remote shell exposed implicitly | tunnel opt-in, loopback-only local server, prominent warning | CLI default/limit tests; `expose_connection_flood_keeps_fixed_worker_count` | pass |
-| Capability leaks through URL/logs | one-time fragment bootstrap; header exchange; opaque redacted session | expose URL, status, `Debug`, and tunnel-error sentinel tests; ADR 1068 delivery exception | pass |
-| Bootstrap replay or stale sessions | single use, short TTL, rotation/revocation, secure cookie attributes | bootstrap expiry/replay, cookie, rotation, revoke, and idle tests | pass |
-| Cross-origin shell mutation | strict Origin/Host plus session-bound CSRF policy | missing/foreign Origin, duplicate header, Host, and mutation integration negatives | pass |
-| Expose resource exhaustion | bounded workers, clients, queues, input rate/body, idle timeout, shutdown | fixed-worker slow-socket flood, queue saturation, max-client, PTY join tests | pass |
-| Data plane forwards unknown routes | explicit data-plane allowlist; `Unknown` returns stable 404 before backend | gateway-server and deployed legacy backend call-count tests | pass |
-| Control plane accepts wrong route | explicit control-plane allowlist plus selected health probes | per-plane server matrix and unknown control-operation tests | pass |
-| Front/backend parser disagreement | one strict `CanonicalRequestTarget` used for classification, auth, audit, metrics, forwarding | shared backend classifier, exact-forwarding test, 10,000-case property corpus, cargo-fuzz target | pass |
-| Ambiguous request-target bypass | reject malformed encoding, encoded separators, backslashes, dot/repeated segments, whitespace, absolute form, non-ASCII | raw TCP negative corpus plus `canonical_request_target` fuzz harness | pass |
-| Route alias crosses planes | alias publication validates typed target plane | canonical/versioned/compatibility alias kind-and-plane pairs | pass for current static aliases |
-| OIDC/JWKS SSRF | one validated URL/origin/address/redirect policy in production | malicious URL/document/redirect/IP/NAT64/6to4 and pinned connected-peer tests | pass |
-| OIDC network I/O stalls auth | immutable cache snapshot; bounded background refresh/LKG | parsed-JWKS `ArcSwap`, post-prefetch env mutation, request-path no-I/O, stale/LKG, and shutdown tests | pass |
-| OIDC resource exhaustion | body/time/cache/concurrency/retry bounds | oversized/slow body, 128-key/cache/resolver caps, timeout/backoff tests and OIDC fuzz harness | pass |
-| Runtime configuration changes under active requests | one typed startup snapshot; no core proxy/OIDC/broker/provider tuning reads from the request or polling hot path | `runtime_config_reads_each_environment_key_once`, `runtime_config_aggregates_errors_without_values`, `runtime_config_failure_precedes_listener_bind`, post-start OIDC env-mutation tests, Gemini hot-path config guard, and app Clippy with warnings denied | pass; remaining `cwd`, temp-dir, user-shell, and external CLI discovery reads are request inputs or discovery, not mutable tuning |
-| Broker secret visible in argv/env | bounded versioned inherited IPC bootstrap | exact command-plan snapshot, hidden CLI rejection, malformed/truncated/oversized bootstrap tests | pass |
-| Broker secret leaks via formatting | redacted secret wrapper, no raw `Display`, zeroize on drop | `Debug`, `Display`, capability-error, log, audit, header-sensitivity, and process-plan sentinels | pass |
-| Broker secret persists in registry/backup/health | metadata/secret separation and non-secret health identity | exact registry-backup and health payload snapshots, legacy-field negatives, instance-bound capability rotation tests, and native `windows-security` CI coverage | pass on Unix; Windows native gate configured, first CI execution pending |
-| Timing oracle in bearer comparison | one constant-time comparison helper | centralized caller inventory plus admin-auth/cleanup functional tests | pass |
+| Threat | Required control | Test/evidence | File(s) | Current status |
+| --- | --- | --- | --- | --- |
+| Remote shell exposed implicitly | tunnel opt-in, loopback-only local server, prominent warning | CLI default/limit tests; `expose_connection_flood_keeps_fixed_worker_count` | `crates/prodex-cli/tests/src/expose.rs`; `crates/prodex-app/src/expose/tests.rs` | pass |
+| Capability leaks through URL/logs | one-time fragment bootstrap; header exchange; opaque redacted session | URL, status, `Debug`, and tunnel-error sentinels | `crates/prodex-app/src/expose/tests.rs`; `docs/adr/1068-expose-session-tunnel-model.md` | pass |
+| Bootstrap replay or stale sessions | single use, short TTL, rotation/revocation, secure cookie attributes | expiry/replay, cookie, rotation, revoke, and idle tests | `crates/prodex-app/src/expose/tests.rs` | pass |
+| Cross-origin shell mutation | strict Origin/Host plus session-bound CSRF policy | missing/foreign Origin, duplicate header, Host, and mutation negatives | `crates/prodex-app/src/expose/tests.rs` | pass |
+| Expose resource exhaustion | bounded workers, clients, queues, input rate/body, idle timeout, shutdown | slow-socket flood, queue saturation, max-client, and PTY join tests | `crates/prodex-app/src/expose/tests.rs` | pass |
+| Data plane forwards unknown routes | explicit data-plane allowlist; `Unknown` returns stable 404 before backend | server and deployed-backend call-count tests | `crates/prodex-gateway-server/src/tests.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_application_boundary.rs` | pass |
+| Control plane accepts wrong route | explicit control-plane allowlist plus selected health probes | per-plane matrix and unknown-control-operation tests | `crates/prodex-gateway-server/src/tests.rs`; `crates/prodex-gateway-http/tests/http_policy.rs` | pass |
+| Front/backend parser disagreement | one exact `CanonicalRequestTarget` object used for classification, auth, audit, metrics, and forwarding | shared-parser corpus and exact-forwarding tests | `crates/prodex-gateway-server/src/lib.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline.rs` | partial: the Hyper front and loopback backend still parse separate objects; the in-process handler migration is pending |
+| Ambiguous request-target bypass | reject malformed encoding, encoded separators, backslashes, dot/repeated segments, whitespace, absolute form, non-ASCII | raw TCP corpus, 10,000-case property test, fuzz harness | `crates/prodex-gateway-http/tests/http_policy.rs`; `fuzz/fuzz_targets/canonical_request_target.rs` | pass |
+| Route alias crosses planes | alias publication validates typed target plane | canonical/versioned/compatibility kind-and-plane pairs | `crates/prodex-gateway-http/src/route.rs`; `crates/prodex-gateway-http/tests/http_policy/routing.rs` | pass for current static aliases |
+| OIDC/JWKS SSRF | one validated URL/origin/address/redirect policy in production | malicious document/redirect/IP/NAT64/6to4 and connected-peer tests | `crates/prodex-authn/tests/oidc.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/tests.rs` | pass |
+| OIDC network I/O stalls auth | immutable cache snapshot; bounded background refresh/LKG | parsed-JWKS `ArcSwap`, request-path no-I/O, stale/LKG, and shutdown tests | `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/cache.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/tests.rs` | pass |
+| OIDC resource exhaustion | body/time/cache/concurrency/retry bounds | oversized/slow body, cache/resolver caps, backoff tests, fuzz harness | `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/tests.rs`; `fuzz/fuzz_targets/oidc_endpoint_policy.rs` | pass |
+| Runtime configuration changes under active requests | one typed startup snapshot; no tuning reads on hot paths | loader count/error/listener-order tests and hot-path guards | `crates/prodex-app/src/runtime_config`; `crates/prodex-app/tests/src/runtime_tuning.rs`; `scripts/ci/config-boundary-guard.mjs` | partial: core tuning is snapshotted, but gateway OIDC/provider/state/log configuration still performs separate startup environment reads and the claimed post-start mutation test is missing |
+| Broker secret visible in argv/env | bounded versioned inherited IPC bootstrap | command-plan snapshot and malformed/truncated/oversized bootstrap tests | `crates/prodex-runtime-broker/src/process.rs`; `crates/prodex-runtime-broker/tests/src/process.rs` | pass |
+| Broker secret leaks via formatting | redacted wrapper, no raw `Display`, zeroize on drop | formatting, error, log, audit, header, and process-plan sentinels | `crates/prodex-runtime-broker/src/admin.rs`; `crates/prodex-runtime-broker/tests/src/lib.rs` | pass |
+| Broker secret persists in registry/backup/health | metadata/secret separation and non-secret health identity | registry/backup/health snapshots, rotation, native Windows gate | `crates/prodex-app/src/runtime_broker/registry/store.rs`; `.github/workflows/ci.yml` | pass on Unix; Windows native gate configured, first CI execution pending |
+| Timing oracle in bearer comparison | one constant-time comparison helper | centralized caller inventory and functional tests | `crates/prodex-runtime-broker/src/admin.rs`; `crates/prodex-app/src/runtime_broker/admin.rs` | pass |
 
 The original focused baseline passed 65 boundary cases across ten suites, seven expose tests, and
 five gateway OIDC tests, while still asserting insecure compatibility behavior. Phase 1 evidence
@@ -36,29 +36,31 @@ above comes from the new contract tests and is separate from that baseline.
 
 ## Cross-Cutting Acceptance Controls
 
-| Threat | Required proof | Status |
-| --- | --- | --- |
-| Credential-scope bypass | production application/authn gate, legacy differential matrix, negative auth tests for every data/control route and credential kind | pass; production data/control routing uses canonical principals and typed operation scopes, with anonymous behavior isolated as an explicit compatibility principal |
-| Cross-tenant access | authz plus storage-adapter negative tests | pass; tenant-bound data/control admission and SQLite/Postgres reconciliation reject mismatched ownership |
-| Mid-stream rotation | stream-commit/affinity regressions | pass; commit-state retry planner forbids provider rotation after first byte or cancellation and focused HTTP/WebSocket affinity tests pass |
-| Lost accounting on cancellation | partial-stream reconciliation tests | pass; production stream exits classify completed, interrupted, and cancelled outcomes, commit observed usage, and release the remainder through the application reconciliation port |
-| Unbounded network-facing work | capacity, timeout, overload, cancellation test for each queue/cache/retry | pass for exposed shell, gateway admission, OIDC caches/refresh, broker bootstrap, provider attempts, and background queues; the default historical stress scenario still exceeds its raw diagnostic-marker threshold on both the baseline and refactor and is reported separately |
-| Request-path schema migration | architecture guard and adapter tests | pass; the production-boundary guard rejects migration/DDL fixtures and storage reconciliation tests keep schema work outside request paths |
-| Secret-bearing CLI arg or URL query reintroduced | `ci:secret-boundary-guard` scans production Rust/CLI/docs plus fixture regions and rejects malicious self-tests | pass |
-| Unsafe code spreads | workspace guard and platform-module safety contract | pass; workspace `unsafe_op_in_unsafe_fn` denial and allow/size/boundary guards pass, while platform-specific unsafe calls remain isolated with per-call safety contracts |
-| Dependency/supply-chain compromise | locked builds, full audit/deny policy, immutable actions/images, SBOM/checksums/provenance verification, Gitleaks | pass |
+| Threat | Required proof | Test/evidence | File(s) | Status |
+| --- | --- | --- | --- | --- |
+| Credential-scope bypass | production canonical authn/application gate for every credential kind | compatibility differential and per-plane negatives | `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_boundary.rs`; `crates/prodex-application/src/auth/request.rs` | partial: production still calls the compatibility authentication planner; canonical `plan_application_request_authentication` has no production caller |
+| Cross-tenant access | authoritative application authz plus storage-adapter negatives | tenant/scope matrices and reconciliation tests | `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_tenant_scope.rs`; `crates/prodex-storage/tests/reconciliation_lifecycle.rs` | partial: storage/admission reject mismatches, but legacy admin use cases still own some resource-scope decisions |
+| Control-plane replay or duplicate mutation | fail-closed canonical idempotency for every mutation | missing-key stable error and replay/conflict tests | `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_router.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs` | pass |
+| Provider secret escapes application boundary | configured `SecretRef` reaches invocation and resolves only in adapter | configured-reference, rotation, redaction, and resolution-failure tests | `crates/prodex-app/src/app_commands/runtime_launch/gateway_secret_config.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs` | missing: composition currently copies projected provider material into cloneable strings and invocation uses a synthetic reference |
+| Mid-stream rotation | stream-commit/affinity regressions | HTTP/WebSocket commit-state tests | `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_spend.rs`; `crates/prodex-app/tests/src/runtime_proxy/affinity.rs` | pass |
+| Lost accounting on cancellation | partial-stream reconciliation | completed/interrupted/cancelled reconciliation tests | `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs`; `crates/prodex-storage/tests/reconciliation_lifecycle.rs` | pass |
+| Unbounded network-facing work | capacity, timeout, overload, cancellation test for every queue/cache/retry | expose/gateway/OIDC/broker/load bounds | `crates/prodex-app/src/expose/tests.rs`; `tests/load/scenarios.json`; `tests/load/runtime-proxy-load.mjs` | pass for implemented paths; baseline and refactor default stress raw-marker thresholds remain documented failures |
+| Request-path schema migration | architecture guard and adapter tests | negative DDL fixture and reconciliation tests | `scripts/ci/production-boundary-guard.mjs`; `crates/prodex-storage/tests/reconciliation_lifecycle.rs` | pass |
+| Secret-bearing CLI arg or URL query reintroduced | source guard with malicious self-tests | `ci:secret-boundary-guard` | `scripts/ci/secret-boundary-guard.mjs` | pass |
+| Unsafe code spreads | workspace guard and platform safety contract | Clippy/allow/size/boundary guards | `Cargo.toml`; `scripts/ci/allow-attribute-guard.mjs`; `crates/prodex-secret-store/src/secure_file` | pass |
+| Dependency/supply-chain compromise | locked audit/deny, immutable inputs, SBOM, checksums, provenance, Gitleaks | supply-chain job and self-test guard | `.github/workflows/ci.yml`; `.github/workflows/npm-publish.yml`; `scripts/ci/supply-chain-guard.mjs` | pass |
 
 ## Phase 4 Secret-File Controls
 
-| Threat | Required control | Authoritative test/evidence | Current status |
-| --- | --- | --- | --- |
-| Final or parent link redirects a secret operation | handle-relative traversal, no-follow final opens, reparse rejection, and handle identity before replace/remove | Unix final/parent symlink, replacement, and refresh-lock identity regressions; cfg(windows) reparse tests; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
-| Weak owner, mode, ACL, or parent trust exposes a secret | current-owner `0600` files; trusted non-writable parents; projected owner/root plus only `0440`-compatible group read; private Windows DACL | Unix owner/mode, group-readable/group-writable, parent-mode, projected-mode tests; Windows DACL unit contract; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
-| Partial or oversized secret file is consumed | metadata precheck plus bounded handle read with a one-byte overflow sentinel | file backend, projected provider, and refresh-result oversized tests | pass |
-| Secret write publishes partial or public content | same-directory private temporary, flush, atomic replace, directory flush/Windows write-through, and post-replace identity check | atomic inode replacement, `0600`, no-temp-residue, and symlink-target preservation tests; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
-| Kubernetes rotation mixes generations | `..data` is the sole intentional link, its target is one normal component, and value/version read through one pinned generation-directory handle | atomic projection rotation, generation anchoring, escape, nested-target, and cfg(windows) controlled-reparse tests; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
-| Secret material survives or escapes generic APIs | zeroize-on-drop owners, no material `Clone` or serde, redacted formatting, and closure-scoped byte exposure | `SecretMaterial` compile-fail doctests, zeroize trait checks, redaction tests, and migrated resolver/provider call sites | pass |
-| Unsupported keyring appears production-capable | production configuration rejects the explicitly unsupported metadata-only stub, whose operations also fail unsupported | application selection and secret-store operation negatives | pass |
+| Threat | Required control | Test/evidence | File(s) | Current status |
+| --- | --- | --- | --- | --- |
+| Final or parent link redirects a secret operation | handle-relative traversal, no-follow opens, reparse rejection, identity checks | Unix link/replacement/refresh-lock tests and native Windows gate | `crates/prodex-secret-store/src/secure_file`; `crates/prodex-secret-store/tests/src/tests.rs`; `.github/workflows/ci.yml` | pass on Unix; Windows native gate configured, first CI execution pending |
+| Weak owner, mode, ACL, or parent trust exposes a secret | current-owner `0600`, trusted parents, projected `0440`, private Windows DACL | mode/owner/parent/projected and malicious-group-ACE tests | `crates/prodex-secret-store/src/secure_file/windows.rs`; `crates/prodex-secret-store/tests/src/tests.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
+| Partial or oversized secret file is consumed | metadata precheck and bounded read with overflow sentinel | backend/provider/refresh custom-bound tests | `crates/prodex-secret-store/src/file_backend.rs`; `crates/prodex-secret-store/src/projected_provider.rs` | pass |
+| Secret write publishes partial or public content | private temporary, flush, atomic replace, directory flush/write-through, identity check | atomic replacement, `0600`, residue, and symlink-target tests | `crates/prodex-secret-store/src/file_backend.rs`; `crates/prodex-secret-store/tests/src/tests.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
+| Kubernetes rotation mixes generations | pin and validate one `..data` generation | rotation, anchoring, escape, nested-target, and reparse tests | `crates/prodex-secret-store/src/projected_provider.rs`; `crates/prodex-secret-store/tests/projected_secret_provider.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
+| Secret material survives or escapes generic APIs | zeroize-on-drop, no material `Clone`/serde, closure-scoped exposure | compile-fail doctests and zeroize/redaction tests | `crates/prodex-domain/src/secrets.rs`; `crates/prodex-domain/tests/secrets.rs` | partial: the core type is safe, but production provider/telemetry/webhook snapshots still retain cloneable raw strings |
+| Unsupported keyring appears production-capable | production rejects the metadata-only stub | selection and operation negatives | `crates/prodex-secret-store/src/keyring_backend.rs`; `crates/prodex-secret-store/tests/src/keyring.rs` | pass |
 
 Compatibility note: `SecretMaterial::expose_secret`, its generic serde implementations, and its
 value `Clone` were removed; callers use `with_exposed_secret`. `SecretValue` also no longer clones.
@@ -72,16 +74,16 @@ Windows runtime-pass claim until its first successful CI run.
 
 ## Phase 7 Supply-Chain Evidence
 
-| Control | Authoritative test/evidence | Status |
-| --- | --- | --- |
-| Immutable GitHub Actions | third-party `uses:` sites pinned to verified 40-character upstream commits with tag comments; `ci:supply-chain-guard` | pass |
-| Exact Rust/MSRV | root/workspace `rust-version`, `rust-toolchain.toml`, every CI setup, and Docker builder use 1.97.0; clippy/rustfmt components installed | pass |
-| Immutable container inputs | Rust, Debian, PostgreSQL, Redis, Syft, and Gitleaks use verified registry manifest-list digests; Kubernetes keeps its release image immutable by digest; Docker/Compose guards and `docker build --check` | pass |
-| License and dependency policy | `cargo deny check advisories bans licenses sources`; exact-version duplicate exceptions with current transitive owners | pass |
-| Unused direct dependencies | pinned `cargo-machete 0.9.2 --with-metadata`; root `postgres` and `prodex-cli` `prodex_shared_types` removed | pass |
-| Release integrity | SPDX JSON SBOM and binaries attested; release job verifies attestations, generates `SHA256SUMS`, and verifies it before publishing | pass |
-| Credential leak scan | digest-pinned Gitleaks job plus self-testing CLI/URL capability guard | pass |
-| Production secret projection | gateway and migration Job resolve Kubernetes `SecretRef` files under `/run/secrets/prodex` | partial: gateway and migrator projected-provider paths pass; the zero-replica control plane remains a placeholder pending its dedicated typed-secret adapter |
+| Control | Test/evidence | File(s) | Status |
+| --- | --- | --- | --- |
+| Immutable GitHub Actions | full-SHA pins with readable tag comments and guard | `.github/workflows`; `scripts/ci/supply-chain-guard.mjs` | pass |
+| Exact Rust/MSRV | manifests, workflows, Docker builder, and components use 1.97.0 | `Cargo.toml`; `rust-toolchain.toml`; `Dockerfile` | pass |
+| Immutable container inputs | verified image digests and Docker/Compose checks | `Dockerfile`; `compose.yaml`; `deploy/kubernetes/prodex-gateway.yaml` | pass |
+| License and dependency policy | audit plus deny advisories/bans/licenses/sources | `deny.toml`; `.github/workflows/ci.yml` | pass |
+| Unused direct dependencies | pinned `cargo-machete 0.9.2 --with-metadata` | `.github/workflows/ci.yml` | pass |
+| Release integrity | SPDX SBOM, attestations, and verified `SHA256SUMS` | `.github/workflows/npm-publish.yml` | pass |
+| Credential leak scan | digest-pinned Gitleaks and CLI/URL capability guard | `.github/workflows/ci.yml`; `scripts/ci/secret-boundary-guard.mjs` | pass |
+| Production secret projection | gateway and migration Job resolve projected `SecretRef` files | `deploy/kubernetes/prodex-gateway.yaml`; `src/bin/prodex-gateway.rs` | partial: the zero-replica control plane still lacks a dedicated production policy/typed-secret adapter |
 
 ## Characterization Order
 
