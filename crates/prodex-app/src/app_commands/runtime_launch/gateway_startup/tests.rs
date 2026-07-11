@@ -30,6 +30,43 @@ fn gateway_args() -> GatewayArgs {
 }
 
 #[test]
+fn gateway_mode_mismatch_fails_before_secret_resolution_or_bind() {
+    let root = temp_root("gateway-service-mode-mismatch");
+    std::fs::write(
+        root.join(prodex_runtime_policy::PRODEX_POLICY_FILE_NAME),
+        r#"
+version = 1
+service_mode = "control-plane"
+
+[secrets]
+production = true
+projected_root = "projected"
+projected_provider = "external"
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "external", name = "postgres-url" }
+
+[[gateway.admin_tokens]]
+name = "operations"
+token_ref = { provider = "external", name = "admin-token" }
+role = "admin"
+"#,
+    )
+    .unwrap();
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let mut args = gateway_args();
+    args.listen = Some("not-a-listener-address".to_string());
+    args.api_key = Some("must-not-be-read".to_string());
+
+    let error = start_gateway_backend(args).unwrap_err().to_string();
+
+    assert!(error.contains("service_mode=control-plane"), "{error}");
+    assert!(!error.contains("secret"), "{error}");
+    assert!(!error.contains("bind"), "{error}");
+}
+
+#[test]
 fn runtime_config_failure_precedes_secret_resolution_and_bind() {
     let root = temp_root("gateway-runtime-config-pre-bind");
     let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
