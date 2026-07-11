@@ -10,6 +10,7 @@ const MANIFEST = "crates/prodex-application/Cargo.toml";
 const SRC_DIR = "crates/prodex-application/src";
 const ALLOWED_DEPENDENCIES = new Set([
   "prodex_authn",
+  "prodex_authz",
   "prodex_config",
   "prodex_control_plane",
   "prodex_domain",
@@ -311,11 +312,14 @@ export function validateSource(sourceText, sourcePath = "source.rs") {
       }
     }
   });
-  if (sourcePath.endsWith("crates/prodex-application/src/lib.rs") || sourcePath === "src/lib.rs") {
-    for (const [snippet, message] of REQUIRED_CONTROL_PLANE_HTTP_BINDING_SNIPPETS) {
-      if (!sourceText.includes(snippet)) {
-        errors.push(`${sourcePath}: ${message}; missing '${snippet}'`);
-      }
+  return errors;
+}
+
+export function validateApplicationBindings(sourceText, sourcePath = `${SRC_DIR}/**/*.rs`) {
+  const errors = [];
+  for (const [snippet, message] of REQUIRED_CONTROL_PLANE_HTTP_BINDING_SNIPPETS) {
+    if (!sourceText.includes(snippet)) {
+      errors.push(`${sourcePath}: ${message}; missing '${snippet}'`);
     }
   }
   return errors;
@@ -335,10 +339,14 @@ async function rustFilesUnder(dir) {
 async function validateSources() {
   const files = await rustFilesUnder(path.join(repoRoot, SRC_DIR));
   const errors = [];
+  const sources = [];
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
-    errors.push(...validateSource(source, path.relative(repoRoot, file)));
+    const relativePath = path.relative(repoRoot, file);
+    errors.push(...validateSource(source, relativePath));
+    sources.push(`// ${relativePath}\n${source}`);
   }
+  errors.push(...validateApplicationBindings(sources.join("\n")));
   return errors;
 }
 
@@ -354,6 +362,7 @@ name = "prodex-application"
 [dependencies]
 prodex_control_plane = { workspace = true }
 prodex_authn = { workspace = true }
+prodex_authz = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_gateway_core = { workspace = true }
 prodex_gateway_http = { workspace = true }
@@ -470,35 +479,31 @@ let _ = plan_gateway_control_plane_route_error_response(error);
 let _ = ApplicationControlPlaneIdempotencyErrorStatus::MethodNotAllowed;
 `;
   assertSelfTest(
-    validateSource(validBindingSource, "crates/prodex-application/src/lib.rs").length === 0,
-    "valid control-plane HTTP route binding rejected",
+    validateApplicationBindings(validBindingSource).length === 0,
+    "valid split application binding rejected",
   );
   assertSelfTest(
-    validateSource(
+    validateApplicationBindings(
       validBindingSource.replaceAll("validate_control_plane_http_action(&action, http)?", ""),
-      "crates/prodex-application/src/lib.rs",
     ).some((error) => error.includes("precomputed-fingerprint idempotency")),
-    "missing precomputed-fingerprint route binding accepted",
+    "missing binding across application src/**/*.rs accepted",
   );
   assertSelfTest(
-    validateSource(
+    validateApplicationBindings(
       validBindingSource.replace('message: "control-plane route is invalid"', 'message: format!("{operation:?}")'),
-      "crates/prodex-application/src/lib.rs",
     ).some((error) => error.includes("route/action mismatch response")),
     "route/action mismatch response leak accepted",
   );
   assertSelfTest(
-    validateSource(
+    validateApplicationBindings(
       validBindingSource.replace("let _ = plan_gateway_control_plane_route_error_response(error);", ""),
-      "crates/prodex-application/src/lib.rs",
     ).some((error) => error.includes("gateway control-plane route error")),
     "missing gateway route error response delegation accepted",
   );
   assertSelfTest(
-    validateSource(
-      validBindingSource.replace("#![forbid(unsafe_code)]", ""),
-      "crates/prodex-application/src/lib.rs",
-    ).some((error) => error.includes("forbid unsafe code")),
+    validateApplicationBindings(validBindingSource.replace("#![forbid(unsafe_code)]", "")).some((error) =>
+      error.includes("forbid unsafe code"),
+    ),
     "missing application unsafe forbid accepted",
   );
 }

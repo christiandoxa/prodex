@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/fuzz/target/
 /node_modules/
 /release/
 

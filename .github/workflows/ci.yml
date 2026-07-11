@@ -31,12 +31,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -85,15 +85,41 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
+          toolchain: 1.97.0
           components: rustfmt
 
       - name: Check formatting
         run: cargo fmt --check
+
+  fuzz-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install pinned fuzz toolchain
+        run: rustup toolchain install nightly-2026-07-11 --profile minimal
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked --version 0.13.2
+
+      - name: Validate the fuzz dependency lock
+        run: cargo metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 >/dev/null
+
+      - name: Build all fuzz targets
+        run: cargo +nightly-2026-07-11 fuzz build --fuzz-dir fuzz
 
   docs-lint:
     runs-on: ubuntu-latest
@@ -101,10 +127,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -118,7 +144,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Scan repository for leaked credentials
         shell: bash
@@ -126,7 +152,7 @@ jobs:
           set -euo pipefail
           docker run --rm \
             -v "${PWD}:/repo" \
-            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             detect --source /repo --no-git --redact --no-banner --config /repo/.gitleaks.toml
 
   process-guard:
@@ -135,18 +161,20 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Enforce churn hygiene
         shell: bash
@@ -213,6 +241,12 @@ jobs:
       - name: Enforce Rust env mutation guard
         run: npm run ci:env-mutation-guard
 
+      - name: Enforce secret-bearing argument and URL guard
+        run: npm run ci:secret-boundary-guard
+
+      - name: Enforce immutable supply-chain pins
+        run: npm run ci:supply-chain-guard
+
       - name: Enforce crate boundaries
         run: npm run ci:crate-boundary
 
@@ -227,6 +261,7 @@ jobs:
           npm run ci:enterprise-id-boundary-guard
           npm run ci:enterprise-binaries-guard
           npm run ci:application-boundary-guard
+          npm run ci:production-boundary-guard
           npm run ci:auth-boundary-guard
           npm run ci:config-boundary-guard
           npm run ci:control-plane-boundary-guard
@@ -262,22 +297,24 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
@@ -290,7 +327,7 @@ jobs:
 
       - name: Upload redacted backup and restore evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: backup-restore-drill-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/backup-restore-drill/evidence.json
@@ -303,10 +340,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -324,29 +361,37 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          package-manager-cache: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
+          toolchain: 1.97.0
           components: clippy
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-bin: false
 
       - name: Cache cargo supply-chain tools
         id: cargo-supply-chain-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/bin/cargo-audit
             ~/.cargo/bin/cargo-deny
-          key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0
+            ~/.cargo/bin/cargo-machete
+          key: ${{ runner.os }}-cargo-supply-chain-tools-audit-0.22.1-deny-0.19.0-machete-0.9.2
 
       - name: Run clippy warning gate
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
@@ -386,7 +431,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if cargo deny check advisories sources; then
+            if cargo deny check advisories bans licenses sources; then
               exit 0
             fi
             if [ "$attempt" -eq 3 ]; then
@@ -395,13 +440,43 @@ jobs:
             sleep "$((attempt * 5))"
           done
 
+      - name: Install cargo-machete
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-machete >/dev/null 2>&1; then
+            cargo install cargo-machete --locked --version 0.9.2
+          fi
+
+      - name: Reject unused direct dependencies
+        run: cargo machete --with-metadata
+
+      - name: Generate source SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${PWD}:/source:ro" \
+            anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f \
+            dir:/source --exclude './target/**' --exclude './.git/**' -o spdx-json \
+            > source-sbom.spdx.json
+          node -e 'JSON.parse(require("node:fs").readFileSync("source-sbom.spdx.json", "utf8"))'
+
+      - name: Upload source SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: source-sbom
+          path: source-sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 14
+
   release-sync:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
@@ -423,19 +498,21 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -456,25 +533,27 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Prebuild auto-rotate integration tests
-        run: cargo test --test auto_rotate --no-run
+        run: cargo test --locked --test auto_rotate --no-run
 
       - name: Run auto-rotate integration test shards
         run: node scripts/ci/auto-rotate-shards.mjs --jobs 6 --timings --timings-json
@@ -489,20 +568,22 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Run profile command internal tests
         run: |
-          cargo test -p prodex-app --lib profile_commands_internal_tests:: -- --test-threads=1
+          cargo test --locked -p prodex-app --lib profile_commands_internal_tests:: -- --test-threads=1
 
   main-internal-core:
     name: Main internal core (${{ matrix.label }})
@@ -534,16 +615,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Run main internal core tests ${{ matrix.label }}
         shell: bash
@@ -566,16 +649,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Run env-sensitive parallel guard
         run: node scripts/ci/runtime-env-parallel.mjs --runs 2 --test-threads 4
@@ -590,10 +675,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -625,16 +710,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Validate runtime CI manifest
         if: matrix.validate_manifest == 'true'
@@ -662,7 +749,7 @@ jobs:
 
       - name: Upload runtime proxy shard diagnostics
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: runtime-proxy-${{ matrix.suite }}-diagnostics
           path: ${{ env.RUNTIME_PROXY_ARTIFACT_DIR }}
@@ -678,16 +765,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Check runtime proxy benchmark regression thresholds
         env:
@@ -703,10 +792,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -778,16 +867,18 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Prepare runtime stress diagnostics
         shell: bash
@@ -860,7 +951,7 @@ jobs:
 
       - name: Upload runtime stress diagnostics
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: runtime-stress-${{ matrix.id }}-diagnostics
           path: ${{ env.RUNTIME_STRESS_ARTIFACT_DIR }}
@@ -871,6 +962,7 @@ jobs:
     needs:
       - changes
       - fmt
+      - fuzz-build
       - docs-lint
       - secret-scan
       - process-guard
@@ -897,10 +989,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
@@ -950,7 +1042,7 @@ jobs:
 
       - name: Upload CI duration telemetry
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ci-duration-telemetry
           path: |

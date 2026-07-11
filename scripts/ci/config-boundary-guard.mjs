@@ -9,6 +9,37 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const CONFIG_MANIFEST = "crates/prodex-config/Cargo.toml";
 const CONFIG_SRC_DIR = "crates/prodex-config/src";
 const CONFIG_LIB = "crates/prodex-config/src/lib.rs";
+const RUNTIME_CONFIG_ENVIRONMENT = "crates/prodex-app/src/runtime_config/environment.rs";
+const RUNTIME_GEMINI_HOT_PATH_FILES = Object.freeze([
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_extensions.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_memory.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_session.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_tool_output.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live/connection.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live_translation.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool.rs",
+]);
+const RUNTIME_GEMINI_ENV_KEYS = Object.freeze([
+  "PRODEX_GEMINI_EXTENSION_DIRS",
+  "PRODEX_GEMINI_EXTENSIONS",
+  "PRODEX_GEMINI_EXPORT_FILE",
+  "PRODEX_GEMINI_CHECKPOINT_EXPORT_FILE",
+  "PRODEX_GEMINI_SESSION_FILE",
+  "PRODEX_GEMINI_CHECKPOINT_FILE",
+  "PRODEX_GEMINI_IMPORT_FILE",
+  "PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD",
+  "PRODEX_GEMINI_TOOL_OUTPUT_DIR",
+  "PRODEX_GEMINI_DISABLE_MEMORY",
+  "PRODEX_GEMINI_DISABLE_CONTEXT_FILES",
+  "PRODEX_GEMINI_LOAD_MEMORY",
+  "PRODEX_GEMINI_MEMORY",
+  "PRODEX_GEMINI_EXTENSION_MEMORY",
+  "PRODEX_GEMINI_LIVE_URL",
+  "PRODEX_GEMINI_LIVE_MODEL",
+  "PRODEX_GEMINI_STICKY_FRESH_OAUTH",
+]);
+const RUNTIME_ENV_READ_PATTERN = /\b(?:std\s*::\s*)?env\s*::\s*(?:var|var_os|vars|vars_os)\s*\(/u;
 const ALLOWED_DEPENDENCIES = new Set(["prodex_domain"]);
 const ALLOWED_DEV_DEPENDENCIES = new Set([]);
 const FORBIDDEN_DEPENDENCIES = new Set([
@@ -165,6 +196,24 @@ export function validateConfigRequiredContracts(sourceText, sourcePath = CONFIG_
   return errors;
 }
 
+export function validateRuntimeGeminiConfigBoundary(environmentSource, hotPathSources) {
+  const errors = [];
+  for (const key of RUNTIME_GEMINI_ENV_KEYS) {
+    const count = environmentSource.split(`"${key}"`).length - 1;
+    if (count !== 1) {
+      errors.push(`${RUNTIME_CONFIG_ENVIRONMENT}: expected exactly one startup read entry for ${key}, found ${count}`);
+    }
+  }
+  for (const [file, source] of hotPathSources) {
+    source.split(/\r?\n/u).forEach((line, index) => {
+      if (RUNTIME_ENV_READ_PATTERN.test(line)) {
+        errors.push(`${file}:${index + 1}: runtime Gemini hot path must use RuntimeConfig, not '${line.trim()}'`);
+      }
+    });
+  }
+  return errors;
+}
+
 async function rustFilesUnder(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const files = [];
@@ -188,6 +237,14 @@ async function validateConfigSources() {
     }
   }
   return errors;
+}
+
+async function validateRuntimeGeminiConfigSources() {
+  const environmentSource = await fs.readFile(path.join(repoRoot, RUNTIME_CONFIG_ENVIRONMENT), "utf8");
+  const hotPathSources = await Promise.all(
+    RUNTIME_GEMINI_HOT_PATH_FILES.map(async (file) => [file, await fs.readFile(path.join(repoRoot, file), "utf8")]),
+  );
+  return validateRuntimeGeminiConfigBoundary(environmentSource, hotPathSources);
 }
 
 function assertSelfTest(condition, message) {
@@ -317,6 +374,23 @@ message: "configuration is not currently available"
     ).some((error) => error.includes("forbid(unsafe_code)")),
     "missing config unsafe forbid accepted",
   );
+  const runtimeEnvironment = RUNTIME_GEMINI_ENV_KEYS.map((key) => `"${key}",`).join("\n");
+  assertSelfTest(
+    validateRuntimeGeminiConfigBoundary(runtimeEnvironment, [["good.rs", "env::current_dir();"]]).length === 0,
+    "typed Gemini runtime config rejected",
+  );
+  assertSelfTest(
+    validateRuntimeGeminiConfigBoundary(runtimeEnvironment, [["bad.rs", "let value = std::env::var(\"KEY\");"]]).some(
+      (error) => error.includes("RuntimeConfig"),
+    ),
+    "Gemini request-path environment read accepted",
+  );
+  assertSelfTest(
+    validateRuntimeGeminiConfigBoundary(runtimeEnvironment.replace('"PRODEX_GEMINI_LIVE_MODEL",', ""), []).some(
+      (error) => error.includes("PRODEX_GEMINI_LIVE_MODEL"),
+    ),
+    "missing Gemini startup key accepted",
+  );
 }
 
 async function main() {
@@ -325,7 +399,11 @@ async function main() {
     return;
   }
   const manifest = await fs.readFile(path.join(repoRoot, CONFIG_MANIFEST), "utf8");
-  const errors = [...validateConfigManifest(manifest), ...(await validateConfigSources())];
+  const errors = [
+    ...validateConfigManifest(manifest),
+    ...(await validateConfigSources()),
+    ...(await validateRuntimeGeminiConfigSources()),
+  ];
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);
     process.exitCode = 1;

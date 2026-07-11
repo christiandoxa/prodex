@@ -307,6 +307,26 @@ function parseManifestDependencies(contents) {
   return deps;
 }
 
+function inheritsWorkspaceLints(contents) {
+  let section = "";
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = stripComment(rawLine).trim();
+    if (!line) {
+      continue;
+    }
+    const parsedSection = parseSection(line);
+    if (parsedSection !== null) {
+      section = parsedSection;
+      continue;
+    }
+    const pair = parseKeyValue(line);
+    if (section === "lints" && pair?.key === "workspace") {
+      return pair.value === "true";
+    }
+  }
+  return false;
+}
+
 function normalizeRelativePath(baseDir, relativePath) {
   return path.relative(repoRoot, path.resolve(baseDir, relativePath)).replaceAll("\\", "/") || ".";
 }
@@ -410,6 +430,18 @@ async function runGuard() {
     process.exitCode = 1;
     return;
   }
+  const missingWorkspaceLints = workspace.packages.filter(
+    (pkg) => !inheritsWorkspaceLints(pkg.contents),
+  );
+  if (missingWorkspaceLints.length > 0) {
+    for (const pkg of missingWorkspaceLints) {
+      process.stderr.write(
+        `${pkg.manifestPath}: workspace crates must inherit [workspace.lints] with [lints] workspace = true\n`,
+      );
+    }
+    process.exitCode = 1;
+    return;
+  }
 
   process.stdout.write(
     `crate-boundary-guard: OK (${workspace.packages.length} packages, ${workspace.edges.length} workspace edges checked)\n`,
@@ -437,6 +469,9 @@ function runSelfTest() {
     "[package]",
     'name = "prodex-terminal-ui"',
     "",
+    "[lints]",
+    "workspace = true",
+    "",
     "[dependencies]",
     "app_alias = { workspace = true }",
     'local_runtime = { package = "prodex-runtime-proxy", path = "../prodex-runtime-proxy" }',
@@ -452,6 +487,12 @@ function runSelfTest() {
     "workspace deps",
   );
   assertEqual(parsePackageName(terminalManifest), "prodex-terminal-ui", "package name");
+  assertEqual(inheritsWorkspaceLints(terminalManifest), true, "workspace lints");
+  assertEqual(
+    inheritsWorkspaceLints('[package]\nname = "missing-lints"'),
+    false,
+    "missing workspace lints",
+  );
   assertEqual(
     parseManifestDependencies(terminalManifest).map((dep) => ({
       alias: dep.alias,

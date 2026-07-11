@@ -6,7 +6,7 @@ import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
-  dead_code: 11,
+  dead_code: 10,
   "unused_imports": 8,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
@@ -24,7 +24,6 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "dead_code|crates/prodex-app/src/runtime_proxy/selection_plan.rs|pub(crate) fn runtime_prompt_cache_affinity_sort_key(",
   "dead_code|crates/prodex-app/src/runtime_proxy/websocket_message/auth.rs|pub(in crate::runtime_proxy) fn runtime_profile_auth_summary_for_selection(",
   "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse.rs|pub(super) fn new(",
-  "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/gemini_rewrite.rs|pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(",
   "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs|impl RuntimeLocalRewriteProxyShared {",
   "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/provider_tools.rs|pub(super) fn runtime_provider_flatten_namespace_tool_name(namespace: &str, name: &str) -> String {",
   "dead_code|crates/prodex-app/src/lib.rs|mod runtime_kiro_acp;",
@@ -131,7 +130,10 @@ function printHelp() {
 }
 
 async function rustFiles() {
-  const result = await git(["ls-files", "--", "*.rs"], { cwd: repoRoot });
+  const result = await git(
+    ["ls-files", "--cached", "--others", "--exclude-standard", "--", "*.rs"],
+    { cwd: repoRoot },
+  );
   return result.stdout.split(/\r?\n/).filter(Boolean).sort();
 }
 
@@ -322,7 +324,13 @@ export function scanRustFileEntries(entries, policyOverrides = {}) {
 export async function scan() {
   const entries = [];
   for (const filePath of await rustFiles()) {
-    const contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+    let contents;
+    try {
+      contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
     entries.push([filePath, contents]);
   }
   return scanRustFileEntries(entries);

@@ -1,0 +1,1 @@
+{"payload_kind":"encrypted_v2","format":"prodex_profile_export","version":2,"cipher":"aes_256_gcm_siv","kdf":{"algorithm":"argon2id","version":19,"memory_kib":65536,"iterations":3,"parallelism":1},"salt_base64":"AAAAAAAAAAAAAAAAAAAAAA==","nonce_base64":"AAAAAAAAAAAAAAAA","ciphertext_base64":"AAAAAAAAAAAAAAAAAAAAAA=="}

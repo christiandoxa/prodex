@@ -43,7 +43,8 @@ services:
       start_period: 10s
 
   postgres:
-    image: postgres:16-alpine
+    # postgres:16-alpine; Dependabot updates the tag and digest together.
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     profiles: ["postgres"]
     restart: unless-stopped
     environment:
@@ -60,7 +61,8 @@ services:
       start_period: 10s
 
   redis:
-    image: redis:7-alpine
+    # redis:7-alpine; Dependabot updates the tag and digest together.
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     profiles: ["redis"]
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]

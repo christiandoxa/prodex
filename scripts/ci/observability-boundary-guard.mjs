@@ -835,14 +835,16 @@ async function rustFilesUnder(dir) {
 async function validateSources() {
   const files = await rustFilesUnder(path.join(repoRoot, OBS_SRC_DIR));
   const errors = [];
+  const crateSource = [];
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
+    crateSource.push(source);
     errors.push(...validateObservabilitySource(source, path.relative(repoRoot, file)));
     if (path.relative(repoRoot, file) === "crates/prodex-observability/src/lib.rs") {
       errors.push(...validateObservabilityCrateRoot(source, path.relative(repoRoot, file)));
-      errors.push(...validateRequiredObservabilityContracts(source, path.relative(repoRoot, file)));
     }
   }
+  errors.push(...validateRequiredObservabilityContracts(crateSource.join("\n"), OBS_SRC_DIR));
   return errors;
 }
 

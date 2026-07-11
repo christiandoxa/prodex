@@ -85,6 +85,13 @@ test("preflight runs application boundary guard self-test before scanning worksp
   assert.ok(labels.indexOf("application-boundary-guard") > labels.indexOf("application-boundary-guard-self-test"));
 });
 
+test("preflight runs production boundary guard self-test before scanning workspace", () => {
+  const labels = preflightSteps(parseArgs(["node", "preflight.mjs"])).map((step) => step.label);
+
+  assert.ok(labels.indexOf("production-boundary-guard-self-test") >= 0);
+  assert.ok(labels.indexOf("production-boundary-guard") > labels.indexOf("production-boundary-guard-self-test"));
+});
+
 test("preflight runs auth boundary guard self-test before scanning workspace", () => {
   const labels = preflightSteps(parseArgs(["node", "preflight.mjs"])).map((step) => step.label);
 

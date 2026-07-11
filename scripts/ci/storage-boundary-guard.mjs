@@ -244,14 +244,16 @@ async function validateStorageSources() {
   const srcRoot = path.join(repoRoot, STORAGE_SRC_DIR);
   const files = await rustFilesUnder(srcRoot);
   const errors = [];
+  const sourceParts = [];
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
     const relativePath = path.relative(repoRoot, file);
+    sourceParts.push(source);
     errors.push(...validateStorageSource(source, relativePath));
-    if (relativePath === STORAGE_LIB) {
-      errors.push(...validateStorageRequiredContracts(source, STORAGE_LIB));
-    }
   }
+  errors.push(
+    ...validateStorageRequiredContracts(sourceParts.join("\n"), STORAGE_SRC_DIR),
+  );
   return errors;
 }
 

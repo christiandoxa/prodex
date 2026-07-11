@@ -159,12 +159,16 @@ const REQUIRED_CONTROL_PLANE_ROUTE_SNIPPETS = Object.freeze([
     "control-plane route planner must fail closed on unsupported methods",
   ],
   [
-    "matches_control_plane_mount(path, \"/admin\")",
-    "control-plane route classifier must preserve segment-boundary admin mount matching",
+    "fn is_control_plane_mount(path: &str)",
+    "control-plane route classifier must keep one explicit mount allowlist",
   ],
   [
-    "matches_control_plane_mount(path, \"/scim\")",
-    "control-plane route classifier must preserve segment-boundary SCIM mount matching",
+    '["/admin", "/v1/admin", "/scim", "/v1/scim"]',
+    "control-plane route classifier must list every supported admin and SCIM mount explicitly",
+  ],
+  [
+    "suffix.starts_with('/')",
+    "control-plane route classifier must preserve segment-boundary mount matching",
   ],
   [
     "strip_control_plane_mount(path, \"/v1/admin\")",
@@ -279,7 +283,20 @@ export function validateManifest(tomlText, manifestPath = MANIFEST) {
   return errors;
 }
 
-export function validateSource(sourceText, sourcePath = "source.rs") {
+function validateRequiredContracts(sourceText, sourcePath) {
+  const errors = [];
+  for (const [snippet, message] of REQUIRED_CONTROL_PLANE_ROUTE_SNIPPETS) {
+    if (!sourceText.includes(snippet)) {
+      errors.push(`${sourcePath}: ${message}; missing '${snippet}'`);
+    }
+  }
+  if (sourceText.includes('path.starts_with("/admin")') || sourceText.includes('path.starts_with("/scim")')) {
+    errors.push(`${sourcePath}: control-plane route matching must stay segment-boundary based, not raw starts_with`);
+  }
+  return errors;
+}
+
+function validateSourceBoundaries(sourceText, sourcePath) {
   const errors = [];
   sourceText.split(/\r?\n/u).forEach((line, index) => {
     for (const { name, pattern } of FORBIDDEN_SOURCE_PATTERNS) {
@@ -288,15 +305,13 @@ export function validateSource(sourceText, sourcePath = "source.rs") {
       }
     }
   });
+  return errors;
+}
+
+export function validateSource(sourceText, sourcePath = "source.rs") {
+  const errors = validateSourceBoundaries(sourceText, sourcePath);
   if (sourcePath.endsWith("crates/prodex-gateway-http/src/lib.rs") || sourcePath === "src/lib.rs") {
-    for (const [snippet, message] of REQUIRED_CONTROL_PLANE_ROUTE_SNIPPETS) {
-      if (!sourceText.includes(snippet)) {
-        errors.push(`${sourcePath}: ${message}; missing '${snippet}'`);
-      }
-    }
-    if (sourceText.includes('path.starts_with("/admin")') || sourceText.includes('path.starts_with("/scim")')) {
-      errors.push(`${sourcePath}: control-plane route matching must stay segment-boundary based, not raw starts_with`);
-    }
+    errors.push(...validateRequiredContracts(sourceText, sourcePath));
   }
   return errors;
 }
@@ -315,10 +330,14 @@ async function rustFilesUnder(dir) {
 async function validateSources() {
   const files = await rustFilesUnder(path.join(repoRoot, SRC_DIR));
   const errors = [];
+  const sourceParts = [];
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
-    errors.push(...validateSource(source, path.relative(repoRoot, file)));
+    const relativePath = path.relative(repoRoot, file);
+    sourceParts.push(source);
+    errors.push(...validateSourceBoundaries(source, relativePath));
   }
+  errors.push(...validateRequiredContracts(sourceParts.join("\n"), SRC_DIR));
   return errors;
 }
 
@@ -392,11 +411,13 @@ pub fn plan_gateway_http_drain() {
     GatewayHttpDrainPlanError::TerminationGraceTooShort;
 }
 pub enum GatewayControlPlaneOperation {}
+fn is_control_plane_mount(path: &str) {
+    ["/admin", "/v1/admin", "/scim", "/v1/scim"];
+    path == mount || suffix.starts_with('/');
+}
 pub fn plan_control_plane_route() {
     GatewayControlPlaneRouteError::NotControlPlaneRoute;
     GatewayControlPlaneRouteError::MethodNotAllowed;
-    matches_control_plane_mount(path, "/admin");
-    matches_control_plane_mount(path, "/scim");
     strip_control_plane_mount(path, "/v1/admin");
     strip_control_plane_mount(path, "/v1/scim");
     control_plane_operation_allows_method(operation, method);

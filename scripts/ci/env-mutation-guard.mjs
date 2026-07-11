@@ -35,7 +35,10 @@ function printHelp() {
 }
 
 async function rustFiles() {
-  const result = await git(["ls-files", "--", "*.rs"], { cwd: repoRoot });
+  const result = await git(
+    ["ls-files", "--cached", "--others", "--exclude-standard", "--", "*.rs"],
+    { cwd: repoRoot },
+  );
   return result.stdout.split(/\r?\n/).filter(Boolean).sort();
 }
 
@@ -72,7 +75,15 @@ async function scan() {
   const violations = [];
 
   for (const filePath of await rustFiles()) {
-    const contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+    let contents;
+    try {
+      contents = await fs.readFile(path.join(repoRoot, filePath), "utf8");
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
     const hits = envMutationHits(filePath, contents);
     if (hits.length === 0) {
       continue;
