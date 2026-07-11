@@ -111,6 +111,7 @@ pub(super) fn resolve_gateway_launch_config_with_secrets(
         resolve_gateway_provider_config_with_resolver(state, args, policy, &secret_resolver)?;
     let auth = resolve_gateway_auth_config_with_resolver(args, policy, &secret_resolver)?;
     if auth.auth_required
+        && provider.provider_credential.is_none()
         && matches!(
             &provider.provider_options,
             RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }
@@ -139,11 +140,17 @@ pub(super) fn resolve_gateway_launch_config_with_secrets(
     let observability =
         gateway_observability_config_with_resolver(paths, policy, &secret_resolver)?;
     let credential_fingerprint = secret_resolver.fingerprint()?;
+    let provider_options = match provider.provider_credential {
+        Some(credential) => provider
+            .provider_options
+            .with_projected_credential(credential),
+        None => provider.provider_options,
+    };
 
     Ok(ResolvedGatewayLaunchConfig {
         provider_name: provider.provider.map(SuperExternalProvider::as_str),
         upstream_base_url: provider.upstream_base_url,
-        provider_options: provider.provider_options,
+        provider_options,
         auth_token_hash: auth.auth_token_hash,
         auth_required: auth.auth_required,
         listen_addr,

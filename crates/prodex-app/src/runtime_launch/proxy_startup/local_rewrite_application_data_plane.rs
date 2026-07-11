@@ -18,7 +18,9 @@ use prodex_domain::{
 use prodex_gateway_core::{GatewayAdmissionRequest, GatewayUsageReconciliationRequest};
 use prodex_gateway_http::{GatewayHttpExecutionPlan, GatewayHttpPolicy, GatewayHttpRouteKind};
 use prodex_observability::{TraceContext, TraceContextError};
-use prodex_provider_core::{ProviderAdapterContract, ProviderEndpoint, provider_adapter};
+use prodex_provider_core::{
+    ProviderAdapterContract, ProviderEndpoint, ProviderId, provider_adapter,
+};
 use prodex_provider_spi::{
     ProviderInvocation, ProviderRetryDecision, ProviderRetryPolicy, ProviderRetryStage,
     ProviderRoute, ProviderRouteError, ProviderStreamMode,
@@ -189,10 +191,42 @@ fn runtime_gateway_provider_invocation(
         request_id: input.request_id,
         call_id: input.reservation.request.call_id,
         route,
-        credential_ref: SecretRef::new("runtime-provider", provider.label(), None::<String>),
+        credential_ref: runtime_gateway_provider_credential_ref(
+            input
+                .shared
+                .provider_credential
+                .as_ref()
+                .map(|credential| credential.reference()),
+            provider,
+        ),
         stream_mode: runtime_gateway_provider_stream_mode(input.captured),
         estimated_usage: input.reservation.request.estimate,
     })
+}
+
+fn runtime_gateway_provider_credential_ref(
+    configured: Option<&SecretRef>,
+    provider: ProviderId,
+) -> SecretRef {
+    configured
+        .cloned()
+        .unwrap_or_else(|| SecretRef::new("runtime-provider", provider.label(), None::<String>))
+}
+
+#[cfg(test)]
+mod provider_credential_tests {
+    use super::*;
+
+    #[test]
+    fn configured_provider_reference_reaches_application_invocation() {
+        let configured = SecretRef::new("external", "provider-key", Some("v2"));
+
+        let selected =
+            runtime_gateway_provider_credential_ref(Some(&configured), ProviderId::OpenAi);
+
+        assert_eq!(selected, configured);
+        assert_ne!(selected.provider(), "runtime-provider");
+    }
 }
 
 fn runtime_gateway_provider_endpoint(route: GatewayHttpRouteKind) -> Option<ProviderEndpoint> {

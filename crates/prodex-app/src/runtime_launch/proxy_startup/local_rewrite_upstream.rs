@@ -95,6 +95,9 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
     )
     .into_owned();
     match &shared.provider {
+        RuntimeLocalRewriteProviderOptions::ProjectedCredential { .. } => {
+            unreachable!("projected provider wrapper must be split before dispatch")
+        }
         RuntimeLocalRewriteProviderOptions::Anthropic { auth } => {
             let auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
             if auth_attempts.is_empty() {
@@ -352,17 +355,21 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
             } else {
                 body
             };
-            let auth_attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys);
-            let selected_api_key = auth_attempts.first().map(|(_, api_key)| *api_key);
+            let prepared_auth = if shared.provider_credential.is_some() {
+                RuntimeLocalRewritePreparedAuth::OpenAiProjected
+            } else {
+                let auth_attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys);
+                RuntimeLocalRewritePreparedAuth::OpenAiResponses {
+                    api_key: auth_attempts.first().map(|(_, api_key)| *api_key),
+                }
+            };
             let response = send_runtime_local_rewrite_prepared_request(
                 request_id,
                 request,
                 shared,
                 &upstream_url,
                 body,
-                RuntimeLocalRewritePreparedAuth::OpenAiResponses {
-                    api_key: selected_api_key,
-                },
+                prepared_auth,
             )?;
             Ok(RuntimeLocalRewriteUpstreamResult {
                 response: RuntimeLocalRewriteUpstreamResponse::Live(

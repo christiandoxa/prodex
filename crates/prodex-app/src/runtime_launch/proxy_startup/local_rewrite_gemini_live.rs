@@ -175,6 +175,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
                 .gemini
                 .live_url
                 .as_deref(),
+            shared,
         ) {
             Ok(socket) => {
                 selected = Some((profile_name, socket));
@@ -293,6 +294,7 @@ fn handle_runtime_gemini_live_tcp_stream(
                 .gemini
                 .live_url
                 .as_deref(),
+            shared,
         ) {
             Ok(socket) => {
                 selected = Some((profile_name, socket));

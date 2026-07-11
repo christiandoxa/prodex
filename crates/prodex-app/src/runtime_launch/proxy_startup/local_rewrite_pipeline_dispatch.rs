@@ -196,6 +196,9 @@ pub(in super::super) fn runtime_local_rewrite_remote_compact_unsupported_message
     provider: &RuntimeLocalRewriteProviderOptions,
 ) -> String {
     let provider_name = match provider {
+        RuntimeLocalRewriteProviderOptions::ProjectedCredential { provider, .. } => {
+            return runtime_local_rewrite_remote_compact_unsupported_message(provider);
+        }
         RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
         RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
         RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => "OpenAI",

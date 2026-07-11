@@ -197,6 +197,12 @@ pub(super) fn runtime_gemini_auth_attempts(
                     .sticky_fresh_oauth,
             )
         }
+        RuntimeGeminiProviderAuth::Projected => Ok(vec![RuntimeGeminiSelectedAuth {
+            profile_name: "projected".to_string(),
+            auth: RuntimeGeminiAuth::Projected,
+            hard_affinity: true,
+            quota_fallback_allowed: false,
+        }]),
     }
 }
 
@@ -471,7 +477,9 @@ pub(super) fn runtime_gemini_model_cache_endpoint(
     upstream_base_url: &str,
 ) -> String {
     match auth {
-        RuntimeGeminiAuth::ApiKey { .. } => upstream_base_url.trim_end_matches('/').to_string(),
+        RuntimeGeminiAuth::ApiKey { .. } | RuntimeGeminiAuth::Projected => {
+            upstream_base_url.trim_end_matches('/').to_string()
+        }
         RuntimeGeminiAuth::OAuth { .. } => gemini_code_assist_endpoint(),
     }
 }

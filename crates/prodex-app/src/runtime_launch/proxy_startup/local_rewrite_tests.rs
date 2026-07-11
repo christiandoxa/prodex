@@ -24,6 +24,8 @@ mod gateway_health;
 mod gateway_state;
 mod gateway_usage;
 mod model_memory;
+#[cfg(unix)]
+mod projected_provider;
 mod provider_routes;
 mod request_constraints;
 mod support;

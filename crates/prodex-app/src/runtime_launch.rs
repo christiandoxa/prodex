@@ -33,8 +33,8 @@ pub(super) use proxy_startup::{
     RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
     RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth, RuntimeKiroProfileAuth,
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
-    start_runtime_gateway_rewrite_proxy, start_runtime_gateway_rewrite_proxy_with_secret_refresh,
-    start_runtime_local_rewrite_proxy,
+    RuntimeProjectedProviderCredential, start_runtime_gateway_rewrite_proxy,
+    start_runtime_gateway_rewrite_proxy_with_secret_refresh, start_runtime_local_rewrite_proxy,
 };
 pub(super) use proxy_startup::{
     RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
