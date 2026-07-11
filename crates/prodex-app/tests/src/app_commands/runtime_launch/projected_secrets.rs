@@ -9,6 +9,7 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         ("gateway-token", "gateway-secret-value"),
         ("provider-key", "provider-secret-value"),
         ("postgres-url", "postgres://prodex@127.0.0.1/prodex"),
+        ("redis-url", "rediss://redis.internal/0"),
         ("admin-token", "admin-secret-value"),
         ("virtual-key", "virtual-secret-value"),
         ("sso-token", "sso-secret-value"),
@@ -34,6 +35,7 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
     };
     policy.state.backend = Some("postgres".to_string());
     policy.state.postgres_url_ref = Some(secret_ref("postgres-url"));
+    policy.state.redis_url_ref = Some(secret_ref("redis-url"));
     policy
         .admin_tokens
         .push(prodex_runtime_policy::RuntimePolicyGatewayAdminToken {
@@ -73,6 +75,10 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         config.state_store,
         RuntimeGatewayStateStore::Postgres { .. }
     ));
+    assert_eq!(
+        config.state_store.coordination_redis_url(),
+        Some("rediss://redis.internal/0")
+    );
 
     let mut raw_args = gateway_args();
     raw_args.auth_token = Some("raw-cli-secret".to_string());

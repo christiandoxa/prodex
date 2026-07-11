@@ -57,8 +57,8 @@ serving; secret files are not read on the request hot path.
 | `gateway.state.sqlite_path` | none | `gateway-state.sqlite` under the Prodex root when `backend=sqlite` | Optional non-empty SQLite database path for admin-managed virtual keys, usage counters, and schema migrations. Relative paths are resolved under the Prodex root and non-blank values are preserved exactly. |
 | `gateway.state.postgres_url_env` | none | empty | Environment variable containing a non-empty, whitespace-free Postgres connection URL. Required when `backend="postgres"`. |
 | `gateway.state.postgres_url_ref` | none | empty | Projected Postgres connection-URL reference. Use instead of `postgres_url_env`; required for the production Postgres backend. |
-| `gateway.state.redis_url_env` | none | empty | Environment variable containing a non-empty, whitespace-free Redis connection URL. Required when `backend="redis"`. |
-| `gateway.state.redis_url_ref` | none | empty | Projected Redis connection-URL reference. Use instead of `redis_url_env` in production. |
+| `gateway.state.redis_url_env` | none | empty | Environment variable containing a non-empty, whitespace-free Redis connection URL. Required when `backend="redis"`; optional Redis coordination source when `backend="postgres"`. |
+| `gateway.state.redis_url_ref` | none | empty | Projected Redis connection-URL reference. Use instead of `redis_url_env` in production; with `backend="postgres"`, configures rebuildable coordination beside durable PostgreSQL state. |
 | `gateway.admin_tokens` | env vars named by `token_env` | empty | Additional admin-plane bearer tokens. Each configured `token_env` name must be exact and whitespace-free and resolve to a non-empty, whitespace-free secret. They protect `/v1/prodex/gateway/*` only and do not authorize model traffic. |
 | `gateway.admin_tokens[].name` | none | required per token | Exact non-empty admin-token identifier without whitespace. |
 | `gateway.admin_tokens[].token_ref` | none | empty | Projected control-plane bearer-token reference. Exactly one of `token_ref` or development-only `token_env` is required. |

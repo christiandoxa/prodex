@@ -75,9 +75,11 @@ pub(crate) fn gateway_state_store_config_with_resolver(
                     SecretPurpose::DataPlaneCredential,
                 )?
                 .context("gateway.state.backend=postgres requires a secret source")?;
-            Ok(RuntimeGatewayStateStore::postgres(
+            let coordination_redis_url = gateway_coordination_redis_url(policy, resolver)?;
+            Ok(RuntimeGatewayStateStore::postgres_with_coordination(
                 env_name.unwrap_or("projected-secret").to_string(),
                 url,
+                coordination_redis_url,
             ))
         }
         "redis" => {
@@ -143,7 +145,7 @@ pub(crate) fn gateway_validate_runtime_topology(
             prodex_application::plan_application_runtime_accounting_verification_required_response(
             );
         bail!(
-            "{}: {}: legacy prodex gateway admission still uses local usage state; durable reservation backend is not wired yet",
+            "{}: {}: durable reservations are wired, but distributed rate and grouped-request admission are not wired yet",
             response.code,
             response.message,
         );
@@ -162,7 +164,7 @@ fn gateway_production_readiness_topology(
             state_store,
             RuntimeGatewayStateStore::Postgres { .. }
         ),
-        shared_redis_configured: gateway_has_shared_redis_url()?,
+        shared_redis_configured: state_store.coordination_redis_url().is_some(),
     })
 }
 
@@ -178,7 +180,7 @@ fn gateway_application_runtime_topology(
             return Ok(None);
         }
     };
-    let shared_redis_configured = gateway_has_shared_redis_url()?;
+    let shared_redis_configured = state_store.coordination_redis_url().is_some();
     Ok(Some(prodex_application::ApplicationRuntimeTopology {
         storage: prodex_storage::StorageTopology {
             durable_store,
@@ -238,19 +240,30 @@ fn gateway_require_multi_replica_accounting_checks() -> Result<bool> {
     }
 }
 
-fn gateway_has_shared_redis_url() -> Result<bool> {
-    match env::var(PRODEX_GATEWAY_REDIS_URL_ENV) {
-        Ok(value) => {
-            if value.is_empty() {
-                bail!("{PRODEX_GATEWAY_REDIS_URL_ENV} cannot be empty");
-            }
-            if value.chars().any(char::is_whitespace) {
-                bail!("{PRODEX_GATEWAY_REDIS_URL_ENV} must not contain whitespace");
-            }
-            Ok(true)
-        }
-        Err(_) => Ok(false),
+fn gateway_coordination_redis_url(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<Option<String>> {
+    if policy
+        .state
+        .redis_url_env
+        .as_deref()
+        .is_some_and(|value| !gateway_exact_policy_identifier(value))
+    {
+        bail!("gateway.state.redis_url_env must be non-empty without whitespace");
     }
+    let development_env = (!resolver.production()
+        && policy.state.redis_url_ref.is_none()
+        && policy.state.redis_url_env.is_none()
+        && env::var_os(PRODEX_GATEWAY_REDIS_URL_ENV).is_some())
+    .then_some(PRODEX_GATEWAY_REDIS_URL_ENV);
+    resolver.resolve(
+        "gateway.state.redis_url",
+        policy.state.redis_url_ref.as_ref(),
+        policy.state.redis_url_env.as_deref().or(development_env),
+        None,
+        SecretPurpose::DataPlaneCredential,
+    )
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {

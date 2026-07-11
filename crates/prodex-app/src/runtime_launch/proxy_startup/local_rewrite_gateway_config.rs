@@ -131,6 +131,7 @@ pub(crate) enum RuntimeGatewayStateStore {
     Postgres {
         url: String,
         state_path: PathBuf,
+        coordination_redis_url: Option<String>,
     },
     Redis {
         url: String,
@@ -178,10 +179,20 @@ impl RuntimeGatewayStateStore {
         Self::Sqlite { path }
     }
 
+    #[cfg(test)]
     pub(crate) fn postgres(url_env: String, url: String) -> Self {
+        Self::postgres_with_coordination(url_env, url, None)
+    }
+
+    pub(crate) fn postgres_with_coordination(
+        url_env: String,
+        url: String,
+        coordination_redis_url: Option<String>,
+    ) -> Self {
         Self::Postgres {
             state_path: PathBuf::from(format!("postgres:{url_env}")),
             url,
+            coordination_redis_url,
         }
     }
 
@@ -225,6 +236,17 @@ impl RuntimeGatewayStateStore {
             Self::Sqlite { path } => path,
             Self::Postgres { state_path, .. } => state_path,
             Self::Redis { state_path, .. } => state_path,
+        }
+    }
+
+    pub(crate) fn coordination_redis_url(&self) -> Option<&str> {
+        match self {
+            Self::Postgres {
+                coordination_redis_url,
+                ..
+            } => coordination_redis_url.as_deref(),
+            Self::Redis { url, .. } => Some(url),
+            Self::File { .. } | Self::Sqlite { .. } => None,
         }
     }
 }
@@ -427,12 +449,14 @@ mod tests {
         let state = RuntimeGatewayStateStore::Postgres {
             url: "postgres://prodex:secret@db.example.test/prodex".to_string(),
             state_path: PathBuf::from("postgres:PRODEX_DATABASE_URL"),
+            coordination_redis_url: Some("redis://:secret@redis.example.test/0".to_string()),
         };
         assert_redacted(
             &format!("{state:?}"),
             &[
                 "postgres://prodex:secret@db.example.test/prodex",
                 "PRODEX_DATABASE_URL",
+                "redis://:secret@redis.example.test/0",
             ],
         );
 

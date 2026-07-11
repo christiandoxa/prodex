@@ -51,6 +51,7 @@ data:
     [gateway.state]
     backend = "postgres"
     postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+    redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
     [[gateway.admin_tokens]]
     name = "prometheus"

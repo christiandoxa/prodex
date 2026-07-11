@@ -66,8 +66,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2294,
-    "reason": "Runtime launch command tests cover provider-aware gateway configuration, authentication, routing aliases, and process planning; capped until gateway cases move to focused fixtures."
+    "maxLines": 2296,
+    "reason": "Runtime launch command tests cover provider-aware gateway configuration, projected PostgreSQL/Redis coordination, authentication, routing aliases, and process planning; capped until gateway cases move to focused fixtures."
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",

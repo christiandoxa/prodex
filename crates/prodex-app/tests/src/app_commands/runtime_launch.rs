@@ -48,7 +48,9 @@ fn gateway_state_store_config_builds_postgres_backend_from_env() {
     policy.state.postgres_url_env = Some("PRODEX_GATEWAY_POSTGRES_URL_TEST".to_string());
     let store = gateway_state_store_config(&paths, &policy).unwrap();
     match store {
-        RuntimeGatewayStateStore::Postgres { url, state_path } => {
+        RuntimeGatewayStateStore::Postgres {
+            url, state_path, ..
+        } => {
             assert_eq!(url, "postgres://prodex:prodex@127.0.0.1:5432/prodex");
             assert_eq!(
                 state_path.display().to_string(),
@@ -203,7 +205,7 @@ fn gateway_launch_config_rejects_invalid_route_alias_identifiers() {
 }
 
 #[test]
-fn gateway_launch_config_rejects_postgres_accounting_gate_until_durable_backend_is_wired() {
+fn gateway_launch_config_rejects_postgres_accounting_gate_until_distributed_admission_is_wired() {
     let root = temp_dir("gateway-runtime-topology-postgres");
     let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let _postgres = TestEnvVarGuard::set(
@@ -229,7 +231,7 @@ fn gateway_launch_config_rejects_postgres_accounting_gate_until_durable_backend_
         err.to_string()
             .contains("runtime_accounting_verification_invalid")
     );
-    assert!(err.to_string().contains("durable reservation backend"));
+    assert!(err.to_string().contains("distributed rate"));
 }
 
 #[test]

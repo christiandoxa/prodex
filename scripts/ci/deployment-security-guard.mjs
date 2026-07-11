@@ -59,6 +59,7 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ["auth_token_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_TOKEN\" }", "projected gateway auth token reference"],
   ["provider_api_key_ref = { provider = \"kubernetes\", name = \"OPENAI_API_KEY\" }", "projected provider API key reference"],
   ["postgres_url_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_POSTGRES_URL\" }", "projected PostgreSQL URL reference"],
+  ["redis_url_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_REDIS_URL\" }", "projected Redis coordination URL reference"],
   ["token_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_METRICS_TOKEN\" }", "projected metrics token reference"],
   ["mountPath: /run/secrets/prodex", "gateway projected secret mount"],
   ["defaultMode: 0440", "private projected secret file mode"],
@@ -277,7 +278,10 @@ export function validateDeploymentSecurity(inputs) {
     if (!/postgres_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_POSTGRES_URL"\s*\}/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must read PostgreSQL state URL from a projected secret reference`);
     }
-    if (/\b(?:postgres_url_env|token_env)\s*=/u.test(gatewayPolicyConfig)) {
+    if (!/redis_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_REDIS_URL"\s*\}/u.test(gatewayPolicyConfig)) {
+      checks.push(`${kubernetesPath}: gateway policy must read Redis coordination URL from a projected secret reference`);
+    }
+    if (/\b(?:postgres_url_env|redis_url_env|token_env)\s*=/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must not use legacy secret env references`);
     }
   }
@@ -565,6 +569,7 @@ data:
     [gateway.state]
     backend = "postgres"
     postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+    redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
     [[gateway.admin_tokens]]
     name = "prometheus"
@@ -892,6 +897,16 @@ export function runSelfTest() {
       ),
     }).some((error) => error.includes("projected secret reference")),
     "wrong PostgreSQL state projected reference accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        'redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }',
+        'redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_WRONG_REDIS_URL" }',
+      ),
+    }).some((error) => error.includes("Redis coordination URL")),
+    "wrong Redis coordination projected reference accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({
