@@ -6,6 +6,7 @@ use secret_store::{DEVELOPMENT_SECRET_PROVIDER_NAME, DevelopmentSecretProvider, 
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -38,15 +39,22 @@ fn write_private(path: &Path, bytes: &[u8]) {
 }
 
 struct EnvGuard {
+    _lock: MutexGuard<'static, ()>,
     name: String,
     previous: Option<OsString>,
 }
 
+static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
 impl EnvGuard {
     fn set(name: &str, value: &str) -> Self {
+        let lock = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let previous = std::env::var_os(name);
         unsafe { std::env::set_var(name, value) };
         Self {
+            _lock: lock,
             name: name.to_string(),
             previous,
         }
