@@ -99,8 +99,9 @@ pub(super) fn runtime_gateway_sqlite_usage_load_from_conn(
 
 pub(super) fn runtime_gateway_postgres_usage_load(
     url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
 ) -> Result<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>> {
-    let mut client = runtime_gateway_postgres_open(url)?;
+    let mut client = runtime_gateway_postgres_open(url, tls)?;
     let rows = client.query(
         r#"
         SELECT key_name, minute_epoch, requests_this_minute, tokens_this_minute,
@@ -275,9 +276,10 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
 
 pub(super) fn runtime_gateway_postgres_usage_apply_deltas(
     url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
     deltas: &[RuntimeGatewayVirtualKeyUsageDelta],
 ) -> Result<()> {
-    let mut client = runtime_gateway_postgres_open(url)?;
+    let mut client = runtime_gateway_postgres_open(url, tls)?;
     let mut tx = client.transaction()?;
     for delta in deltas {
         let ledger = runtime_gateway_billing_ledger_entry_from_delta(delta);

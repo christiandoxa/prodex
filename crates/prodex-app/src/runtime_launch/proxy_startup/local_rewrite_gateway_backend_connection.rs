@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result, anyhow, bail};
-use postgres::{Client as PostgresClient, NoTls};
+use postgres::Client as PostgresClient;
 #[cfg(test)]
 use prodex_storage_sqlite::{SqliteRuntimeMode, plan_sqlite_migrations};
 use redis::Commands;
@@ -217,8 +217,11 @@ pub(super) fn runtime_gateway_sqlite_open(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-pub(super) fn runtime_gateway_postgres_open(url: &str) -> Result<PostgresClient> {
-    let mut client = PostgresClient::connect(url, NoTls)
+pub(super) fn runtime_gateway_postgres_open(
+    url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
+) -> Result<PostgresClient> {
+    let mut client = prodex_storage_postgres_runtime::connect_blocking(url, tls)
         .context("failed to connect to gateway postgres state")?;
     let schema_key = runtime_gateway_schema_key("postgres", url);
     if runtime_gateway_schema_should_ensure(&schema_key) {
@@ -259,8 +262,11 @@ pub(crate) fn runtime_gateway_sqlite_migrate_compatibility_state(path: &Path) ->
     Ok(())
 }
 
-pub(crate) fn runtime_gateway_postgres_migrate_compatibility_state(url: &str) -> Result<()> {
-    let mut client = PostgresClient::connect(url, NoTls)
+pub(crate) fn runtime_gateway_postgres_migrate_compatibility_state(
+    url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
+) -> Result<()> {
+    let mut client = prodex_storage_postgres_runtime::connect_blocking(url, tls)
         .context("failed to connect to gateway postgres state")?;
     runtime_gateway_postgres_apply_compatibility_migrations(&mut client)?;
     Ok(())

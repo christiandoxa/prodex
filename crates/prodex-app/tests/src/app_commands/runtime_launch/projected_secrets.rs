@@ -71,10 +71,13 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
     assert!(config.auth_required);
     assert_eq!(config.admin_tokens.len(), 1);
     assert_eq!(config.virtual_keys.len(), 1);
-    assert!(matches!(
-        config.state_store,
-        RuntimeGatewayStateStore::Postgres { .. }
-    ));
+    let RuntimeGatewayStateStore::Postgres { tls, .. } = &config.state_store else {
+        panic!("expected postgres state store");
+    };
+    assert_eq!(
+        tls.mode(),
+        prodex_storage_postgres_runtime::PostgresTlsMode::VerifyFull
+    );
     assert_eq!(
         config.state_store.coordination_redis_url(),
         Some("rediss://redis.internal/0")

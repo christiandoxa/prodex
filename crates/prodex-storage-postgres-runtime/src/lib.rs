@@ -7,14 +7,17 @@
 
 use std::{fmt, future::Future, time::Duration};
 
+mod tls;
 mod types;
+pub use tls::{PostgresTlsConfig, PostgresTlsMode, connect_blocking};
 pub use types::{
     IdempotentWriteOutcome, PostgresRuntimeError, ReserveOutcome, ReserveRejection,
     StoredReservation, StoredReservationState,
 };
 
 use deadpool_postgres::{
-    Config as DeadpoolConfig, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime, Timeouts,
+    Config as DeadpoolConfig, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime, SslMode,
+    Timeouts,
 };
 use prodex_domain::{
     CallId, IdempotencyKey, RequestId, ReservationId, ReservationRecord, TenantId, UsageAmount,
@@ -166,8 +169,23 @@ impl PostgresRuntimeConfig {
         T::TlsConnect: Sync + Send,
         <T::TlsConnect as TlsConnect<Socket>>::Future: Send,
     {
+        self.create_pool_with_tls_and_ssl_mode(tls, None)
+    }
+
+    fn create_pool_with_tls_and_ssl_mode<T>(
+        &self,
+        tls: T,
+        ssl_mode: Option<SslMode>,
+    ) -> Result<Pool, PostgresRuntimeError>
+    where
+        T: MakeTlsConnect<Socket> + Clone + Sync + Send + 'static,
+        T::Stream: Sync + Send,
+        T::TlsConnect: Sync + Send,
+        <T::TlsConnect as TlsConnect<Socket>>::Future: Send,
+    {
         let mut config = DeadpoolConfig::new();
         config.url = Some(self.database_url.clone());
+        config.ssl_mode = ssl_mode;
         config.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Verified,
         });
@@ -185,7 +203,18 @@ impl PostgresRuntimeConfig {
 
     /// Builds an unencrypted pool only when the caller opts into that choice by name.
     pub fn create_pool_explicit_no_tls(&self) -> Result<Pool, PostgresRuntimeError> {
-        self.create_pool_with_tls(tokio_postgres::NoTls)
+        self.create_pool_with_tls_and_ssl_mode(tokio_postgres::NoTls, Some(SslMode::Disable))
+    }
+
+    pub fn create_pool_with_tls_config(
+        &self,
+        tls: &PostgresTlsConfig,
+    ) -> Result<Pool, PostgresRuntimeError> {
+        match tls.mode() {
+            PostgresTlsMode::Disable => self.create_pool_explicit_no_tls(),
+            PostgresTlsMode::VerifyFull => self
+                .create_pool_with_tls_and_ssl_mode(tls.rustls_connector()?, Some(SslMode::Require)),
+        }
     }
 }
 
@@ -242,6 +271,14 @@ impl PostgresRepository {
         config: &PostgresRuntimeConfig,
     ) -> Result<Self, PostgresRuntimeError> {
         let pool = config.create_pool_explicit_no_tls()?;
+        Ok(Self::from_pool_with_config(pool, config))
+    }
+
+    pub fn from_config_with_tls_config(
+        config: &PostgresRuntimeConfig,
+        tls: &PostgresTlsConfig,
+    ) -> Result<Self, PostgresRuntimeError> {
+        let pool = config.create_pool_with_tls_config(tls)?;
         Ok(Self::from_pool_with_config(pool, config))
     }
 

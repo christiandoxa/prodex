@@ -37,8 +37,8 @@ where
         RuntimeGatewayStateStore::Sqlite { path } => {
             runtime_gateway_mutate_admin_key_store_sqlite(shared, path, mutation)
         }
-        RuntimeGatewayStateStore::Postgres { url, .. } => {
-            runtime_gateway_mutate_admin_key_store_postgres(shared, url, mutation)
+        RuntimeGatewayStateStore::Postgres { url, tls, .. } => {
+            runtime_gateway_mutate_admin_key_store_postgres(shared, url, tls, mutation)
         }
         RuntimeGatewayStateStore::Redis { url, .. } => {
             runtime_gateway_mutate_admin_key_store_redis(shared, url, mutation)
@@ -177,12 +177,13 @@ where
 fn runtime_gateway_mutate_admin_key_store_postgres<F>(
     shared: &RuntimeLocalRewriteProxyShared,
     url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
     mutation: F,
 ) -> Result<(), tiny_http::ResponseBox>
 where
     F: FnOnce(&mut RuntimeGatewayVirtualKeyStoreFile) -> Result<(), RuntimeGatewayAdminError>,
 {
-    let mut client = match runtime_gateway_postgres_open(url) {
+    let mut client = match runtime_gateway_postgres_open(url, tls) {
         Ok(client) => client,
         Err(_err) => {
             return Err(build_runtime_proxy_json_error_response(

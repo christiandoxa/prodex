@@ -76,11 +76,15 @@ pub(crate) fn gateway_state_store_config_with_resolver(
                 )?
                 .context("gateway.state.backend=postgres requires a secret source")?;
             let coordination_redis_url = gateway_coordination_redis_url(policy, resolver)?;
-            Ok(RuntimeGatewayStateStore::postgres_with_coordination(
-                env_name.unwrap_or("projected-secret").to_string(),
-                url,
-                coordination_redis_url,
-            ))
+            let tls = gateway_postgres_tls_config(paths, policy, resolver)?;
+            Ok(
+                RuntimeGatewayStateStore::postgres_with_coordination_and_tls(
+                    env_name.unwrap_or("projected-secret").to_string(),
+                    url,
+                    coordination_redis_url,
+                    tls,
+                ),
+            )
         }
         "redis" => {
             if policy
@@ -112,6 +116,43 @@ pub(crate) fn gateway_state_store_config_with_resolver(
         other => {
             bail!("gateway.state.backend must be file, sqlite, postgres, or redis, got {other:?}")
         }
+    }
+}
+
+fn gateway_postgres_tls_config(
+    paths: &AppPaths,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<prodex_storage_postgres_runtime::PostgresTlsConfig> {
+    let mode = policy
+        .state
+        .postgres_tls_mode
+        .as_deref()
+        .unwrap_or(if resolver.production() {
+            "verify-full"
+        } else {
+            "disable"
+        });
+    match mode {
+        "verify-full" => {
+            let ca_path = policy.state.postgres_tls_ca_path.as_deref().map(|value| {
+                let path = PathBuf::from(value);
+                if path.is_absolute() {
+                    path
+                } else {
+                    paths.root.join(path)
+                }
+            });
+            Ok(prodex_storage_postgres_runtime::PostgresTlsConfig::verify_full(ca_path))
+        }
+        "disable" if resolver.production() => {
+            bail!("gateway.state.postgres_tls_mode=disable is forbidden in production")
+        }
+        "disable" if policy.state.postgres_tls_ca_path.is_some() => {
+            bail!("gateway.state.postgres_tls_ca_path requires postgres_tls_mode=verify-full")
+        }
+        "disable" => Ok(prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable()),
+        _ => bail!("gateway.state.postgres_tls_mode must be verify-full or disable"),
     }
 }
 

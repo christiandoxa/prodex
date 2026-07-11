@@ -159,6 +159,50 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             path.display()
         );
     }
+    if let Some(mode) = policy.gateway.state.postgres_tls_mode.as_deref()
+        && !matches!(mode, "verify-full" | "disable")
+    {
+        bail!(
+            "gateway.state.postgres_tls_mode in {} must be verify-full or disable",
+            path.display()
+        );
+    }
+    if matches!(
+        policy
+            .gateway
+            .state
+            .postgres_tls_ca_path
+            .as_deref()
+            .map(str::trim),
+        Some("")
+    ) {
+        bail!(
+            "gateway.state.postgres_tls_ca_path in {} cannot be empty",
+            path.display()
+        );
+    }
+    if policy.gateway.state.postgres_tls_ca_path.is_some()
+        && matches!(
+            policy.gateway.state.postgres_tls_mode.as_deref(),
+            Some("disable")
+        )
+    {
+        bail!(
+            "gateway.state.postgres_tls_ca_path in {} requires postgres_tls_mode=verify-full",
+            path.display()
+        );
+    }
+    if policy.secrets.production
+        && matches!(
+            policy.gateway.state.postgres_tls_mode.as_deref(),
+            Some("disable")
+        )
+    {
+        bail!(
+            "gateway.state.postgres_tls_mode in {} cannot be disable when secrets.production=true",
+            path.display()
+        );
+    }
     validate_gateway_secret_source(
         policy,
         path,

@@ -108,6 +108,8 @@ pub struct RuntimePolicyGatewayStateSettings {
     pub redis_url_env: Option<String>,
     pub postgres_url_ref: Option<SecretRef>,
     pub redis_url_ref: Option<SecretRef>,
+    pub postgres_tls_mode: Option<String>,
+    pub postgres_tls_ca_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]

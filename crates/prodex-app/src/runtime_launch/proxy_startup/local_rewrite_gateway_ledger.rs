@@ -43,8 +43,8 @@ pub(super) fn runtime_gateway_billing_ledger_load(
         RuntimeGatewayStateStore::Sqlite { path } => {
             runtime_gateway_sqlite_ledger_load(path, limit).map_err(std::io::Error::other)
         }
-        RuntimeGatewayStateStore::Postgres { url, .. } => {
-            runtime_gateway_postgres_ledger_load(url, limit).map_err(std::io::Error::other)
+        RuntimeGatewayStateStore::Postgres { url, tls, .. } => {
+            runtime_gateway_postgres_ledger_load(url, tls, limit).map_err(std::io::Error::other)
         }
         RuntimeGatewayStateStore::Redis { url, .. } => {
             runtime_gateway_redis_ledger_load(url, RUNTIME_GATEWAY_REDIS_LEDGER_KEY, limit)
@@ -568,9 +568,10 @@ fn runtime_gateway_billing_ledger_reconcile_response(
             )
             .map_err(std::io::Error::other)
         }
-        RuntimeGatewayStateStore::Postgres { url, .. } => {
+        RuntimeGatewayStateStore::Postgres { url, tls, .. } => {
             runtime_gateway_postgres_ledger_reconcile_response(
                 url,
+                tls,
                 event,
                 runtime_gateway_unix_epoch_seconds(),
             )

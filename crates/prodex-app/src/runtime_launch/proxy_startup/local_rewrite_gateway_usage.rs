@@ -46,7 +46,9 @@ pub(super) fn runtime_gateway_virtual_key_usage_load_strict(
     let path = state_store.usage_path();
     let usage = match state_store {
         RuntimeGatewayStateStore::Sqlite { path } => runtime_gateway_sqlite_usage_load(path),
-        RuntimeGatewayStateStore::Postgres { url, .. } => runtime_gateway_postgres_usage_load(url),
+        RuntimeGatewayStateStore::Postgres { url, tls, .. } => {
+            runtime_gateway_postgres_usage_load(url, tls)
+        }
         RuntimeGatewayStateStore::Redis { url, .. } => {
             runtime_gateway_redis_usage_load(url, RUNTIME_GATEWAY_REDIS_USAGE_KEY)
         }
@@ -156,8 +158,8 @@ pub(super) fn runtime_gateway_virtual_key_usage_apply_deltas(
             return runtime_gateway_sqlite_usage_apply_deltas(path, deltas)
                 .map_err(std::io::Error::other);
         }
-        RuntimeGatewayStateStore::Postgres { url, .. } => {
-            return runtime_gateway_postgres_usage_apply_deltas(url, deltas)
+        RuntimeGatewayStateStore::Postgres { url, tls, .. } => {
+            return runtime_gateway_postgres_usage_apply_deltas(url, tls, deltas)
                 .map_err(std::io::Error::other);
         }
         RuntimeGatewayStateStore::Redis { url, .. } => {

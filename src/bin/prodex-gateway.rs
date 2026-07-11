@@ -18,7 +18,7 @@ USAGE:
     prodex-gateway --help
     prodex-gateway --version
     prodex-gateway migrate --backend sqlite --path <PATH>
-    prodex-gateway migrate --backend postgres --url-env <ENV>
+    prodex-gateway migrate --backend postgres --url-env <ENV> [--tls-mode verify-full|disable] [--tls-ca <PATH>]
     prodex-gateway serve [--listen <ADDR>]
     prodex-gateway consume-config-publication --transport <PATH> --replica <ID> --root <PATH>
 
@@ -34,8 +34,13 @@ const GATEWAY_CONFIG_PUBLICATION_CONSUME_EVENT_NAME: &str = "config_publication.
 
 #[derive(Debug, PartialEq, Eq)]
 enum MigrationTarget {
-    Sqlite { path: PathBuf },
-    Postgres { url_env: String },
+    Sqlite {
+        path: PathBuf,
+    },
+    Postgres {
+        url_env: String,
+        tls: prodex_storage_postgres_runtime::PostgresTlsConfig,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -141,8 +146,8 @@ fn run_migrate(target: Result<MigrationTarget, String>) -> Result<(), String> {
             run_gateway_migrate(GatewayMigrationTarget::Sqlite { path })?,
             "sqlite",
         ),
-        MigrationTarget::Postgres { url_env } => (
-            run_gateway_migrate(GatewayMigrationTarget::Postgres { url_env })?,
+        MigrationTarget::Postgres { url_env, tls } => (
+            run_gateway_migrate(GatewayMigrationTarget::Postgres { url_env, tls })?,
             "postgres",
         ),
     };
@@ -173,12 +178,16 @@ where
     let mut backend = None;
     let mut path = None;
     let mut url_env = None;
+    let mut tls_mode = None;
+    let mut tls_ca = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--backend" => backend = args.next(),
             "--path" => path = args.next().map(PathBuf::from),
             "--url-env" => url_env = args.next(),
+            "--tls-mode" => tls_mode = args.next(),
+            "--tls-ca" => tls_ca = args.next().map(PathBuf::from),
             "--help" | "-h" => return Err(HELP.to_string()),
             other => return Err(format!("unknown migrate argument: {other}\n\n{HELP}")),
         }
@@ -187,9 +196,21 @@ where
         Some("sqlite") => path
             .map(|path| MigrationTarget::Sqlite { path })
             .ok_or_else(|| "sqlite migration requires --path <PATH>".to_string()),
-        Some("postgres") => url_env
-            .map(|url_env| MigrationTarget::Postgres { url_env })
-            .ok_or_else(|| "postgres migration requires --url-env <ENV>".to_string()),
+        Some("postgres") => {
+            let url_env =
+                url_env.ok_or_else(|| "postgres migration requires --url-env <ENV>".to_string())?;
+            let tls = match tls_mode.as_deref().unwrap_or("verify-full") {
+                "verify-full" => {
+                    prodex_storage_postgres_runtime::PostgresTlsConfig::verify_full(tls_ca)
+                }
+                "disable" if tls_ca.is_some() => {
+                    return Err("--tls-ca requires --tls-mode verify-full".to_string());
+                }
+                "disable" => prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable(),
+                _ => return Err("--tls-mode must be verify-full or disable".to_string()),
+            };
+            Ok(MigrationTarget::Postgres { url_env, tls })
+        }
         Some(other) => Err(format!("unsupported migration backend: {other}")),
         None => Err("migration requires --backend sqlite|postgres".to_string()),
     }
@@ -260,7 +281,31 @@ mod tests {
             )
             .unwrap(),
             MigrationTarget::Postgres {
-                url_env: "PRODEX_GATEWAY_POSTGRES_URL".to_string()
+                url_env: "PRODEX_GATEWAY_POSTGRES_URL".to_string(),
+                tls: prodex_storage_postgres_runtime::PostgresTlsConfig::verify_full(None),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_explicit_plaintext_postgres_migration_target() {
+        assert_eq!(
+            parse_migrate_args(
+                [
+                    "--backend",
+                    "postgres",
+                    "--url-env",
+                    "PRODEX_GATEWAY_POSTGRES_URL",
+                    "--tls-mode",
+                    "disable",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
+            .unwrap(),
+            MigrationTarget::Postgres {
+                url_env: "PRODEX_GATEWAY_POSTGRES_URL".to_string(),
+                tls: prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable(),
             }
         );
     }

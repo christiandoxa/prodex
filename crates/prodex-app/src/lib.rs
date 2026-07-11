@@ -148,8 +148,11 @@ pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result
     runtime_launch::runtime_gateway_sqlite_migrate_compatibility_state(path)
 }
 
-pub fn migrate_gateway_compatibility_state_postgres(url: &str) -> anyhow::Result<()> {
-    runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url)
+pub fn migrate_gateway_compatibility_state_postgres(
+    url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
+) -> anyhow::Result<()> {
+    runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url, tls)
 }
 pub use gateway_backend::{GatewayBackend, start_policy_gateway_backend};
 use runtime_proxy::*;

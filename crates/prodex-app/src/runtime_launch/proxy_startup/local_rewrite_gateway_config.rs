@@ -132,6 +132,7 @@ pub(crate) enum RuntimeGatewayStateStore {
         url: String,
         state_path: PathBuf,
         coordination_redis_url: Option<String>,
+        tls: prodex_storage_postgres_runtime::PostgresTlsConfig,
     },
     Redis {
         url: String,
@@ -184,15 +185,31 @@ impl RuntimeGatewayStateStore {
         Self::postgres_with_coordination(url_env, url, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn postgres_with_coordination(
         url_env: String,
         url: String,
         coordination_redis_url: Option<String>,
     ) -> Self {
+        Self::postgres_with_coordination_and_tls(
+            url_env,
+            url,
+            coordination_redis_url,
+            prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable(),
+        )
+    }
+
+    pub(crate) fn postgres_with_coordination_and_tls(
+        url_env: String,
+        url: String,
+        coordination_redis_url: Option<String>,
+        tls: prodex_storage_postgres_runtime::PostgresTlsConfig,
+    ) -> Self {
         Self::Postgres {
             state_path: PathBuf::from(format!("postgres:{url_env}")),
             url,
             coordination_redis_url,
+            tls,
         }
     }
 
@@ -255,7 +272,7 @@ pub(crate) fn runtime_gateway_postgres_repository(
     state_store: &RuntimeGatewayStateStore,
     worker_count: usize,
 ) -> anyhow::Result<Option<prodex_storage_postgres_runtime::PostgresRepository>> {
-    let RuntimeGatewayStateStore::Postgres { url, .. } = state_store else {
+    let RuntimeGatewayStateStore::Postgres { url, tls, .. } = state_store else {
         return Ok(None);
     };
     let config = prodex_storage_postgres_runtime::PostgresRuntimeConfig::new(
@@ -263,7 +280,7 @@ pub(crate) fn runtime_gateway_postgres_repository(
         worker_count.clamp(1, 32),
     )
     .map_err(|_| anyhow::anyhow!("failed to configure PostgreSQL gateway accounting pool"))?;
-    prodex_storage_postgres_runtime::PostgresRepository::from_config_explicit_no_tls(&config)
+    prodex_storage_postgres_runtime::PostgresRepository::from_config_with_tls_config(&config, tls)
         .map(Some)
         .map_err(|_| anyhow::anyhow!("failed to configure PostgreSQL gateway accounting pool"))
 }
@@ -471,6 +488,7 @@ mod tests {
             url: "postgres://prodex:secret@db.example.test/prodex".to_string(),
             state_path: PathBuf::from("postgres:PRODEX_DATABASE_URL"),
             coordination_redis_url: Some("redis://:secret@redis.example.test/0".to_string()),
+            tls: prodex_storage_postgres_runtime::PostgresTlsConfig::verify_full(None),
         };
         assert_redacted(
             &format!("{state:?}"),

@@ -14,8 +14,13 @@ pub use prodex_app::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GatewayMigrationTarget {
-    Sqlite { path: PathBuf },
-    Postgres { url_env: String },
+    Sqlite {
+        path: PathBuf,
+    },
+    Postgres {
+        url_env: String,
+        tls: prodex_storage_postgres_runtime::PostgresTlsConfig,
+    },
 }
 
 pub fn run_gateway_migrate(target: GatewayMigrationTarget) -> Result<String, String> {
@@ -39,12 +44,12 @@ pub fn run_gateway_migrate(target: GatewayMigrationTarget) -> Result<String, Str
                 plan.migrations.len()
             ))
         }
-        GatewayMigrationTarget::Postgres { url_env } => {
+        GatewayMigrationTarget::Postgres { url_env, tls } => {
             let url = std::env::var(&url_env)
                 .map_err(|_| format!("missing postgres URL environment variable {url_env}"))?;
             let plan = plan_postgres_migrations(PostgresRuntimeMode::ExternalMigrator)
                 .map_err(|err| err.to_string())?;
-            let mut client = postgres::Client::connect(&url, postgres::NoTls)
+            let mut client = prodex_storage_postgres_runtime::connect_blocking(&url, &tls)
                 .map_err(|err| format!("failed to connect postgres from {url_env}: {err}"))?;
             for migration in &plan.migrations {
                 client.batch_execute(migration.sql).map_err(|err| {
@@ -54,9 +59,9 @@ pub fn run_gateway_migrate(target: GatewayMigrationTarget) -> Result<String, Str
                     )
                 })?;
             }
-            prodex_app::migrate_gateway_compatibility_state_postgres(&url).map_err(|err| {
-                format!("failed to migrate gateway postgres compatibility state: {err:#}")
-            })?;
+            prodex_app::migrate_gateway_compatibility_state_postgres(&url, &tls).map_err(
+                |err| format!("failed to migrate gateway postgres compatibility state: {err:#}"),
+            )?;
             Ok(format!(
                 "applied {} postgres migration(s) and ensured gateway compatibility schema",
                 plan.migrations.len()

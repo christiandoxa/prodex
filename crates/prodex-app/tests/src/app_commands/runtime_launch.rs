@@ -3,6 +3,8 @@ use super::*;
 mod arg0_cleanup;
 #[path = "runtime_launch/openai_spark_context.rs"]
 mod openai_spark_context;
+#[path = "runtime_launch/postgres_tls.rs"]
+mod postgres_tls;
 #[path = "runtime_launch/preflight.rs"]
 mod preflight;
 #[path = "runtime_launch/profile_selection.rs"]
@@ -19,7 +21,6 @@ mod routes;
 mod run_command_strategy;
 #[path = "runtime_launch/super_runtime.rs"]
 mod super_runtime;
-
 fn gateway_args() -> GatewayArgs {
     GatewayArgs {
         command: None,
@@ -60,7 +61,6 @@ fn gateway_state_store_config_builds_postgres_backend_from_env() {
         other => panic!("expected postgres gateway state backend, got {other:?}"),
     }
 }
-
 #[test]
 fn gateway_launch_config_accepts_postgres_state_store_without_accounting_gate() {
     let root = temp_dir("gateway-runtime-topology-postgres-local");

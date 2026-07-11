@@ -263,8 +263,9 @@ fn runtime_gateway_sql_key_store_i64_to_u64(value: i64, field: &str) -> Result<u
 
 pub(super) fn runtime_gateway_postgres_load_key_store(
     url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
 ) -> Result<RuntimeGatewayVirtualKeyStoreFile> {
-    let mut client = runtime_gateway_postgres_open(url)?;
+    let mut client = runtime_gateway_postgres_open(url, tls)?;
     runtime_gateway_postgres_load_key_store_from_client(&mut client)
 }
 
@@ -982,7 +983,8 @@ mod tests {
                     .expect("postgres enterprise migration should apply");
             }
         }
-        runtime_gateway_postgres_migrate_compatibility_state(url)
+        let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+        runtime_gateway_postgres_migrate_compatibility_state(url, &tls)
             .expect("postgres compatibility migrations should apply");
     }
 
@@ -1360,14 +1362,15 @@ mod tests {
             }],
         };
 
-        let mut conn = runtime_gateway_postgres_open(&url).unwrap();
+        let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+        let mut conn = runtime_gateway_postgres_open(&url, &tls).unwrap();
         let mut tx = conn.transaction().unwrap();
         if let Err(error) = runtime_gateway_postgres_save_key_store_in_tx(&mut tx, &store) {
             panic!("{error:#}");
         }
         tx.commit().unwrap();
 
-        let loaded = runtime_gateway_postgres_load_key_store(&url).unwrap();
+        let loaded = runtime_gateway_postgres_load_key_store(&url, &tls).unwrap();
         assert!(loaded.keys.iter().any(|key| key.name == store.keys[0].name));
         assert!(
             loaded

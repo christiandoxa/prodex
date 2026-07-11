@@ -74,9 +74,10 @@ pub(super) fn runtime_gateway_sqlite_ledger_load(
 
 pub(super) fn runtime_gateway_postgres_ledger_load(
     url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
     limit: usize,
 ) -> Result<Vec<RuntimeGatewayBillingLedgerEntry>> {
-    let mut client = runtime_gateway_postgres_open(url)?;
+    let mut client = runtime_gateway_postgres_open(url, tls)?;
     let sql = r#"
         SELECT phase, request_id, typed_request_id, call_id, key_name, tenant_id,
                team_id, project_id, user_id, budget_id, model, minute_epoch,
@@ -166,10 +167,11 @@ pub(super) fn runtime_gateway_sqlite_ledger_reconcile_response(
 
 pub(super) fn runtime_gateway_postgres_ledger_reconcile_response(
     url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
     event: &RuntimeProviderGatewaySpendEvent,
     reconciled_at_epoch: u64,
 ) -> Result<bool> {
-    let mut client = runtime_gateway_postgres_open(url)?;
+    let mut client = runtime_gateway_postgres_open(url, tls)?;
     let Some(key_name) = event.key_name.as_deref() else {
         return Ok(false);
     };

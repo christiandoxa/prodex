@@ -31,7 +31,8 @@ fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
                 .expect("postgres enterprise migration should apply");
         }
     }
-    runtime_gateway_postgres_migrate_compatibility_state(url)
+    let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+    runtime_gateway_postgres_migrate_compatibility_state(url, &tls)
         .expect("postgres compatibility migrations should apply");
 }
 

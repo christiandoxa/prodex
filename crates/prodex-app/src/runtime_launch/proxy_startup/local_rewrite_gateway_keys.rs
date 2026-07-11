@@ -144,8 +144,8 @@ pub(super) fn runtime_gateway_virtual_key_store_load_strict(
     let path = state_store.key_store_path();
     let store = match state_store {
         RuntimeGatewayStateStore::Sqlite { path } => runtime_gateway_sqlite_load_key_store(path),
-        RuntimeGatewayStateStore::Postgres { url, .. } => {
-            runtime_gateway_postgres_load_key_store(url)
+        RuntimeGatewayStateStore::Postgres { url, tls, .. } => {
+            runtime_gateway_postgres_load_key_store(url, tls)
         }
         RuntimeGatewayStateStore::Redis { url, .. } => {
             runtime_gateway_redis_load_key_store(url, RUNTIME_GATEWAY_REDIS_KEY_STORE_KEY)

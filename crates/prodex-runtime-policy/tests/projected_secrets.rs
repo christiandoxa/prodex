@@ -123,3 +123,34 @@ fn production_policy_rejects_foreign_secret_provider() {
             .contains("must use secrets.projected_provider when secrets.production=true")
     );
 }
+
+#[test]
+fn production_policy_rejects_disabled_postgres_tls() {
+    let root = TestRoot::new("postgres-plaintext");
+    root.write_policy(&PRODUCTION_POLICY.replace(
+        "postgres_url_ref = { provider = \"external\", name = \"postgres-url\" }",
+        "postgres_url_ref = { provider = \"external\", name = \"postgres-url\" }\npostgres_tls_mode = \"disable\"",
+    ));
+
+    let error = load_runtime_policy_from_root(root.path()).unwrap_err();
+    assert!(format!("{error:#}").contains("cannot be disable when secrets.production=true"));
+}
+
+#[test]
+fn production_policy_accepts_verify_full_with_custom_ca() {
+    let root = TestRoot::new("postgres-verify-full");
+    root.write_policy(&PRODUCTION_POLICY.replace(
+        "postgres_url_ref = { provider = \"external\", name = \"postgres-url\" }",
+        "postgres_url_ref = { provider = \"external\", name = \"postgres-url\" }\npostgres_tls_mode = \"verify-full\"\npostgres_tls_ca_path = \"certs/postgres-ca.pem\"",
+    ));
+
+    let policy = load_runtime_policy_from_root(root.path()).unwrap().unwrap();
+    assert_eq!(
+        policy.gateway.state.postgres_tls_mode.as_deref(),
+        Some("verify-full")
+    );
+    assert_eq!(
+        policy.gateway.state.postgres_tls_ca_path.as_deref(),
+        Some("certs/postgres-ca.pem")
+    );
+}
