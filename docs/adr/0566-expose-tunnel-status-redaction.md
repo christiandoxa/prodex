@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 1068](1068-expose-session-tunnel-model.md)
 
 ## Context
 
@@ -19,8 +19,8 @@ before rendering it in the terminal panel.
 
 ## Consequences
 
-- `prodex expose` still tells operators that the tunnel is unavailable and how
-  to continue with `--no-tunnel`.
+- `prodex expose` still tells operators when an explicitly requested tunnel is
+  unavailable and continues with loopback-only access.
 - Secret-like values from tunnel startup diagnostics are removed from the local
   terminal status.
-- Local relay, access-token, CSP, and Cloudflare URL behavior are unchanged.
+- ADR 1068 replaces the legacy access-token and default-tunnel behavior.

@@ -3,6 +3,15 @@
 Prodex reads `policy.toml` from the Prodex root, usually `~/.prodex/policy.toml` unless `PRODEX_HOME` is set.
 Environment variables override policy values, and unset values fall back to built-in defaults.
 
+Core runtime-proxy, broker, WebSocket, smart-context, request-body, and OIDC
+timing settings are captured in one typed snapshot at startup. The environment
+is read once per key and policy is loaded once for that snapshot; active
+requests and broker polling loops do not re-read those inputs. Configuration
+errors are aggregated, report key names without values, and stop proxy startup
+before the listener is bound. Changing these inputs therefore requires a
+restart. Legacy lenient inputs keep their documented/default behavior and emit
+`runtime_config_compatibility_default` with the key name only.
+
 Relative `runtime.log_dir` values are resolved under the Prodex root. `PRODEX_RUNTIME_LOG_DIR` is used as provided.
 Use `prodex info` for effective tuning values and `prodex doctor --runtime --json` for the resolved runtime log directory, format, and current `log_path`.
 
@@ -76,9 +85,10 @@ serving; secret files are not read on the request hot path.
 | `gateway.sso.key_prefixes_header` | none | `x-prodex-sso-key-prefixes` | Exact whitespace-free optional comma/semicolon/newline-separated virtual-key prefixes visible to the SSO principal. Empty means global access. |
 | `gateway.sso.tenant_header` | none | `x-prodex-sso-tenant` | Exact whitespace-free optional tenant id header from a trusted SSO proxy. Missing values fall back to an active matching SCIM user's tenant. SCIM users can also carry `team_id`, `project_id`, `user_id`, and `budget_id`; SSO/OIDC admin requests inherit those dimensions from the matching active SCIM user. |
 | `gateway.sso.require_tenant` | none | `false` | Reject SSO/OIDC admin authentication when no tenant is supplied by the trusted header, OIDC claim, or active SCIM user. Enable for multi-tenant deployments. |
-| `gateway.sso.oidc_issuer` | none | empty | Enable native OIDC/JWT admin auth for bearer tokens issued by this exact HTTPS issuer. The URL must include a host and no userinfo. Requires `oidc_audience`; Prodex discovers JWKS from this issuer when `oidc_jwks_url` is omitted. |
+| `gateway.sso.oidc_issuer` | none | empty | Enable native OIDC/JWT admin auth for bearer tokens issued by this exact normalized HTTPS issuer. The bounded URL must include a permitted host and no userinfo, query, or fragment. Requires `oidc_audience`; Prodex discovers JWKS from this issuer when `oidc_jwks_url` is omitted. |
 | `gateway.sso.oidc_audience` | none | empty | Exact whitespace-free required audience for OIDC/JWT admin bearer tokens. |
-| `gateway.sso.oidc_jwks_url` | none | issuer discovery | Optional exact HTTPS JWKS URL with host and no userinfo, used to verify OIDC/JWT admin bearer token signatures. |
+| `gateway.sso.oidc_jwks_url` | none | issuer discovery | Optional exact HTTPS JWKS URL used to verify OIDC/JWT admin bearer token signatures. It must use the issuer origin unless its full origin and effective port appear in `oidc_jwks_origin_allowlist`. |
+| `gateway.sso.oidc_jwks_origin_allowlist` | none | empty | Up to 16 exact HTTPS origins permitted for cross-origin JWKS. Entries contain only scheme, normalized host, and optional explicit port; paths, userinfo, queries, fragments, and private/loopback/metadata IP literals are rejected. Redirects remain disabled. |
 | `gateway.sso.oidc_user_claim` | none | `email` | Exact whitespace-free claim used as the admin principal name before SCIM lookup. Runtime falls back to `email`, `preferred_username`, then `sub` only when the configured claim is absent from the token. |
 | `gateway.sso.oidc_role_claim` | none | `prodex_role` | Exact whitespace-free optional claim carrying `admin` or `viewer`; missing values fall back to an active matching SCIM user's role, then `viewer`, while malformed/unknown explicit values resolve to `viewer`. |
 | `gateway.sso.oidc_tenant_claim` | none | `prodex_tenant` | Exact whitespace-free optional claim carrying the admin tenant id; missing values fall back to an active matching SCIM user's tenant. |
@@ -142,11 +152,12 @@ Admin-managed virtual keys and SCIM users default to file state under the Prodex
 
 Gateway OIDC discovery/JWKS startup prefetch is bounded by
 `PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS`, defaulting to 2000 ms. Request-path
-OIDC authentication still reads only the startup cache and fails closed when the
-cache is unavailable. When OIDC is configured, OIDC timing env overrides must be
-exact unsigned integers without whitespace; prefetch timeout and refresh failure
-backoff must be greater than zero, while HTTP cache TTL and last-known-good may
-be zero for diagnostics.
+OIDC authentication reads only the startup cache and fails closed when the cache
+is unavailable. OIDC timing overrides retain their legacy compatibility rule:
+valid unsigned values are bounded, HTTP cache TTL and last-known-good may be zero
+for diagnostics, and malformed values use the default while logging only the
+affected key name. Values are snapshotted before the listener is bound and do
+not change until restart.
 
 Example:
 
@@ -189,6 +200,7 @@ default_role = "viewer"
 # oidc_issuer = "https://idp.example"
 # oidc_audience = "prodex-gateway"
 # oidc_jwks_url = "https://idp.example/.well-known/jwks.json" # optional
+# oidc_jwks_origin_allowlist = ["https://keys.idp.example:8443"] # only for cross-origin JWKS
 # oidc_user_claim = "email"
 # oidc_role_claim = "prodex_role"
 # oidc_tenant_claim = "prodex_tenant"
