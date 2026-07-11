@@ -99,6 +99,12 @@ mod update_notice;
 #[doc(hidden)]
 pub mod bench_support;
 
+#[cfg(feature = "allocation-bench-support")]
+#[doc(hidden)]
+pub mod allocation_bench_support {
+    pub use prodex_bench_support::{RuntimeAllocationSnapshot, runtime_allocation_snapshot};
+}
+
 use app_commands::*;
 pub(crate) use app_state::*;
 use audit_log::*;
