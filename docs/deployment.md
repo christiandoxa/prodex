@@ -163,13 +163,15 @@ gateway bearer token, provider API key references, PostgreSQL, and Redis
 connection references. It must not mount `prodex-control-plane-secrets`; that
 secret is reserved for the placeholder control-plane workload.
 
-The migration Job is currently a safe-failing placeholder. It documents that
-gateway request-serving pods must not run schema migration from startup. The Job
-is labeled separately, uses the dedicated `prodex-gateway-migration`
+The migration Job runs the dedicated external `prodex-gateway migrate` command;
+gateway request-serving pods do not run schema migration during startup. The
+Job is labeled separately, uses the dedicated `prodex-gateway-migration`
 ServiceAccount, reads only `prodex-gateway-migration-secrets` containing the
 PostgreSQL URL, and has a dedicated egress-only NetworkPolicy that permits DNS
-and PostgreSQL but not Redis, provider HTTPS, or ingress. Replace the
-placeholder only after the versioned migrator command lands.
+and PostgreSQL but not Redis, provider HTTPS, or ingress. The current migrator
+ensures the compatibility schema; migration status/history, advisory locking,
+and the complete versioned expand/contract workflow remain required before the
+database migration contract is considered complete.
 
 The same manifest also includes a `prodex-control-plane` `Deployment`, `Service`,
 and `NetworkPolicy` as an explicit enterprise control-plane surface. It is scaled
