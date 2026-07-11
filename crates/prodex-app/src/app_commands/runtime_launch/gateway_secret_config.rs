@@ -1,3 +1,4 @@
+use super::RuntimeProjectedProviderCredential;
 use anyhow::{Context as _, Result, bail};
 use prodex_domain::{SecretProvider as _, SecretPurpose, SecretRef, SecretResolutionRequest};
 use secret_store::ProjectedSecretProvider;
@@ -38,6 +39,47 @@ impl GatewaySecretResolver {
 
     pub(crate) fn production(&self) -> bool {
         self.production
+    }
+
+    pub(crate) fn projected_provider_credential(
+        &self,
+        context: &str,
+        reference: Option<&SecretRef>,
+        direct: Option<&str>,
+    ) -> Result<Option<RuntimeProjectedProviderCredential>> {
+        if reference.is_some() && direct.is_some() {
+            bail!("{context} must use exactly one secret source");
+        }
+        if self.production && direct.is_some() {
+            bail!("{context} raw CLI/environment credentials are forbidden in production");
+        }
+        let Some(reference) = reference else {
+            return Ok(None);
+        };
+        let provider = self
+            .projected
+            .as_ref()
+            .context("projected secret provider is not configured")?;
+        if !reference.is_well_formed() || reference.provider() != provider.descriptor().name {
+            bail!("{context} secret reference is invalid");
+        }
+        let mut fingerprint = self
+            .fingerprint
+            .lock()
+            .map_err(|_| anyhow::anyhow!("gateway secret fingerprint state is unavailable"))?;
+        fingerprint.update(context.as_bytes());
+        fingerprint.update([2]);
+        fingerprint.update(reference.provider().as_bytes());
+        fingerprint.update([0]);
+        fingerprint.update(reference.name().as_bytes());
+        fingerprint.update([0]);
+        if let Some(version) = reference.version() {
+            fingerprint.update(version.as_bytes());
+        }
+        Ok(Some(RuntimeProjectedProviderCredential::new(
+            reference.clone(),
+            provider.clone(),
+        )))
     }
 
     pub(crate) fn resolve(

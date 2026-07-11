@@ -26,6 +26,7 @@ pub(super) fn runtime_copilot_auth_attempts(
                     api_key: api_key.to_string(),
                     api_url: None,
                     hard_affinity: api_keys.len() <= 1,
+                    projected: false,
                 })
                 .collect::<Vec<_>>();
             if attempts.is_empty() {
@@ -33,6 +34,13 @@ pub(super) fn runtime_copilot_auth_attempts(
             }
             Ok(attempts)
         }
+        RuntimeCopilotProviderAuth::Projected => Ok(vec![RuntimeCopilotSelectedAuth {
+            profile_name: "projected".to_string(),
+            api_key: String::new(),
+            api_url: None,
+            hard_affinity: true,
+            projected: true,
+        }]),
         RuntimeCopilotProviderAuth::Profiles { profiles } => {
             let pool = shared
                 .copilot_oauth_pool
@@ -61,6 +69,7 @@ impl RuntimeCopilotOAuthPool {
                 api_key: profile.api_key,
                 api_url: Some(profile.api_url),
                 hard_affinity: true,
+                projected: false,
             }]);
         }
         let profiles = if state.profiles.is_empty() {
@@ -81,6 +90,7 @@ impl RuntimeCopilotOAuthPool {
                     api_key: profile.api_key,
                     api_url: Some(profile.api_url),
                     hard_affinity: false,
+                    projected: false,
                 }
             })
             .collect())

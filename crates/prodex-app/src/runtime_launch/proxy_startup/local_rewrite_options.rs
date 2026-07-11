@@ -6,9 +6,48 @@ use super::local_rewrite_gateway_config::{
 use super::local_rewrite_kiro::RuntimeKiroProfileAuth;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use super::*;
+use prodex_domain::SecretRef;
+use secret_store::ProjectedSecretProvider;
+use std::fmt;
+
+#[derive(Clone)]
+pub(crate) struct RuntimeProjectedProviderCredential {
+    reference: SecretRef,
+    provider: ProjectedSecretProvider,
+}
+
+impl RuntimeProjectedProviderCredential {
+    pub(crate) fn new(reference: SecretRef, provider: ProjectedSecretProvider) -> Self {
+        Self {
+            reference,
+            provider,
+        }
+    }
+
+    pub(crate) fn reference(&self) -> &SecretRef {
+        &self.reference
+    }
+
+    pub(super) fn provider(&self) -> &ProjectedSecretProvider {
+        &self.provider
+    }
+}
+
+impl fmt::Debug for RuntimeProjectedProviderCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeProjectedProviderCredential")
+            .field("reference", &"<redacted>")
+            .field("provider", &"<redacted>")
+            .finish()
+    }
+}
 
 #[derive(Clone)]
 pub(crate) enum RuntimeLocalRewriteProviderOptions {
+    ProjectedCredential {
+        provider: Box<RuntimeLocalRewriteProviderOptions>,
+        credential: RuntimeProjectedProviderCredential,
+    },
     Anthropic {
         auth: RuntimeAnthropicProviderAuth,
     },
@@ -42,8 +81,36 @@ pub(crate) enum RuntimeLocalRewriteProviderOptions {
 }
 
 impl RuntimeLocalRewriteProviderOptions {
+    pub(crate) fn with_projected_credential(
+        self,
+        credential: RuntimeProjectedProviderCredential,
+    ) -> Self {
+        Self::ProjectedCredential {
+            provider: Box::new(self),
+            credential,
+        }
+    }
+
+    pub(crate) fn into_runtime_parts(
+        self,
+    ) -> (
+        RuntimeLocalRewriteProviderOptions,
+        Option<RuntimeProjectedProviderCredential>,
+    ) {
+        match self {
+            Self::ProjectedCredential {
+                provider,
+                credential,
+            } => (*provider, Some(credential)),
+            provider => (provider, None),
+        }
+    }
+
     pub(super) fn bridge_kind(&self) -> RuntimeProviderBridgeKind {
         match self {
+            RuntimeLocalRewriteProviderOptions::ProjectedCredential { provider, .. } => {
+                provider.bridge_kind()
+            }
             RuntimeLocalRewriteProviderOptions::Anthropic { .. } => {
                 RuntimeProviderBridgeKind::Anthropic
             }
@@ -64,6 +131,9 @@ impl RuntimeLocalRewriteProviderOptions {
 
     pub(super) fn configured_reasoning_reserve_tokens(&self) -> Option<u64> {
         match self {
+            RuntimeLocalRewriteProviderOptions::ProjectedCredential { provider, .. } => {
+                provider.configured_reasoning_reserve_tokens()
+            }
             RuntimeLocalRewriteProviderOptions::Gemini {
                 thinking_budget_tokens,
                 ..
@@ -93,4 +163,35 @@ pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {
     pub(crate) gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig,
     pub(crate) gateway_call_id_header: Option<String>,
     pub(crate) gateway_observability: RuntimeGatewayObservabilityConfig,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projected_provider_credential_debug_is_redacted() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-provider-credential-debug-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let credential = RuntimeProjectedProviderCredential::new(
+            SecretRef::new("debug-provider-secret", "debug-name-secret", None::<String>),
+            ProjectedSecretProvider::new(&root, "debug-provider-secret").unwrap(),
+        );
+
+        let rendered = format!("{credential:?}");
+
+        assert!(rendered.contains("RuntimeProjectedProviderCredential"));
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("debug-provider-secret"));
+        assert!(!rendered.contains("debug-name-secret"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

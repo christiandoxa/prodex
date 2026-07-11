@@ -75,6 +75,12 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
     )
     .unwrap();
     assert!(config.auth_required);
+    let RuntimeLocalRewriteProviderOptions::ProjectedCredential { credential, .. } =
+        &config.provider_options
+    else {
+        panic!("production provider credential should remain deferred");
+    };
+    assert_eq!(credential.reference(), &secret_ref("provider-key"));
     assert_eq!(config.admin_tokens.len(), 1);
     assert_eq!(config.virtual_keys.len(), 1);
     let RuntimeGatewayStateStore::Postgres { tls, .. } = &config.state_store else {
@@ -123,7 +129,7 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         &secrets,
     )
     .unwrap();
-    assert_ne!(rotated.credential_fingerprint, initial_fingerprint);
+    assert_eq!(rotated.credential_fingerprint, initial_fingerprint);
 
     let mut raw_args = gateway_args();
     raw_args.auth_token = Some("raw-cli-secret".to_string());

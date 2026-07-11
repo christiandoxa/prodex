@@ -4,6 +4,7 @@ use std::fmt;
 pub(crate) enum RuntimeAnthropicAuth {
     ApiKey { api_key: String },
     OAuth { access_token: String },
+    Projected,
 }
 
 #[derive(Clone)]
@@ -14,6 +15,7 @@ pub(crate) enum RuntimeAnthropicProviderAuth {
     OAuthProfiles {
         profiles: Vec<RuntimeAnthropicOAuthProfileAuth>,
     },
+    Projected,
 }
 
 #[derive(Clone)]

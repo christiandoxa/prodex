@@ -41,7 +41,14 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
     body: Vec<u8>,
     api_keys: &[String],
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let api_key_attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys);
+    let api_key_attempts = if shared.provider_credential.is_some() {
+        vec![("projected".to_string(), None)]
+    } else {
+        runtime_local_rewrite_api_key_attempts(shared, api_keys)
+            .into_iter()
+            .map(|(label, api_key)| (label, Some(api_key)))
+            .collect()
+    };
     if api_key_attempts.is_empty() {
         anyhow::bail!("DeepSeek provider has no API keys configured");
     }
@@ -75,7 +82,7 @@ fn send_runtime_deepseek_responses_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     body: Vec<u8>,
-    api_key_attempts: Vec<(String, &str)>,
+    api_key_attempts: Vec<(String, Option<&str>)>,
     api_key_attempt_count: usize,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let model_selection = runtime_local_rewrite_model_selection(
@@ -227,7 +234,7 @@ fn send_runtime_deepseek_passthrough_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     body: Vec<u8>,
-    api_key_attempts: Vec<(String, &str)>,
+    api_key_attempts: Vec<(String, Option<&str>)>,
     api_key_attempt_count: usize,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let upstream_url = runtime_deepseek_upstream_url(

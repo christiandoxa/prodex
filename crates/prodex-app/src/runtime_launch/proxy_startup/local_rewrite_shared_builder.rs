@@ -22,11 +22,13 @@ pub(super) fn build_runtime_local_rewrite_proxy_shared(
     gateway_call_id_header: Option<String>,
     gateway_observability: RuntimeGatewayObservabilityConfig,
 ) -> Result<RuntimeLocalRewriteProxyShared> {
+    let (provider, provider_credential) = provider.into_runtime_parts();
     Ok(RuntimeLocalRewriteProxyShared {
         runtime_shared,
         upstream_base_url,
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         provider,
+        provider_credential,
         deepseek_conversations: Arc::new(Mutex::new(BTreeMap::new())),
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_conversations: Arc::new(Mutex::new(BTreeMap::new())),

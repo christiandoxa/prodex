@@ -14,6 +14,7 @@ pub(crate) enum RuntimeCopilotProviderAuth {
     Profiles {
         profiles: Vec<RuntimeCopilotProfileAuth>,
     },
+    Projected,
 }
 
 #[derive(Clone)]
@@ -69,6 +70,7 @@ pub(super) struct RuntimeCopilotSelectedAuth {
     pub(super) api_key: String,
     pub(super) api_url: Option<String>,
     pub(super) hard_affinity: bool,
+    pub(super) projected: bool,
 }
 
 #[derive(Clone)]

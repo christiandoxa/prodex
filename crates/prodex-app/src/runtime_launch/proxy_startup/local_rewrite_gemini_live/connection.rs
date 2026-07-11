@@ -1,6 +1,8 @@
 //! Gemini Live upstream connection and local websocket upgrade helpers.
 
 use super::super::gemini_rewrite::RuntimeGeminiAuth;
+use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::super::local_rewrite_transport::runtime_local_rewrite_with_projected_provider_secret;
 use super::GEMINI_LIVE_WEBSOCKET_URL;
 use crate::{
     RuntimeUpstreamWebSocket, TinyHeader, TinyResponse, TinyStatusCode, derive_accept_key,
@@ -13,14 +15,22 @@ use tungstenite::client::IntoClientRequest;
 pub(super) fn runtime_gemini_live_connect(
     auth: &RuntimeGeminiAuth,
     configured_endpoint: Option<&str>,
+    shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeUpstreamWebSocket> {
     let endpoint = configured_endpoint.unwrap_or(GEMINI_LIVE_WEBSOCKET_URL);
+    if matches!(auth, RuntimeGeminiAuth::Projected) {
+        return runtime_local_rewrite_with_projected_provider_secret(
+            shared.provider_credential.as_ref(),
+            |api_key| runtime_gemini_live_connect_api_key(endpoint, api_key),
+        );
+    }
     let url = match auth {
         RuntimeGeminiAuth::ApiKey { api_key } => {
             let separator = if endpoint.contains('?') { '&' } else { '?' };
             format!("{endpoint}{separator}key={api_key}")
         }
         RuntimeGeminiAuth::OAuth { .. } => endpoint.to_string(),
+        RuntimeGeminiAuth::Projected => unreachable!("projected auth is handled above"),
     };
     let mut request = url
         .into_client_request()
@@ -33,6 +43,23 @@ pub(super) fn runtime_gemini_live_connect(
                 .context("failed to encode Gemini Live OAuth header")?,
         );
     }
+    let (mut socket, _) =
+        tungstenite::connect(request).context("failed to connect Gemini Live websocket")?;
+    runtime_set_upstream_websocket_io_timeout(&mut socket, Some(Duration::from_secs(30)))
+        .context("failed to configure Gemini Live websocket timeout")?;
+    Ok(socket)
+}
+
+fn runtime_gemini_live_connect_api_key(
+    endpoint: &str,
+    api_key: &str,
+) -> Result<RuntimeUpstreamWebSocket> {
+    let separator = if endpoint.contains('?') { '&' } else { '?' };
+    let url = zeroize::Zeroizing::new(format!("{endpoint}{separator}key={api_key}"));
+    let request = url
+        .as_str()
+        .into_client_request()
+        .context("failed to build Gemini Live websocket request")?;
     let (mut socket, _) =
         tungstenite::connect(request).context("failed to connect Gemini Live websocket")?;
     runtime_set_upstream_websocket_io_timeout(&mut socket, Some(Duration::from_secs(30)))

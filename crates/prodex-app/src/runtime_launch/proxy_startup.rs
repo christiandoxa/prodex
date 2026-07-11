@@ -108,8 +108,8 @@ pub(crate) use local_rewrite::{
     RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
-    start_runtime_gateway_rewrite_proxy, start_runtime_gateway_rewrite_proxy_with_secret_refresh,
-    start_runtime_local_rewrite_proxy,
+    RuntimeProjectedProviderCredential, start_runtime_gateway_rewrite_proxy,
+    start_runtime_gateway_rewrite_proxy_with_secret_refresh, start_runtime_local_rewrite_proxy,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 pub(crate) use local_rewrite_gateway_backend_connection::{

@@ -6,6 +6,7 @@ use std::{env, path::Path};
 pub(crate) struct ResolvedGatewayProviderConfig {
     pub(crate) provider: Option<SuperExternalProvider>,
     pub(crate) provider_options: RuntimeLocalRewriteProviderOptions,
+    pub(crate) provider_credential: Option<RuntimeProjectedProviderCredential>,
     pub(crate) upstream_base_url: String,
 }
 
@@ -27,20 +28,62 @@ pub(crate) fn resolve_gateway_provider_config_with_resolver(
             "gateway Kiro profile credentials are forbidden in production; use a provider with projected credentials"
         );
     }
-    let api_key = resolver.resolve(
+    let provider_credential = resolver.projected_provider_credential(
         "gateway provider API key",
         policy.provider_api_key_ref.as_ref(),
-        None,
         args.api_key.as_deref(),
-        SecretPurpose::ProviderCredential,
     )?;
-    let provider_options = gateway_provider_options(state, provider, api_key.as_deref())?;
+    let provider_options = if provider_credential.is_some() {
+        gateway_projected_provider_options(provider)?
+    } else {
+        let api_key = resolver.resolve(
+            "gateway provider API key",
+            None,
+            None,
+            args.api_key.as_deref(),
+            SecretPurpose::ProviderCredential,
+        )?;
+        gateway_provider_options(state, provider, api_key.as_deref())?
+    };
     let upstream_base_url = gateway_upstream_base_url(args, policy, provider)?;
     Ok(ResolvedGatewayProviderConfig {
         provider,
         provider_options,
+        provider_credential,
         upstream_base_url,
     })
+}
+
+fn gateway_projected_provider_options(
+    provider: Option<SuperExternalProvider>,
+) -> Result<RuntimeLocalRewriteProviderOptions> {
+    match provider {
+        Some(SuperExternalProvider::Anthropic) => {
+            Ok(RuntimeLocalRewriteProviderOptions::Anthropic {
+                auth: RuntimeAnthropicProviderAuth::Projected,
+            })
+        }
+        Some(SuperExternalProvider::Copilot) => Ok(RuntimeLocalRewriteProviderOptions::Copilot {
+            auth: RuntimeCopilotProviderAuth::Projected,
+        }),
+        Some(SuperExternalProvider::DeepSeek) => Ok(RuntimeLocalRewriteProviderOptions::DeepSeek {
+            api_keys: Vec::new(),
+            strict_tools: runtime_deepseek_strict_tools_enabled(Path::new(""))?,
+            beta_base_url: runtime_deepseek_beta_base_url(Path::new(""))?,
+            web_search_mode: runtime_deepseek_web_search_mode(Path::new(""))?,
+        }),
+        Some(SuperExternalProvider::Gemini) => Ok(RuntimeLocalRewriteProviderOptions::Gemini {
+            auth: RuntimeGeminiProviderAuth::Projected,
+            thinking_budget_tokens: None,
+            model_resolution: RuntimeGeminiModelResolution::from_current_settings(),
+        }),
+        Some(SuperExternalProvider::Kiro) => {
+            bail!("gateway Kiro does not accept a projected provider API key")
+        }
+        None => Ok(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: Vec::new(),
+        }),
+    }
 }
 
 pub(crate) fn gateway_policy_provider(value: &str) -> Result<SuperExternalProvider> {
