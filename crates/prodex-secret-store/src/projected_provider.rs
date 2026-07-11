@@ -50,7 +50,11 @@ impl ProjectedSecretProvider {
         &self.provider_name
     }
 
-    fn resolve_path(&self, relative: &str) -> Result<PathBuf, SecretResolutionError> {
+    fn resolve_path_from(
+        &self,
+        root: &Path,
+        relative: &str,
+    ) -> Result<PathBuf, SecretResolutionError> {
         let relative = Path::new(relative);
         if relative.components().next().is_none()
             || relative
@@ -59,11 +63,29 @@ impl ProjectedSecretProvider {
         {
             return Err(SecretResolutionError::PermissionDenied);
         }
-        let resolved = fs::canonicalize(self.root.join(relative)).map_err(map_resolution_io)?;
-        if resolved == self.root || !resolved.starts_with(&self.root) {
+        let resolved = fs::canonicalize(root.join(relative)).map_err(map_resolution_io)?;
+        if resolved == root || !resolved.starts_with(root) {
             return Err(SecretResolutionError::PermissionDenied);
         }
         Ok(resolved)
+    }
+
+    fn projected_generation_root(&self) -> Result<Option<PathBuf>, SecretResolutionError> {
+        let data_link = self.root.join("..data");
+        match fs::symlink_metadata(&data_link) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(map_resolution_io(error)),
+        }
+
+        let resolved = fs::canonicalize(data_link).map_err(map_resolution_io)?;
+        if resolved == self.root || !resolved.starts_with(&self.root) {
+            return Err(SecretResolutionError::PermissionDenied);
+        }
+        if !fs::metadata(&resolved).map_err(map_resolution_io)?.is_dir() {
+            return Err(SecretResolutionError::ProviderUnavailable);
+        }
+        Ok(Some(resolved))
     }
 
     pub(crate) fn read_projected_file(
@@ -71,7 +93,16 @@ impl ProjectedSecretProvider {
         relative: &str,
         max_bytes: u64,
     ) -> Result<Vec<u8>, SecretResolutionError> {
-        let path = self.resolve_path(relative)?;
+        self.read_projected_file_from(&self.root, relative, max_bytes)
+    }
+
+    fn read_projected_file_from(
+        &self,
+        root: &Path,
+        relative: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, SecretResolutionError> {
+        let path = self.resolve_path_from(root, relative)?;
         let metadata = fs::metadata(&path).map_err(map_resolution_io)?;
         if !metadata.is_file() || metadata.len() > max_bytes {
             return Err(SecretResolutionError::ProviderUnavailable);
@@ -93,9 +124,13 @@ impl ProjectedSecretProvider {
         Ok(bytes)
     }
 
-    fn read_version(&self, name: &str) -> Result<Option<String>, SecretResolutionError> {
+    fn read_version(
+        &self,
+        root: &Path,
+        name: &str,
+    ) -> Result<Option<String>, SecretResolutionError> {
         let version_name = format!("{name}.version");
-        match self.read_projected_file(&version_name, PROJECTED_VERSION_MAX_BYTES) {
+        match self.read_projected_file_from(root, &version_name, PROJECTED_VERSION_MAX_BYTES) {
             Ok(bytes) => String::from_utf8(bytes)
                 .ok()
                 .filter(|value| {
@@ -136,9 +171,14 @@ impl SecretProvider for ProjectedSecretProvider {
         {
             return Err(SecretResolutionError::NotFound);
         }
-        let bytes =
-            self.read_projected_file(request.reference.name(), PROJECTED_SECRET_MAX_BYTES)?;
-        let version = self.read_version(request.reference.name())?;
+        let generation = self.projected_generation_root()?;
+        let root = generation.as_deref().unwrap_or(&self.root);
+        let bytes = self.read_projected_file_from(
+            root,
+            request.reference.name(),
+            PROJECTED_SECRET_MAX_BYTES,
+        )?;
+        let version = self.read_version(root, request.reference.name())?;
         if request.reference.version().is_some()
             && request.reference.version() != version.as_deref()
         {

@@ -170,3 +170,55 @@ fn projected_provider_follows_atomic_kubernetes_projection_rotation() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn projected_provider_anchors_value_and_version_to_one_kubernetes_generation() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("generation-anchor");
+    let first = root.join("..2026_01");
+    let second = root.join("..2026_02");
+    fs::create_dir(&first).unwrap();
+    fs::create_dir(&second).unwrap();
+    write_private(&first.join("OPENAI_API_KEY"), b"first-value");
+    write_private(&first.join("OPENAI_API_KEY.version"), b"v1");
+    write_private(&second.join("OPENAI_API_KEY"), b"second-value");
+    write_private(&second.join("OPENAI_API_KEY.version"), b"v2");
+
+    symlink("..2026_02", root.join("..data")).unwrap();
+    // Model a value path captured before the ..data swap while version resolves after it.
+    symlink("..2026_01/OPENAI_API_KEY", root.join("OPENAI_API_KEY")).unwrap();
+    symlink(
+        "..data/OPENAI_API_KEY.version",
+        root.join("OPENAI_API_KEY.version"),
+    )
+    .unwrap();
+
+    let provider = ProjectedSecretProvider::new(&root, "external-secrets").unwrap();
+    let material = provider.resolve(&request("v2")).unwrap();
+    assert_eq!(material.expose_secret(), b"second-value");
+    assert_eq!(material.version(), Some("v2"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn projected_provider_rejects_data_generation_escape() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_dir("generation-escape");
+    let outside = root.with_extension("outside-generation");
+    fs::create_dir(&outside).unwrap();
+    write_private(&outside.join("OPENAI_API_KEY"), b"outside-value");
+    write_private(&outside.join("OPENAI_API_KEY.version"), b"v1");
+    symlink(&outside, root.join("..data")).unwrap();
+
+    let provider = ProjectedSecretProvider::new(&root, "external-secrets").unwrap();
+    assert_eq!(
+        provider.resolve(&request("v1")),
+        Err(SecretResolutionError::PermissionDenied)
+    );
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}
