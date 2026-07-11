@@ -8,9 +8,9 @@ Accepted.
 
 The legacy `prodex gateway` process parked forever after starting its bounded
 worker pool. SIGTERM therefore used the operating-system default termination,
-without first changing readiness or waiting for admitted requests. The async
-dedicated serve adapter is not wired yet, but Kubernetes already declares a
-termination grace period and preStop delay.
+without first changing readiness or waiting for admitted requests. At the time
+of this decision the async dedicated serve adapter was not wired, although
+Kubernetes already declared a termination grace period and preStop delay.
 
 ## Decision
 

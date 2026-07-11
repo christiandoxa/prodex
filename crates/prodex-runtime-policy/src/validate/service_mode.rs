@@ -65,6 +65,7 @@ fn control_plane_data_plane_field(policy: &RuntimePolicyFile) -> Option<&'static
             gateway.request_constraints != Default::default(),
         ),
         ("gateway.virtual_keys", !gateway.virtual_keys.is_empty()),
+        ("gateway.sso", gateway.sso != Default::default()),
         (
             "gateway.observability",
             gateway.observability != Default::default(),
