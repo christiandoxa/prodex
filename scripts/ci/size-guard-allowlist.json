@@ -271,13 +271,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",
-    "maxLines": 981,
-    "reason": "Gateway SQLite, PostgreSQL, and Redis compatibility migration handling remains capped while backend-specific connections are split."
+    "maxLines": 987,
+    "reason": "Gateway SQLite, PostgreSQL, and Redis compatibility migration handling now threads one fail-closed TLS policy through blocking opens and migrations; capped while backend-specific connections are split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_key_store_backend.rs",
-    "maxLines": 1507,
-    "reason": "Gateway key-store compatibility, exact decoding, and backend persistence remain capped until backend implementations are split."
+    "maxLines": 1510,
+    "reason": "Gateway key-store compatibility, exact decoding, backend persistence, and explicit local PostgreSQL TLS fixtures remain capped until backend implementations are split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
@@ -286,13 +286,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1671,
-    "reason": "Gateway admin auth coverage remains capped while token, SSO, OIDC, and SCIM scenarios are split into focused fixtures."
+    "maxLines": 1672,
+    "reason": "Gateway admin auth coverage includes explicit local PostgreSQL plaintext setup and remains capped while token, SSO, OIDC, and SCIM scenarios are split into focused fixtures."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
-    "maxLines": 1298,
-    "reason": "Gateway durable state and cross-proxy PostgreSQL/Redis admission coverage remains capped while backend scenarios are split."
+    "maxLines": 1299,
+    "reason": "Gateway durable state and cross-proxy PostgreSQL/Redis admission coverage includes explicit local PostgreSQL plaintext setup and remains capped while backend scenarios are split."
   },
   {
     "file": "src/bin/prodex-control-plane.rs",

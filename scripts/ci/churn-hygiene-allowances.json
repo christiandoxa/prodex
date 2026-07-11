@@ -1,5 +1,33 @@
 [
   {
+    "id": "postgres-tls-and-release-0.274.0",
+    "requiredSubjects": [
+      "feat(storage): enforce postgres transport tls",
+      "fix(ci): verify postgres tls deployment",
+      "chore(release): release 0.274.0"
+    ],
+    "caps": {
+      "maxFiles": 47,
+      "maxBehaviorFiles": 29,
+      "maxLines": 1256,
+      "maxFileLines": 237
+    },
+    "reason": "Reviewed release range combining the shared rustls PostgreSQL connector, fail-closed production policy, pooled and blocking TLS proof with hostname mismatch rejection, backup/restore fixture repair, deployment security validation, full all-features local suite, and synchronized 0.274.0 Cargo/npm/changelog metadata."
+  },
+  {
+    "id": "grouped-request-budget-accounting-20260711",
+    "requiredSubjects": [
+      "feat(storage): enforce grouped request budgets"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 28,
+      "maxLines": 1249,
+      "maxFileLines": 159
+    },
+    "reason": "Reviewed atomic grouped request-budget accounting across domain, storage plans, PostgreSQL schema/runtime, gateway admission, multi-replica PostgreSQL/Redis proofs, policy documentation, size ratchets, clippy, changed tests, and the real Docker-backed storage proof."
+  },
+  {
     "id": "pooled-postgres-accounting-runtime-20260711",
     "requiredSubjects": [
       "feat(storage): add pooled postgres runtime"

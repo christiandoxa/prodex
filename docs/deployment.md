@@ -97,7 +97,8 @@ that prelaunch gate and rejects invalid multi-replica claims before the proxy
 binds a port. A valid PostgreSQL+Redis declaration with at least two replicas is
 accepted: PostgreSQL atomically enforces cumulative request, token, and cost
 budgets, including grouped keys, while Redis enforces distributed RPM/TPM.
-PostgreSQL TLS remains a separate production requirement.
+Production policy defaults PostgreSQL transport to certificate and hostname
+verification.
 
 Use `gateway.state.backend = "postgres"` with `postgres_url_env` for shared database-backed admin keys, usage counters, and billing ledger rows:
 
@@ -105,7 +106,13 @@ Use `gateway.state.backend = "postgres"` with `postgres_url_env` for shared data
 [gateway.state]
 backend = "postgres"
 postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"
+postgres_tls_mode = "disable" # local Compose only
 ```
+
+Production deployments must use `postgres_tls_mode = "verify-full"` (the
+production default). Set `postgres_tls_ca_path` to a PEM CA bundle when native
+roots do not contain the database issuer. The same mode applies to pooled
+accounting, blocking admin/usage/ledger access, and external migrations.
 
 The Compose file includes an optional Postgres service under the `postgres` profile:
 
@@ -165,7 +172,8 @@ gateway bearer token, provider API key references, PostgreSQL, and Redis
 connection references. It must not mount `prodex-control-plane-secrets`; that
 secret is reserved for the placeholder control-plane workload.
 
-The migration Job runs the dedicated external `prodex-gateway migrate` command;
+The migration Job runs the dedicated external `prodex-gateway migrate` command
+with `--tls-mode verify-full`;
 gateway request-serving pods do not run schema migration during startup. The
 Job is labeled separately, uses the dedicated `prodex-gateway-migration`
 ServiceAccount, reads only `prodex-gateway-migration-secrets` containing the
@@ -247,6 +255,7 @@ provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
 [gateway.state]
 backend = "postgres"
 postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+postgres_tls_mode = "verify-full"
 
 [[gateway.admin_tokens]]
 name = "prometheus"

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,7 +11,7 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const postgresImage = "postgres:16-alpine";
 const redisImage = "redis:7-alpine";
 export const MISSING_DEPENDENCY_MESSAGE =
-  "ci:storage-postgres-proof requires either PRODEX_TEST_POSTGRES_URL or local docker + psql";
+  "ci:storage-postgres-proof requires either PRODEX_TEST_POSTGRES_URL or local docker + psql + openssl";
 
 function assertSelfTest(condition, message) {
   if (!condition) {
@@ -21,11 +23,12 @@ export function selectProofMode({
   postgresUrl = process.env.PRODEX_TEST_POSTGRES_URL,
   dockerAvailable,
   psqlAvailable,
+  opensslAvailable,
 } = {}) {
   if (postgresUrl) {
     return "direct";
   }
-  if (dockerAvailable && psqlAvailable) {
+  if (dockerAvailable && psqlAvailable && opensslAvailable) {
     return "managed";
   }
   throw new Error(MISSING_DEPENDENCY_MESSAGE);
@@ -111,12 +114,58 @@ async function waitForRedis(containerId) {
   throw new Error("temporary Redis container did not become ready");
 }
 
+async function createTlsMaterial(tlsDir) {
+  await fs.chmod(tlsDir, 0o755);
+  const caKey = path.join(tlsDir, "ca.key");
+  const caCert = path.join(tlsDir, "ca.crt");
+  const serverKey = path.join(tlsDir, "server.key");
+  const serverCsr = path.join(tlsDir, "server.csr");
+  const serverCert = path.join(tlsDir, "server.crt");
+  const extensions = path.join(tlsDir, "server.ext");
+  await run(
+    "openssl",
+    [
+      "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+      "-keyout", caKey, "-out", caCert, "-days", "1",
+      "-subj", "/CN=Prodex Test CA",
+      "-addext", "basicConstraints=critical,CA:TRUE",
+      "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+    ],
+    { capture: true },
+  );
+  await run(
+    "openssl",
+    [
+      "req", "-new", "-newkey", "rsa:2048", "-nodes",
+      "-keyout", serverKey, "-out", serverCsr, "-subj", "/CN=localhost",
+    ],
+    { capture: true },
+  );
+  await fs.writeFile(
+    extensions,
+    "subjectAltName=DNS:localhost\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n",
+  );
+  await run(
+    "openssl",
+    [
+      "x509", "-req", "-in", serverCsr, "-CA", caCert, "-CAkey", caKey,
+      "-CAcreateserial", "-out", serverCert, "-days", "1", "-extfile", extensions,
+    ],
+    { capture: true },
+  );
+  await fs.chmod(serverKey, 0o640);
+}
+
 async function runWithManagedPostgres() {
   selectProofMode({
     postgresUrl: null,
     dockerAvailable: await commandExists("docker"),
     psqlAvailable: await commandExists("psql"),
+    opensslAvailable: await commandExists("openssl", ["version"]),
   });
+
+  const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-pg-tls-"));
+  await createTlsMaterial(tlsDir);
 
   const containerName = `prodex-pg-proof-${process.pid}-${Date.now()}`;
   const { stdout: containerIdRaw } = await run(
@@ -124,7 +173,6 @@ async function runWithManagedPostgres() {
     [
       "run",
       "-d",
-      "--rm",
       "--name",
       containerName,
       "-e",
@@ -132,7 +180,13 @@ async function runWithManagedPostgres() {
       "-e",
       "POSTGRES_DB=prodex_test",
       "-P",
+      "-v",
+      `${tlsDir}:/tls:ro`,
+      "--entrypoint",
+      "sh",
       postgresImage,
+      "-c",
+      "cp /tls/server.crt /tmp/server.crt && cp /tls/server.key /tmp/server.key && chown postgres:postgres /tmp/server.crt /tmp/server.key && chmod 600 /tmp/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key",
     ],
     { capture: true },
   );
@@ -155,7 +209,12 @@ async function runWithManagedPostgres() {
     if (!Number.isFinite(port) || port <= 0) {
       throw new Error(`failed to resolve temporary Postgres port from '${portRaw.trim()}'`);
     }
-    await waitForPostgres(port);
+    try {
+      await waitForPostgres(port);
+    } catch (error) {
+      const { stdout, stderr } = await run("docker", ["logs", containerId], { capture: true });
+      throw new Error(`${error.message}\n${stderr || stdout}`);
+    }
     const { stdout: redisPortRaw } = await run(
       "docker",
       ["port", redisContainerId, "6379/tcp"],
@@ -169,9 +228,24 @@ async function runWithManagedPostgres() {
     await run("node", ["scripts/ci/storage-boundary-guard.mjs"], {
       env: {
         PRODEX_TEST_POSTGRES_URL: `postgres://postgres:postgres@127.0.0.1:${port}/prodex_test`,
+        PRODEX_TEST_POSTGRES_TLS_URL: `postgres://postgres:postgres@localhost:${port}/prodex_test`,
+        PRODEX_TEST_POSTGRES_TLS_CA: path.join(tlsDir, "ca.crt"),
         PRODEX_TEST_REDIS_URL: `redis://127.0.0.1:${redisPort}/0`,
       },
     });
+    await run(
+      "cargo",
+      [
+        "test", "-q", "-p", "prodex-storage-postgres-runtime",
+        "--test", "postgres_tls", "--", "--test-threads=1",
+      ],
+      {
+        env: {
+          PRODEX_TEST_POSTGRES_TLS_URL: `postgres://postgres:postgres@localhost:${port}/prodex_test`,
+          PRODEX_TEST_POSTGRES_TLS_CA: path.join(tlsDir, "ca.crt"),
+        },
+      },
+    );
   } finally {
     if (redisContainerId) {
       try {
@@ -181,6 +255,7 @@ async function runWithManagedPostgres() {
     try {
       await run("docker", ["rm", "-f", containerId], { capture: true });
     } catch {}
+    await fs.rm(tlsDir, { recursive: true, force: true });
   }
 }
 
@@ -190,6 +265,7 @@ function runSelfTest() {
       postgresUrl: "postgres://example",
       dockerAvailable: false,
       psqlAvailable: false,
+      opensslAvailable: false,
     }) === "direct",
     "explicit PRODEX_TEST_POSTGRES_URL must bypass local dependency checks",
   );
@@ -198,6 +274,7 @@ function runSelfTest() {
       postgresUrl: "",
       dockerAvailable: true,
       psqlAvailable: true,
+      opensslAvailable: true,
     }) === "managed",
     "local docker+psql availability must select managed Postgres mode",
   );
@@ -207,6 +284,7 @@ function runSelfTest() {
       postgresUrl: "",
       dockerAvailable: true,
       psqlAvailable: false,
+      opensslAvailable: true,
     });
   } catch (error) {
     missingDependencyError = String(error);

@@ -51,6 +51,7 @@ data:
     [gateway.state]
     backend = "postgres"
     postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+    postgres_tls_mode = "verify-full"
     redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
     [[gateway.admin_tokens]]
@@ -427,6 +428,8 @@ spec:
             - "postgres"
             - "--url-env"
             - "PRODEX_GATEWAY_POSTGRES_URL"
+            - "--tls-mode"
+            - "verify-full"
           envFrom:
             - secretRef:
                 name: prodex-gateway-migration-secrets

@@ -42,6 +42,8 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ['"--backend"', "gateway migration backend flag"],
   ['"postgres"', "gateway migration postgres backend"],
   ['"--url-env"', "gateway migration URL env flag"],
+  ['"--tls-mode"', "gateway migration TLS mode flag"],
+  ['"verify-full"', "gateway migration certificate and hostname verification"],
   ["name: prodex-gateway-migration", "migration job and network policy surface"],
   ["serviceAccountName: prodex-gateway-migration", "explicit migration service account"],
   ["name: prodex-gateway-migration-secrets", "migration-only database secret"],
@@ -70,6 +72,7 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ["subPath: policy.toml", "gateway policy ConfigMap subPath"],
   ['backend = "postgres"', "PostgreSQL gateway state backend"],
   ["postgres_url_ref = { provider = \"kubernetes\", name = \"PRODEX_GATEWAY_POSTGRES_URL\" }", "PostgreSQL gateway state URL reference"],
+  ['postgres_tls_mode = "verify-full"', "PostgreSQL certificate and hostname verification policy"],
   ["name: prodex-default-deny", "namespace default-deny network policy"],
   ["prodex.dev/network-tier: ingress", "restricted ingress namespace selector"],
   ["prodex.dev/network-tier: monitoring", "monitoring namespace selector for metrics scraping"],
@@ -569,6 +572,7 @@ data:
     [gateway.state]
     backend = "postgres"
     postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+    postgres_tls_mode = "verify-full"
     redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
 
     [[gateway.admin_tokens]]
@@ -699,6 +703,8 @@ command: ["prodex-gateway", "migrate"]
 "--backend"
 "postgres"
 "--url-env"
+"--tls-mode"
+"verify-full"
 name: prodex-gateway-migration
 name: prodex-gateway-migration-secrets
 app.kubernetes.io/name: prodex-gateway-migration

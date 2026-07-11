@@ -42,9 +42,13 @@ INSERT INTO prodex_role_bindings VALUES
 INSERT INTO prodex_provider_credentials VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000401', 'openai', 'external', 'provider-a', '1', 1000),
   ('${tenantB}', '00000000-0000-7000-8000-000000000402', 'openai', 'external', 'provider-b', '1', 1000);
-INSERT INTO prodex_budget_counters VALUES
-  ('${tenantA}', 'tenant-default', NULL, 0, 0, 15, 150, 1000),
-  ('${tenantB}', 'tenant-default', NULL, 0, 0, 25, 250, 1000);
+INSERT INTO prodex_budget_counters (
+  tenant_id, storage_scope, virtual_key_id, reserved_tokens,
+  reserved_cost_micros, committed_tokens, committed_cost_micros,
+  request_count, updated_at_unix_ms
+) VALUES
+  ('${tenantA}', 'tenant-default', NULL, 0, 0, 15, 150, 0, 1000),
+  ('${tenantB}', 'tenant-default', NULL, 0, 0, 25, 250, 0, 1000);
 INSERT INTO prodex_budget_policies VALUES
   ('${tenantA}', 'tenant-default', 1000, 10000, 1000),
   ('${tenantB}', 'tenant-default', 1000, 10000, 1000);
@@ -332,7 +336,7 @@ async function runManagedDrill() {
 
     await run(
       "cargo",
-      ["run", "--quiet", "--bin", "prodex-gateway", "--", "migrate", "--backend", "postgres", "--url-env", "PRODEX_GATEWAY_POSTGRES_URL"],
+      ["run", "--quiet", "--bin", "prodex-gateway", "--", "migrate", "--backend", "postgres", "--url-env", "PRODEX_GATEWAY_POSTGRES_URL", "--tls-mode", "disable"],
       { capture: true, env: { PRODEX_GATEWAY_POSTGRES_URL: postgresUrl } },
     );
     await dockerPsql(containerId, sourceDatabase, seedSql);

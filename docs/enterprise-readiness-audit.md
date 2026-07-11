@@ -905,7 +905,7 @@ while moving legacy adapter code behind enterprise boundaries.
   versioned external migrations instead of one current-state bootstrap blob, so
   future schema growth stays on the same migrator boundary as the enterprise
   storage plan. The production Kubernetes migration Job now runs
-  `prodex-gateway migrate --backend postgres --url-env PRODEX_GATEWAY_POSTGRES_URL`
+  `prodex-gateway migrate --backend postgres --url-env PRODEX_GATEWAY_POSTGRES_URL --tls-mode verify-full`
   with migration-only credentials instead of a placeholder shell command.
   The initial enterprise PostgreSQL migration now queries `pg_policies` and
   creates only missing tenant-isolation policies, so retries are repeatable and
@@ -2150,7 +2150,8 @@ while moving legacy adapter code behind enterprise boundaries.
 - Keep Kubernetes `policy.toml` mounted from `prodex-gateway-policy` so the
   metrics viewer token is registered in the checked-in deployment artifact.
 - Keep Kubernetes `policy.toml` configured with `[gateway.state] backend =
-  "postgres"` and `postgres_url_env = "PRODEX_GATEWAY_POSTGRES_URL"` so
+  "postgres"`, a projected `postgres_url_ref`, and `postgres_tls_mode =
+  "verify-full"` so
   multi-replica gateway pods do not fall back to per-pod file state.
 - Keep a namespace-wide Kubernetes default-deny NetworkPolicy with no allow
   rules so new pods in the `prodex` namespace are isolated until a dedicated
