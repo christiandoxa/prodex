@@ -292,7 +292,11 @@ fn runtime_gateway_apply_admin_virtual_key_store(
     shared: &RuntimeLocalRewriteProxyShared,
     store: &RuntimeGatewayVirtualKeyStoreFile,
 ) {
-    let Ok(mut entries) = shared.gateway_virtual_keys.lock() else {
+    let Ok(_update) = shared.gateway_credentials.update.lock() else {
+        return;
+    };
+    let current = shared.gateway_credentials.current.load_full();
+    let Ok(mut entries) = current.virtual_keys.lock() else {
         return;
     };
     let mut next = entries

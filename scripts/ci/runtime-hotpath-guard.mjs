@@ -75,6 +75,15 @@ const ALLOWLIST = Object.freeze([
       "bounded local rewrite worker pool created during launch, outside request commit path",
   },
   {
+    name: "gateway-secret-refresh-worker",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_credentials.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 1,
+    reason:
+      "single bounded projected-secret refresh worker created during gateway launch, outside request and stream paths",
+  },
+  {
     name: "local-rewrite-gateway-openoptions-import",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
     id: "blocking-file-open",

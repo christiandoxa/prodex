@@ -1,4 +1,5 @@
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
+use super::local_rewrite_gateway_credentials::runtime_gateway_pin_request_credentials;
 use super::local_rewrite_gemini::runtime_gemini_live_auth_attempts;
 use crate::{
     WsMessage, WsRole, WsSocket, acquire_runtime_proxy_active_request_slot_with_wait,
@@ -71,6 +72,7 @@ pub(super) fn spawn_runtime_gemini_live_sidecar(
         while !shutdown.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((stream, _peer)) => {
+                    let request_shared = runtime_gateway_pin_request_credentials(&shared);
                     let request_id = runtime_proxy_next_request_id(&shared.runtime_shared);
                     let guard = match acquire_runtime_proxy_active_request_slot_with_wait(
                         &shared.runtime_shared,
@@ -87,11 +89,13 @@ pub(super) fn spawn_runtime_gemini_live_sidecar(
                         }
                     };
                     let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                        if let Err(err) =
-                            handle_runtime_gemini_live_tcp_stream(request_id, stream, &shared)
-                        {
+                        if let Err(err) = handle_runtime_gemini_live_tcp_stream(
+                            request_id,
+                            stream,
+                            &request_shared,
+                        ) {
                             runtime_proxy_log(
-                                &shared.runtime_shared,
+                                &request_shared.runtime_shared,
                                 runtime_proxy_structured_log_message(
                                     "local_rewrite_gemini_live_sidecar_error",
                                     [

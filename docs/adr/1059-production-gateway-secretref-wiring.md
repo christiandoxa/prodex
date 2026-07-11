@@ -33,6 +33,7 @@ or Secret `envFrom`. ConfigMap environment input remains non-secret.
 - Production startup fails closed on missing, malformed, stale, foreign, or
   unreadable secret references without logging material or reference names.
 - Request handling performs no secret filesystem I/O.
-- The projected provider observes atomic rotation when resolved again. A
-  bounded background refresh that atomically swaps live gateway credentials is
-  still required for rotation of already-started gateway state.
+- The projected provider observes atomic rotation when resolved again. ADR 1065
+  adds bounded background refresh and atomic request-pinned credential
+  snapshots. PostgreSQL and Redis connection URLs remain restart-required
+  because their live clients are not rebuilt during refresh.

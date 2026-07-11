@@ -1395,9 +1395,21 @@ while moving legacy adapter code behind enterprise boundaries.
   reject CLI/environment credentials in explicit production mode; the
   Kubernetes workload uses a private read-only projected volume rather than
   Secret `envFrom`; see
-  `docs/adr/1059-production-gateway-secretref-wiring.md`. Live credential
-  rotation still needs a bounded background refresh that atomically preserves
-  last-known-good material.
+  `docs/adr/1059-production-gateway-secretref-wiring.md`. Kubernetes projected
+  value and version reads are now anchored to one canonical `..data`
+  generation. A five-second background worker resolves and validates a complete
+  launch candidate, compares an in-memory secret fingerprint, and publishes a
+  changed credential snapshot through `ArcSwap`; each HTTP request and Gemini
+  Live connection pins one snapshot. Failed resolution or validation preserves
+  last-known-good and emits only categorical redacted outcomes. Policy key
+  refresh also preserves current non-conflicting admin-created virtual keys;
+  see `docs/adr/1065-atomic-gateway-secret-rotation.md`. Regression coverage is
+  in `crates/prodex-secret-store/tests/projected_secret_provider.rs`,
+  `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_credentials.rs`,
+  and
+  `crates/prodex-app/tests/src/app_commands/runtime_launch/projected_secrets.rs`.
+  PostgreSQL and Redis connection URL rotation remains restart-required because
+  live repositories, pools, and Redis executors are not rebuilt or swapped.
   Gateway runtime launch
   config debug output redacts admin-token hashes, SSO/OIDC metadata, state-store
   URLs, local paths, observability bearer tokens, and guardrail webhook tokens

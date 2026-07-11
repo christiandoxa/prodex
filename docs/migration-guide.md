@@ -160,6 +160,35 @@ shipping the contract step.
    only where deployment policy allows.
 5. Maintain backup/restore, Kubernetes, and deployment security artifacts.
 
+### Projected credential rotation rollout
+
+1. Mount the external-secret output as a read-only Kubernetes projected volume;
+   do not use `subPath`, Secret `envFrom`, or raw production credential
+   environment variables.
+2. Use unversioned `SecretRef` values for credentials that must follow projected
+   rotations. Exact version-pinned references intentionally remain on that
+   version until policy changes.
+3. Publish each value and optional `.version` sidecar in one Kubernetes
+   projection generation. The provider anchors both reads to the canonical
+   `..data` target.
+4. Allow at least one five-second refresh interval, then verify new requests or
+   new Gemini Live connections use the rotated credential. Existing work keeps
+   its pinned snapshot until completion.
+5. Treat `gateway_secret_refresh outcome=applied` as a successful publication.
+   `resolution_failed` and `validation_failed` are categorical redacted events;
+   they leave last-known-good active. The gateway does not currently expire
+   stale credentials or degrade readiness solely because refresh keeps failing,
+   so operators must alert on repeated failures.
+6. Roll back a bad credential by publishing the previous valid value as a new
+   projection generation. Do not remove the active generation in place.
+7. Restart gateway replicas to rotate PostgreSQL or Redis connection URLs.
+   Refresh revalidates those references but excludes them from the
+   live-credential fingerprint; repositories, pools, and Redis executors are
+   created only at startup.
+
+Implementation and verification details are recorded in
+`docs/adr/1065-atomic-gateway-secret-rotation.md`.
+
 ## Phase 8: Cutover and Compatibility
 
 1. Run legacy and new adapters side by side in staging.
@@ -184,6 +213,9 @@ Before declaring the enterprise target complete, verify:
 - OIDC/JWKS network fetches are off request paths.
 - Runtime-policy reload failure preserves the previous cache entry, returns an
   error without acknowledgement, and a corrected retry replaces it once.
+- Projected gateway credential rotation publishes one validated snapshot,
+  preserves last-known-good on failure, pins in-flight request/connection
+  credentials, and documents restart-required PostgreSQL/Redis URL rotation.
 - Full test suite and focused runtime proxy tests pass.
 - Architecture docs, ADRs, threat model, migration guide, deployment docs, and
   backup/restore docs are current.

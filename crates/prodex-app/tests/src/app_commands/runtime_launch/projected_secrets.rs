@@ -79,6 +79,42 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         config.state_store.coordination_redis_url(),
         Some("rediss://redis.internal/0")
     );
+    let initial_fingerprint = config.credential_fingerprint;
+    let postgres_path = secrets
+        .projected_root
+        .as_ref()
+        .unwrap()
+        .join("postgres-url");
+    std::fs::write(&postgres_path, "postgres://prodex@127.0.0.2/prodex").unwrap();
+    let static_rotated = resolve_gateway_launch_config_with_secrets(
+        &paths,
+        &state,
+        &gateway_args(),
+        &policy,
+        &secrets,
+    )
+    .unwrap();
+    assert_eq!(static_rotated.credential_fingerprint, initial_fingerprint);
+    let provider_path = secrets
+        .projected_root
+        .as_ref()
+        .unwrap()
+        .join("provider-key");
+    std::fs::write(&provider_path, "rotated-provider-secret").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&provider_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let rotated = resolve_gateway_launch_config_with_secrets(
+        &paths,
+        &state,
+        &gateway_args(),
+        &policy,
+        &secrets,
+    )
+    .unwrap();
+    assert_ne!(rotated.credential_fingerprint, initial_fingerprint);
 
     let mut raw_args = gateway_args();
     raw_args.auth_token = Some("raw-cli-secret".to_string());

@@ -2317,6 +2317,7 @@ version = "0.273.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
+ "arc-swap",
  "base64",
  "chrono",
  "clap",

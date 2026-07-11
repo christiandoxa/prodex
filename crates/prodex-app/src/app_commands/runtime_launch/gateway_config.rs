@@ -73,16 +73,7 @@ pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) call_id_header: String,
     pub(super) observability: RuntimeGatewayObservabilityConfig,
     pub(super) presidio_redaction_enabled: bool,
-}
-
-pub(super) fn resolve_current_gateway_launch_config(
-    paths: &AppPaths,
-    state: &AppState,
-    args: &GatewayArgs,
-) -> Result<ResolvedGatewayLaunchConfig> {
-    let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
-    let secrets = prodex_runtime_policy::runtime_policy_secrets().unwrap_or_default();
-    resolve_gateway_launch_config_with_secrets(paths, state, args, &policy, &secrets)
+    pub(super) credential_fingerprint: [u8; 32],
 }
 
 #[cfg(test)]
@@ -143,6 +134,11 @@ pub(super) fn resolve_gateway_launch_config_with_secrets(
     let state_store = gateway_state_store_config_with_resolver(paths, policy, &secret_resolver)?;
     gateway_validate_runtime_topology(&state_store)?;
 
+    let sso = gateway_sso_config_with_resolver(policy, &secret_resolver)?;
+    let observability =
+        gateway_observability_config_with_resolver(paths, policy, &secret_resolver)?;
+    let credential_fingerprint = secret_resolver.fingerprint()?;
+
     Ok(ResolvedGatewayLaunchConfig {
         provider_name: provider.provider.map(SuperExternalProvider::as_str),
         upstream_base_url: provider.upstream_base_url,
@@ -151,15 +147,16 @@ pub(super) fn resolve_gateway_launch_config_with_secrets(
         auth_required: auth.auth_required,
         listen_addr,
         admin_tokens: auth.admin_tokens,
-        sso: gateway_sso_config_with_resolver(policy, &secret_resolver)?,
+        sso,
         state_store,
         virtual_keys: auth.virtual_keys,
         route_aliases,
         guardrails: guardrail.guardrails,
         guardrail_webhook: guardrail.webhook,
         call_id_header,
-        observability: gateway_observability_config_with_resolver(paths, policy, &secret_resolver)?,
+        observability,
         presidio_redaction_enabled: guardrail.presidio_redaction_enabled,
+        credential_fingerprint,
     })
 }
 

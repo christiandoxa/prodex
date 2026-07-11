@@ -16,6 +16,20 @@ pub(crate) use super::local_rewrite_gateway_config::{
     RuntimeGatewayStateStore, runtime_gateway_postgres_repository,
     runtime_gateway_redis_rate_limit_executor,
 };
+use super::local_rewrite_gateway_credentials::{
+    RuntimeGatewayCredentialRefreshPlan, RuntimeGatewayCredentialState,
+    runtime_gateway_initial_credential_snapshot, runtime_gateway_pin_request_credentials,
+    runtime_gateway_spawn_secret_refresh,
+};
+use super::local_rewrite_gateway_data_plane_audit::{
+    runtime_gateway_audit_data_plane_auth_failed,
+    runtime_gateway_audit_data_plane_guardrail_blocked,
+    runtime_gateway_audit_data_plane_guardrail_webhook_blocked,
+    runtime_gateway_audit_data_plane_presidio_redaction_failed,
+    runtime_gateway_audit_data_plane_request_body_too_large,
+    runtime_gateway_audit_data_plane_request_capture_failed,
+    runtime_gateway_audit_data_plane_virtual_key_rejected,
+};
 pub(super) use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_guardrail_webhook_block;
 pub(super) use super::local_rewrite_gateway_keys::{
     RuntimeGatewayDurableReservationState, runtime_gateway_request_header_rejection,
@@ -74,7 +88,6 @@ use super::*;
 use anyhow::Context;
 use redaction::redaction_redact_secret_like_text;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
 pub(super) const RUNTIME_LOCAL_REWRITE_PROFILE: &str = "local";
@@ -117,6 +130,7 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_oidc_http_cache:
         Arc<Mutex<BTreeMap<String, RuntimeGatewayOidcHttpCacheEntry>>>,
     pub(super) gateway_admin_idempotency_keys: Arc<Mutex<BTreeSet<String>>>,
+    pub(super) gateway_credentials: RuntimeGatewayCredentialState,
     pub(super) gateway_auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(super) gateway_admin_tokens: Vec<RuntimeGatewayAdminToken>,
     pub(super) gateway_sso: RuntimeGatewaySsoConfig,
@@ -241,18 +255,26 @@ impl Drop for RuntimeGatewayUsageRequestGuard {
 pub(crate) fn start_runtime_local_rewrite_proxy(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
 ) -> Result<RuntimeRotationProxy> {
-    start_runtime_local_rewrite_proxy_with_file_access(options, true)
+    start_runtime_local_rewrite_proxy_with_file_access(options, true, None)
 }
 
 pub(crate) fn start_runtime_gateway_rewrite_proxy(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
 ) -> Result<RuntimeRotationProxy> {
-    start_runtime_local_rewrite_proxy_with_file_access(options, false)
+    start_runtime_local_rewrite_proxy_with_file_access(options, false, None)
+}
+
+pub(crate) fn start_runtime_gateway_rewrite_proxy_with_secret_refresh(
+    options: RuntimeLocalRewriteProxyStartOptions<'_>,
+    secret_refresh: RuntimeGatewayCredentialRefreshPlan,
+) -> Result<RuntimeRotationProxy> {
+    start_runtime_local_rewrite_proxy_with_file_access(options, false, Some(secret_refresh))
 }
 
 fn start_runtime_local_rewrite_proxy_with_file_access(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
     allow_local_file_access: bool,
+    secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
 ) -> Result<RuntimeRotationProxy> {
     let RuntimeLocalRewriteProxyStartOptions {
         paths,
@@ -401,6 +423,24 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
         runtime_copilot_init_current_workspace_custom_instructions();
     }
     let shutdown = Arc::new(AtomicBool::new(false));
+    let gateway_virtual_keys = Arc::new(Mutex::new(gateway_virtual_key_entries));
+    let gateway_credentials =
+        RuntimeGatewayCredentialState::new(runtime_gateway_initial_credential_snapshot(
+            super::local_rewrite_gateway_credentials::RuntimeGatewayCredentialRefreshCandidate {
+                fingerprint: secret_refresh
+                    .as_ref()
+                    .map(|plan| plan.initial_fingerprint)
+                    .unwrap_or([0; 32]),
+                provider: provider.clone(),
+                auth_token_hash: gateway_auth_token_hash.clone(),
+                admin_tokens: gateway_admin_tokens.clone(),
+                sso: gateway_sso.clone(),
+                virtual_keys: Vec::new(),
+                guardrail_webhook: gateway_guardrail_webhook.clone(),
+                observability: gateway_observability.clone(),
+            },
+            Arc::clone(&gateway_virtual_keys),
+        ));
     let shared = RuntimeLocalRewriteProxyShared {
         runtime_shared: runtime_shared.clone(),
         upstream_base_url,
@@ -417,6 +457,7 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
         gateway_oidc_prefetch_in_flight: Arc::new(AtomicBool::new(gateway_sso.oidc.is_some())),
         gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
         gateway_admin_idempotency_keys: Arc::new(Mutex::new(BTreeSet::new())),
+        gateway_credentials,
         gateway_auth_token_hash,
         gateway_admin_tokens,
         gateway_sso,
@@ -427,7 +468,7 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
             .ok()
             .flatten()
             .map(|summary| summary.version),
-        gateway_virtual_keys: Arc::new(Mutex::new(gateway_virtual_key_entries)),
+        gateway_virtual_keys,
         gateway_virtual_key_store_path,
         gateway_usage: RuntimeGatewayVirtualKeyUsageState {
             usage: Arc::new(Mutex::new(gateway_virtual_key_usage)),
@@ -464,6 +505,13 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
             runtime_gateway_run_oidc_background_refresh_loop(shared, shutdown);
         }));
     }
+    if let Some(secret_refresh) = secret_refresh {
+        worker_threads.push(runtime_gateway_spawn_secret_refresh(
+            shared.clone(),
+            Arc::clone(&shutdown),
+            secret_refresh,
+        ));
+    }
     let gemini_live_sidecar_addr = if matches!(
         &shared.provider,
         RuntimeLocalRewriteProviderOptions::Gemini { .. }
@@ -484,12 +532,13 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
             loop {
                 match server.recv() {
                     Ok(request) => {
+                        let request_shared = runtime_gateway_pin_request_credentials(&shared);
                         let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                            handle_runtime_local_rewrite_proxy_request(request, &shared);
+                            handle_runtime_local_rewrite_proxy_request(request, &request_shared);
                         });
                         if let Err(panic) = result {
                             runtime_proxy_log(
-                                &shared.runtime_shared,
+                                &request_shared.runtime_shared,
                                 format!(
                                     "runtime_proxy_worker_panic lane=local_rewrite panic={}",
                                     crate::runtime_panic::runtime_panic_payload_label(
@@ -533,198 +582,6 @@ fn build_runtime_local_rewrite_http_client() -> Result<reqwest::blocking::Client
         .no_proxy()
         .build()
         .context("failed to build runtime local rewrite HTTP client")
-}
-
-fn runtime_gateway_audit_data_plane_auth_failed(
-    shared: &RuntimeLocalRewriteProxyShared,
-    path_value: &str,
-) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "reason": "missing_or_invalid_gateway_bearer_token",
-            "path": path_value,
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        "auth_failed",
-        "failure",
-        payload,
-    );
-}
-
-fn runtime_gateway_audit_data_plane_request_capture_failed(
-    shared: &RuntimeLocalRewriteProxyShared,
-    path_value: &str,
-) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "path": path_value,
-            "reason": "request_capture_failed",
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        "request_capture_failed",
-        "failure",
-        payload,
-    );
-}
-
-fn runtime_gateway_audit_data_plane_presidio_redaction_failed(
-    shared: &RuntimeLocalRewriteProxyShared,
-    path_value: &str,
-) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "path": path_value,
-            "reason": "presidio_redaction_failed",
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        "presidio_redaction_failed",
-        "failure",
-        payload,
-    );
-}
-
-fn runtime_gateway_audit_data_plane_request_body_too_large(
-    shared: &RuntimeLocalRewriteProxyShared,
-    path_value: &str,
-) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "path": path_value,
-            "reason": "request_body_too_large",
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        "request_body_too_large",
-        "failure",
-        payload,
-    );
-}
-
-fn runtime_gateway_audit_data_plane_virtual_key_rejected(
-    shared: &RuntimeLocalRewriteProxyShared,
-    path_value: &str,
-    reason: &str,
-) {
-    let action = if reason == "invalid_gateway_key" {
-        "auth_failed"
-    } else {
-        "authorization_denied"
-    };
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "reason": reason,
-            "path": path_value,
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        action,
-        "failure",
-        payload,
-    );
-}
-
-fn runtime_gateway_audit_data_plane_guardrail_blocked(
-    shared: &RuntimeLocalRewriteProxyShared,
-    path_value: &str,
-    reason: &str,
-) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "reason": reason,
-            "path": path_value,
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        "guardrail_blocked",
-        "failure",
-        payload,
-    );
-}
-
-fn runtime_gateway_audit_data_plane_guardrail_webhook_blocked(
-    shared: &RuntimeLocalRewriteProxyShared,
-    path_value: &str,
-    phase: &str,
-    reason: &str,
-) {
-    let payload = serde_json::json!({
-        "state_backend": shared.gateway_state_store.label(),
-        "details": {
-            "path": path_value,
-            "phase": phase,
-            "reason": reason,
-        },
-    });
-    let default_log_dir = shared
-        .runtime_shared
-        .log_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
-    let path = prodex_audit_log::audit_log_path(default_log_dir);
-    let _ = prodex_audit_log::append_audit_event(
-        &path,
-        "gateway_data_plane",
-        "guardrail_webhook_blocked",
-        "failure",
-        payload,
-    );
 }
 
 fn handle_runtime_local_rewrite_proxy_request(

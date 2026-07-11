@@ -67,7 +67,7 @@ pub(crate) fn gateway_state_store_config_with_resolver(
                     .then_some("PRODEX_GATEWAY_POSTGRES_URL")
             });
             let url = resolver
-                .resolve(
+                .resolve_static(
                     "gateway.state.backend=postgres",
                     policy.state.postgres_url_ref.as_ref(),
                     env_name,
@@ -96,7 +96,7 @@ pub(crate) fn gateway_state_store_config_with_resolver(
                     .then_some(PRODEX_GATEWAY_REDIS_URL_ENV)
             });
             let url = resolver
-                .resolve(
+                .resolve_static(
                     "gateway.state.backend=redis",
                     policy.state.redis_url_ref.as_ref(),
                     env_name,
@@ -257,7 +257,7 @@ fn gateway_coordination_redis_url(
         && policy.state.redis_url_env.is_none()
         && env::var_os(PRODEX_GATEWAY_REDIS_URL_ENV).is_some())
     .then_some(PRODEX_GATEWAY_REDIS_URL_ENV);
-    resolver.resolve(
+    resolver.resolve_static(
         "gateway.state.redis_url",
         policy.state.redis_url_ref.as_ref(),
         policy.state.redis_url_env.as_deref().or(development_env),

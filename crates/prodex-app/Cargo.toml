@@ -18,6 +18,7 @@ bench-support = ["dep:prodex_bench_support"]
 
 [dependencies]
 anyhow = { workspace = true }
+arc-swap = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }

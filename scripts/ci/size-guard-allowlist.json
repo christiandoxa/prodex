@@ -36,7 +36,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1408,
+    "maxLines": 1265,
     "reason": "Local rewrite and gateway request orchestration now performs header-first admin and virtual-key authentication, tenant conversation scoping, bounded background-task admission, and owns pooled PostgreSQL accounting plus Redis rate-limit handles; capped until request admission is split from proxy startup."
   },
   {

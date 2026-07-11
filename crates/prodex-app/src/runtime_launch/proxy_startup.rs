@@ -31,7 +31,9 @@ mod local_rewrite_gateway_billing_csv;
 mod local_rewrite_gateway_billing_summary;
 mod local_rewrite_gateway_budget;
 mod local_rewrite_gateway_config;
+mod local_rewrite_gateway_credentials;
 mod local_rewrite_gateway_dashboard;
+mod local_rewrite_gateway_data_plane_audit;
 mod local_rewrite_gateway_distributed_rate_limit;
 mod local_rewrite_gateway_file_ledger;
 mod local_rewrite_gateway_guardrail_webhook;
@@ -95,12 +97,16 @@ pub(crate) use local_rewrite::{
     RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
-    start_runtime_gateway_rewrite_proxy, start_runtime_local_rewrite_proxy,
+    start_runtime_gateway_rewrite_proxy, start_runtime_gateway_rewrite_proxy_with_secret_refresh,
+    start_runtime_local_rewrite_proxy,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 pub(crate) use local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_migrate_compatibility_state,
     runtime_gateway_sqlite_migrate_compatibility_state,
+};
+pub(crate) use local_rewrite_gateway_credentials::{
+    RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
 };
 pub(crate) use local_rewrite_kiro::RuntimeKiroProfileAuth;
 use workers::spawn_runtime_rotation_proxy_workers;

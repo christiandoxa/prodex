@@ -1,11 +1,14 @@
 use anyhow::{Context as _, Result, bail};
 use prodex_domain::{SecretProvider as _, SecretPurpose, SecretRef, SecretResolutionRequest};
 use secret_store::ProjectedSecretProvider;
+use sha2::{Digest, Sha256};
 use std::env;
+use std::sync::Mutex;
 
 pub(crate) struct GatewaySecretResolver {
     production: bool,
     projected: Option<ProjectedSecretProvider>,
+    fingerprint: Mutex<Sha256>,
 }
 
 impl GatewaySecretResolver {
@@ -29,6 +32,7 @@ impl GatewaySecretResolver {
         Ok(Self {
             production: policy.production,
             projected,
+            fingerprint: Mutex::new(Sha256::new()),
         })
     }
 
@@ -43,6 +47,29 @@ impl GatewaySecretResolver {
         env_name: Option<&str>,
         direct: Option<&str>,
         purpose: SecretPurpose,
+    ) -> Result<Option<String>> {
+        self.resolve_with_rotation_tracking(context, reference, env_name, direct, purpose, true)
+    }
+
+    pub(crate) fn resolve_static(
+        &self,
+        context: &str,
+        reference: Option<&SecretRef>,
+        env_name: Option<&str>,
+        direct: Option<&str>,
+        purpose: SecretPurpose,
+    ) -> Result<Option<String>> {
+        self.resolve_with_rotation_tracking(context, reference, env_name, direct, purpose, false)
+    }
+
+    fn resolve_with_rotation_tracking(
+        &self,
+        context: &str,
+        reference: Option<&SecretRef>,
+        env_name: Option<&str>,
+        direct: Option<&str>,
+        purpose: SecretPurpose,
+        track_rotation: bool,
     ) -> Result<Option<String>> {
         if reference.is_some() && (env_name.is_some() || direct.is_some()) {
             bail!("{context} must use exactly one secret source");
@@ -79,9 +106,36 @@ impl GatewaySecretResolver {
         } else {
             (None, context.to_string())
         };
-        value
+        let value = value
             .map(|value| validate_secret_value(&source_context, value))
-            .transpose()
+            .transpose()?;
+        if track_rotation {
+            let mut fingerprint = self
+                .fingerprint
+                .lock()
+                .map_err(|_| anyhow::anyhow!("gateway secret fingerprint state is unavailable"))?;
+            fingerprint.update(context.as_bytes());
+            fingerprint.update([0]);
+            match value.as_deref() {
+                Some(value) => {
+                    fingerprint.update([1]);
+                    fingerprint.update((value.len() as u64).to_le_bytes());
+                    fingerprint.update(value.as_bytes());
+                }
+                None => fingerprint.update([0]),
+            }
+        }
+        Ok(value)
+    }
+
+    pub(crate) fn fingerprint(&self) -> Result<[u8; 32]> {
+        let fingerprint = self
+            .fingerprint
+            .lock()
+            .map_err(|_| anyhow::anyhow!("gateway secret fingerprint state is unavailable"))?
+            .clone()
+            .finalize();
+        Ok(fingerprint.into())
     }
 }
 
