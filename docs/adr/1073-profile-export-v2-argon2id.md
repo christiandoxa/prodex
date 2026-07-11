@@ -57,9 +57,10 @@ ciphertext, decrypted plaintext, salt, and nonce buffers use zeroize-on-drop
 storage. Profile payload, secret-file, and envelope `Debug` implementations
 redact plaintext and ciphertext fields. The public bounded parser is
 `parse_profile_export_envelope<T>(&[u8])` and is also the import and fuzz entry
-point. The old raw-key `derive_profile_export_key` helper remains temporarily for
-source compatibility, is deprecated, and is not used internally; callers of that
-legacy helper remain responsible for erasing its returned array.
+point. The unused raw-key `derive_profile_export_key` compatibility helper was removed: returning
+a plain array made the library unable to guarantee derived-key erasure. Version-1 envelope
+decryption compatibility remains in the bounded import path and therefore does not require a
+public raw-key API.
 
 ## Argon2id Parameter Measurement
 
