@@ -18,15 +18,41 @@ pub(in super::super) struct RuntimeGatewayAdminAuth {
     pub(in super::super) allowed_key_prefixes: Vec<String>,
 }
 
+pub(in super::super) struct RuntimeGatewayAdminAuthentication {
+    pub(in super::super) auth: RuntimeGatewayAdminAuth,
+    pub(in super::super) evidence: RuntimeGatewayAdminCredentialEvidence,
+}
+
+pub(in super::super) enum RuntimeGatewayAdminCredentialEvidence {
+    Principal,
+    Oidc(Box<RuntimeGatewayOidcAdminCredentialEvidence>),
+}
+
+pub(in super::super) struct RuntimeGatewayOidcAdminCredentialEvidence {
+    pub(in super::super) token: RuntimeGatewayVerifiedOidcToken,
+    pub(in super::super) subject_name: String,
+    pub(in super::super) claimed_tenant_id: Option<String>,
+    pub(in super::super) role_claim: Option<String>,
+}
+
+impl RuntimeGatewayAdminAuthentication {
+    fn principal(auth: RuntimeGatewayAdminAuth) -> Self {
+        Self {
+            auth,
+            evidence: RuntimeGatewayAdminCredentialEvidence::Principal,
+        }
+    }
+}
+
 pub(in super::super) fn runtime_gateway_admin_auth(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> Option<RuntimeGatewayAdminAuth> {
+) -> Option<RuntimeGatewayAdminAuthentication> {
     if let Some(auth) = runtime_gateway_oidc_admin_auth(captured, shared) {
         return Some(auth);
     }
     if let Some(auth) = runtime_gateway_sso_admin_auth(captured, shared) {
-        return Some(auth);
+        return Some(RuntimeGatewayAdminAuthentication::principal(auth));
     }
     let authorization = captured
         .headers
@@ -35,16 +61,18 @@ pub(in super::super) fn runtime_gateway_admin_auth(
         .map(|(_, value)| value.as_str())?;
     for token in &shared.gateway_admin_tokens {
         if token.token_hash.verify_authorization_header(authorization) {
-            return Some(RuntimeGatewayAdminAuth {
-                name: token.name.clone(),
-                role: token.role,
-                tenant_id: token.tenant_id.clone(),
-                team_id: token.team_id.clone(),
-                project_id: token.project_id.clone(),
-                user_id: token.user_id.clone(),
-                budget_id: token.budget_id.clone(),
-                allowed_key_prefixes: token.allowed_key_prefixes.clone(),
-            });
+            return Some(RuntimeGatewayAdminAuthentication::principal(
+                RuntimeGatewayAdminAuth {
+                    name: token.name.clone(),
+                    role: token.role,
+                    tenant_id: token.tenant_id.clone(),
+                    team_id: token.team_id.clone(),
+                    project_id: token.project_id.clone(),
+                    user_id: token.user_id.clone(),
+                    budget_id: token.budget_id.clone(),
+                    allowed_key_prefixes: token.allowed_key_prefixes.clone(),
+                },
+            ));
         }
     }
     None
@@ -53,14 +81,15 @@ pub(in super::super) fn runtime_gateway_admin_auth(
 pub(super) fn runtime_gateway_oidc_admin_auth(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-) -> Option<RuntimeGatewayAdminAuth> {
+) -> Option<RuntimeGatewayAdminAuthentication> {
     let config = shared.gateway_sso.oidc.as_ref()?;
     let authorization = runtime_gateway_header(captured, "authorization")?;
     let token = runtime_gateway_authorization_bearer_token(authorization)?;
-    let claims = runtime_gateway_verify_oidc_token(token, config, shared).ok()?;
-    let name = runtime_gateway_oidc_admin_name(&claims, config)?;
+    let token = runtime_gateway_verify_oidc_token(token, config, shared).ok()?;
+    let claims = &token.claims;
+    let name = runtime_gateway_oidc_admin_name(claims, config)?;
     let claimed_tenant_id =
-        runtime_gateway_oidc_claim_scope_string(&claims, &config.tenant_claim).ok()?;
+        runtime_gateway_oidc_claim_scope_string(claims, &config.tenant_claim).ok()?;
     let scim_user = runtime_gateway_scim_user_for_claimed_tenant(
         runtime_gateway_scim_user_by_name(shared, &name).ok()?,
         claimed_tenant_id.as_deref(),
@@ -68,12 +97,12 @@ pub(super) fn runtime_gateway_oidc_admin_auth(
     if scim_user.as_ref().is_some_and(|user| !user.active) {
         return None;
     }
-    let role = runtime_gateway_sso_resolved_role(
-        runtime_gateway_oidc_role_claim_string(&claims, &config.role_claim).as_deref(),
-        scim_user.as_ref(),
-    );
-    let tenant_id =
-        claimed_tenant_id.or_else(|| scim_user.as_ref().and_then(|user| user.tenant_id.clone()));
+    let role_claim = runtime_gateway_oidc_role_claim_string(claims, &config.role_claim)
+        .map(|claim| claim.to_ascii_lowercase());
+    let role = runtime_gateway_sso_resolved_role(role_claim.as_deref(), scim_user.as_ref());
+    let tenant_id = claimed_tenant_id
+        .clone()
+        .or_else(|| scim_user.as_ref().and_then(|user| user.tenant_id.clone()));
     if shared.gateway_sso.require_tenant && tenant_id.is_none() {
         return None;
     }
@@ -82,7 +111,7 @@ pub(super) fn runtime_gateway_oidc_admin_auth(
     let user_id = scim_user.as_ref().and_then(|user| user.user_id.clone());
     let budget_id = scim_user.as_ref().and_then(|user| user.budget_id.clone());
     let allowed_key_prefixes =
-        runtime_gateway_oidc_claim_string_vec(&claims, &config.key_prefixes_claim)
+        runtime_gateway_oidc_claim_string_vec(claims, &config.key_prefixes_claim)
             .ok()?
             .or_else(|| {
                 scim_user
@@ -90,15 +119,25 @@ pub(super) fn runtime_gateway_oidc_admin_auth(
                     .map(|user| user.allowed_key_prefixes.clone())
             })
             .unwrap_or_default();
-    Some(RuntimeGatewayAdminAuth {
-        name: format!("oidc:{name}"),
-        role,
-        tenant_id,
-        team_id,
-        project_id,
-        user_id,
-        budget_id,
-        allowed_key_prefixes,
+    Some(RuntimeGatewayAdminAuthentication {
+        auth: RuntimeGatewayAdminAuth {
+            name: format!("oidc:{name}"),
+            role,
+            tenant_id,
+            team_id,
+            project_id,
+            user_id,
+            budget_id,
+            allowed_key_prefixes,
+        },
+        evidence: RuntimeGatewayAdminCredentialEvidence::Oidc(Box::new(
+            RuntimeGatewayOidcAdminCredentialEvidence {
+                token,
+                subject_name: name,
+                claimed_tenant_id,
+                role_claim,
+            },
+        )),
     })
 }
 

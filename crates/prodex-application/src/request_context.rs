@@ -2,10 +2,8 @@ use std::error::Error;
 use std::fmt;
 
 use prodex_authn::{
-    CompatibilityAuthenticationError, CompatibilityAuthenticationRequest,
     VerifiedCredentialAuthenticationError, VerifiedCredentialAuthenticationRequest,
-    VerifiedCredentialEvidence, authenticate_compatibility_request,
-    authenticate_verified_credential,
+    VerifiedCredentialEvidence, authenticate_verified_credential,
 };
 use prodex_authz::{
     BoundaryAuthorizationError, BoundaryKind, authorize_boundary_role, authorize_boundary_scope,
@@ -188,20 +186,6 @@ pub fn plan_application_request_authentication_from_evidence(
     Ok(ApplicationAuthenticatedRequestContext { request, principal })
 }
 
-/// Temporary source-compatible adapter removed with the production cutover.
-pub fn plan_application_request_authentication_from_compatibility(
-    request: ApplicationRequestContext<'_>,
-    principal: Option<Principal>,
-    anonymous_allowed: bool,
-) -> Result<ApplicationAuthenticatedRequestContext<'_>, CompatibilityAuthenticationError> {
-    let principal = authenticate_compatibility_request(CompatibilityAuthenticationRequest {
-        principal,
-        required_scope: request.required_credential_scope,
-        anonymous_allowed,
-    })?;
-    Ok(ApplicationAuthenticatedRequestContext { request, principal })
-}
-
 pub fn plan_application_data_plane_authorization(
     authenticated: ApplicationAuthenticatedRequestContext<'_>,
 ) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
@@ -256,20 +240,6 @@ pub fn plan_application_control_plane_authorization(
         authenticated,
         tenant: Some(tenant),
     })
-}
-
-/// Temporary source-compatible aliases removed with the production cutover.
-pub fn plan_application_data_plane_authorization_from_compatibility(
-    authenticated: ApplicationAuthenticatedRequestContext<'_>,
-) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
-    plan_application_data_plane_authorization(authenticated)
-}
-
-pub fn plan_application_control_plane_authorization_from_compatibility(
-    authenticated: ApplicationAuthenticatedRequestContext<'_>,
-    action: ControlPlaneActionRequest,
-) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
-    plan_application_control_plane_authorization(authenticated, action)
 }
 
 pub(crate) const fn required_credential_scope_for_plane(
