@@ -41,15 +41,19 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
 ]);
 const ALLOWED_RUNTIME_DEPENDENCIES = new Set([
   "deadpool-postgres",
+  "postgres",
   "prodex_domain",
   "prodex_storage",
   "prodex_storage_postgres",
+  "rustls",
+  "rustls-native-certs",
+  "rustls-pemfile",
   "tokio",
   "tokio-postgres",
+  "tokio-postgres-rustls",
   "uuid",
 ]);
 const FORBIDDEN_RUNTIME_SOURCE_PATTERNS = Object.freeze([
-  { name: "filesystem", pattern: /\bstd\s*::\s*fs\b/u },
   { name: "process", pattern: /\bstd\s*::\s*process\b/u },
   { name: "HTTP framework", pattern: /\b(axum|hyper|tower)\s*::/u },
   { name: "HTTP client", pattern: /\breqwest\s*::/u },
@@ -240,7 +244,10 @@ prodex_storage = { workspace = true }
     "crate root without unsafe forbid accepted",
   );
   assertSelfTest(
-    validateRuntimeManifest("[dependencies]\ndeadpool-postgres = \"0.14\"\ntokio-postgres = \"0.7\"\n", "runtime/Cargo.toml").length === 0,
+    validateRuntimeManifest(
+      "[dependencies]\ndeadpool-postgres = \"0.14\"\npostgres = \"0.19\"\nrustls = \"0.23\"\nrustls-native-certs = \"0.8\"\nrustls-pemfile = \"2\"\ntokio-postgres = \"0.7\"\ntokio-postgres-rustls = \"0.14\"\n",
+      "runtime/Cargo.toml",
+    ).length === 0,
     "valid runtime adapter manifest rejected",
   );
   assertSelfTest(
