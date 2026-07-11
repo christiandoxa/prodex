@@ -27,7 +27,7 @@ Status meanings:
 | Runtime configuration changes under active requests | one typed startup snapshot; no core proxy/OIDC/broker/provider tuning reads from the request or polling hot path | `runtime_config_reads_each_environment_key_once`, `runtime_config_aggregates_errors_without_values`, `runtime_config_failure_precedes_listener_bind`, post-start OIDC env-mutation tests, Gemini hot-path config guard, and app Clippy with warnings denied | pass; remaining `cwd`, temp-dir, user-shell, and external CLI discovery reads are request inputs or discovery, not mutable tuning |
 | Broker secret visible in argv/env | bounded versioned inherited IPC bootstrap | exact command-plan snapshot, hidden CLI rejection, malformed/truncated/oversized bootstrap tests | pass |
 | Broker secret leaks via formatting | redacted secret wrapper, no raw `Display`, zeroize on drop | `Debug`, `Display`, capability-error, log, audit, header-sensitivity, and process-plan sentinels | pass |
-| Broker secret persists in registry/backup/health | metadata/secret separation and non-secret health identity | exact registry-backup and health payload snapshots, legacy-field negatives, and instance-bound capability rotation tests | pass on Unix; Windows broker capability-file DACL hardening and runtime evidence remain pending |
+| Broker secret persists in registry/backup/health | metadata/secret separation and non-secret health identity | exact registry-backup and health payload snapshots, legacy-field negatives, instance-bound capability rotation tests, and native `windows-security` CI coverage | pass on Unix; Windows native gate configured, first CI execution pending |
 | Timing oracle in bearer comparison | one constant-time comparison helper | centralized caller inventory plus admin-auth/cleanup functional tests | pass |
 
 The original focused baseline passed 65 boundary cases across ten suites, seven expose tests, and
@@ -52,11 +52,11 @@ above comes from the new contract tests and is separate from that baseline.
 
 | Threat | Required control | Authoritative test/evidence | Current status |
 | --- | --- | --- | --- |
-| Final or parent link redirects a secret operation | handle-relative traversal, no-follow final opens, reparse rejection, and handle identity before replace/remove | Unix final/parent symlink, replacement, and refresh-lock identity regressions; cfg(windows) reparse tests; Windows target check and all-target Clippy | pass on Unix; Windows compile-verified, runtime evidence pending because the MinGW linker tools were unavailable |
-| Weak owner, mode, ACL, or parent trust exposes a secret | current-owner `0600` files; trusted non-writable parents; projected owner/root plus only `0440`-compatible group read; private Windows DACL | Unix owner/mode, group-readable/group-writable, parent-mode, projected-mode tests; Windows DACL unit contract; Windows target check and all-target Clippy | pass on Unix; Windows compile-verified, runtime evidence pending because the MinGW linker tools were unavailable |
+| Final or parent link redirects a secret operation | handle-relative traversal, no-follow final opens, reparse rejection, and handle identity before replace/remove | Unix final/parent symlink, replacement, and refresh-lock identity regressions; cfg(windows) reparse tests; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
+| Weak owner, mode, ACL, or parent trust exposes a secret | current-owner `0600` files; trusted non-writable parents; projected owner/root plus only `0440`-compatible group read; private Windows DACL | Unix owner/mode, group-readable/group-writable, parent-mode, projected-mode tests; Windows DACL unit contract; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
 | Partial or oversized secret file is consumed | metadata precheck plus bounded handle read with a one-byte overflow sentinel | file backend, projected provider, and refresh-result oversized tests | pass |
-| Secret write publishes partial or public content | same-directory private temporary, flush, atomic replace, directory flush/Windows write-through, and post-replace identity check | atomic inode replacement, `0600`, no-temp-residue, and symlink-target preservation tests; Windows target check and all-target Clippy | pass on Unix; Windows compile-verified, runtime evidence pending because the MinGW linker tools were unavailable |
-| Kubernetes rotation mixes generations | `..data` is the sole intentional link, its target is one normal component, and value/version read through one pinned generation-directory handle | atomic projection rotation, generation anchoring, escape, nested-target, and cfg(windows) controlled-reparse tests; Windows target check and all-target Clippy | pass on Unix; Windows compile-verified, runtime evidence pending because the MinGW linker tools were unavailable |
+| Secret write publishes partial or public content | same-directory private temporary, flush, atomic replace, directory flush/Windows write-through, and post-replace identity check | atomic inode replacement, `0600`, no-temp-residue, and symlink-target preservation tests; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
+| Kubernetes rotation mixes generations | `..data` is the sole intentional link, its target is one normal component, and value/version read through one pinned generation-directory handle | atomic projection rotation, generation anchoring, escape, nested-target, and cfg(windows) controlled-reparse tests; native `windows-security` CI job | pass on Unix; Windows native gate configured, first CI execution pending |
 | Secret material survives or escapes generic APIs | zeroize-on-drop owners, no material `Clone` or serde, redacted formatting, and closure-scoped byte exposure | `SecretMaterial` compile-fail doctests, zeroize trait checks, redaction tests, and migrated resolver/provider call sites | pass |
 | Unsupported keyring appears production-capable | production configuration rejects the explicitly unsupported metadata-only stub, whose operations also fail unsupported | application selection and secret-store operation negatives | pass |
 
@@ -64,9 +64,11 @@ Compatibility note: `SecretMaterial::expose_secret`, its generic serde implement
 value `Clone` were removed; callers use `with_exposed_secret`. `SecretValue` also no longer clones.
 The keyring marker remains source-compatible, but production configuration rejects it explicitly.
 
-Windows evidence: Rust 1.97.0's `x86_64-pc-windows-gnu` target passes locked,
-all-feature `cargo check` and all-target Clippy. Test linking could not start because
-`x86_64-w64-mingw32-dlltool` is not installed, so this matrix makes no Windows runtime-pass claim.
+Windows evidence: `.github/workflows/ci.yml` now runs the secret-store, runtime-broker,
+profile-export, and application broker-capability tests natively on `windows-latest` with Rust
+1.97.0. The supply-chain guard rejects removal, unlocked commands, fail-open behavior, or missing
+suite coverage. This local Linux host cannot execute that native job, so the matrix makes no
+Windows runtime-pass claim until its first successful CI run.
 
 ## Phase 7 Supply-Chain Evidence
 

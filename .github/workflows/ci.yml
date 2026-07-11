@@ -155,6 +155,33 @@ jobs:
             ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
             detect --source /repo --no-git --redact --no-banner --config /repo/.gitleaks.toml
 
+  windows-security:
+    name: Windows native security tests
+    needs: changes
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: false
+
+      - name: Test native secret files, broker bootstrap, and profile export
+        run: cargo test --locked --all-features -p prodex-secret-store -p prodex-runtime-broker -p prodex-profile-export -- --test-threads=1
+
+      - name: Test native broker capability persistence
+        run: cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1
+
   process-guard:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -965,6 +992,7 @@ jobs:
       - fuzz-build
       - docs-lint
       - secret-scan
+      - windows-security
       - process-guard
       - compat-replay-gate
       - supply-chain

@@ -7,6 +7,37 @@ import { repoRoot } from "../npm/common.mjs";
 const ACTION = /^\s*uses:\s*([^\s#]+)(?:\s+#\s*(\S+))?\s*$/gmu;
 const CONTAINER = /\b((?:ghcr\.io|quay\.io|docker\.io)\/[a-z0-9._/-]+|anchore\/[a-z0-9._/-]+):([a-z0-9._-]+)(?:@sha256:([a-f0-9]{64}))?/giu;
 
+function workflowJob(contents, name) {
+  const lines = contents.split(/\r?\n/u);
+  const start = lines.findIndex((line) => line === `  ${name}:`);
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^  [a-z0-9_-]+:\s*$/iu.test(line));
+  return lines.slice(start, end < 0 ? lines.length : end).join("\n");
+}
+
+export function validateWindowsSecurityJob(contents) {
+  const job = workflowJob(contents, "windows-security");
+  if (!job) return [".github/workflows/ci.yml: missing windows-security job"];
+  const violations = [];
+  for (const marker of [
+    "runs-on: windows-latest",
+    "timeout-minutes: 30",
+    "toolchain: 1.97.0",
+    "uses: Swatinem/rust-cache@",
+    "cache-bin: false",
+    "cargo test --locked --all-features -p prodex-secret-store -p prodex-runtime-broker -p prodex-profile-export -- --test-threads=1",
+    "cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1",
+  ]) {
+    if (!job.includes(marker)) {
+      violations.push(`.github/workflows/ci.yml: windows-security job missing ${marker}`);
+    }
+  }
+  if (job.includes("continue-on-error: true")) {
+    violations.push(".github/workflows/ci.yml: windows-security job must fail closed");
+  }
+  return violations;
+}
+
 export function validateWorkflow(filePath, contents) {
   const violations = [];
   let rustActions = 0;
@@ -74,6 +105,26 @@ function selfTest() {
     [],
   );
   assert.equal(validateCompose("services:\n  db:\n    image: postgres:16\n").length, 1);
+  const windowsJob = `jobs:
+  windows-security:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: dtolnay/rust-toolchain@0123456789abcdef0123456789abcdef01234567 # stable
+        with:
+          toolchain: 1.97.0
+      - uses: Swatinem/rust-cache@0123456789abcdef0123456789abcdef01234567 # v2
+        with:
+          cache-bin: false
+      - run: cargo test --locked --all-features -p prodex-secret-store -p prodex-runtime-broker -p prodex-profile-export -- --test-threads=1
+      - run: cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1
+`;
+  assert.deepEqual(validateWindowsSecurityJob(windowsJob), []);
+  assert.equal(
+    validateWindowsSecurityJob(windowsJob.replace("prodex-profile-export", "missing-profile-export")).length,
+    1,
+  );
+  assert.equal(validateWindowsSecurityJob("jobs:\n  fmt:\n    runs-on: ubuntu-latest\n").length, 1);
 }
 
 async function main() {
@@ -82,7 +133,9 @@ async function main() {
   const violations = [];
   for (const fileName of (await fs.readdir(workflowDir)).filter((name) => /\.ya?ml$/u.test(name)).sort()) {
     const filePath = `.github/workflows/${fileName}`;
-    violations.push(...validateWorkflow(filePath, await fs.readFile(path.join(workflowDir, fileName), "utf8")));
+    const contents = await fs.readFile(path.join(workflowDir, fileName), "utf8");
+    violations.push(...validateWorkflow(filePath, contents));
+    if (fileName === "ci.yml") violations.push(...validateWindowsSecurityJob(contents));
   }
   violations.push(...validateDockerfile(await fs.readFile(path.join(repoRoot, "Dockerfile"), "utf8")));
   violations.push(...validateCompose(await fs.readFile(path.join(repoRoot, "compose.yaml"), "utf8")));
