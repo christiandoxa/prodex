@@ -3,7 +3,9 @@ use std::fmt;
 
 use prodex_authn::{
     CompatibilityAuthenticationError, CompatibilityAuthenticationRequest,
-    authenticate_compatibility_request,
+    VerifiedCredentialAuthenticationError, VerifiedCredentialAuthenticationRequest,
+    VerifiedCredentialEvidence, authenticate_compatibility_request,
+    authenticate_verified_credential,
 };
 use prodex_authz::{
     BoundaryAuthorizationError, BoundaryKind, authorize_boundary_role, authorize_boundary_scope,
@@ -169,10 +171,24 @@ pub fn plan_application_request_context(
     })
 }
 
-/// Strangler binding for credentials still verified by the legacy adapter.
+/// Authenticates transport-verified evidence against the already canonicalized request.
 ///
-/// The returned context is authoritative: callers must not continue to
-/// admission or dispatch when this planner rejects the credential scope.
+/// The request context supplies the authoritative route credential scope. The
+/// evidence adapter cannot reparse the target or choose a different scope.
+pub fn plan_application_request_authentication_from_evidence(
+    request: ApplicationRequestContext<'_>,
+    evidence: Option<VerifiedCredentialEvidence>,
+    anonymous_allowed: bool,
+) -> Result<ApplicationAuthenticatedRequestContext<'_>, VerifiedCredentialAuthenticationError> {
+    let principal = authenticate_verified_credential(VerifiedCredentialAuthenticationRequest {
+        evidence,
+        required_scope: request.required_credential_scope,
+        anonymous_allowed,
+    })?;
+    Ok(ApplicationAuthenticatedRequestContext { request, principal })
+}
+
+/// Temporary source-compatible adapter removed with the production cutover.
 pub fn plan_application_request_authentication_from_compatibility(
     request: ApplicationRequestContext<'_>,
     principal: Option<Principal>,
@@ -186,7 +202,7 @@ pub fn plan_application_request_authentication_from_compatibility(
     Ok(ApplicationAuthenticatedRequestContext { request, principal })
 }
 
-pub fn plan_application_data_plane_authorization_from_compatibility(
+pub fn plan_application_data_plane_authorization(
     authenticated: ApplicationAuthenticatedRequestContext<'_>,
 ) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
     if authenticated.request.plane != GatewayHttpRoutePlane::DataPlane {
@@ -216,7 +232,7 @@ pub fn plan_application_data_plane_authorization_from_compatibility(
     })
 }
 
-pub fn plan_application_control_plane_authorization_from_compatibility(
+pub fn plan_application_control_plane_authorization(
     authenticated: ApplicationAuthenticatedRequestContext<'_>,
     action: ControlPlaneActionRequest,
 ) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
@@ -240,6 +256,20 @@ pub fn plan_application_control_plane_authorization_from_compatibility(
         authenticated,
         tenant: Some(tenant),
     })
+}
+
+/// Temporary source-compatible aliases removed with the production cutover.
+pub fn plan_application_data_plane_authorization_from_compatibility(
+    authenticated: ApplicationAuthenticatedRequestContext<'_>,
+) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
+    plan_application_data_plane_authorization(authenticated)
+}
+
+pub fn plan_application_control_plane_authorization_from_compatibility(
+    authenticated: ApplicationAuthenticatedRequestContext<'_>,
+    action: ControlPlaneActionRequest,
+) -> Result<ApplicationAuthorizedRequestContext<'_>, ApplicationRequestAuthorizationError> {
+    plan_application_control_plane_authorization(authenticated, action)
 }
 
 pub(crate) const fn required_credential_scope_for_plane(
@@ -275,8 +305,12 @@ mod tests {
         )
     }
 
+    fn evidence(principal: Principal) -> Option<VerifiedCredentialEvidence> {
+        Some(VerifiedCredentialEvidence::Principal(principal))
+    }
+
     #[test]
-    fn canonical_context_and_compatibility_authentication_are_one_scope_gate() {
+    fn canonical_context_and_verified_evidence_are_one_scope_gate() {
         let data_target = CanonicalRequestTarget::parse("/v1/responses?stream=true").unwrap();
         let data = plan_application_request_context(&data_target).unwrap();
         assert_eq!(data.target().path_and_query(), "/v1/responses?stream=true");
@@ -284,18 +318,17 @@ mod tests {
         let debug = format!("{data:?}");
         assert!(!debug.contains("/v1/responses"));
         assert!(!debug.contains("stream=true"));
+        let authenticated = plan_application_request_authentication_from_evidence(
+            data,
+            evidence(principal(CredentialScope::DataPlane, Role::Operator)),
+            false,
+        )
+        .unwrap();
+        assert!(std::ptr::eq(authenticated.request().target(), &data_target,));
         assert!(
-            plan_application_request_authentication_from_compatibility(
+            plan_application_request_authentication_from_evidence(
                 data,
-                Some(principal(CredentialScope::DataPlane, Role::Operator)),
-                false,
-            )
-            .is_ok()
-        );
-        assert!(
-            plan_application_request_authentication_from_compatibility(
-                data,
-                Some(principal(CredentialScope::ControlPlane, Role::Admin)),
+                evidence(principal(CredentialScope::ControlPlane, Role::Admin)),
                 false,
             )
             .is_err()
@@ -304,13 +337,11 @@ mod tests {
         let health_target = CanonicalRequestTarget::parse("/readyz").unwrap();
         let health = plan_application_request_context(&health_target).unwrap();
         assert_eq!(health.plane(), GatewayHttpRoutePlane::Health);
-        assert!(
-            plan_application_request_authentication_from_compatibility(health, None, true).is_ok()
-        );
+        assert!(plan_application_request_authentication_from_evidence(health, None, true).is_ok());
     }
 
     #[test]
-    fn unknown_route_never_reaches_compatibility_authentication() {
+    fn unknown_route_never_reaches_evidence_authentication() {
         let target = CanonicalRequestTarget::parse("/v1/not-supported").unwrap();
         assert_eq!(
             plan_application_request_context(&target),
@@ -319,53 +350,51 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_authorization_binds_data_plane_scope_role_and_tenant() {
+    fn evidence_authorization_binds_data_plane_scope_role_and_tenant() {
         let target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
         let request = plan_application_request_context(&target).unwrap();
         let operator = principal(CredentialScope::DataPlane, Role::Operator);
         let expected_tenant = operator.tenant_id.unwrap();
-        let authenticated = plan_application_request_authentication_from_compatibility(
+        let authenticated = plan_application_request_authentication_from_evidence(
             request,
-            Some(operator),
+            evidence(operator),
             false,
         )
         .unwrap();
-        let authorized =
-            plan_application_data_plane_authorization_from_compatibility(authenticated).unwrap();
+        let authorized = plan_application_data_plane_authorization(authenticated).unwrap();
         assert_eq!(
             authorized.tenant_context().unwrap().tenant_id,
             expected_tenant
         );
         assert!(!format!("{authorized:?}").contains(&expected_tenant.to_string()));
 
-        let viewer = plan_application_request_authentication_from_compatibility(
+        let viewer = plan_application_request_authentication_from_evidence(
             request,
-            Some(principal(CredentialScope::DataPlane, Role::Viewer)),
+            evidence(principal(CredentialScope::DataPlane, Role::Viewer)),
             false,
         )
         .unwrap();
         assert!(
-            plan_application_data_plane_authorization_from_compatibility(viewer).is_err(),
+            plan_application_data_plane_authorization(viewer).is_err(),
             "data-plane viewer must not reach admission",
         );
         assert!(
-            plan_application_request_authentication_from_compatibility(
+            plan_application_request_authentication_from_evidence(
                 request,
-                Some(principal(CredentialScope::ControlPlane, Role::Admin)),
+                evidence(principal(CredentialScope::ControlPlane, Role::Admin)),
                 false,
             )
             .is_err(),
             "control-plane scope must not enter the data plane",
         );
         assert!(
-            plan_application_request_authentication_from_compatibility(request, None, false)
-                .is_err(),
+            plan_application_request_authentication_from_evidence(request, None, false).is_err(),
             "anonymous requests must not enter a configured data plane",
         );
     }
 
     #[test]
-    fn compatibility_authorization_binds_control_plane_principal_and_tenant() {
+    fn evidence_authorization_binds_control_plane_principal_and_tenant() {
         let target = CanonicalRequestTarget::parse("/admin/keys").unwrap();
         let request = plan_application_request_context(&target).unwrap();
         let admin = principal(CredentialScope::ControlPlane, Role::Admin);
@@ -382,41 +411,40 @@ mod tests {
         };
 
         assert!(
-            plan_application_request_authentication_from_compatibility(request, None, false)
-                .is_err(),
+            plan_application_request_authentication_from_evidence(request, None, false).is_err(),
             "anonymous requests must not enter the control plane",
         );
         assert!(
-            plan_application_request_authentication_from_compatibility(
+            plan_application_request_authentication_from_evidence(
                 request,
-                Some(principal(CredentialScope::DataPlane, Role::Operator)),
+                evidence(principal(CredentialScope::DataPlane, Role::Operator)),
                 false,
             )
             .is_err(),
             "data-plane scope must not enter the control plane",
         );
 
-        let authenticated = plan_application_request_authentication_from_compatibility(
+        let authenticated = plan_application_request_authentication_from_evidence(
             request,
-            Some(admin.clone()),
+            evidence(admin.clone()),
             false,
         )
         .unwrap();
-        let authorized = plan_application_control_plane_authorization_from_compatibility(
+        let authorized = plan_application_control_plane_authorization(
             authenticated,
             action(admin.clone(), tenant_id),
         )
         .unwrap();
         assert_eq!(authorized.tenant_context().unwrap().tenant_id, tenant_id);
 
-        let authenticated = plan_application_request_authentication_from_compatibility(
+        let authenticated = plan_application_request_authentication_from_evidence(
             request,
-            Some(admin.clone()),
+            evidence(admin.clone()),
             false,
         )
         .unwrap();
         assert_eq!(
-            plan_application_control_plane_authorization_from_compatibility(
+            plan_application_control_plane_authorization(
                 authenticated,
                 action(
                     principal(CredentialScope::ControlPlane, Role::Viewer),
@@ -428,29 +456,26 @@ mod tests {
         );
 
         let viewer = principal(CredentialScope::ControlPlane, Role::Viewer);
-        let authenticated = plan_application_request_authentication_from_compatibility(
+        let authenticated = plan_application_request_authentication_from_evidence(
             request,
-            Some(viewer.clone()),
+            evidence(viewer.clone()),
             false,
         )
         .unwrap();
         assert!(
-            plan_application_control_plane_authorization_from_compatibility(
-                authenticated,
-                action(viewer, tenant_id),
-            )
-            .is_err(),
+            plan_application_control_plane_authorization(authenticated, action(viewer, tenant_id),)
+                .is_err(),
             "control-plane viewer must not mutate virtual keys",
         );
 
-        let authenticated = plan_application_request_authentication_from_compatibility(
+        let authenticated = plan_application_request_authentication_from_evidence(
             request,
-            Some(admin.clone()),
+            evidence(admin.clone()),
             false,
         )
         .unwrap();
         let foreign_tenant = id::<TenantId>("00000000-0000-7000-8000-000000000003");
-        let error = plan_application_control_plane_authorization_from_compatibility(
+        let error = plan_application_control_plane_authorization(
             authenticated,
             action(admin, foreign_tenant),
         )

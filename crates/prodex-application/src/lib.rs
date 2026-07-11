@@ -26,10 +26,12 @@ pub use provider::*;
 pub use request_context::{
     ApplicationAuthenticatedRequestContext, ApplicationAuthorizedRequestContext,
     ApplicationRequestAuthorizationError, ApplicationRequestContext,
-    ApplicationRequestContextError,
+    ApplicationRequestContextError, plan_application_control_plane_authorization,
     plan_application_control_plane_authorization_from_compatibility,
+    plan_application_data_plane_authorization,
     plan_application_data_plane_authorization_from_compatibility,
-    plan_application_request_authentication_from_compatibility, plan_application_request_context,
+    plan_application_request_authentication_from_compatibility,
+    plan_application_request_authentication_from_evidence, plan_application_request_context,
 };
 
 use std::error::Error;
