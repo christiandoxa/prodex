@@ -122,7 +122,7 @@ fn gateway_launch_config_rejects_empty_auth_token_inputs() {
 
     assert!(
         err.to_string()
-            .contains("gateway --auth-token cannot be empty")
+            .contains("gateway authentication token cannot be empty")
     );
 
     let mut args = gateway_args();
@@ -134,7 +134,7 @@ fn gateway_launch_config_rejects_empty_auth_token_inputs() {
 
     assert!(
         err.to_string()
-            .contains("gateway --auth-token must not contain whitespace")
+            .contains("gateway authentication token must not contain whitespace")
     );
 
     let _token = TestEnvVarGuard::set("PRODEX_GATEWAY_TOKEN", "");
