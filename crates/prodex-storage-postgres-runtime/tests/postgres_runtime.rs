@@ -3,7 +3,10 @@ use prodex_domain::{
     BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey, ReservationId,
     ReservationReconciliationReason, ReservationRequest, TenantId, UsageAmount, VirtualKeyId,
 };
-use prodex_storage::{AtomicReservationCommand, TenantStorageKey, UsageReconciliationCommand};
+use prodex_storage::{
+    AtomicReservationCommand, ExpiredReservationRecoveryCommand, TenantStorageKey,
+    UsageReconciliationCommand,
+};
 use prodex_storage_postgres::{SET_TENANT_STATEMENT, UPSERT_TENANT_LIFECYCLE_STATEMENT};
 use prodex_storage_postgres_runtime::{
     IdempotentWriteOutcome, PostgresRepository, PostgresRuntimeConfig, ReserveOutcome,
@@ -127,6 +130,32 @@ async fn two_repositories_reserve_and_reconcile_idempotently() {
         IdempotentWriteOutcome::Replayed
     );
 
+    let abandoned = reservation_command(tenant_id);
+    let abandoned_record = match repository_one.reserve(abandoned.clone()).await.unwrap() {
+        ReserveOutcome::Reserved(record) => record,
+        outcome => panic!("unexpected abandoned reservation outcome: {outcome:?}"),
+    };
+    let recovery = ExpiredReservationRecoveryCommand {
+        storage_key: abandoned.storage_key,
+        snapshot: BudgetSnapshot {
+            reserved: abandoned.request.estimate,
+            committed: UsageAmount::new(40, 400),
+        },
+        record: abandoned_record,
+        now_unix_ms: abandoned_record.expires_at_unix_ms,
+    };
+    assert_eq!(
+        repository_one
+            .release_expired(recovery.clone())
+            .await
+            .unwrap(),
+        IdempotentWriteOutcome::Applied
+    );
+    assert_eq!(
+        repository_two.release_expired(recovery).await.unwrap(),
+        IdempotentWriteOutcome::Replayed
+    );
+
     let mut client = pool_one
         .get()
         .await
@@ -147,11 +176,16 @@ async fn two_repositories_reserve_and_reconcile_idempotently() {
         .await
         .unwrap()
         .get(0);
-    assert_eq!(ledger_count, 3, "reserved, committed, and released only");
+    assert_eq!(
+        ledger_count, 5,
+        "completed and abandoned reservations have one event per phase"
+    );
     let counter = transaction
         .query_one(
-            "SELECT reserved_tokens, reserved_cost_micros, committed_tokens, \
-                    committed_cost_micros \
+            "SELECT COALESCE(SUM(reserved_tokens), 0)::BIGINT, \
+                    COALESCE(SUM(reserved_cost_micros), 0)::BIGINT, \
+                    COALESCE(SUM(committed_tokens), 0)::BIGINT, \
+                    COALESCE(SUM(committed_cost_micros), 0)::BIGINT \
              FROM prodex_budget_counters \
              WHERE tenant_id = $1",
             &[&tenant_id.as_uuid()],
