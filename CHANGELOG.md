@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.276.0 - 2026-07-11
+
+### Misc
+
+- Add explainable constraint-aware routing (`b315a0e`)
+
 ## 0.275.0 - 2026-07-11
 
 ### Runtime
@@ -111,13 +117,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Smooth adaptive log quota header (`33273cd`)
-
-## 0.263.0 - 2026-07-08
-
-### CLI
-
-- Marquee log quota header (`c5cc036`)
-
-### Misc
-
-- Update upstream compatibility watchdog (`b5db7c3`)
