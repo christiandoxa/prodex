@@ -1,4 +1,10 @@
-use super::*;
+use crate::types::RuntimePolicyFile;
+use crate::validate_helpers::{
+    validate_optional_i64_percent, validate_optional_u64, validate_optional_usize,
+    validate_optional_usize_allow_zero,
+};
+use anyhow::Result;
+use std::path::Path;
 
 pub fn validate_runtime_proxy_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     validate_optional_usize(
