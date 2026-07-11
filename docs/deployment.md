@@ -137,6 +137,8 @@ The tracked Compose policy uses projected references for shared database-backed
 admin keys, usage counters, billing ledger rows, and Redis coordination:
 
 ```toml
+version = 1
+
 [secrets]
 projected_root = "/run/secrets"
 projected_provider = "compose"
@@ -212,7 +214,7 @@ baseline with:
 The gateway workload mounts `prodex-gateway-secrets`, which contains the
 gateway bearer token, provider API key references, PostgreSQL, and Redis
 connection references. It must not mount `prodex-control-plane-secrets`; that
-secret is reserved for the placeholder control-plane workload.
+secret is reserved for the dedicated control-plane workload.
 
 The data-plane container starts explicitly with
 `/usr/local/bin/prodex-gateway serve`; it does not route deployment startup
@@ -230,15 +232,14 @@ ensures the compatibility schema; migration status/history, advisory locking,
 and the complete versioned expand/contract workflow remain required before the
 database migration contract is considered complete.
 
-The same manifest also includes a `prodex-control-plane` `Deployment`, `Service`,
-and `NetworkPolicy` as an explicit enterprise control-plane surface. It is scaled
-to `replicas: 0` and annotated as a placeholder until the control-plane async
-adapter is wired to `prodex-application` and `prodex-control-plane`. Operators
-must not scale it above zero until the `prodex-control-plane serve` command is
-implemented and validated. The placeholder mounts only
-`prodex-control-plane-secrets`, which contains PostgreSQL and Redis connection
-references, so provider API keys and data-plane gateway tokens remain scoped to
-the gateway workload.
+The same manifest runs a single `prodex-control-plane` replica behind its own
+`Service` and restricted `NetworkPolicy`. The dedicated binary explicitly
+requests `service_mode = "control-plane"` and listens on `0.0.0.0:4100`; normal
+gateway startup rejects that policy. Its ExternalSecret contains only the
+projected admin token plus PostgreSQL and Redis connection references. The
+workload mounts those values as read-only files rather than importing secrets
+through `env` or `envFrom`, and it uses a 45-second termination grace period
+with a 15-second pre-stop delay before the bounded backend drain.
 
 The gateway ConfigMap sets `PRODEX_GATEWAY_REPLICA_COUNT=3` and
 `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`, and the gateway
@@ -270,14 +271,14 @@ topologies still need the broker-backed publication transport staged in
 node-local or cluster-local transport roots are not equivalent.
 
 The namespace default-deny policy has no allow rules. The gateway and
-placeholder control-plane NetworkPolicies intentionally avoid unbounded
+control-plane NetworkPolicies intentionally avoid unbounded
 in-cluster ingress and egress rules. They accept application ingress only from
 namespaces labeled `prodex.dev/network-tier=ingress`, gateway metrics scraping
 only from namespaces labeled `prodex.dev/network-tier=monitoring`, allow DNS to
 `kube-dns`, and allow PostgreSQL (`5432`) and Redis (`6379`) only in namespaces
 labeled `prodex.dev/network-tier=data-store`. Gateway pods additionally allow
 outbound HTTPS (`443`) to public provider endpoints while excluding RFC1918
-private ranges from that broad HTTPS egress; the control-plane placeholder does
+private ranges from that broad HTTPS egress; the control plane does
 not allow public provider egress. Label your ingress controller, monitoring,
 and database/Redis namespaces, or replace the selectors with your private
 endpoint policy before applying the manifest.
@@ -290,6 +291,8 @@ updates remain visible. The manifest also mounts `prodex-gateway-policy` at
 `/var/lib/prodex/policy.toml`:
 
 ```toml
+version = 1
+
 [secrets]
 production = true
 projected_root = "/run/secrets/prodex"
@@ -311,6 +314,32 @@ name = "prometheus"
 token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }
 role = "viewer"
 ```
+
+The dedicated control-plane policy is intentionally smaller:
+
+```toml
+version = 1
+service_mode = "control-plane"
+
+[secrets]
+production = true
+projected_root = "/run/secrets/prodex"
+projected_provider = "kubernetes"
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+postgres_tls_mode = "verify-full"
+redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
+
+[[gateway.admin_tokens]]
+name = "operations"
+token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+role = "admin"
+```
+
+It deliberately has no provider key, gateway root token, virtual keys, SSO,
+outbound observability, routing, request constraints, or guardrail capability.
 
 The PostgreSQL state backend keeps admin keys, SCIM users, usage counters, and
 billing ledger rows shared across Kubernetes gateway replicas. Add `tenant_id`

@@ -90,6 +90,7 @@ remain as a fixed, non-growing budget until their public migration is planned.
 
 Production gateway workloads and the external PostgreSQL migrator resolve `SecretRef` values from
 projected files under `/run/secrets/prodex`; the migration Job does not inject its database URL
-through `envFrom`. The zero-replica control-plane manifest remains an explicit follow-up until its
-dedicated production policy and typed secret adapter are wired. A shell wrapper that copies file
-contents back into the process environment is not an acceptable substitute.
+through `envFrom`. The live control-plane workload has a dedicated typed policy and a separate
+ExternalSecret limited to its admin token plus PostgreSQL and Redis references. Neither provider
+credentials nor data-plane bearer tokens enter that pod, and no shell wrapper copies projected
+file contents back into the process environment.

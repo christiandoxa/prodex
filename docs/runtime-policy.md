@@ -29,6 +29,17 @@ prodex doctor --runtime --json | jq -r '.runtime_logs.directory'
 
 Defaults below are production defaults. Test builds use smaller timeouts and limits in several places.
 
+## Service Mode
+
+| Policy key | Default | Meaning |
+| --- | --- | --- |
+| `service_mode` | `gateway` | Typed process role. `gateway` preserves the data-plane policy contract. `control-plane` is accepted only by the dedicated control-plane entrypoint and requires production projected secrets, a projected `role = "admin"` token, and shared PostgreSQL or Redis state. Control-plane policies reject provider, data-plane auth, virtual-key, routing, SSO, outbound observability, request-constraint, and guardrail capabilities. |
+
+`prodex-gateway` and the compatibility gateway command reject
+`service_mode = "control-plane"`. Conversely, `prodex-control-plane serve`
+requires that explicit mode; an absent policy therefore cannot silently start a
+control-plane listener.
+
 ## Runtime Keys
 
 | Policy key | Environment override | Default | Meaning |

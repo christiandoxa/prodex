@@ -58,6 +58,10 @@ fn control_plane_mode_rejects_data_plane_capabilities() {
             "gateway.observability",
             "[gateway.observability]\nhttp_endpoint = \"https://telemetry.example.com\"",
         ),
+        (
+            "gateway.sso",
+            "[gateway.sso]\noidc_issuer = \"https://idp.example.com\"\noidc_audience = \"prodex\"",
+        ),
     ] {
         let mut input = String::from(
             r#"version = 1

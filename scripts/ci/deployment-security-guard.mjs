@@ -116,13 +116,18 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
 const REQUIRED_CONTROL_PLANE_MARKERS = Object.freeze([
   ["name: prodex-gateway", "gateway deployment/service surface"],
   ["name: prodex-control-plane", "control-plane deployment/service surface"],
+  ["name: prodex-control-plane-config", "dedicated control-plane runtime ConfigMap"],
+  ["name: prodex-control-plane-policy", "dedicated control-plane policy ConfigMap"],
   ["name: prodex-control-plane-secrets", "control-plane storage/coordination secret"],
   ["serviceAccountName: prodex-control-plane", "explicit control-plane service account"],
   ["app.kubernetes.io/component: control-plane", "control-plane component label"],
-  ["placeholder-until-control-plane-adapter-exists", "explicit control-plane placeholder"],
   ['command: ["/usr/local/bin/prodex-control-plane"]', "control-plane binary command"],
-  ['args: ["serve"]', "control-plane serve command is explicit and gated by replicas 0"],
-  ["replicas: 0", "control-plane placeholder scaled to zero until adapter exists"],
+  ['args: ["serve", "--listen", "0.0.0.0:4100"]', "explicit control-plane listen address"],
+  ["service_mode = \"control-plane\"", "typed control-plane runtime policy mode"],
+  ["PRODEX_CONTROL_PLANE_ADMIN_TOKEN", "projected control-plane admin token"],
+  ["replicas: 1", "live single-replica control-plane deployment"],
+  ["terminationGracePeriodSeconds: 45", "control-plane termination grace period"],
+  ['command: ["sh", "-c", "sleep 15"]', "control-plane pre-stop drain delay"],
   ["port: 4100", "control-plane service port"],
 ]);
 
@@ -408,6 +413,9 @@ export function validateDeploymentSecurity(inputs) {
   if (!gatewayPolicyConfig) {
     checks.push(`${kubernetesPath}: missing gateway policy ConfigMap`);
   } else {
+    if (!/(?:^|\n)\s*version\s*=\s*1\s*$/mu.test(gatewayPolicyConfig)) {
+      checks.push(`${kubernetesPath}: gateway policy must declare runtime policy version 1`);
+    }
     if (!/\[\[gateway\.admin_tokens\]\]/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must define admin token bindings`);
     }
@@ -434,6 +442,72 @@ export function validateDeploymentSecurity(inputs) {
     }
     if (/\b(?:postgres_url_env|redis_url_env|token_env)\s*=/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must not use legacy secret env references`);
+    }
+  }
+  const controlPlanePolicyConfig = kubernetesDocumentByKindAndName(
+    kubernetes,
+    "ConfigMap",
+    "prodex-control-plane-policy",
+  );
+  if (!controlPlanePolicyConfig) {
+    checks.push(`${kubernetesPath}: missing control-plane policy ConfigMap`);
+  } else {
+    for (const [pattern, description] of [
+      [/(?:^|\n)\s*version\s*=\s*1\s*$/mu, "runtime policy version 1"],
+      [/(?:^|\n)\s*service_mode\s*=\s*"control-plane"\s*$/mu, "typed service_mode=control-plane"],
+      [/(?:^|\n)\s*production\s*=\s*true\s*$/mu, "production projected-secret mode"],
+      [/projected_root\s*=\s*"\/run\/secrets\/prodex"/u, "projected secret root"],
+      [/projected_provider\s*=\s*"kubernetes"/u, "projected Kubernetes secret provider"],
+      [/\[gateway\.state\]/u, "shared state section"],
+      [/(?:^|\n)\s*backend\s*=\s*"postgres"\s*$/mu, "PostgreSQL shared state backend"],
+      [/postgres_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_POSTGRES_URL"\s*\}/u, "projected PostgreSQL URL"],
+      [/redis_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_REDIS_URL"\s*\}/u, "projected Redis URL"],
+      [/\[\[gateway\.admin_tokens\]\]/u, "projected admin token binding"],
+      [/token_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_CONTROL_PLANE_ADMIN_TOKEN"\s*\}/u, "projected control-plane admin token"],
+      [/(?:^|\n)\s*role\s*=\s*"admin"\s*$/mu, "explicit admin role"],
+    ]) {
+      if (!pattern.test(controlPlanePolicyConfig)) {
+        checks.push(`${kubernetesPath}: control-plane policy must configure ${description}`);
+      }
+    }
+    if (
+      /(?:^|\n)\s*(?:provider|base_url|require_auth|auth_token_ref|provider_api_key_ref)\s*=/mu.test(
+        controlPlanePolicyConfig,
+      ) ||
+      /\[\[gateway\.(?:virtual_keys|route_aliases)\]\]|\[gateway\.(?:adaptive_routing|request_constraints|sso|observability|guardrails)\]/u.test(
+        controlPlanePolicyConfig,
+      )
+    ) {
+      checks.push(`${kubernetesPath}: control-plane policy must not configure data-plane, SSO, or outbound capabilities`);
+    }
+    if (/\b(?:postgres_url_env|redis_url_env|token_env|http_bearer_token_env)\s*=/u.test(controlPlanePolicyConfig)) {
+      checks.push(`${kubernetesPath}: control-plane policy must use projected SecretRef fields, not secret environment names`);
+    }
+  }
+  const controlPlaneSecrets = kubernetesDocumentByKindAndName(
+    kubernetes,
+    "ExternalSecret",
+    "prodex-control-plane-secrets",
+  );
+  if (!controlPlaneSecrets) {
+    checks.push(`${kubernetesPath}: missing control-plane ExternalSecret`);
+  } else {
+    const secretKeys = [...controlPlaneSecrets.matchAll(/^\s*-\s*secretKey:\s*(\S+)\s*$/gmu)].map(
+      (match) => match[1],
+    );
+    const expectedSecretKeys = [
+      "PRODEX_CONTROL_PLANE_ADMIN_TOKEN",
+      "PRODEX_GATEWAY_POSTGRES_URL",
+      "PRODEX_GATEWAY_REDIS_URL",
+    ];
+    if (
+      secretKeys.length !== expectedSecretKeys.length ||
+      expectedSecretKeys.some((key) => !secretKeys.includes(key)) ||
+      secretKeys.some((key) => !expectedSecretKeys.includes(key))
+    ) {
+      checks.push(
+        `${kubernetesPath}: control-plane ExternalSecret must contain only admin, PostgreSQL, and Redis projected keys`,
+      );
     }
   }
   const gatewayDeployment = kubernetesDocumentByKindAndName(kubernetes, "Deployment", "prodex-gateway");
@@ -503,11 +577,70 @@ export function validateDeploymentSecurity(inputs) {
     if (!/^\s*serviceAccountName:\s*prodex-control-plane\s*$/mu.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must use prodex-control-plane service account`);
     }
-    if (!/secretRef:\s*\n\s*name:\s*prodex-control-plane-secrets/u.test(controlPlaneDeployment)) {
-      checks.push(`${kubernetesPath}: control-plane workload must mount prodex-control-plane-secrets`);
+    if (!/^\s*replicas:\s*1\s*$/mu.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must run exactly one replica`);
     }
-    if (/secretRef:\s*\n\s*name:\s*prodex-gateway-secrets/u.test(controlPlaneDeployment)) {
-      checks.push(`${kubernetesPath}: control-plane workload must not mount prodex-gateway-secrets`);
+    if (!/^\s*args:\s*\["serve",\s*"--listen",\s*"0\.0\.0\.0:4100"\]\s*$/mu.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must listen explicitly on 0.0.0.0:4100`);
+    }
+    if (!/terminationGracePeriodSeconds:\s*45\b/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must declare a 45-second termination grace period`);
+    }
+    if (!/preStop:[\s\S]*?command:\s*\["sh",\s*"-c",\s*"sleep 15"\]/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must declare the pre-stop drain delay`);
+    }
+    if (/envFrom:[\s\S]*?secretRef:/u.test(controlPlaneDeployment) || /secretKeyRef:/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane secrets must not be consumed through env or envFrom`);
+    }
+    if (!/envFrom:\s*\n\s*-\s*configMapRef:\s*\n\s*name:\s*prodex-control-plane-config/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must use its dedicated runtime ConfigMap`);
+    }
+    if (!/mountPath:\s*\/var\/lib\/prodex\/policy\.toml[\s\S]*?subPath:\s*policy\.toml/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must mount its policy.toml ConfigMap`);
+    }
+    if (!/configMap:\s*\n\s*name:\s*prodex-control-plane-policy/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must source prodex-control-plane-policy`);
+    }
+    const controlPlaneVolumeMounts =
+      controlPlaneDeployment.split(/\n\s+volumeMounts:\s*\n/u)[1]?.split(/\n\s+volumes:\s*\n/u)[0] ?? "";
+    const controlPlaneSecretMount = controlPlaneVolumeMounts
+      .split(/(?=^\s+-\s+name:\s+)/mu)
+      .find((item) => /name:\s+prodex-control-plane-secrets\b/u.test(item));
+    if (!controlPlaneSecretMount || !/mountPath:\s*\/run\/secrets\/prodex/u.test(controlPlaneSecretMount)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must mount projected secrets at /run/secrets/prodex`);
+    } else {
+      if (/subPath:/u.test(controlPlaneSecretMount)) {
+        checks.push(`${kubernetesPath}: control-plane projected Secret mount must not use subPath`);
+      }
+      if (!/readOnly:\s*true/u.test(controlPlaneSecretMount)) {
+        checks.push(`${kubernetesPath}: control-plane projected Secret mount must be read-only`);
+      }
+    }
+    const controlPlaneVolumes = controlPlaneDeployment.split(/\n\s+volumes:\s*\n/u)[1] ?? "";
+    const controlPlaneSecretVolume = controlPlaneVolumes
+      .split(/(?=^\s+-\s+name:\s+)/mu)
+      .find((item) => /name:\s+prodex-control-plane-secrets\b/u.test(item));
+    if (!controlPlaneSecretVolume || !/projected:\s*\n/u.test(controlPlaneSecretVolume)) {
+      checks.push(`${kubernetesPath}: control-plane Secret must use a projected volume`);
+    } else {
+      if (!/defaultMode:\s*0440\b/u.test(controlPlaneSecretVolume)) {
+        checks.push(`${kubernetesPath}: control-plane projected Secret volume must use private defaultMode 0440`);
+      }
+      if (!/secret:\s*\n\s*name:\s*prodex-control-plane-secrets/u.test(controlPlaneSecretVolume)) {
+        checks.push(`${kubernetesPath}: control-plane projected Secret volume must reference prodex-control-plane-secrets`);
+      }
+      for (const key of [
+        "PRODEX_CONTROL_PLANE_ADMIN_TOKEN",
+        "PRODEX_GATEWAY_POSTGRES_URL",
+        "PRODEX_GATEWAY_REDIS_URL",
+      ]) {
+        if (!new RegExp(`key:\\s*${key}\\b`, "u").test(controlPlaneSecretVolume)) {
+          checks.push(`${kubernetesPath}: control-plane projected Secret volume must include ${key}`);
+        }
+      }
+    }
+    if (/prodex-gateway-secrets|prodex-gateway-policy|OPENAI_API_KEY|PRODEX_GATEWAY_TOKEN\b/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane workload must not mount gateway or provider capabilities`);
     }
   }
   const migrationJob = kubernetesDocumentByKindAndName(kubernetes, "Job", "prodex-gateway-migration");
@@ -754,29 +887,64 @@ kind: Deployment
 metadata:
   name: prodex-control-plane
 spec:
+  replicas: 1
   template:
     spec:
       serviceAccountName: prodex-control-plane
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: prodex-control-plane
+          command: ["/usr/local/bin/prodex-control-plane"]
+          args: ["serve", "--listen", "0.0.0.0:4100"]
+          envFrom:
+            - configMapRef:
+                name: prodex-control-plane-config
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 15"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-      envFrom:
-        - secretRef:
-            name: prodex-control-plane-secrets
+          volumeMounts:
+            - name: prodex-control-plane-secrets
+              mountPath: /run/secrets/prodex
+              readOnly: true
+            - name: control-plane-policy
+              mountPath: /var/lib/prodex/policy.toml
+              subPath: policy.toml
+              readOnly: true
+      volumes:
+        - name: prodex-control-plane-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: prodex-control-plane-secrets
+                  items:
+                    - key: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+                      path: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+                    - key: PRODEX_GATEWAY_POSTGRES_URL
+                      path: PRODEX_GATEWAY_POSTGRES_URL
+                    - key: PRODEX_GATEWAY_REDIS_URL
+                      path: PRODEX_GATEWAY_REDIS_URL
+        - name: control-plane-policy
+          configMap:
+            name: prodex-control-plane-policy
 ---
 kind: ConfigMap
 metadata:
   name: prodex-gateway-policy
 data:
   policy.toml: |
+    version = 1
+
     [secrets]
     production = true
     projected_root = "/run/secrets/prodex"
@@ -798,6 +966,33 @@ data:
     token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }
     role = "viewer"
 ---
+kind: ConfigMap
+metadata:
+  name: prodex-control-plane-config
+---
+kind: ConfigMap
+metadata:
+  name: prodex-control-plane-policy
+data:
+  policy.toml: |
+    version = 1
+    service_mode = "control-plane"
+
+    [secrets]
+    production = true
+    projected_root = "/run/secrets/prodex"
+    projected_provider = "kubernetes"
+
+    [gateway.state]
+    backend = "postgres"
+    postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+    redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
+
+    [[gateway.admin_tokens]]
+    name = "operations"
+    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+    role = "admin"
+---
 kind: ExternalSecret
 metadata:
   name: prodex-gateway-secrets
@@ -806,6 +1001,15 @@ spec:
     - secretKey: PRODEX_GATEWAY_METRICS_TOKEN
       remoteRef:
         key: prodex/gateway/metrics-token
+---
+kind: ExternalSecret
+metadata:
+  name: prodex-control-plane-secrets
+spec:
+  data:
+    - secretKey: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+    - secretKey: PRODEX_GATEWAY_POSTGRES_URL
+    - secretKey: PRODEX_GATEWAY_REDIS_URL
 ---
 kind: ServiceMonitor
 metadata:
@@ -956,10 +1160,6 @@ except:
 172.16.0.0/12
 192.168.0.0/16
 app.kubernetes.io/component: control-plane
-placeholder-until-control-plane-adapter-exists
-command: ["/usr/local/bin/prodex-control-plane"]
-args: ["serve"]
-replicas: 0
 port: 4100
 `,
     backupRunbook: `
@@ -1446,19 +1646,100 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("secretRef:\n            name: prodex-control-plane-secrets", ""),
-    }).some((error) => error.includes("control-plane workload must mount")),
+      kubernetes: valid.kubernetes.replace(
+        "            - name: prodex-control-plane-secrets\n              mountPath: /run/secrets/prodex\n              readOnly: true\n",
+        "",
+      ),
+    }).some((error) => error.includes("must mount projected secrets")),
     "missing control-plane workload secret binding accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
       kubernetes: valid.kubernetes.replace(
-        "secretRef:\n            name: prodex-control-plane-secrets",
-        "secretRef:\n            name: prodex-gateway-secrets",
+        "                  name: prodex-control-plane-secrets\n                  items:",
+        "                  name: prodex-gateway-secrets\n                  items:",
       ),
-    }).some((error) => error.includes("control-plane workload must not mount")),
+    }).some((error) => error.includes("must not mount gateway or provider capabilities")),
     "control-plane gateway secret binding accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace("  replicas: 1\n  template:", "  replicas: 0\n  template:"),
+    }).some((error) => error.includes("exactly one replica")),
+    "scaled-to-zero control-plane accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace('service_mode = "control-plane"', 'service_mode = "gateway"'),
+    }).some((error) => error.includes("typed service_mode=control-plane")),
+    "gateway-mode control-plane policy accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        '    service_mode = "control-plane"\n\n    [secrets]',
+        '    service_mode = "control-plane"\n\n    [gateway]\n    provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }\n\n    [secrets]',
+      ),
+    }).some((error) => error.includes("must not configure data-plane, SSO, or outbound capabilities")),
+    "control-plane provider capability accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        '    service_mode = "control-plane"\n\n    [secrets]',
+        '    service_mode = "control-plane"\n\n    [gateway.sso]\n    oidc_issuer = "https://idp.example.com"\n    oidc_audience = "prodex"\n\n    [secrets]',
+      ),
+    }).some((error) => error.includes("must not configure data-plane, SSO, or outbound capabilities")),
+    "control-plane SSO capability accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replaceAll('    backend = "postgres"', '    backend = "file"'),
+    }).some((error) => error.includes("PostgreSQL shared state backend")),
+    "control-plane local state accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace('    role = "admin"', '    role = "viewer"'),
+    }).some((error) => error.includes("explicit admin role")),
+    "control-plane viewer-only token accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "        - name: prodex-control-plane\n          command:",
+        "        - name: prodex-control-plane\n          envFrom:\n            - secretRef:\n                name: prodex-control-plane-secrets\n          command:",
+      ),
+    }).some((error) => error.includes("must not be consumed through env or envFrom")),
+    "control-plane secret envFrom accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "    - secretKey: PRODEX_GATEWAY_REDIS_URL\n---\nkind: ServiceMonitor",
+        "    - secretKey: PRODEX_GATEWAY_REDIS_URL\n    - secretKey: OPENAI_API_KEY\n---\nkind: ServiceMonitor",
+      ),
+    }).some((error) => error.includes("must contain only admin, PostgreSQL, and Redis")),
+    "control-plane provider secret accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        'args: ["serve", "--listen", "0.0.0.0:4100"]',
+        'args: ["serve"]',
+      ),
+    }).some((error) => error.includes("listen explicitly on 0.0.0.0:4100")),
+    "implicit loopback control-plane listen accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({
