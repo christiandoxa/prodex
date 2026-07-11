@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read};
 use std::path::Path;
+use zeroize::Zeroizing;
 
 use crate::{
     AppPaths, RuntimeBrokerRegistry, load_json_file_with_backup,
@@ -11,6 +12,7 @@ use crate::{
     write_json_file_with_backup,
 };
 use prodex_runtime_broker::{RuntimeBrokerCapability, RuntimeBrokerSecret};
+use secret_store::{FileSecretBackend, SecretBackend as _, SecretLocation, SecretValue};
 
 const RUNTIME_BROKER_CAPABILITY_MAX_BYTES: u64 =
     prodex_runtime_broker::RUNTIME_BROKER_CAPABILITY_MAX_BYTES as u64;
@@ -139,44 +141,17 @@ pub(crate) fn save_runtime_broker_capability(
     capability: &RuntimeBrokerSecret,
 ) -> Result<()> {
     let path = runtime_broker_capability_file_path(paths, broker_key);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    remove_runtime_broker_capability(paths, broker_key);
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let write_result = (|| {
-        let mut file = options
-            .open(&path)
-            .with_context(|| format!("failed to create {}", path.display()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(fs::Permissions::from_mode(0o600))
-                .with_context(|| format!("failed to secure {}", path.display()))?;
-        }
-        prodex_runtime_broker::write_runtime_broker_capability(&mut file, instance_id, capability)
-            .with_context(|| format!("failed to write {}", path.display()))?;
-        file.sync_all()
-            .with_context(|| format!("failed to sync {}", path.display()))?;
-        runtime_broker_validate_capability_metadata(&file.metadata().with_context(|| {
-            format!(
-                "failed to inspect runtime broker capability {}",
-                path.display()
-            )
-        })?)?;
-        Ok(())
-    })();
-    if write_result.is_err() {
-        remove_runtime_broker_capability(paths, broker_key);
-    }
-    write_result
+    let location = SecretLocation::file(&path);
+    let mut payload = Zeroizing::new(Vec::new());
+    prodex_runtime_broker::write_runtime_broker_capability(&mut *payload, instance_id, capability)
+        .context("failed to encode runtime broker capability")?;
+    FileSecretBackend::new()
+        .write_bounded(
+            &location,
+            SecretValue::bytes(std::mem::take(&mut *payload)),
+            RUNTIME_BROKER_CAPABILITY_MAX_BYTES,
+        )
+        .with_context(|| format!("failed to write {}", path.display()))
 }
 
 pub(crate) fn load_runtime_broker_capability(
@@ -196,24 +171,17 @@ fn load_runtime_broker_capability_record(
     broker_key: &str,
 ) -> Result<RuntimeBrokerCapability> {
     let path = runtime_broker_capability_file_path(paths, broker_key);
-    let metadata = runtime_broker_capability_metadata(&path)?;
-    let file = fs::File::open(&path).with_context(|| {
-        format!(
-            "failed to open runtime broker capability {}",
-            path.display()
+    let value = FileSecretBackend::new()
+        .read_bounded(
+            &SecretLocation::file(&path),
+            RUNTIME_BROKER_CAPABILITY_MAX_BYTES,
         )
-    })?;
-    let opened = file.metadata().with_context(|| {
-        format!(
-            "failed to inspect runtime broker capability {}",
-            path.display()
-        )
-    })?;
-    if !runtime_broker_same_file_metadata(&metadata, &opened) {
-        anyhow::bail!("runtime broker capability changed while opening");
-    }
-    runtime_broker_validate_capability_metadata(&opened)?;
-    prodex_runtime_broker::read_runtime_broker_capability(file)
+        .with_context(|| format!("failed to read {}", path.display()))?
+        .context("runtime broker capability is missing")?;
+    value
+        .with_bytes(|bytes| {
+            prodex_runtime_broker::read_runtime_broker_capability(Cursor::new(bytes))
+        })
         .context("runtime broker capability is invalid")
 }
 
@@ -264,24 +232,10 @@ pub(crate) fn remove_runtime_broker_capability_if_matches(
 
 pub(crate) fn remove_runtime_broker_capability(paths: &AppPaths, broker_key: &str) {
     let path = runtime_broker_capability_file_path(paths, broker_key);
-    let Ok(metadata) = fs::symlink_metadata(&path) else {
-        return;
-    };
-    if metadata.file_type().is_file()
-        && metadata.len() <= RUNTIME_BROKER_CAPABILITY_MAX_BYTES
-        && let Ok(mut file) = fs::OpenOptions::new().write(true).open(&path)
-        && let Ok(opened) = file.metadata()
-        && runtime_broker_same_file_metadata(&metadata, &opened)
-    {
-        let zeros = vec![0_u8; metadata.len() as usize];
-        let _ = file.write_all(&zeros);
-        let _ = file.sync_all();
-    }
-    if fs::symlink_metadata(&path)
-        .ok()
-        .is_some_and(|current| runtime_broker_same_file_metadata(&metadata, &current))
-    {
-        let _ = fs::remove_file(path);
+    let location = SecretLocation::file(&path);
+    let backend = FileSecretBackend::new();
+    if backend.delete(&location).is_err() {
+        let _ = backend.remove_untrusted_entry(&location);
     }
 }
 
@@ -310,35 +264,6 @@ fn remove_runtime_broker_file_checked(path: &Path) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err).with_context(|| format!("failed to remove {}", path.display())),
     }
-}
-
-fn runtime_broker_capability_metadata(path: &Path) -> Result<fs::Metadata> {
-    let metadata = fs::symlink_metadata(path).with_context(|| {
-        format!(
-            "failed to inspect runtime broker capability {}",
-            path.display()
-        )
-    })?;
-    runtime_broker_validate_capability_metadata(&metadata)?;
-    Ok(metadata)
-}
-
-fn runtime_broker_validate_capability_metadata(metadata: &fs::Metadata) -> Result<()> {
-    if metadata.file_type().is_symlink()
-        || !metadata.file_type().is_file()
-        || metadata.len() == 0
-        || metadata.len() > RUNTIME_BROKER_CAPABILITY_MAX_BYTES
-    {
-        anyhow::bail!("runtime broker capability file is invalid");
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o777 != 0o600 {
-            anyhow::bail!("runtime broker capability permissions must be 0600");
-        }
-    }
-    Ok(())
 }
 
 #[cfg(unix)]
@@ -383,6 +308,12 @@ mod tests {
             "prodex-broker-capability-{label}-{}-{nonce}",
             std::process::id()
         ));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
         AppPaths {
             state_file: root.join("state.json"),
             managed_profiles_root: root.join("profiles"),
@@ -624,5 +555,55 @@ mod tests {
         assert!(load_runtime_broker_capability(&paths, "broker", "instance").is_err());
 
         let _ = fs::remove_dir_all(paths.root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capability_writer_replaces_only_the_final_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let paths = test_paths("replace-final-symlink");
+        let capability_path = runtime_broker_capability_file_path(&paths, "broker");
+        let target = paths.root.join("outside-secret");
+        fs::write(&target, "outside").unwrap();
+        symlink(&target, &capability_path).unwrap();
+        let capability = RuntimeBrokerSecret::new("inside-capability").unwrap();
+
+        save_runtime_broker_capability(&paths, "broker", "instance", &capability).unwrap();
+
+        assert!(!capability_path.is_symlink());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "outside");
+        assert!(
+            load_runtime_broker_capability(&paths, "broker", "instance")
+                .unwrap()
+                .matches(capability.expose())
+        );
+
+        let _ = fs::remove_dir_all(paths.root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capability_writer_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+        let paths = test_paths("reject-parent-symlink");
+        fs::remove_dir_all(&paths.root).unwrap();
+        let outside = paths.root.with_extension("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(outside.join("marker"), "outside").unwrap();
+        symlink(&outside, &paths.root).unwrap();
+        let capability = RuntimeBrokerSecret::new("inside-capability").unwrap();
+
+        assert!(save_runtime_broker_capability(&paths, "broker", "instance", &capability).is_err());
+        assert_eq!(
+            fs::read_to_string(outside.join("marker")).unwrap(),
+            "outside"
+        );
+        assert!(!outside.join("runtime-broker-broker.capability").exists());
+
+        fs::remove_file(&paths.root).unwrap();
+        let _ = fs::remove_dir_all(outside);
     }
 }

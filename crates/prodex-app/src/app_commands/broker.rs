@@ -153,17 +153,18 @@ pub(crate) fn runtime_broker_publish_start(
         executable_sha256: current_identity.executable_sha256.clone(),
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
     };
-    save_runtime_broker_registry(paths, &bootstrap.broker_key, &registry)?;
-    if let Err(err) = save_runtime_broker_capability(
+    save_runtime_broker_capability(
         paths,
         &bootstrap.broker_key,
         &bootstrap.instance_id,
         &bootstrap.admin_token,
-    ) {
-        remove_runtime_broker_registry_if_instance_matches(
+    )?;
+    if let Err(err) = save_runtime_broker_registry(paths, &bootstrap.broker_key, &registry) {
+        remove_runtime_broker_capability_if_matches(
             paths,
             &bootstrap.broker_key,
             &bootstrap.instance_id,
+            &bootstrap.admin_token,
         );
         return Err(err);
     }

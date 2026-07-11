@@ -231,6 +231,8 @@ fn runtime_broker_command_registers_follower_when_owner_lock_is_busy() {
     state
         .save(&paths)
         .expect("runtime broker test state should save");
+    fs::set_permissions(&paths.root, fs::Permissions::from_mode(0o700))
+        .expect("runtime broker test root should be private");
     let _owner_lock = try_acquire_runtime_owner_lock(&paths)
         .expect("owner lock should open")
         .expect("owner lock should be held by the existing broker");
