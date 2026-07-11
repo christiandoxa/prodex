@@ -88,6 +88,7 @@ fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
         &error,
         secret_store::SecretError::InvalidLocation { reason }
             if reason.ends_with(" is not a regular secret file")
+                || reason.ends_with("secret path contains a symlink")
     );
     let error = anyhow::Error::new(error);
     if is_non_regular_file {

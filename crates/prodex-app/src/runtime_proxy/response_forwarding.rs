@@ -167,6 +167,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
         Arc::clone(&shared.async_runtime),
         shared.log_path.clone(),
         request_id,
+        &shared.runtime_config,
     );
     let (lookahead, prefetch) =
         inspect_runtime_sse_lookahead_async(prefetch, shared.log_path.clone(), request_id).await?;
@@ -305,10 +306,9 @@ impl Read for RuntimePrefetchReader {
             let next = if let Some(chunk) = self.backlog.pop_front() {
                 Some(chunk)
             } else {
-                match self
-                    .receiver
-                    .recv_timeout(Duration::from_millis(runtime_proxy_stream_idle_timeout_ms()))
-                {
+                match self.receiver.recv_timeout(Duration::from_millis(
+                    self.shared.config.stream_idle_timeout_ms,
+                )) {
                     Ok(chunk) => {
                         if let RuntimePrefetchChunk::Data(bytes) = &chunk {
                             runtime_prefetch_release_queued_bytes(&self.shared, bytes.len());

@@ -303,7 +303,11 @@ pub(crate) fn proxy_runtime_responses_request(
                         runtime_proxy_log_field("profile", candidate_name.as_str()),
                         runtime_proxy_log_field(
                             "hard_limit",
-                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                            shared
+                                .runtime_config
+                                .tuning
+                                .profile_inflight_hard_limit
+                                .to_string(),
                         ),
                     ],
                 ),

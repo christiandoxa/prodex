@@ -1,8 +1,5 @@
 use crate::core_constants::{QUOTA_HTTP_CONNECT_TIMEOUT_MS, QUOTA_HTTP_READ_TIMEOUT_MS};
-use crate::runtime_config::{
-    runtime_proxy_compact_request_timeout_ms, runtime_proxy_http_connect_timeout_ms,
-    runtime_proxy_stream_idle_timeout_ms,
-};
+use crate::runtime_config::RuntimeConfig;
 use anyhow::Result;
 use reqwest::blocking::Client;
 
@@ -12,21 +9,23 @@ pub(crate) fn runtime_upstream_proxy_mode_label(explicit_no_proxy: bool) -> &'st
 
 pub(crate) fn build_runtime_upstream_async_http_client(
     explicit_no_proxy: bool,
+    runtime_config: &RuntimeConfig,
 ) -> Result<reqwest::Client> {
     prodex_proxy_config::build_runtime_upstream_async_http_client(
         explicit_no_proxy,
-        runtime_proxy_http_connect_timeout_ms(),
-        runtime_proxy_stream_idle_timeout_ms(),
+        runtime_config.tuning.http_connect_timeout_ms,
+        runtime_config.tuning.stream_idle_timeout_ms,
     )
 }
 
 pub(crate) fn build_runtime_upstream_async_http_compact_client(
     explicit_no_proxy: bool,
+    runtime_config: &RuntimeConfig,
 ) -> Result<reqwest::Client> {
     prodex_proxy_config::build_runtime_upstream_async_http_compact_client(
         explicit_no_proxy,
-        runtime_proxy_http_connect_timeout_ms(),
-        runtime_proxy_compact_request_timeout_ms(),
+        runtime_config.tuning.http_connect_timeout_ms,
+        runtime_config.compact_request_timeout_ms,
     )
 }
 

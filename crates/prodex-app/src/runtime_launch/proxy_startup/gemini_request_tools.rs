@@ -1,4 +1,5 @@
 use super::super::gemini_request_policy::RuntimeGeminiPolicyCompat;
+use crate::RuntimeGeminiConfig;
 use crate::runtime_launch::proxy_startup::provider_tools;
 use prodex_provider_core::gemini_provider_core_tools_from_requests;
 use std::collections::BTreeSet;
@@ -7,8 +8,9 @@ pub(super) fn runtime_gemini_tools_from_requests(
     original: &serde_json::Value,
     chat: &serde_json::Value,
     model: &str,
+    config: &RuntimeGeminiConfig,
 ) -> Option<serde_json::Value> {
-    let policy = RuntimeGeminiPolicyCompat::from_request_and_files(original);
+    let policy = RuntimeGeminiPolicyCompat::from_request_and_files(original, config);
     let mut chat = chat.clone();
     if let Some(mut tools) =
         provider_tools::runtime_provider_chat_tools_from_responses_request(original)
@@ -27,10 +29,20 @@ pub(super) fn runtime_gemini_tools_from_requests(
     })
 }
 
+pub(in super::super::super) fn runtime_gemini_blocked_tool_call_message_with_config(
+    name: &str,
+    args: &serde_json::Value,
+    config: &RuntimeGeminiConfig,
+) -> Option<String> {
+    RuntimeGeminiPolicyCompat::from_request_and_files(&serde_json::Value::Null, config)
+        .blocked_tool_call_message(name, args)
+}
+
+#[cfg(test)]
 pub(in super::super::super) fn runtime_gemini_blocked_tool_call_message(
     name: &str,
     args: &serde_json::Value,
 ) -> Option<String> {
-    RuntimeGeminiPolicyCompat::from_request_and_files(&serde_json::Value::Null)
-        .blocked_tool_call_message(name, args)
+    let config = crate::RuntimeConfig::compatibility_current();
+    runtime_gemini_blocked_tool_call_message_with_config(name, args, &config.gemini)
 }

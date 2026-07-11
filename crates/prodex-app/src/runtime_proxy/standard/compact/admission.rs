@@ -2,7 +2,7 @@
 
 use super::super::super::{
     build_runtime_proxy_json_error_response, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_profile_inflight_hard_limit, runtime_proxy_structured_log_message,
+    runtime_proxy_structured_log_message,
 };
 use super::logging::{RuntimeProxyCompactFinalFailureLog, log_runtime_proxy_compact_final_failure};
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
@@ -58,7 +58,11 @@ pub(super) fn log_runtime_compact_inflight_saturated(
                 runtime_proxy_log_field("profile", profile_name),
                 runtime_proxy_log_field(
                     "hard_limit",
-                    runtime_proxy_profile_inflight_hard_limit().to_string(),
+                    shared
+                        .runtime_config
+                        .tuning
+                        .profile_inflight_hard_limit
+                        .to_string(),
                 ),
             ],
         ),

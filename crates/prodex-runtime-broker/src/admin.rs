@@ -41,9 +41,9 @@ pub fn runtime_broker_admin_forbidden_error() -> RuntimeBrokerAdminError {
 
 pub fn runtime_broker_validate_admin_token(
     provided_token: Option<&str>,
-    expected_token: &str,
+    expected_token: &RuntimeBrokerSecret,
 ) -> Result<(), RuntimeBrokerAdminError> {
-    if provided_token == Some(expected_token) {
+    if provided_token.is_some_and(|provided| expected_token.matches(provided)) {
         Ok(())
     } else {
         Err(runtime_broker_admin_forbidden_error())

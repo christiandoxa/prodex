@@ -85,14 +85,10 @@ impl GatewaySecretResolver {
             let material = provider
                 .resolve(&SecretResolutionRequest::new(reference.clone(), purpose))
                 .map_err(|_| anyhow::anyhow!("{context} secret resolution failed"))?;
-            (
-                Some(
-                    std::str::from_utf8(material.expose_secret())
-                        .with_context(|| format!("{context} secret must be UTF-8"))?
-                        .to_string(),
-                ),
-                context.to_string(),
-            )
+            let value = material
+                .with_exposed_secret(|bytes| std::str::from_utf8(bytes).map(str::to_owned))
+                .with_context(|| format!("{context} secret must be UTF-8"))?;
+            (Some(value), context.to_string())
         } else if let Some(value) = direct {
             (Some(value.to_string()), context.to_string())
         } else if let Some(env_name) = env_name {

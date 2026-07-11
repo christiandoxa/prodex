@@ -14,3 +14,6 @@ path = "src/lib.rs"
 chrono = { workspace = true }
 reqwest = { workspace = true }
 tungstenite = { workspace = true }
+
+[lints]
+workspace = true

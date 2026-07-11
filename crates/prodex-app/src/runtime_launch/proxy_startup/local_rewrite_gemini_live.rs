@@ -167,7 +167,15 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     let mut selected = None;
     let mut last_error = None;
     for (profile_name, auth) in attempts {
-        match runtime_gemini_live_connect(&auth) {
+        match runtime_gemini_live_connect(
+            &auth,
+            shared
+                .runtime_shared
+                .runtime_config
+                .gemini
+                .live_url
+                .as_deref(),
+        ) {
             Ok(socket) => {
                 selected = Some((profile_name, socket));
                 break;
@@ -277,7 +285,15 @@ fn handle_runtime_gemini_live_tcp_stream(
     let mut selected = None;
     let mut last_error = None;
     for (profile_name, auth) in attempts {
-        match runtime_gemini_live_connect(&auth) {
+        match runtime_gemini_live_connect(
+            &auth,
+            shared
+                .runtime_shared
+                .runtime_config
+                .gemini
+                .live_url
+                .as_deref(),
+        ) {
             Ok(socket) => {
                 selected = Some((profile_name, socket));
                 break;

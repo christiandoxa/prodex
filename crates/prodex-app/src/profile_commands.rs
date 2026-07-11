@@ -35,14 +35,8 @@ pub(crate) use self::manage::{
 };
 pub(crate) use self::remove::handle_remove_profile;
 #[cfg(test)]
-use aes_gcm_siv::aead::Aead;
-#[cfg(test)]
-use aes_gcm_siv::aead::KeyInit;
-#[cfg(test)]
-use aes_gcm_siv::{Aes256GcmSiv, Nonce};
-#[cfg(test)]
 use prodex_profile_export::{
-    PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, derive_profile_export_key,
+    PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_VERSION_V2, ProfileExportKdfParameters,
     serialize_profile_export_payload, validate_profile_export_header,
 };
 

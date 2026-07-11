@@ -47,7 +47,11 @@ pub(super) fn proxy_runtime_noncompact_request(
                         runtime_proxy_log_field("profile", current_profile.as_str()),
                         runtime_proxy_log_field(
                             "hard_limit",
-                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                            shared
+                                .runtime_config
+                                .tuning
+                                .profile_inflight_hard_limit
+                                .to_string(),
                         ),
                     ],
                 ),
@@ -258,7 +262,11 @@ pub(super) fn proxy_runtime_noncompact_request(
                         runtime_proxy_log_field("profile", candidate_name.as_str()),
                         runtime_proxy_log_field(
                             "hard_limit",
-                            runtime_proxy_profile_inflight_hard_limit().to_string(),
+                            shared
+                                .runtime_config
+                                .tuning
+                                .profile_inflight_hard_limit
+                                .to_string(),
                         ),
                     ],
                 ),

@@ -80,7 +80,10 @@ async fn send_runtime_proxy_upstream_request_with_events(
     })?;
 
     let upstream_client = if events.route_kind == RuntimeRouteKind::Compact {
-        build_runtime_upstream_async_http_compact_client(shared.upstream_no_proxy)?
+        build_runtime_upstream_async_http_compact_client(
+            shared.upstream_no_proxy,
+            &shared.runtime_config,
+        )?
     } else {
         shared.async_client.clone()
     };
@@ -155,7 +158,10 @@ async fn send_runtime_proxy_upstream_request_with_events(
             ],
         ),
     );
-    if runtime_take_fault_injection("PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE") {
+    if runtime_take_fault_injection_budget(
+        "PRODEX_RUNTIME_FAULT_UPSTREAM_CONNECT_ERROR_ONCE",
+        shared.runtime_config.fault_upstream_connect_error_once,
+    ) {
         bail!("injected runtime upstream connect failure");
     }
     let response = match upstream_request.send().await {

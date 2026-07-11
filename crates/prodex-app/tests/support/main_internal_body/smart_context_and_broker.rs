@@ -6,8 +6,7 @@ fn smart_context_enabled_from_default_super_shortcut() -> bool {
     let Commands::Super(args) = command else {
         panic!("expected Super command from prodex s");
     };
-    args.into_caveman_args()
-        .smart_context
+    args.into_caveman_args().smart_context
 }
 
 #[test]
@@ -144,14 +143,8 @@ fn runtime_smart_context_proxy_disabled_passes_large_tool_output_unchanged() {
         shared_codex_root: temp_dir.path.join("shared"),
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
-    let proxy = start_runtime_rotation_proxy(
-        &paths,
-        &state,
-        "second",
-        backend.base_url(),
-        false,
-    )
-    .expect("runtime proxy should start with smart context disabled");
+    let proxy = start_runtime_rotation_proxy(&paths, &state, "second", backend.base_url(), false)
+        .expect("runtime proxy should start with smart context disabled");
     let tool_output = (0..2500)
         .map(|index| format!("line {index}: repeated command output"))
         .collect::<Vec<_>>()
@@ -214,8 +207,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             upstream_no_proxy: false,
             smart_context_enabled: false,
             current_profile: "main".to_string(),
-            instance_token: "dead-instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "dead-instance".to_string(),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,
@@ -242,8 +234,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             upstream_no_proxy: false,
             smart_context_enabled: false,
             current_profile: "main".to_string(),
-            instance_token: "live-instance".to_string(),
-            admin_token: "secret".to_string(),
+            instance_id: "live-instance".to_string(),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,
@@ -334,23 +325,16 @@ fn runtime_broker_lease_drop_removes_file() {
 #[test]
 fn runtime_broker_startup_grace_covers_ready_timeout() {
     let _timeout_guard = TestEnvVarGuard::set("PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS", "15000");
-    assert!(runtime_broker_startup_grace_seconds() >= 16);
+    assert!(
+        runtime_broker_startup_grace_seconds(
+            RuntimeConfig::compatibility_current().broker_ready_timeout_ms,
+        ) >= 16
+    );
 }
 
 #[test]
 fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
-    let runtime_broker = Commands::RuntimeBroker(RuntimeBrokerArgs {
-        current_profile: "main".to_string(),
-        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
-        include_code_review: false,
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        model_context_window_tokens: None,
-        broker_key: "broker".to_string(),
-        instance_token: "instance".to_string(),
-        admin_token: "admin".to_string(),
-        listen_addr: None,
-    });
+    let runtime_broker = Commands::RuntimeBroker(RuntimeBrokerArgs {});
     let update = Commands::Update(CodexUpdateArgs {
         codex_args: vec![OsString::from("--check")],
     });

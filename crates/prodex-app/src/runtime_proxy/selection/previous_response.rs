@@ -1,19 +1,18 @@
 use super::{
-    RuntimeProfileSelectionCatalog, RuntimeRotationProxyShared, RuntimeSelectionProfileEntry,
-    read_auth_summary, runtime_previous_response_negative_cache_active,
+    RuntimeRotationProxyShared, RuntimeRotationState, read_auth_summary,
+    runtime_previous_response_negative_cache_active,
     runtime_profile_auth_failure_active_with_auth_cache,
     runtime_profile_cached_auth_summary_from_maps_for_selection,
-    runtime_profile_quota_summary_for_route_from_state, runtime_profile_selection_catalog,
-    runtime_proxy_log, runtime_proxy_sync_probe_pressure_mode_active_for_route,
-    runtime_quota_precommit_guard_reason, runtime_quota_pressure_band_reason,
-    runtime_route_kind_label, runtime_selection_log_fields_with_quota,
-    runtime_selection_quota_source_label,
+    runtime_profile_quota_summary_for_route_from_state, runtime_proxy_log,
+    runtime_proxy_sync_probe_pressure_mode_active_for_route, runtime_quota_precommit_guard_reason,
+    runtime_quota_pressure_band_reason, runtime_route_kind_label,
+    runtime_selection_log_fields_with_quota, runtime_selection_quota_source_label,
 };
 use anyhow::Result;
 use chrono::Local;
-use prodex_app_reports::ProfileSelectionProvider;
 use prodex_quota::RuntimeQuotaPressureBand;
 use prodex_runtime_state::RuntimeRouteKind;
+use prodex_state::ProfileEntry;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -56,7 +55,6 @@ pub(super) fn next_runtime_previous_response_candidate_with_trace(
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        let selection_catalog = runtime_profile_selection_catalog(&runtime);
         if let Some(owner) = previous_response_id.and_then(|response_id| {
             runtime
                 .state
@@ -64,7 +62,7 @@ pub(super) fn next_runtime_previous_response_candidate_with_trace(
                 .get(response_id)
                 .map(|binding| binding.profile_name.as_str())
         }) && !excluded_profiles.contains(owner)
-            && selection_catalog.contains(owner)
+            && runtime.state.profiles.contains_key(owner)
             && !previous_response_id.is_some_and(|response_id| {
                 runtime_previous_response_negative_cache_active(
                     &runtime.profile_health,
@@ -95,12 +93,10 @@ pub(super) fn next_runtime_previous_response_candidate_with_trace(
             return Ok(Some(owner.to_string()));
         }
         let mut disk_fallback_entries = Vec::new();
-        for (order_index, profile) in
-            runtime_previous_response_ordered_profiles(&selection_catalog, &runtime.current_profile)
-                .into_iter()
-                .enumerate()
+        for (order_index, (name, profile)) in runtime_previous_response_ordered_profiles(&runtime)
+            .into_iter()
+            .enumerate()
         {
-            let name = profile.name.as_str();
             if excluded_profiles.contains(name) {
                 continue;
             }
@@ -246,7 +242,7 @@ pub(super) fn next_runtime_previous_response_candidate_with_trace(
                         false,
                         runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained,
                     );
-                    return Ok(Some(profile.name.clone()));
+                    return Ok(Some(name.to_string()));
                 }
                 Some(_) => {
                     let mut candidate = super::runtime_selection_trace_candidate(
@@ -267,7 +263,7 @@ pub(super) fn next_runtime_previous_response_candidate_with_trace(
                 }
                 None if allow_disk_auth_fallback => {
                     disk_fallback_entries.push(RuntimePreviousResponseDiskFallbackEntry {
-                        name: profile.name.clone(),
+                        name: name.to_string(),
                         codex_home: profile.codex_home.clone(),
                         order_index,
                     });
@@ -302,35 +298,32 @@ pub(super) fn next_runtime_previous_response_candidate_with_trace(
     Ok(None)
 }
 
-fn runtime_previous_response_ordered_profiles<'a>(
-    catalog: &'a RuntimeProfileSelectionCatalog,
-    current_profile: &str,
-) -> Vec<&'a RuntimeSelectionProfileEntry> {
-    let current_index = catalog
-        .entries
+fn runtime_previous_response_ordered_profiles(
+    runtime: &RuntimeRotationState,
+) -> Vec<(&str, &ProfileEntry)> {
+    let mut ordered = runtime
+        .state
+        .profiles
         .iter()
-        .position(|entry| entry.name == current_profile);
-    let mut ordered = Vec::with_capacity(catalog.entries.len());
-    if let Some(index) = current_index {
-        ordered.push((
-            catalog.entries[index].runtime_pool_priority(),
-            0,
-            &catalog.entries[index],
-        ));
-        for (offset, entry) in catalog.entries.iter().skip(index + 1).enumerate() {
-            ordered.push((entry.runtime_pool_priority(), offset + 1, entry));
-        }
-        let tail_len = catalog.entries.len().saturating_sub(index + 1);
-        for (offset, entry) in catalog.entries.iter().take(index).enumerate() {
-            ordered.push((entry.runtime_pool_priority(), tail_len + offset + 1, entry));
-        }
-    } else {
-        for (index, entry) in catalog.entries.iter().enumerate() {
-            if entry.name != current_profile {
-                ordered.push((entry.runtime_pool_priority(), index, entry));
+        .enumerate()
+        .map(|(index, (name, profile))| (index, name.as_str(), profile))
+        .collect::<Vec<_>>();
+    let current_index = ordered
+        .iter()
+        .position(|(_, name, _)| *name == runtime.current_profile);
+    let profile_count = ordered.len();
+    ordered.sort_by_key(|(index, _, profile)| {
+        let rotation_index = current_index.map_or(*index, |current_index| {
+            if *index >= current_index {
+                index - current_index
+            } else {
+                profile_count - current_index + index
             }
-        }
-    }
-    ordered.sort_by_key(|(provider_priority, order_index, _)| (*provider_priority, *order_index));
-    ordered.into_iter().map(|(_, _, entry)| entry).collect()
+        });
+        (profile.provider.runtime_pool_priority(), rotation_index)
+    });
+    ordered
+        .into_iter()
+        .map(|(_, name, profile)| (name, profile))
+        .collect()
 }

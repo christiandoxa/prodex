@@ -1,7 +1,7 @@
 use super::super::deepseek_rewrite::{
     RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
 };
-use super::super::gemini_rewrite::runtime_gemini_blocked_tool_call_message;
+use super::super::gemini_rewrite::runtime_gemini_blocked_tool_call_message_with_config;
 use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_stream_reasoning_summary_text_delta_event,
     runtime_provider_stream_text_delta_event,
@@ -59,6 +59,7 @@ mod gemini_sse_tool_calls;
 use gemini_sse_tool_calls::RuntimeGeminiToolCall;
 
 pub(super) struct RuntimeGeminiSseState {
+    pub(super) gemini_config: crate::RuntimeGeminiConfig,
     request_id: u64,
     response_id: String,
     created_at: u64,
@@ -101,6 +102,7 @@ impl RuntimeGeminiSseState {
         conversation_messages: Vec<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
+        gemini_config: crate::RuntimeGeminiConfig,
     ) -> Self {
         let command_output_only =
             runtime_gemini_conversation_requests_command_output_only(&conversation_messages);
@@ -110,6 +112,7 @@ impl RuntimeGeminiSseState {
         let response_id = RequestId::new();
         let request_id = (response_id.as_uuid().as_u128() >> 64) as u64;
         Self {
+            gemini_config,
             request_id,
             response_id: format!("resp_gemini_{response_id}"),
             created_at: provider_core_chat_compatible_created_at(),

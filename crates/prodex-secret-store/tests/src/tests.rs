@@ -1,14 +1,15 @@
 use crate::{
     FileSecretBackend, KeyringSecretBackend, RefreshLeaseBypassReason, RefreshLeaseCoordinator,
     RefreshLeaseDecision, RefreshLeaseError, RefreshLeaseErrorStatus, RefreshLeaseRole,
-    SecretBackend, SecretBackendKind, SecretBackendSelection, SecretError, SecretLocation,
-    SecretManager, SecretRevision, SecretStoreErrorStatus, SecretValue, auth_json_location,
-    auth_json_location_for_backend, auth_json_path, describe_secret_location,
+    SecretBackendSelection, SecretError, SecretLocation, SecretManager, SecretRevision,
+    SecretStoreErrorStatus, SecretValue, auth_json_location, auth_json_path,
     plan_refresh_lease_error_response, plan_secret_error_response,
 };
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+mod keyring;
 
 fn temp_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -20,6 +21,11 @@ fn temp_dir(name: &str) -> PathBuf {
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    }
     dir
 }
 
@@ -50,7 +56,7 @@ fn file_backend_round_trips_text_values() {
     );
     assert_eq!(
         store.read(&location).unwrap(),
-        Some(SecretValue::Text("{\"access_token\":\"abc\"}".to_string()))
+        Some(SecretValue::text("{\"access_token\":\"abc\"}"))
     );
 
     store.delete(&location).unwrap();
@@ -65,11 +71,14 @@ fn file_backend_preserves_binary_values() {
     let path = root.join("secret.bin");
     let store = SecretManager::new(FileSecretBackend::new());
     let location = SecretLocation::file(&path);
-    let payload = SecretValue::bytes(vec![0xff, 0x00, 0x41]);
+    let expected = vec![0xff, 0x00, 0x41];
 
-    store.write(&location, payload.clone()).unwrap();
+    store
+        .write(&location, SecretValue::bytes(expected.clone()))
+        .unwrap();
 
-    assert_eq!(store.read(&location).unwrap(), Some(payload));
+    let payload = store.read(&location).unwrap().unwrap();
+    payload.with_bytes(|bytes| assert_eq!(bytes, expected));
     assert!(store.read_text(&location).is_err());
 
     let _ = fs::remove_dir_all(root);
@@ -81,6 +90,11 @@ fn file_backend_rejects_oversized_secret_reads() {
     let path = root.join("auth.json");
     let file = fs::File::create(&path).unwrap();
     file.set_len(1024 * 1024 + 1).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
     let store = SecretManager::new(FileSecretBackend::new());
     let location = SecretLocation::file(&path);
 
@@ -127,14 +141,105 @@ fn file_backend_rejects_symlink_secret_reads() {
         store.probe_revision(&location).unwrap_err(),
         SecretError::InvalidLocation { .. }
     ));
+    assert!(matches!(
+        store.delete(&location).unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        "{\"access_token\":\"leaked\"}"
+    );
 
     let _ = fs::remove_dir_all(root);
 }
 
 #[cfg(unix)]
 #[test]
+fn file_backend_rejects_symlinked_parent_components() {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let root = temp_dir("symlink-parent");
+    let outside = root.with_extension("outside-parent");
+    fs::create_dir(&outside).unwrap();
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
+    let outside_secret = outside.join("auth.json");
+    fs::write(&outside_secret, "outside").unwrap();
+    fs::set_permissions(&outside_secret, fs::Permissions::from_mode(0o600)).unwrap();
+    symlink(&outside, root.join("linked")).unwrap();
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(root.join("linked/auth.json"));
+
+    assert!(matches!(
+        store.read(&location).unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+    assert!(matches!(
+        store.write_text(&location, "replacement").unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+    assert_eq!(fs::read_to_string(outside_secret).unwrap(), "outside");
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_backend_rejects_non_private_file_and_parent_modes() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let root = temp_dir("mode-validation");
+    let path = root.join("auth.json");
+    fs::write(&path, "group-readable").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(&path);
+    assert!(matches!(
+        store.read(&location).unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+
+    fs::remove_file(&path).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).unwrap();
+    assert!(matches!(
+        store.write_text(&location, "secret").unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+    assert!(!path.exists());
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_backend_atomically_replaces_symlink_without_touching_target() {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let root = temp_dir("atomic-symlink-replace");
+    let outside = root.with_extension("outside-secret");
+    fs::write(&outside, "outside").unwrap();
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
+    let path = root.join("auth.json");
+    symlink(&outside, &path).unwrap();
+    let store = SecretManager::new(FileSecretBackend::new());
+    let location = SecretLocation::file(&path);
+
+    store.write_text(&location, "inside").unwrap();
+
+    assert!(!path.is_symlink());
+    assert_eq!(
+        store.read_text(&location).unwrap().as_deref(),
+        Some("inside")
+    );
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_file(outside);
+}
+
+#[cfg(unix)]
+#[test]
 fn file_backend_writes_secret_files_with_private_permissions() {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt};
 
     let root = temp_dir("private-permissions");
     let path = root.join("nested/auth.json");
@@ -147,16 +252,52 @@ fn file_backend_writes_secret_files_with_private_permissions() {
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
+    assert_eq!(
+        fs::metadata(&path).unwrap().uid(),
+        fs::metadata(&root).unwrap().uid()
+    );
+
+    let first_inode = fs::metadata(&path).unwrap().ino();
+    store
+        .write_text(&location, "{\"access_token\":\"rotated\"}")
+        .unwrap();
+    assert_ne!(first_inode, fs::metadata(&path).unwrap().ino());
+    assert!(fs::read_dir(path.parent().unwrap()).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".prodex-secret.")
+    }));
 
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(windows)]
 #[test]
-fn file_backend_rejects_keyring_locations() {
+fn file_backend_rejects_reparse_point_secret_reads() {
+    use std::os::windows::fs::symlink_file;
+
+    let root = temp_dir("windows-reparse-read");
+    let target = root.join("target.json");
+    let path = root.join("auth.json");
+    fs::write(&target, "outside").unwrap();
+    if let Err(error) = symlink_file(&target, &path) {
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            let _ = fs::remove_dir_all(root);
+            return;
+        }
+        panic!("failed to create test reparse point: {error}");
+    }
     let store = SecretManager::new(FileSecretBackend::new());
-    let location = SecretLocation::keyring("prodex", "auth");
-    let err = store.write_text(&location, "value").unwrap_err();
-    assert!(matches!(err, SecretError::UnsupportedLocation { .. }));
+    let location = SecretLocation::file(&path);
+
+    assert!(matches!(
+        store.read(&location).unwrap_err(),
+        SecretError::InvalidLocation { .. }
+    ));
+    assert_eq!(fs::read_to_string(target).unwrap(), "outside");
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -165,30 +306,6 @@ fn file_backend_rejects_empty_file_path() {
     let location = SecretLocation::file(PathBuf::new());
 
     let err = store.read(&location).unwrap_err();
-
-    assert!(matches!(err, SecretError::InvalidLocation { .. }));
-}
-
-#[test]
-fn keyring_backend_validates_service_name() {
-    let backend = KeyringSecretBackend::new("prodex").unwrap();
-    assert_eq!(backend.service(), "prodex");
-    assert!(!backend.is_supported());
-    assert!(backend.unsupported_reason().contains("not implemented"));
-
-    let err = KeyringSecretBackend::new("   ").unwrap_err();
-    assert!(matches!(err, SecretError::InvalidLocation { .. }));
-
-    let err = KeyringSecretBackend::new(" prodex ").unwrap_err();
-    assert!(matches!(err, SecretError::InvalidLocation { .. }));
-}
-
-#[test]
-fn keyring_backend_rejects_empty_location_account() {
-    let backend = KeyringSecretBackend::new("prodex").unwrap();
-    let location = SecretLocation::keyring("prodex", "");
-
-    let err = backend.read(&location).unwrap_err();
 
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
 }
@@ -210,32 +327,13 @@ fn selectable_backend_file_round_trips_text_values() {
     );
     assert_eq!(
         store.read(&location).unwrap(),
-        Some(SecretValue::Text("{\"access_token\":\"abc\"}".to_string()))
+        Some(SecretValue::text("{\"access_token\":\"abc\"}"))
     );
 
     store.delete(&location).unwrap();
     assert_eq!(store.read(&location).unwrap(), None);
 
     let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn selectable_backend_from_kind_requires_keyring_service() {
-    assert_eq!(
-        SecretBackendSelection::from_kind(SecretBackendKind::File, None)
-            .unwrap()
-            .kind(),
-        SecretBackendKind::File
-    );
-
-    let err = SecretBackendSelection::from_kind(SecretBackendKind::Keyring, None).unwrap_err();
-    assert!(matches!(err, SecretError::InvalidLocation { .. }));
-}
-
-#[test]
-fn secret_backend_kind_rejects_padded_values() {
-    let err = " keyring ".parse::<SecretBackendKind>().unwrap_err();
-    assert!(matches!(err, SecretError::InvalidLocation { .. }));
 }
 
 #[test]
@@ -281,7 +379,7 @@ fn secret_store_debug_output_is_stable_and_redacted() {
         reason: "permission denied for super-secret-token".to_string(),
     };
     let keyring_backend = KeyringSecretBackend::new("prodex-secret-service").unwrap();
-    let selection = SecretBackendSelection::keyring("prodex-secret-service").unwrap();
+    let selection = SecretBackendSelection::Keyring(keyring_backend.clone());
 
     let rendered = format!("{location:?} {value:?} {error:?} {keyring_backend:?} {selection:?}");
 
@@ -301,6 +399,9 @@ fn secret_store_debug_output_is_stable_and_redacted() {
     assert!(rendered.contains("Text"));
     assert!(rendered.contains("Io"));
     assert!(rendered.contains("KeyringSecretBackend"));
+
+    fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    requires_zeroize_on_drop::<SecretValue>();
 }
 
 #[test]
@@ -342,7 +443,9 @@ fn refresh_lease_debug_output_is_stable_and_redacted() {
         other => panic!("expected owner, got {other:?}"),
     };
     let follower = RefreshLeaseDecision::Follower {
-        result_json: "{\"access_token\":\"super-refresh-secret\"}".to_string(),
+        result_json: "{\"access_token\":\"super-refresh-secret\"}"
+            .to_string()
+            .into(),
     };
     let error = RefreshLeaseError::Io {
         path: root.join("refresh-token-secret.lock"),
@@ -399,6 +502,10 @@ fn file_backend_probe_revision_tracks_metadata() {
     assert!(rendered.contains("SecretRevision"));
     assert!(rendered.contains("size_bytes: \"<redacted>\""));
     assert!(rendered.contains("modified_at: Some(\"<redacted>\")"));
+    assert_eq!(
+        revision.as_ref().unwrap().to_string(),
+        "<redacted-secret-revision>"
+    );
 
     store
         .write(&location, SecretValue::bytes(vec![0xff, 0x00, 0x41, 0x42]))
@@ -410,23 +517,6 @@ fn file_backend_probe_revision_tracks_metadata() {
     assert_eq!(store.probe_revision(&location).unwrap(), None);
 
     let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn auth_json_location_for_keyring_backend_uses_deterministic_account() {
-    let selection = SecretBackendSelection::keyring("prodex").unwrap();
-    let location = auth_json_location_for_backend("/tmp/codex-home", &selection);
-    assert_eq!(
-        location,
-        SecretLocation::Keyring {
-            service: "prodex".to_string(),
-            account: "auth-json:/tmp/codex-home".to_string(),
-        }
-    );
-    assert_eq!(
-        describe_secret_location(&location),
-        "keyring://prodex/auth-json:/tmp/codex-home"
-    );
 }
 
 #[test]
@@ -457,10 +547,39 @@ fn refresh_lease_acquires_owner_and_creates_hashed_lock() {
                     .to_string()
                     .contains(sensitive_key)
             );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+                let metadata = fs::metadata(owner.lock_path()).unwrap();
+                assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+                assert_eq!(metadata.uid(), fs::metadata(&root).unwrap().uid());
+            }
         }
         other => panic!("expected owner, got {other:?}"),
     }
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn refresh_lease_owner_cannot_remove_a_replacement_lock() {
+    let root = temp_dir("refresh-lease-identity");
+    let coordinator = RefreshLeaseCoordinator::new(&root);
+    let sensitive_key = "identity-bound-refresh-token";
+    let mut original = match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner,
+        other => panic!("expected owner, got {other:?}"),
+    };
+    fs::remove_file(original.lock_path()).unwrap();
+    let replacement = match coordinator.acquire(sensitive_key).unwrap() {
+        RefreshLeaseDecision::Owner(owner) => owner,
+        other => panic!("expected replacement owner, got {other:?}"),
+    };
+
+    assert!(original.release().is_err());
+    assert!(replacement.lock_path().exists());
+
+    drop(replacement);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -479,7 +598,22 @@ fn refresh_lease_follower_reads_committed_result() {
 
     match coordinator.acquire(sensitive_key).unwrap() {
         RefreshLeaseDecision::Follower { result_json } => {
-            assert_eq!(result_json, "{\"access_token\":\"redacted-result\"}");
+            assert_eq!(
+                result_json.as_str(),
+                "{\"access_token\":\"redacted-result\"}"
+            );
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                assert_eq!(
+                    fs::metadata(coordinator.paths_for_key(sensitive_key).result_path())
+                        .unwrap()
+                        .permissions()
+                        .mode()
+                        & 0o777,
+                    0o600
+                );
+            }
         }
         other => panic!("expected follower, got {other:?}"),
     }
@@ -495,6 +629,11 @@ fn refresh_lease_ignores_oversized_result_file() {
     let paths = coordinator.paths_for_key(sensitive_key);
     let file = fs::File::create(paths.result_path()).unwrap();
     file.set_len(1024 * 1024 + 1).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(paths.result_path(), fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     match coordinator.acquire(sensitive_key).unwrap() {
         RefreshLeaseDecision::Owner(owner) => {
@@ -595,7 +734,7 @@ fn refresh_lease_waiting_follower_reads_committed_result() {
 
     match follower.join().unwrap() {
         RefreshLeaseDecision::Follower { result_json } => {
-            assert_eq!(result_json, "{\"access_token\":\"shared-result\"}");
+            assert_eq!(result_json.as_str(), "{\"access_token\":\"shared-result\"}");
         }
         other => panic!("expected follower, got {other:?}"),
     }
@@ -612,6 +751,11 @@ fn refresh_lease_recovers_stale_lock() {
         .with_poll_interval(Duration::from_millis(1));
     let paths = coordinator.paths_for_key("stale-token-secret");
     fs::write(paths.lock_path(), "pid=old\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(paths.lock_path(), fs::Permissions::from_mode(0o600)).unwrap();
+    }
     std::thread::sleep(Duration::from_millis(2));
 
     match coordinator.acquire("stale-token-secret").unwrap() {

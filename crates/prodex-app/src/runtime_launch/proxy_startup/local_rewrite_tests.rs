@@ -18,6 +18,7 @@ mod gateway_admin_governance_headers;
 mod gateway_admin_ledger_query;
 mod gateway_admin_scope;
 mod gateway_admin_tenant_scope;
+mod gateway_application_boundary;
 mod gateway_grouped_budget;
 mod gateway_health;
 mod gateway_state;
@@ -226,7 +227,7 @@ fn kiro_responses_route_returns_translated_buffered_response() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -306,7 +307,7 @@ fn kiro_responses_route_reuses_previous_response_history() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -400,7 +401,7 @@ fn kiro_responses_route_reuses_tool_history_by_call_id() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -494,7 +495,7 @@ fn kiro_responses_route_supports_buffered_sse_streaming() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -592,7 +593,7 @@ fn kiro_remote_compact_uses_kiro_semantic_summary_when_available() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -744,7 +745,7 @@ fn kiro_chat_completions_route_reuses_responses_translation_surface() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -821,7 +822,7 @@ fn kiro_messages_route_reuses_anthropic_translation_surface() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -903,7 +904,7 @@ fn kiro_messages_route_preserves_anthropic_tool_use_blocks() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -987,7 +988,7 @@ fn kiro_messages_route_replays_anthropic_tool_result_followup() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1098,7 +1099,7 @@ fn kiro_messages_route_streams_anthropic_sse() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1178,7 +1179,7 @@ fn kiro_chat_completions_route_accepts_legacy_functions_and_function_call() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1274,7 +1275,7 @@ fn kiro_chat_completions_route_rejects_unsupported_response_format() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1361,7 +1362,7 @@ fn kiro_chat_completions_route_rejects_multiple_choices() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1437,7 +1438,7 @@ fn kiro_chat_completions_route_rejects_stop_sequences() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1513,7 +1514,7 @@ fn kiro_chat_completions_route_rejects_temperature() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1589,7 +1590,7 @@ fn kiro_chat_completions_route_rejects_top_p() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1665,7 +1666,7 @@ fn kiro_chat_completions_route_rejects_presence_penalty() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1741,7 +1742,7 @@ fn kiro_chat_completions_route_rejects_frequency_penalty() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1817,7 +1818,7 @@ fn kiro_chat_completions_route_rejects_seed() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1893,7 +1894,7 @@ fn kiro_chat_completions_route_tolerates_parallel_tool_calls_true() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -1968,7 +1969,7 @@ fn kiro_chat_completions_route_ignores_user_metadata() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -2043,7 +2044,7 @@ fn kiro_chat_completions_route_ignores_token_limit_controls() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -2118,7 +2119,7 @@ fn kiro_chat_completions_route_rejects_invalid_token_limit_controls() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -2194,7 +2195,7 @@ fn kiro_chat_completions_stream_translates_to_chat_chunks() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -2276,7 +2277,7 @@ fn kiro_chat_completions_stream_emits_tool_calls() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",
@@ -2372,7 +2373,7 @@ fn kiro_streaming_emits_tool_argument_delta_from_tool_call_update() {
     let paths = app_paths_for_root(root.clone());
     let codex_home = root.join("kiro-home");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
-    fs::write(
+    write_private_test_secret(
         codex_home.join("kiro_auth.json"),
         serde_json::json!({
             "auth_key": "kirocli:social:token",

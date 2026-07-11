@@ -12,3 +12,6 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { workspace = true }
+
+[lints]
+workspace = true

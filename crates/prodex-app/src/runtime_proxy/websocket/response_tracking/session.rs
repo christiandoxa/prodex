@@ -1,10 +1,7 @@
 use anyhow::{Context, Result};
 use std::time::{Duration, Instant};
 
-use crate::{
-    runtime_proxy_websocket_precommit_progress_timeout_ms,
-    runtime_set_upstream_websocket_io_timeout,
-};
+use crate::runtime_set_upstream_websocket_io_timeout;
 
 use super::{
     RuntimeAutoRedeemResetCreditOutcome, RuntimeProfileInFlightGuard, RuntimeProxyRequest,
@@ -211,7 +208,10 @@ pub(super) fn start_runtime_websocket_upstream_session(
     runtime_set_upstream_websocket_io_timeout(
         &mut upstream_socket,
         Some(Duration::from_millis(
-            runtime_proxy_websocket_precommit_progress_timeout_ms(),
+            shared
+                .runtime_config
+                .tuning
+                .websocket_precommit_progress_timeout_ms,
         )),
     )
     .context("failed to configure runtime websocket pre-commit timeout")?;

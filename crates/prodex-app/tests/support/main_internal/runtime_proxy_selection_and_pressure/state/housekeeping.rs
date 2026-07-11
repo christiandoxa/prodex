@@ -280,10 +280,9 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
             upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
             include_code_review: false,
             upstream_no_proxy: false,
-        smart_context_enabled: false,
+            smart_context_enabled: false,
             current_profile: "tracked".to_string(),
-            instance_token: "stale-instance".to_string(),
-            admin_token: "stale-admin".to_string(),
+            instance_id: "stale-instance".to_string(),
             prodex_version: None,
             executable_path: None,
             executable_sha256: None,
@@ -291,6 +290,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
         },
     )
     .expect("stale runtime broker registry should save");
+    save_runtime_broker_test_capability(&paths, stale_broker_key, "stale-instance", "stale-admin");
     let stale_lease_dir = runtime_broker_lease_dir(&paths, stale_broker_key);
     fs::create_dir_all(&stale_lease_dir).expect("stale lease dir should exist");
     let stale_lease = stale_lease_dir.join("999999999-stale.lease");
@@ -363,6 +363,10 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
     assert!(
         !runtime_broker_registry_last_good_file_path(&paths, stale_broker_key).exists(),
         "stale runtime broker registry backup should be removed"
+    );
+    assert!(
+        !runtime_broker_capability_file_path(&paths, stale_broker_key).exists(),
+        "stale runtime broker capability should be removed"
     );
     assert!(!stale_lease.exists(), "dead lease should be removed");
     assert!(

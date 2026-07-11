@@ -89,6 +89,35 @@ fn doctor_install_parse_as_top_level_command() {
     };
     assert!(args.install);
 }
+
+#[test]
+fn runtime_broker_hidden_command_accepts_no_secret_arguments() {
+    let command = parse_cli_command_from(["prodex", "__runtime-broker"])
+        .expect("runtime broker command should parse without configuration arguments");
+    assert!(matches!(
+        command,
+        Commands::RuntimeBroker(RuntimeBrokerArgs {})
+    ));
+
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "__runtime-broker",
+            "--admin-token",
+            "must-not-enter-argv",
+        ])
+        .is_err()
+    );
+    assert!(
+        parse_cli_command_from([
+            "prodex",
+            "__runtime-broker",
+            "--instance-token",
+            "must-not-enter-argv",
+        ])
+        .is_err()
+    );
+}
 #[test]
 fn setup_parse_as_top_level_command() {
     let command =

@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum SecretLocation {
@@ -50,33 +51,35 @@ impl fmt::Debug for SecretLocation {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub enum SecretValue {
-    Text(String),
-    Bytes(Vec<u8>),
+    Text(Zeroizing<String>),
+    Bytes(Zeroizing<Vec<u8>>),
 }
+
+impl ZeroizeOnDrop for SecretValue {}
 
 impl SecretValue {
     pub fn text(value: impl Into<String>) -> Self {
-        Self::Text(value.into())
+        Self::Text(Zeroizing::new(value.into()))
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn bytes(value: impl Into<Vec<u8>>) -> Self {
-        Self::Bytes(value.into())
+        Self::Bytes(Zeroizing::new(value.into()))
     }
 
-    pub fn as_text(&self) -> Option<&str> {
+    pub fn with_bytes<T>(&self, expose: impl FnOnce(&[u8]) -> T) -> T {
         match self {
-            Self::Text(value) => Some(value.as_str()),
-            Self::Bytes(_) => None,
+            Self::Text(value) => expose(value.as_bytes()),
+            Self::Bytes(value) => expose(value.as_slice()),
         }
     }
 
-    pub fn into_bytes(self) -> Vec<u8> {
+    pub fn with_text<T>(&self, expose: impl FnOnce(Option<&str>) -> T) -> T {
         match self {
-            Self::Text(value) => value.into_bytes(),
-            Self::Bytes(value) => value,
+            Self::Text(value) => expose(Some(value.as_str())),
+            Self::Bytes(_) => expose(None),
         }
     }
 }
@@ -261,14 +264,7 @@ impl fmt::Debug for SecretRevision {
 
 impl fmt::Display for SecretRevision {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.modified_at.as_ref() {
-            Some(modified_at) => write!(
-                f,
-                "size_bytes={} modified_at={modified_at:?}",
-                self.size_bytes
-            ),
-            None => write!(f, "size_bytes={} modified_at=none", self.size_bytes),
-        }
+        f.write_str("<redacted-secret-revision>")
     }
 }
 
@@ -309,10 +305,13 @@ impl<B: SecretBackend> SecretManager<B> {
 
     pub fn read_text(&self, location: &SecretLocation) -> Result<Option<String>, SecretError> {
         match self.backend.read(location)? {
-            Some(SecretValue::Text(text)) => Ok(Some(text)),
-            Some(SecretValue::Bytes(bytes)) => String::from_utf8(bytes)
+            Some(SecretValue::Text(mut text)) => Ok(Some(std::mem::take(&mut *text))),
+            Some(SecretValue::Bytes(mut bytes)) => String::from_utf8(std::mem::take(&mut *bytes))
                 .map(Some)
-                .map_err(|_| SecretError::invalid_location("secret payload is not valid UTF-8")),
+                .map_err(|error| {
+                    drop(Zeroizing::new(error.into_bytes()));
+                    SecretError::invalid_location("secret payload is not valid UTF-8")
+                }),
             None => Ok(None),
         }
     }
@@ -327,8 +326,7 @@ impl<B: SecretBackend> SecretManager<B> {
         location: &SecretLocation,
         value: impl Into<String>,
     ) -> Result<(), SecretError> {
-        self.backend
-            .write(location, SecretValue::Text(value.into()))
+        self.backend.write(location, SecretValue::text(value))
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

@@ -2,7 +2,7 @@ use std::{
     convert::Infallible,
     future::Future,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -62,6 +62,99 @@ async fn route_isolation_keeps_data_and_control_planes_separate() {
 }
 
 #[tokio::test]
+async fn unknown_routes_are_rejected_before_backend_in_both_planes() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let backend_calls = Arc::clone(&calls);
+    let (backend_addr, backend) = spawn_backend(move |_| {
+        let calls = Arc::clone(&backend_calls);
+        async move {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Response::new(Full::new(Bytes::from_static(b"unexpected")))
+        }
+    })
+    .await;
+    let client = test_client();
+
+    let (data_addr, data_stop, data) =
+        spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |_| {}).await;
+    let response = request(&client, data_addr, "/v1/not-supported", Bytes::new()).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    stop_frontend(data_stop, data).await;
+
+    let (control_addr, control_stop, control) =
+        spawn_frontend(GatewayServerMode::ControlPlane, backend_addr, |_| {}).await;
+    let response = request(
+        &client,
+        control_addr,
+        "/v1/prodex/gateway/not-supported",
+        Bytes::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    stop_frontend(control_stop, control).await;
+    backend.abort();
+}
+
+#[tokio::test]
+async fn canonical_target_is_forwarded_exactly_and_ambiguous_targets_never_reach_backend() {
+    let targets = Arc::new(Mutex::new(Vec::new()));
+    let backend_targets = Arc::clone(&targets);
+    let (backend_addr, backend) = spawn_backend(move |request| {
+        let targets = Arc::clone(&backend_targets);
+        async move {
+            targets.lock().unwrap().push(request.uri().to_string());
+            Response::new(Full::new(Bytes::from_static(b"ok")))
+        }
+    })
+    .await;
+    let (front_addr, stop, front) =
+        spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |_| {}).await;
+
+    let response = request(
+        &test_client(),
+        front_addr,
+        "/v1/responses?cursor=a%2Fb&limit=1",
+        Bytes::new(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        targets.lock().unwrap().as_slice(),
+        ["/v1/responses?cursor=a%2Fb&limit=1"]
+    );
+
+    let invalid = request(&test_client(), front_addr, "/v1//responses", Bytes::new()).await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        invalid.into_body().collect().await.unwrap().to_bytes(),
+        r#"{"error":{"code":"invalid_request_target","message":"request target is invalid"}}"#
+    );
+
+    for target in ["/v1/%2e%2e/admin", "/v1/%2Fadmin", "/v1/%zz"] {
+        let mut client = TcpStream::connect(front_addr).await.unwrap();
+        client
+            .write_all(format!("GET {target} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let headers = read_headers(&mut client).await;
+        assert!(headers.starts_with("HTTP/1.1 400"), "{target}: {headers}");
+    }
+
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(b"GET http://example.com/v1/responses HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    let headers = read_headers(&mut client).await;
+    assert!(headers.starts_with("HTTP/1.1 400"), "{headers}");
+    assert_eq!(targets.lock().unwrap().len(), 1);
+
+    stop_frontend(stop, front).await;
+    backend.abort();
+}
+
+#[tokio::test]
 async fn response_body_streams_without_waiting_for_completion() {
     let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_addr = backend.local_addr().unwrap();
@@ -99,6 +192,71 @@ async fn response_body_streams_without_waiting_for_completion() {
     assert_eq!(body.collect().await.unwrap().to_bytes(), "second");
     stop_frontend(stop, front).await;
     backend.await.unwrap();
+}
+
+#[tokio::test]
+async fn compatibility_front_matches_backend_response_contract() {
+    let (backend_addr, backend) = spawn_backend(|_| async {
+        Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("x-upstream-contract", "exact")
+            .body(Full::new(Bytes::from_static(b"generic upstream 429")))
+            .unwrap()
+    })
+    .await;
+    let client = test_client();
+    let direct = request(&client, backend_addr, "/responses", Bytes::new()).await;
+    let direct_status = direct.status();
+    let direct_header = direct.headers()["x-upstream-contract"].clone();
+    let direct_body = direct.into_body().collect().await.unwrap().to_bytes();
+
+    let (front_addr, stop, front) =
+        spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |_| {}).await;
+    let proxied = request(&client, front_addr, "/responses", Bytes::new()).await;
+    assert_eq!(proxied.status(), direct_status);
+    assert_eq!(proxied.headers()["x-upstream-contract"], direct_header);
+    assert_eq!(
+        proxied.into_body().collect().await.unwrap().to_bytes(),
+        direct_body
+    );
+
+    stop_frontend(stop, front).await;
+    backend.abort();
+}
+
+#[tokio::test]
+async fn client_disconnect_cancels_backend_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backend_addr = listener.local_addr().unwrap();
+    let (closed_tx, closed_rx) = oneshot::channel();
+    let backend = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_headers(&mut stream).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nfirst\r\n")
+            .await
+            .unwrap();
+        stream.flush().await.unwrap();
+        let mut byte = [0_u8; 1];
+        assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
+        closed_tx.send(()).unwrap();
+    });
+    let (front_addr, stop, front) =
+        spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |_| {}).await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(b"GET /responses HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    read_headers(&mut client).await;
+    drop(client);
+
+    timeout(Duration::from_secs(1), closed_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    backend.await.unwrap();
+    stop_frontend(stop, front).await;
 }
 
 #[tokio::test]
@@ -162,8 +320,18 @@ async fn shutdown_drains_an_inflight_response() {
     });
     started.notified().await;
     stop.send(()).unwrap();
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    let rebound = timeout(Duration::from_secs(1), async {
+        loop {
+            if let Ok(listener) = TcpListener::bind(front_addr).await {
+                break listener;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     assert!(!front.is_finished());
+    drop(rebound);
     release.notify_one();
     assert_eq!(pending.await.unwrap().status(), StatusCode::OK);
     timeout(Duration::from_secs(1), &mut front)
@@ -211,6 +379,50 @@ async fn websocket_upgrade_tunnels_bytes_until_connection_closes() {
     drop(client);
     backend.await.unwrap();
     stop_frontend(stop, front).await;
+}
+
+#[tokio::test]
+async fn shutdown_closes_upgrades_before_drain_completes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backend_addr = listener.local_addr().unwrap();
+    let (closed_tx, closed_rx) = oneshot::channel();
+    let backend = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_headers(&mut stream).await;
+        stream
+            .write_all(
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        let mut byte = [0_u8; 1];
+        assert_eq!(stream.read(&mut byte).await.unwrap(), 0);
+        closed_tx.send(()).unwrap();
+    });
+    let (front_addr, stop, mut front) =
+        spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |_| {}).await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(
+            b"GET /realtime HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    assert!(read_headers(&mut client).await.starts_with("HTTP/1.1 101"));
+
+    stop.send(()).unwrap();
+    timeout(Duration::from_secs(1), &mut front)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let mut byte = [0_u8; 1];
+    assert_eq!(client.read(&mut byte).await.unwrap(), 0);
+    timeout(Duration::from_secs(1), closed_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    backend.await.unwrap();
 }
 
 #[tokio::test]

@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::path::Path;
 use std::{env, io};
+use zeroize::Zeroizing;
 
 use super::progress::print_profile_import_progress;
 use terminal_ui::{
@@ -46,11 +47,11 @@ pub(super) fn resolve_export_password_mode(args: &ExportProfileArgs) -> Result<b
     })
 }
 
-pub(super) fn resolve_export_password() -> Result<String> {
+pub(super) fn resolve_export_password() -> Result<Zeroizing<String>> {
     if let Ok(password) = env::var(PROFILE_EXPORT_PASSWORD_ENV)
         && !password.trim().is_empty()
     {
-        return Ok(password);
+        return Ok(Zeroizing::new(password));
     }
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         bail!(
@@ -59,19 +60,19 @@ pub(super) fn resolve_export_password() -> Result<String> {
         );
     }
 
-    let password = prompt_profile_export_password_tui(
+    let password = Zeroizing::new(prompt_profile_export_password_tui(
         "Profile Export",
         "Export password",
         "Enter a password for the encrypted profile bundle.",
-    )?;
+    )?);
     if password.is_empty() {
         bail!("export password cannot be empty");
     }
-    let confirmation = prompt_profile_export_password_tui(
+    let confirmation = Zeroizing::new(prompt_profile_export_password_tui(
         "Profile Export",
         "Confirm export password",
         "Enter the same password again.",
-    )?;
+    )?);
     if password != confirmation {
         bail!("export passwords did not match");
     }
@@ -104,7 +105,7 @@ pub(super) fn resolve_import_password() -> Result<String> {
 
 fn prompt_profile_export_password_tui(title: &str, label: &str, detail: &str) -> Result<String> {
     let mut tui = ExportPromptTui::new()?;
-    let mut input = String::new();
+    let mut input = Zeroizing::new(String::new());
     loop {
         tui.terminal.draw(|frame| {
             let chunks = Layout::default()
@@ -161,7 +162,7 @@ fn prompt_profile_export_password_tui(title: &str, label: &str, detail: &str) ->
             && key.kind == KeyEventKind::Press
         {
             match key.code {
-                KeyCode::Enter => return Ok(input),
+                KeyCode::Enter => return Ok(std::mem::take(&mut *input)),
                 KeyCode::Esc => bail!("profile export password input cancelled"),
                 KeyCode::Backspace => {
                     input.pop();

@@ -557,6 +557,7 @@ mod tests {
             input_tokens: Some(100),
             output_tokens: Some(25),
             cost_usd: Some(0.0001),
+            reconciliation_reason: Some(prodex_domain::ReservationReconciliationReason::Completed),
             sink: "runtime-log".to_string(),
         };
 
@@ -631,6 +632,9 @@ mod tests {
                     input_tokens: Some(100),
                     output_tokens: Some(25),
                     cost_usd: Some(0.0001),
+                    reconciliation_reason: Some(
+                        prodex_domain::ReservationReconciliationReason::Completed,
+                    ),
                     sink: "runtime-log".to_string(),
                 },
                 30,

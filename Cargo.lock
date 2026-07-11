@@ -158,6 +158,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03918c3dbd7701a85c6b9887732e2921175f26c350b4563841d0958c21d57e6d"
 
 [[package]]
+name = "argon2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures 0.2.17",
+ "password-hash",
+]
+
+[[package]]
 name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,6 +265,15 @@ name = "bitflags"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
+
+[[package]]
+name = "blake2"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
+dependencies = [
+ "digest 0.10.7",
+]
 
 [[package]]
 name = "block-buffer"
@@ -845,6 +866,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
  "crypto-common 0.1.7",
+ "subtle",
 ]
 
 [[package]]
@@ -2128,6 +2150,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "password-hash"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "346f04948ba92c43e8469c1ee6736c7563d71012b17d40745260fe106aac2166"
+dependencies = [
+ "base64ct",
+ "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
 name = "pbkdf2"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2335,7 +2368,6 @@ dependencies = [
  "base64",
  "criterion",
  "libc",
- "postgres",
  "prodex-app",
  "prodex-application",
  "prodex-config",
@@ -2343,6 +2375,7 @@ dependencies = [
  "prodex-domain",
  "prodex-gateway-http",
  "prodex-gateway-server",
+ "prodex-secret-store",
  "prodex-storage",
  "prodex-storage-postgres",
  "prodex-storage-postgres-runtime",
@@ -2357,7 +2390,6 @@ dependencies = [
 name = "prodex-app"
 version = "0.276.0"
 dependencies = [
- "aes-gcm-siv",
  "anyhow",
  "arc-swap",
  "base64",
@@ -2374,6 +2406,7 @@ dependencies = [
  "prodex-app-reports",
  "prodex-application",
  "prodex-audit-log",
+ "prodex-authn",
  "prodex-bench-support",
  "prodex-caveman-assets",
  "prodex-cli",
@@ -2383,6 +2416,7 @@ dependencies = [
  "prodex-control-plane",
  "prodex-core",
  "prodex-domain",
+ "prodex-gateway-core",
  "prodex-gateway-http",
  "prodex-housekeeping",
  "prodex-mcp-stdio",
@@ -2391,6 +2425,7 @@ dependencies = [
  "prodex-profile-export",
  "prodex-profile-identity",
  "prodex-provider-core",
+ "prodex-provider-spi",
  "prodex-proxy-config",
  "prodex-quota",
  "prodex-redaction",
@@ -2438,6 +2473,7 @@ dependencies = [
  "toml",
  "tungstenite",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2460,6 +2496,7 @@ name = "prodex-application"
 version = "0.276.0"
 dependencies = [
  "prodex-authn",
+ "prodex-authz",
  "prodex-config",
  "prodex-control-plane",
  "prodex-domain",
@@ -2489,6 +2526,7 @@ name = "prodex-authn"
 version = "0.276.0"
 dependencies = [
  "prodex-domain",
+ "url",
 ]
 
 [[package]]
@@ -2521,7 +2559,6 @@ version = "0.276.0"
 dependencies = [
  "clap",
  "prodex-runtime-gemini",
- "prodex-shared-types",
  "reqwest",
  "serde",
 ]
@@ -2573,6 +2610,7 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2651,12 +2689,14 @@ version = "0.276.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
+ "argon2",
  "base64",
  "getrandom 0.4.3",
  "pbkdf2",
  "serde",
  "serde_json",
  "sha2",
+ "zeroize",
 ]
 
 [[package]]
@@ -2731,6 +2771,7 @@ dependencies = [
  "prodex-runtime-state",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -2839,6 +2880,7 @@ name = "prodex-runtime-policy"
 version = "0.276.0"
 dependencies = [
  "anyhow",
+ "prodex-authn",
  "prodex-core",
  "prodex-domain",
  "prodex-secret-store",
@@ -2893,8 +2935,11 @@ version = "0.276.0"
 name = "prodex-secret-store"
 version = "0.276.0"
 dependencies = [
+ "libc",
  "prodex-domain",
  "sha2",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

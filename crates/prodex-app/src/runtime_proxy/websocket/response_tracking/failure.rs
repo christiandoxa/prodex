@@ -1,7 +1,6 @@
 use super::{
     RuntimeRotationProxyShared, RuntimeWebsocketAttempt, RuntimeWebsocketSessionState,
-    note_runtime_profile_transport_failure, runtime_proxy_log,
-    runtime_proxy_websocket_precommit_progress_timeout_ms, runtime_websocket_error_log_value,
+    note_runtime_profile_transport_failure, runtime_proxy_log, runtime_websocket_error_log_value,
     runtime_websocket_timeout_error,
 };
 use anyhow::Result;
@@ -194,7 +193,10 @@ pub(super) fn handle_runtime_websocket_read_error(
 
     if !committed && precommit_hold_count > 0 && runtime_websocket_timeout_error(&err) {
         let elapsed_ms = precommit_started_at.elapsed().as_millis();
-        let timeout_ms = runtime_proxy_websocket_precommit_progress_timeout_ms();
+        let timeout_ms = shared
+            .runtime_config
+            .tuning
+            .websocket_precommit_progress_timeout_ms;
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(

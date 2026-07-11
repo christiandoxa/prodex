@@ -318,7 +318,7 @@ pub(super) fn translate_runtime_responses_reply_to_anthropic(
             }
         };
         let anthropic_request = messages_request_to_anthropic(request);
-        let debug_anthropic = std::env::var_os("PRODEX_DEBUG_ANTHROPIC_COMPAT").is_some();
+        let debug_anthropic = shared.runtime_config.debug_anthropic_compat;
         let reply = anthropic::translate_runtime_buffered_responses_reply_to_anthropic_with_server_tool_followups(
             buffered_parts_to_anthropic(parts),
             &anthropic_request,

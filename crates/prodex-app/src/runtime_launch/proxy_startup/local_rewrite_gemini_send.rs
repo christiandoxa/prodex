@@ -1,6 +1,6 @@
 use super::super::gemini_rewrite::{
     RuntimeGeminiAuth, RuntimeGeminiProviderAuth, RuntimeGeminiTranslatedRequest,
-    runtime_gemini_generate_request_body, runtime_gemini_native_request_body,
+    runtime_gemini_generate_request_body_with_config, runtime_gemini_native_request_body,
     runtime_gemini_project_id, runtime_gemini_request_upstream_url,
 };
 use super::super::local_rewrite::{
@@ -167,12 +167,13 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                 );
             }
             let mut translated = if responses_route {
-                runtime_gemini_generate_request_body(
+                runtime_gemini_generate_request_body_with_config(
                     &model_body,
                     &shared.gemini_conversations,
                     matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }),
                     runtime_gemini_project_id(&selected.auth),
                     thinking_budget_tokens,
+                    &shared.runtime_shared.runtime_config.gemini,
                 )?
             } else {
                 RuntimeGeminiTranslatedRequest {

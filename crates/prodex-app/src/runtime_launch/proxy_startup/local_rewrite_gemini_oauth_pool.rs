@@ -186,7 +186,16 @@ pub(super) fn runtime_gemini_auth_attempts(
                 .gemini_oauth_pool
                 .as_ref()
                 .context("Gemini OAuth pool was not initialized")?;
-            pool.select_attempts(body, profiles, model_scope)
+            pool.select_attempts_with_sticky_fresh(
+                body,
+                profiles,
+                model_scope,
+                shared
+                    .runtime_shared
+                    .runtime_config
+                    .gemini
+                    .sticky_fresh_oauth,
+            )
         }
     }
 }
@@ -335,11 +344,22 @@ impl RuntimeGeminiOAuthPool {
         )
     }
 
+    #[cfg(test)]
     pub(in super::super) fn select_attempts(
         &self,
         body: &[u8],
         fallback_profiles: &[RuntimeGeminiOAuthProfileAuth],
         model_scope: Option<&str>,
+    ) -> Result<Vec<RuntimeGeminiSelectedAuth>> {
+        self.select_attempts_with_sticky_fresh(body, fallback_profiles, model_scope, true)
+    }
+
+    pub(in super::super) fn select_attempts_with_sticky_fresh(
+        &self,
+        body: &[u8],
+        fallback_profiles: &[RuntimeGeminiOAuthProfileAuth],
+        model_scope: Option<&str>,
+        sticky_fresh_oauth: bool,
     ) -> Result<Vec<RuntimeGeminiSelectedAuth>> {
         let mut state = self
             .state
@@ -358,7 +378,7 @@ impl RuntimeGeminiOAuthPool {
         {
             return Ok(attempts);
         }
-        if runtime_gemini_sticky_fresh_oauth_enabled()
+        if sticky_fresh_oauth
             && let Some(scope) = model_scope.filter(|scope| scope.starts_with("session:"))
             && let Some(profile_name) = state.session_profile_bindings.get(scope)
             && let Some(attempts) = runtime_gemini_oauth_affinity_attempts(&profiles, profile_name)
@@ -400,16 +420,6 @@ impl RuntimeGeminiOAuthPool {
                 .collect();
         }
         Ok(attempts)
-    }
-}
-
-fn runtime_gemini_sticky_fresh_oauth_enabled() -> bool {
-    match std::env::var("PRODEX_GEMINI_STICKY_FRESH_OAUTH") {
-        Ok(value) => !matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "off" | "no"
-        ),
-        Err(_) => true,
     }
 }
 

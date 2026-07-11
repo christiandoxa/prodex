@@ -154,6 +154,8 @@ pub struct RuntimePolicyGatewaySsoSettings {
     pub oidc_issuer: Option<String>,
     pub oidc_audience: Option<String>,
     pub oidc_jwks_url: Option<String>,
+    #[serde(default)]
+    pub oidc_jwks_origin_allowlist: Vec<String>,
     pub oidc_user_claim: Option<String>,
     pub oidc_role_claim: Option<String>,
     pub oidc_tenant_claim: Option<String>,

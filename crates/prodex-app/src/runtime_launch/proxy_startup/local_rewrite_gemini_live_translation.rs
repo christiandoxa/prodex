@@ -49,6 +49,7 @@ pub(super) struct RuntimeGeminiLiveServerTranslation {
 }
 
 pub(super) struct RuntimeGeminiLiveState {
+    configured_model: Option<String>,
     turn_sequence: u64,
     response_id: String,
     item_id: String,
@@ -64,8 +65,14 @@ pub(super) struct RuntimeGeminiLiveState {
 }
 
 impl RuntimeGeminiLiveState {
+    #[cfg(test)]
     pub(super) fn new(_request_id: u64) -> Self {
+        Self::new_with_model(_request_id, None)
+    }
+
+    pub(super) fn new_with_model(_request_id: u64, configured_model: Option<String>) -> Self {
         Self {
+            configured_model,
             turn_sequence: 1,
             response_id: runtime_gemini_live_response_id(),
             item_id: runtime_gemini_live_item_id(),
@@ -126,7 +133,10 @@ impl RuntimeGeminiLiveState {
                 {
                     self.output_audio_rate = output_audio.rate;
                 }
-                upstream_messages.push(runtime_gemini_live_setup_message(session));
+                upstream_messages.push(runtime_gemini_live_setup_message(
+                    session,
+                    self.configured_model.as_deref(),
+                ));
                 wait_for_setup = true;
             }
             "input_audio_buffer.append" => {
@@ -425,11 +435,7 @@ fn runtime_gemini_live_call_id() -> String {
 
 fn runtime_gemini_live_setup_message(
     session: &serde_json::Map<String, serde_json::Value>,
+    configured_model: Option<&str>,
 ) -> serde_json::Value {
-    let configured_model = std::env::var("PRODEX_GEMINI_LIVE_MODEL").ok();
-    gemini_provider_core_live_setup_message(
-        session,
-        GEMINI_LIVE_DEFAULT_MODEL,
-        configured_model.as_deref(),
-    )
+    gemini_provider_core_live_setup_message(session, GEMINI_LIVE_DEFAULT_MODEL, configured_model)
 }

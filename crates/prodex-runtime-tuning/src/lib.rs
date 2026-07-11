@@ -362,6 +362,11 @@ fn runtime_fault_counters() -> &'static Mutex<BTreeMap<String, RuntimeFaultBudge
 pub fn runtime_take_fault_injection(env_key: &str) -> bool {
     let raw_value = env::var(env_key).ok().unwrap_or_default();
     let configured = raw_value.parse::<usize>().unwrap_or(0);
+    runtime_take_fault_injection_budget(env_key, configured)
+}
+
+pub fn runtime_take_fault_injection_budget(env_key: &str, configured: usize) -> bool {
+    let raw_value = configured.to_string();
     if configured == 0 {
         if let Ok(mut counters) = runtime_fault_counters().lock() {
             counters.remove(env_key);

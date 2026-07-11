@@ -71,6 +71,7 @@ pub(crate) struct RuntimeGatewayOidcConfig {
     pub(crate) issuer: String,
     pub(crate) audience: String,
     pub(crate) jwks_url: Option<String>,
+    pub(crate) jwks_origin_allowlist: Vec<String>,
     pub(crate) user_claim: String,
     pub(crate) role_claim: String,
     pub(crate) tenant_claim: String,
@@ -83,6 +84,10 @@ impl fmt::Debug for RuntimeGatewayOidcConfig {
             .field("issuer", &"<redacted>")
             .field("audience", &"<redacted>")
             .field("jwks_url", &self.jwks_url.as_ref().map(|_| "<redacted>"))
+            .field(
+                "jwks_origin_allowlist_count",
+                &self.jwks_origin_allowlist.len(),
+            )
             .field("user_claim", &"<redacted>")
             .field("role_claim", &"<redacted>")
             .field("tenant_claim", &"<redacted>")
@@ -467,6 +472,7 @@ mod tests {
                 issuer: "https://issuer.example.test".to_string(),
                 audience: "prodex-gateway".to_string(),
                 jwks_url: Some("https://issuer.example.test/jwks.json".to_string()),
+                jwks_origin_allowlist: Vec::new(),
                 user_claim: "email".to_string(),
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),

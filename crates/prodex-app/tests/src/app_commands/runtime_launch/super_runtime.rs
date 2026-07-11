@@ -1,7 +1,7 @@
 use super::{
     AppState, BTreeMap, ProfileEntry, ProfileProvider, RUNTIME_PROXY_OPENAI_MOUNT_PATH,
     RuntimeLaunchRequest, TestEnvVarGuard, fs, prepare_runtime_launch,
-    prepare_runtime_launch_dry_run, temp_dir, write_state,
+    prepare_runtime_launch_dry_run, temp_dir, write_runtime_launch_auth, write_state,
 };
 
 #[test]
@@ -10,7 +10,7 @@ fn prepare_runtime_launch_enables_runtime_proxy_for_openai_smart_context_single_
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let main_home = root.join("main-home");
     fs::create_dir_all(&main_home).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&main_home),
         r#"{"tokens":{"access_token":"main-token"}}"#,
     )
@@ -68,7 +68,7 @@ fn prepare_runtime_launch_dry_run_previews_proxy_for_presidio_redaction() {
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let main_home = root.join("main-home");
     fs::create_dir_all(&main_home).unwrap();
-    fs::write(
+    write_runtime_launch_auth(
         secret_store::auth_json_path(&main_home),
         r#"{"tokens":{"access_token":"main-token"}}"#,
     )

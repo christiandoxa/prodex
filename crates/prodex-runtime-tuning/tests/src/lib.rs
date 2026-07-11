@@ -5,8 +5,8 @@ use crate::{
     runtime_proxy_async_worker_count_default, runtime_proxy_lane_limits_from_overrides,
     runtime_proxy_log_queue_capacity_default, runtime_proxy_long_lived_queue_capacity_default,
     runtime_proxy_long_lived_worker_count_default, runtime_proxy_worker_count_default,
-    runtime_take_fault_injection, runtime_tuning_snapshot_from_input,
-    runtime_websocket_dns_resolve_overflow_capacity_default,
+    runtime_take_fault_injection, runtime_take_fault_injection_budget,
+    runtime_tuning_snapshot_from_input, runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
     runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
@@ -343,4 +343,16 @@ fn runtime_proxy_lane_limits_keep_defaults_and_clamp_overrides() {
             standard: 8,
         }
     );
+}
+
+#[test]
+fn snapshotted_fault_budget_is_consumed_without_environment_reads() {
+    let key = "PRODEX_TEST_SNAPSHOTTED_FAULT_BUDGET";
+
+    assert!(runtime_take_fault_injection_budget(key, 2));
+    assert!(runtime_take_fault_injection_budget(key, 2));
+    assert!(!runtime_take_fault_injection_budget(key, 2));
+    assert!(runtime_take_fault_injection_budget(key, 1));
+    assert!(!runtime_take_fault_injection_budget(key, 1));
+    assert!(!runtime_take_fault_injection_budget(key, 0));
 }

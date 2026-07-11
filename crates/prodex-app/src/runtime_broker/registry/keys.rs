@@ -1,7 +1,6 @@
 use crate::{
     RUNTIME_BROKER_IDLE_GRACE_SECONDS, RUNTIME_PROXY_OPENAI_MOUNT_PATH,
-    runtime_broker_ready_timeout_ms, runtime_current_prodex_binary_identity,
-    runtime_prodex_binary_identity_key,
+    runtime_current_prodex_binary_identity, runtime_prodex_binary_identity_key,
 };
 
 #[cfg(test)]
@@ -76,9 +75,9 @@ pub(crate) fn runtime_broker_key_with_smart_context(
     )
 }
 
-pub(crate) fn runtime_broker_startup_grace_seconds() -> i64 {
+pub(crate) fn runtime_broker_startup_grace_seconds(ready_timeout_ms: u64) -> i64 {
     prodex_runtime_broker::runtime_broker_startup_grace_seconds(
-        runtime_broker_ready_timeout_ms(),
+        ready_timeout_ms,
         RUNTIME_BROKER_IDLE_GRACE_SECONDS,
     )
 }

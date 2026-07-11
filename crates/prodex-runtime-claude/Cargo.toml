@@ -19,3 +19,6 @@ prodex_runtime_launch = { workspace = true }
 prodex_shared_codex_fs = { workspace = true }
 runtime_anthropic_crate = { workspace = true }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

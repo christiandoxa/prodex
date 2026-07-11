@@ -10,11 +10,12 @@ use super::provider_bridge::{
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
 use prodex_domain::{CallId, RequestId};
+#[cfg(test)]
+use prodex_provider_core::gemini_provider_core_runtime_responses_value_with_fallback_ids;
 use prodex_provider_core::{
     gemini_provider_core_buffered_responses_value_with_fallback_ids,
     gemini_provider_core_chat_assistant_messages, gemini_provider_core_normalized_response_value,
     gemini_provider_core_response_terminal_without_history,
-    gemini_provider_core_runtime_responses_value_with_fallback_ids,
 };
 use std::fmt;
 use std::io::Read;
@@ -33,11 +34,16 @@ mod gemini_request_session;
 #[path = "gemini_request_tool_output.rs"]
 mod gemini_request_tool_output;
 
+#[cfg(test)]
 pub(super) use gemini_request::{
     runtime_gemini_blocked_tool_call_message, runtime_gemini_generate_request_body,
 };
+pub(super) use gemini_request::{
+    runtime_gemini_blocked_tool_call_message_with_config,
+    runtime_gemini_generate_request_body_with_config,
+};
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
     value: &serde_json::Value,
     _request_id: u64,
@@ -144,7 +150,13 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
     let response = gemini_provider_core_buffered_responses_value_with_fallback_ids(
         value.as_ref(),
         translated.as_ref(),
-        runtime_gemini_blocked_tool_call_message,
+        |name, args| {
+            runtime_gemini_blocked_tool_call_message_with_config(
+                name,
+                args,
+                &runtime_shared.runtime_config.gemini,
+            )
+        },
         || format!("resp_gemini_{}", RequestId::new()),
         |_index| format!("call_gemini_{}", CallId::new()),
     );
@@ -156,7 +168,11 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
             response_id,
             conversation_messages,
             gemini_provider_core_chat_assistant_messages(&value, request_id, |name, args| {
-                runtime_gemini_blocked_tool_call_message(name, args)
+                runtime_gemini_blocked_tool_call_message_with_config(
+                    name,
+                    args,
+                    &runtime_shared.runtime_config.gemini,
+                )
             }),
         );
     }
