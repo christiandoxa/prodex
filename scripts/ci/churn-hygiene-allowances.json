@@ -2,18 +2,15 @@
   {
     "id": "constraint-aware-routing-0.276.0",
     "requiredSubjects": [
-      "feat(routing): add explainable constraint-aware routing",
-      "chore(release): release 0.276.0",
-      "refactor(routing): group planner inputs",
-      "chore(ci): review routing release churn"
+      "feat(routing): add explainable constraint-aware routing"
     ],
     "caps": {
-      "maxFiles": 109,
-      "maxBehaviorFiles": 91,
-      "maxLines": 9300,
-      "maxFileLines": 741
+      "maxFiles": 97,
+      "maxBehaviorFiles": 90,
+      "maxLines": 8965,
+      "maxFileLines": 738
     },
-    "reason": "Reviewed the constraint-aware routing, deterministic route-explain diagnostics, bounded decision traces, affinity-safe saturation relief, planner input cleanup, and synchronized 0.276.0 release metadata with the full all-features local test matrix, serial runtime suite, preflight guards, Clippy, formatting, and credential scan."
+    "reason": "Reviewed the constraint-aware routing, deterministic route-explain diagnostics, bounded decision traces, and affinity-safe saturation relief with the full all-features local test matrix, serial runtime suite, preflight guards, Clippy, formatting, and credential scan."
   },
   {
     "id": "postgres-tls-and-release-0.274.0",
