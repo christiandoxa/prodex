@@ -73,6 +73,18 @@ const OPTIONAL_POSTGRES_MIGRATION_TEST = Object.freeze({
     "--test-threads=1",
   ],
 });
+const OPTIONAL_POSTGRES_RUNTIME_TEST = Object.freeze({
+  command: "cargo",
+  args: [
+    "test",
+    "-q",
+    "-p",
+    "prodex-storage-postgres-runtime",
+    "two_repositories_reserve_and_reconcile_idempotently",
+    "--",
+    "--test-threads=1",
+  ],
+});
 
 function stripComment(line) {
   let inString = false;
@@ -331,6 +343,11 @@ async function main() {
   await runCommand(
     OPTIONAL_POSTGRES_MIGRATION_TEST.command,
     OPTIONAL_POSTGRES_MIGRATION_TEST.args,
+    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+  );
+  await runCommand(
+    OPTIONAL_POSTGRES_RUNTIME_TEST.command,
+    OPTIONAL_POSTGRES_RUNTIME_TEST.args,
     { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
   );
 }

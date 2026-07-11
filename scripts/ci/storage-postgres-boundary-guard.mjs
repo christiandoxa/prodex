@@ -9,6 +9,9 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const MANIFEST = "crates/prodex-storage-postgres/Cargo.toml";
 const SRC_DIR = "crates/prodex-storage-postgres/src";
 const LIB = "crates/prodex-storage-postgres/src/lib.rs";
+const RUNTIME_MANIFEST = "crates/prodex-storage-postgres-runtime/Cargo.toml";
+const RUNTIME_SRC_DIR = "crates/prodex-storage-postgres-runtime/src";
+const RUNTIME_LIB = "crates/prodex-storage-postgres-runtime/src/lib.rs";
 const ALLOWED_DEPENDENCIES = new Set(["prodex_domain", "prodex_storage"]);
 const ALLOWED_DEV_DEPENDENCIES = new Set(["postgres"]);
 const FORBIDDEN_DEPENDENCIES = new Set([
@@ -35,6 +38,22 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
   { name: "http client", pattern: /\breqwest\s*::/u },
   { name: "database driver", pattern: /\b(postgres|rusqlite|sqlx|redis)\s*::/u },
   { name: "transport", pattern: /\btungstenite\s*::/u },
+]);
+const ALLOWED_RUNTIME_DEPENDENCIES = new Set([
+  "deadpool-postgres",
+  "prodex_domain",
+  "prodex_storage",
+  "prodex_storage_postgres",
+  "tokio",
+  "tokio-postgres",
+  "uuid",
+]);
+const FORBIDDEN_RUNTIME_SOURCE_PATTERNS = Object.freeze([
+  { name: "filesystem", pattern: /\bstd\s*::\s*fs\b/u },
+  { name: "process", pattern: /\bstd\s*::\s*process\b/u },
+  { name: "HTTP framework", pattern: /\b(axum|hyper|tower)\s*::/u },
+  { name: "HTTP client", pattern: /\breqwest\s*::/u },
+  { name: "DDL", pattern: /\b(CREATE|ALTER|DROP)\s+(TABLE|INDEX|POLICY|SCHEMA)\b/iu },
 ]);
 
 function stripComment(line) {
@@ -126,6 +145,37 @@ export function validateSource(sourceText, sourcePath = "source.rs") {
   return errors;
 }
 
+export function validateRuntimeManifest(tomlText, manifestPath = RUNTIME_MANIFEST) {
+  const sections = parseDependencySections(tomlText);
+  const errors = [];
+  for (const dep of sections.get("dependencies") ?? []) {
+    if (!ALLOWED_RUNTIME_DEPENDENCIES.has(dep)) {
+      errors.push(`${manifestPath}: unexpected runtime adapter dependency '${dep}'`);
+    }
+  }
+  for (const sectionName of sorted(sections.keys())) {
+    if (sectionName.startsWith("target.")) {
+      errors.push(`${manifestPath}: target-specific dependencies are not allowed in the PostgreSQL runtime adapter`);
+    }
+  }
+  return errors;
+}
+
+export function validateRuntimeSource(sourceText, sourcePath = "source.rs") {
+  const errors = [];
+  sourceText.split(/\r?\n/u).forEach((line, index) => {
+    for (const { name, pattern } of FORBIDDEN_RUNTIME_SOURCE_PATTERNS) {
+      if (pattern.test(line)) {
+        errors.push(`${sourcePath}:${index + 1}: PostgreSQL runtime adapter cannot use ${name} '${line.trim()}'`);
+      }
+    }
+  });
+  if (sourcePath === RUNTIME_LIB && !sourceText.includes("#![forbid(unsafe_code)]")) {
+    errors.push(`${sourcePath}: PostgreSQL runtime adapter crate root must forbid unsafe code`);
+  }
+  return errors;
+}
+
 async function rustFilesUnder(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const files = [];
@@ -189,6 +239,18 @@ prodex_storage = { workspace = true }
     validateSource("pub const SQL: &str = \"SELECT 1\";", LIB).some((error) => error.includes("forbid unsafe code")),
     "crate root without unsafe forbid accepted",
   );
+  assertSelfTest(
+    validateRuntimeManifest("[dependencies]\ndeadpool-postgres = \"0.14\"\ntokio-postgres = \"0.7\"\n", "runtime/Cargo.toml").length === 0,
+    "valid runtime adapter manifest rejected",
+  );
+  assertSelfTest(
+    validateRuntimeManifest("[dependencies]\nprodex_app = { path = \"../prodex-app\" }\n", "runtime-bad/Cargo.toml").some((error) => error.includes("prodex_app")),
+    "runtime adapter app dependency accepted",
+  );
+  assertSelfTest(
+    validateRuntimeSource("const SQL: &str = \"CREATE TABLE bad(id INT)\";", "runtime-bad.rs").some((error) => error.includes("DDL")),
+    "runtime adapter DDL accepted",
+  );
 }
 
 async function main() {
@@ -197,7 +259,19 @@ async function main() {
     return;
   }
   const manifest = await fs.readFile(path.join(repoRoot, MANIFEST), "utf8");
-  const errors = [...validateManifest(manifest), ...(await validateSources())];
+  const runtimeManifest = await fs.readFile(path.join(repoRoot, RUNTIME_MANIFEST), "utf8");
+  const runtimeFiles = await rustFilesUnder(path.join(repoRoot, RUNTIME_SRC_DIR));
+  const runtimeErrors = [];
+  for (const file of runtimeFiles) {
+    const source = await fs.readFile(file, "utf8");
+    runtimeErrors.push(...validateRuntimeSource(source, path.relative(repoRoot, file)));
+  }
+  const errors = [
+    ...validateManifest(manifest),
+    ...(await validateSources()),
+    ...validateRuntimeManifest(runtimeManifest),
+    ...runtimeErrors,
+  ];
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);
     process.exitCode = 1;
