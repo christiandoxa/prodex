@@ -120,6 +120,7 @@ fn gateway_sso_headers_can_authenticate_scoped_admin() {
         .header("x-prodex-sso-user", "alice@example.com")
         .header("x-prodex-sso-role", "admin")
         .header("x-prodex-sso-key-prefixes", "team-a-")
+        .header("Idempotency-Key", "sso-create-team-a")
         .json(&serde_json::json!({"name": "team-a-sso"}))
         .send()
         .expect("SSO admin create key request should be sent");
@@ -134,6 +135,7 @@ fn gateway_sso_headers_can_authenticate_scoped_admin() {
         .header("x-prodex-sso-user", "alice@example.com")
         .header("x-prodex-sso-role", "admin")
         .header("x-prodex-sso-key-prefixes", "team-a-")
+        .header("Idempotency-Key", "sso-create-team-b-forbidden")
         .json(&serde_json::json!({"name": "team-b-sso"}))
         .send()
         .expect("SSO admin forbidden create key request should be sent");
@@ -163,6 +165,7 @@ fn gateway_sso_headers_can_authenticate_scoped_admin() {
         .header("x-prodex-sso-user", "alice@example.com")
         .header("x-prodex-sso-role", "viewer")
         .header("x-prodex-sso-key-prefixes", "team-a-")
+        .header("Idempotency-Key", "sso-viewer-create-denied")
         .json(&serde_json::json!({"name": "team-a-viewer-denied"}))
         .send()
         .expect("SSO viewer forbidden create key request should be sent");
@@ -231,6 +234,7 @@ fn gateway_sso_missing_or_unknown_role_never_uses_admin_default() {
             ))
             .header("x-prodex-sso-token", sso_token)
             .header("x-prodex-sso-user", "alice@example.com")
+            .header("Idempotency-Key", "sso-role-create-denied")
             .json(&serde_json::json!({"name": "team-a-denied"}));
         if let Some(role) = role {
             request = request.header("x-prodex-sso-role", role);
@@ -345,6 +349,7 @@ fn gateway_scim_users_can_provision_sso_admin_scope() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "scim-create-alice")
         .json(&serde_json::json!({
             "userName": "alice@example.com",
             "displayName": "Alice Example",
@@ -388,6 +393,7 @@ fn gateway_scim_users_can_provision_sso_admin_scope() {
         ))
         .header("x-prodex-sso-token", sso_token)
         .header("x-prodex-sso-user", "alice@example.com")
+        .header("Idempotency-Key", "scim-sso-create-team-a")
         .json(&serde_json::json!({"name": "team-a-scim"}))
         .send()
         .expect("SCIM-backed SSO create key request should be sent");
@@ -404,6 +410,7 @@ fn gateway_scim_users_can_provision_sso_admin_scope() {
         ))
         .header("x-prodex-sso-token", sso_token)
         .header("x-prodex-sso-user", "alice@example.com")
+        .header("Idempotency-Key", "scim-sso-create-team-b-forbidden")
         .json(&serde_json::json!({"name": "team-b-scim"}))
         .send()
         .expect("SCIM-backed SSO forbidden key request should be sent");
@@ -415,6 +422,7 @@ fn gateway_scim_users_can_provision_sso_admin_scope() {
             proxy.listen_addr, user_id
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "scim-disable-alice")
         .json(&serde_json::json!({
             "Operations": [
                 {"op": "replace", "path": "active", "value": false}
@@ -504,6 +512,7 @@ fn gateway_oidc_jwt_can_authenticate_scoped_admin() {
             proxy.listen_addr
         ))
         .bearer_auth(&token)
+        .header("Idempotency-Key", "oidc-create-team-a")
         .json(&serde_json::json!({"name": "team-a-oidc"}))
         .send()
         .expect("OIDC admin create key request should be sent");
@@ -515,6 +524,7 @@ fn gateway_oidc_jwt_can_authenticate_scoped_admin() {
             proxy.listen_addr
         ))
         .bearer_auth(&token)
+        .header("Idempotency-Key", "oidc-create-team-b-forbidden")
         .json(&serde_json::json!({"name": "team-b-oidc"}))
         .send()
         .expect("OIDC admin forbidden key request should be sent");
@@ -765,6 +775,7 @@ fn gateway_oidc_jwt_can_discover_jwks_uri() {
             proxy.listen_addr
         ))
         .bearer_auth(&token)
+        .header("Idempotency-Key", "oidc-discovery-create")
         .json(&serde_json::json!({"name": "team-a-discovered-oidc"}))
         .send()
         .expect("OIDC discovery admin create key request should be sent");
@@ -843,6 +854,7 @@ fn authenticates_with_stale_while_revalidate_jwks_without_request_path_fetch() {
             proxy.listen_addr
         ))
         .bearer_auth(&token)
+        .header("Idempotency-Key", "oidc-lkg-create-first")
         .json(&serde_json::json!({"name": "team-lkg-first"}))
         .send()
         .expect("first OIDC admin create key request should be sent");
@@ -869,6 +881,7 @@ fn authenticates_with_stale_while_revalidate_jwks_without_request_path_fetch() {
             proxy.listen_addr
         ))
         .bearer_auth(&token)
+        .header("Idempotency-Key", "oidc-lkg-create-second")
         .json(&serde_json::json!({"name": "team-lkg-second"}))
         .send()
         .expect("second OIDC admin create key request should be sent");
@@ -949,6 +962,7 @@ fn expired_oidc_jwks_cache_fails_closed_without_request_path_fetch() {
             proxy.listen_addr
         ))
         .bearer_auth(&token)
+        .header("Idempotency-Key", "oidc-expired-lkg-create-first")
         .json(&serde_json::json!({"name": "team-expired-lkg-first"}))
         .send()
         .expect("first OIDC admin create key request should be sent");
@@ -1044,6 +1058,7 @@ fn oidc_background_refresh_uses_jwks_cache_control_max_age() {
             proxy.listen_addr
         ))
         .bearer_auth(&token)
+        .header("Idempotency-Key", "oidc-cache-control-create-first")
         .json(&serde_json::json!({"name": "team-cache-control-first"}))
         .send()
         .expect("first OIDC admin create key request should be sent");
@@ -1294,6 +1309,7 @@ fn gateway_scim_create_keeps_compat_shape_on_sqlite_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-scim-create")
         .json(&serde_json::json!({"userName": "sqlite@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("sqlite SCIM create request should be sent");
@@ -1355,6 +1371,7 @@ fn gateway_scim_update_keeps_compat_shape_on_sqlite_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-scim-update-create")
         .json(&serde_json::json!({"userName": "sqlite-update@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("sqlite SCIM create request should be sent");
@@ -1371,6 +1388,7 @@ fn gateway_scim_update_keeps_compat_shape_on_sqlite_backend() {
             proxy.listen_addr, user_id
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-scim-update")
         .json(&serde_json::json!({"displayName": "SQLite Update"}))
         .send()
         .expect("sqlite SCIM update request should be sent");
@@ -1432,6 +1450,7 @@ fn gateway_scim_delete_keeps_compat_shape_on_sqlite_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-scim-delete-create")
         .json(&serde_json::json!({"userName": "sqlite-delete@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("sqlite SCIM create request should be sent");
@@ -1448,6 +1467,7 @@ fn gateway_scim_delete_keeps_compat_shape_on_sqlite_backend() {
             proxy.listen_addr, user_id
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-scim-delete")
         .send()
         .expect("sqlite SCIM delete request should be sent");
     assert_eq!(deleted.status().as_u16(), 200);
@@ -1514,6 +1534,7 @@ fn gateway_scim_create_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-scim-create")
         .json(&serde_json::json!({"userName": "postgres@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("postgres SCIM create request should be sent");
@@ -1589,6 +1610,7 @@ fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-scim-update-create")
         .json(&serde_json::json!({"userName": "postgres-update@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("postgres SCIM create request should be sent");
@@ -1613,6 +1635,7 @@ fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr, user_id
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-scim-update")
         .json(&serde_json::json!({"displayName": "Postgres Update"}))
         .send()
         .expect("postgres SCIM update request should be sent");
@@ -1688,6 +1711,7 @@ fn gateway_scim_delete_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-scim-delete-create")
         .json(&serde_json::json!({"userName": "postgres-delete@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("postgres SCIM create request should be sent");
@@ -1712,6 +1736,7 @@ fn gateway_scim_delete_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr, user_id
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-scim-delete")
         .send()
         .expect("postgres SCIM delete request should be sent");
     let deleted_status = deleted.status().as_u16();
