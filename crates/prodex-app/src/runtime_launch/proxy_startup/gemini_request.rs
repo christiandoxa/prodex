@@ -50,7 +50,6 @@ use gemini_request_memory::runtime_gemini_memory_files_enabled;
 pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message;
 pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message_with_config;
 use gemini_request_tools::runtime_gemini_tools_from_requests;
-pub(super) use gemini_request_util::{runtime_gemini_config_dir, runtime_gemini_home_dir};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 #[cfg(test)]

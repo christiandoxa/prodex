@@ -1,8 +1,9 @@
 use super::super::copilot_instructions::runtime_copilot_init_current_workspace_custom_instructions;
 use super::deepseek_rewrite::*;
+#[cfg(test)]
+pub(crate) use super::local_rewrite_constraints::start_runtime_gateway_rewrite_proxy;
 pub(crate) use super::local_rewrite_constraints::{
-    start_runtime_gateway_rewrite_proxy, start_runtime_gateway_rewrite_proxy_with_secret_refresh,
-    start_runtime_local_rewrite_proxy,
+    start_runtime_gateway_rewrite_proxy_with_runtime_config, start_runtime_local_rewrite_proxy,
 };
 use super::local_rewrite_copilot::{
     RuntimeCopilotOAuthPool, runtime_copilot_oauth_pool_from_provider,
@@ -196,6 +197,7 @@ pub(super) fn runtime_gateway_try_reserve_background_task(
 
 pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
+    runtime_config: Arc<RuntimeConfig>,
     allow_local_file_access: bool,
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
@@ -222,7 +224,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         gateway_observability,
     } = options;
     let (provider, provider_credential) = provider.into_runtime_parts();
-    let (runtime_config, log_path) = runtime_local_rewrite_runtime_config(paths)?;
+    let log_path = runtime_local_rewrite_log_path(&runtime_config);
     let (server, listen_addr) = runtime_local_rewrite_server(preferred_listen_addr)?;
     initialize_runtime_probe_refresh_queue(runtime_config.tuning.probe_refresh_worker_count);
     let worker_count = runtime_config.tuning.worker_count;
@@ -469,9 +471,8 @@ fn runtime_local_rewrite_usage_state(
     }
 }
 
-fn runtime_local_rewrite_runtime_config(paths: &AppPaths) -> Result<(Arc<RuntimeConfig>, PathBuf)> {
-    let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(paths)?);
-    let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config);
+fn runtime_local_rewrite_log_path(runtime_config: &RuntimeConfig) -> PathBuf {
+    let log_path = initialize_runtime_proxy_log_path_from_config(runtime_config);
     for key in runtime_config.compatibility_defaults() {
         runtime_proxy_log_to_path(
             &log_path,
@@ -481,7 +482,7 @@ fn runtime_local_rewrite_runtime_config(paths: &AppPaths) -> Result<(Arc<Runtime
             ),
         );
     }
-    Ok((runtime_config, log_path))
+    log_path
 }
 
 fn runtime_local_rewrite_server(

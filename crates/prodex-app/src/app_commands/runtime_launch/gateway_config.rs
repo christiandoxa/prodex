@@ -87,12 +87,32 @@ pub(super) fn resolve_gateway_launch_config(
     resolve_gateway_launch_config_with_secrets(paths, state, args, policy, &Default::default())
 }
 
+#[cfg(test)]
 pub(super) fn resolve_gateway_launch_config_with_secrets(
     paths: &AppPaths,
     state: &AppState,
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+) -> Result<ResolvedGatewayLaunchConfig> {
+    let runtime_config = RuntimeConfig::from_env_policy_and_cli(paths)?;
+    resolve_gateway_launch_config_with_runtime_config(
+        paths,
+        state,
+        args,
+        policy,
+        secrets,
+        &runtime_config,
+    )
+}
+
+pub(super) fn resolve_gateway_launch_config_with_runtime_config(
+    paths: &AppPaths,
+    state: &AppState,
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+    runtime_config: &RuntimeConfig,
 ) -> Result<ResolvedGatewayLaunchConfig> {
     let secret_resolver = GatewaySecretResolver::from_policy(secrets)?;
     if secret_resolver.production() {
@@ -134,7 +154,7 @@ pub(super) fn resolve_gateway_launch_config_with_secrets(
     let guardrail = resolve_gateway_guardrail_config_with_resolver(args, policy, &secret_resolver)?;
     let call_id_header = gateway_call_id_header_config(policy)?;
     let state_store = gateway_state_store_config_with_resolver(paths, policy, &secret_resolver)?;
-    gateway_validate_runtime_topology(&state_store)?;
+    gateway_validate_runtime_topology(&state_store, &runtime_config.gateway)?;
 
     let sso = gateway_sso_config_with_resolver(policy, &secret_resolver)?;
     let observability =

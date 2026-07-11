@@ -15,44 +15,59 @@ use super::local_rewrite_model_memory::runtime_local_rewrite_model_scope;
 use super::local_rewrite_options::RuntimeLocalRewriteProxyStartOptions;
 use super::provider_bridge::{RuntimeProviderRouteKind, runtime_provider_route_kind};
 use crate::{
-    RuntimeProxyRequest, RuntimeRotationProxy, build_runtime_proxy_json_error_response,
-    runtime_proxy_log,
+    RuntimeConfig, RuntimeProxyRequest, RuntimeRotationProxy,
+    build_runtime_proxy_json_error_response, runtime_proxy_log,
 };
 
 pub(crate) fn start_runtime_local_rewrite_proxy(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
 ) -> anyhow::Result<RuntimeRotationProxy> {
+    let runtime_config = runtime_local_rewrite_compatibility_config(&options)?;
     super::local_rewrite::start_runtime_local_rewrite_proxy_with_file_access(
         options,
+        runtime_config,
         true,
         None,
         Default::default(),
     )
 }
 
+#[cfg(test)]
 pub(crate) fn start_runtime_gateway_rewrite_proxy(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
     request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
 ) -> anyhow::Result<RuntimeRotationProxy> {
+    let runtime_config = runtime_local_rewrite_compatibility_config(&options)?;
     super::local_rewrite::start_runtime_local_rewrite_proxy_with_file_access(
         options,
+        runtime_config,
         false,
         None,
         request_constraints,
     )
 }
 
-pub(crate) fn start_runtime_gateway_rewrite_proxy_with_secret_refresh(
+pub(crate) fn start_runtime_gateway_rewrite_proxy_with_runtime_config(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
-    secret_refresh: RuntimeGatewayCredentialRefreshPlan,
+    runtime_config: Arc<RuntimeConfig>,
+    secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
 ) -> anyhow::Result<RuntimeRotationProxy> {
     super::local_rewrite::start_runtime_local_rewrite_proxy_with_file_access(
         options,
+        runtime_config,
         false,
-        Some(secret_refresh),
+        secret_refresh,
         request_constraints,
     )
+}
+
+fn runtime_local_rewrite_compatibility_config(
+    options: &RuntimeLocalRewriteProxyStartOptions<'_>,
+) -> anyhow::Result<Arc<RuntimeConfig>> {
+    Ok(Arc::new(RuntimeConfig::from_env_policy_and_cli(
+        options.paths,
+    )?))
 }
 
 pub(super) struct RuntimeGatewayPendingConstraintPlan<'a> {

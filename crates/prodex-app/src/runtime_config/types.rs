@@ -30,12 +30,17 @@ pub(crate) struct RuntimeConfig {
     pub(crate) log_format: RuntimeLogFormat,
     pub(crate) websocket_environment: RuntimeWebsocketEnvironment,
     pub(crate) oidc: RuntimeOidcTimingConfig,
+    pub(crate) gateway: RuntimeGatewayConfig,
     pub(crate) gemini: RuntimeGeminiConfig,
     pub(super) compatibility_defaults: Vec<&'static str>,
 }
 
 #[derive(Clone)]
 pub(crate) struct RuntimeGeminiConfig {
+    pub(crate) home_dir: Option<PathBuf>,
+    pub(crate) config_dir: Option<PathBuf>,
+    pub(crate) system_settings_path: Option<PathBuf>,
+    pub(crate) system_defaults_path: Option<PathBuf>,
     pub(crate) extension_dirs: Vec<PathBuf>,
     pub(crate) extension_selection: RuntimeGeminiExtensionSelection,
     pub(crate) export_checkpoint_path: Option<PathBuf>,
@@ -48,6 +53,12 @@ pub(crate) struct RuntimeGeminiConfig {
     pub(crate) live_url: Option<String>,
     pub(crate) live_model: Option<String>,
     pub(crate) sticky_fresh_oauth: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RuntimeGatewayConfig {
+    pub(crate) replica_count: u16,
+    pub(crate) require_multi_replica_accounting_checks: bool,
 }
 
 impl RuntimeGeminiConfig {
@@ -84,6 +95,8 @@ impl fmt::Debug for RuntimeConfig {
                 &self.smart_context_canary_percent,
             )
             .field("log_format", &self.log_format)
+            .field("gateway", &self.gateway)
+            .field("gemini_home_configured", &self.gemini.home_dir.is_some())
             .field(
                 "websocket_proxy_configured",
                 &self.websocket_environment.has_proxy(),

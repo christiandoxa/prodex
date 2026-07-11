@@ -33,6 +33,11 @@ impl GatewayBackend {
         self.auth_required
     }
 
+    #[cfg(test)]
+    pub(crate) fn runtime_config(&self) -> &crate::RuntimeConfig {
+        &self.proxy.runtime_config
+    }
+
     pub fn shutdown_and_drain(&self, timeout: Duration) -> bool {
         self.proxy.shutdown_and_drain(timeout)
     }
