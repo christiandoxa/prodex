@@ -350,6 +350,46 @@ fn prepare_managed_codex_home_only_reprocesses_changed_sessions() {
 
 #[cfg(unix)]
 #[test]
+fn prepare_managed_codex_home_repairs_corrupt_session_metadata_prefix() {
+    let temp_dir = PrepareTestDir::new("repair-session-metadata-prefix");
+    let paths = temp_dir.app_paths();
+    let codex_home = temp_dir.path.join("profile-codex-home");
+    let session_id = "01900000-0000-7000-8000-000000000003";
+    let session_file = paths.shared_codex_root.join(format!(
+        "sessions/2026/07/03/rollout-2026-07-03T18-17-41-{session_id}.jsonl"
+    ));
+    fs::create_dir_all(session_file.parent().expect("session parent"))
+        .expect("session parent should exist");
+    fs::write(
+        &session_file,
+        "corrupt attachment rewrite prefix\n{\"timestamp\":\"2026-07-03T18:17:41Z\",\"type\":\"response_item\",\"payload\":{\"cwd\":\"/tmp/workspace\"}}\n",
+    )
+    .expect("corrupt session should write");
+
+    prepare_managed_codex_home(&paths, &codex_home)
+        .expect("managed codex home should repair the session");
+
+    let repaired = fs::read_to_string(&session_file).expect("repaired session should read");
+    let mut lines = repaired.lines();
+    let metadata: serde_json::Value = serde_json::from_str(
+        lines
+            .next()
+            .expect("repaired session should start with metadata"),
+    )
+    .expect("first line should be valid metadata JSON");
+    assert_eq!(metadata["type"], "session_meta");
+    assert_eq!(metadata["payload"]["session_id"], session_id);
+    assert_eq!(metadata["payload"]["id"], session_id);
+    assert!(lines.any(|line| line.contains(r#""type":"response_item""#)));
+    assert!(
+        fs::read_to_string(session_file.with_extension("jsonl.prodex-repair-bak"))
+            .expect("repair backup should read")
+            .starts_with("corrupt attachment rewrite prefix")
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn prepare_managed_codex_home_retries_attachment_that_appears_later() {
     let temp_dir = PrepareTestDir::new("late-session-attachment");
     let paths = temp_dir.app_paths();

@@ -5,13 +5,14 @@ use crate::image_attachments::{
 };
 use chrono::{DateTime, Utc};
 use filetime::FileTime;
+use prodex_session_store::repair_codex_session_metadata_prefix;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::time::UNIX_EPOCH;
 
 const SESSION_TIMESTAMP_PREFIX: &str = "\"timestamp\":\"";
-const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 3;
+const SESSION_MAINTENANCE_CACHE_VERSION: u8 = 4;
 const SESSION_MAINTENANCE_CACHE_FILE: &str = "shared-codex-session-maintenance-v1.json";
 
 #[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -160,10 +161,18 @@ fn maintain_codex_sessions_in_dir(
             continue;
         }
 
-        let Some(contents) = persist_codex_session_file_image_attachments(codex_home, &path)?
+        let Some(mut contents) = persist_codex_session_file_image_attachments(codex_home, &path)?
         else {
             continue;
         };
+        if repair_codex_session_metadata_prefix(&path, &contents)? {
+            let Some(repaired_contents) =
+                persist_codex_session_file_image_attachments(codex_home, &path)?
+            else {
+                continue;
+            };
+            contents = repaired_contents;
+        }
         restore_codex_session_file_modified_time(&path, &contents)?;
         if codex_session_image_attachments_are_stable(codex_home, &contents) {
             next.files.insert(key, session_file_fingerprint(&path)?);

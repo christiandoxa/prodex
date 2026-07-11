@@ -130,7 +130,8 @@ pub(super) fn runtime_websocket_buffer_precommit_hold(
         text: text.to_string(),
         response_ids: inspected.response_ids.clone(),
     });
-    let lookahead_budget_exhausted = *precommit_hold_bytes >= RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES;
+    let lookahead_budget_exhausted = precommit_hold_promotion_allowed
+        && *precommit_hold_bytes >= RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES;
     if *precommit_hold_promotion_event_seen || lookahead_budget_exhausted {
         runtime_proxy_log(
             shared,

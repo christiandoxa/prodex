@@ -368,6 +368,21 @@ pub fn repair_resume_session_metadata_prefix(
     Ok(None)
 }
 
+pub fn repair_codex_session_metadata_prefix(path: &Path, contents: &str) -> Result<bool> {
+    if contents
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .is_some_and(session_meta::line_starts_codex_rollout_metadata)
+    {
+        return Ok(false);
+    }
+    let Some(selector) = codex_session_id_from_path(path) else {
+        return Ok(false);
+    };
+    repair_session_file_metadata_prefix(path, &selector, true)
+}
+
 pub fn find_unrepairable_resume_session(
     shared_codex_root: &Path,
     selector: &str,
@@ -1005,6 +1020,18 @@ fn full_codex_session_id(selector: &str) -> Option<&str> {
             _ => byte.is_ascii_hexdigit(),
         });
     valid.then_some(selector)
+}
+
+fn codex_session_id_from_path(path: &Path) -> Option<String> {
+    let stem = path.file_stem().and_then(|stem| stem.to_str())?;
+    if full_codex_session_id(stem).is_some() {
+        return Some(stem.to_string());
+    }
+    stem.split('-')
+        .collect::<Vec<_>>()
+        .windows(5)
+        .map(|parts| parts.join("-"))
+        .find(|candidate| full_codex_session_id(candidate).is_some())
 }
 
 fn prodex_debug_resume_repair_enabled() -> bool {

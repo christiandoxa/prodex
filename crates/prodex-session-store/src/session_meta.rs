@@ -22,21 +22,14 @@ fn value_starts_codex_rollout_metadata(value: &serde_json::Value) -> bool {
     let Some(payload) = value.get("payload").and_then(serde_json::Value::as_object) else {
         return false;
     };
-    [
-        "id",
-        "timestamp",
-        "cwd",
-        "originator",
-        "cli_version",
-        "source",
-    ]
-    .iter()
-    .all(|field| {
-        payload
-            .get(*field)
-            .and_then(serde_json::Value::as_str)
-            .is_some()
-    })
+    ["id", "timestamp", "cwd", "originator", "cli_version"]
+        .iter()
+        .all(|field| {
+            payload
+                .get(*field)
+                .and_then(serde_json::Value::as_str)
+                .is_some()
+        })
 }
 
 pub(crate) fn synthetic_session_metadata_line(
@@ -62,6 +55,10 @@ pub(crate) fn synthetic_session_metadata_line(
             })
     });
     let mut payload = serde_json::Map::new();
+    payload.insert(
+        "session_id".to_string(),
+        serde_json::Value::String(session_id.clone()),
+    );
     payload.insert("id".to_string(), serde_json::Value::String(session_id));
     payload.insert(
         "timestamp".to_string(),

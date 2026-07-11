@@ -11,6 +11,7 @@ fn assert_codex_session_meta_line(
     let value: serde_json::Value =
         serde_json::from_str(line).expect("synthetic metadata should be valid JSON");
     assert_eq!(value["type"], "session_meta");
+    assert_eq!(value["payload"]["session_id"], session_id);
     assert_eq!(value["payload"]["id"], session_id);
     let outer_timestamp = value["timestamp"]
         .as_str()
@@ -32,6 +33,33 @@ fn assert_codex_session_meta_line(
         .expect("synthetic cwd should deserialize as a Codex PathBuf");
     assert!(!cwd.is_empty());
     value
+}
+
+#[test]
+fn repair_codex_session_metadata_prefix_preserves_subagent_metadata() {
+    let root = test_temp_dir("session-preserve-subagent-metadata");
+    let session_id = "01900000-0000-7000-8000-000000000001";
+    let session_path = root.join(format!("rollout-2026-07-11T11-17-19-{session_id}.jsonl"));
+    let raw = format!(
+        "{{\"timestamp\":\"2026-07-11T11:17:19Z\",\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"01900000-0000-7000-8000-000000000002\",\"id\":\"{session_id}\",\"timestamp\":\"2026-07-11T11:17:19Z\",\"cwd\":\"/tmp/workspace\",\"originator\":\"codex-tui\",\"cli_version\":\"0.144.1\",\"source\":{{\"subagent\":{{\"thread_spawn\":{{\"parent_thread_id\":\"01900000-0000-7000-8000-000000000002\",\"depth\":1}}}}}}}}}}\n"
+    );
+    fs::write(&session_path, &raw).expect("subagent session should write");
+
+    assert!(
+        !repair_codex_session_metadata_prefix(&session_path, &raw)
+            .expect("valid subagent metadata should be accepted")
+    );
+    assert_eq!(
+        fs::read_to_string(&session_path).expect("subagent session should read"),
+        raw
+    );
+    assert!(
+        !session_path
+            .with_extension("jsonl.prodex-repair-bak")
+            .exists()
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

@@ -579,9 +579,13 @@ fn websocket_quota_after_response_created_stays_precommit_retryable() {
             .expect("upstream websocket should receive request");
         socket
             .send(WsMessage::Text(
-                r#"{"type":"response.created","response":{"id":"resp-quota-hold"}}"#
-                    .to_string()
-                    .into(),
+                serde_json::json!({
+                    "type": "response.created",
+                    "response": {"id": "resp-quota-hold"},
+                    "padding": "x".repeat(RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES),
+                })
+                .to_string()
+                .into(),
             ))
             .expect("upstream should send response.created");
         socket
@@ -610,7 +614,7 @@ fn websocket_quota_after_response_created_stays_precommit_retryable() {
         request_text: r#"{"type":"response.create"}"#,
         request_previous_response_id: None,
         request_prompt_cache_key: None,
-        request_session_id: None,
+        request_session_id: Some("session-quota-hold"),
         request_turn_state: None,
         shared: &shared,
         websocket_session: &mut websocket_session,

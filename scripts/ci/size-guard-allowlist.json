@@ -81,8 +81,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs",
-    "maxLines": 1017,
-    "reason": "WebSocket precommit hold regressions now cover bounded sideband lookahead, quota/overload retry boundaries, and terminal-error reuse; capped until sideband and terminal suites split."
+    "maxLines": 1021,
+    "reason": "WebSocket precommit hold regressions now include oversized response-created quota retry boundaries; capped until sideband and terminal suites split."
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
@@ -131,13 +131,13 @@
   },
   {
     "file": "crates/prodex-session-store/src/lib.rs",
-    "maxLines": 1023,
-    "reason": "Session report resolution, resume repair with slim threshold change; recapped at current size."
+    "maxLines": 1050,
+    "reason": "Session metadata-prefix recovery reuses the existing resume-repair machinery; capped until repair helpers split from report resolution."
   },
   {
     "file": "crates/prodex-session-store/tests/src/lib.rs",
-    "maxLines": 1032,
-    "reason": "Resume-repair and session-store regression coverage remain capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
+    "maxLines": 1060,
+    "reason": "Resume-repair coverage now preserves valid subagent metadata; capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
@@ -241,8 +241,8 @@
   },
   {
     "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",
-    "maxLines": 1018,
-    "reason": "Shared Codex home prepare regression coverage now includes bounded history and attachment race cases; capped until history and attachment fixtures split by domain."
+    "maxLines": 1058,
+    "reason": "Shared Codex home preparation now covers corrupt transcript metadata recovery; capped until history, transcript, and attachment fixtures split by domain."
   },
   {
     "file": "crates/prodex-app/src/runtime_external_provider_config.rs",
