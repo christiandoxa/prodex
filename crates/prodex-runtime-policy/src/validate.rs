@@ -11,6 +11,8 @@ mod gateway;
 mod runtime;
 #[path = "validate/runtime_proxy.rs"]
 mod runtime_proxy;
+#[path = "validate/service_mode.rs"]
+mod service_mode;
 
 pub use crate::validate_secrets::parse_secret_backend_kind;
 pub use errors::{
@@ -23,6 +25,10 @@ pub fn validate_runtime_policy_file(policy: &RuntimePolicyFile, path: &Path) -> 
     errors.capture(
         RuntimePolicyValidationSection::Version,
         validate_policy_version(policy, path),
+    );
+    errors.capture(
+        RuntimePolicyValidationSection::ServiceMode,
+        service_mode::validate_service_mode(policy, path),
     );
     errors.capture(
         RuntimePolicyValidationSection::Runtime,

@@ -1,5 +1,5 @@
 use super::validate_gateway_exact_identifier;
-use crate::types::RuntimePolicyFile;
+use crate::types::{RuntimePolicyFile, RuntimePolicyServiceMode};
 use crate::validate_helpers::validate_gateway_state_backend;
 use crate::validate_secrets::{validate_gateway_secret_ref, validate_gateway_secret_source};
 use anyhow::{Context, Result, bail};
@@ -18,7 +18,7 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
         "gateway.provider_api_key_ref",
         policy.gateway.provider_api_key_ref.as_ref(),
     )?;
-    if policy.secrets.production {
+    if policy.secrets.production && policy.service_mode == RuntimePolicyServiceMode::Gateway {
         if policy.gateway.require_auth != Some(true) {
             bail!(
                 "gateway.require_auth in {} must be true when secrets.production=true",

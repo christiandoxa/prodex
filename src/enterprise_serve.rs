@@ -24,12 +24,21 @@ fn run_enterprise_serve(
     args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let listen_addr = parse_listen_addr(mode, args)?;
-    let backend = prodex_app::start_policy_gateway_backend(Some("127.0.0.1:0".to_string()))
-        .map_err(|_| "failed to start gateway backend".to_string())?;
-    let server_mode = match mode {
-        DedicatedServerMode::DataPlane => GatewayServerMode::DataPlane,
-        DedicatedServerMode::ControlPlane => GatewayServerMode::ControlPlane,
+    let (policy_mode, server_mode) = match mode {
+        DedicatedServerMode::DataPlane => (
+            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+            GatewayServerMode::DataPlane,
+        ),
+        DedicatedServerMode::ControlPlane => (
+            prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane,
+            GatewayServerMode::ControlPlane,
+        ),
     };
+    let backend = prodex_app::start_policy_gateway_backend_for_mode(
+        Some("127.0.0.1:0".to_string()),
+        policy_mode,
+    )
+    .map_err(|error| format!("failed to start gateway backend: {error}"))?;
     let server_result = serve(
         GatewayServerConfig::production(listen_addr, server_mode),
         backend.listen_addr(),

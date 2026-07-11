@@ -2,10 +2,141 @@ use super::{
     RuntimePolicyFile, RuntimePolicyValidationErrors, RuntimePolicyValidationSection,
     validate_runtime_policy_file,
 };
+use crate::RuntimePolicyServiceMode;
 use std::path::Path;
 
 fn parse_policy(input: &str) -> RuntimePolicyFile {
     toml::from_str(input).expect("policy TOML should parse")
+}
+
+fn control_plane_policy() -> RuntimePolicyFile {
+    parse_policy(
+        r#"
+version = 1
+service_mode = "control-plane"
+
+[secrets]
+production = true
+projected_root = "/run/secrets/prodex"
+projected_provider = "kubernetes"
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+
+[[gateway.admin_tokens]]
+name = "operations"
+token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+role = "admin"
+"#,
+    )
+}
+
+#[test]
+fn service_mode_defaults_to_gateway_and_accepts_explicit_control_plane() {
+    assert_eq!(
+        parse_policy("version = 1").service_mode,
+        RuntimePolicyServiceMode::Gateway
+    );
+    validate_runtime_policy_file(&control_plane_policy(), Path::new("policy.toml"))
+        .expect("projected admin auth and shared state should satisfy control-plane mode");
+}
+
+#[test]
+fn control_plane_mode_rejects_data_plane_capabilities() {
+    for (field, configure) in [
+        ("gateway.provider", "provider = \"anthropic\""),
+        (
+            "gateway.provider_api_key_ref",
+            "provider_api_key_ref = { provider = \"kubernetes\", name = \"PROVIDER_KEY\" }",
+        ),
+        (
+            "gateway.auth_token_ref",
+            "auth_token_ref = { provider = \"kubernetes\", name = \"GATEWAY_TOKEN\" }",
+        ),
+        (
+            "gateway.observability",
+            "[gateway.observability]\nhttp_endpoint = \"https://telemetry.example.com\"",
+        ),
+    ] {
+        let mut input = String::from(
+            r#"version = 1
+service_mode = "control-plane"
+
+[secrets]
+production = true
+projected_root = "/run/secrets/prodex"
+projected_provider = "kubernetes"
+
+[gateway]
+"#,
+        );
+        input.push_str(configure);
+        input.push_str(
+            r#"
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+
+[[gateway.admin_tokens]]
+name = "operations"
+token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+role = "admin"
+"#,
+        );
+        let error = validate_runtime_policy_file(&parse_policy(&input), Path::new("policy.toml"))
+            .expect_err("control-plane data-plane capability should fail closed");
+        assert!(error.to_string().contains(field), "{error:#}");
+    }
+}
+
+#[test]
+fn control_plane_mode_requires_production_projected_admin_and_shared_state() {
+    let cases = [
+        (
+            "production mode",
+            "production = true",
+            "production = false",
+            "secrets.production",
+        ),
+        (
+            "admin role",
+            "role = \"admin\"",
+            "role = \"viewer\"",
+            "projected admin-role token",
+        ),
+        (
+            "shared state",
+            "backend = \"postgres\"",
+            "backend = \"file\"",
+            "must configure postgres or redis",
+        ),
+    ];
+    let valid = r#"
+version = 1
+service_mode = "control-plane"
+
+[secrets]
+production = true
+projected_root = "/run/secrets/prodex"
+projected_provider = "kubernetes"
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+
+[[gateway.admin_tokens]]
+name = "operations"
+token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+role = "admin"
+"#;
+    for (name, from, to, expected) in cases {
+        let policy = parse_policy(&valid.replacen(from, to, 1));
+        let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+            .expect_err("unsafe control-plane policy should fail closed");
+        assert!(error.to_string().contains(expected), "{name}: {error:#}");
+    }
 }
 
 #[test]

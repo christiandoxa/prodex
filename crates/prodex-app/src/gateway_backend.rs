@@ -56,5 +56,16 @@ impl std::fmt::Debug for GatewayBackend {
 pub fn start_policy_gateway_backend(
     preferred_listen_addr: Option<String>,
 ) -> Result<GatewayBackend> {
+    start_policy_gateway_backend_for_mode(
+        preferred_listen_addr,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+    )
+}
+
+pub fn start_policy_gateway_backend_for_mode(
+    preferred_listen_addr: Option<String>,
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+) -> Result<GatewayBackend> {
+    prodex_runtime_policy::ensure_runtime_policy_service_mode(service_mode)?;
     app_commands::start_policy_gateway_backend_inner(preferred_listen_addr)
 }
