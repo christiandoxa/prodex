@@ -1,7 +1,3 @@
-use anyhow::{Context, Result, bail};
-use secret_store::SecretBackendKind;
-use std::path::Path;
-
 use crate::types::{PRODEX_POLICY_VERSION, RuntimePolicyFile};
 use crate::validate_helpers::{
     gateway_observability_http_endpoint_has_http_host, validate_gateway_admin_role,
@@ -9,9 +5,13 @@ use crate::validate_helpers::{
     validate_gateway_route_strategy, validate_gateway_state_backend, validate_optional_i64_percent,
     validate_optional_u64, validate_optional_usize, validate_optional_usize_allow_zero,
 };
+use crate::validate_request_constraints::validate_gateway_request_constraints;
 use crate::validate_secrets::{
     validate_gateway_secret_ref, validate_gateway_secret_source, validate_secret_policy,
 };
+use anyhow::{Context, Result, bail};
+use secret_store::SecretBackendKind;
+use std::path::Path;
 
 pub fn parse_secret_backend_kind(value: &str) -> Result<SecretBackendKind> {
     value
@@ -146,6 +146,7 @@ pub fn validate_gateway_policy(policy: &RuntimePolicyFile, path: &Path) -> Resul
             path.display()
         );
     }
+    validate_gateway_request_constraints(policy, path)?;
     if let Some(backend) = policy.gateway.state.backend.as_deref() {
         validate_gateway_state_backend(backend)
             .with_context(|| format!("gateway.state.backend in {} is invalid", path.display()))?;

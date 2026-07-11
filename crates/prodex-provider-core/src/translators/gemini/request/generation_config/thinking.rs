@@ -34,7 +34,7 @@ fn gemini_thinking_config(
             "thinkingBudget": 0,
         }));
     }
-    if gemini_model_uses_thinking_level(model) {
+    if gemini_provider_core_model_uses_thinking_level(model) {
         let level = match effort.as_str() {
             "low" => "LOW",
             "medium" => "MEDIUM",
@@ -58,7 +58,7 @@ fn gemini_thinking_config(
     }))
 }
 
-fn gemini_model_uses_thinking_level(model: &str) -> bool {
+pub fn gemini_provider_core_model_uses_thinking_level(model: &str) -> bool {
     let model = model.to_ascii_lowercase();
     model.contains("gemini-3") || model.contains("gemma-3") || model.contains("gemma-4")
 }

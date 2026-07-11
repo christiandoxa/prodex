@@ -347,7 +347,25 @@ fn runtime_gateway_route_selected_model(
         .iter()
         .map(|model| model.trim())
         .filter(|model| !model.is_empty())
+        .map(str::to_string)
         .collect::<Vec<_>>();
+    runtime_gateway_route_selected_model_from_models(
+        alias,
+        &models,
+        request_id,
+        model_state,
+        estimated_tokens,
+    )
+}
+
+pub(crate) fn runtime_gateway_route_selected_model_from_models(
+    alias: &RuntimeGatewayRouteAlias,
+    models: &[String],
+    request_id: u64,
+    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
+    estimated_tokens: u64,
+) -> Option<String> {
+    let models = models.iter().map(String::as_str).collect::<Vec<_>>();
     if models.is_empty() {
         return None;
     }
@@ -443,12 +461,7 @@ fn runtime_gateway_requested_output_tokens(body: &[u8], input_tokens: u64) -> u6
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
         return input_tokens;
     };
-    let Some(object) = value.as_object() else {
-        return input_tokens;
-    };
-    ["max_output_tokens", "max_tokens", "max_completion_tokens"]
-        .iter()
-        .find_map(|field| object.get(*field).and_then(serde_json::Value::as_u64))
+    prodex_provider_core::provider_requested_output_tokens_compat(&value)
         // ponytail: uncapped requests reserve one extra input-sized output budget; replace with
         // model-aware output estimation when clamp logs show it is still too loose.
         .unwrap_or(input_tokens)

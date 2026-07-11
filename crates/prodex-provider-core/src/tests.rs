@@ -46,6 +46,7 @@ fn catalog_covers_gateway_providers() {
         provider_supported_endpoints(ProviderId::Gemini),
         [
             ProviderEndpoint::Responses,
+            ProviderEndpoint::ResponsesCompact,
             ProviderEndpoint::ChatCompletions,
             ProviderEndpoint::Messages,
             ProviderEndpoint::Models,
@@ -227,7 +228,7 @@ fn provider_contract_matrix_is_stable_and_complete() {
         );
         assert!(contract.supported_endpoints.contains(&"responses"));
         assert!(contract.supported_endpoints.contains(&"models"));
-        if contract.provider == "copilot" {
+        if matches!(contract.provider, "copilot" | "gemini") {
             assert!(contract.supported_endpoints.contains(&"responses/compact"));
         }
         assert!(contract.model_count > 0);

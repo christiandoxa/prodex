@@ -6,11 +6,13 @@ pub(crate) fn runtime_proxy_optimistic_current_candidate_for_route(
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
 ) -> Result<Option<String>> {
+    let mut trace = runtime_selection_trace_builder(route_kind, None);
     runtime_proxy_optimistic_current_candidate_for_route_with_selection(
         shared,
         excluded_profiles,
         route_kind,
         None,
+        &mut trace,
     )
 }
 
@@ -19,6 +21,7 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
     excluded_profiles: &BTreeSet<String>,
     route_kind: RuntimeRouteKind,
     prompt_cache_key: Option<&str>,
+    trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
     let prompt_cache_owner_profile = runtime_prompt_cache_bound_profile(prompt_cache_key);
@@ -113,6 +116,20 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
     let (quota_summary, quota_source) =
         runtime_profile_quota_summary_for_route(shared, &current_profile, route_kind)?;
     let inflight_soft_limit = runtime_profile_inflight_soft_limit(route_kind, pressure_mode);
+    let trace_candidate = || {
+        runtime_selection_trace_candidate(
+            0,
+            runtime_proxy_crate::RuntimeRouteCandidateClass::Current,
+            Some(quota_summary),
+            Some(inflight_count),
+            Some(health_score.max(performance_score)),
+            Some(if circuit_open_until.is_some() {
+                runtime_proxy_crate::RuntimeRouteCircuitState::Open
+            } else {
+                runtime_proxy_crate::RuntimeRouteCircuitState::Closed
+            }),
+        )
+    };
     if let RuntimeOptimisticCurrentCandidateDecision::Skip(skip) =
         runtime_optimistic_current_candidate_decision(
             RuntimeOptimisticCurrentCandidateSelectionInput {
@@ -135,6 +152,9 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
         )
     {
         let reason = skip.reason_label();
+        let mut candidate = trace_candidate();
+        runtime_selection_trace_reject(&mut candidate, reason, None);
+        trace.record_candidate(&current_profile, candidate);
         if skip.reason == RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity {
             runtime_proxy_log(
                 shared,
@@ -200,6 +220,12 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
         return Ok(None);
     }
 
+    trace.record_candidate(&current_profile, trace_candidate());
+    trace.record_stage(
+        runtime_proxy_crate::RuntimeRouteDecisionStage::Ranking,
+        runtime_proxy_crate::RuntimeRouteDecisionStageOutcome::Passed,
+    );
+
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -222,6 +248,15 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
     );
     if !reserve_runtime_profile_route_circuit_half_open_probe(shared, &current_profile, route_kind)?
     {
+        let mut candidate = trace_candidate();
+        candidate.circuit_state = Some(runtime_proxy_crate::RuntimeRouteCircuitState::HalfOpenWait);
+        runtime_selection_trace_reject(
+            &mut candidate,
+            runtime_proxy_crate::RuntimeRouteDecisionReasonKind::RouteCircuitHalfOpenProbeWait
+                .as_str(),
+            None,
+        );
+        trace.record_candidate(&current_profile, candidate);
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -245,5 +280,6 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
         );
         return Ok(None);
     }
+    trace.mark_selected(&current_profile);
     Ok(Some(current_profile))
 }

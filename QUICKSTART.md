@@ -379,7 +379,7 @@ curl http://127.0.0.1:4000/v1/responses \
   -d '{"model":"prodex-fast","input":"hello"}'
 ```
 
-The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It emits `x-prodex-call-id`, writes `gateway_spend` events for request and response phases to runtime logs, can export those events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, and supports catalog-backed route strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`), static virtual keys with persisted request/spend usage and model/budget/RPM/TPM limits, file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, plus keyword/model, Presidio, and external webhook guardrails. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can inspect usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, read virtual-key usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, admin-managed key and SCIM user mutations are recorded in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix and tenant scopes.
+The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/v1/images/*`, `/v1/audio/*`, `/v1/batches`, `/v1/rerank`, `/v1/a2a`, `/v1/messages`, and `/v1/models` where the selected upstream supports them. It emits `x-prodex-call-id`, writes bounded route-decision and `gateway_spend` events to runtime logs, can export spend events to JSONL or HTTP using generic, OTel, Datadog, or Langfuse-shaped payloads, and supports catalog-backed route strategies (`fallback`, `round-robin`, `least-busy`, `lowest-cost`, `lowest-latency`, `rpm`, `tpm`, `first`), static virtual keys with persisted request/spend usage and model/budget/RPM/TPM limits, file, SQLite, Postgres, or Redis-backed gateway admin/usage/ledger/SCIM state, plus keyword/model, Presidio, and external webhook guardrails. Admin-token, trusted-proxy SSO, or OIDC/JWT bearer requests can inspect usage, create generated-token keys, rotate/disable/update/delete admin-managed keys, provision SSO users through SCIM-compatible `/v1/prodex/gateway/scim/v2/Users`, read virtual-key usage at `/v1/prodex/gateway/keys` and `/v1/prodex/gateway/usage`, inspect side-effect-free route plans at `/v1/prodex/gateway/routes/explain`, read recent billing ledger records with response-status/output-token reconciliation at `/v1/prodex/gateway/ledger`, read aggregated billing totals at `/v1/prodex/gateway/ledger/summary`, export billing CSV from `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, scrape Prometheus text metrics at `/v1/prodex/gateway/metrics`, fetch the machine-readable gateway contract at `/v1/prodex/gateway/openapi.json`, and open the built-in gateway admin dashboard and Route Workbench at `/v1/prodex/gateway/admin`; policy/env-backed keys remain read-only, explain payloads are not stored or logged, admin operations record redacted metadata in `prodex audit`, and additional admin-plane tokens can be `admin` or read-only `viewer` with optional virtual-key prefix and tenant scopes.
 
 JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for gateway Responses, key, usage, billing ledger, metrics, and OpenAPI calls.
 
@@ -413,6 +413,13 @@ enabled = true
 shadow_mode = true
 window_size = 128
 min_samples = 8
+
+[gateway.request_constraints]
+# Disabled by default for compatibility. Enable strict pre-commit admission explicitly.
+enabled = true
+unknown_context = "safe_window"
+safe_window_tokens = 128000
+oversized_output = "reject" # or "passthrough" / "clamp_with_notice"
 
 [gateway.state]
 backend = "sqlite"

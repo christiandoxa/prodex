@@ -154,7 +154,10 @@ fn response_selection_skips_soft_pinned_affinity_when_quota_blocks_precommit() {
         RuntimeResponseCandidateSelection {
             pinned_profile: Some("main"),
             previous_response_id: Some("resp_unbound"),
-            ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), RuntimeRouteKind::Responses)
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
         },
     )
     .expect("selection should succeed");
@@ -189,6 +192,162 @@ fn response_selection_logs_plan_counts_before_pick() {
     assert!(
         log.contains("selection_pick route=responses profile=second"),
         "selection pick should still follow the plan: {log}"
+    );
+    let trace_lines = log
+        .lines()
+        .filter(|line| line.contains(" route_decision "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        trace_lines.len(),
+        1,
+        "selection must emit exactly one trace: {log}"
+    );
+    let trace_json = runtime_proxy_crate::runtime_proxy_log_fields(trace_lines[0])
+        .remove("trace")
+        .expect("selection should emit one route decision trace");
+    let trace = serde_json::from_str::<runtime_proxy_crate::RuntimeRouteDecisionTrace>(&trace_json)
+        .expect("route decision trace should be typed JSON");
+    assert_eq!(
+        trace.terminal_outcome,
+        runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::Selected
+    );
+    assert!(trace.selected_candidate.is_some());
+    assert!(trace.candidates.iter().any(|candidate| candidate.selected));
+    assert!(!trace_json.contains("second"));
+}
+
+#[test]
+fn response_selection_trace_preserves_optimistic_current_circuit_rejection() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .profile_route_circuit_open_until
+        .insert(
+            runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
+            Local::now().timestamp() + 60,
+        );
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), RuntimeRouteKind::Responses),
+    )
+    .expect("selection should succeed");
+    assert_eq!(selected.as_deref(), Some("second"));
+
+    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let trace_lines = log
+        .lines()
+        .filter(|line| line.contains(" route_decision "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        trace_lines.len(),
+        1,
+        "selection must emit exactly one trace: {log}"
+    );
+    let trace_json = runtime_proxy_crate::runtime_proxy_log_fields(trace_lines[0])
+        .remove("trace")
+        .expect("selection should emit one route decision trace");
+    let trace = serde_json::from_str::<runtime_proxy_crate::RuntimeRouteDecisionTrace>(&trace_json)
+        .expect("route decision trace should be typed JSON");
+    let current = trace
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.class == runtime_proxy_crate::RuntimeRouteCandidateClass::Current
+        })
+        .expect("trace should preserve the optimistic current decision");
+    assert_eq!(
+        current
+            .reason
+            .as_ref()
+            .map(runtime_proxy_crate::RuntimeRouteDecisionReason::as_str),
+        Some(
+            runtime_proxy_crate::RuntimeRouteDecisionReasonKind::RouteCircuitOpen.as_str()
+        )
+    );
+    assert_eq!(
+        current.circuit_state,
+        Some(runtime_proxy_crate::RuntimeRouteCircuitState::Open)
+    );
+    assert!(!current.selected);
+    assert!(trace.candidates.iter().any(|candidate| candidate.selected));
+}
+
+#[test]
+fn response_selection_emits_one_no_candidate_trace() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+    let excluded = BTreeSet::from(["main".to_string(), "second".to_string()]);
+
+    let selected = select_runtime_response_candidate_for_route(
+        &shared,
+        RuntimeResponseCandidateSelection::fresh(&excluded, RuntimeRouteKind::Responses),
+    )
+    .expect("selection should succeed");
+    assert_eq!(selected, None);
+
+    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let trace_lines = log
+        .lines()
+        .filter(|line| line.contains(" route_decision "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        trace_lines.len(),
+        1,
+        "selection must emit exactly one trace: {log}"
+    );
+    let trace_json = runtime_proxy_crate::runtime_proxy_log_fields(trace_lines[0])
+        .remove("trace")
+        .expect("selection should emit one route decision trace");
+    let trace = serde_json::from_str::<runtime_proxy_crate::RuntimeRouteDecisionTrace>(&trace_json)
+        .expect("route decision trace should be typed JSON");
+    assert_eq!(
+        trace.terminal_outcome,
+        runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::NoCandidate
+    );
+    assert_eq!(trace.selected_candidate, None);
+}
+
+#[test]
+fn direct_hard_selection_trace_has_explicit_affinity() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+
+    runtime_selection_trace_log_direct(
+        &shared,
+        42,
+        RuntimeSelectionTraceDirect {
+            requested_model: Some("gpt-test"),
+            route_kind: RuntimeRouteKind::Standard,
+            candidate_key: "main",
+            class: runtime_proxy_crate::RuntimeRouteCandidateClass::Current,
+            affinity_kind: Some(runtime_proxy_crate::RuntimeRouteAffinityKind::Strict),
+            hard_affinity: true,
+        },
+    );
+
+    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let trace_json = log
+        .lines()
+        .find(|line| line.contains(" route_decision "))
+        .and_then(|line| runtime_proxy_crate::runtime_proxy_log_fields(line).remove("trace"))
+        .expect("direct selection should emit a trace");
+    let trace = serde_json::from_str::<runtime_proxy_crate::RuntimeRouteDecisionTrace>(&trace_json)
+        .expect("route decision trace should be typed JSON");
+    assert!(trace.affinity.hard);
+    assert_eq!(
+        trace.affinity.kind,
+        runtime_proxy_crate::RuntimeRouteAffinityKind::Strict
+    );
+    assert_eq!(
+        trace.affinity.outcome,
+        runtime_proxy_crate::RuntimeRouteAffinityOutcome::Retained
     );
 }
 

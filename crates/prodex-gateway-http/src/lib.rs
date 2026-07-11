@@ -141,6 +141,7 @@ pub enum GatewayHttpRouteKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GatewayControlPlaneOperation {
     GatewayAdminRead,
+    RouteExplain,
     TenantCreate,
     TenantUpdate,
     UserInvite,
@@ -170,6 +171,7 @@ impl GatewayControlPlaneOperation {
         !matches!(
             self,
             Self::GatewayAdminRead
+                | Self::RouteExplain
                 | Self::ScimUserRead
                 | Self::VirtualKeyRead
                 | Self::BillingRead
@@ -792,7 +794,6 @@ pub fn plan_gateway_http_request(
             actual: request.body_len,
         });
     }
-
     let route = classify_route(&request.path);
     validate_method(route, request.method)?;
     validate_singleton_credential_headers(&request.headers)?;
@@ -802,7 +803,6 @@ pub fn plan_gateway_http_request(
     if policy.require_trace_context && requires_trace(route) && trace_context.is_none() {
         return Err(GatewayHttpPlanError::MissingTraceContext);
     }
-
     let (preserved_upstream_headers, stripped_headers) =
         classify_upstream_headers(&request.headers);
     let trace_propagation_metrics = trace_propagation_metrics_from_headers(&request.headers);
@@ -1041,7 +1041,6 @@ fn control_plane_operation_for_path(
             _ => None,
         };
     }
-
     let admin_path = strip_control_plane_mount(path, "/admin")
         .or_else(|| strip_control_plane_mount(path, "/v1/admin"))?;
     match normalized_segments(admin_path).as_slice() {
@@ -1052,6 +1051,7 @@ fn control_plane_operation_for_path(
         | ["observability"]
         | ["guardrails"]
         | ["usage"] => Some(GatewayControlPlaneOperation::GatewayAdminRead),
+        ["routes", "explain"] => Some(GatewayControlPlaneOperation::RouteExplain),
         ["tenants"] => Some(GatewayControlPlaneOperation::TenantCreate),
         ["tenants", ..] => Some(GatewayControlPlaneOperation::TenantUpdate),
         ["users"] | ["users", "invites"] => Some(GatewayControlPlaneOperation::UserInvite),
@@ -1149,7 +1149,8 @@ fn control_plane_operation_allows_method(
         | GatewayControlPlaneOperation::ScimUserRead
         | GatewayControlPlaneOperation::VirtualKeyRead
         | GatewayControlPlaneOperation::BillingRead => method == GatewayHttpMethod::Get,
-        GatewayControlPlaneOperation::TenantCreate
+        GatewayControlPlaneOperation::RouteExplain
+        | GatewayControlPlaneOperation::TenantCreate
         | GatewayControlPlaneOperation::UserInvite
         | GatewayControlPlaneOperation::ScimUserCreate
         | GatewayControlPlaneOperation::RoleBindingGrant
@@ -1280,7 +1281,6 @@ fn validate_singleton_credential_headers(
     if authorization_count > 1 {
         return Err(GatewayHttpPlanError::DuplicateAuthorization);
     }
-
     let account_count = headers
         .iter()
         .filter(|header| header.normalized_name() == "chatgpt-account-id")

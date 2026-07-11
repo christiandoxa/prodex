@@ -382,6 +382,21 @@ pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
 ) -> Result<RuntimeProxyRequest> {
     let max_body_bytes = runtime_proxy_max_request_body_bytes()?;
+    capture_runtime_proxy_request_with_max(request, max_body_bytes)
+}
+
+pub(crate) fn capture_runtime_proxy_request_with_limit(
+    request: &mut tiny_http::Request,
+    limit: u64,
+) -> Result<RuntimeProxyRequest> {
+    let max_body_bytes = runtime_proxy_max_request_body_bytes()?.min(limit);
+    capture_runtime_proxy_request_with_max(request, max_body_bytes)
+}
+
+fn capture_runtime_proxy_request_with_max(
+    request: &mut tiny_http::Request,
+    max_body_bytes: u64,
+) -> Result<RuntimeProxyRequest> {
     if let Some(content_length) = runtime_proxy_request_content_length(request)
         && content_length > max_body_bytes
     {

@@ -174,6 +174,23 @@ mod runtime_proxy_contract_tests;
 #[path = "../tests/src/lib.rs"]
 mod test_env_guard_tests;
 
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeGatewaySideEffectSnapshot {
+    runtime_state_fingerprint: u64,
+    model_memory_fingerprint: u64,
+    api_key_cursor: usize,
+    credential_fingerprint: [u8; 32],
+    admin_idempotency_fingerprint: u64,
+    oidc_cache_entries: usize,
+    pending_usage_deltas: usize,
+    usage_request_ids: usize,
+    usage_typed_request_ids: usize,
+    usage_call_ids: usize,
+    usage_ledger_scopes: usize,
+    usage_durable_reservations: usize,
+}
+
 struct RuntimeRotationProxy {
     server: Arc<TinyServer>,
     shutdown: Arc<AtomicBool>,
@@ -184,6 +201,19 @@ struct RuntimeRotationProxy {
     gemini_live_sidecar_model: Option<String>,
     log_path: PathBuf,
     active_request_count: Arc<AtomicUsize>,
+    #[cfg(test)]
+    request_sequence: Arc<AtomicU64>,
+    #[cfg(test)]
+    lane_admission: prodex_runtime_state::RuntimeProxyLaneAdmission,
+    #[cfg(test)]
+    gateway_route_load:
+        Option<Arc<Mutex<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelState>>>>,
+    #[cfg(test)]
+    gateway_usage:
+        Option<Arc<Mutex<BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>>>>,
+    #[cfg(test)]
+    gateway_side_effect_snapshot:
+        Option<Arc<dyn Fn() -> RuntimeGatewaySideEffectSnapshot + Send + Sync>>,
     owner_lock: Option<StateFileLock>,
 }
 

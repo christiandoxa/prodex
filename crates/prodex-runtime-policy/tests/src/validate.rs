@@ -6,6 +6,74 @@ fn parse_policy(input: &str) -> RuntimePolicyFile {
 }
 
 #[test]
+fn gateway_request_constraints_parse_and_default() {
+    let defaults = parse_policy("version = 1");
+    assert_eq!(
+        defaults.gateway.request_constraints,
+        Default::default(),
+        "request constraints stay opt-in"
+    );
+
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[gateway.request_constraints]
+enabled = true
+unknown_context = "reject"
+safe_window_tokens = 65536
+oversized_output = "clamp_with_notice"
+"#,
+    );
+    validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect("explicit request constraints should be valid");
+    let constraints = policy.gateway.request_constraints;
+    assert_eq!(constraints.enabled, Some(true));
+    assert_eq!(constraints.unknown_context.as_deref(), Some("reject"));
+    assert_eq!(constraints.safe_window_tokens, Some(65_536));
+    assert_eq!(
+        constraints.oversized_output.as_deref(),
+        Some("clamp_with_notice")
+    );
+}
+
+#[test]
+fn gateway_request_constraints_reject_invalid_values() {
+    for (field, value) in [
+        ("unknown_context", "guess"),
+        ("oversized_output", "truncate"),
+    ] {
+        let policy = parse_policy(&format!(
+            "version = 1\n[gateway.request_constraints]\n{field} = \"{value}\"\n"
+        ));
+        let err = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+            .expect_err("unknown request constraint policy should be rejected");
+        assert!(
+            err.to_string()
+                .contains(&format!("gateway.request_constraints.{field}"))
+        );
+    }
+}
+
+#[test]
+fn gateway_request_constraints_reject_zero_safe_window() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[gateway.request_constraints]
+safe_window_tokens = 0
+"#,
+    );
+    let err = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("zero safe window should be rejected");
+    assert!(
+        err.to_string()
+            .contains("gateway.request_constraints.safe_window_tokens")
+    );
+}
+
+#[test]
 fn validate_runtime_policy_allows_zero_websocket_executor_overflow_capacities() {
     let policy = parse_policy(
         r#"

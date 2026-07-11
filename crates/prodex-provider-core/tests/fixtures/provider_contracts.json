@@ -86,6 +86,7 @@
     "transform_status": "translated",
     "required_endpoints": [
       "responses",
+      "responses/compact",
       "chat-completions",
       "messages",
       "models",

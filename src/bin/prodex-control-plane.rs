@@ -471,7 +471,6 @@ fn run_plan_http_control_plane(args: impl Iterator<Item = String>) -> Result<Str
             );
         }
     };
-
     let mut otlp_attributes = vec![
         OtlpLogAttribute::bool("planned", true),
         OtlpLogAttribute::string("operation", control_plane_operation_label(route.operation)),
@@ -1190,6 +1189,7 @@ fn parse_gateway_http_method(value: &str) -> Result<GatewayHttpMethod, String> {
 fn control_plane_operation_label(operation: ControlPlaneOperation) -> &'static str {
     match operation {
         ControlPlaneOperation::GatewayAdminRead => "gateway_admin_read",
+        ControlPlaneOperation::RouteExplain => "route_explain",
         ControlPlaneOperation::TenantCreate => "tenant_create",
         ControlPlaneOperation::TenantUpdate => "tenant_update",
         ControlPlaneOperation::UserInvite => "user_invite",

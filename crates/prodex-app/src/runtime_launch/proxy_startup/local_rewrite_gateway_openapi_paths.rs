@@ -13,6 +13,7 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
     let usage_path = format!("{mount_path}/prodex/gateway/usage");
     let metrics_path = format!("{mount_path}/prodex/gateway/metrics");
     let providers_path = format!("{mount_path}/prodex/gateway/providers");
+    let route_explain_path = format!("{mount_path}/prodex/gateway/routes/explain");
     let observability_path = format!("{mount_path}/prodex/gateway/observability");
     let guardrails_path = format!("{mount_path}/prodex/gateway/guardrails");
     let openapi_path = format!("{mount_path}/prodex/gateway/openapi.json");
@@ -441,6 +442,41 @@ pub(super) fn runtime_gateway_openapi_paths_for_mount(
                         }
                     },
                     "401": {"$ref": "#/components/responses/GatewayError"}
+                }
+            }
+        }),
+    );
+    paths.insert(
+        route_explain_path,
+        serde_json::json!({
+            "post": {
+                "operationId": "explainGatewayRoute",
+                "summary": "Explain a gateway route decision without sending an upstream request or mutating runtime state",
+                "security": [{"GatewayBearerAuth": []}],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/GatewayRouteExplainRequest"}
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Versioned, bounded, side-effect-free route explanation",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/GatewayRouteExplainResponse"}
+                            }
+                        }
+                    },
+                    "400": {"$ref": "#/components/responses/GatewayError"},
+                    "401": {"$ref": "#/components/responses/GatewayError"},
+                    "403": {"$ref": "#/components/responses/GatewayError"},
+                    "405": {"$ref": "#/components/responses/GatewayError"},
+                    "413": {"$ref": "#/components/responses/GatewayError"},
+                    "422": {"$ref": "#/components/responses/GatewayError"},
+                    "503": {"$ref": "#/components/responses/GatewayError"}
                 }
             }
         }),

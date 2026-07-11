@@ -4,6 +4,7 @@ mod adapter;
 mod bridge;
 mod catalog;
 mod chat_tools_bridge;
+mod constraints;
 mod contract;
 mod deepseek_bridge;
 mod errors;
@@ -40,6 +41,17 @@ pub use chat_tools_bridge::{
     provider_core_chat_tools_from_responses_request,
     provider_core_chat_web_search_options_from_responses_request,
     provider_core_flatten_namespace_tool_name,
+};
+pub use constraints::{
+    PROVIDER_REQUEST_SAFE_WINDOW_TOKENS_DEFAULT, ProviderOutputAdjustment,
+    ProviderOutputLimitField, ProviderOversizedOutputPolicy, ProviderReasoningEffort,
+    ProviderRequestConstraintDecision, ProviderRequestConstraintEvaluation,
+    ProviderRequestConstraintPolicy, ProviderRequestFeature, ProviderRequestLimitError,
+    ProviderRequestLimitErrorKind, ProviderRequestRequirements, ProviderUnknownContextPolicy,
+    evaluate_provider_request_constraints,
+    evaluate_provider_request_constraints_with_catalog_entry, provider_request_requirements,
+    provider_request_requirements_from_value, provider_requested_output_tokens,
+    provider_requested_output_tokens_compat,
 };
 pub use contract::{
     PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContractSpec, ProviderEndpointContractSpec,
@@ -261,8 +273,8 @@ pub use translators::{
     deepseek_provider_core_validate_stream_tool_call_delta,
     gemini_provider_core_function_call_arguments_delta_event,
     gemini_provider_core_function_call_arguments_delta_event_with_thought_signature,
-    gemini_provider_core_output_item_added_event, gemini_provider_core_output_item_done_event,
-    gemini_provider_core_output_text_delta_event,
+    gemini_provider_core_model_uses_thinking_level, gemini_provider_core_output_item_added_event,
+    gemini_provider_core_output_item_done_event, gemini_provider_core_output_text_delta_event,
     gemini_provider_core_reasoning_summary_part_added_event,
     gemini_provider_core_reasoning_summary_text_delta_event,
     gemini_provider_core_response_completed_event, gemini_provider_core_response_created_event,
@@ -326,5 +338,6 @@ pub use translators::{
 };
 pub use usage::{
     ProviderTokenUsage, calculate_cost_microusd, estimate_request_input_tokens,
-    estimate_text_tokens, extract_usage_tokens, microusd_to_usd,
+    estimate_request_input_tokens_value, estimate_text_tokens, extract_usage_tokens,
+    microusd_to_usd,
 };

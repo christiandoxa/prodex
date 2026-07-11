@@ -57,8 +57,24 @@ impl TestUpstream {
         )
     }
 
+    pub(super) fn start_with_statuses(
+        statuses: &[u16],
+        content_type: &'static str,
+        response_body: &'static str,
+    ) -> Self {
+        Self::start_with_responses(statuses.to_vec(), content_type, response_body)
+    }
+
     fn start_n_with_response(
         request_count: usize,
+        content_type: &'static str,
+        response_body: &'static str,
+    ) -> Self {
+        Self::start_with_responses(vec![200; request_count], content_type, response_body)
+    }
+
+    fn start_with_responses(
+        statuses: Vec<u16>,
         content_type: &'static str,
         response_body: &'static str,
     ) -> Self {
@@ -71,7 +87,7 @@ impl TestUpstream {
         let (headers_tx, headers_rx) = mpsc::channel();
         let (path_tx, path_rx) = mpsc::channel();
         let thread = thread::spawn(move || {
-            for _ in 0..request_count {
+            for status in statuses {
                 let mut request = server.recv().expect("test upstream should receive request");
                 let path = request.url().to_string();
                 let headers = request
@@ -92,7 +108,8 @@ impl TestUpstream {
                 let _ = path_tx.send(path);
                 let _ = headers_tx.send(headers);
                 let _ = body_tx.send(body);
-                let mut response = TinyResponse::from_string(response_body).with_status_code(200);
+                let mut response =
+                    TinyResponse::from_string(response_body).with_status_code(status);
                 response.add_header(TinyHeader::from_bytes("content-type", content_type).unwrap());
                 let _ = request.respond(response);
             }

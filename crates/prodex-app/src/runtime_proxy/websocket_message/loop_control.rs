@@ -1,10 +1,11 @@
 use super::super::{
-    RuntimeRouteKind, runtime_noncompact_session_priority_profile,
+    RuntimeRouteKind, RuntimeSelectionTraceDirect, runtime_noncompact_session_priority_profile,
     runtime_proxy_allows_direct_current_profile_fallback,
     runtime_proxy_direct_current_fallback_profile, runtime_proxy_log,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_sync_probe_pressure_pause,
-    runtime_remaining_sync_probe_cold_start_profiles_for_route,
+    runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_selection_trace_log_direct,
+    runtime_smart_context_model_name_from_body,
 };
 use super::{
     RuntimeWebsocketDirectCurrentFallbackReason, RuntimeWebsocketMessageLoopAction,
@@ -168,6 +169,20 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         else {
             return Ok(None);
         };
+        let requested_model =
+            runtime_smart_context_model_name_from_body(self.request_text.as_bytes());
+        runtime_selection_trace_log_direct(
+            self.shared,
+            self.request_id,
+            RuntimeSelectionTraceDirect {
+                requested_model: requested_model.as_deref(),
+                route_kind: RuntimeRouteKind::Websocket,
+                candidate_key: &current_profile,
+                class: runtime_proxy_crate::RuntimeRouteCandidateClass::Fallback,
+                affinity_kind: None,
+                hard_affinity: false,
+            },
+        );
         runtime_proxy_log(
             self.shared,
             format!(

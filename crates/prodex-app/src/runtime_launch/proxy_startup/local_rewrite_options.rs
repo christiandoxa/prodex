@@ -61,6 +61,16 @@ impl RuntimeLocalRewriteProviderOptions {
             RuntimeLocalRewriteProviderOptions::Kiro { .. } => RuntimeProviderBridgeKind::Kiro,
         }
     }
+
+    pub(super) fn configured_reasoning_reserve_tokens(&self) -> Option<u64> {
+        match self {
+            RuntimeLocalRewriteProviderOptions::Gemini {
+                thinking_budget_tokens,
+                ..
+            } => *thinking_budget_tokens,
+            _ => None,
+        }
+    }
 }
 
 pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {

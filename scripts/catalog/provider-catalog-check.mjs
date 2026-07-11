@@ -32,6 +32,7 @@ const requiredFeatureFlags = [
   "web_search",
   "reasoning",
 ];
+const reasoningEfforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
 const providerCounts = new Map();
 const issues = [];
 const seenIds = new Set();
@@ -50,6 +51,45 @@ for (const model of models) {
   }
   if (model.provider !== "local" && model.context_window_tokens == null) {
     issues.push(`missing context window for ${model.provider}:${model.id}`);
+  }
+  for (const field of ["max_output_tokens", "default_output_reserve_tokens"]) {
+    if (model[field] != null && (!Number.isSafeInteger(model[field]) || model[field] <= 0)) {
+      issues.push(`${field} must be a positive safe integer for ${model.provider}:${model.id}`);
+    }
+  }
+  if (model.embedding_compatible != null && typeof model.embedding_compatible !== "boolean") {
+    issues.push(`embedding_compatible must be boolean for ${model.provider}:${model.id}`);
+  }
+  if (model.supported_reasoning_efforts != null) {
+    if (!Array.isArray(model.supported_reasoning_efforts) || model.supported_reasoning_efforts.some((effort) => !reasoningEfforts.has(effort))) {
+      issues.push(`supported_reasoning_efforts is invalid for ${model.provider}:${model.id}`);
+    }
+  }
+  if (model.default_reasoning_effort != null && !reasoningEfforts.has(model.default_reasoning_effort)) {
+    issues.push(`default_reasoning_effort is invalid for ${model.provider}:${model.id}`);
+  }
+  if (model.default_reasoning_effort != null && !model.supported_reasoning_efforts?.includes(model.default_reasoning_effort)) {
+    issues.push(`default_reasoning_effort must be supported for ${model.provider}:${model.id}`);
+  }
+  if (model.reasoning_reserve_tokens != null) {
+    if (typeof model.reasoning_reserve_tokens !== "object" || Array.isArray(model.reasoning_reserve_tokens)) {
+      issues.push(`reasoning_reserve_tokens must be an object for ${model.provider}:${model.id}`);
+    } else {
+      for (const [effort, tokens] of Object.entries(model.reasoning_reserve_tokens)) {
+        if (!reasoningEfforts.has(effort) || !Number.isSafeInteger(tokens) || tokens < 0) {
+          issues.push(`reasoning_reserve_tokens.${effort} is invalid for ${model.provider}:${model.id}`);
+        }
+        if (!model.supported_reasoning_efforts?.includes(effort)) {
+          issues.push(`reasoning_reserve_tokens.${effort} must be supported for ${model.provider}:${model.id}`);
+        }
+      }
+    }
+  }
+  if (model.default_output_reserve_tokens != null && model.max_output_tokens != null && model.default_output_reserve_tokens > model.max_output_tokens) {
+    issues.push(`default_output_reserve_tokens exceeds max_output_tokens for ${model.provider}:${model.id}`);
+  }
+  if (model.default_output_reserve_tokens != null && model.context_window_tokens != null && model.default_output_reserve_tokens > model.context_window_tokens) {
+    issues.push(`default_output_reserve_tokens exceeds context_window_tokens for ${model.provider}:${model.id}`);
   }
   if (!Array.isArray(model.supported_endpoints) || model.supported_endpoints.length === 0) {
     issues.push(`missing endpoint list for ${model.provider}:${model.id}`);
