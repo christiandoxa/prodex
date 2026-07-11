@@ -18,6 +18,7 @@ USAGE:
     prodex-gateway --help
     prodex-gateway --version
     prodex-gateway migrate --backend sqlite --path <PATH>
+    prodex-gateway migrate --backend postgres --url-ref <NAME> --secret-provider <PROVIDER> --secret-root <PATH> [--tls-mode verify-full|disable] [--tls-ca <PATH>]
     prodex-gateway migrate --backend postgres --url-env <ENV> [--tls-mode verify-full|disable] [--tls-ca <PATH>]
     prodex-gateway serve [--listen <ADDR>]
     prodex-gateway consume-config-publication --transport <PATH> --replica <ID> --root <PATH>
@@ -39,6 +40,11 @@ enum MigrationTarget {
     },
     Postgres {
         url_env: String,
+        tls: prodex_storage_postgres_runtime::PostgresTlsConfig,
+    },
+    PostgresProjected {
+        reference: prodex_domain::SecretRef,
+        projected_root: PathBuf,
         tls: prodex_storage_postgres_runtime::PostgresTlsConfig,
     },
 }
@@ -150,6 +156,18 @@ fn run_migrate(target: Result<MigrationTarget, String>) -> Result<(), String> {
             run_gateway_migrate(GatewayMigrationTarget::Postgres { url_env, tls })?,
             "postgres",
         ),
+        MigrationTarget::PostgresProjected {
+            reference,
+            projected_root,
+            tls,
+        } => (
+            run_gateway_migrate(GatewayMigrationTarget::PostgresProjected {
+                reference,
+                projected_root,
+                tls,
+            })?,
+            "postgres",
+        ),
     };
     let output = encode_gateway_migration_summary(backend, &message)?;
     println!("{output}");
@@ -178,6 +196,9 @@ where
     let mut backend = None;
     let mut path = None;
     let mut url_env = None;
+    let mut url_ref = None;
+    let mut secret_provider = None;
+    let mut secret_root = None;
     let mut tls_mode = None;
     let mut tls_ca = None;
     let mut args = args.into_iter();
@@ -186,6 +207,9 @@ where
             "--backend" => backend = args.next(),
             "--path" => path = args.next().map(PathBuf::from),
             "--url-env" => url_env = args.next(),
+            "--url-ref" => url_ref = args.next(),
+            "--secret-provider" => secret_provider = args.next(),
+            "--secret-root" => secret_root = args.next().map(PathBuf::from),
             "--tls-mode" => tls_mode = args.next(),
             "--tls-ca" => tls_ca = args.next().map(PathBuf::from),
             "--help" | "-h" => return Err(HELP.to_string()),
@@ -197,8 +221,6 @@ where
             .map(|path| MigrationTarget::Sqlite { path })
             .ok_or_else(|| "sqlite migration requires --path <PATH>".to_string()),
         Some("postgres") => {
-            let url_env =
-                url_env.ok_or_else(|| "postgres migration requires --url-env <ENV>".to_string())?;
             let tls = match tls_mode.as_deref().unwrap_or("verify-full") {
                 "verify-full" => {
                     prodex_storage_postgres_runtime::PostgresTlsConfig::verify_full(tls_ca)
@@ -209,7 +231,32 @@ where
                 "disable" => prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable(),
                 _ => return Err("--tls-mode must be verify-full or disable".to_string()),
             };
-            Ok(MigrationTarget::Postgres { url_env, tls })
+            match (url_env, url_ref, secret_provider, secret_root) {
+                (Some(url_env), None, None, None) => Ok(MigrationTarget::Postgres { url_env, tls }),
+                (None, Some(name), Some(provider), Some(projected_root)) => {
+                    let reference = prodex_domain::SecretRef::new(
+                        provider,
+                        name,
+                        None::<String>,
+                    );
+                    if !reference.is_well_formed() {
+                        return Err("postgres migration secret reference is invalid".to_string());
+                    }
+                    Ok(MigrationTarget::PostgresProjected {
+                        reference,
+                        projected_root,
+                        tls,
+                    })
+                }
+                (None, None, None, None) => Err(
+                    "postgres migration requires --url-ref/--secret-provider/--secret-root or --url-env"
+                        .to_string(),
+                ),
+                _ => Err(
+                    "postgres migration secret source flags are incomplete or conflicting"
+                        .to_string(),
+                ),
+            }
         }
         Some(other) => Err(format!("unsupported migration backend: {other}")),
         None => Err("migration requires --backend sqlite|postgres".to_string()),
@@ -284,6 +331,60 @@ mod tests {
                 url_env: "PRODEX_GATEWAY_POSTGRES_URL".to_string(),
                 tls: prodex_storage_postgres_runtime::PostgresTlsConfig::verify_full(None),
             }
+        );
+    }
+
+    #[test]
+    fn parses_projected_postgres_migration_target() {
+        assert_eq!(
+            parse_migrate_args(
+                [
+                    "--backend",
+                    "postgres",
+                    "--url-ref",
+                    "PRODEX_GATEWAY_POSTGRES_URL",
+                    "--secret-provider",
+                    "kubernetes",
+                    "--secret-root",
+                    "/run/secrets/prodex",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
+            .unwrap(),
+            MigrationTarget::PostgresProjected {
+                reference: prodex_domain::SecretRef::new(
+                    "kubernetes",
+                    "PRODEX_GATEWAY_POSTGRES_URL",
+                    None::<String>,
+                ),
+                projected_root: PathBuf::from("/run/secrets/prodex"),
+                tls: prodex_storage_postgres_runtime::PostgresTlsConfig::verify_full(None),
+            }
+        );
+    }
+
+    #[test]
+    fn postgres_migration_rejects_conflicting_secret_sources() {
+        assert_eq!(
+            parse_migrate_args(
+                [
+                    "--backend",
+                    "postgres",
+                    "--url-env",
+                    "PRODEX_GATEWAY_POSTGRES_URL",
+                    "--url-ref",
+                    "PRODEX_GATEWAY_POSTGRES_URL",
+                    "--secret-provider",
+                    "kubernetes",
+                    "--secret-root",
+                    "/run/secrets/prodex",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
+            .unwrap_err(),
+            "postgres migration secret source flags are incomplete or conflicting"
         );
     }
 

@@ -208,6 +208,7 @@ rusqlite = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+secret_store = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
@@ -215,7 +216,6 @@ criterion = "0.8.2"
 libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-secret_store = { workspace = true }
 
 [[bench]]
 name = "runtime_proxy_hot_paths"
