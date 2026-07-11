@@ -142,7 +142,6 @@ prodex_runtime_gemini = { package = "prodex-runtime-gemini", path = "crates/prod
 prodex_runtime_gemini_cli_compat = { package = "prodex-runtime-gemini-cli-compat", path = "crates/prodex-runtime-gemini-cli-compat", version = "0.276.0" }
 prodex_runtime_launch = { package = "prodex-runtime-launch", path = "crates/prodex-runtime-launch", version = "0.276.0" }
 prodex_runtime_policy = { package = "prodex-runtime-policy", path = "crates/prodex-runtime-policy", version = "0.276.0" }
-prodex_runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.276.0" }
 prodex_runtime_quota = { package = "prodex-runtime-quota", path = "crates/prodex-runtime-quota", version = "0.276.0" }
 prodex_runtime_state = { package = "prodex-runtime-state", path = "crates/prodex-runtime-state", version = "0.276.0" }
 prodex_runtime_store = { package = "prodex-runtime-store", path = "crates/prodex-runtime-store", version = "0.276.0" }
@@ -167,11 +166,9 @@ postgres = "0.19.12"
 redis = { version = "1.2.4", default-features = false }
 rustls = { version = "0.23.41", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.4"
-runtime_anthropic = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.276.0" }
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.276.0" }
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.276.0" }
 runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "0.276.0" }
-runtime_proxy = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.276.0" }
 runtime_proxy_crate = { package = "prodex-runtime-proxy", path = "crates/prodex-runtime-proxy", version = "0.276.0" }
 secret_store = { package = "prodex-secret-store", path = "crates/prodex-secret-store", version = "0.276.0" }
 serde = { version = "1.0.228", features = ["derive"] }

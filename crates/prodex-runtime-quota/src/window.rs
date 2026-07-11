@@ -3,6 +3,7 @@ use prodex_quota::{
     RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, UsageResponse, find_main_window,
     openai_quota_runtime_window_pair, remaining_percent,
 };
+use runtime_proxy_crate as runtime_proxy;
 
 pub fn runtime_quota_window_status_to_proxy(
     status: RuntimeQuotaWindowStatus,

@@ -1,4 +1,5 @@
 use prodex_runtime_state::RuntimeRouteKind;
+use runtime_proxy_crate as runtime_proxy;
 
 pub fn runtime_route_kind_to_proxy(
     route_kind: RuntimeRouteKind,

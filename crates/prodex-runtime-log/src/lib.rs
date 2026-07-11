@@ -1,3 +1,4 @@
+use runtime_proxy_crate as runtime_proxy;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::io::Write;

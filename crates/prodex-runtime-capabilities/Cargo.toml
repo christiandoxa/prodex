@@ -11,8 +11,8 @@ name = "prodex_runtime_capabilities"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_runtime_proxy = { workspace = true }
-runtime_anthropic = { workspace = true }
+runtime_proxy_crate = { workspace = true }
+runtime_anthropic_crate = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

@@ -1,4 +1,5 @@
 use super::*;
+use runtime_proxy_crate as runtime_proxy;
 
 #[test]
 fn runtime_proxy_codex_args_preserve_user_overrides_after_proxy_overrides() {
