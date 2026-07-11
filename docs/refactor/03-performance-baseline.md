@@ -94,6 +94,22 @@ metrics, not isolated proxy-process claims.
 | CPU/request (ms) | 123.00 / 122.83 / 121.25 / 122.67 / 122.08 | 122.67 | 0.58% |
 | Peak harness RSS (KiB) | 92,784 / 93,816 / 92,156 / 92,784 / 92,072 | 92,784 | 0.75% |
 
+### Baseline evidence completeness
+
+The preserved five runs did not capture every metric required by the method.
+Missing values are not inferred from RSS, elapsed time, or log-marker counts.
+
+| Required metric | Before evidence | Existing read-only source | Baseline interpretation |
+| --- | --- | --- | --- |
+| Allocation/request | unsupported; not captured in any sample | none in the Criterion or load harness | no allocation no-regression claim |
+| Queue wait | unsupported; not captured in any sample | runtime logs expose some recovered/exhausted waits, but not every successful wait | admission-pressure markers are not queue-wait latency; no queue-wait no-regression claim |
+| Runtime-state lock wait | not captured in any sample | authenticated broker metrics expose cumulative total/count/max | the baseline command did not snapshot the endpoint, so no lock-wait no-regression claim |
+
+The current load harness can take read-only broker lock-wait snapshots for new
+`--start-proxy` runs. That does not retroactively supply values for these
+historical samples, and no replacement baseline was run for this documentation
+update.
+
 All 600 requests succeeded. Sample two emitted one `profile_inflight_saturated` marker without an
 error response; the other four emitted no admission-pressure marker. This is retained as baseline
 backpressure variance.
@@ -102,9 +118,12 @@ backpressure variance.
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | Runtime hot-path check | pass | one threshold miss | pass | one threshold miss | pass | complete; distribution above |
 | Runtime proxy load | pass | pass with one pressure marker | pass | pass | pass | complete; 600/600 responses succeeded |
-| Slow client/upstream | pending | pending | pending | pending | pending | harness inventory pending |
-| High concurrency/overload | pending | pending | pending | pending | pending | harness inventory pending |
-| Long stream/cancellation | pending | pending | pending | pending | pending | harness inventory pending |
+| Slow client load scenario | not captured | not captured | not captured | not captured | not captured | implemented and self-tested; no matched baseline samples |
+| Slow upstream load scenario | not captured | not captured | not captured | not captured | not captured | implemented and self-tested; no matched baseline samples |
+| High concurrency/overload load scenarios | not captured | not captured | not captured | not captured | not captured | stress/spike runs are reported in the results file, but not as matched five-sample evidence |
+| Long-stream load scenario | not captured | not captured | not captured | not captured | not captured | implemented and self-tested; no matched baseline samples |
+| Soak load scenario | not captured | not captured | not captured | not captured | not captured | implemented; no final matched samples |
+| Cancellation, partial stream, upgrade drain, deterministic shutdown | n/a | n/a | n/a | n/a | n/a | focused correctness tests only; not load-performance evidence |
 
 ## Acceptance Comparison
 

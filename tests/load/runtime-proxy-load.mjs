@@ -18,6 +18,8 @@ const MAX_REQUEST_TIMEOUT_MS = 120_000;
 const MAX_SCENARIO_CONCURRENCY = 256;
 const MAX_SCENARIO_REQUESTS = 100_000;
 const MAX_SCENARIO_DURATION_SECONDS = 3_600;
+const BROKER_METRICS_PATH = "/__prodex/runtime/metrics";
+const BROKER_ADMIN_TOKEN_HEADER = "X-Prodex-Admin-Token";
 const PRESSURE_MARKERS = [
   "runtime_proxy_queue_overloaded",
   "runtime_proxy_active_limit_reached",
@@ -335,6 +337,19 @@ function selfTestScenarios(scenarios) {
     }),
   );
   assert.throws(() => clientConfig({ client: { readDelayMs: MAX_CLIENT_READ_DELAY_MS + 1 } }, {}));
+  assert.deepEqual(
+    lockWaitEvidence(
+      { waitTotalNs: 100, waitCount: 2, waitMaxNs: 80 },
+      { waitTotalNs: 175, waitCount: 5, waitMaxNs: 90 },
+      true,
+    ),
+    {
+      status: "captured",
+      start: { waitTotalNs: 100, waitCount: 2, waitMaxNs: 80 },
+      end: { waitTotalNs: 175, waitCount: 5, waitMaxNs: 90 },
+      delta: { waitTotalNs: 75, waitCount: 3 },
+    },
+  );
 }
 
 function routeForRequest(scenario, args, id) {
@@ -499,6 +514,68 @@ async function scanPressureMarkers(args) {
   };
 }
 
+function lockWaitEvidence(start, end, proxyStarted) {
+  if (!proxyStarted) {
+    return { status: "not_captured", reason: "runtime broker was not launched by the harness" };
+  }
+  if (!start || !end) {
+    return { status: "not_captured", reason: "read-only broker metrics were unavailable" };
+  }
+  if (end.waitTotalNs < start.waitTotalNs || end.waitCount < start.waitCount) {
+    return { status: "not_captured", reason: "broker lock-wait counters reset during the run" };
+  }
+  return {
+    status: "captured",
+    start,
+    end,
+    delta: {
+      waitTotalNs: end.waitTotalNs - start.waitTotalNs,
+      waitCount: end.waitCount - start.waitCount,
+    },
+  };
+}
+
+async function readBrokerLockWait(proxy) {
+  if (!proxy) return null;
+  try {
+    const response = await fetch(`${proxy.root}${BROKER_METRICS_PATH}`, {
+      headers: { [BROKER_ADMIN_TOKEN_HEADER]: proxy.adminToken },
+    });
+    if (!response.ok) return null;
+    const metrics = await response.json();
+    const lockWait = metrics.runtime_state_lock_wait;
+    if (
+      !lockWait ||
+      ![lockWait.wait_total_ns, lockWait.wait_count, lockWait.wait_max_ns].every(
+        (value) => Number.isSafeInteger(value) && value >= 0,
+      )
+    ) {
+      return null;
+    }
+    return {
+      waitTotalNs: lockWait.wait_total_ns,
+      waitCount: lockWait.wait_count,
+      waitMaxNs: lockWait.wait_max_ns,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function performanceEvidence(proxyStarted, lockWaitStart, lockWaitEnd) {
+  return {
+    allocationPerRequest: {
+      status: "unsupported",
+      reason: "the harness has no allocation counter",
+    },
+    queueWait: {
+      status: "unsupported",
+      reason: "runtime logs do not capture every successful queue wait",
+    },
+    runtimeStateLockWait: lockWaitEvidence(lockWaitStart, lockWaitEnd, proxyStarted),
+  };
+}
+
 async function startMock(args) {
   const child = spawn(process.execPath, [
     MOCK_UPSTREAM,
@@ -655,6 +732,8 @@ async function startProxy(args, upstreamBaseUrl) {
   args.runtimeLogDir = runtimeLogDir;
   return {
     child,
+    root: proxyRoot,
+    adminToken: bootstrap.admin_token,
     target: `${proxyRoot}/backend-api`,
     prodexHome: root,
     runtimeLogDir,
@@ -677,7 +756,8 @@ async function stopChild(child) {
 }
 
 function printSummary(result) {
-  const { summary, thresholds, failures, scenario, stages, target, runtimeLogDir } = result;
+  const { summary, thresholds, failures, scenario, stages, target, runtimeLogDir, evidence } =
+    result;
   process.stdout.write(
     [
       `scenario=${scenario} target=${target}`,
@@ -686,6 +766,7 @@ function printSummary(result) {
       `latency_ms p50=${summary.latencyMs.p50} p95=${summary.latencyMs.p95} p99=${summary.latencyMs.p99} max=${summary.latencyMs.max}`,
       `admission_pressure responses=${summary.admissionPressure.responses} markers=${summary.admissionPressure.markers} rate=${round(summary.admissionPressure.rate, 4)}`,
       `by_status=${JSON.stringify(summary.byStatus)} by_route=${JSON.stringify(summary.byRoute)}`,
+      `performance_evidence=${JSON.stringify(evidence)}`,
       `thresholds=${JSON.stringify(thresholds)}`,
       `stages=${stages.map((stage) => `${stage.name}:${stage.results.length}`).join(",")}`,
       runtimeLogDir ? `runtime_log_dir=${runtimeLogDir}` : null,
@@ -761,6 +842,7 @@ async function main() {
     if (!target) {
       throw new Error("target required: pass --target or --start-mock");
     }
+    const lockWaitStart = await readBrokerLockWait(proxy);
 
     const stages = [];
     const state = { sequence: 0 };
@@ -771,6 +853,7 @@ async function main() {
       stages.push(await runStage(stage, scenario, args, target, state));
     }
     const results = stages.flatMap((stage) => stage.results);
+    const lockWaitEnd = await readBrokerLockWait(proxy);
     const pressureMarkers = await scanPressureMarkers(args);
     const summary = summarize(results, pressureMarkers);
     const thresholds = thresholdsFor(scenario, args);
@@ -781,6 +864,7 @@ async function main() {
       runtimeLogDir: proxy?.runtimeLogDir ?? args.runtimeLogDir,
       stages,
       summary,
+      evidence: performanceEvidence(Boolean(proxy), lockWaitStart, lockWaitEnd),
       thresholds,
       failures,
     };
