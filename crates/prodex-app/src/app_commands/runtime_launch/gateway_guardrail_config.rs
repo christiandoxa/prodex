@@ -155,7 +155,7 @@ fn gateway_guardrail_webhook_config_with_resolver(
     } else {
         "gateway.guardrails.webhook"
     };
-    let bearer_token = resolver.resolve(
+    let bearer_token = resolver.runtime_secret(
         token_context,
         policy.guardrails.webhook_bearer_token_ref.as_ref(),
         policy.guardrails.webhook_bearer_token_env.as_deref(),

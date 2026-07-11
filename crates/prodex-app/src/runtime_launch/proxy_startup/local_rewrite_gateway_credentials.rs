@@ -258,6 +258,7 @@ mod tests {
         runtime_gateway_apply_secret_refresh, runtime_gateway_initial_credential_snapshot,
     };
     use crate::runtime_launch::proxy_startup::deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
+    use crate::runtime_launch::proxy_startup::local_rewrite::RuntimeGatewaySecret;
     use crate::runtime_launch::proxy_startup::local_rewrite::RuntimeLocalRewriteProviderOptions;
     use crate::runtime_launch::proxy_startup::local_rewrite_gateway_config::{
         RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
@@ -268,6 +269,13 @@ mod tests {
     };
     use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
     use std::sync::{Arc, Mutex};
+
+    fn test_secret(value: &str) -> RuntimeGatewaySecret {
+        RuntimeGatewaySecret::development_compatibility(prodex_domain::SecretMaterial::new(
+            value.as_bytes().to_vec(),
+            None::<String>,
+        ))
+    }
 
     fn openai_provider(api_key: &str) -> RuntimeLocalRewriteProviderOptions {
         RuntimeLocalRewriteProviderOptions::OpenAiResponses {
@@ -285,11 +293,11 @@ mod tests {
             sso: RuntimeGatewaySsoConfig::default(),
             virtual_keys: Vec::new(),
             guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
-                bearer_token: Some(api_key.to_string()),
+                bearer_token: Some(test_secret(api_key)),
                 ..Default::default()
             },
             observability: RuntimeGatewayObservabilityConfig {
-                http_bearer_token: Some(api_key.to_string()),
+                http_bearer_token: Some(test_secret(api_key)),
                 ..Default::default()
             },
         }
@@ -346,15 +354,11 @@ mod tests {
 
         let current = state.current.load_full();
         assert_eq!(provider_api_key(&pinned), "old-secret");
-        assert_eq!(
-            pinned.observability.http_bearer_token.as_deref(),
-            Some("old-secret")
-        );
+        assert!(pinned.observability.http_bearer_token.is_some());
+        assert!(!format!("{:?}", pinned.observability).contains("old-secret"));
         assert_eq!(provider_api_key(&current), "new-secret");
-        assert_eq!(
-            current.observability.http_bearer_token.as_deref(),
-            Some("new-secret")
-        );
+        assert!(current.observability.http_bearer_token.is_some());
+        assert!(!format!("{:?}", current.observability).contains("new-secret"));
         assert!(
             !runtime_gateway_apply_secret_refresh(
                 &state,

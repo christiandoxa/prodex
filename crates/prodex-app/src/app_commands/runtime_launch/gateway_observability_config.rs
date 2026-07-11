@@ -86,7 +86,7 @@ pub(crate) fn gateway_observability_config_with_resolver(
     } else {
         "gateway.observability.http_bearer_token_env"
     };
-    let http_bearer_token = resolver.resolve(
+    let http_bearer_token = resolver.runtime_secret(
         token_context,
         policy.observability.http_bearer_token_ref.as_ref(),
         policy.observability.http_bearer_token_env.as_deref(),

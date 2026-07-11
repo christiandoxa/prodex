@@ -19,8 +19,6 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         ("admin-token", "admin-secret-value"),
         ("virtual-key", "virtual-secret-value"),
         ("sso-token", "sso-secret-value"),
-        ("telemetry-token", "telemetry-secret-value"),
-        ("webhook-token", "webhook-secret-value"),
     ] {
         let path = secret_root.join(name);
         std::fs::write(&path, value).unwrap();
@@ -83,6 +81,13 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
     assert_eq!(credential.reference(), &secret_ref("provider-key"));
     assert_eq!(config.admin_tokens.len(), 1);
     assert_eq!(config.virtual_keys.len(), 1);
+    assert!(config.observability.http_bearer_token.is_some());
+    assert!(config.guardrail_webhook.bearer_token.is_some());
+    let outbound_debug = format!("{:?} {:?}", config.observability, config.guardrail_webhook);
+    assert!(!outbound_debug.contains("telemetry-token"));
+    assert!(!outbound_debug.contains("webhook-token"));
+    assert!(!outbound_debug.contains("telemetry-secret-value"));
+    assert!(!outbound_debug.contains("webhook-secret-value"));
     let RuntimeGatewayStateStore::Postgres { tls, .. } = &config.state_store else {
         panic!("expected postgres state store");
     };

@@ -3,7 +3,8 @@ use super::{
     RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, TestUpstream, app_paths_for_root,
-    runtime_gateway_test_admin_token, start_runtime_local_rewrite_proxy, temp_root,
+    runtime_gateway_test_admin_token, runtime_gateway_test_secret,
+    start_runtime_local_rewrite_proxy, temp_root,
 };
 use crate::TestEnvVarGuard;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_admin_route_explain::RUNTIME_GATEWAY_ROUTE_EXPLAIN_MAX_BODY_BYTES;
@@ -79,7 +80,7 @@ fn start_route_explain_gateway(
         gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
             url: Some(format!("http://{}/guardrail", upstream.addr)),
             phases: vec!["request".to_string()],
-            bearer_token: Some("route-explain-webhook-secret".to_string()),
+            bearer_token: Some(runtime_gateway_test_secret("route-explain-webhook-secret")),
             fail_closed: true,
         },
         gateway_call_id_header: Some("x-prodex-call-id".to_string()),

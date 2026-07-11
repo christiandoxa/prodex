@@ -38,7 +38,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
         gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig {
             url: Some("https://guardrails.example.test/check".to_string()),
             phases: vec!["request".to_string()],
-            bearer_token: Some("webhook-secret".to_string()),
+            bearer_token: Some(runtime_gateway_test_secret("webhook-secret")),
             fail_closed: true,
         },
         gateway_call_id_header: Some("x-prodex-call-id".to_string()),
@@ -47,7 +47,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
             jsonl_path: Some(root.join("gateway-observability.jsonl")),
             http_endpoint: Some("https://telemetry.example.test/ingest".to_string()),
             http_schema: "prodex.gateway.event.v1".to_string(),
-            http_bearer_token: Some("telemetry-secret".to_string()),
+            http_bearer_token: Some(runtime_gateway_test_secret("telemetry-secret")),
         },
     })
     .expect("gateway proxy should start");

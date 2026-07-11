@@ -25,7 +25,9 @@ mod observability;
 mod projected_credential;
 
 pub(super) use observability::emit_runtime_gateway_spend_event;
-pub(super) use projected_credential::runtime_local_rewrite_with_projected_provider_secret;
+pub(super) use projected_credential::{
+    runtime_gateway_with_outbound_secret, runtime_local_rewrite_with_projected_provider_secret,
+};
 use projected_credential::{
     runtime_local_rewrite_apply_projected_bearer, runtime_local_rewrite_apply_projected_header,
 };

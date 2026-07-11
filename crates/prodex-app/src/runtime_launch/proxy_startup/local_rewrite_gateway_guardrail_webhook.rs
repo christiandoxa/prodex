@@ -1,4 +1,5 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite_transport::runtime_gateway_with_outbound_secret;
 use super::*;
 use base64::Engine;
 use prodex_domain::{CallId, RequestId};
@@ -52,6 +53,35 @@ fn runtime_gateway_guardrail_webhook_error_kind(err: &reqwest::Error) -> &'stati
     }
 }
 
+fn runtime_gateway_guardrail_webhook_failure(
+    shared: &RuntimeLocalRewriteProxyShared,
+    phase: &str,
+    request_id: u64,
+    error_kind: &str,
+) -> Option<RuntimeGatewayGuardrailWebhookBlock> {
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_guardrail_webhook_failed",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("phase", phase),
+                runtime_proxy_log_field("endpoint", "redacted"),
+                runtime_proxy_log_field("error_kind", error_kind),
+            ],
+        ),
+    );
+    runtime_gateway_guardrail_webhook_failure_block(shared.gateway_guardrail_webhook.fail_closed)
+}
+
+fn runtime_gateway_guardrail_webhook_failure_block(
+    fail_closed: bool,
+) -> Option<RuntimeGatewayGuardrailWebhookBlock> {
+    fail_closed.then(|| RuntimeGatewayGuardrailWebhookBlock {
+        reason: "webhook_error".to_string(),
+    })
+}
+
 pub(super) fn runtime_gateway_guardrail_webhook_block(
     phase: &str,
     request_id: u64,
@@ -84,33 +114,31 @@ fn runtime_gateway_guardrail_webhook_decision(
         .post(url)
         .timeout(RUNTIME_GATEWAY_GUARDRAIL_WEBHOOK_TIMEOUT)
         .json(&payload);
-    if let Some(token) = shared.gateway_guardrail_webhook.bearer_token.as_deref() {
-        request = request.bearer_auth(token);
+    if let Some(secret) = shared.gateway_guardrail_webhook.bearer_token.as_ref() {
+        request = match runtime_gateway_with_outbound_secret(secret, |token| {
+            Ok(request.bearer_auth(token))
+        }) {
+            Ok(request) => request,
+            Err(_) => {
+                return runtime_gateway_guardrail_webhook_failure(
+                    shared,
+                    phase,
+                    request_id,
+                    "credential_resolution",
+                );
+            }
+        };
     }
     let response = match request.send() {
         Ok(response) => response,
         Err(err) => {
             let err = err.without_url();
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_guardrail_webhook_failed",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("phase", phase),
-                        runtime_proxy_log_field("endpoint", "redacted"),
-                        runtime_proxy_log_field(
-                            "error_kind",
-                            runtime_gateway_guardrail_webhook_error_kind(&err),
-                        ),
-                    ],
-                ),
+            return runtime_gateway_guardrail_webhook_failure(
+                shared,
+                phase,
+                request_id,
+                runtime_gateway_guardrail_webhook_error_kind(&err),
             );
-            return shared.gateway_guardrail_webhook.fail_closed.then(|| {
-                RuntimeGatewayGuardrailWebhookBlock {
-                    reason: "webhook_error".to_string(),
-                }
-            });
         }
     };
     let status = response.status();
@@ -212,5 +240,16 @@ mod tests {
             7
         );
         assert_ne!(payload["call_id"].as_str(), Some("prodex-42"));
+    }
+
+    #[test]
+    fn guardrail_webhook_failure_respects_fail_closed() {
+        assert!(runtime_gateway_guardrail_webhook_failure_block(false).is_none());
+        assert_eq!(
+            runtime_gateway_guardrail_webhook_failure_block(true)
+                .unwrap()
+                .reason,
+            "webhook_error"
+        );
     }
 }

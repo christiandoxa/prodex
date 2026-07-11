@@ -46,7 +46,7 @@ pub(super) use super::local_rewrite_model_memory::{
     RuntimeLocalRewriteModelMemoryState, runtime_local_rewrite_model_selection,
 };
 pub(crate) use super::local_rewrite_options::{
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
+    RuntimeGatewaySecret, RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
     RuntimeProjectedProviderCredential,
 };
 use super::local_rewrite_pipeline::run_runtime_local_rewrite_pipeline;
