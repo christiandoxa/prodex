@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::{
-    PrometheusTextOptions, RuntimeBrokerContinuationMetrics,
+    PrometheusTextOptions, RuntimeBrokerAllocationMetrics, RuntimeBrokerContinuationMetrics,
     RuntimeBrokerContinuationSignalMetrics, RuntimeBrokerContinuityFailureReasonMetrics,
     RuntimeBrokerLaneMetrics, RuntimeBrokerPreviousResponseContinuityMetrics,
     RuntimeBrokerRouteContinuityMetrics, RuntimeBrokerSnapshot, RuntimeBrokerStateLockWaitMetrics,
@@ -47,6 +47,16 @@ fn sample_snapshot() -> RuntimeBrokerSnapshot {
             wait_count: 1,
             wait_max_ns: 8_000_000,
         },
+        allocation: Some(RuntimeBrokerAllocationMetrics {
+            alloc_calls: 40,
+            realloc_calls: 5,
+            dealloc_calls: 30,
+            allocated_bytes: 4_000,
+            reallocated_bytes: 500,
+            deallocated_bytes: 3_000,
+            live_bytes: 1_500,
+            peak_live_bytes: 2_000,
+        }),
         traffic: RuntimeBrokerTrafficMetrics {
             responses: RuntimeBrokerLaneMetrics {
                 active: 3,
@@ -206,6 +216,16 @@ fn sample_broker_metrics() -> broker::RuntimeBrokerMetrics {
             wait_count: 3,
             wait_max_ns: 25,
         },
+        allocation: Some(broker::RuntimeBrokerAllocationMetrics {
+            alloc_calls: 40,
+            realloc_calls: 5,
+            dealloc_calls: 30,
+            allocated_bytes: 4_000,
+            reallocated_bytes: 500,
+            deallocated_bytes: 3_000,
+            live_bytes: 1_500,
+            peak_live_bytes: 2_000,
+        }),
         traffic: broker::RuntimeBrokerTrafficMetrics {
             responses: sample_broker_lane(3, 9),
             compact: sample_broker_lane(1, 3),
@@ -289,6 +309,7 @@ fn builds_prometheus_snapshot_from_broker_metrics() {
     assert_eq!(snapshot.profile_inflight.get("main"), Some(&3));
     assert_eq!(snapshot.admission_wait.wait_total_ns, 30);
     assert_eq!(snapshot.long_lived_queue_wait.wait_count, 3);
+    assert_eq!(snapshot.allocation.unwrap().reallocated_bytes, 500);
     assert_eq!(snapshot.continuations.response_bindings, 7);
     assert_eq!(
         snapshot
@@ -304,6 +325,37 @@ fn builds_prometheus_snapshot_from_broker_metrics() {
     );
     assert!(rendered.contains("prodex_runtime_broker_active_requests"));
     assert!(rendered.contains("broker_key=\"broker-123\""));
+}
+
+#[test]
+fn allocation_metrics_render_only_when_present_with_constant_cardinality() {
+    let rendered = render_runtime_broker_prometheus(&sample_snapshot());
+    let allocation_samples = rendered
+        .lines()
+        .filter(|line| line.starts_with("prodex_runtime_broker_allocation_"))
+        .count();
+
+    assert_eq!(allocation_samples, 8);
+    assert!(rendered.contains("# TYPE prodex_runtime_broker_allocation_alloc_calls_total counter"));
+    assert!(
+        rendered.contains("# TYPE prodex_runtime_broker_allocation_allocated_bytes_total counter")
+    );
+    assert!(rendered.contains("# TYPE prodex_runtime_broker_allocation_live_bytes gauge"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_alloc_calls_total"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_realloc_calls_total"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_dealloc_calls_total"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_allocated_bytes_total"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_reallocated_bytes_total"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_deallocated_bytes_total"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_live_bytes"));
+    assert!(rendered.contains("prodex_runtime_broker_allocation_peak_live_bytes"));
+    assert!(!rendered.contains("operation=\""));
+
+    let mut snapshot = sample_snapshot();
+    snapshot.allocation = None;
+    assert!(
+        !render_runtime_broker_prometheus(&snapshot).contains("prodex_runtime_broker_allocation_")
+    );
 }
 
 #[test]
