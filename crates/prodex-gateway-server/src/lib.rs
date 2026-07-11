@@ -26,10 +26,19 @@ use prodex_gateway_http::{
     classify_request_target,
 };
 use tokio::{
+    io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::{TcpListener, TcpStream},
     sync::{OwnedSemaphorePermit, Semaphore, watch},
     task::JoinSet,
     time::{Instant, timeout, timeout_at},
+};
+
+mod channel_body;
+mod in_process_upgrade;
+
+pub use channel_body::{GatewayResponseBodySender, bounded_response_body};
+pub use in_process_upgrade::{
+    GatewayInProcessUpgrade, GatewayInProcessUpgradeHandoff, bounded_in_process_upgrade,
 };
 
 pub type GatewayBoxError = Box<dyn Error + Send + Sync>;
@@ -76,7 +85,12 @@ pub struct GatewayHandlerRequest {
 /// Streaming response returned by an in-process gateway handler.
 pub struct GatewayHandlerResponse {
     pub response: Response<GatewayResponseBody>,
-    pub backend_upgrade: Option<upgrade::OnUpgrade>,
+    pub backend_upgrade: Option<GatewayHandlerUpgrade>,
+}
+
+pub enum GatewayHandlerUpgrade {
+    Backend(upgrade::OnUpgrade),
+    InProcess(GatewayInProcessUpgradeHandoff),
 }
 
 impl GatewayHandlerResponse {
@@ -103,7 +117,20 @@ impl GatewayHandlerResponse {
         B::Error: Error + Send + Sync + 'static,
     {
         let mut handled = Self::new(response);
-        handled.backend_upgrade = Some(backend_upgrade);
+        handled.backend_upgrade = Some(GatewayHandlerUpgrade::Backend(backend_upgrade));
+        handled
+    }
+
+    pub fn with_in_process_upgrade<B>(
+        response: Response<B>,
+        upgrade: GatewayInProcessUpgradeHandoff,
+    ) -> Self
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Error + Send + Sync + 'static,
+    {
+        let mut handled = Self::new(response);
+        handled.backend_upgrade = Some(GatewayHandlerUpgrade::InProcess(upgrade));
         handled
     }
 }
@@ -431,12 +458,24 @@ where
     if response.status() == StatusCode::SWITCHING_PROTOCOLS
         && let (Some(frontend_upgrade), Some(backend_upgrade)) = (frontend_upgrade, backend_upgrade)
     {
-        tokio::spawn(tunnel_upgrades(
-            frontend_upgrade,
-            backend_upgrade,
-            state.shutdown.clone(),
-            permit,
-        ));
+        match backend_upgrade {
+            GatewayHandlerUpgrade::Backend(backend_upgrade) => {
+                tokio::spawn(tunnel_upgrades(
+                    frontend_upgrade,
+                    backend_upgrade,
+                    state.shutdown.clone(),
+                    permit,
+                ));
+            }
+            GatewayHandlerUpgrade::InProcess(upgrade) => {
+                tokio::spawn(tunnel_in_process_upgrade(
+                    frontend_upgrade,
+                    upgrade,
+                    state.shutdown.clone(),
+                    permit,
+                ));
+            }
+        }
     }
     Ok(response)
 }
@@ -528,6 +567,50 @@ async fn tunnel_upgrades(
     tokio::select! {
         _ = shutdown.changed() => {}
         _ = tokio::io::copy_bidirectional(&mut frontend, &mut backend) => {}
+    }
+}
+
+async fn tunnel_in_process_upgrade(
+    frontend: upgrade::OnUpgrade,
+    handoff: GatewayInProcessUpgradeHandoff,
+    mut shutdown: watch::Receiver<bool>,
+    _permit: Arc<OwnedSemaphorePermit>,
+) {
+    let Ok(frontend) = (tokio::select! {
+        _ = shutdown.changed() => return,
+        frontend = frontend => frontend,
+    }) else {
+        return;
+    };
+    let (to_application, mut from_application) = handoff.into_channels();
+    let frontend = TokioIo::new(frontend);
+    let (mut frontend_read, mut frontend_write) = tokio::io::split(frontend);
+    let upload = async move {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            let read = frontend_read.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            if to_application
+                .send(Bytes::copy_from_slice(&buffer[..read]))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        Result::<(), std::io::Error>::Ok(())
+    };
+    let download = async move {
+        while let Some(bytes) = from_application.recv().await {
+            frontend_write.write_all(&bytes).await?;
+        }
+        frontend_write.shutdown().await
+    };
+    tokio::select! {
+        _ = shutdown.changed() => {}
+        _ = async { let _ = tokio::try_join!(upload, download); } => {}
     }
 }
 
