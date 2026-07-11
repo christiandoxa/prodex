@@ -2,7 +2,8 @@
 //! Async HTTP/1 compatibility front for a loopback Prodex gateway backend.
 
 use std::{
-    convert::Infallible, error::Error, future::Future, net::SocketAddr, sync::Arc, time::Duration,
+    convert::Infallible, error::Error, fmt, future::Future, net::SocketAddr, sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{Context as _, Result, ensure};
@@ -10,7 +11,7 @@ use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full, Limited, combinators::UnsyncBoxBody};
 use hyper::{
     Request, Response, StatusCode, Uri,
-    body::Incoming,
+    body::{Body, Incoming},
     header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, HeaderValue},
     server::conn::http1,
     service::service_fn,
@@ -21,7 +22,8 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
 };
 use prodex_gateway_http::{
-    CanonicalRequestTarget, GatewayHttpPolicy, GatewayHttpRoutePlane, classify_request_target,
+    CanonicalRequestTarget, GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane,
+    classify_request_target,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -30,9 +32,11 @@ use tokio::{
     time::{Instant, timeout, timeout_at},
 };
 
-type BoxError = Box<dyn Error + Send + Sync>;
-type ProxyClient = Client<HttpConnector, Limited<Incoming>>;
-type ProxyBody = UnsyncBoxBody<Bytes, BoxError>;
+pub type GatewayBoxError = Box<dyn Error + Send + Sync>;
+pub type GatewayRequestBody = Limited<Incoming>;
+pub type GatewayResponseBody = UnsyncBoxBody<Bytes, GatewayBoxError>;
+
+type ProxyClient = Client<HttpConnector, GatewayRequestBody>;
 
 const ROUTE_UNAVAILABLE: &[u8] =
     br#"{"error":{"code":"route_not_available","message":"route is not available"}}"#;
@@ -61,6 +65,66 @@ pub struct GatewayServerConfig {
     pub response_header_timeout: Duration,
     pub drain_timeout: Duration,
 }
+
+/// Canonical, route-classified request delivered to an in-process gateway handler.
+pub struct GatewayHandlerRequest {
+    pub target: CanonicalRequestTarget,
+    pub route: GatewayHttpRouteKind,
+    pub request: Request<GatewayRequestBody>,
+}
+
+/// Streaming response returned by an in-process gateway handler.
+pub struct GatewayHandlerResponse {
+    pub response: Response<GatewayResponseBody>,
+    pub backend_upgrade: Option<upgrade::OnUpgrade>,
+}
+
+impl GatewayHandlerResponse {
+    pub fn new<B>(response: Response<B>) -> Self
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Error + Send + Sync + 'static,
+    {
+        Self {
+            response: response.map(|body| {
+                body.map_err(|error| Box::new(error) as GatewayBoxError)
+                    .boxed_unsync()
+            }),
+            backend_upgrade: None,
+        }
+    }
+
+    pub fn with_backend_upgrade<B>(
+        response: Response<B>,
+        backend_upgrade: upgrade::OnUpgrade,
+    ) -> Self
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: Error + Send + Sync + 'static,
+    {
+        let mut handled = Self::new(response);
+        handled.backend_upgrade = Some(backend_upgrade);
+        handled
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GatewayHandlerError {
+    InvalidRequest,
+    InvalidRequestTarget,
+    RequestBodyTooLarge,
+    Unavailable,
+}
+
+impl fmt::Display for GatewayHandlerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "gateway handler failed")
+    }
+}
+
+impl Error for GatewayHandlerError {}
+
+pub type GatewayHandlerResult = std::result::Result<GatewayHandlerResponse, GatewayHandlerError>;
 
 impl GatewayServerConfig {
     pub fn production(listen_addr: SocketAddr, mode: GatewayServerMode) -> Self {
@@ -98,6 +162,19 @@ impl GatewayServerConfig {
 
 /// Runs the compatibility front until SIGINT or SIGTERM, then drains open connections.
 pub fn serve(config: GatewayServerConfig, backend_addr: SocketAddr) -> Result<()> {
+    let backend = LoopbackBackend::new(backend_addr)?;
+    serve_with_handler(config, move |request| {
+        let backend = backend.clone();
+        async move { backend.handle(request).await }
+    })
+}
+
+/// Runs the gateway with an in-process request handler until SIGINT or SIGTERM.
+pub fn serve_with_handler<H, Fut>(config: GatewayServerConfig, handler: H) -> Result<()>
+where
+    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
+{
     config.validate()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -107,38 +184,104 @@ pub fn serve(config: GatewayServerConfig, backend_addr: SocketAddr) -> Result<()
         let listener = TcpListener::bind(config.listen_addr)
             .await
             .context("failed to bind gateway server listener")?;
-        run(listener, config, backend_addr, shutdown_signal()).await
+        run_with_handler(listener, config, handler, shutdown_signal()).await
     })
 }
 
 #[derive(Clone)]
-struct ProxyState {
-    mode: GatewayServerMode,
-    backend_authority: hyper::http::uri::Authority,
-    backend_host: HeaderValue,
+struct LoopbackBackend {
+    authority: hyper::http::uri::Authority,
+    host: HeaderValue,
     client: ProxyClient,
+}
+
+impl LoopbackBackend {
+    fn new(backend_addr: SocketAddr) -> Result<Self> {
+        let backend = backend_addr.to_string();
+        Ok(Self {
+            authority: backend
+                .parse()
+                .context("failed to prepare gateway backend authority")?,
+            host: HeaderValue::from_str(&backend)
+                .context("failed to prepare gateway backend host header")?,
+            client: Client::builder(TokioExecutor::new()).build_http(),
+        })
+    }
+
+    async fn handle(&self, request: GatewayHandlerRequest) -> GatewayHandlerResult {
+        let GatewayHandlerRequest {
+            target,
+            route: _,
+            request,
+        } = request;
+        let (mut parts, body) = request.into_parts();
+        let mut uri_parts = parts.uri.into_parts();
+        uri_parts.scheme = Some(hyper::http::uri::Scheme::HTTP);
+        uri_parts.authority = Some(self.authority.clone());
+        uri_parts.path_and_query = Some(
+            target
+                .path_and_query()
+                .parse()
+                .map_err(|_| GatewayHandlerError::InvalidRequestTarget)?,
+        );
+        parts.uri = Uri::from_parts(uri_parts).map_err(|_| GatewayHandlerError::InvalidRequest)?;
+        parts.headers.insert(HOST, self.host.clone());
+
+        let mut response = self
+            .client
+            .request(Request::from_parts(parts, body))
+            .await
+            .map_err(|error| {
+                if caused_by_length_limit(&error) {
+                    GatewayHandlerError::RequestBodyTooLarge
+                } else {
+                    GatewayHandlerError::Unavailable
+                }
+            })?;
+        let backend_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
+            .then(|| upgrade::on(&mut response));
+        let (parts, body) = response.into_parts();
+        let response = Response::from_parts(parts, body);
+        Ok(match backend_upgrade {
+            Some(upgrade) => GatewayHandlerResponse::with_backend_upgrade(response, upgrade),
+            None => GatewayHandlerResponse::new(response),
+        })
+    }
+}
+
+struct ServerState<H> {
+    mode: GatewayServerMode,
+    handler: Arc<H>,
     max_request_body_bytes: usize,
     response_header_timeout: Duration,
     shutdown: watch::Receiver<bool>,
 }
 
-async fn run<F>(
+impl<H> Clone for ServerState<H> {
+    fn clone(&self) -> Self {
+        Self {
+            mode: self.mode,
+            handler: Arc::clone(&self.handler),
+            max_request_body_bytes: self.max_request_body_bytes,
+            response_header_timeout: self.response_header_timeout,
+            shutdown: self.shutdown.clone(),
+        }
+    }
+}
+
+async fn run_with_handler<F, H, Fut>(
     listener: TcpListener,
     config: GatewayServerConfig,
-    backend_addr: SocketAddr,
+    handler: H,
     shutdown: F,
 ) -> Result<()>
 where
     F: Future<Output = Result<()>>,
+    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
 {
     config.validate()?;
-    let backend = backend_addr.to_string();
-    let backend_authority: hyper::http::uri::Authority = backend
-        .parse()
-        .context("failed to prepare gateway backend authority")?;
-    let backend_host =
-        HeaderValue::from_str(&backend).context("failed to prepare gateway backend host header")?;
-    let client = Client::builder(TokioExecutor::new()).build_http();
+    let handler = Arc::new(handler);
     let connections = Arc::new(Semaphore::new(config.max_connections));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut tasks = JoinSet::new();
@@ -168,11 +311,9 @@ where
                 }
             }
         };
-        let state = ProxyState {
+        let state = ServerState {
             mode: config.mode,
-            backend_authority: backend_authority.clone(),
-            backend_host: backend_host.clone(),
-            client: client.clone(),
+            handler: Arc::clone(&handler),
             max_request_body_bytes: config.max_request_body_bytes,
             response_header_timeout: config.response_header_timeout,
             shutdown: shutdown_rx.clone(),
@@ -203,11 +344,19 @@ where
     stop_result
 }
 
-async fn serve_connection(stream: TcpStream, state: ProxyState, permit: OwnedSemaphorePermit) {
+async fn serve_connection<H, Fut>(
+    stream: TcpStream,
+    state: ServerState<H>,
+    permit: OwnedSemaphorePermit,
+) where
+    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
+{
     let permit = Arc::new(permit);
     let mut shutdown = state.shutdown.clone();
-    let service =
-        service_fn(move |request| proxy_request(request, state.clone(), Arc::clone(&permit)));
+    let service = service_fn(move |request| {
+        handle_ingress_request(request, state.clone(), Arc::clone(&permit))
+    });
     let connection = http1::Builder::new()
         .serve_connection(TokioIo::new(stream), service)
         .with_upgrades();
@@ -221,11 +370,15 @@ async fn serve_connection(stream: TcpStream, state: ProxyState, permit: OwnedSem
     }
 }
 
-async fn proxy_request(
+async fn handle_ingress_request<H, Fut>(
     mut request: Request<Incoming>,
-    state: ProxyState,
+    state: ServerState<H>,
     permit: Arc<OwnedSemaphorePermit>,
-) -> Result<Response<ProxyBody>, Infallible> {
+) -> Result<Response<GatewayResponseBody>, Infallible>
+where
+    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
+{
     if request.uri().scheme().is_some() || request.uri().authority().is_some() {
         return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET));
     }
@@ -242,6 +395,7 @@ async fn proxy_request(
     if !route_allowed(state.mode, route.plane) {
         return Ok(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE));
     }
+    let route = route.kind;
     match content_length(&request) {
         Err(()) => return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)),
         Ok(Some(length)) if length > state.max_request_body_bytes as u64 => {
@@ -254,37 +408,29 @@ async fn proxy_request(
         .headers()
         .contains_key(hyper::header::UPGRADE)
         .then(|| upgrade::on(&mut request));
-    let (mut parts, body) = request.into_parts();
-    let mut uri_parts = parts.uri.into_parts();
-    uri_parts.scheme = Some(hyper::http::uri::Scheme::HTTP);
-    uri_parts.authority = Some(state.backend_authority.clone());
-    let Ok(path_and_query) = target.path_and_query().parse() else {
-        return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET));
+    let (parts, body) = request.into_parts();
+    let request = GatewayHandlerRequest {
+        target,
+        route,
+        request: Request::from_parts(parts, Limited::new(body, state.max_request_body_bytes)),
     };
-    uri_parts.path_and_query = Some(path_and_query);
-    let Ok(uri) = Uri::from_parts(uri_parts) else {
-        return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST));
-    };
-    parts.uri = uri;
-    parts.headers.insert(HOST, state.backend_host.clone());
-    let request = Request::from_parts(parts, Limited::new(body, state.max_request_body_bytes));
-
-    let mut response =
-        match timeout(state.response_header_timeout, state.client.request(request)).await {
-            Err(_) => return Ok(json_error(StatusCode::GATEWAY_TIMEOUT, BACKEND_TIMEOUT)),
-            Ok(Err(error)) if caused_by_length_limit(&error) => {
-                return Ok(json_error(StatusCode::PAYLOAD_TOO_LARGE, BODY_TOO_LARGE));
-            }
-            Ok(Err(_)) => {
-                return Ok(json_error(StatusCode::BAD_GATEWAY, BACKEND_UNAVAILABLE));
-            }
-            Ok(Ok(response)) => response,
-        };
-
-    if response.status() == StatusCode::SWITCHING_PROTOCOLS
-        && let Some(frontend_upgrade) = frontend_upgrade
+    let handled = match timeout(
+        state.response_header_timeout,
+        (state.handler.as_ref())(request),
+    )
+    .await
     {
-        let backend_upgrade = upgrade::on(&mut response);
+        Err(_) => return Ok(json_error(StatusCode::GATEWAY_TIMEOUT, BACKEND_TIMEOUT)),
+        Ok(Err(error)) => return Ok(handler_error_response(error)),
+        Ok(Ok(handled)) => handled,
+    };
+    let GatewayHandlerResponse {
+        response,
+        backend_upgrade,
+    } = handled;
+    if response.status() == StatusCode::SWITCHING_PROTOCOLS
+        && let (Some(frontend_upgrade), Some(backend_upgrade)) = (frontend_upgrade, backend_upgrade)
+    {
         tokio::spawn(tunnel_upgrades(
             frontend_upgrade,
             backend_upgrade,
@@ -292,12 +438,22 @@ async fn proxy_request(
             permit,
         ));
     }
-    let (parts, body) = response.into_parts();
-    Ok(Response::from_parts(
-        parts,
-        body.map_err(|error| Box::new(error) as BoxError)
-            .boxed_unsync(),
-    ))
+    Ok(response)
+}
+
+fn handler_error_response(error: GatewayHandlerError) -> Response<GatewayResponseBody> {
+    match error {
+        GatewayHandlerError::InvalidRequest => json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST),
+        GatewayHandlerError::InvalidRequestTarget => {
+            json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST_TARGET)
+        }
+        GatewayHandlerError::RequestBodyTooLarge => {
+            json_error(StatusCode::PAYLOAD_TOO_LARGE, BODY_TOO_LARGE)
+        }
+        GatewayHandlerError::Unavailable => {
+            json_error(StatusCode::BAD_GATEWAY, BACKEND_UNAVAILABLE)
+        }
+    }
 }
 
 fn route_allowed(mode: GatewayServerMode, plane: GatewayHttpRoutePlane) -> bool {
@@ -333,10 +489,10 @@ fn caused_by_length_limit(error: &(dyn Error + 'static)) -> bool {
     false
 }
 
-fn json_error(status: StatusCode, body: &'static [u8]) -> Response<ProxyBody> {
+fn json_error(status: StatusCode, body: &'static [u8]) -> Response<GatewayResponseBody> {
     let mut response = Response::new(
         Full::new(Bytes::from_static(body))
-            .map_err(|error: Infallible| -> BoxError { match error {} })
+            .map_err(|error: Infallible| -> GatewayBoxError { match error {} })
             .boxed_unsync(),
     );
     *response.status_mut() = status;
