@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::SecretError;
 
-const PROJECTED_SECRET_MAX_BYTES: u64 = 64 * 1024;
+pub(crate) const PROJECTED_SECRET_MAX_BYTES: u64 = 64 * 1024;
 const PROJECTED_VERSION_MAX_BYTES: u64 = 128;
 
 #[derive(Clone)]
@@ -46,6 +46,10 @@ impl ProjectedSecretProvider {
         })
     }
 
+    pub(crate) fn provider_name(&self) -> &str {
+        &self.provider_name
+    }
+
     fn resolve_path(&self, relative: &str) -> Result<PathBuf, SecretResolutionError> {
         let relative = Path::new(relative);
         if relative.components().next().is_none()
@@ -62,7 +66,7 @@ impl ProjectedSecretProvider {
         Ok(resolved)
     }
 
-    fn read_projected_file(
+    pub(crate) fn read_projected_file(
         &self,
         relative: &str,
         max_bytes: u64,

@@ -1,3 +1,4 @@
+mod development_provider;
 mod file_backend;
 mod keyring_backend;
 mod locations;
@@ -6,6 +7,7 @@ mod projected_provider;
 mod refresh_lease;
 mod selection;
 
+pub use self::development_provider::*;
 pub use self::file_backend::*;
 pub use self::keyring_backend::*;
 pub use self::locations::*;
