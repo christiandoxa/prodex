@@ -76,6 +76,10 @@ pub struct RuntimeBrokerMetrics {
     pub local_overload_backoff_remaining_seconds: u64,
     #[serde(default)]
     pub runtime_state_lock_wait: RuntimeStateLockWaitMetrics,
+    #[serde(default)]
+    pub admission_wait: RuntimeWaitDurationMetrics,
+    #[serde(default)]
+    pub long_lived_queue_wait: RuntimeWaitDurationMetrics,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: BTreeMap<String, usize>,
     #[serde(default)]
@@ -107,6 +111,8 @@ pub struct RuntimeBrokerMetricsSnapshotInput<'a> {
     pub active_request_limit: usize,
     pub local_overload_backoff_remaining_seconds: u64,
     pub runtime_state_lock_wait: RuntimeStateLockWaitMetrics,
+    pub admission_wait: RuntimeWaitDurationMetrics,
+    pub long_lived_queue_wait: RuntimeWaitDurationMetrics,
     pub traffic: RuntimeBrokerTrafficMetrics,
     pub profile_inflight: &'a BTreeMap<String, usize>,
     pub profile_retry_backoff_until: &'a BTreeMap<String, i64>,
@@ -140,6 +146,8 @@ pub fn runtime_broker_metrics_from_snapshot_input(
         active_request_limit: input.active_request_limit,
         local_overload_backoff_remaining_seconds: input.local_overload_backoff_remaining_seconds,
         runtime_state_lock_wait: input.runtime_state_lock_wait,
+        admission_wait: input.admission_wait,
+        long_lived_queue_wait: input.long_lived_queue_wait,
         traffic: input.traffic,
         profile_inflight: input.profile_inflight.clone(),
         active_request_release_underflows_total: 0,

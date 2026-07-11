@@ -5,8 +5,9 @@
 
 use prodex_runtime_state::{
     RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
-    RuntimeContinuationStatuses, RuntimeProfileHealth, RuntimeStateLockWaitMetrics,
+    RuntimeContinuationStatuses, RuntimeProfileHealth,
 };
+pub use prodex_runtime_state::{RuntimeStateLockWaitMetrics, RuntimeWaitDurationMetrics};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;

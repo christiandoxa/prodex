@@ -82,6 +82,16 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
             wait_count: 1,
             wait_max_ns: 10,
         },
+        admission_wait: RuntimeWaitDurationMetrics {
+            wait_total_ns: 20,
+            wait_count: 2,
+            wait_max_ns: 15,
+        },
+        long_lived_queue_wait: RuntimeWaitDurationMetrics {
+            wait_total_ns: 30,
+            wait_count: 3,
+            wait_max_ns: 18,
+        },
         traffic,
         profile_inflight: &profile_inflight,
         profile_retry_backoff_until: &BTreeMap::from([("main".to_string(), 101)]),
@@ -108,6 +118,8 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
     assert_eq!(metrics.health.pid, 42);
     assert_eq!(metrics.health.persistence_role, "owner");
     assert_eq!(metrics.health.active_requests, 3);
+    assert_eq!(metrics.admission_wait.wait_total_ns, 20);
+    assert_eq!(metrics.long_lived_queue_wait.wait_count, 3);
     assert_eq!(metrics.profile_inflight.get("main"), Some(&2));
     assert_eq!(metrics.retry_backoffs, 1);
     assert_eq!(metrics.transport_backoffs, 1);

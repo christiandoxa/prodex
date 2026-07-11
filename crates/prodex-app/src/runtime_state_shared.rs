@@ -33,7 +33,7 @@ pub(crate) use prodex_runtime_state::{
     RuntimeContinuationBindingLifecycle, RuntimeContinuationBindingStatus,
     RuntimeContinuationStatuses, RuntimeProbeCacheFreshness, RuntimeProfileBackoffs,
     RuntimeProfileHealth, RuntimeRouteKind, RuntimeStateLockWaitMetricCounters,
-    RuntimeStateLockWaitMetrics,
+    RuntimeStateLockWaitMetrics, RuntimeWaitDurationMetricCounters,
 };
 pub(crate) use prodex_shared_types::RuntimeProfileProbeCacheEntry;
 

@@ -236,6 +236,36 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait(
     acquire_runtime_proxy_active_request_slot_with_wait_for_request(shared, transport, path, None)
 }
 
+struct RuntimeProxyWaitMetricGuard<'a> {
+    metrics: &'a RuntimeWaitDurationMetricCounters,
+    started_at: Option<Instant>,
+}
+
+impl<'a> RuntimeProxyWaitMetricGuard<'a> {
+    fn new(metrics: &'a RuntimeWaitDurationMetricCounters) -> Self {
+        Self {
+            metrics,
+            started_at: None,
+        }
+    }
+
+    fn started(&self) -> bool {
+        self.started_at.is_some()
+    }
+
+    fn start(&mut self) {
+        self.started_at.get_or_insert_with(Instant::now);
+    }
+}
+
+impl Drop for RuntimeProxyWaitMetricGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(started_at) = self.started_at {
+            self.metrics.record_wait(started_at.elapsed());
+        }
+    }
+}
+
 pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
     shared: &RuntimeRotationProxyShared,
     transport: &str,
@@ -250,11 +280,12 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
         pressure_mode,
         &shared.runtime_config,
     );
-    let mut waited = false;
+    let mut wait_metric =
+        RuntimeProxyWaitMetricGuard::new(shared.lane_admission.admission_wait_metrics.as_ref());
     loop {
         match probe_runtime_proxy_active_request_slot(shared, transport, path, request) {
             Ok(guard) => {
-                if waited {
+                if wait_metric.started() {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -284,7 +315,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                     record_runtime_proxy_admission_rejection(shared, transport, path, rejection);
                     return Err(rejection);
                 }
-                if !waited {
+                if !wait_metric.started() {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -299,8 +330,8 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                             }
                         ),
                     );
+                    wait_metric.start();
                 }
-                waited = true;
                 let (mutex, condvar) = &*shared.lane_admission.wait;
                 let wait_guard = mutex
                     .lock()
@@ -339,11 +370,13 @@ where
         pressure_mode,
         &shared.runtime_config,
     );
-    let mut waited = false;
+    let mut wait_metric = RuntimeProxyWaitMetricGuard::new(
+        shared.lane_admission.long_lived_queue_wait_metrics.as_ref(),
+    );
     loop {
         match try_enqueue(item) {
             Ok(()) => {
-                if waited {
+                if wait_metric.started() {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -367,7 +400,7 @@ where
                     );
                     return Err((RuntimeProxyQueueRejection::Full, item));
                 }
-                if !waited {
+                if !wait_metric.started() {
                     runtime_proxy_log(
                         shared,
                         format!(
@@ -376,8 +409,8 @@ where
                             budget.saturating_sub(elapsed).as_millis()
                         ),
                     );
+                    wait_metric.start();
                 }
-                waited = true;
                 let (mutex, condvar) = &*shared.lane_admission.wait;
                 let wait_guard = mutex
                     .lock()

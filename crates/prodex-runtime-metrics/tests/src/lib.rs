@@ -6,9 +6,10 @@ use crate::{
     RuntimeBrokerContinuationSignalMetrics, RuntimeBrokerContinuityFailureReasonMetrics,
     RuntimeBrokerLaneMetrics, RuntimeBrokerPreviousResponseContinuityMetrics,
     RuntimeBrokerRouteContinuityMetrics, RuntimeBrokerSnapshot, RuntimeBrokerStateLockWaitMetrics,
-    RuntimeBrokerTrafficMetrics, format_runtime_broker_snapshot_summary,
-    render_runtime_broker_prometheus, render_runtime_broker_prometheus_from_metrics,
-    render_runtime_broker_prometheus_with_options, runtime_broker_prometheus_snapshot,
+    RuntimeBrokerTrafficMetrics, RuntimeBrokerWaitDurationMetrics,
+    format_runtime_broker_snapshot_summary, render_runtime_broker_prometheus,
+    render_runtime_broker_prometheus_from_metrics, render_runtime_broker_prometheus_with_options,
+    runtime_broker_prometheus_snapshot,
 };
 use prodex_runtime_broker as broker;
 
@@ -35,6 +36,16 @@ fn sample_snapshot() -> RuntimeBrokerSnapshot {
             wait_total_ns: 25_000_000,
             wait_count: 3,
             wait_max_ns: 10_000_000,
+        },
+        admission_wait: RuntimeBrokerWaitDurationMetrics {
+            wait_total_ns: 15_000_000,
+            wait_count: 2,
+            wait_max_ns: 9_000_000,
+        },
+        long_lived_queue_wait: RuntimeBrokerWaitDurationMetrics {
+            wait_total_ns: 8_000_000,
+            wait_count: 1,
+            wait_max_ns: 8_000_000,
         },
         traffic: RuntimeBrokerTrafficMetrics {
             responses: RuntimeBrokerLaneMetrics {
@@ -185,6 +196,16 @@ fn sample_broker_metrics() -> broker::RuntimeBrokerMetrics {
         active_request_limit: 12,
         local_overload_backoff_remaining_seconds: 0,
         runtime_state_lock_wait: Default::default(),
+        admission_wait: broker::RuntimeWaitDurationMetrics {
+            wait_total_ns: 30,
+            wait_count: 2,
+            wait_max_ns: 20,
+        },
+        long_lived_queue_wait: broker::RuntimeWaitDurationMetrics {
+            wait_total_ns: 40,
+            wait_count: 3,
+            wait_max_ns: 25,
+        },
         traffic: broker::RuntimeBrokerTrafficMetrics {
             responses: sample_broker_lane(3, 9),
             compact: sample_broker_lane(1, 3),
@@ -266,6 +287,8 @@ fn builds_prometheus_snapshot_from_broker_metrics() {
     assert_eq!(snapshot.traffic.responses.active, 3);
     assert_eq!(snapshot.traffic.responses.limit, 9);
     assert_eq!(snapshot.profile_inflight.get("main"), Some(&3));
+    assert_eq!(snapshot.admission_wait.wait_total_ns, 30);
+    assert_eq!(snapshot.long_lived_queue_wait.wait_count, 3);
     assert_eq!(snapshot.continuations.response_bindings, 7);
     assert_eq!(
         snapshot
@@ -296,6 +319,24 @@ fn renders_prometheus_text_with_help_and_labels() {
     assert!(rendered.contains(
             "prodex_runtime_broker_runtime_state_lock_wait_max_seconds{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 0.01"
         ));
+    assert!(rendered.contains(
+        "prodex_runtime_broker_admission_wait_total_seconds{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 0.015"
+    ));
+    assert!(rendered.contains(
+        "prodex_runtime_broker_admission_waits_total{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 2"
+    ));
+    assert!(rendered.contains(
+        "prodex_runtime_broker_admission_wait_max_seconds{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 0.009"
+    ));
+    assert!(rendered.contains(
+        "prodex_runtime_broker_long_lived_queue_wait_total_seconds{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 0.008"
+    ));
+    assert!(rendered.contains(
+        "prodex_runtime_broker_long_lived_queue_waits_total{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 1"
+    ));
+    assert!(rendered.contains(
+        "prodex_runtime_broker_long_lived_queue_wait_max_seconds{broker_key=\"broker-123\",listen_addr=\"127.0.0.1:8080\"} 0.008"
+    ));
     assert!(rendered.contains("prodex_runtime_broker_lane_admissions_total"));
     assert!(rendered.contains("prodex_runtime_broker_lane_releases_total"));
     assert!(rendered.contains("prodex_runtime_broker_lane_global_limit_rejections_total"));
