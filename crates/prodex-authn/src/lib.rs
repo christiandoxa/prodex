@@ -6,10 +6,16 @@
 //! no discovery, JWKS fetch, HTTP, filesystem, database, or async-runtime work.
 
 mod compatibility;
+mod evidence;
 
 pub use compatibility::{
     CompatibilityAuthenticationError, CompatibilityAuthenticationRequest,
     authenticate_compatibility_request,
+};
+pub use evidence::{
+    VerifiedCredentialAuthenticationError, VerifiedCredentialAuthenticationRequest,
+    VerifiedCredentialEvidence, VerifiedOidcCredentialEvidence, VerifiedOidcRoleEvidence,
+    authenticate_verified_credential,
 };
 
 use std::error::Error;
@@ -616,6 +622,27 @@ pub fn authenticate_oidc_claims(
     claims: TokenClaims,
     now_unix_ms: u64,
 ) -> Result<Principal, AuthenticationError> {
+    validate_oidc_token_claims(policy, jwks_snapshot, &claims, now_unix_ms)?;
+    let tenant_id = claims.tenant_id.ok_or(AuthenticationError::MissingTenant)?;
+    let role = role_mapper
+        .role_for_claim(claims.role_claim.as_deref())
+        .map_err(AuthenticationError::Role)?;
+
+    Ok(Principal::new(
+        claims.principal_id,
+        Some(tenant_id),
+        claims.principal_kind,
+        role,
+        claims.credential_scope,
+    ))
+}
+
+pub fn validate_oidc_token_claims(
+    policy: &OidcValidationPolicy,
+    jwks_snapshot: Option<&JwksCacheSnapshot>,
+    claims: &TokenClaims,
+    now_unix_ms: u64,
+) -> Result<(), AuthenticationError> {
     require_usable_jwks(jwks_snapshot, now_unix_ms)?;
     if !claims.signature_verified {
         return Err(AuthenticationError::SignatureNotVerified);
@@ -634,18 +661,7 @@ pub fn authenticate_oidc_claims(
     policy
         .validate_claims(&claims.issuer, &claims.audience, claims.algorithm)
         .map_err(AuthenticationError::Claims)?;
-    let tenant_id = claims.tenant_id.ok_or(AuthenticationError::MissingTenant)?;
-    let role = role_mapper
-        .role_for_claim(claims.role_claim.as_deref())
-        .map_err(AuthenticationError::Role)?;
-
-    Ok(Principal::new(
-        claims.principal_id,
-        Some(tenant_id),
-        claims.principal_kind,
-        role,
-        claims.credential_scope,
-    ))
+    Ok(())
 }
 
 fn token_key_id_is_well_formed(key_id: &str) -> bool {
