@@ -105,7 +105,9 @@ cargo test -q --workspace --all-features -- --test-threads=1
 database-backed storage race proof. It first verifies its branch-selection
 logic without starting Docker, then uses `PRODEX_TEST_POSTGRES_URL` when
 provided, or starts a temporary local Postgres container when Docker and `psql`
-are available.
+are available. Heavy CI runs this proof as a required step before the backup and
+restore drill, so storage/runtime changes cannot pass by silently skipping the
+database concurrency evidence.
 Add `-- --storage-postgres-proof` to `npm run ci:preflight` (or set
 `PRODEX_PREFLIGHT_STORAGE_POSTGRES_PROOF=1`) when you want that proof included
 in the standard local preflight run.

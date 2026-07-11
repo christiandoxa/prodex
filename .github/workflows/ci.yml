@@ -282,6 +282,9 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
 
+      - name: Run PostgreSQL accounting concurrency proof
+        run: npm run ci:storage-postgres-proof
+
       - name: Run PostgreSQL backup and restore drill
         run: npm run ci:backup-restore-drill
 
