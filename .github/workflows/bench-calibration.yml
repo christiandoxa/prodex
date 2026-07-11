@@ -68,21 +68,23 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Install Rust toolchain
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Cache Rust dependencies
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Collect benchmark log
         id: collect
@@ -244,7 +246,7 @@ jobs:
 
       - name: Upload calibration artifact
         if: ${{ always() && steps.collect.outputs.artifact_dir != '' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bench-calibration-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.collect.outputs.artifact_dir }}

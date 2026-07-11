@@ -27,22 +27,24 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Run full local test suite
         shell: bash
@@ -114,8 +116,8 @@ jobs:
             \( -name 'prodex-runtime-*.log' -o -name 'prodex-runtime-latest.path' \) \
             | sort > "${artifact_dir}/runtime-log-files.txt" || true
 
-          cargo run -q --all-features -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
-          cargo run -q --all-features -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
+          cargo run --locked -q --all-features -- doctor --runtime > "${artifact_dir}/doctor-runtime.txt" 2>&1 || true
+          cargo run --locked -q --all-features -- doctor --runtime --json > "${artifact_dir}/doctor-runtime.json" 2> "${artifact_dir}/doctor-runtime-json.stderr" || true
 
           echo "Full test suite failed. Recent cargo output:"
           cat "${artifact_dir}/cargo-test-tail.txt"
@@ -130,7 +132,7 @@ jobs:
 
       - name: Upload full-test diagnostics
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: full-test-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/full-test-diagnostics
