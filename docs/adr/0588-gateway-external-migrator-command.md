@@ -17,15 +17,19 @@ Add `prodex-gateway migrate` as the external migration entrypoint. The command
 executes the versioned storage migration plans for:
 
 - `--backend sqlite --path <PATH>`
+- `--backend postgres --url-ref <NAME> --secret-provider <PROVIDER> --secret-root <PATH>`
 - `--backend postgres --url-env <ENV>`
 
-The production Kubernetes migration Job now runs
-`prodex-gateway migrate --backend postgres --url-env PRODEX_GATEWAY_POSTGRES_URL`
-with migration-only credentials.
+The production Kubernetes migration Job uses the projected-reference form. It mounts the
+migration-only Secret read-only at `/run/secrets/prodex`; the URL is resolved through the hardened
+projected provider and never enters argv or the process environment. `--url-env` remains only as a
+backward-compatible development/restore-drill input.
 
 ## Consequences
 
 - Production manifests no longer advertise a placeholder migration path.
 - Gateway request-serving open paths remain DDL-free; migrations run through the
   dedicated external migrator command.
+- Migration connection material stays in a bounded, zeroizing `SecretMaterial` until the database
+  adapter consumes it.
 - The serving subcommand remains gated until the async gateway adapter is wired.

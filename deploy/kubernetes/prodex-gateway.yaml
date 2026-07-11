@@ -417,6 +417,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -426,13 +427,14 @@ spec:
           args:
             - "--backend"
             - "postgres"
-            - "--url-env"
+            - "--url-ref"
             - "PRODEX_GATEWAY_POSTGRES_URL"
+            - "--secret-provider"
+            - "kubernetes"
+            - "--secret-root"
+            - "/run/secrets/prodex"
             - "--tls-mode"
             - "verify-full"
-          envFrom:
-            - secretRef:
-                name: prodex-gateway-migration-secrets
           resources:
             requests:
               cpu: 100m
@@ -445,6 +447,20 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-gateway-migration-secrets
+              mountPath: /run/secrets/prodex
+              readOnly: true
+      volumes:
+        - name: prodex-gateway-migration-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: prodex-gateway-migration-secrets
+                  items:
+                    - key: PRODEX_GATEWAY_POSTGRES_URL
+                      path: PRODEX_GATEWAY_POSTGRES_URL
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

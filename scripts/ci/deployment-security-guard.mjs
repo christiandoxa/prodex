@@ -41,7 +41,9 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ['command: ["prodex-gateway", "migrate"]', "explicit gateway migration command"],
   ['"--backend"', "gateway migration backend flag"],
   ['"postgres"', "gateway migration postgres backend"],
-  ['"--url-env"', "gateway migration URL env flag"],
+  ['"--url-ref"', "gateway migration projected URL reference flag"],
+  ['"--secret-provider"', "gateway migration projected secret provider flag"],
+  ['"--secret-root"', "gateway migration projected secret root flag"],
   ['"--tls-mode"', "gateway migration TLS mode flag"],
   ['"verify-full"', "gateway migration certificate and hostname verification"],
   ["name: prodex-gateway-migration", "migration job and network policy surface"],
@@ -367,6 +369,15 @@ export function validateDeploymentSecurity(inputs) {
     if (/^\s*serviceAccountName:\s*prodex-gateway\s*$/mu.test(migrationJob)) {
       checks.push(`${kubernetesPath}: migration Job must not use prodex-gateway service account`);
     }
+    if (/envFrom:[\s\S]*?secretRef:\s*\n\s*name:\s*prodex-gateway-migration-secrets/u.test(migrationJob)) {
+      checks.push(`${kubernetesPath}: migration database URL must not be consumed through envFrom`);
+    }
+    if (!/mountPath:\s*\/run\/secrets\/prodex[\s\S]*?readOnly:\s*true/u.test(migrationJob)) {
+      checks.push(`${kubernetesPath}: migration Job must mount projected secrets read-only`);
+    }
+    if (!/name:\s*prodex-gateway-migration-secrets[\s\S]*?projected:\s*\n[\s\S]*?defaultMode:\s*0440/u.test(migrationJob)) {
+      checks.push(`${kubernetesPath}: migration Job must use a private projected Secret volume`);
+    }
   }
   const controlPlanePolicies = kubernetesDocumentsByKindAndName(
     kubernetes,
@@ -657,11 +668,23 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migration
+          args: ["--backend", "postgres", "--url-ref", "PRODEX_GATEWAY_POSTGRES_URL", "--secret-provider", "kubernetes", "--secret-root", "/run/secrets/prodex", "--tls-mode", "verify-full"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: prodex-gateway-migration-secrets
+              mountPath: /run/secrets/prodex
+              readOnly: true
+      volumes:
+        - name: prodex-gateway-migration-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: prodex-gateway-migration-secrets
 ---
 kind: ServiceAccount
 kind: Service
@@ -702,7 +725,9 @@ image: repo/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177
 command: ["prodex-gateway", "migrate"]
 "--backend"
 "postgres"
-"--url-env"
+"--url-ref"
+"--secret-provider"
+"--secret-root"
 "--tls-mode"
 "verify-full"
 name: prodex-gateway-migration
@@ -1109,9 +1134,19 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("name: prodex-gateway-migration-secrets", ""),
+      kubernetes: valid.kubernetes.replaceAll("name: prodex-gateway-migration-secrets", ""),
     }).some((error) => error.includes("migration-only database secret")),
     "missing migration-only database secret accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "        - name: migration\n          args:",
+        "        - name: migration\n          envFrom:\n            - secretRef:\n                name: prodex-gateway-migration-secrets\n          args:",
+      ),
+    }).some((error) => error.includes("migration database URL must not be consumed through envFrom")),
+    "migration database URL envFrom accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({

@@ -88,9 +88,8 @@ secret-bearing CLI flags and capabilities interpolated into URL queries,
 paths, or userinfo. Four existing provider/gateway compatibility flag sites
 remain as a fixed, non-growing budget until their public migration is planned.
 
-Production gateway workloads already resolve `SecretRef` values from projected
-files under `/run/secrets/prodex`. The external migration binary still exposes
-only `--url-env`, and the zero-replica control-plane manifest is still a
-placeholder. Those two adapters remain explicit follow-up work; a shell wrapper
-that copies file contents back into the process environment is not an acceptable
-substitute for a typed `SecretRef` boundary.
+Production gateway workloads and the external PostgreSQL migrator resolve `SecretRef` values from
+projected files under `/run/secrets/prodex`; the migration Job does not inject its database URL
+through `envFrom`. The zero-replica control-plane manifest remains an explicit follow-up until its
+dedicated production policy and typed secret adapter are wired. A shell wrapper that copies file
+contents back into the process environment is not an acceptable substitute.
