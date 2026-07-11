@@ -1,3 +1,8 @@
+#[cfg(feature = "allocation-bench-support")]
+#[global_allocator]
+static RUNTIME_ALLOCATION_BENCH_ALLOCATOR: prodex_bench_support::CountingGlobalAllocator =
+    prodex_bench_support::CountingGlobalAllocator::new();
+
 #[cfg(all(target_os = "linux", target_env = "gnu", not(test)))]
 unsafe extern "C" {
     fn malloc_trim(pad: usize) -> i32;

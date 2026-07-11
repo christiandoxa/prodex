@@ -188,6 +188,7 @@ zeroize = "1.9.0"
 [features]
 default = []
 bench-support = ["prodex_app/bench-support"]
+allocation-bench-support = ["prodex_app/allocation-bench-support"]
 
 [dependencies]
 prodex_app = { workspace = true }

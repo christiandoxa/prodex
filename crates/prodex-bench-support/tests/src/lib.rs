@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn counting_allocator_reports_allocations_without_retaining_pointers() {
+    let before = runtime_allocation_snapshot();
+    let bytes = std::hint::black_box(vec![0_u8; 4_096].into_boxed_slice());
+    let allocated = runtime_allocation_snapshot();
+
+    assert!(allocated.alloc_calls > before.alloc_calls);
+    assert!(
+        allocated
+            .allocated_bytes
+            .saturating_sub(before.allocated_bytes)
+            >= 4_096
+    );
+    assert!(allocated.allocation_operations() > before.allocation_operations());
+
+    drop(bytes);
+    let deallocated = runtime_allocation_snapshot();
+    assert!(deallocated.dealloc_calls > allocated.dealloc_calls);
+    assert!(
+        deallocated
+            .deallocated_bytes
+            .saturating_sub(allocated.deallocated_bytes)
+            >= 4_096
+    );
+}
+
+#[test]
 fn runtime_proxy_hot_path_bench_check_config_normalizes_zero_values() {
     let config = RuntimeProxyHotPathBenchCheckConfig {
         samples: 0,

@@ -15,6 +15,7 @@ doctest = false
 [features]
 default = []
 bench-support = ["dep:prodex_bench_support"]
+allocation-bench-support = ["dep:prodex_bench_support"]
 
 [dependencies]
 anyhow = { workspace = true }
