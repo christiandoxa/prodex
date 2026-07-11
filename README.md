@@ -333,7 +333,7 @@ prodex caveman rtk ponytail --full-access
 
 Answer `y` at the Presidio prompt, or pass `--presidio`, to add runtime PII redaction. Use `--no-presidio` for non-interactive launches. Full access maps to Codex's sandbox bypass and trusts only the launch directory for that session.
 
-`prodex s expose` starts a token-protected browser terminal and uses a Cloudflare quick tunnel when `cloudflared` is available. Add `--no-tunnel` for loopback-only access.
+`prodex s expose` starts a loopback-only browser terminal with a one-time session URL. Add `--tunnel` to explicitly publish the remote shell through a Cloudflare quick tunnel; the local listener remains bound to loopback.
 
 Smart Context preserves continuation metadata and critical signals while applying deterministic, validated context rewriting. See [docs/smart-context.md](docs/smart-context.md) for its safety model and rollout controls.
 
@@ -584,7 +584,6 @@ Use `--provider anthropic` when you want the Codex/Super front end with Anthropi
 ```bash
 prodex login --with-claude
 prodex s --provider anthropic --model claude-sonnet-4-6
-prodex s --provider anthropic --model claude-sonnet-4-6 --api-key "$ANTHROPIC_API_KEY"
 ```
 
 If `--api-key` is omitted, Prodex uses the Anthropic profile created by `prodex login --with-claude` or `prodex profile import claude`. API-key mode still reads `ANTHROPIC_API_KEY`; `ANTHROPIC_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-anthropic` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to Anthropic's OpenAI-compatible chat API, and keeps quota preflight disabled. `prodex quota --all --provider anthropic` shows OAuth readiness for Anthropic profiles; set `ANTHROPIC_ADMIN_KEY` when you want Anthropic Admin rate-limit groups included.
@@ -611,7 +610,7 @@ prodex super --cli kiro --profile kiro-main
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
 ```bash
-prodex s deepseek --model deepseek-v4-pro --api-key "$DEEPSEEK_API_KEY"
+prodex s deepseek --model deepseek-v4-pro
 ```
 
 If `--api-key` is omitted, Prodex reads `DEEPSEEK_API_KEY`; `DEEPSEEK_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-deepseek` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to DeepSeek's OpenAI-format chat API, and keeps quota preflight disabled. Prodex also injects a one-model Codex catalog for the selected DeepSeek model, so `/model` stays on that model and offers the DeepSeek-compatible `high`/`xhigh` effort choices. `prodex quota --all --provider deepseek` reads the same `DEEPSEEK_API_KEY(S)` environment and fetches DeepSeek `/user/balance`. Available Super optimizer tools remain local Prodex overlay additions around Codex. Remote compact is not implemented for this adapter yet, so the default DeepSeek context window is large and `--auto-compact-token-limit` defaults high.
@@ -656,7 +655,6 @@ prodex s gemini
 prodex s gemini --cli gemini
 prodex s gemini --cli agy
 GEMINI_API_KEY=... prodex s gemini --model gemini-2.5-pro
-prodex s gemini --model gemini-2.5-pro --api-key "$GEMINI_API_KEY"
 ```
 
 Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex login --with-google` or the interactive Google sign-in choice, then routes through Google's Code Assist Gemini endpoint. Google login verifies Code Assist readiness before creating or updating the profile, and may open a second browser page if Google requires account verification. With `--api-key`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)`, Prodex converts Codex Responses requests to Chat Completions and sends them through Google's documented `/v1beta/openai/chat/completions` endpoint with Bearer authentication. Streaming, function calls, continuations, and Gemini `reasoning_effort` values are converted back into Codex Responses semantics. Plural key env vars may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures. OAuth sessions keep fresh Gemini requests sticky to the previous successful profile by default for smoother Codex-style continuity; set `PRODEX_GEMINI_STICKY_FRESH_OAUTH=0` to restore pure fresh-request round robin. The default model is `auto`, matching Gemini CLI-style model routing through Gemini 3 and stable fallbacks; launch-time Gemini `modelConfigs` / `modelIdResolutions` / `modelChains` are projected into the Codex catalog and runtime fallback snapshot when configured. The injected catalog exposes Gemini reasoning efforts with the 2.5 default thinking budget of 8192 where budget mode is used. `prodex quota` reads the same Google OAuth profile and fetches Gemini Code Assist `retrieveUserQuota` bucket data. Available Super optimizer tools remain local Prodex overlay additions around Codex on this path.
@@ -746,6 +744,9 @@ prodex profile export
 prodex profile remove second
 prodex profile remove --all
 ```
+
+Password-protected exports now use the version-2 Argon2id envelope. Imports stay
+compatible with existing version-1 PBKDF2 bundles.
 
 </details>
 
