@@ -1,4 +1,9 @@
-use super::*;
+use crate::{RuntimeRotationProxy, runtime_proxy_flush_logs_for_path, runtime_proxy_log_to_path};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    thread,
+    time::{Duration, Instant},
+};
 
 impl RuntimeRotationProxy {
     pub(crate) fn shutdown_and_drain(&self, timeout: Duration) -> bool {
@@ -44,7 +49,15 @@ fn wait_for_active_requests(active: &AtomicUsize, timeout: Duration) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::wait_for_active_requests;
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn drain_waits_for_inflight_release_and_times_out_when_stuck() {
