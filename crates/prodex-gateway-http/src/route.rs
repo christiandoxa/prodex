@@ -533,7 +533,7 @@ pub(super) fn requires_streaming_backpressure(route: GatewayHttpRouteKind) -> bo
     )
 }
 
-pub(super) fn trace_context_from_headers(
+pub fn trace_context_from_headers(
     headers: &[GatewayHttpHeader],
 ) -> Result<Option<TraceContext>, GatewayHttpPlanError> {
     let mut values = headers

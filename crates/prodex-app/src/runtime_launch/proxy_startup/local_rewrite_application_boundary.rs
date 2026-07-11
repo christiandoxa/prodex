@@ -1,8 +1,8 @@
 use prodex_application::{
     ApplicationAuthenticatedRequestContext, ApplicationAuthorizedRequestContext,
     ApplicationRequestAuthorizationError, ApplicationRequestContext,
-    ApplicationRequestContextError, plan_application_control_plane_authorization,
-    plan_application_data_plane_authorization,
+    ApplicationRequestContextError, ApplicationRequestDeadline,
+    plan_application_control_plane_authorization, plan_application_data_plane_authorization,
     plan_application_request_authentication_from_evidence, plan_application_request_context,
 };
 use prodex_authn::{
@@ -11,9 +11,10 @@ use prodex_authn::{
 };
 use prodex_control_plane::{ControlPlaneActionRequest, ControlPlaneResourceRef};
 use prodex_domain::{
-    CredentialScope, ExplicitRoleMapper, Principal, PrincipalId, PrincipalKind, Role, TenantId,
+    CredentialScope, ExplicitRoleMapper, Principal, PrincipalId, PrincipalKind, RequestId, Role,
+    TenantId,
 };
-use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpRequestMeta};
+use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpHeader, GatewayHttpRequestMeta};
 use sha2::{Digest, Sha256};
 
 use super::local_rewrite_gateway_admin_auth::{
@@ -40,27 +41,34 @@ pub(super) struct RuntimeGatewayAdminPreauthorization<'a> {
     pub(super) application: Option<ApplicationAuthorizedRequestContext<'a>>,
 }
 
-pub(super) fn runtime_gateway_application_request_context(
-    target: &CanonicalRequestTarget,
-) -> Result<ApplicationRequestContext<'_>, ApplicationRequestContextError> {
-    plan_application_request_context(target)
+pub(super) fn runtime_gateway_application_request_context<'a>(
+    target: &'a CanonicalRequestTarget,
+    request_id: RequestId,
+    deadline: ApplicationRequestDeadline,
+    headers: &[(String, String)],
+) -> Result<ApplicationRequestContext<'a>, ApplicationRequestContextError> {
+    let headers = headers
+        .iter()
+        .map(|(name, value)| GatewayHttpHeader::new(name, value))
+        .collect::<Vec<_>>();
+    plan_application_request_context(target, request_id, deadline, &headers)
 }
 
-pub(super) fn runtime_gateway_application_authentication(
-    request: ApplicationRequestContext<'_>,
+pub(super) fn runtime_gateway_application_authentication<'a>(
+    request: &ApplicationRequestContext<'a>,
     credential: RuntimeGatewayVerifiedCredential,
-) -> Result<ApplicationAuthenticatedRequestContext<'_>, VerifiedCredentialAuthenticationError> {
+) -> Result<ApplicationAuthenticatedRequestContext<'a>, VerifiedCredentialAuthenticationError> {
     plan_application_request_authentication_from_evidence(
-        request,
+        request.clone(),
         credential.evidence,
         credential.anonymous_allowed,
     )
 }
 
-pub(super) fn runtime_gateway_application_data_plane_authorization(
-    request: ApplicationRequestContext<'_>,
+pub(super) fn runtime_gateway_application_data_plane_authorization<'a>(
+    request: &ApplicationRequestContext<'a>,
     credential: RuntimeGatewayVerifiedCredential,
-) -> Result<ApplicationAuthorizedRequestContext<'_>, RuntimeGatewayApplicationBoundaryError> {
+) -> Result<ApplicationAuthorizedRequestContext<'a>, RuntimeGatewayApplicationBoundaryError> {
     let authenticated = runtime_gateway_application_authentication(request, credential)
         .map_err(RuntimeGatewayApplicationBoundaryError::Authentication)?;
     plan_application_data_plane_authorization(authenticated)
@@ -68,7 +76,7 @@ pub(super) fn runtime_gateway_application_data_plane_authorization(
 }
 
 pub(super) fn runtime_gateway_application_control_plane_authorization<'a>(
-    request: ApplicationRequestContext<'a>,
+    request: &ApplicationRequestContext<'a>,
     http: &GatewayHttpRequestMeta,
     authentication: &RuntimeGatewayAdminAuthentication,
 ) -> Result<ApplicationAuthorizedRequestContext<'a>, RuntimeGatewayApplicationBoundaryError> {
@@ -85,7 +93,7 @@ pub(super) fn runtime_gateway_application_control_plane_authorization<'a>(
 }
 
 pub(super) fn runtime_gateway_admin_preauthorization<'a>(
-    request: ApplicationRequestContext<'a>,
+    request: &ApplicationRequestContext<'a>,
     http: &GatewayHttpRequestMeta,
     authentication: &RuntimeGatewayAdminAuthentication,
 ) -> Result<Option<ApplicationAuthorizedRequestContext<'a>>, RuntimeGatewayApplicationBoundaryError>
@@ -313,6 +321,19 @@ mod tests {
     use super::super::local_rewrite_gateway_admin_auth::runtime_gateway_test_verified_oidc_token;
     use super::*;
     use prodex_gateway_http::GatewayHttpMethod;
+    use std::time::{Duration, Instant};
+
+    fn application_request_context<'a>(
+        target: &'a CanonicalRequestTarget,
+    ) -> ApplicationRequestContext<'a> {
+        runtime_gateway_application_request_context(
+            target,
+            RequestId::new(),
+            ApplicationRequestDeadline::at(Instant::now() + Duration::from_secs(30)),
+            &[],
+        )
+        .unwrap()
+    }
 
     fn virtual_key() -> runtime_proxy_crate::RuntimeGatewayVirtualKey {
         runtime_proxy_crate::RuntimeGatewayVirtualKey {
@@ -376,7 +397,7 @@ mod tests {
     #[test]
     fn application_gate_matches_the_legacy_data_plane_decision_matrix() {
         let target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
-        let request = runtime_gateway_application_request_context(&target).unwrap();
+        let request = application_request_context(&target);
 
         for virtual_keys_empty in [false, true] {
             for legacy_data_plane_authorized in [false, true] {
@@ -391,7 +412,7 @@ mod tests {
                         authentication_configured,
                     );
                     assert_eq!(
-                        runtime_gateway_application_data_plane_authorization(request, credential)
+                        runtime_gateway_application_data_plane_authorization(&request, credential)
                             .is_ok(),
                         legacy_allows,
                         "virtual_keys_empty={virtual_keys_empty} legacy_authorized={legacy_data_plane_authorized} auth_configured={authentication_configured}",
@@ -404,10 +425,10 @@ mod tests {
     #[test]
     fn application_gate_binds_typed_tenant_and_control_plane_role() {
         let data_target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
-        let data = runtime_gateway_application_request_context(&data_target).unwrap();
+        let data = application_request_context(&data_target);
         let key = virtual_key();
         let authorized = runtime_gateway_application_data_plane_authorization(
-            data,
+            &data,
             runtime_gateway_data_plane_credential(Some(&key), false, true),
         )
         .unwrap();
@@ -420,7 +441,7 @@ mod tests {
         assert!(!format!("{authorized:?}").contains("boundary-secret"));
 
         let control_target = CanonicalRequestTarget::parse("/admin/keys").unwrap();
-        let control = runtime_gateway_application_request_context(&control_target).unwrap();
+        let control = application_request_context(&control_target);
         let read = GatewayHttpRequestMeta {
             method: GatewayHttpMethod::Get,
             path: "/admin/keys".to_string(),
@@ -433,7 +454,7 @@ mod tests {
         };
         assert!(
             runtime_gateway_application_control_plane_authorization(
-                control,
+                &control,
                 &read,
                 &admin_authentication(RuntimeGatewayAdminRole::Viewer),
             )
@@ -442,7 +463,7 @@ mod tests {
         );
         assert!(
             runtime_gateway_application_control_plane_authorization(
-                control,
+                &control,
                 &write,
                 &admin_authentication(RuntimeGatewayAdminRole::Viewer),
             )
@@ -451,7 +472,7 @@ mod tests {
         );
         assert!(
             runtime_gateway_application_control_plane_authorization(
-                control,
+                &control,
                 &write,
                 &admin_authentication(RuntimeGatewayAdminRole::Admin),
             )
@@ -463,10 +484,10 @@ mod tests {
     #[test]
     fn non_uuid_oidc_tenant_claim_must_match_the_resolved_tenant_text() {
         let target = CanonicalRequestTarget::parse("/admin/keys").unwrap();
-        let request = runtime_gateway_application_request_context(&target).unwrap();
+        let request = application_request_context(&target);
         let matched = oidc_admin_authentication("tenant-a", "tenant-a");
         let authenticated = runtime_gateway_application_authentication(
-            request,
+            &request,
             runtime_gateway_control_plane_credential(&matched),
         )
         .unwrap();
@@ -480,7 +501,7 @@ mod tests {
         let mismatched = oidc_admin_authentication("tenant-b", "tenant-a");
         assert_eq!(
             runtime_gateway_application_authentication(
-                request,
+                &request,
                 runtime_gateway_control_plane_credential(&mismatched),
             ),
             Err(VerifiedCredentialAuthenticationError::OidcPrincipalMismatch),
@@ -494,7 +515,7 @@ mod tests {
     #[test]
     fn oidc_role_claim_must_match_resolved_admin_and_unknown_is_rejected() {
         let target = CanonicalRequestTarget::parse("/admin/keys").unwrap();
-        let request = runtime_gateway_application_request_context(&target).unwrap();
+        let request = application_request_context(&target);
         for (role_claim, expected) in [
             (
                 "viewer",
@@ -516,11 +537,59 @@ mod tests {
             evidence.role_claim = Some(role_claim.to_string());
             assert_eq!(
                 runtime_gateway_application_authentication(
-                    request,
+                    &request,
                     runtime_gateway_control_plane_credential(&authentication),
                 ),
                 Err(expected),
             );
         }
+    }
+
+    #[test]
+    fn application_adapter_preserves_request_identity_deadline_trace_and_exact_target() {
+        let target = CanonicalRequestTarget::parse("/v1/responses?stream=true").unwrap();
+        let request_id = "00000000-0000-7000-8000-000000000020"
+            .parse::<RequestId>()
+            .unwrap();
+        let deadline = ApplicationRequestDeadline::at(Instant::now() + Duration::from_secs(30));
+        let mut headers = vec![
+            (
+                "traceparent".to_string(),
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                "authorization".to_string(),
+                "Bearer private-boundary-secret".to_string(),
+            ),
+        ];
+        let request =
+            runtime_gateway_application_request_context(&target, request_id, deadline, &headers)
+                .unwrap();
+
+        headers.clear();
+        assert!(std::ptr::eq(request.target(), &target));
+        assert_eq!(request.request_id(), request_id);
+        assert_eq!(request.deadline(), deadline);
+        assert_eq!(
+            request.trace_context().unwrap().traceparent(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+        assert!(request.metadata().credential_present());
+        assert!(!format!("{request:?}").contains("private-boundary-secret"));
+
+        let key = virtual_key();
+        let authorized = runtime_gateway_application_data_plane_authorization(
+            &request,
+            runtime_gateway_data_plane_credential(Some(&key), false, true),
+        )
+        .unwrap();
+        assert_eq!(authorized.request().request_id(), request_id);
+        assert_eq!(authorized.request().deadline(), deadline);
+        assert_eq!(authorized.correlation_context().request_id, request_id);
+        assert_eq!(
+            authorized.correlation_context().tenant_id,
+            authorized.tenant_context().map(|tenant| tenant.tenant_id)
+        );
+        assert!(std::ptr::eq(authorized.request().target(), &target));
     }
 }

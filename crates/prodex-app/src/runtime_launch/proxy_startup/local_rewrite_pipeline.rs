@@ -25,8 +25,8 @@ use super::local_rewrite_application_boundary::{
     runtime_gateway_application_request_context, runtime_gateway_data_plane_credential,
 };
 use super::local_rewrite_application_data_plane::{
-    RuntimeGatewayApplicationAdmission, runtime_gateway_application_local_admission,
-    runtime_gateway_application_provider_dispatch,
+    RuntimeGatewayApplicationAdmission, runtime_gateway_application_http_policy,
+    runtime_gateway_application_local_admission, runtime_gateway_application_provider_dispatch,
 };
 use super::local_rewrite_constraints::{
     RuntimeGatewayPendingConstraintPlan, runtime_gateway_prepare_constraint_plan,
@@ -81,11 +81,14 @@ use crate::runtime_proxy::{
 };
 use crate::runtime_proxy_shared::RuntimeProxyActiveRequestGuard;
 use crate::{runtime_proxy_log, runtime_proxy_next_request_id};
+use prodex_application::{ApplicationRequestContextError, ApplicationRequestDeadline};
+use prodex_domain::RequestId;
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{
     RuntimeProxyRequest, is_runtime_realtime_websocket_path, path_without_query,
     runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
+use std::time::{Duration, Instant};
 
 const RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE: &str = "upstream request failed";
 
@@ -251,27 +254,38 @@ fn runtime_local_rewrite_canonical_context<'target>(
     target: &'target prodex_gateway_http::CanonicalRequestTarget,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteCanonicalRequest<'target>> {
-    let context = match runtime_gateway_application_request_context(target) {
-        Ok(context) => context,
-        Err(_) => {
-            return Err(RuntimeLocalRewritePipelineExit::Rejected(Box::new(
-                RuntimeLocalRewritePipelineReply {
-                    request,
-                    response: build_runtime_proxy_json_error_response(
-                        404,
-                        "route_not_available",
-                        "route is not available",
-                    ),
-                    _guards: RuntimeLocalRewritePipelineGuards::default(),
-                },
-            )));
-        }
-    };
     let path = target.path_and_query().to_string();
     let request_id = if runtime_gateway_request_path_is_route_explain(&path, shared) {
         0
     } else {
         runtime_proxy_next_request_id(&shared.runtime_shared)
+    };
+    let typed_request_id = RequestId::new();
+    let started_at = Instant::now();
+    let request_timeout =
+        Duration::from_millis(runtime_gateway_application_http_policy(shared).request_timeout_ms);
+    let deadline = ApplicationRequestDeadline::at(
+        started_at
+            .checked_add(request_timeout)
+            .unwrap_or(started_at),
+    );
+    let header_request = capture_runtime_proxy_websocket_request(&request);
+    let context = match runtime_gateway_application_request_context(
+        target,
+        typed_request_id,
+        deadline,
+        &header_request.headers,
+    ) {
+        Ok(context) => context,
+        Err(error) => {
+            return Err(RuntimeLocalRewritePipelineExit::Rejected(Box::new(
+                RuntimeLocalRewritePipelineReply {
+                    request,
+                    response: runtime_local_rewrite_application_context_rejection(error),
+                    _guards: RuntimeLocalRewritePipelineGuards::default(),
+                },
+            )));
+        }
     };
     let state = RuntimeLocalRewriteRequestState {
         request,
@@ -290,6 +304,26 @@ fn runtime_local_rewrite_canonical_context<'target>(
         return Err(state.respond(response));
     }
     Ok(RuntimeLocalRewriteCanonicalRequest(state))
+}
+
+fn runtime_local_rewrite_application_context_rejection(
+    error: ApplicationRequestContextError,
+) -> tiny_http::ResponseBox {
+    let ApplicationRequestContextError::Trace(error) = error else {
+        return build_runtime_proxy_json_error_response(
+            404,
+            "route_not_available",
+            "route is not available",
+        );
+    };
+    let response = prodex_gateway_http::plan_gateway_http_error_response(&error);
+    let status = match response.status {
+        prodex_gateway_http::GatewayHttpErrorStatus::BadRequest => 400,
+        prodex_gateway_http::GatewayHttpErrorStatus::MethodNotAllowed => 405,
+        prodex_gateway_http::GatewayHttpErrorStatus::PayloadTooLarge => 413,
+        prodex_gateway_http::GatewayHttpErrorStatus::InternalServerError => 500,
+    };
+    build_runtime_proxy_json_error_response(status, response.code, response.message)
 }
 
 fn runtime_local_rewrite_authenticate<'target>(
@@ -335,7 +369,7 @@ fn runtime_local_rewrite_preauthorize_admin<'target>(
         path_without_query(state.context.target().path_and_query()),
     );
     let application =
-        match runtime_gateway_admin_preauthorization(state.context, &http, &authentication) {
+        match runtime_gateway_admin_preauthorization(&state.context, &http, &authentication) {
             Ok(application) => application,
             Err(RuntimeGatewayApplicationBoundaryError::Authorization(_)) => {
                 return Err(runtime_gateway_admin_authorization_rejection_response(
@@ -432,7 +466,7 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
         legacy_authorized,
         shared.gateway_auth_token_hash.is_some() || admin_configured,
     );
-    runtime_gateway_application_data_plane_authorization(state.context, credential)
+    runtime_gateway_application_data_plane_authorization(&state.context, credential)
         .map(Some)
         .map_err(|_| runtime_local_rewrite_data_auth_rejection(state, shared))
 }
