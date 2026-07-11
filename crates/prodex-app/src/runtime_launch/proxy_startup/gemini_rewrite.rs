@@ -67,6 +67,7 @@ pub(crate) enum RuntimeGeminiAuth {
         access_token: String,
         project_id: Option<String>,
     },
+    Projected,
 }
 
 #[derive(Clone)]
@@ -77,6 +78,7 @@ pub(crate) enum RuntimeGeminiProviderAuth {
     OAuthProfiles {
         profiles: Vec<RuntimeGeminiOAuthProfileAuth>,
     },
+    Projected,
 }
 
 #[derive(Clone)]
@@ -199,7 +201,7 @@ pub(super) fn runtime_gemini_upstream_url(
         "generateContent"
     };
     match auth {
-        RuntimeGeminiAuth::ApiKey { .. } => {
+        RuntimeGeminiAuth::ApiKey { .. } | RuntimeGeminiAuth::Projected => {
             let model_path = if model.starts_with("models/") {
                 model.to_string()
             } else {
@@ -228,7 +230,7 @@ pub(super) fn runtime_gemini_native_upstream_url(
     path_and_query: &str,
 ) -> String {
     match auth {
-        RuntimeGeminiAuth::ApiKey { .. } => format!(
+        RuntimeGeminiAuth::ApiKey { .. } | RuntimeGeminiAuth::Projected => format!(
             "{}{}",
             base_url.trim_end_matches('/'),
             path_and_query
@@ -262,7 +264,7 @@ pub(super) fn runtime_gemini_request_upstream_url(
 
 pub(super) fn runtime_gemini_project_id(auth: &RuntimeGeminiAuth) -> Option<&str> {
     match auth {
-        RuntimeGeminiAuth::ApiKey { .. } => None,
+        RuntimeGeminiAuth::ApiKey { .. } | RuntimeGeminiAuth::Projected => None,
         RuntimeGeminiAuth::OAuth { project_id, .. } => project_id.as_deref(),
     }
 }

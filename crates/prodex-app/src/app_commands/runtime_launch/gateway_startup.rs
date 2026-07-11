@@ -106,9 +106,11 @@ fn gateway_refresh_args(args: &GatewayArgs) -> GatewayArgs {
 fn gateway_refresh_candidate(
     gateway: &gateway_config::ResolvedGatewayLaunchConfig,
 ) -> RuntimeGatewayCredentialRefreshCandidate {
+    let (provider, provider_credential) = gateway.provider_options.clone().into_runtime_parts();
     RuntimeGatewayCredentialRefreshCandidate {
         fingerprint: gateway.credential_fingerprint,
-        provider: gateway.provider_options.clone(),
+        provider,
+        provider_credential,
         auth_token_hash: gateway.auth_token_hash.clone(),
         admin_tokens: gateway.admin_tokens.clone(),
         sso: gateway.sso.clone(),

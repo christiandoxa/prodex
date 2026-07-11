@@ -1,4 +1,7 @@
-use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
+use super::local_rewrite::{
+    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
+    RuntimeProjectedProviderCredential,
+};
 use super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewaySsoConfig,
@@ -22,6 +25,7 @@ const GATEWAY_SECRET_REFRESH_SHUTDOWN_POLL: Duration = Duration::from_millis(100
 pub(crate) struct RuntimeGatewayCredentialRefreshCandidate {
     pub(crate) fingerprint: [u8; 32],
     pub(crate) provider: RuntimeLocalRewriteProviderOptions,
+    pub(crate) provider_credential: Option<RuntimeProjectedProviderCredential>,
     pub(crate) auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(crate) admin_tokens: Vec<RuntimeGatewayAdminToken>,
     pub(crate) sso: RuntimeGatewaySsoConfig,
@@ -56,6 +60,7 @@ impl RuntimeGatewayCredentialRefreshPlan {
 pub(super) struct RuntimeGatewayCredentialSnapshot {
     pub(super) fingerprint: [u8; 32],
     pub(super) provider: RuntimeLocalRewriteProviderOptions,
+    pub(super) provider_credential: Option<RuntimeProjectedProviderCredential>,
     pub(super) auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(super) admin_tokens: Vec<RuntimeGatewayAdminToken>,
     pub(super) sso: RuntimeGatewaySsoConfig,
@@ -86,6 +91,7 @@ pub(super) fn runtime_gateway_initial_credential_snapshot(
     RuntimeGatewayCredentialSnapshot {
         fingerprint: candidate.fingerprint,
         provider: candidate.provider,
+        provider_credential: candidate.provider_credential,
         auth_token_hash: candidate.auth_token_hash,
         admin_tokens: candidate.admin_tokens,
         sso: candidate.sso,
@@ -101,6 +107,7 @@ pub(super) fn runtime_gateway_pin_request_credentials(
     let snapshot = shared.gateway_credentials.current.load_full();
     let mut pinned = shared.clone();
     pinned.provider = snapshot.provider.clone();
+    pinned.provider_credential = snapshot.provider_credential.clone();
     pinned.gateway_auth_token_hash = snapshot.auth_token_hash.clone();
     pinned.gateway_admin_tokens = snapshot.admin_tokens.clone();
     pinned.gateway_sso = snapshot.sso.clone();
@@ -193,6 +200,7 @@ fn runtime_gateway_apply_secret_refresh(
         .store(Arc::new(RuntimeGatewayCredentialSnapshot {
             fingerprint: candidate.fingerprint,
             provider: candidate.provider,
+            provider_credential: candidate.provider_credential,
             auth_token_hash: candidate.auth_token_hash,
             admin_tokens: candidate.admin_tokens,
             sso: candidate.sso,
@@ -271,6 +279,7 @@ mod tests {
         RuntimeGatewayCredentialRefreshCandidate {
             fingerprint: [fingerprint; 32],
             provider: openai_provider(api_key),
+            provider_credential: None,
             auth_token_hash: None,
             admin_tokens: Vec::new(),
             sso: RuntimeGatewaySsoConfig::default(),

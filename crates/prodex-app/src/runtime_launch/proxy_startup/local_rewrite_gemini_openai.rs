@@ -33,7 +33,14 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
     body: Vec<u8>,
     api_keys: &[String],
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let api_key_attempts = runtime_local_rewrite_api_key_attempts(shared, api_keys);
+    let api_key_attempts = if shared.provider_credential.is_some() {
+        vec![("projected".to_string(), None)]
+    } else {
+        runtime_local_rewrite_api_key_attempts(shared, api_keys)
+            .into_iter()
+            .map(|(label, api_key)| (label, Some(api_key)))
+            .collect()
+    };
     if api_key_attempts.is_empty() {
         bail!("Gemini API-key pool is empty");
     }

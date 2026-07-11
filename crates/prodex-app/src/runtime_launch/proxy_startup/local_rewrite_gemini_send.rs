@@ -87,10 +87,20 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
         runtime_provider_route_kind(path_without_query(&request.path_and_query)),
         Some(RuntimeProviderRouteKind::Responses)
     );
-    if responses_route && let RuntimeGeminiProviderAuth::ApiKeys { api_keys } = auth {
-        return super::local_rewrite_gemini_openai::send_runtime_gemini_openai_compatible_request(
-            request_id, request, shared, body, api_keys,
-        );
+    if responses_route {
+        match auth {
+            RuntimeGeminiProviderAuth::ApiKeys { api_keys } => {
+                return super::local_rewrite_gemini_openai::send_runtime_gemini_openai_compatible_request(
+                    request_id, request, shared, body, api_keys,
+                );
+            }
+            RuntimeGeminiProviderAuth::Projected => {
+                return super::local_rewrite_gemini_openai::send_runtime_gemini_openai_compatible_request(
+                    request_id, request, shared, body, &[],
+                );
+            }
+            RuntimeGeminiProviderAuth::OAuthProfiles { .. } => {}
+        }
     }
     let thinking_budget_tokens = runtime_gemini_thinking_budget_tokens(&shared.provider);
     let model_scope = shared

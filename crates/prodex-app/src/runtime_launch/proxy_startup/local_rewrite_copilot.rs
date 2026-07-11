@@ -124,7 +124,7 @@ pub(super) fn send_runtime_copilot_upstream_request(
                         auth_label: selected.profile_name.as_str(),
                         model,
                         auth_factory: || RuntimeLocalRewritePreparedAuth::Copilot {
-                            api_key: selected.api_key.as_str(),
+                            api_key: (!selected.projected).then_some(selected.api_key.as_str()),
                         },
                     },
                 )?;
@@ -254,7 +254,7 @@ fn send_runtime_copilot_responses_request(
                         auth_label: selected.profile_name.as_str(),
                         model,
                         auth_factory: || RuntimeLocalRewritePreparedAuth::Copilot {
-                            api_key: selected.api_key.as_str(),
+                            api_key: (!selected.projected).then_some(selected.api_key.as_str()),
                         },
                     },
                 )?;

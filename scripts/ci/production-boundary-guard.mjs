@@ -11,6 +11,10 @@ const FILES = Object.freeze({
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_boundary.rs",
   dataPlaneAdapter:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
+  providerConfig:
+    "crates/prodex-app/src/app_commands/runtime_launch/gateway_provider_config.rs",
+  providerAdapter:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/projected_credential.rs",
   application: "crates/prodex-application/src/request_context.rs",
   authn: "crates/prodex-authn/src/compatibility.rs",
   pipeline:
@@ -424,6 +428,64 @@ export function validateProductionBoundary(sources) {
     `${FILES.dataPlaneAdapter}: synthetic unbounded precommit policy must not fake application authority`,
   );
 
+  const providerInvocation =
+    functionBody(sources.dataPlaneAdapter, "runtime_gateway_provider_invocation") ?? "";
+  requireText(
+    errors,
+    providerInvocation,
+    ".provider_credential",
+    `${FILES.dataPlaneAdapter}: application provider invocation must receive the configured credential reference`,
+  );
+  requireText(
+    errors,
+    providerInvocation,
+    "credential.reference()",
+    `${FILES.dataPlaneAdapter}: application provider invocation must preserve the configured SecretRef`,
+  );
+
+  const providerConfig =
+    functionBody(sources.providerConfig, "resolve_gateway_provider_config_with_resolver") ?? "";
+  requireBefore(
+    errors,
+    providerConfig,
+    "projected_provider_credential(",
+    "gateway_projected_provider_options(",
+    `${FILES.providerConfig}: projected provider credentials must remain references during planning`,
+  );
+
+  const providerAdapter =
+    functionBody(
+      sources.providerAdapter,
+      "runtime_local_rewrite_with_projected_provider_secret",
+    ) ?? "";
+  requireOrdered(
+    errors,
+    providerAdapter,
+    [
+      ".provider()",
+      ".resolve(",
+      "SecretPurpose::ProviderCredential",
+      "material.with_exposed_secret(",
+    ],
+    `${FILES.providerAdapter}: projected provider secrets must resolve and expose only inside the outgoing adapter`,
+  );
+  for (const forbidden of [
+    "std::env",
+    "env::var",
+    "var_os(",
+    ".to_owned()",
+    ".to_string()",
+    ".to_vec()",
+    "String::from(",
+  ]) {
+    forbidText(
+      errors,
+      providerAdapter,
+      forbidden,
+      `${FILES.providerAdapter}: projected provider request path must not read the environment or clone raw secret material`,
+    );
+  }
+
   requireText(
     errors,
     sources.application,
@@ -596,7 +658,18 @@ function runSelfTest() {
     adapter:
       "plan_application_request_context(target); plan_application_request_authentication_from_compatibility(); plan_application_data_plane_authorization_from_compatibility(); plan_application_control_plane_authorization_from_compatibility(); RuntimeGatewayAdminPreauthorization; CredentialScope::DataPlane; CredentialScope::ControlPlane;",
     dataPlaneAdapter:
-      "plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); RuntimeGatewayApplicationAdmission::CompatibilityAnonymous; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;",
+      `plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); RuntimeGatewayApplicationAdmission::CompatibilityAnonymous; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
+      fn runtime_gateway_provider_invocation() {
+        shared.provider_credential.as_ref().map(|credential| credential.reference());
+      }`,
+    providerConfig: `fn resolve_gateway_provider_config_with_resolver() {
+      resolver.projected_provider_credential();
+      gateway_projected_provider_options();
+    }`,
+    providerAdapter: `fn runtime_local_rewrite_with_projected_provider_secret() {
+      credential.provider().resolve(SecretPurpose::ProviderCredential);
+      material.with_exposed_secret(|bytes| expose(bytes));
+    }`,
     application:
       "classify_request_target(target); authenticate_compatibility_request(CompatibilityAuthenticationRequest {}); authorize_boundary_scope(boundary, principal); authorize_boundary_role(boundary, principal); decide_control_plane_action(action); principal.tenant_context(TenantMode::SingleTenant);",
     authn: "if principal.credential_scope != required {}",
@@ -604,6 +677,33 @@ function runSelfTest() {
       "mod local_rewrite_application_boundary; mod local_rewrite_application_data_plane; mod local_rewrite_pipeline;",
   };
   assertSelfTest(validateProductionBoundary(valid).length === 0, "valid wiring rejected");
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      dataPlaneAdapter: valid.dataPlaneAdapter.replace("credential.reference()", "credential"),
+    }).some((error) => error.includes("preserve the configured SecretRef")),
+    "synthetic provider credential reference accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      providerAdapter: valid.providerAdapter.replace(
+        "material.with_exposed_secret(|bytes| expose(bytes));",
+        "let copied = material.to_vec();",
+      ),
+    }).some((error) => error.includes("resolve and expose only inside")),
+    "projected provider material exposed outside the scoped adapter accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      providerAdapter: valid.providerAdapter.replace(
+        "credential.provider()",
+        "std::env::var(\"PROVIDER_KEY\"); credential.provider()",
+      ),
+    }).some((error) => error.includes("must not read the environment")),
+    "request-path environment credential read accepted",
+  );
   assertSelfTest(
     validateProductionBoundary({
       ...valid,

@@ -46,6 +46,7 @@ pub(super) use super::local_rewrite_model_memory::{
 };
 pub(crate) use super::local_rewrite_options::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
+    RuntimeProjectedProviderCredential,
 };
 use super::local_rewrite_pipeline::run_runtime_local_rewrite_pipeline;
 #[cfg(test)]
@@ -80,6 +81,7 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) upstream_base_url: String,
     pub(super) mount_path: String,
     pub(super) provider: RuntimeLocalRewriteProviderOptions,
+    pub(super) provider_credential: Option<RuntimeProjectedProviderCredential>,
     pub(super) deepseek_conversations: RuntimeDeepSeekConversationStore,
     pub(super) deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
     pub(super) gemini_conversations: RuntimeDeepSeekConversationStore,
@@ -219,6 +221,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         gateway_call_id_header,
         gateway_observability,
     } = options;
+    let (provider, provider_credential) = provider.into_runtime_parts();
     let (runtime_config, log_path) = runtime_local_rewrite_runtime_config(paths)?;
     let (server, listen_addr) = runtime_local_rewrite_server(preferred_listen_addr)?;
     initialize_runtime_probe_refresh_queue(runtime_config.tuning.probe_refresh_worker_count);
@@ -348,6 +351,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
                     .map(|plan| plan.initial_fingerprint)
                     .unwrap_or([0; 32]),
                 provider: provider.clone(),
+                provider_credential: provider_credential.clone(),
                 auth_token_hash: gateway_auth_token_hash.clone(),
                 admin_tokens: gateway_admin_tokens.clone(),
                 sso: gateway_sso.clone(),
@@ -362,6 +366,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         upstream_base_url,
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         provider,
+        provider_credential,
         deepseek_conversations: RuntimeDeepSeekConversationStore::default(),
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_conversations: RuntimeDeepSeekConversationStore::default(),
