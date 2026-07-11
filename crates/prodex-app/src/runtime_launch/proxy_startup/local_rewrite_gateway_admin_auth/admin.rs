@@ -289,6 +289,7 @@ impl RuntimeGatewayAdminAuth {
             self.project_id.clone(),
             self.user_id.clone(),
             self.budget_id.clone(),
+            self.allowed_key_prefixes.clone(),
         )
     }
 
@@ -308,11 +309,7 @@ impl RuntimeGatewayAdminAuth {
     }
 
     pub(in super::super) fn can_access_key(&self, key_name: &str) -> bool {
-        self.allowed_key_prefixes.is_empty()
-            || self
-                .allowed_key_prefixes
-                .iter()
-                .any(|prefix| key_name.starts_with(prefix))
+        self.governance_scope().matches_resource_name(key_name)
     }
 
     pub(in super::super) fn can_access_entry(&self, entry: &RuntimeGatewayVirtualKeyEntry) -> bool {
@@ -339,7 +336,7 @@ impl RuntimeGatewayAdminAuth {
 pub(in super::super) fn runtime_gateway_admin_auth_is_unscoped(
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> bool {
-    admin_auth.governance_scope().is_unscoped()
+    admin_auth.governance_scope().dimensions_are_unrestricted()
 }
 
 pub(in super::super) fn runtime_gateway_admin_auth_matches_entry(
