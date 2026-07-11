@@ -1,4 +1,5 @@
 use crate::RuntimeProxyCodexEndpoint;
+use runtime_proxy_crate as runtime_proxy;
 use std::ffi::OsString;
 use std::net::SocketAddr;
 

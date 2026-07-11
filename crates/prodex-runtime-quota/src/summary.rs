@@ -20,6 +20,7 @@ use prodex_quota::{
 };
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::RuntimeQuotaSource;
+use runtime_proxy_crate as runtime_proxy;
 
 pub fn runtime_quota_summary_to_proxy(
     summary: RuntimeQuotaSummary,

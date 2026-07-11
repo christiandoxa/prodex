@@ -8,7 +8,7 @@ pub use prodex_quota::{
     RuntimeQuotaWindowStatus, RuntimeQuotaWindowSummary, StoredAuth, StoredTokens, UsageResponse,
     UsageWindow, WindowPair,
 };
-pub use prodex_runtime_proxy::RuntimeProxyRequest;
+pub use runtime_proxy_crate::RuntimeProxyRequest;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InfoQuotaSource {

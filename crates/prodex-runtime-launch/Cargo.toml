@@ -19,7 +19,7 @@ prodex_state = { workspace = true }
 prodex_core = { workspace = true }
 redaction = { workspace = true }
 reqwest = { workspace = true }
-runtime_proxy = { workspace = true }
+runtime_proxy_crate = { workspace = true }
 terminal_ui = { workspace = true }
 
 [lints]
