@@ -359,7 +359,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         estimated_cost_microusd,
         minute_epoch,
     )?;
-    let typed_request_id = RequestId::new();
+    let typed_request_id = authorized.request().request_id();
     let call_id = CallId::new();
     let command = runtime_gateway_reservation_command(
         shared,
@@ -375,7 +375,6 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         authorized,
         captured,
         shared,
-        typed_request_id,
         command.clone(),
     )
     .map_err(|_| runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
@@ -526,7 +525,6 @@ fn runtime_gateway_application_admission_without_virtual_key(
             application: RuntimeGatewayApplicationAdmission::CompatibilityAnonymous,
         });
     };
-    let request_id_typed = RequestId::new();
     let call_id = CallId::new();
     let reservation_id = prodex_domain::ReservationId::new();
     let estimate = UsageAmount::new(
@@ -547,23 +545,18 @@ fn runtime_gateway_application_admission_without_virtual_key(
         created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
         ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
     };
-    let application = runtime_gateway_application_data_plane_admission(
-        authorized,
-        captured,
-        shared,
-        request_id_typed,
-        command,
-    )
-    .map_err(|_| {
-        runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_application_admission_failed",
-                [runtime_proxy_log_field("request", request_id.to_string())],
-            ),
-        );
-        runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
-    })?;
+    let application =
+        runtime_gateway_application_data_plane_admission(authorized, captured, shared, command)
+            .map_err(|_| {
+                runtime_proxy_log(
+                    &shared.runtime_shared,
+                    runtime_proxy_structured_log_message(
+                        "gateway_application_admission_failed",
+                        [runtime_proxy_log_field("request", request_id.to_string())],
+                    ),
+                );
+                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+            })?;
     Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
         namespace: None,
         application,

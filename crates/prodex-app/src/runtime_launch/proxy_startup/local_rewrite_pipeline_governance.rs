@@ -59,7 +59,7 @@ pub(super) fn runtime_local_rewrite_dispatch_control_plane<'target, 'shared>(
         request.state.request_id,
         &request.captured,
         shared,
-        request.state.context,
+        &request.state.context,
         request.state.admin.take(),
     ) {
         return Err(request.respond(response));

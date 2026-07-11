@@ -123,7 +123,6 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
     authorized: &ApplicationAuthorizedRequestContext<'_>,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
-    request_id: RequestId,
     reservation: AtomicReservationCommand,
 ) -> Result<RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError> {
     let Some(tenant) = authorized.tenant_context() else {
@@ -133,8 +132,12 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
         .principal()
         .cloned()
         .ok_or(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal)?;
-    let trace_context = runtime_gateway_application_trace_context(request_id)
-        .map_err(RuntimeGatewayApplicationDataPlaneError::TraceContext)?;
+    let request_id = authorized.request().request_id();
+    let trace_context = match authorized.request().trace_context() {
+        Some(trace_context) => trace_context.clone(),
+        None => runtime_gateway_application_trace_context(request_id)
+            .map_err(RuntimeGatewayApplicationDataPlaneError::TraceContext)?,
+    };
     let provider_invocation =
         runtime_gateway_provider_invocation(RuntimeGatewayProviderInvocationInput {
             tenant,

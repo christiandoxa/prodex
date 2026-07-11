@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::time::Instant;
 
 use prodex_authn::{
     VerifiedCredentialAuthenticationError, VerifiedCredentialAuthenticationRequest,
@@ -12,34 +13,171 @@ use prodex_control_plane::{
     ControlPlaneActionRequest, ControlPlaneAuthorizationError, ControlPlaneDecision,
     decide_control_plane_action,
 };
-use prodex_domain::{CredentialScope, Principal, TenantContext, TenantMode, TenantResolutionError};
-use prodex_gateway_http::{
-    CanonicalRequestTarget, GatewayHttpRouteKind, GatewayHttpRoutePlane, classify_request_target,
+use prodex_domain::{
+    CorrelationContext, CredentialScope, Principal, RequestId, TenantContext, TenantMode,
+    TenantResolutionError,
 };
+use prodex_gateway_http::{
+    CanonicalRequestTarget, GatewayHttpHeader, GatewayHttpPlanError, GatewayHttpRouteKind,
+    GatewayHttpRoutePlane, classify_request_target, trace_context_from_headers,
+};
+use prodex_observability::TraceContext;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+pub const APPLICATION_REQUEST_METADATA_HEADER_LIMIT: usize = 64;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ApplicationRequestDeadline(Instant);
+
+impl ApplicationRequestDeadline {
+    pub const fn at(deadline: Instant) -> Self {
+        Self(deadline)
+    }
+
+    pub const fn instant(self) -> Instant {
+        self.0
+    }
+
+    pub fn is_expired_at(self, now: Instant) -> bool {
+        now >= self.0
+    }
+}
+
+impl fmt::Debug for ApplicationRequestDeadline {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ApplicationRequestDeadline")
+            .field(&"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct ApplicationRequestMetadata {
+    observed_header_count: u8,
+    headers_truncated: bool,
+    trace_context_present: bool,
+    credential_present: bool,
+    affinity_present: bool,
+    codex_metadata_present: bool,
+    user_agent_present: bool,
+}
+
+impl ApplicationRequestMetadata {
+    fn from_headers(headers: &[GatewayHttpHeader]) -> Self {
+        let mut metadata = Self {
+            observed_header_count: headers.len().min(APPLICATION_REQUEST_METADATA_HEADER_LIMIT)
+                as u8,
+            headers_truncated: headers.len() > APPLICATION_REQUEST_METADATA_HEADER_LIMIT,
+            ..Self::default()
+        };
+        for header in headers
+            .iter()
+            .take(APPLICATION_REQUEST_METADATA_HEADER_LIMIT)
+        {
+            match header.normalized_name().as_str() {
+                "traceparent" => metadata.trace_context_present = true,
+                "authorization" | "chatgpt-account-id" => metadata.credential_present = true,
+                "session_id" | "x-codex-turn-state" => metadata.affinity_present = true,
+                "x-openai-subagent" | "x-codex-turn-metadata" | "x-codex-beta-features" => {
+                    metadata.codex_metadata_present = true
+                }
+                "user-agent" => metadata.user_agent_present = true,
+                _ => {}
+            }
+        }
+        metadata
+    }
+
+    pub const fn observed_header_count(self) -> usize {
+        self.observed_header_count as usize
+    }
+
+    pub const fn headers_truncated(self) -> bool {
+        self.headers_truncated
+    }
+
+    pub const fn trace_context_present(self) -> bool {
+        self.trace_context_present
+    }
+
+    pub const fn credential_present(self) -> bool {
+        self.credential_present
+    }
+
+    pub const fn affinity_present(self) -> bool {
+        self.affinity_present
+    }
+
+    pub const fn codex_metadata_present(self) -> bool {
+        self.codex_metadata_present
+    }
+
+    pub const fn user_agent_present(self) -> bool {
+        self.user_agent_present
+    }
+}
+
+impl fmt::Debug for ApplicationRequestMetadata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApplicationRequestMetadata")
+            .field("observed_header_count", &self.observed_header_count)
+            .field("headers_truncated", &self.headers_truncated)
+            .field("trace_context_present", &self.trace_context_present)
+            .field("credential_present", &self.credential_present)
+            .field("affinity_present", &self.affinity_present)
+            .field("codex_metadata_present", &self.codex_metadata_present)
+            .field("user_agent_present", &self.user_agent_present)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct ApplicationRequestContext<'a> {
     target: &'a CanonicalRequestTarget,
+    request_id: RequestId,
+    deadline: ApplicationRequestDeadline,
     route: GatewayHttpRouteKind,
     plane: GatewayHttpRoutePlane,
     required_credential_scope: Option<CredentialScope>,
+    trace_context: Option<TraceContext>,
+    correlation: CorrelationContext,
+    metadata: ApplicationRequestMetadata,
 }
 
 impl<'a> ApplicationRequestContext<'a> {
-    pub const fn target(self) -> &'a CanonicalRequestTarget {
+    pub const fn target(&self) -> &'a CanonicalRequestTarget {
         self.target
     }
 
-    pub const fn route(self) -> GatewayHttpRouteKind {
+    pub const fn request_id(&self) -> RequestId {
+        self.request_id
+    }
+
+    pub const fn deadline(&self) -> ApplicationRequestDeadline {
+        self.deadline
+    }
+
+    pub const fn route(&self) -> GatewayHttpRouteKind {
         self.route
     }
 
-    pub const fn plane(self) -> GatewayHttpRoutePlane {
+    pub const fn plane(&self) -> GatewayHttpRoutePlane {
         self.plane
     }
 
-    pub const fn required_credential_scope(self) -> Option<CredentialScope> {
+    pub const fn required_credential_scope(&self) -> Option<CredentialScope> {
         self.required_credential_scope
+    }
+
+    pub fn trace_context(&self) -> Option<&TraceContext> {
+        self.trace_context.as_ref()
+    }
+
+    pub const fn correlation_context(&self) -> &CorrelationContext {
+        &self.correlation
+    }
+
+    pub const fn metadata(&self) -> ApplicationRequestMetadata {
+        self.metadata
     }
 }
 
@@ -47,9 +185,17 @@ impl fmt::Debug for ApplicationRequestContext<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ApplicationRequestContext")
             .field("target", &"<redacted>")
+            .field("request_id", &"<redacted>")
+            .field("deadline", &"<redacted>")
             .field("route", &self.route)
             .field("plane", &self.plane)
             .field("required_credential_scope", &self.required_credential_scope)
+            .field(
+                "trace_context",
+                &self.trace_context.as_ref().map(|_| "<redacted>"),
+            )
+            .field("correlation", &"<redacted>")
+            .field("metadata", &self.metadata)
             .finish()
     }
 }
@@ -61,8 +207,8 @@ pub struct ApplicationAuthenticatedRequestContext<'a> {
 }
 
 impl<'a> ApplicationAuthenticatedRequestContext<'a> {
-    pub const fn request(&self) -> ApplicationRequestContext<'a> {
-        self.request
+    pub const fn request(&self) -> &ApplicationRequestContext<'a> {
+        &self.request
     }
 
     pub fn principal(&self) -> Option<&Principal> {
@@ -83,11 +229,12 @@ impl fmt::Debug for ApplicationAuthenticatedRequestContext<'_> {
 pub struct ApplicationAuthorizedRequestContext<'a> {
     authenticated: ApplicationAuthenticatedRequestContext<'a>,
     tenant: Option<TenantContext>,
+    correlation: CorrelationContext,
 }
 
 impl<'a> ApplicationAuthorizedRequestContext<'a> {
-    pub const fn request(&self) -> ApplicationRequestContext<'a> {
-        self.authenticated.request
+    pub const fn request(&self) -> &ApplicationRequestContext<'a> {
+        &self.authenticated.request
     }
 
     pub fn principal(&self) -> Option<&Principal> {
@@ -96,6 +243,10 @@ impl<'a> ApplicationAuthorizedRequestContext<'a> {
 
     pub const fn tenant_context(&self) -> Option<TenantContext> {
         self.tenant
+    }
+
+    pub const fn correlation_context(&self) -> &CorrelationContext {
+        &self.correlation
     }
 }
 
@@ -108,22 +259,43 @@ impl fmt::Debug for ApplicationAuthorizedRequestContext<'_> {
                 &self.authenticated.principal.as_ref().map(|_| "<redacted>"),
             )
             .field("tenant", &self.tenant.map(|_| "<redacted>"))
+            .field("correlation", &"<redacted>")
             .finish()
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum ApplicationRequestContextError {
     UnknownRoute,
+    Trace(GatewayHttpPlanError),
+}
+
+impl fmt::Debug for ApplicationRequestContextError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownRoute => f.write_str("UnknownRoute"),
+            Self::Trace(_) => f.debug_tuple("Trace").field(&"<redacted>").finish(),
+        }
+    }
 }
 
 impl fmt::Display for ApplicationRequestContextError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("application route is not available")
+        match self {
+            Self::UnknownRoute => f.write_str("application route is not available"),
+            Self::Trace(error) => error.fmt(f),
+        }
     }
 }
 
-impl Error for ApplicationRequestContextError {}
+impl Error for ApplicationRequestContextError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Trace(error) => Some(error),
+            Self::UnknownRoute => None,
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum ApplicationRequestAuthorizationError {
@@ -156,16 +328,30 @@ impl fmt::Display for ApplicationRequestAuthorizationError {
 
 impl Error for ApplicationRequestAuthorizationError {}
 
-pub fn plan_application_request_context(
-    target: &CanonicalRequestTarget,
-) -> Result<ApplicationRequestContext<'_>, ApplicationRequestContextError> {
+pub fn plan_application_request_context<'a>(
+    target: &'a CanonicalRequestTarget,
+    request_id: RequestId,
+    deadline: ApplicationRequestDeadline,
+    headers: &[GatewayHttpHeader],
+) -> Result<ApplicationRequestContext<'a>, ApplicationRequestContextError> {
     let route =
         classify_request_target(target).ok_or(ApplicationRequestContextError::UnknownRoute)?;
+    let trace_context =
+        trace_context_from_headers(headers).map_err(ApplicationRequestContextError::Trace)?;
+    let correlation = match trace_context.as_ref() {
+        Some(trace) => CorrelationContext::new(request_id).with_trace_id(trace.trace_id.clone()),
+        None => CorrelationContext::new(request_id),
+    };
     Ok(ApplicationRequestContext {
         target,
+        request_id,
+        deadline,
         route: route.kind,
         plane: route.plane,
         required_credential_scope: required_credential_scope_for_plane(route.plane),
+        trace_context,
+        correlation,
+        metadata: ApplicationRequestMetadata::from_headers(headers),
     })
 }
 
@@ -193,10 +379,7 @@ pub fn plan_application_data_plane_authorization(
         return Err(ApplicationRequestAuthorizationError::WrongPlane);
     }
     let Some(principal) = authenticated.principal.as_ref() else {
-        return Ok(ApplicationAuthorizedRequestContext {
-            authenticated,
-            tenant: None,
-        });
+        return Ok(application_authorized_request_context(authenticated, None));
     };
     let boundary = if authenticated.request.route == GatewayHttpRouteKind::DataPlaneQuota {
         BoundaryKind::DataPlaneQuota
@@ -210,10 +393,10 @@ pub fn plan_application_data_plane_authorization(
     let tenant = principal
         .tenant_context(TenantMode::SingleTenant)
         .map_err(ApplicationRequestAuthorizationError::Tenant)?;
-    Ok(ApplicationAuthorizedRequestContext {
+    Ok(application_authorized_request_context(
         authenticated,
-        tenant: Some(tenant),
-    })
+        Some(tenant),
+    ))
 }
 
 pub fn plan_application_control_plane_authorization(
@@ -236,10 +419,29 @@ pub fn plan_application_control_plane_authorization(
             return Err(ApplicationRequestAuthorizationError::ControlPlane(error));
         }
     };
-    Ok(ApplicationAuthorizedRequestContext {
+    Ok(application_authorized_request_context(
         authenticated,
-        tenant: Some(tenant),
-    })
+        Some(tenant),
+    ))
+}
+
+fn application_authorized_request_context(
+    authenticated: ApplicationAuthenticatedRequestContext<'_>,
+    tenant: Option<TenantContext>,
+) -> ApplicationAuthorizedRequestContext<'_> {
+    let correlation = match tenant {
+        Some(tenant) => authenticated
+            .request
+            .correlation
+            .clone()
+            .with_tenant_id(tenant.tenant_id),
+        None => authenticated.request.correlation.clone(),
+    };
+    ApplicationAuthorizedRequestContext {
+        authenticated,
+        tenant,
+        correlation,
+    }
 }
 
 pub(crate) const fn required_credential_scope_for_plane(
@@ -257,6 +459,9 @@ mod tests {
     use super::*;
     use prodex_control_plane::{ControlPlaneOperation, ControlPlaneResourceRef};
     use prodex_domain::{PrincipalId, PrincipalKind, ResourceKind, Role, TenantId};
+    use std::time::Duration;
+
+    const REQUEST_ID: &str = "00000000-0000-7000-8000-000000000004";
 
     fn id<T: std::str::FromStr>(value: &str) -> T
     where
@@ -279,17 +484,33 @@ mod tests {
         Some(VerifiedCredentialEvidence::Principal(principal))
     }
 
+    fn request_context<'a>(target: &'a CanonicalRequestTarget) -> ApplicationRequestContext<'a> {
+        request_context_with_headers(target, &[]).unwrap()
+    }
+
+    fn request_context_with_headers<'a>(
+        target: &'a CanonicalRequestTarget,
+        headers: &[GatewayHttpHeader],
+    ) -> Result<ApplicationRequestContext<'a>, ApplicationRequestContextError> {
+        plan_application_request_context(
+            target,
+            id::<RequestId>(REQUEST_ID),
+            ApplicationRequestDeadline::at(Instant::now() + Duration::from_secs(30)),
+            headers,
+        )
+    }
+
     #[test]
     fn canonical_context_and_verified_evidence_are_one_scope_gate() {
         let data_target = CanonicalRequestTarget::parse("/v1/responses?stream=true").unwrap();
-        let data = plan_application_request_context(&data_target).unwrap();
+        let data = request_context(&data_target);
         assert_eq!(data.target().path_and_query(), "/v1/responses?stream=true");
         assert_eq!(data.plane(), GatewayHttpRoutePlane::DataPlane);
         let debug = format!("{data:?}");
         assert!(!debug.contains("/v1/responses"));
         assert!(!debug.contains("stream=true"));
         let authenticated = plan_application_request_authentication_from_evidence(
-            data,
+            data.clone(),
             evidence(principal(CredentialScope::DataPlane, Role::Operator)),
             false,
         )
@@ -305,7 +526,7 @@ mod tests {
         );
 
         let health_target = CanonicalRequestTarget::parse("/readyz").unwrap();
-        let health = plan_application_request_context(&health_target).unwrap();
+        let health = request_context(&health_target);
         assert_eq!(health.plane(), GatewayHttpRoutePlane::Health);
         assert!(plan_application_request_authentication_from_evidence(health, None, true).is_ok());
     }
@@ -314,7 +535,7 @@ mod tests {
     fn unknown_route_never_reaches_evidence_authentication() {
         let target = CanonicalRequestTarget::parse("/v1/not-supported").unwrap();
         assert_eq!(
-            plan_application_request_context(&target),
+            request_context_with_headers(&target, &[]),
             Err(ApplicationRequestContextError::UnknownRoute),
         );
     }
@@ -322,11 +543,11 @@ mod tests {
     #[test]
     fn evidence_authorization_binds_data_plane_scope_role_and_tenant() {
         let target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
-        let request = plan_application_request_context(&target).unwrap();
+        let request = request_context(&target);
         let operator = principal(CredentialScope::DataPlane, Role::Operator);
         let expected_tenant = operator.tenant_id.unwrap();
         let authenticated = plan_application_request_authentication_from_evidence(
-            request,
+            request.clone(),
             evidence(operator),
             false,
         )
@@ -339,7 +560,7 @@ mod tests {
         assert!(!format!("{authorized:?}").contains(&expected_tenant.to_string()));
 
         let viewer = plan_application_request_authentication_from_evidence(
-            request,
+            request.clone(),
             evidence(principal(CredentialScope::DataPlane, Role::Viewer)),
             false,
         )
@@ -350,7 +571,7 @@ mod tests {
         );
         assert!(
             plan_application_request_authentication_from_evidence(
-                request,
+                request.clone(),
                 evidence(principal(CredentialScope::ControlPlane, Role::Admin)),
                 false,
             )
@@ -366,7 +587,7 @@ mod tests {
     #[test]
     fn evidence_authorization_binds_control_plane_principal_and_tenant() {
         let target = CanonicalRequestTarget::parse("/admin/keys").unwrap();
-        let request = plan_application_request_context(&target).unwrap();
+        let request = request_context(&target);
         let admin = principal(CredentialScope::ControlPlane, Role::Admin);
         let tenant_id = admin.tenant_id.unwrap();
         let action = |principal: Principal, resource_tenant_id| ControlPlaneActionRequest {
@@ -381,12 +602,13 @@ mod tests {
         };
 
         assert!(
-            plan_application_request_authentication_from_evidence(request, None, false).is_err(),
+            plan_application_request_authentication_from_evidence(request.clone(), None, false)
+                .is_err(),
             "anonymous requests must not enter the control plane",
         );
         assert!(
             plan_application_request_authentication_from_evidence(
-                request,
+                request.clone(),
                 evidence(principal(CredentialScope::DataPlane, Role::Operator)),
                 false,
             )
@@ -395,7 +617,7 @@ mod tests {
         );
 
         let authenticated = plan_application_request_authentication_from_evidence(
-            request,
+            request.clone(),
             evidence(admin.clone()),
             false,
         )
@@ -408,7 +630,7 @@ mod tests {
         assert_eq!(authorized.tenant_context().unwrap().tenant_id, tenant_id);
 
         let authenticated = plan_application_request_authentication_from_evidence(
-            request,
+            request.clone(),
             evidence(admin.clone()),
             false,
         )
@@ -427,7 +649,7 @@ mod tests {
 
         let viewer = principal(CredentialScope::ControlPlane, Role::Viewer);
         let authenticated = plan_application_request_authentication_from_evidence(
-            request,
+            request.clone(),
             evidence(viewer.clone()),
             false,
         )
@@ -453,3 +675,7 @@ mod tests {
         assert!(!format!("{error:?}").contains(&foreign_tenant.to_string()));
     }
 }
+
+#[cfg(test)]
+#[path = "request_context_snapshot_tests.rs"]
+mod snapshot_tests;

@@ -53,7 +53,7 @@ pub(super) fn runtime_gateway_respond_route_explain(
     };
     captured.path_and_query = request_context.target().path_and_query().to_string();
     let response =
-        runtime_gateway_admin_response(0, &captured, shared, request_context, preauthorized_admin)
+        runtime_gateway_admin_response(0, &captured, shared, &request_context, preauthorized_admin)
             .unwrap_or_else(|| {
                 build_runtime_proxy_json_error_response(
                     404,

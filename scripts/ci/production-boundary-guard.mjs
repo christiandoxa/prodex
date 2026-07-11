@@ -16,6 +16,9 @@ const FILES = Object.freeze({
   providerAdapter:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/projected_credential.rs",
   application: "crates/prodex-application/src/request_context.rs",
+  gatewayRoute: "crates/prodex-gateway-http/src/route.rs",
+  applicationBoundaryTests:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_application_boundary.rs",
   authn: "crates/prodex-authn/src/evidence.rs",
   oidcAdapter:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/token_claims.rs",
@@ -66,6 +69,15 @@ function requireOrdered(errors, source, needles, message) {
   for (let index = 1; index < needles.length; index += 1) {
     requireBefore(errors, source, needles[index - 1], needles[index], message);
   }
+}
+
+function requireCount(errors, source, needle, expected, message) {
+  const actual = source.split(needle).length - 1;
+  if (actual !== expected) errors.push(message);
+}
+
+function requirePattern(errors, source, pattern, message) {
+  if (!pattern.test(source)) errors.push(message);
 }
 
 export function validateProductionBoundary(sources) {
@@ -128,11 +140,44 @@ export function validateProductionBoundary(sources) {
   }
 
   const canonical = functionBody(sources.pipeline, "runtime_local_rewrite_canonical_context");
-  requireText(
+  requireOrdered(
     errors,
     canonical ?? "",
-    "runtime_gateway_application_request_context(target)",
-    `${FILES.pipeline}: canonical stage must invoke application request-context planning`,
+    [
+      "runtime_proxy_next_request_id(&shared.runtime_shared)",
+      "let typed_request_id = RequestId::new();",
+      "let started_at = Instant::now();",
+      "Duration::from_millis(runtime_gateway_application_http_policy(shared).request_timeout_ms)",
+      "ApplicationRequestDeadline::at(",
+      "capture_runtime_proxy_websocket_request(&request)",
+      "runtime_gateway_application_request_context(",
+    ],
+    `${FILES.pipeline}: canonical stage must construct one typed request context from the request sequence, monotonic deadline, and original headers`,
+  );
+  requirePattern(
+    errors,
+    canonical ?? "",
+    /runtime_gateway_application_request_context\(\s*target,\s*typed_request_id,\s*deadline,\s*&header_request\.headers,\s*\)/s,
+    `${FILES.pipeline}: canonical request-context planning must receive the exact target, typed request ID, deadline, and original headers`,
+  );
+  requireCount(
+    errors,
+    canonical ?? "",
+    "RequestId::new()",
+    1,
+    `${FILES.pipeline}: canonical stage must generate the typed request ID exactly once`,
+  );
+  forbidText(
+    errors,
+    canonical ?? "",
+    "SystemTime",
+    `${FILES.pipeline}: application deadline must use a monotonic clock`,
+  );
+  requireText(
+    errors,
+    sources.pipeline,
+    "prodex_gateway_http::plan_gateway_http_error_response(&error)",
+    `${FILES.pipeline}: request-context metadata failures must retain canonical gateway HTTP status mapping`,
   );
   const adminAuth = functionBody(sources.pipeline, "runtime_local_rewrite_preauthorize_admin") ?? "";
   requireBefore(
@@ -170,8 +215,14 @@ export function validateProductionBoundary(sources) {
   requireText(
     errors,
     control,
-    "request.state.context",
+    "&request.state.context",
     `${FILES.governance}: admin dispatch must receive the canonical application context`,
+  );
+  forbidText(
+    errors,
+    control,
+    "request.state.context.clone()",
+    `${FILES.governance}: admin dispatch must reuse rather than clone the canonical application context`,
   );
   requireText(
     errors,
@@ -372,7 +423,7 @@ export function validateProductionBoundary(sources) {
 
   for (const [needle, message] of [
     [
-      "plan_application_request_context(target)",
+      "plan_application_request_context(target, request_id, deadline, &headers)",
       `${FILES.adapter}: credential adapter must invoke application request-context planning`,
     ],
     [
@@ -543,6 +594,16 @@ export function validateProductionBoundary(sources) {
       `${FILES.dataPlaneAdapter}: application retry authority must be limited to irreversible stages`,
     ],
   ]) requireText(errors, sources.dataPlaneAdapter, needle, message);
+  for (const [needle, message] of [
+    [
+      "let request_id = authorized.request().request_id();",
+      `${FILES.dataPlaneAdapter}: admission must reuse the canonical typed request ID`,
+    ],
+    [
+      "authorized.request().trace_context()",
+      `${FILES.dataPlaneAdapter}: admission must reuse the request context's parsed trace`,
+    ],
+  ]) requireText(errors, sources.dataPlaneAdapter, needle, message);
   forbidText(
     errors,
     sources.dataPlaneAdapter,
@@ -614,6 +675,52 @@ export function validateProductionBoundary(sources) {
     "classify_request_target(target)",
     `${FILES.application}: request context must derive its route from the canonical target`,
   );
+  for (const [needle, message] of [
+    [
+      "request_id: RequestId",
+      `${FILES.application}: immutable request context must carry a typed request ID`,
+    ],
+    [
+      "deadline: ApplicationRequestDeadline",
+      `${FILES.application}: immutable request context must carry a monotonic deadline`,
+    ],
+    [
+      "trace_context: Option<TraceContext>",
+      `${FILES.application}: immutable request context must own parsed trace context`,
+    ],
+    [
+      "correlation: CorrelationContext",
+      `${FILES.application}: immutable request context must own canonical correlation context`,
+    ],
+    [
+      "metadata: ApplicationRequestMetadata",
+      `${FILES.application}: immutable request context must carry bounded redacted metadata`,
+    ],
+    [
+      "APPLICATION_REQUEST_METADATA_HEADER_LIMIT",
+      `${FILES.application}: request metadata collection must remain explicitly bounded`,
+    ],
+    [
+      "trace_context_from_headers(headers)",
+      `${FILES.application}: request context must use the canonical trace parser`,
+    ],
+    [
+      ".with_trace_id(trace.trace_id.clone())",
+      `${FILES.application}: parsed trace identity must enter canonical correlation`,
+    ],
+    [
+      ".with_tenant_id(tenant.tenant_id)",
+      `${FILES.application}: authorized correlation must bind the canonical tenant`,
+    ],
+    [
+      '.field("request_id", &"<redacted>")',
+      `${FILES.application}: request-context Debug must redact typed request identity`,
+    ],
+    [
+      '.field("deadline", &"<redacted>")',
+      `${FILES.application}: request-context Debug must redact deadline internals`,
+    ],
+  ]) requireText(errors, sources.application, needle, message);
   requireText(
     errors,
     sources.application,
@@ -644,12 +751,58 @@ export function validateProductionBoundary(sources) {
       `${FILES.application}: application authorization must resolve typed tenant context`,
     ],
   ]) requireText(errors, sources.application, needle, message);
-  for (const field of ["pub target:", "pub route:", "pub plane:", "pub required_credential_scope:"]) {
+  for (const field of [
+    "pub target:",
+    "pub request_id:",
+    "pub deadline:",
+    "pub route:",
+    "pub plane:",
+    "pub required_credential_scope:",
+    "pub trace_context:",
+    "pub correlation:",
+    "pub metadata:",
+  ]) {
     forbidText(
       errors,
       sources.application,
       field,
       `${FILES.application}: validated request-context fields must remain immutable outside the application boundary`,
+    );
+  }
+  requireText(
+    errors,
+    sources.gatewayRoute,
+    "pub fn trace_context_from_headers(",
+    `${FILES.gatewayRoute}: application and HTTP planning must share one trace parser`,
+  );
+  requireText(
+    errors,
+    sources.keys,
+    "let typed_request_id = authorized.request().request_id();",
+    `${FILES.keys}: gateway accounting must reuse the canonical typed request ID`,
+  );
+  for (const lateId of [
+    "let typed_request_id = RequestId::new();",
+    "let request_id_typed = RequestId::new();",
+  ]) {
+    forbidText(
+      errors,
+      sources.keys,
+      lateId,
+      `${FILES.keys}: gateway admission must not generate a second typed request ID`,
+    );
+  }
+  for (const needle of [
+    "gateway_application_boundary_rejects_invalid_and_duplicate_trace_context_before_upstream",
+    'header("traceparent", "private-invalid-traceparent")',
+    "duplicate_headers.append(",
+    '"invalid_trace_context"',
+  ]) {
+    requireText(
+      errors,
+      sources.applicationBoundaryTests,
+      needle,
+      `${FILES.applicationBoundaryTests}: production boundary must retain invalid and duplicate trace regression coverage`,
     );
   }
   requireText(
@@ -739,7 +892,21 @@ function runSelfTest() {
       runtime_local_rewrite_dispatch_provider(ready, shared);
     }
     fn runtime_local_rewrite_canonical_context() {
-      runtime_gateway_application_request_context(target);
+      runtime_proxy_next_request_id(&shared.runtime_shared);
+      let typed_request_id = RequestId::new();
+      let started_at = Instant::now();
+      Duration::from_millis(runtime_gateway_application_http_policy(shared).request_timeout_ms);
+      ApplicationRequestDeadline::at(started_at.checked_add(timeout));
+      capture_runtime_proxy_websocket_request(&request);
+      runtime_gateway_application_request_context(
+        target,
+        typed_request_id,
+        deadline,
+        &header_request.headers,
+      );
+    }
+    fn runtime_local_rewrite_application_context_rejection() {
+      prodex_gateway_http::plan_gateway_http_error_response(&error);
     }
     fn runtime_local_rewrite_preauthorize_admin() {
       runtime_gateway_admin_auth();
@@ -757,7 +924,7 @@ function runSelfTest() {
       acquire_runtime_proxy_active_request_slot_with_wait();
     }`,
     governance: `fn runtime_local_rewrite_dispatch_control_plane() {
-      runtime_gateway_admin_response(request.state.context);
+      runtime_gateway_admin_response(&request.state.context);
     }
     fn runtime_local_rewrite_reserve_virtual_key() {
       runtime_gateway_virtual_key_admission();
@@ -767,6 +934,7 @@ function runSelfTest() {
       send_runtime_local_rewrite_upstream_request();
     }`,
     keys: `fn runtime_gateway_virtual_key_admission() {
+      let typed_request_id = authorized.request().request_id();
       runtime_gateway_application_data_plane_admission();
       runtime_gateway_try_durable_reservation();
     }
@@ -810,13 +978,15 @@ function runSelfTest() {
       plan_application_control_plane_idempotency_replay(operation, existing.as_ref());
     }`,
     adapter:
-      `plan_application_request_context(target); plan_application_request_authentication_from_evidence(); plan_application_data_plane_authorization(); plan_application_control_plane_authorization(); RuntimeGatewayAdminPreauthorization; CredentialScope::DataPlane; CredentialScope::ControlPlane; VerifiedCredentialEvidence::Principal; VerifiedCredentialEvidence::Oidc; token.canonical_claims(principal_id); VerifiedOidcRoleEvidence::Claim(ExplicitRoleMapper::new([])); VerifiedOidcRoleEvidence::TrustedMissingClaimFallback;
+      `plan_application_request_context(target, request_id, deadline, &headers); plan_application_request_authentication_from_evidence(); plan_application_data_plane_authorization(); plan_application_control_plane_authorization(); RuntimeGatewayAdminPreauthorization; CredentialScope::DataPlane; CredentialScope::ControlPlane; VerifiedCredentialEvidence::Principal; VerifiedCredentialEvidence::Oidc; token.canonical_claims(principal_id); VerifiedOidcRoleEvidence::Claim(ExplicitRoleMapper::new([])); VerifiedOidcRoleEvidence::TrustedMissingClaimFallback;
       let oidc_name = format!("oidc:{subject_name}");
       stable(&[resolved_tenant_text.as_bytes(), oidc_name.as_bytes()]);
       claimed_tenant_id.map(runtime_gateway_control_plane_tenant_id_from_text);
       "prodex:gateway-admin-control-plane-tenant-text:v1";`,
     dataPlaneAdapter:
       `plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); RuntimeGatewayApplicationAdmission::CompatibilityAnonymous; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
+      let request_id = authorized.request().request_id();
+      authorized.request().trace_context();
       fn runtime_gateway_provider_invocation() {
         shared.provider_credential.as_ref().map(|credential| credential.reference());
       }`,
@@ -829,7 +999,36 @@ function runSelfTest() {
       material.with_exposed_secret(|bytes| expose(bytes));
     }`,
     application:
-      "classify_request_target(target); authenticate_verified_credential(VerifiedCredentialAuthenticationRequest { required_scope: request.required_credential_scope }); authorize_boundary_scope(boundary, principal); authorize_boundary_role(boundary, principal); decide_control_plane_action(action); principal.tenant_context(TenantMode::SingleTenant);",
+      `struct ApplicationRequestContext {
+        target: CanonicalRequestTarget,
+        request_id: RequestId,
+        deadline: ApplicationRequestDeadline,
+        route: GatewayHttpRouteKind,
+        plane: GatewayHttpRoutePlane,
+        required_credential_scope: CredentialScope,
+        trace_context: Option<TraceContext>,
+        correlation: CorrelationContext,
+        metadata: ApplicationRequestMetadata,
+      }
+      APPLICATION_REQUEST_METADATA_HEADER_LIMIT;
+      classify_request_target(target);
+      trace_context_from_headers(headers);
+      CorrelationContext::new(request_id).with_trace_id(trace.trace_id.clone());
+      correlation.with_tenant_id(tenant.tenant_id);
+      debug.field("request_id", &"<redacted>");
+      debug.field("deadline", &"<redacted>");
+      authenticate_verified_credential(VerifiedCredentialAuthenticationRequest { required_scope: request.required_credential_scope });
+      authorize_boundary_scope(boundary, principal);
+      authorize_boundary_role(boundary, principal);
+      decide_control_plane_action(action);
+      principal.tenant_context(TenantMode::SingleTenant);`,
+    gatewayRoute: "pub fn trace_context_from_headers() {}",
+    applicationBoundaryTests:
+      `fn gateway_application_boundary_rejects_invalid_and_duplicate_trace_context_before_upstream() {
+        client.header("traceparent", "private-invalid-traceparent");
+        duplicate_headers.append(value);
+        "invalid_trace_context";
+      }`,
     authn: `if principal.credential_scope != required {}
       validate_oidc_token_claims();
       claims.principal_id == principal.id;
@@ -851,7 +1050,11 @@ function runSelfTest() {
     modules:
       "mod local_rewrite_application_boundary; mod local_rewrite_application_data_plane; mod local_rewrite_pipeline;",
   };
-  assertSelfTest(validateProductionBoundary(valid).length === 0, "valid wiring rejected");
+  const validErrors = validateProductionBoundary(valid);
+  assertSelfTest(
+    validErrors.length === 0,
+    `valid wiring rejected: ${validErrors.join("; ")}`,
+  );
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
@@ -885,6 +1088,34 @@ function runSelfTest() {
       pipeline: valid.pipeline.replace("runtime_gateway_application_data_plane_authorization();", ""),
     }).some((error) => error.includes("data credentials")),
     "data-plane authorization bypass accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      pipeline: valid.pipeline.replace("deadline,\n        &header_request.headers", "fresh_deadline(),\n        &header_request.headers"),
+    }).some((error) => error.includes("exact target, typed request ID, deadline")),
+    "request-context deadline replacement accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      pipeline: valid.pipeline.replace("&header_request.headers,", "&[],"),
+    }).some((error) => error.includes("original headers")),
+    "request-context original-header bypass accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      pipeline: valid.pipeline.replace("let started_at = Instant::now();", "let started_at = SystemTime::now();"),
+    }).some((error) => error.includes("monotonic clock")),
+    "wall-clock request deadline accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      keys: `${valid.keys}\nlet request_id_typed = RequestId::new();`,
+    }).some((error) => error.includes("second typed request ID")),
+    "late gateway typed request ID accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
