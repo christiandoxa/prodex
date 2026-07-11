@@ -32,6 +32,7 @@ mod local_rewrite_gateway_billing_summary;
 mod local_rewrite_gateway_budget;
 mod local_rewrite_gateway_config;
 mod local_rewrite_gateway_dashboard;
+mod local_rewrite_gateway_distributed_rate_limit;
 mod local_rewrite_gateway_file_ledger;
 mod local_rewrite_gateway_guardrail_webhook;
 mod local_rewrite_gateway_key_patch;

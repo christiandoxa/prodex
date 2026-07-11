@@ -735,8 +735,9 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0716-domain-reservation-commit-error-redaction.md`, and
   `docs/adr/0717-domain-reservation-reconciliation-error-redaction.md`, and
   `docs/adr/0718-domain-budget-rejection-error-redaction.md`.
-- **Remaining gap:** Replace legacy gateway ledger mutations with the durable
-  reservation backend behind the application boundary.
+- **Remaining gap:** Grouped request budgets still use compatibility usage
+  snapshots and need a durable cross-replica counter contract. Expired
+  reservation recovery also still needs production worker wiring.
 
 ### 6. Admission Must Not Use Only Local In-Memory Usage
 
@@ -772,13 +773,19 @@ while moving legacy adapter code behind enterprise boundaries.
   composition roots can select PostgreSQL or SQLite durable reservation DML
   through one application boundary instead of branching on storage adapters in
   `prodex-app`.
-  Legacy `prodex gateway` startup now also fails closed when
+  Active PostgreSQL-backed gateway admission now executes pooled atomic
+  reservation before upstream dispatch. When Redis coordination is configured,
+  RPM and TPM are checked and incremented together through one tenant-hash-slot
+  Lua operation before the durable reservation; a TPM denial cannot consume RPM
+  allowance. The local usage mutex is released before Redis I/O and reacquired
+  only for compatibility usage recording. Legacy `prodex gateway` startup also
+  fails closed when
   `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`: runtime topology
   planning still runs, and the composition root now emits the shared
   `runtime_accounting_verification_invalid` application-level failure envelope
-  before refusing to claim multi-replica readiness while request admission
-  remains on the local compatibility path instead of the durable reservation
-  backend. Accounting topology env values are now exact runtime inputs, so
+  before refusing to claim full multi-replica readiness while grouped request
+  budgets remain on the local compatibility path. Accounting topology env
+  values are now exact runtime inputs, so
   padded replica-count or accounting-gate values fail closed instead of being
   trim-normalized into active topology intent. Runtime proxy tuning env values
   now use the same exact numeric boundary for local worker counts, queue
@@ -794,10 +801,9 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0540-budget-group-tenant-scope.md`, and
   `docs/adr/0979-application-atomic-reservation-storage-boundary.md`, and
   `docs/adr/0672-budget-group-id-exact-boundary.md`.
-- **Remaining gap:** The legacy `prodex-app` local usage path still remains an
-  adapter migration target; request-serving admission still needs to execute
-  the durable reservation backend through the new application boundary instead
-  of mutating local compatibility usage state.
+- **Remaining gap:** Grouped request-budget admission still aggregates local
+  compatibility usage. It must move to a durable cross-replica operation before
+  the production accounting gate can open.
 
 ### 7. Tenant ID Must Be Mandatory and Keyed
 

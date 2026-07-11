@@ -14,6 +14,7 @@ pub(crate) use super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig,
     RuntimeGatewayStateStore, runtime_gateway_postgres_repository,
+    runtime_gateway_redis_rate_limit_executor,
 };
 pub(super) use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_guardrail_webhook_block;
 pub(super) use super::local_rewrite_gateway_keys::{
@@ -122,6 +123,8 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_state_store: RuntimeGatewayStateStore,
     pub(super) gateway_postgres_repository:
         Option<prodex_storage_postgres_runtime::PostgresRepository>,
+    pub(super) gateway_redis_rate_limit_executor:
+        Option<prodex_storage_redis_runtime::RedisRateLimitExecutor>,
     pub(super) gateway_policy_version: Option<u32>,
     pub(super) gateway_virtual_keys: Arc<Mutex<Vec<RuntimeGatewayVirtualKeyEntry>>>,
     pub(super) gateway_virtual_key_store_path: PathBuf,
@@ -334,6 +337,8 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
     };
     let gateway_postgres_repository =
         runtime_gateway_postgres_repository(&gateway_state_store, worker_count)?;
+    let gateway_redis_rate_limit_executor =
+        runtime_gateway_redis_rate_limit_executor(&gateway_state_store, &runtime_shared)?;
     register_runtime_proxy_persistence_mode(&log_path, true);
     register_runtime_smart_context_proxy_state(
         &log_path,
@@ -417,6 +422,7 @@ fn start_runtime_local_rewrite_proxy_with_file_access(
         gateway_sso,
         gateway_state_store,
         gateway_postgres_repository,
+        gateway_redis_rate_limit_executor,
         gateway_policy_version: prodex_runtime_policy::runtime_policy_summary()
             .ok()
             .flatten()

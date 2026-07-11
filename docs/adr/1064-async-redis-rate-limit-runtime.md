@@ -20,10 +20,11 @@ and all-or-nothing RPM/TPM plans and maps results through the planning crate's
 typed result parsers. Dual-counter keys use an internal tenant hash tag so both
 keys share one Redis Cluster slot.
 
-Keep the multi-replica production gate closed until the dual plan is wired into
-active gateway admission and grouped request budgets have a distributed,
-durable-safe contract. Two independently connected executors prove the Redis
-primitive does not overshoot or consume RPM when TPM denies a request.
+Wire the dual plan into active PostgreSQL-backed gateway admission before
+durable reservation and upstream dispatch. Keep the multi-replica production
+gate closed until grouped request budgets have a distributed, durable-safe
+contract. Two independently connected executors prove the Redis primitive does
+not overshoot or consume RPM when TPM denies a request.
 
 ## Consequences
 

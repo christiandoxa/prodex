@@ -268,6 +268,27 @@ pub(crate) fn runtime_gateway_postgres_repository(
         .map_err(|_| anyhow::anyhow!("failed to configure PostgreSQL gateway accounting pool"))
 }
 
+pub(crate) fn runtime_gateway_redis_rate_limit_executor(
+    state_store: &RuntimeGatewayStateStore,
+    runtime_shared: &RuntimeRotationProxyShared,
+) -> anyhow::Result<Option<prodex_storage_redis_runtime::RedisRateLimitExecutor>> {
+    let RuntimeGatewayStateStore::Postgres {
+        coordination_redis_url: Some(url),
+        ..
+    } = state_store
+    else {
+        return Ok(None);
+    };
+    let config = prodex_storage_redis_runtime::RedisRuntimeConfig::new(url.clone())
+        .map_err(|_| anyhow::anyhow!("failed to configure Redis gateway rate limiter"))?;
+    runtime_shared
+        .async_runtime
+        .handle()
+        .block_on(prodex_storage_redis_runtime::RedisRateLimitExecutor::connect(&config))
+        .map(Some)
+        .map_err(|_| anyhow::anyhow!("failed to connect Redis gateway rate limiter"))
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct RuntimeGatewayObservabilityConfig {
     pub(crate) sinks: Vec<String>,

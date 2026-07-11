@@ -902,12 +902,16 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
         return;
     };
+    let coordination_redis_url = std::env::var("PRODEX_TEST_REDIS_URL").ok();
 
     let root = temp_root("gateway-postgres-shared-backend");
     let paths = app_paths_for_root(root.clone());
     runtime_gateway_postgres_create_current_schema_for_tests(&url);
-    let state_store =
-        RuntimeGatewayStateStore::postgres("PRODEX_TEST_POSTGRES_URL".to_string(), url.clone());
+    let state_store = RuntimeGatewayStateStore::postgres_with_coordination(
+        "PRODEX_TEST_POSTGRES_URL".to_string(),
+        url.clone(),
+        coordination_redis_url.clone(),
+    );
     let upstream = TestUpstream::start_n(1);
     let admin_token = "admin-token";
     let route_aliases = vec![runtime_proxy_crate::RuntimeGatewayRouteAlias {
@@ -955,17 +959,21 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         "team-shared-postgres-{}",
         prodex_domain::VirtualKeyId::new()
     );
+    let mut create_payload = serde_json::json!({
+        "name": key_name,
+        "tenant_id": prodex_domain::TenantId::new().to_string(),
+        "budget_microusd": 42_u64
+    });
+    if coordination_redis_url.is_some() {
+        create_payload["rpm_limit"] = serde_json::json!(1_u64);
+    }
     let created = client
         .post(format!(
             "http://{}/v1/prodex/gateway/keys",
             proxy_a.listen_addr
         ))
         .bearer_auth(admin_token)
-        .json(&serde_json::json!({
-            "name": key_name,
-            "tenant_id": prodex_domain::TenantId::new().to_string(),
-            "budget_microusd": 42_u64
-        }))
+        .json(&create_payload)
         .send()
         .expect("shared postgres create key request should be sent");
     let created_status = created.status().as_u16();
@@ -1048,7 +1056,14 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         second.join().expect("second request thread should finish"),
     ];
     statuses.sort_unstable();
-    assert_eq!(statuses, vec![200, 403]);
+    assert_eq!(
+        statuses,
+        if coordination_redis_url.is_some() {
+            vec![200, 429]
+        } else {
+            vec![200, 403]
+        }
+    );
     let denied: serde_json::Value = client
         .post(format!("http://{}/v1/responses", proxy_b.listen_addr))
         .bearer_auth(created["token"].as_str().unwrap())
@@ -1057,7 +1072,14 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
         .expect("follow-up denied postgres request should be sent")
         .json()
         .expect("denied response should be json");
-    assert_eq!(denied["error"]["code"], "budget_exceeded");
+    assert_eq!(
+        denied["error"]["code"],
+        if coordination_redis_url.is_some() {
+            "rpm_limit_exceeded"
+        } else {
+            "budget_exceeded"
+        }
+    );
 
     let _ = upstream
         .body_rx

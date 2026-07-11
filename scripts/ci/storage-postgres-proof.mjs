@@ -7,6 +7,7 @@ const modulePath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const postgresImage = "postgres:16-alpine";
+const redisImage = "redis:7-alpine";
 export const MISSING_DEPENDENCY_MESSAGE =
   "ci:storage-postgres-proof requires either PRODEX_TEST_POSTGRES_URL or local docker + psql";
 
@@ -98,6 +99,18 @@ async function waitForPostgres(port) {
   throw new Error("temporary Postgres container did not become ready");
 }
 
+async function waitForRedis(containerId) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      await run("docker", ["exec", containerId, "redis-cli", "ping"], { capture: true });
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  throw new Error("temporary Redis container did not become ready");
+}
+
 async function runWithManagedPostgres() {
   selectProofMode({
     postgresUrl: null,
@@ -124,7 +137,14 @@ async function runWithManagedPostgres() {
     { capture: true },
   );
   const containerId = containerIdRaw.trim();
+  let redisContainerId = null;
   try {
+    const { stdout: redisContainerIdRaw } = await run(
+      "docker",
+      ["run", "-d", "--rm", "-P", redisImage],
+      { capture: true },
+    );
+    redisContainerId = redisContainerIdRaw.trim();
     const { stdout: portRaw } = await run(
       "docker",
       ["port", containerId, "5432/tcp"],
@@ -136,12 +156,28 @@ async function runWithManagedPostgres() {
       throw new Error(`failed to resolve temporary Postgres port from '${portRaw.trim()}'`);
     }
     await waitForPostgres(port);
+    const { stdout: redisPortRaw } = await run(
+      "docker",
+      ["port", redisContainerId, "6379/tcp"],
+      { capture: true },
+    );
+    const redisPort = Number.parseInt(redisPortRaw.trim().split(":").at(-1) ?? "", 10);
+    if (!Number.isFinite(redisPort) || redisPort <= 0) {
+      throw new Error(`failed to resolve temporary Redis port from '${redisPortRaw.trim()}'`);
+    }
+    await waitForRedis(redisContainerId);
     await run("node", ["scripts/ci/storage-boundary-guard.mjs"], {
       env: {
         PRODEX_TEST_POSTGRES_URL: `postgres://postgres:postgres@127.0.0.1:${port}/prodex_test`,
+        PRODEX_TEST_REDIS_URL: `redis://127.0.0.1:${redisPort}/0`,
       },
     });
   } finally {
+    if (redisContainerId) {
+      try {
+        await run("docker", ["rm", "-f", redisContainerId], { capture: true });
+      } catch {}
+    }
     try {
       await run("docker", ["rm", "-f", containerId], { capture: true });
     } catch {}
