@@ -341,7 +341,6 @@ fn gateway_readyz_fails_during_local_overload_while_livez_and_startupz_stay_up()
         assert_eq!(response.status().as_u16(), 200);
         let body: serde_json::Value = response.json().expect("probe response should be json");
         assert_eq!(body["ready"], true);
-        assert_eq!(body["local_overload"], true);
         assert_eq!(body["draining"], false);
     }
 

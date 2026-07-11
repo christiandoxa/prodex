@@ -778,7 +778,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_budget_admission_ignores_stale_local_spend_only() {
+    fn durable_budget_admission_ignores_stale_local_spend_and_requests() {
         let key = runtime_proxy_crate::RuntimeGatewayVirtualKey {
             name: "admin-managed-key".to_string(),
             tenant_id: Some(TenantId::new().to_string()),
@@ -821,16 +821,16 @@ mod tests {
             Some(1),
             10,
         )
-        .expect("durable-backed budget should not be blocked by stale local spend");
+        .expect("durable-backed budget should not be blocked by stale local usage");
 
         assert_eq!(admitted.key_name, "admin-managed-key");
-        assert_eq!(local_usage.requests_total, 1);
+        assert_eq!(local_usage.requests_total, 0);
         assert_eq!(local_usage.requests_this_minute, 1);
         assert_eq!(local_usage.spend_microusd, 0);
     }
 
     #[test]
-    fn durable_budget_admission_keeps_local_request_limits() {
+    fn durable_budget_admission_defers_request_budget_to_durable_store() {
         let key = runtime_proxy_crate::RuntimeGatewayVirtualKey {
             name: "admin-managed-key".to_string(),
             tenant_id: Some(TenantId::new().to_string()),
@@ -852,16 +852,15 @@ mod tests {
         };
         let local_usage = runtime_gateway_local_admission_usage(&key, Some(&usage), true);
 
-        assert!(matches!(
-            runtime_proxy_crate::runtime_gateway_virtual_key_admission(
-                &key,
-                Some(&local_usage),
-                br#"{"model":"gpt-5.4","input":"hello"}"#,
-                Some(1),
-                10,
-            ),
-            Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::RequestBudgetExceeded)
-        ));
+        assert_eq!(local_usage.requests_total, 0);
+        runtime_proxy_crate::runtime_gateway_virtual_key_admission(
+            &key,
+            Some(&local_usage),
+            br#"{"model":"gpt-5.4","input":"hello"}"#,
+            Some(1),
+            10,
+        )
+        .expect("durable-backed request budget should not be blocked by stale local usage");
     }
 
     #[test]

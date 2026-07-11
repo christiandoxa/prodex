@@ -281,7 +281,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 980,
+    "maxLines": 979,
     "reason": "Virtual-key admission and durable reservation accounting remain capped after atomic fail-closed integration."
   },
   {
