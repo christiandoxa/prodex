@@ -2705,6 +2705,7 @@ version = "0.273.0"
 name = "prodex-secret-store"
 version = "0.273.0"
 dependencies = [
+ "prodex-domain",
  "sha2",
 ]
 

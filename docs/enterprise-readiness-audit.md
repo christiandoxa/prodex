@@ -1372,7 +1372,14 @@ while moving legacy adapter code behind enterprise boundaries.
   redacts locations, values, keyring backend selections, refresh-lease payloads,
   secret revision metadata, paths, accounts, and backend reasons while
   preserving variant names; see
-  `docs/adr/0985-secret-store-debug-redaction.md`. Gateway runtime launch
+  `docs/adr/0985-secret-store-debug-redaction.md`. The production-oriented
+  projected provider implements the domain `SecretProvider` contract with
+  canonical root containment, bounded private files, exact version sidecars,
+  redacted debug output, and rotation-visible rereads; see
+  `docs/adr/1058-projected-external-secret-provider.md`. Runtime policy and the
+  gateway composition root still need to select this provider and reject raw
+  production credentials before the secret-provider target is complete.
+  Gateway runtime launch
   config debug output redacts admin-token hashes, SSO/OIDC metadata, state-store
   URLs, local paths, observability bearer tokens, and guardrail webhook tokens
   while preserving backend and feature shape; see

@@ -11,4 +11,5 @@ name = "secret_store"
 path = "src/lib.rs"
 
 [dependencies]
+prodex_domain = { workspace = true }
 sha2 = { workspace = true }

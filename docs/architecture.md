@@ -78,7 +78,8 @@ Key crates:
 - `prodex-runtime-state`: runtime lane counters, bindings, snapshots, and scheduled-save models.
 - `prodex-runtime-store`: merge and compaction helpers for persisted runtime state.
 - `prodex-session-store`: persisted shared Codex session metadata helpers.
-- `prodex-secret-store`: storage backend primitives.
+- `prodex-secret-store`: development storage primitives and the bounded,
+  read-only projected external-secret provider described by ADR 1058.
 - `prodex-profile-export`: encrypted import/export envelopes.
 
 Persistence rules:
