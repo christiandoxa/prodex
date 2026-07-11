@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 1074](1074-production-control-plane-service-mode.md).
 
 ## Context
 

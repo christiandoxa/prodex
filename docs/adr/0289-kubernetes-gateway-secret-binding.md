@@ -17,8 +17,9 @@ Bind `Deployment/prodex-gateway` to `prodex-gateway-secrets` and reject gateway
 workload mounts of `prodex-control-plane-secrets` in the deployment security
 guard.
 
-The control-plane placeholder remains bound to `prodex-control-plane-secrets`,
-which contains only PostgreSQL and Redis references.
+The control-plane workload remains bound to `prodex-control-plane-secrets`,
+which contains only its projected admin token plus PostgreSQL and Redis
+references.
 
 ## Consequences
 

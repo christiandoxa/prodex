@@ -26,11 +26,11 @@ fn run_enterprise_serve(
     let listen_addr = parse_listen_addr(mode, args)?;
     let (policy_mode, server_mode) = match mode {
         DedicatedServerMode::DataPlane => (
-            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+            prodex_app::RuntimePolicyServiceMode::Gateway,
             GatewayServerMode::DataPlane,
         ),
         DedicatedServerMode::ControlPlane => (
-            prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane,
+            prodex_app::RuntimePolicyServiceMode::ControlPlane,
             GatewayServerMode::ControlPlane,
         ),
     };

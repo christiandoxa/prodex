@@ -164,6 +164,7 @@ pub fn migrate_gateway_compatibility_state_postgres(
 pub use gateway_backend::{
     GatewayBackend, start_policy_gateway_backend, start_policy_gateway_backend_for_mode,
 };
+pub use prodex_runtime_policy::RuntimePolicyServiceMode;
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;

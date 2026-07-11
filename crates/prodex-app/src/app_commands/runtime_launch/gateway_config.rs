@@ -108,6 +108,7 @@ pub(super) fn resolve_gateway_launch_config_with_secrets(
     )
 }
 
+#[cfg(test)]
 pub(super) fn resolve_gateway_launch_config_with_runtime_config(
     paths: &AppPaths,
     state: &AppState,

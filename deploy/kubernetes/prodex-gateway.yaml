@@ -38,6 +38,8 @@ metadata:
   namespace: prodex
 data:
   policy.toml: |
+    version = 1
+
     [secrets]
     production = true
     projected_root = "/run/secrets/prodex"
@@ -58,6 +60,42 @@ data:
     name = "prometheus"
     token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_METRICS_TOKEN" }
     role = "viewer"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodex-control-plane-config
+  namespace: prodex
+data:
+  PRODEX_HOME: /var/lib/prodex
+  PRODEX_RUNTIME_LOG_DIR: /var/log/prodex
+  RUST_LOG: info
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodex-control-plane-policy
+  namespace: prodex
+data:
+  policy.toml: |
+    version = 1
+    service_mode = "control-plane"
+
+    [secrets]
+    production = true
+    projected_root = "/run/secrets/prodex"
+    projected_provider = "kubernetes"
+
+    [gateway.state]
+    backend = "postgres"
+    postgres_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_POSTGRES_URL" }
+    postgres_tls_mode = "verify-full"
+    redis_url_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_REDIS_URL" }
+
+    [[gateway.admin_tokens]]
+    name = "operations"
+    token_ref = { provider = "kubernetes", name = "PRODEX_CONTROL_PLANE_ADMIN_TOKEN" }
+    role = "admin"
 ---
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
@@ -103,6 +141,9 @@ spec:
     name: prodex-control-plane-secrets
     creationPolicy: Owner
   data:
+    - secretKey: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+      remoteRef:
+        key: prodex/control-plane/admin-token
     - secretKey: PRODEX_GATEWAY_POSTGRES_URL
       remoteRef:
         key: prodex/gateway/postgres-url
@@ -506,13 +547,11 @@ kind: Deployment
 metadata:
   name: prodex-control-plane
   namespace: prodex
-  annotations:
-    prodex.dev/status: placeholder-until-control-plane-adapter-exists
   labels:
     app.kubernetes.io/name: prodex-control-plane
     app.kubernetes.io/component: control-plane
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: prodex-control-plane
@@ -524,6 +563,7 @@ spec:
     spec:
       serviceAccountName: prodex-control-plane
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -536,15 +576,13 @@ spec:
           image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/prodex-control-plane"]
-          args: ["serve"]
+          args: ["serve", "--listen", "0.0.0.0:4100"]
           ports:
             - name: http
               containerPort: 4100
           envFrom:
             - configMapRef:
-                name: prodex-gateway-config
-            - secretRef:
-                name: prodex-control-plane-secrets
+                name: prodex-control-plane-config
           readinessProbe:
             httpGet:
               path: /readyz
@@ -566,6 +604,10 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 12
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 15"]
           resources:
             requests:
               cpu: 100m
@@ -581,7 +623,10 @@ spec:
           volumeMounts:
             - name: prodex-home
               mountPath: /var/lib/prodex
-            - name: gateway-policy
+            - name: prodex-control-plane-secrets
+              mountPath: /run/secrets/prodex
+              readOnly: true
+            - name: control-plane-policy
               mountPath: /var/lib/prodex/policy.toml
               subPath: policy.toml
               readOnly: true
@@ -592,9 +637,22 @@ spec:
       volumes:
         - name: prodex-home
           emptyDir: {}
-        - name: gateway-policy
+        - name: prodex-control-plane-secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: prodex-control-plane-secrets
+                  items:
+                    - key: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+                      path: PRODEX_CONTROL_PLANE_ADMIN_TOKEN
+                    - key: PRODEX_GATEWAY_POSTGRES_URL
+                      path: PRODEX_GATEWAY_POSTGRES_URL
+                    - key: PRODEX_GATEWAY_REDIS_URL
+                      path: PRODEX_GATEWAY_REDIS_URL
+        - name: control-plane-policy
           configMap:
-            name: prodex-gateway-policy
+            name: prodex-control-plane-policy
         - name: tmp
           emptyDir:
             medium: Memory
