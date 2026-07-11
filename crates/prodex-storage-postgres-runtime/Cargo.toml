@@ -1,0 +1,23 @@
+[package]
+name = "prodex-storage-postgres-runtime"
+version.workspace = true
+edition.workspace = true
+description = "Async pooled PostgreSQL execution adapter for Prodex storage plans"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_storage_postgres_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+deadpool-postgres = { workspace = true }
+prodex_domain = { workspace = true }
+prodex_storage = { workspace = true }
+prodex_storage_postgres = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+tokio-postgres = { workspace = true, features = ["with-uuid-1"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

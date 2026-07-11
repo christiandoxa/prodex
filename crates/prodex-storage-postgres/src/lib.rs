@@ -1050,7 +1050,7 @@ WITH locked_reservation AS (
 ), mark_reservation AS (
     UPDATE prodex_reservations
     SET committed_at_unix_ms = $8,
-        released_at_unix_ms = CASE WHEN $10 > 0 OR $11 > 0 THEN $8 ELSE released_at_unix_ms END
+        released_at_unix_ms = CASE WHEN $10::BIGINT > 0 OR $11::BIGINT > 0 THEN $8 ELSE released_at_unix_ms END
     WHERE tenant_id = $1
       AND reservation_id = $2
       AND EXISTS (SELECT 1 FROM update_counter)
@@ -1083,7 +1083,7 @@ WITH locked_reservation AS (
     )
     SELECT $1, $13, $2, $3, 'released', $10, $11, $8
     WHERE EXISTS (SELECT 1 FROM mark_reservation)
-      AND ($10 > 0 OR $11 > 0)
+      AND ($10::BIGINT > 0 OR $11::BIGINT > 0)
     ON CONFLICT (tenant_id, reservation_id, event_kind) DO NOTHING
     RETURNING tenant_id
 )
