@@ -74,6 +74,7 @@ pub enum JwtAlgorithm {
     Rs384,
     Rs512,
     Es256,
+    Es384,
     EdDsa,
 }
 
