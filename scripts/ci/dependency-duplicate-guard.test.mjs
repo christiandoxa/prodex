@@ -25,6 +25,12 @@ cpufeatures v0.2.17
 cpufeatures v0.3.0
     sha2 v0.11.0
 
+const-oid v0.9.6
+    x509-cert v0.2.5
+
+const-oid v0.10.2
+    digest v0.11.3
+
 crypto-common v0.1.7
     digest v0.10.7
 
@@ -117,6 +123,7 @@ test("default budget accepts current duplicate families", () => {
     [
       ["block-buffer", 2],
       ["cfg_aliases", 2],
+      ["const-oid", 2],
       ["cpufeatures", 2],
       ["crypto-common", 2],
       ["digest", 2],

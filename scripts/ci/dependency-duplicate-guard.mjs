@@ -16,6 +16,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "sha1 and sha2 currently resolve through different cpufeatures lines.",
   },
   {
+    name: "const-oid",
+    maxVersions: 2,
+    reason: "tokio-postgres-rustls ASN.1 verification and digest 0.11 currently resolve const-oid 0.9 and 0.10.",
+  },
+  {
     name: "crypto-common",
     maxVersions: 2,
     reason: "digest 0.10 and 0.11 pull different crypto-common lines.",
