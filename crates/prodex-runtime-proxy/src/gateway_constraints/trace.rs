@@ -53,18 +53,30 @@ pub fn runtime_gateway_constraint_error_trace(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn constraint_trace(
-    endpoint: ProviderEndpoint,
-    provider: ProviderId,
-    requested_model: &str,
-    candidates: &[RuntimeGatewayConstraintCandidate],
-    selected_index: Option<usize>,
-    selected_model: Option<&str>,
-    no_route_reason: Option<ProviderRequestConstraintDecision>,
-    hard_affinity: bool,
-    model_state: &BTreeMap<String, RuntimeGatewayRouteModelState>,
-) -> RuntimeRouteDecisionTrace {
+pub(super) struct ConstraintTraceInput<'a> {
+    pub(super) endpoint: ProviderEndpoint,
+    pub(super) provider: ProviderId,
+    pub(super) requested_model: &'a str,
+    pub(super) candidates: &'a [RuntimeGatewayConstraintCandidate],
+    pub(super) selected_index: Option<usize>,
+    pub(super) selected_model: Option<&'a str>,
+    pub(super) no_route_reason: Option<ProviderRequestConstraintDecision>,
+    pub(super) hard_affinity: bool,
+    pub(super) model_state: &'a BTreeMap<String, RuntimeGatewayRouteModelState>,
+}
+
+pub(super) fn constraint_trace(input: ConstraintTraceInput<'_>) -> RuntimeRouteDecisionTrace {
+    let ConstraintTraceInput {
+        endpoint,
+        provider,
+        requested_model,
+        candidates,
+        selected_index,
+        selected_model,
+        no_route_reason,
+        hard_affinity,
+        model_state,
+    } = input;
     let mut builder = RuntimeRouteDecisionTraceBuilder::new(
         trace_route(endpoint),
         (!requested_model.is_empty()).then_some(requested_model),
