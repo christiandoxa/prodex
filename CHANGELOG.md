@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.275.0 - 2026-07-11
+
+### Runtime
+
+- Preserve quota retry and repair transcripts (`afdb1bd`)
+
 ## 0.274.0 - 2026-07-11
 
 ### Runtime
@@ -26,6 +32,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Replace unmaintained pem parser (`a2218eb`)
 - Enforce postgres transport tls (`147e6e5`)
 - Enforce grouped request budgets (`b97ed3d`)
 - Enforce distributed rpm tpm (`2c3a02e`)
@@ -114,13 +121,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Update upstream compatibility watchdog (`b5db7c3`)
-
-## 0.262.0 - 2026-07-08
-
-### CLI
-
-- Show profile quota in log headers (`5719800`)
-
-### Misc
-
-- Satisfy log TUI clippy gate (`559f856`)
