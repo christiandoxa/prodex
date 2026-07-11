@@ -53,3 +53,14 @@ test("assessDrill accepts an intact restore within thresholds", () => {
     { passed: true, failures: [] },
   );
 });
+
+test("script self-test runs with stdin closed", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  await promisify(execFile)(process.execPath, [
+    "scripts/ci/backup-restore-drill.mjs",
+    "--self-test",
+  ], {
+    cwd: new URL("../..", import.meta.url),
+  });
+});

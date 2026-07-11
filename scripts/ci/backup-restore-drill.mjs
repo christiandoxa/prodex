@@ -150,15 +150,19 @@ SELECT json_build_object(
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const piped = options.capture || options.input !== undefined;
+    const hasInput = options.input !== undefined;
     const child = spawn(command, args, {
       cwd: repoRoot,
       env: { ...process.env, ...(options.env ?? {}) },
-      stdio: piped ? ["pipe", "pipe", "pipe"] : "inherit",
+      stdio: [
+        hasInput ? "pipe" : "ignore",
+        options.capture ? "pipe" : "inherit",
+        options.capture ? "pipe" : "inherit",
+      ],
     });
     let stdout = "";
     let stderr = "";
-    if (piped) {
+    if (options.capture) {
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk) => {
@@ -167,7 +171,12 @@ function run(command, args, options = {}) {
       child.stderr.on("data", (chunk) => {
         stderr += chunk;
       });
-      child.stdin.end(options.input ?? "");
+    }
+    if (hasInput) {
+      child.stdin.on("error", (error) => {
+        if (error.code !== "EPIPE") reject(error);
+      });
+      child.stdin.end(options.input);
     }
     child.on("error", reject);
     child.on("close", (code, signal) => {
@@ -237,6 +246,22 @@ async function waitForPostgres(containerId) {
   throw new Error("temporary Postgres container did not become ready");
 }
 
+async function waitForPublishedPostgres(port) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      await run(
+        "psql",
+        ["-h", "127.0.0.1", "-p", String(port), "-U", "postgres", "-d", sourceDatabase, "-c", "select 1"],
+        { capture: true, env: { PGPASSWORD: "postgres" } },
+      );
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  throw new Error("temporary published Postgres endpoint did not become ready");
+}
+
 async function sha256File(filePath) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
@@ -273,7 +298,7 @@ async function runManagedDrill() {
     schema_version: 1,
     backend: "postgres",
     result: "failed",
-    source_revision: await revision(),
+    source_revision: "unavailable",
     thresholds: {
       max_rpo_seconds: maxRpoSeconds,
       max_rto_seconds: maxRtoSeconds,
@@ -282,6 +307,7 @@ async function runManagedDrill() {
   let containerId = null;
 
   try {
+    evidence.source_revision = await revision();
     const { stdout } = await run(
       "docker",
       [
@@ -301,6 +327,7 @@ async function runManagedDrill() {
     );
     const port = Number.parseInt(portOutput.trim().split(":").at(-1) ?? "", 10);
     if (!Number.isInteger(port) || port <= 0) throw new Error("temporary Postgres port is invalid");
+    await waitForPublishedPostgres(port);
     const postgresUrl = `postgres://postgres:postgres@127.0.0.1:${port}/${sourceDatabase}`;
 
     await run(
@@ -410,7 +437,7 @@ async function runManagedDrill() {
   }
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   if (parseThreshold("60", 1, "rpo") !== 60) throw new Error("threshold parsing failed");
   const assessment = assessDrill({
     rpoSeconds: 1,
@@ -424,11 +451,12 @@ function runSelfTest() {
     rlsIsolated: true,
   });
   if (!assessment.passed) throw new Error("passing drill assessment was rejected");
+  if (!(await revision())) throw new Error("source revision lookup failed");
 }
 
 export async function main() {
   if (process.argv.includes("--self-test")) {
-    runSelfTest();
+    await runSelfTest();
     return;
   }
   await runManagedDrill();

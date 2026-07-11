@@ -142,7 +142,8 @@ PRODEX_BACKUP_DRILL_MAX_RTO_SECONDS=300 \
 npm run ci:backup-restore-drill
 ```
 
-The command starts disposable PostgreSQL source and restore databases, invokes
+The command requires Docker plus `psql`, starts disposable PostgreSQL source
+and restore databases, invokes
 the external migrator, seeds synthetic tenant/accounting records, dumps and
 restores them, and verifies all twelve RLS-protected tables. It also proves that
 a write made after the backup is absent from the restored recovery point.

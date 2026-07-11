@@ -111,8 +111,8 @@ Add `-- --storage-postgres-proof` to `npm run ci:preflight` (or set
 in the standard local preflight run.
 
 `npm run ci:backup-restore-drill` runs the PostgreSQL recovery gate used by
-heavy CI jobs. It requires Docker, applies the external migrator, performs a
-real `pg_dump`/`pg_restore`, gates RPO/RTO, verifies tenant and accounting
+heavy CI jobs. It requires Docker and the PostgreSQL client, applies the
+external migrator, performs a real `pg_dump`/`pg_restore`, gates RPO/RTO, verifies tenant and accounting
 fingerprints, and writes redacted evidence to
 `target/backup-restore-drill/evidence.json`.
 

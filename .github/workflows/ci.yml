@@ -279,6 +279,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+
       - name: Run PostgreSQL backup and restore drill
         run: npm run ci:backup-restore-drill
 
