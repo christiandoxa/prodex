@@ -106,10 +106,10 @@ pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProv
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
     RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
-    RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
-    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
-    RuntimeProjectedProviderCredential, start_runtime_gateway_rewrite_proxy_with_runtime_config,
-    start_runtime_local_rewrite_proxy,
+    RuntimeGatewayOidcConfig, RuntimeGatewaySecret, RuntimeGatewaySsoConfig,
+    RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
+    RuntimeLocalRewriteProxyStartOptions, RuntimeProjectedProviderCredential,
+    start_runtime_gateway_rewrite_proxy_with_runtime_config, start_runtime_local_rewrite_proxy,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 pub(crate) use local_rewrite_gateway_backend_connection::{

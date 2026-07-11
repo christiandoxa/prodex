@@ -1412,7 +1412,8 @@ fn gateway_observability_config_reads_http_bearer_token_env() {
         Some("https://otel.example/v1/traces")
     );
     assert_eq!(config.http_schema, "otlp");
-    assert_eq!(config.http_bearer_token.as_deref(), Some("obs-token"));
+    assert!(config.http_bearer_token.is_some());
+    assert!(!format!("{config:?}").contains("obs-token"));
 }
 
 #[test]
@@ -1444,7 +1445,8 @@ fn resolve_gateway_guardrail_config_normalizes_supported_webhook_phases() {
         config.webhook.phases,
         vec!["pre".to_string(), "post".to_string()]
     );
-    assert_eq!(config.webhook.bearer_token.as_deref(), Some("guard-token"));
+    assert!(config.webhook.bearer_token.is_some());
+    assert!(!format!("{:?}", config.webhook).contains("guard-token"));
     assert!(config.webhook.fail_closed);
 }
 

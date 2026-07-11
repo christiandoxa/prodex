@@ -26,6 +26,67 @@ const DOCUMENTED_SECRET_ARG = new RegExp(
   `^\\s*(?:\\$\\s*)?prodex\\b[^\\n]*--${SENSITIVE}(?:=|\\s+\\S)`,
   "gimu",
 );
+const WEBSOCKET_SECRET_QUERY = /(?:[?&]|\{[^}]*separator[^}]*\})(?:key|access[_-]?token)=|(?:append_pair|query_pair)\s*\(\s*["'](?:key|access[_-]?token)["']/giu;
+const PRODUCTION_WEBSOCKET_URL_FILES = new Set([
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live/connection.rs",
+]);
+const RUNTIME_GATEWAY_SECRET_BOUNDARIES = new Map([
+  [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_config.rs",
+    [
+      "http_bearer_token: Option<RuntimeGatewaySecret>",
+      "bearer_token: Option<RuntimeGatewaySecret>",
+    ],
+  ],
+  [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_options.rs",
+    [
+      "DevelopmentCompatibility(SecretMaterial)",
+      "credential: RuntimeProjectedProviderCredential",
+      "source: Arc<RuntimeGatewaySecretSource>",
+    ],
+  ],
+  [
+    "crates/prodex-app/src/app_commands/runtime_launch/gateway_secret_config.rs",
+    [
+      "RuntimeGatewaySecret::projected",
+      "RuntimeGatewaySecret::development_compatibility",
+    ],
+  ],
+  [
+    "crates/prodex-app/src/app_commands/runtime_launch/gateway_observability_config.rs",
+    ["resolver.runtime_secret("],
+  ],
+  [
+    "crates/prodex-app/src/app_commands/runtime_launch/gateway_guardrail_config.rs",
+    ["resolver.runtime_secret("],
+  ],
+  [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/projected_credential.rs",
+    [
+      "runtime_gateway_with_outbound_secret<T>",
+      "SecretResolutionRequest::new(",
+      "material.with_exposed_secret(",
+    ],
+  ],
+  [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs",
+    ["runtime_gateway_with_outbound_secret(secret"],
+  ],
+  [
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_guardrail_webhook.rs",
+    ["runtime_gateway_with_outbound_secret(secret"],
+  ],
+]);
+const RAW_RUNTIME_GATEWAY_SECRET = /(?:http_bearer_token|bearer_token)\s*:\s*Option\s*<\s*String\s*>|(?:http_bearer_token|bearer_token)\.as_deref\s*\(/gu;
+const DEVELOPMENT_GATEWAY_SECRET_CONSTRUCTION = /RuntimeGatewaySecret::development_compatibility\s*\(/gu;
+const GATEWAY_SECRET_RESOLVER =
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_secret_config.rs";
+const DEFERRED_GATEWAY_SECRET_CONFIG_FILES = new Set([
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_observability_config.rs",
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_guardrail_config.rs",
+]);
 const TEST_PATH = /(?:^|\/)(?:tests?|fixtures?)(?:\/|$)|(?:^|\/)(?:tests?|[^/]+_tests?)\.rs$|\.test\.mjs$|^scripts\/ci\/secret-boundary-guard\.mjs$/u;
 
 // Compatibility debt only: new occurrences exhaust these per-file budgets and fail.
@@ -103,6 +164,67 @@ export function validateFiles(files) {
         pushViolation(violations, filePath, contents, match.index, kind);
       }
     }
+
+    if (PRODUCTION_WEBSOCKET_URL_FILES.has(filePath)) {
+      WEBSOCKET_SECRET_QUERY.lastIndex = 0;
+      for (const match of contents.matchAll(WEBSOCKET_SECRET_QUERY)) {
+        pushViolation(
+          violations,
+          filePath,
+          contents,
+          match.index,
+          "secret-bearing production websocket URL query",
+        );
+      }
+    }
+
+    DEVELOPMENT_GATEWAY_SECRET_CONSTRUCTION.lastIndex = 0;
+    if (filePath !== GATEWAY_SECRET_RESOLVER) {
+      for (const match of contents.matchAll(DEVELOPMENT_GATEWAY_SECRET_CONSTRUCTION)) {
+        pushViolation(
+          violations,
+          filePath,
+          contents,
+          match.index,
+          "ungated development gateway secret material",
+        );
+      }
+    }
+
+    if (DEFERRED_GATEWAY_SECRET_CONFIG_FILES.has(filePath)) {
+      const eagerResolution = contents.indexOf("resolver.resolve(");
+      if (eagerResolution !== -1) {
+        violations.push({
+          filePath,
+          line: lineNumber(contents, eagerResolution),
+          kind: "eager outbound gateway secret resolution",
+          snippet: "resolver.resolve(",
+        });
+      }
+    }
+
+    const requiredBoundarySnippets = RUNTIME_GATEWAY_SECRET_BOUNDARIES.get(filePath);
+    if (requiredBoundarySnippets) {
+      for (const snippet of requiredBoundarySnippets) {
+        if (!contents.includes(snippet)) {
+          violations.push({
+            filePath,
+            line: 1,
+            kind: "runtime gateway secret boundary",
+            snippet: `missing required boundary '${snippet}'`,
+          });
+        }
+      }
+      RAW_RUNTIME_GATEWAY_SECRET.lastIndex = 0;
+      for (const match of contents.matchAll(RAW_RUNTIME_GATEWAY_SECRET)) {
+        violations.push({
+          filePath,
+          line: lineNumber(contents, match.index),
+          kind: "cloneable raw runtime gateway secret",
+          snippet: match[0],
+        });
+      }
+    }
   }
 
   return violations;
@@ -137,6 +259,44 @@ function selfTest() {
     assert.equal(hits.length, 1, `${expected} fixture was not rejected`);
     assert.match(hits[0].kind, new RegExp(expected, "iu"));
   }
+
+  const websocketHits = validateFiles([
+    {
+      filePath:
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live/connection.rs",
+      contents: 'let url = format!("{endpoint}{separator}key={api_key}");',
+    },
+  ]);
+  assert.equal(websocketHits.length, 1);
+  assert.ok(
+    websocketHits.some((hit) => hit.kind.includes("websocket URL query")),
+    "production websocket query fixture was not rejected",
+  );
+
+  const rawSnapshotHits = validateFiles([
+    {
+      filePath:
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_config.rs",
+      contents:
+        "http_bearer_token: Option<String>\nbearer_token: Option<RuntimeGatewaySecret>",
+    },
+  ]);
+  assert.ok(
+    rawSnapshotHits.some((hit) => hit.kind.includes("cloneable raw runtime gateway secret")),
+    "raw runtime snapshot fixture was not rejected",
+  );
+
+  const eagerResolutionHits = validateFiles([
+    {
+      filePath:
+        "crates/prodex-app/src/app_commands/runtime_launch/gateway_observability_config.rs",
+      contents: "resolver.runtime_secret(\nresolver.resolve(",
+    },
+  ]);
+  assert.ok(
+    eagerResolutionHits.some((hit) => hit.kind.includes("eager outbound")),
+    "eager outbound resolution fixture was not rejected",
+  );
 }
 
 async function repositoryFiles() {

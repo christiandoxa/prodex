@@ -8,6 +8,7 @@ use super::super::provider_bridge::{
     RuntimeProviderGatewaySpendEvent, runtime_provider_gateway_spend_apply_admission_ids,
     runtime_provider_gateway_spend_apply_ledger_scope,
 };
+use super::projected_credential::runtime_gateway_with_outbound_secret;
 use super::runtime_local_rewrite_log_url;
 use crate::runtime_proxy_log;
 use redaction::redaction_redact_secret_like_text;
@@ -127,31 +128,53 @@ fn emit_runtime_gateway_observability_sinks_blocking(
             .post(endpoint)
             .timeout(RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT)
             .json(&payload);
-        if let Some(token) = shared.gateway_observability.http_bearer_token.as_deref() {
-            request = request.bearer_auth(token);
+        if let Some(secret) = shared.gateway_observability.http_bearer_token.as_ref() {
+            request = match runtime_gateway_with_outbound_secret(secret, |token| {
+                Ok(request.bearer_auth(token))
+            }) {
+                Ok(request) => request,
+                Err(_) => {
+                    runtime_gateway_observability_log_http_failure(
+                        shared,
+                        event.request,
+                        endpoint,
+                        "credential_resolution",
+                    );
+                    return;
+                }
+            };
         }
         if let Err(err) = request.send() {
             let error = runtime_gateway_observability_redacted_log_text(
                 &reqwest::Error::without_url(err).to_string(),
             );
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_observability_http_failed",
-                    [
-                        runtime_proxy_log_field("request", event.request.to_string()),
-                        runtime_proxy_log_field(
-                            "endpoint",
-                            runtime_gateway_observability_redacted_log_text(
-                                &runtime_local_rewrite_log_url(endpoint),
-                            ),
-                        ),
-                        runtime_proxy_log_field("error", error),
-                    ],
-                ),
-            );
+            runtime_gateway_observability_log_http_failure(shared, event.request, endpoint, &error);
         }
     }
+}
+
+fn runtime_gateway_observability_log_http_failure(
+    shared: &RuntimeLocalRewriteProxyShared,
+    request_id: impl ToString,
+    endpoint: &str,
+    error: &str,
+) {
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_observability_http_failed",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field(
+                    "endpoint",
+                    runtime_gateway_observability_redacted_log_text(
+                        &runtime_local_rewrite_log_url(endpoint),
+                    ),
+                ),
+                runtime_proxy_log_field("error", error),
+            ],
+        ),
+    );
 }
 
 fn runtime_gateway_observability_redacted_log_text(value: &str) -> String {

@@ -6,9 +6,9 @@ use super::local_rewrite_gateway_config::{
 use super::local_rewrite_kiro::RuntimeKiroProfileAuth;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use super::*;
-use prodex_domain::SecretRef;
+use prodex_domain::{SecretMaterial, SecretPurpose, SecretRef};
 use secret_store::ProjectedSecretProvider;
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 #[derive(Clone)]
 pub(crate) struct RuntimeProjectedProviderCredential {
@@ -38,6 +38,53 @@ impl fmt::Debug for RuntimeProjectedProviderCredential {
         f.debug_struct("RuntimeProjectedProviderCredential")
             .field("reference", &"<redacted>")
             .field("provider", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct RuntimeGatewaySecret {
+    source: Arc<RuntimeGatewaySecretSource>,
+}
+
+pub(super) enum RuntimeGatewaySecretSource {
+    Projected {
+        credential: RuntimeProjectedProviderCredential,
+        purpose: SecretPurpose,
+    },
+    DevelopmentCompatibility(SecretMaterial),
+}
+
+impl RuntimeGatewaySecret {
+    pub(crate) fn projected(
+        credential: RuntimeProjectedProviderCredential,
+        purpose: SecretPurpose,
+    ) -> Self {
+        Self {
+            source: Arc::new(RuntimeGatewaySecretSource::Projected {
+                credential,
+                purpose,
+            }),
+        }
+    }
+
+    pub(crate) fn development_compatibility(material: SecretMaterial) -> Self {
+        Self {
+            source: Arc::new(RuntimeGatewaySecretSource::DevelopmentCompatibility(
+                material,
+            )),
+        }
+    }
+
+    pub(super) fn source(&self) -> &RuntimeGatewaySecretSource {
+        self.source.as_ref()
+    }
+}
+
+impl fmt::Debug for RuntimeGatewaySecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGatewaySecret")
+            .field("source", &"<redacted>")
             .finish()
     }
 }
@@ -169,6 +216,21 @@ pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {
 mod tests {
     use super::*;
 
+    fn projected_secret(
+        root: &std::path::Path,
+        name: &str,
+        purpose: SecretPurpose,
+    ) -> RuntimeGatewaySecret {
+        let credential = RuntimeProjectedProviderCredential::new(
+            SecretRef::new("external", name, None::<String>),
+            ProjectedSecretProvider::new(root, "external").unwrap(),
+        );
+        RuntimeGatewaySecret::projected(credential, purpose)
+    }
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
+
     #[test]
     fn projected_provider_credential_debug_is_redacted() {
         let root = std::env::temp_dir().join(format!(
@@ -192,6 +254,34 @@ mod tests {
         assert!(rendered.contains("<redacted>"));
         assert!(!rendered.contains("debug-provider-secret"));
         assert!(!rendered.contains("debug-name-secret"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gateway_secret_debug_redacts_projected_and_compatibility_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-gateway-secret-debug-{}",
+            prodex_domain::RequestId::new()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let projected = projected_secret(
+            &root,
+            "debug-projected-secret-name",
+            SecretPurpose::TelemetryExportCredential,
+        );
+        let compatibility = RuntimeGatewaySecret::development_compatibility(SecretMaterial::new(
+            "debug-compatibility-secret".as_bytes().to_vec(),
+            None::<String>,
+        ));
+
+        for rendered in [format!("{projected:?}"), format!("{compatibility:?}")] {
+            assert!(rendered.contains("<redacted>"));
+            assert!(!rendered.contains("debug-projected-secret-name"));
+            assert!(!rendered.contains("debug-compatibility-secret"));
+            assert!(!rendered.contains(root.to_string_lossy().as_ref()));
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 }
