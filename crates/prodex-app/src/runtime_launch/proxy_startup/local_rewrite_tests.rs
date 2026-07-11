@@ -3059,6 +3059,7 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(viewer_token)
+        .header("Idempotency-Key", "viewer-create-denied")
         .json(&serde_json::json!({"name": "team-rbac"}))
         .send()
         .expect("viewer create key request should be sent");
@@ -3074,6 +3075,7 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "rbac-admin-create")
         .json(&serde_json::json!({"name": "team-rbac"}))
         .send()
         .expect("admin create key request should be sent");
@@ -3085,6 +3087,7 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(viewer_token)
+        .header("Idempotency-Key", "viewer-patch-denied")
         .json(&serde_json::json!({"disabled": true}))
         .send()
         .expect("viewer patch key request should be sent");
@@ -3096,6 +3099,7 @@ fn gateway_admin_viewer_token_can_read_but_not_mutate_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(viewer_token)
+        .header("Idempotency-Key", "viewer-delete-denied")
         .send()
         .expect("viewer delete key request should be sent");
     assert_eq!(viewer_delete.status().as_u16(), 403);

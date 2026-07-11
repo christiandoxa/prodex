@@ -329,11 +329,11 @@ export function validateProductionBoundary(sources) {
     "plan_application_control_plane_idempotency_from_http_digest(",
     `${FILES.admin}: production admin mutations must enter application idempotency planning`,
   );
-  requireText(
+  forbidText(
     errors,
     adminIdempotency,
     "ApplicationControlPlaneIdempotencyError::IdempotencyKeyRequired) => return None",
-    `${FILES.admin}: compatibility adapter must preserve optional legacy idempotency after canonical planning`,
+    `${FILES.admin}: canonical mutation idempotency must fail closed when the key is missing`,
   );
   requireText(
     errors,
@@ -588,7 +588,6 @@ function runSelfTest() {
     }
     fn runtime_gateway_admin_idempotency_response() {
       plan_application_control_plane_idempotency_from_http_digest();
-      ApplicationControlPlaneIdempotencyError::IdempotencyKeyRequired) => return None;
       runtime_gateway_admin_idempotency_replay_decision(&operation, existing_fingerprint.as_deref());
     }
     fn runtime_gateway_admin_idempotency_replay_decision() {

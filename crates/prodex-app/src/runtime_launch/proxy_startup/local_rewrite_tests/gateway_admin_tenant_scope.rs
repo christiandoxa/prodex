@@ -69,6 +69,7 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(tenant_a_token)
+        .header("Idempotency-Key", "tenant-a-create-shared")
         .json(&serde_json::json!({"name": "shared-main"}))
         .send()
         .expect("tenant-a create key request should be sent");
@@ -86,6 +87,7 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(tenant_b_token)
+        .header("Idempotency-Key", "tenant-b-create-other")
         .json(&serde_json::json!({"name": "other-main"}))
         .send()
         .expect("tenant-b create key request should be sent");
@@ -103,6 +105,7 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(tenant_a_token)
+        .header("Idempotency-Key", "tenant-a-cross-tenant-create-forbidden")
         .json(&serde_json::json!({"name": "tenant-b-forbidden", "tenant_id": "tenant-b"}))
         .send()
         .expect("tenant-a cross-tenant create request should be sent");
@@ -114,6 +117,7 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(tenant_a_token)
+        .header("Idempotency-Key", "tenant-a-clear-tenant-forbidden")
         .json(&serde_json::json!({"tenant_id": null}))
         .send()
         .expect("tenant-a scope-clearing patch request should be sent");
@@ -175,6 +179,7 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(tenant_a_token)
+        .header("Idempotency-Key", "tenant-a-scim-create-alice")
         .json(&serde_json::json!({"userName": "alice@example.com"}))
         .send()
         .expect("tenant-a SCIM create request should be sent");
@@ -189,6 +194,7 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
             proxy.listen_addr
         ))
         .bearer_auth(tenant_b_token)
+        .header("Idempotency-Key", "tenant-b-scim-create-bob")
         .json(&serde_json::json!({"userName": "bob@example.com"}))
         .send()
         .expect("tenant-b SCIM create request should be sent");

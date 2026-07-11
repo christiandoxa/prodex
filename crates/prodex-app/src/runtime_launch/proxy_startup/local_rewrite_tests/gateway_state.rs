@@ -385,6 +385,7 @@ fn gateway_sqlite_state_store_persists_admin_keys_and_usage() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-state-create")
         .json(&serde_json::json!({
             "name": "team-sqlite",
             "tenant_id": prodex_domain::TenantId::new().to_string()
@@ -614,6 +615,7 @@ fn gateway_sqlite_state_store_rotates_admin_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-rotate-create")
         .json(&serde_json::json!({
             "name": "team-sqlite-rotate",
             "tenant_id": prodex_domain::TenantId::new().to_string()
@@ -645,6 +647,7 @@ fn gateway_sqlite_state_store_rotates_admin_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-rotate-update")
         .json(&serde_json::json!({"rotate": true}))
         .send()
         .expect("sqlite rotate key request should be sent");
@@ -734,6 +737,7 @@ fn gateway_sqlite_shared_backend_allows_only_one_budget_limited_reservation_acro
             proxy_a.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "sqlite-shared-create")
         .json(&serde_json::json!({
             "name": "team-shared",
             "tenant_id": prodex_domain::TenantId::new().to_string(),
@@ -974,6 +978,7 @@ fn gateway_postgres_shared_backend_allows_only_one_budget_limited_reservation_ac
             proxy_a.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-shared-create")
         .json(&create_payload)
         .send()
         .expect("shared postgres create key request should be sent");
@@ -1222,6 +1227,7 @@ fn gateway_postgres_state_store_rotates_admin_keys() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-rotate-create")
         .json(&serde_json::json!({"name": key_name}))
         .send()
         .expect("postgres create key request should be sent");
@@ -1258,6 +1264,7 @@ fn gateway_postgres_state_store_rotates_admin_keys() {
             proxy.listen_addr, key_name
         ))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", "postgres-rotate-update")
         .json(&serde_json::json!({"rotate": true}))
         .send()
         .expect("postgres rotate key request should be sent");
