@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import assert from "node:assert/strict";
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -6,6 +7,10 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCENARIO_FILE = path.join(__dirname, "scenarios.json");
+const MAX_DELAY_MS = 30_000;
+const MAX_OUTPUT_CHUNKS = 256;
+const MAX_OUTPUT_CHUNK_BYTES = 16 * 1024;
+const MAX_STREAM_BYTES = 8 * 1024 * 1024;
 
 function parseArgs(argv) {
   const args = {
@@ -22,7 +27,7 @@ function parseArgs(argv) {
       continue;
     }
     const key = value.replace(/^--/, "");
-    const booleanKeys = new Set(["print-ready", "quiet"]);
+    const booleanKeys = new Set(["print-ready", "quiet", "self-test"]);
     if (booleanKeys.has(key)) {
       args[key.replace(/-([a-z])/g, (_, char) => char.toUpperCase())] = true;
       continue;
@@ -44,6 +49,8 @@ function parseArgs(argv) {
     "generic429Rate",
     "slowEvery",
     "slowDelayMs",
+    "outputChunks",
+    "outputChunkBytes",
   ]) {
     if (args[key] !== undefined) {
       args[key] = Number(args[key]);
@@ -62,6 +69,43 @@ async function loadScenario(name) {
   return scenario;
 }
 
+function validateMockConfig(config) {
+  for (const key of ["firstByteMs", "chunkDelayMs", "jitterMs", "slowDelayMs"]) {
+    if (!Number.isFinite(config[key]) || config[key] < 0 || config[key] > MAX_DELAY_MS) {
+      throw new Error(`${key} must be between 0 and ${MAX_DELAY_MS}`);
+    }
+  }
+  for (const key of ["errorRate", "quotaRate", "generic429Rate"]) {
+    if (!Number.isFinite(config[key]) || config[key] < 0 || config[key] > 1) {
+      throw new Error(`${key} must be between 0 and 1`);
+    }
+  }
+  if (config.errorRate + config.quotaRate + config.generic429Rate > 1) {
+    throw new Error("combined injected failure rate must not exceed 1");
+  }
+  if (!Number.isInteger(config.slowEvery) || config.slowEvery < 0) {
+    throw new Error("slowEvery must be a non-negative integer");
+  }
+  if (
+    !Number.isInteger(config.outputChunks) ||
+    config.outputChunks < 1 ||
+    config.outputChunks > MAX_OUTPUT_CHUNKS
+  ) {
+    throw new Error(`outputChunks must be between 1 and ${MAX_OUTPUT_CHUNKS}`);
+  }
+  if (
+    !Number.isInteger(config.outputChunkBytes) ||
+    config.outputChunkBytes < 1 ||
+    config.outputChunkBytes > MAX_OUTPUT_CHUNK_BYTES
+  ) {
+    throw new Error(`outputChunkBytes must be between 1 and ${MAX_OUTPUT_CHUNK_BYTES}`);
+  }
+  if (config.outputChunks * (config.outputChunkBytes + 512) + 4_096 > MAX_STREAM_BYTES) {
+    throw new Error(`configured stream must not exceed ${MAX_STREAM_BYTES} bytes`);
+  }
+  return config;
+}
+
 function mergeMockConfig(scenario, args) {
   const config = {
     firstByteMs: 50,
@@ -72,6 +116,8 @@ function mergeMockConfig(scenario, args) {
     generic429Rate: 0,
     slowEvery: 0,
     slowDelayMs: 0,
+    outputChunks: 1,
+    outputChunkBytes: 2,
     ...(scenario.mock ?? {}),
   };
   for (const key of Object.keys(config)) {
@@ -79,7 +125,23 @@ function mergeMockConfig(scenario, args) {
       config[key] = args[key];
     }
   }
-  return config;
+  return validateMockConfig(config);
+}
+
+async function selfTest() {
+  const scenarios = JSON.parse(await readFile(SCENARIO_FILE, "utf8")).scenarios;
+  for (const scenario of Object.values(scenarios)) {
+    mergeMockConfig(scenario, {});
+  }
+  assert.equal(mergeMockConfig(scenarios["slow-client"], {}).outputChunkBytes, 16 * 1024);
+  assert.equal(mergeMockConfig(scenarios["slow-upstream"], {}).firstByteMs, 500);
+  assert.equal(mergeMockConfig(scenarios["long-stream"], {}).outputChunks, 64);
+  assert.throws(() =>
+    validateMockConfig({
+      ...mergeMockConfig(scenarios.baseline, {}),
+      outputChunks: MAX_OUTPUT_CHUNKS + 1,
+    }),
+  );
 }
 
 function sleep(ms) {
@@ -194,6 +256,60 @@ function noteRequest(metrics, accountId) {
   };
 }
 
+function waitForDrainOrClose(res) {
+  if (res.destroyed) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const finish = (writable) => {
+      res.off("drain", drained);
+      res.off("close", closed);
+      resolve(writable);
+    };
+    const drained = () => finish(true);
+    const closed = () => finish(false);
+    res.once("drain", drained);
+    res.once("close", closed);
+  });
+}
+
+async function writeStreamChunk(res, chunk) {
+  return res.write(chunk) || (await waitForDrainOrClose(res));
+}
+
+function* responseChunks(config, responseId, turnState) {
+  yield sse("response.created", {
+    type: "response.created",
+    response_id: responseId,
+    response: { id: responseId },
+  });
+  yield sse("response.in_progress", {
+    type: "response.in_progress",
+    response_id: responseId,
+    response: { id: responseId },
+  });
+  const delta = config.outputChunkBytes === 2 ? "ok" : "x".repeat(config.outputChunkBytes);
+  for (let index = 0; index < config.outputChunks; index += 1) {
+    yield sse("response.output_text.delta", {
+      type: "response.output_text.delta",
+      response_id: responseId,
+      delta,
+    });
+  }
+  yield sse("response.completed", {
+    type: "response.completed",
+    response_id: responseId,
+    turn_state: turnState,
+    response: {
+      id: responseId,
+      usage: {
+        input_tokens: 10,
+        cached_input_tokens: 0,
+        output_tokens: config.outputChunks === 1 ? 2 : config.outputChunks,
+        output_tokens_details: { reasoning_tokens: 0 },
+      },
+    },
+  });
+}
+
 async function handleResponses(req, res, config, metrics, requestNumber, accountId) {
   await requestBody(req).catch(() => "");
   const done = noteRequest(metrics, accountId);
@@ -241,39 +357,8 @@ async function handleResponses(req, res, config, metrics, requestNumber, account
       res.end();
       return;
     }
-    const chunks = [
-      sse("response.created", {
-        type: "response.created",
-        response_id: responseId,
-        response: { id: responseId },
-      }),
-      sse("response.in_progress", {
-        type: "response.in_progress",
-        response_id: responseId,
-        response: { id: responseId },
-      }),
-      sse("response.output_text.delta", {
-        type: "response.output_text.delta",
-        response_id: responseId,
-        delta: "ok",
-      }),
-      sse("response.completed", {
-        type: "response.completed",
-        response_id: responseId,
-        turn_state: turnState,
-        response: {
-          id: responseId,
-          usage: {
-            input_tokens: 10,
-            cached_input_tokens: 0,
-            output_tokens: 2,
-            output_tokens_details: { reasoning_tokens: 0 },
-          },
-        },
-      }),
-    ];
-    for (const chunk of chunks) {
-      res.write(chunk);
+    for (const chunk of responseChunks(config, responseId, turnState)) {
+      if (!(await writeStreamChunk(res, chunk))) return;
       await sleep(config.chunkDelayMs);
     }
     res.end();
@@ -303,12 +388,18 @@ async function handleCompact(req, res, config, metrics, requestNumber, accountId
 
 async function main() {
   const args = parseArgs(process.argv);
+  if (args.selfTest) {
+    await selfTest();
+    process.stdout.write("mock-upstream self-test: ok\n");
+    return;
+  }
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: node tests/load/mock-upstream.mjs [--scenario baseline|stress|spike|soak] [--host 127.0.0.1] [--port 9900]",
+        "Usage: node tests/load/mock-upstream.mjs [--scenario NAME] [--host 127.0.0.1] [--port 9900]",
         "",
-        "Options override scenario mock config: --first-byte-ms, --chunk-delay-ms, --jitter-ms, --error-rate, --quota-rate, --generic-429-rate, --slow-every, --slow-delay-ms.",
+        "Options override scenario mock config: --first-byte-ms, --chunk-delay-ms, --jitter-ms, --error-rate, --quota-rate, --generic-429-rate, --slow-every, --slow-delay-ms, --output-chunks, --output-chunk-bytes.",
+        "Use --self-test to validate every checked-in scenario without opening a socket.",
       ].join("\n") + "\n",
     );
     return;

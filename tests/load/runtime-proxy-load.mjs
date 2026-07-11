@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { chmod, mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -11,6 +12,12 @@ import { performance } from "node:perf_hooks";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCENARIO_FILE = path.join(__dirname, "scenarios.json");
 const MOCK_UPSTREAM = path.join(__dirname, "mock-upstream.mjs");
+const MAX_BODY_CAPTURE_BYTES = 1024 * 1024;
+const MAX_CLIENT_READ_DELAY_MS = 1_000;
+const MAX_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_SCENARIO_CONCURRENCY = 256;
+const MAX_SCENARIO_REQUESTS = 100_000;
+const MAX_SCENARIO_DURATION_SECONDS = 3_600;
 const PRESSURE_MARKERS = [
   "runtime_proxy_queue_overloaded",
   "runtime_proxy_active_limit_reached",
@@ -38,7 +45,14 @@ function parseArgs(argv) {
     upstreamNoProxy: true,
     authToken: "load-client-token",
   };
-  const booleans = new Set(["start-mock", "start-proxy", "json", "upstream-proxy"]);
+  const booleans = new Set([
+    "start-mock",
+    "start-proxy",
+    "json",
+    "upstream-proxy",
+    "self-test",
+    "dry-run",
+  ]);
   for (let index = 2; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--help" || value === "-h") {
@@ -70,6 +84,8 @@ function parseArgs(argv) {
     "maxErrorRate",
     "maxTtftP95Ms",
     "maxAdmissionPressureRate",
+    "clientReadDelayMs",
+    "requestTimeoutMs",
   ]) {
     if (args[key] !== undefined && args[key] !== null) {
       args[key] = Number(args[key]);
@@ -80,7 +96,57 @@ function parseArgs(argv) {
 
 async function loadScenarios() {
   const raw = await readFile(SCENARIO_FILE, "utf8");
-  return JSON.parse(raw).scenarios;
+  const scenarios = JSON.parse(raw).scenarios;
+  for (const [name, scenario] of Object.entries(scenarios)) validateScenario(name, scenario);
+  return scenarios;
+}
+
+function boundedInteger(value, minimum, maximum, name) {
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be between ${minimum} and ${maximum}`);
+  }
+  return value;
+}
+
+function validateScenario(name, scenario) {
+  if (!scenario || typeof scenario !== "object" || !Array.isArray(scenario.stages)) {
+    throw new Error(`scenario ${name} must define stages`);
+  }
+  for (const stage of scenario.stages) validateStage(name, stage);
+  clientConfig(scenario, {});
+}
+
+function validateStage(name, stage) {
+  boundedInteger(
+    Number(stage.concurrency ?? 1),
+    1,
+    MAX_SCENARIO_CONCURRENCY,
+    `${name} concurrency`,
+  );
+  if (stage.requests === undefined && stage.durationSec === undefined) {
+    throw new Error(`${name} must bound each stage by requests or durationSec`);
+  }
+  if (stage.requests !== undefined) {
+    boundedInteger(Number(stage.requests), 1, MAX_SCENARIO_REQUESTS, `${name} requests`);
+  }
+  if (stage.durationSec !== undefined) {
+    boundedInteger(
+      Number(stage.durationSec),
+      1,
+      MAX_SCENARIO_DURATION_SECONDS,
+      `${name} durationSec`,
+    );
+  }
+}
+
+function clientConfig(scenario, args) {
+  const readDelayMs = Number(args.clientReadDelayMs ?? scenario.client?.readDelayMs ?? 0);
+  const requestTimeoutMs = Number(
+    args.requestTimeoutMs ?? scenario.client?.requestTimeoutMs ?? 30_000,
+  );
+  boundedInteger(readDelayMs, 0, MAX_CLIENT_READ_DELAY_MS, "client read delay");
+  boundedInteger(requestTimeoutMs, 1_000, MAX_REQUEST_TIMEOUT_MS, "request timeout");
+  return { readDelayMs, requestTimeoutMs };
 }
 
 function sleep(ms) {
@@ -168,7 +234,7 @@ function requestPayload(route, id) {
   };
 }
 
-async function sendRequest(baseUrl, route, id, authToken) {
+async function sendRequest(baseUrl, route, id, authToken, client) {
   const startedAt = performance.now();
   let status = 0;
   let firstByteAt = null;
@@ -185,6 +251,7 @@ async function sendRequest(baseUrl, route, id, authToken) {
         "user-agent": "prodex-load-harness/1",
       },
       body: JSON.stringify(requestPayload(route, id)),
+      signal: AbortSignal.timeout(client.requestTimeoutMs),
     });
     status = response.status;
     const reader = response.body?.getReader();
@@ -192,15 +259,24 @@ async function sendRequest(baseUrl, route, id, authToken) {
       body = await response.text();
       firstByteAt = performance.now();
     } else {
+      const decoder = new TextDecoder();
+      let reads = 0;
       while (true) {
+        if (reads > 0 && client.readDelayMs > 0) await sleep(client.readDelayMs);
         const { done, value } = await reader.read();
         if (done) {
+          if (body.length < MAX_BODY_CAPTURE_BYTES) body += decoder.decode();
           break;
         }
+        reads += 1;
         if (firstByteAt === null) {
           firstByteAt = performance.now();
         }
-        body += new TextDecoder().decode(value);
+        if (body.length < MAX_BODY_CAPTURE_BYTES) {
+          body += decoder
+            .decode(value, { stream: true })
+            .slice(0, MAX_BODY_CAPTURE_BYTES - body.length);
+        }
       }
     }
     const finishedAt = performance.now();
@@ -228,8 +304,13 @@ async function sendRequest(baseUrl, route, id, authToken) {
 }
 
 function stagePlan(scenario, args) {
-  if (args.requests || args.durationSec || args.concurrency) {
-    return [
+  let stages;
+  if (
+    args.requests !== undefined ||
+    args.durationSec !== undefined ||
+    args.concurrency !== undefined
+  ) {
+    stages = [
       {
         name: "override",
         requests: args.requests,
@@ -237,8 +318,23 @@ function stagePlan(scenario, args) {
         concurrency: args.concurrency ?? 1,
       },
     ];
+  } else {
+    stages = scenario.stages ?? [{ name: args.scenario, requests: 100, concurrency: 8 }];
   }
-  return scenario.stages ?? [{ name: args.scenario, requests: 100, concurrency: 8 }];
+  for (const stage of stages) validateStage(args.scenario, stage);
+  return stages;
+}
+
+function selfTestScenarios(scenarios) {
+  assert.ok(clientConfig(scenarios["slow-client"], {}).readDelayMs > 0);
+  assert.ok(scenarios["slow-upstream"].mock.firstByteMs >= 500);
+  assert.ok(scenarios["long-stream"].mock.outputChunks >= 32);
+  assert.throws(() =>
+    validateStage("unbounded", {
+      concurrency: 1,
+    }),
+  );
+  assert.throws(() => clientConfig({ client: { readDelayMs: MAX_CLIENT_READ_DELAY_MS + 1 } }, {}));
 }
 
 function routeForRequest(scenario, args, id) {
@@ -257,6 +353,7 @@ async function runStage(stage, scenario, args, baseUrl, state) {
   const endsAt = stage.durationSec ? startedAt + Number(stage.durationSec) * 1000 : null;
   let issued = 0;
   const maxRequests = stage.requests ? Number(stage.requests) : Number.POSITIVE_INFINITY;
+  const client = clientConfig(scenario, args);
 
   async function worker() {
     while (issued < maxRequests) {
@@ -266,7 +363,7 @@ async function runStage(stage, scenario, args, baseUrl, state) {
       issued += 1;
       const id = ++state.sequence;
       const route = routeForRequest(scenario, args, id);
-      results.push(await sendRequest(baseUrl, route, id, args.authToken));
+      results.push(await sendRequest(baseUrl, route, id, args.authToken, client));
     }
   }
 
@@ -604,22 +701,47 @@ async function main() {
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: node tests/load/runtime-proxy-load.mjs [--scenario baseline|stress|spike|soak] [--target http://127.0.0.1:9901/backend-api]",
+        "Usage: node tests/load/runtime-proxy-load.mjs [--scenario NAME] [--target http://127.0.0.1:9901/backend-api]",
         "",
         "Useful local modes:",
         "  --start-mock                         Start mock upstream and load it directly.",
         "  --start-mock --start-proxy           Start mock upstream, temp Prodex home, and hidden runtime broker.",
         "  --requests N --concurrency N         Override scenario stages.",
+        "  --client-read-delay-ms N             Delay each response-body read after the first chunk.",
+        "  --request-timeout-ms N               Bound each request independently.",
         "  --max-error-rate N --max-ttft-p95-ms N --max-admission-pressure-rate N",
+        "  --dry-run                             Validate and print a scenario without opening sockets.",
+        "  --self-test                           Validate all checked-in scenarios and bounds.",
       ].join("\n") + "\n",
     );
     return;
   }
 
   const scenarios = await loadScenarios();
+  if (args.selfTest) {
+    selfTestScenarios(scenarios);
+    process.stdout.write("runtime-proxy-load self-test: ok\n");
+    return;
+  }
   const scenario = scenarios[args.scenario];
   if (!scenario) {
     throw new Error(`unknown scenario: ${args.scenario}`);
+  }
+  if (args.dryRun) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          scenario: args.scenario,
+          stages: stagePlan(scenario, args),
+          client: clientConfig(scenario, args),
+          mock: scenario.mock ?? {},
+          thresholds: thresholdsFor(scenario, args),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return;
   }
 
   let mock = null;

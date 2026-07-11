@@ -25,6 +25,94 @@
         "maxAdmissionPressureRate": 0
       }
     },
+    "slow-client": {
+      "description": "A bounded client that deliberately drains a large streamed response slowly.",
+      "route": "responses",
+      "stages": [
+        {
+          "name": "slow-client",
+          "requests": 8,
+          "concurrency": 2
+        }
+      ],
+      "client": {
+        "readDelayMs": 25,
+        "requestTimeoutMs": 20000
+      },
+      "mock": {
+        "firstByteMs": 20,
+        "chunkDelayMs": 0,
+        "jitterMs": 5,
+        "outputChunks": 48,
+        "outputChunkBytes": 16384,
+        "errorRate": 0,
+        "quotaRate": 0,
+        "generic429Rate": 0
+      },
+      "thresholds": {
+        "maxErrorRate": 0,
+        "maxTtftP95Ms": 1000,
+        "maxAdmissionPressureRate": 0
+      }
+    },
+    "slow-upstream": {
+      "description": "A bounded upstream with consistently slow first-byte and chunk delivery.",
+      "route": "responses",
+      "stages": [
+        {
+          "name": "slow-upstream",
+          "requests": 12,
+          "concurrency": 4
+        }
+      ],
+      "client": {
+        "requestTimeoutMs": 20000
+      },
+      "mock": {
+        "firstByteMs": 500,
+        "chunkDelayMs": 75,
+        "jitterMs": 25,
+        "outputChunks": 4,
+        "outputChunkBytes": 256,
+        "errorRate": 0,
+        "quotaRate": 0,
+        "generic429Rate": 0
+      },
+      "thresholds": {
+        "maxErrorRate": 0,
+        "maxTtftP95Ms": 2500,
+        "maxAdmissionPressureRate": 0
+      }
+    },
+    "long-stream": {
+      "description": "A bounded long-lived response stream with many ordered output chunks.",
+      "route": "responses",
+      "stages": [
+        {
+          "name": "long-stream",
+          "requests": 8,
+          "concurrency": 2
+        }
+      ],
+      "client": {
+        "requestTimeoutMs": 20000
+      },
+      "mock": {
+        "firstByteMs": 30,
+        "chunkDelayMs": 10,
+        "jitterMs": 5,
+        "outputChunks": 64,
+        "outputChunkBytes": 256,
+        "errorRate": 0,
+        "quotaRate": 0,
+        "generic429Rate": 0
+      },
+      "thresholds": {
+        "maxErrorRate": 0,
+        "maxTtftP95Ms": 500,
+        "maxAdmissionPressureRate": 0
+      }
+    },
     "stress": {
       "description": "High concurrency pressure with mixed Responses and compact traffic.",
       "route": "mixed",
