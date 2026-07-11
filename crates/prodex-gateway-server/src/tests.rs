@@ -1,6 +1,7 @@
 use std::{
     convert::Infallible,
     future::Future,
+    num::NonZeroUsize,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -29,7 +30,7 @@ use tokio::{
 
 use super::{
     GatewayHandlerRequest, GatewayHandlerResponse, GatewayServerConfig, GatewayServerMode,
-    LoopbackBackend, run_with_handler,
+    LoopbackBackend, bounded_in_process_upgrade, run_with_handler,
 };
 use prodex_gateway_http::GatewayHttpRouteKind;
 
@@ -647,6 +648,68 @@ async fn direct_handler_upgrade_handoff_closes_before_drain_completes() {
         .unwrap()
         .unwrap();
     backend.await.unwrap();
+}
+
+#[tokio::test]
+async fn in_process_upgrade_preserves_byte_order_and_closes_before_drain() {
+    let (closed_tx, closed_rx) = oneshot::channel();
+    let closed_tx = Arc::new(Mutex::new(Some(closed_tx)));
+    let handler_closed = Arc::clone(&closed_tx);
+    let (front_addr, stop, mut front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        move |_| {
+            let closed = Arc::clone(&handler_closed);
+            async move {
+                let (mut application, handoff) = bounded_in_process_upgrade(NonZeroUsize::MIN);
+                std::thread::spawn(move || {
+                    let mut payload = [0_u8; 8];
+                    std::io::Read::read_exact(&mut application, &mut payload).unwrap();
+                    assert_eq!(&payload, b"pingpong");
+                    std::io::Write::write_all(&mut application, b"firstsecond").unwrap();
+                    let mut byte = [0_u8; 1];
+                    assert_eq!(std::io::Read::read(&mut application, &mut byte).unwrap(), 0);
+                    closed.lock().unwrap().take().unwrap().send(()).unwrap();
+                });
+                let response = Response::builder()
+                    .status(StatusCode::SWITCHING_PROTOCOLS)
+                    .header(hyper::header::CONNECTION, "Upgrade")
+                    .header(hyper::header::UPGRADE, "websocket")
+                    .body(Full::new(Bytes::new()))
+                    .unwrap();
+                Ok(GatewayHandlerResponse::with_in_process_upgrade(
+                    response, handoff,
+                ))
+            }
+        },
+    )
+    .await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(
+            b"GET /realtime HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    assert!(read_headers(&mut client).await.starts_with("HTTP/1.1 101"));
+    client.write_all(b"ping").await.unwrap();
+    client.write_all(b"pong").await.unwrap();
+    let mut payload = [0_u8; 11];
+    client.read_exact(&mut payload).await.unwrap();
+    assert_eq!(&payload, b"firstsecond");
+
+    stop.send(()).unwrap();
+    timeout(Duration::from_secs(1), &mut front)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let mut byte = [0_u8; 1];
+    assert_eq!(client.read(&mut byte).await.unwrap(), 0);
+    timeout(Duration::from_secs(1), closed_rx)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]
