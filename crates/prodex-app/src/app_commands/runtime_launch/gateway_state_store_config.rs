@@ -6,10 +6,7 @@ use prodex_domain::{
 };
 use std::{env, path::PathBuf};
 
-const PRODEX_GATEWAY_REPLICA_COUNT_ENV: &str = "PRODEX_GATEWAY_REPLICA_COUNT";
 const PRODEX_GATEWAY_REDIS_URL_ENV: &str = "PRODEX_GATEWAY_REDIS_URL";
-const PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS_ENV: &str =
-    "PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS";
 
 #[cfg(test)]
 pub(crate) fn gateway_state_store_config(
@@ -158,10 +155,10 @@ fn gateway_postgres_tls_config(
 
 pub(crate) fn gateway_validate_runtime_topology(
     state_store: &RuntimeGatewayStateStore,
+    config: &RuntimeGatewayConfig,
 ) -> Result<()> {
-    let gateway_replica_count = gateway_runtime_replica_count()?;
-    let require_multi_replica_accounting_checks =
-        gateway_require_multi_replica_accounting_checks()?;
+    let gateway_replica_count = config.replica_count;
+    let require_multi_replica_accounting_checks = config.require_multi_replica_accounting_checks;
     if require_multi_replica_accounting_checks {
         let topology = gateway_production_readiness_topology(state_store, gateway_replica_count)?;
         plan_production_deployment_readiness(&topology).map_err(|report| {
@@ -225,50 +222,6 @@ fn gateway_application_runtime_topology(
         redis_cache: vec![],
         redis_coordination: vec![],
     }))
-}
-
-fn gateway_runtime_replica_count() -> Result<u16> {
-    match env::var(PRODEX_GATEWAY_REPLICA_COUNT_ENV) {
-        Ok(value) => {
-            if value.is_empty() {
-                bail!("{PRODEX_GATEWAY_REPLICA_COUNT_ENV} cannot be empty");
-            }
-            if value.chars().any(char::is_whitespace) {
-                bail!("{PRODEX_GATEWAY_REPLICA_COUNT_ENV} must not contain whitespace");
-            }
-            let count = value.parse::<u16>().with_context(|| {
-                format!("{PRODEX_GATEWAY_REPLICA_COUNT_ENV} must be a positive integer")
-            })?;
-            if count == 0 {
-                bail!("{PRODEX_GATEWAY_REPLICA_COUNT_ENV} must be at least 1");
-            }
-            Ok(count)
-        }
-        Err(_) => Ok(1),
-    }
-}
-
-fn gateway_require_multi_replica_accounting_checks() -> Result<bool> {
-    match env::var(PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS_ENV) {
-        Ok(value) => {
-            if value.is_empty() {
-                bail!("{PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS_ENV} cannot be empty");
-            }
-            if value.chars().any(char::is_whitespace) {
-                bail!(
-                    "{PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS_ENV} must not contain whitespace"
-                );
-            }
-            match value.to_ascii_lowercase().as_str() {
-                "1" | "true" | "yes" | "on" => Ok(true),
-                "0" | "false" | "no" | "off" => Ok(false),
-                _ => bail!(
-                    "{PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS_ENV} must be one of true,false,1,0,yes,no,on,off"
-                ),
-            }
-        }
-        Err(_) => Ok(false),
-    }
 }
 
 fn gateway_coordination_redis_url(

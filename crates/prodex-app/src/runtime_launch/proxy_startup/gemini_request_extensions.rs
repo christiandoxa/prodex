@@ -1,6 +1,5 @@
 use super::gemini_request::{
     RUNTIME_GEMINI_EXTENSION_SCAN_LIMIT, RUNTIME_GEMINI_MEMORY_BYTE_LIMIT,
-    runtime_gemini_config_dir,
 };
 use super::gemini_request_io::runtime_gemini_read_text_limited;
 use crate::RuntimeGeminiConfig;
@@ -162,7 +161,7 @@ fn runtime_gemini_load_extension_manifest(
 
 fn runtime_gemini_extension_roots(config: &RuntimeGeminiConfig) -> Vec<PathBuf> {
     let mut roots = config.extension_dirs.clone();
-    if let Some(gemini_home) = runtime_gemini_config_dir() {
+    if let Some(gemini_home) = &config.config_dir {
         roots.push(gemini_home.join("extensions"));
     }
     roots

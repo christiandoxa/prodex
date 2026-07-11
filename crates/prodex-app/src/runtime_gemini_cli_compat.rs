@@ -3,8 +3,8 @@ use std::path::Path;
 use terminal_ui::print_panel;
 
 pub(crate) use prodex_runtime_gemini_cli_compat::{
-    GeminiSettingsSource, gemini_cli_config_home_for, gemini_settings_source_paths_for,
-    gemini_settings_sources, parse_gemini_settings_json,
+    GeminiSettingsSource, gemini_settings_source_paths_for_config_home, gemini_settings_sources,
+    parse_gemini_settings_json,
 };
 
 pub(crate) fn prepare_gemini_cli_compat(codex_home: &Path) -> Result<()> {
