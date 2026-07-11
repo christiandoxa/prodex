@@ -24,24 +24,22 @@ pub(super) fn runtime_gemini_live_connect(
             |api_key| runtime_gemini_live_connect_api_key(endpoint, api_key),
         );
     }
-    let url = match auth {
-        RuntimeGeminiAuth::ApiKey { api_key } => {
-            let separator = if endpoint.contains('?') { '&' } else { '?' };
-            format!("{endpoint}{separator}key={api_key}")
-        }
-        RuntimeGeminiAuth::OAuth { .. } => endpoint.to_string(),
-        RuntimeGeminiAuth::Projected => unreachable!("projected auth is handled above"),
-    };
-    let mut request = url
+    let mut request = endpoint
         .into_client_request()
         .context("failed to build Gemini Live websocket request")?;
-    if let RuntimeGeminiAuth::OAuth { access_token, .. } = auth {
-        request.headers_mut().insert(
-            tungstenite::http::header::AUTHORIZATION,
-            format!("Bearer {access_token}")
-                .parse()
-                .context("failed to encode Gemini Live OAuth header")?,
-        );
+    match auth {
+        RuntimeGeminiAuth::ApiKey { api_key } => {
+            runtime_gemini_live_insert_api_key(&mut request, api_key)?;
+        }
+        RuntimeGeminiAuth::OAuth { access_token, .. } => {
+            request.headers_mut().insert(
+                tungstenite::http::header::AUTHORIZATION,
+                format!("Bearer {access_token}")
+                    .parse()
+                    .context("failed to encode Gemini Live OAuth header")?,
+            );
+        }
+        RuntimeGeminiAuth::Projected => unreachable!("projected auth is handled above"),
     }
     let (mut socket, _) =
         tungstenite::connect(request).context("failed to connect Gemini Live websocket")?;
@@ -54,17 +52,28 @@ fn runtime_gemini_live_connect_api_key(
     endpoint: &str,
     api_key: &str,
 ) -> Result<RuntimeUpstreamWebSocket> {
-    let separator = if endpoint.contains('?') { '&' } else { '?' };
-    let url = zeroize::Zeroizing::new(format!("{endpoint}{separator}key={api_key}"));
-    let request = url
-        .as_str()
+    let mut request = endpoint
         .into_client_request()
         .context("failed to build Gemini Live websocket request")?;
+    runtime_gemini_live_insert_api_key(&mut request, api_key)?;
     let (mut socket, _) =
         tungstenite::connect(request).context("failed to connect Gemini Live websocket")?;
     runtime_set_upstream_websocket_io_timeout(&mut socket, Some(Duration::from_secs(30)))
         .context("failed to configure Gemini Live websocket timeout")?;
     Ok(socket)
+}
+
+fn runtime_gemini_live_insert_api_key(
+    request: &mut tungstenite::http::Request<()>,
+    api_key: &str,
+) -> Result<()> {
+    request.headers_mut().insert(
+        "x-goog-api-key",
+        api_key
+            .parse()
+            .context("failed to encode Gemini Live API key header")?,
+    );
+    Ok(())
 }
 
 pub(super) fn runtime_gemini_live_websocket_key(request: &tiny_http::Request) -> Option<String> {
@@ -91,4 +100,22 @@ pub(super) fn runtime_gemini_live_upgrade_response(
         .with_header(upgrade)
         .with_header(connection)
         .with_header(accept))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_key_is_carried_in_header_not_websocket_target() {
+        let endpoint = "wss://generativelanguage.googleapis.com/ws/live?mode=audio";
+        let api_key = "gemini-live-query-secret-sentinel";
+        let mut request = endpoint.into_client_request().unwrap();
+
+        runtime_gemini_live_insert_api_key(&mut request, api_key).unwrap();
+
+        assert_eq!(request.uri().to_string(), endpoint);
+        assert!(!request.uri().to_string().contains(api_key));
+        assert_eq!(request.headers()["x-goog-api-key"], api_key);
+    }
 }
