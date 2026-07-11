@@ -146,6 +146,10 @@ fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_cou
     assert_eq!(metrics.admission_wait.wait_count, 1);
     assert_eq!(metrics.long_lived_queue_wait.wait_total_ns, 34);
     assert_eq!(metrics.long_lived_queue_wait.wait_count, 1);
+    #[cfg(feature = "allocation-bench-support")]
+    assert!(metrics.allocation.is_some());
+    #[cfg(not(feature = "allocation-bench-support"))]
+    assert_eq!(metrics.allocation, None);
     assert_eq!(
         metrics.continuity_failure_reasons.stale_continuation,
         BTreeMap::from([

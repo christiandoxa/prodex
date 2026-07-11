@@ -92,6 +92,16 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
             wait_count: 3,
             wait_max_ns: 18,
         },
+        allocation: Some(RuntimeBrokerAllocationMetrics {
+            alloc_calls: 40,
+            realloc_calls: 5,
+            dealloc_calls: 30,
+            allocated_bytes: 4_000,
+            reallocated_bytes: 500,
+            deallocated_bytes: 3_000,
+            live_bytes: 1_500,
+            peak_live_bytes: 2_000,
+        }),
         traffic,
         profile_inflight: &profile_inflight,
         profile_retry_backoff_until: &BTreeMap::from([("main".to_string(), 101)]),
@@ -120,6 +130,7 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
     assert_eq!(metrics.health.active_requests, 3);
     assert_eq!(metrics.admission_wait.wait_total_ns, 20);
     assert_eq!(metrics.long_lived_queue_wait.wait_count, 3);
+    assert_eq!(metrics.allocation.unwrap().peak_live_bytes, 2_000);
     assert_eq!(metrics.profile_inflight.get("main"), Some(&2));
     assert_eq!(metrics.retry_backoffs, 1);
     assert_eq!(metrics.transport_backoffs, 1);
@@ -142,5 +153,19 @@ fn metrics_snapshot_input_builds_broker_metrics_dto() {
             .stale_continuation
             .get("watchdog"),
         Some(&1)
+    );
+
+    let encoded = serde_json::to_value(&metrics).unwrap();
+    assert_eq!(encoded["allocation"]["alloc_calls"], 40);
+
+    let mut metrics_without_allocation = metrics;
+    metrics_without_allocation.allocation = None;
+    let encoded = serde_json::to_value(&metrics_without_allocation).unwrap();
+    assert!(!encoded.as_object().unwrap().contains_key("allocation"));
+    assert_eq!(
+        serde_json::from_value::<RuntimeBrokerMetrics>(encoded)
+            .unwrap()
+            .allocation,
+        None
     );
 }

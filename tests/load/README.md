@@ -20,16 +20,36 @@ npm run load:runtime-proxy -- --scenario long-stream --dry-run
 
 The driver reports request error rate, TTFT percentiles, latency percentiles, status mix, route mix, and admission-pressure evidence from local responses plus runtime log markers when `--runtime-log-dir` or `--start-proxy` is used. The slow-client case delays response-body reads, slow-upstream delays every first byte and chunk, and long-stream emits 64 ordered output deltas. Scenario validation caps concurrency, duration/request count, delays, per-request timeout, chunk count, chunk size, and total mock stream bytes.
 
-Every summary also reports `performance_evidence`. Allocation/request is
-unsupported because the harness has no allocation counter. With `--start-proxy`,
-the harness reads the authenticated broker metrics endpoint before and after the
-load and reports admission wait, long-lived queue wait, and runtime-state lock
-wait separately. Each captured item includes cumulative start/end snapshots and
-a process-level delta with total nanoseconds, wait count, the cumulative maximum
-at the end of the run, and mean nanoseconds per newly observed wait. The maximum
-counter cannot be differenced into an interval maximum, and the final read-only
-metrics snapshot contributes to runtime-state lock wait. Direct-target and
-mock-only runs report these broker-only durations as not captured; pressure
+Every summary also reports `performance_evidence`. With `--start-proxy`, the
+harness reads the authenticated broker metrics endpoint before and after the
+load. An instrumented binary reports process-wide allocation start/end snapshots
+and deltas. `allocationOperationsPerRequest` is `(alloc_calls delta +
+realloc_calls delta) / attempted requests`; `requestedBytesPerRequest` is
+`(allocated_bytes delta + reallocated_bytes delta) / attempted requests`.
+Attempted requests include failures. These are process-level normalizations, not
+proof that a specific request owned every allocation in the interval. The
+harness accepts only non-negative JavaScript safe-integer counters. Normal builds
+and direct-target runs report allocation evidence as unsupported.
+
+Build and run an allocation-instrumented proxy with:
+
+```bash
+cargo build --features allocation-bench-support
+npm run load:runtime-proxy -- --scenario baseline --start-mock --start-proxy --prodex ./target/debug/prodex
+```
+
+Allocator instrumentation changes runtime overhead. Use its allocation fields as
+instrumented evidence; do not treat wall-time, TTFT, or latency results as
+equivalent to a normal build or compare instrumented and normal runs as
+like-for-like wall-time measurements.
+
+The harness also reports admission wait, long-lived queue wait, and runtime-state
+lock wait separately. Each captured item includes cumulative start/end snapshots
+and a process-level delta with total nanoseconds, wait count, the cumulative
+maximum at the end of the run, and mean nanoseconds per newly observed wait. The
+maximum counter cannot be differenced into an interval maximum, and the final
+read-only metrics snapshot contributes to runtime-state lock wait. Direct-target
+and mock-only runs report these broker-only durations as not captured; pressure
 markers remain pressure evidence rather than queue-latency estimates.
 
 CI smoke:

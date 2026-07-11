@@ -1,9 +1,9 @@
 use anyhow::Result;
 use chrono::Local;
 use prodex_runtime_broker::{
-    RuntimeBrokerContinuityFailureReasonMetrics, RuntimeBrokerLaneMetrics, RuntimeBrokerMetadata,
-    RuntimeBrokerMetrics, RuntimeBrokerTrafficMetrics,
-    runtime_broker_continuity_failure_reason_metrics_with_live,
+    RuntimeBrokerAllocationMetrics, RuntimeBrokerContinuityFailureReasonMetrics,
+    RuntimeBrokerLaneMetrics, RuntimeBrokerMetadata, RuntimeBrokerMetrics,
+    RuntimeBrokerTrafficMetrics, runtime_broker_continuity_failure_reason_metrics_with_live,
 };
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -85,6 +85,26 @@ fn runtime_broker_live_lane_metrics(
     }
 }
 
+fn runtime_broker_allocation_metrics() -> Option<RuntimeBrokerAllocationMetrics> {
+    #[cfg(feature = "allocation-bench-support")]
+    {
+        let snapshot = crate::allocation_bench_support::runtime_allocation_snapshot();
+        Some(RuntimeBrokerAllocationMetrics {
+            alloc_calls: snapshot.alloc_calls,
+            realloc_calls: snapshot.realloc_calls,
+            dealloc_calls: snapshot.dealloc_calls,
+            allocated_bytes: snapshot.allocated_bytes,
+            reallocated_bytes: snapshot.reallocated_bytes,
+            deallocated_bytes: snapshot.deallocated_bytes,
+            live_bytes: snapshot.live_bytes,
+            peak_live_bytes: snapshot.peak_live_bytes,
+        })
+    }
+
+    #[cfg(not(feature = "allocation-bench-support"))]
+    None
+}
+
 pub(crate) fn runtime_broker_metrics_snapshot(
     shared: &RuntimeRotationProxyShared,
     metadata: &RuntimeBrokerMetadata,
@@ -121,6 +141,7 @@ pub(crate) fn runtime_broker_metrics_snapshot(
                     .lane_admission
                     .long_lived_queue_wait_metrics
                     .snapshot(),
+                allocation: runtime_broker_allocation_metrics(),
                 traffic: RuntimeBrokerTrafficMetrics {
                     responses: runtime_broker_live_lane_metrics(
                         shared,

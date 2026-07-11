@@ -20,6 +20,25 @@ const MAX_SCENARIO_REQUESTS = 100_000;
 const MAX_SCENARIO_DURATION_SECONDS = 3_600;
 const BROKER_METRICS_PATH = "/__prodex/runtime/metrics";
 const BROKER_ADMIN_TOKEN_HEADER = "X-Prodex-Admin-Token";
+const BROKER_ALLOCATION_FIELDS = [
+  ["allocCalls", "alloc_calls"],
+  ["reallocCalls", "realloc_calls"],
+  ["deallocCalls", "dealloc_calls"],
+  ["allocatedBytes", "allocated_bytes"],
+  ["reallocatedBytes", "reallocated_bytes"],
+  ["deallocatedBytes", "deallocated_bytes"],
+  ["liveBytes", "live_bytes"],
+  ["peakLiveBytes", "peak_live_bytes"],
+];
+const BROKER_ALLOCATION_CUMULATIVE_FIELDS = [
+  "allocCalls",
+  "reallocCalls",
+  "deallocCalls",
+  "allocatedBytes",
+  "reallocatedBytes",
+  "deallocatedBytes",
+  "peakLiveBytes",
+];
 const PRESSURE_MARKERS = [
   "runtime_proxy_queue_overloaded",
   "runtime_proxy_active_limit_reached",
@@ -350,20 +369,102 @@ function selfTestScenarios(scenarios) {
       delta: { waitTotalNs: 75, waitCount: 3, waitMaxNs: 90, waitMeanNs: 25 },
     },
   );
+  const allocationStart = brokerAllocationSnapshot({
+    allocation: {
+      alloc_calls: 100,
+      realloc_calls: 20,
+      dealloc_calls: 90,
+      allocated_bytes: 1_000,
+      reallocated_bytes: 400,
+      deallocated_bytes: 800,
+      live_bytes: 600,
+      peak_live_bytes: 700,
+    },
+  });
+  const allocationEnd = brokerAllocationSnapshot({
+    allocation: {
+      alloc_calls: 160,
+      realloc_calls: 30,
+      dealloc_calls: 140,
+      allocated_bytes: 2_200,
+      reallocated_bytes: 800,
+      deallocated_bytes: 1_600,
+      live_bytes: 1_400,
+      peak_live_bytes: 1_500,
+    },
+  });
+  assert.equal(brokerAllocationSnapshot({}).status, "unsupported");
+  assert.equal(
+    brokerAllocationSnapshot({
+      allocation: {
+        alloc_calls: Number.MAX_SAFE_INTEGER + 1,
+        realloc_calls: 0,
+        dealloc_calls: 0,
+        allocated_bytes: 0,
+        reallocated_bytes: 0,
+        deallocated_bytes: 0,
+        live_bytes: 0,
+        peak_live_bytes: 0,
+      },
+    }).status,
+    "invalid",
+  );
+  const zeroAllocation = Object.fromEntries(
+    BROKER_ALLOCATION_FIELDS.map(([field]) => [field, 0]),
+  );
+  assert.equal(
+    allocationPerRequestEvidence(
+      { status: "captured", snapshot: zeroAllocation },
+      {
+        status: "captured",
+        snapshot: { ...zeroAllocation, allocCalls: Number.MAX_SAFE_INTEGER, reallocCalls: 1 },
+      },
+      true,
+      1,
+    ).status,
+    "not_captured",
+  );
   const performance = performanceEvidence(
     true,
     {
+      allocation: allocationStart,
       admissionWait: { waitTotalNs: 10, waitCount: 1, waitMaxNs: 10 },
       longLivedQueueWait: { waitTotalNs: 20, waitCount: 2, waitMaxNs: 12 },
       runtimeStateLockWait: { waitTotalNs: 30, waitCount: 3, waitMaxNs: 15 },
     },
     {
+      allocation: allocationEnd,
       admissionWait: { waitTotalNs: 50, waitCount: 3, waitMaxNs: 25 },
       longLivedQueueWait: { waitTotalNs: 70, waitCount: 4, waitMaxNs: 30 },
       runtimeStateLockWait: { waitTotalNs: 90, waitCount: 6, waitMaxNs: 35 },
     },
+    20,
   );
-  assert.equal(performance.allocationPerRequest.status, "unsupported");
+  assert.deepEqual(performance.allocationPerRequest.delta, {
+    allocCalls: 60,
+    reallocCalls: 10,
+    deallocCalls: 50,
+    allocatedBytes: 1_200,
+    reallocatedBytes: 400,
+    deallocatedBytes: 800,
+    liveBytes: 800,
+    peakLiveBytes: 800,
+  });
+  assert.equal(performance.allocationPerRequest.allocationOperationsPerRequest, 3.5);
+  assert.equal(performance.allocationPerRequest.requestedBytesPerRequest, 80);
+  assert.equal(
+    performanceEvidence(false, null, null, 20).allocationPerRequest.status,
+    "unsupported",
+  );
+  assert.equal(
+    performanceEvidence(
+      true,
+      { allocation: { status: "unsupported" } },
+      { allocation: { status: "unsupported" } },
+      20,
+    ).allocationPerRequest.status,
+    "unsupported",
+  );
   assert.deepEqual(performance.admissionWait.delta, {
     waitTotalNs: 40,
     waitCount: 2,
@@ -585,7 +686,94 @@ function brokerWaitDuration(metrics, field) {
   };
 }
 
-async function readBrokerWaitDurations(proxy) {
+function brokerAllocationSnapshot(metrics) {
+  const allocation = metrics.allocation;
+  if (allocation == null) return { status: "unsupported" };
+
+  const snapshot = {};
+  for (const [outputField, brokerField] of BROKER_ALLOCATION_FIELDS) {
+    const value = allocation[brokerField];
+    if (!Number.isSafeInteger(value) || value < 0) {
+      return { status: "invalid" };
+    }
+    snapshot[outputField] = value;
+  }
+  return { status: "captured", snapshot };
+}
+
+function allocationPerRequestEvidence(start, end, proxyStarted, attemptedRequests) {
+  if (!proxyStarted) {
+    return {
+      status: "unsupported",
+      reason: "allocation counters require a broker launched by the harness",
+    };
+  }
+  if (!start || !end) {
+    return { status: "not_captured", reason: "read-only broker metrics were unavailable" };
+  }
+  if (start.status === "unsupported" || end.status === "unsupported") {
+    return {
+      status: "unsupported",
+      reason: "the prodex binary was not built with allocation-bench-support",
+    };
+  }
+  if (start.status !== "captured" || end.status !== "captured") {
+    return {
+      status: "not_captured",
+      reason: "broker allocation counters were not non-negative safe integers",
+    };
+  }
+  if (!Number.isSafeInteger(attemptedRequests) || attemptedRequests <= 0) {
+    return { status: "not_captured", reason: "no safe positive attempted-request count" };
+  }
+
+  const startSnapshot = start.snapshot;
+  const endSnapshot = end.snapshot;
+  if (
+    BROKER_ALLOCATION_CUMULATIVE_FIELDS.some(
+      (field) => endSnapshot[field] < startSnapshot[field],
+    )
+  ) {
+    return { status: "not_captured", reason: "broker allocation counters reset during the run" };
+  }
+
+  const delta = Object.fromEntries(
+    BROKER_ALLOCATION_FIELDS.map(([field]) => [field, endSnapshot[field] - startSnapshot[field]]),
+  );
+  if (!Object.values(delta).every(Number.isSafeInteger)) {
+    return {
+      status: "not_captured",
+      reason: "broker allocation counter deltas exceeded safe integer precision",
+    };
+  }
+  const allocationOperations = delta.allocCalls + delta.reallocCalls;
+  const requestedBytes = delta.allocatedBytes + delta.reallocatedBytes;
+  if (![allocationOperations, requestedBytes].every(Number.isSafeInteger)) {
+    return {
+      status: "not_captured",
+      reason: "broker allocation totals exceeded safe integer precision",
+    };
+  }
+
+  return {
+    status: "captured",
+    definitions: {
+      attemptedRequests: "all requests attempted by the harness, including failed requests",
+      allocationOperationsPerRequest:
+        "(allocCalls delta + reallocCalls delta) / attemptedRequests",
+      requestedBytesPerRequest:
+        "(allocatedBytes delta + reallocatedBytes delta) / attemptedRequests",
+    },
+    attemptedRequests,
+    start: startSnapshot,
+    end: endSnapshot,
+    delta,
+    allocationOperationsPerRequest: round(allocationOperations / attemptedRequests, 4),
+    requestedBytesPerRequest: round(requestedBytes / attemptedRequests, 4),
+  };
+}
+
+async function readBrokerPerformanceMetrics(proxy) {
   if (!proxy) return null;
   try {
     const response = await fetch(`${proxy.root}${BROKER_METRICS_PATH}`, {
@@ -594,6 +782,7 @@ async function readBrokerWaitDurations(proxy) {
     if (!response.ok) return null;
     const metrics = await response.json();
     return {
+      allocation: brokerAllocationSnapshot(metrics),
       admissionWait: brokerWaitDuration(metrics, "admission_wait"),
       longLivedQueueWait: brokerWaitDuration(metrics, "long_lived_queue_wait"),
       runtimeStateLockWait: brokerWaitDuration(metrics, "runtime_state_lock_wait"),
@@ -603,25 +792,27 @@ async function readBrokerWaitDurations(proxy) {
   }
 }
 
-function performanceEvidence(proxyStarted, waitStart, waitEnd) {
+function performanceEvidence(proxyStarted, metricsStart, metricsEnd, attemptedRequests) {
   return {
-    allocationPerRequest: {
-      status: "unsupported",
-      reason: "the harness has no allocation counter",
-    },
+    allocationPerRequest: allocationPerRequestEvidence(
+      metricsStart?.allocation,
+      metricsEnd?.allocation,
+      proxyStarted,
+      attemptedRequests,
+    ),
     admissionWait: waitDurationEvidence(
-      waitStart?.admissionWait,
-      waitEnd?.admissionWait,
+      metricsStart?.admissionWait,
+      metricsEnd?.admissionWait,
       proxyStarted,
     ),
     longLivedQueueWait: waitDurationEvidence(
-      waitStart?.longLivedQueueWait,
-      waitEnd?.longLivedQueueWait,
+      metricsStart?.longLivedQueueWait,
+      metricsEnd?.longLivedQueueWait,
       proxyStarted,
     ),
     runtimeStateLockWait: waitDurationEvidence(
-      waitStart?.runtimeStateLockWait,
-      waitEnd?.runtimeStateLockWait,
+      metricsStart?.runtimeStateLockWait,
+      metricsEnd?.runtimeStateLockWait,
       proxyStarted,
     ),
   };
@@ -893,7 +1084,7 @@ async function main() {
     if (!target) {
       throw new Error("target required: pass --target or --start-mock");
     }
-    const waitStart = await readBrokerWaitDurations(proxy);
+    const metricsStart = await readBrokerPerformanceMetrics(proxy);
 
     const stages = [];
     const state = { sequence: 0 };
@@ -904,7 +1095,7 @@ async function main() {
       stages.push(await runStage(stage, scenario, args, target, state));
     }
     const results = stages.flatMap((stage) => stage.results);
-    const waitEnd = await readBrokerWaitDurations(proxy);
+    const metricsEnd = await readBrokerPerformanceMetrics(proxy);
     const pressureMarkers = await scanPressureMarkers(args);
     const summary = summarize(results, pressureMarkers);
     const thresholds = thresholdsFor(scenario, args);
@@ -915,7 +1106,7 @@ async function main() {
       runtimeLogDir: proxy?.runtimeLogDir ?? args.runtimeLogDir,
       stages,
       summary,
-      evidence: performanceEvidence(Boolean(proxy), waitStart, waitEnd),
+      evidence: performanceEvidence(Boolean(proxy), metricsStart, metricsEnd, summary.total),
       thresholds,
       failures,
     };
