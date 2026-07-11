@@ -31,6 +31,77 @@ fn response_selection_preserves_bound_previous_response_affinity_despite_quota()
 }
 
 #[test]
+fn previous_response_discovery_skips_blocked_profiles_before_cached_candidate() {
+    let response_id = "resp_unbound";
+
+    let quota_dir = TestDir::isolated();
+    let quota_shared = runtime_shared_for_affinity_selection(&quota_dir, BTreeMap::new());
+    let selected = select_runtime_response_candidate_for_route(
+        &quota_shared,
+        RuntimeResponseCandidateSelection {
+            discover_previous_response_owner: true,
+            previous_response_id: Some(response_id),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .expect("quota-aware discovery should succeed");
+    assert_eq!(selected.as_deref(), Some("second"));
+    runtime_proxy_flush_logs_for_path(&quota_shared.log_path);
+    let log = fs::read_to_string(&quota_shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains(
+        "selection_skip_affinity route=responses affinity=previous_response_discovery profile=main"
+    ));
+
+    let negative_dir = TestDir::isolated();
+    let negative_shared = runtime_shared_for_affinity_selection(&negative_dir, BTreeMap::new());
+    let now = Local::now().timestamp();
+    {
+        let mut runtime = negative_shared
+            .runtime
+            .lock()
+            .expect("runtime lock should succeed");
+        runtime
+            .profile_probe_cache
+            .get_mut("main")
+            .expect("main probe should exist")
+            .result = Ok(usage_with_main_windows(95, 18_000, 95, 604_800));
+        runtime.profile_health.insert(
+            runtime_previous_response_negative_cache_key(
+                response_id,
+                "main",
+                RuntimeRouteKind::Responses,
+            ),
+            RuntimeProfileHealth {
+                score: RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD,
+                updated_at: now,
+            },
+        );
+    }
+    let selected = select_runtime_response_candidate_for_route(
+        &negative_shared,
+        RuntimeResponseCandidateSelection {
+            discover_previous_response_owner: true,
+            previous_response_id: Some(response_id),
+            ..RuntimeResponseCandidateSelection::fresh(
+                &BTreeSet::new(),
+                RuntimeRouteKind::Responses,
+            )
+        },
+    )
+    .expect("negative-cache-aware discovery should succeed");
+    assert_eq!(selected.as_deref(), Some("second"));
+    runtime_proxy_flush_logs_for_path(&negative_shared.log_path);
+    let log =
+        fs::read_to_string(&negative_shared.log_path).expect("runtime log should be readable");
+    assert!(log.contains(
+        "selection_skip_affinity route=responses affinity=previous_response_discovery profile=main reason=negative_cache"
+    ));
+}
+
+#[test]
 fn response_selection_uses_prompt_cache_affinity_for_fresh_ties() {
     let temp_dir = TestDir::isolated();
     clear_runtime_prompt_cache_profile_bindings();
