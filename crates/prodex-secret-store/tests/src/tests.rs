@@ -122,6 +122,32 @@ fn file_backend_rejects_oversized_secret_writes() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn file_backend_honors_caller_specific_bounds() {
+    let root = temp_dir("caller-bound");
+    let path = root.join("capability");
+    let backend = FileSecretBackend::new();
+    let location = SecretLocation::file(&path);
+
+    assert!(
+        backend
+            .write_bounded(&location, SecretValue::bytes(b"12345".to_vec()), 4)
+            .is_err()
+    );
+    assert!(!path.exists());
+    backend
+        .write_bounded(&location, SecretValue::bytes(b"1234".to_vec()), 4)
+        .unwrap();
+    assert!(backend.read_bounded(&location, 3).is_err());
+    backend
+        .read_bounded(&location, 4)
+        .unwrap()
+        .unwrap()
+        .with_bytes(|bytes| assert_eq!(bytes, b"1234"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
 #[cfg(unix)]
 #[test]
 fn file_backend_rejects_symlink_secret_reads() {

@@ -14,21 +14,23 @@ impl FileSecretBackend {
     pub fn new() -> Self {
         Self
     }
-}
 
-impl SecretBackend for FileSecretBackend {
-    fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {
+    pub fn read_bounded(
+        &self,
+        location: &SecretLocation,
+        max_bytes: u64,
+    ) -> Result<Option<SecretValue>, SecretError> {
         let path = file_path(location)?;
         let Some(opened) = secure_file::open_file(path, FileSecurity::Private)
             .map_err(|error| secure_error(path, error))?
         else {
             return Ok(None);
         };
-        if opened.metadata().len() > FILE_SECRET_MAX_BYTES {
-            return Err(secret_size_error(path));
+        if opened.metadata().len() > max_bytes {
+            return Err(secret_size_error(path, max_bytes));
         }
         let bytes = opened
-            .read_bounded(FILE_SECRET_MAX_BYTES)
+            .read_bounded(max_bytes)
             .map_err(|error| secure_error(path, error))?;
 
         match String::from_utf8(bytes) {
@@ -37,15 +39,39 @@ impl SecretBackend for FileSecretBackend {
         }
     }
 
-    fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {
+    pub fn write_bounded(
+        &self,
+        location: &SecretLocation,
+        value: SecretValue,
+        max_bytes: u64,
+    ) -> Result<(), SecretError> {
         let path = file_path(location)?;
         value.with_bytes(|bytes| {
-            if bytes.len() as u64 > FILE_SECRET_MAX_BYTES {
-                return Err(secret_size_error(path));
+            if bytes.len() as u64 > max_bytes {
+                return Err(secret_size_error(path, max_bytes));
             }
             secure_file::write_private_atomic(path, bytes)
                 .map_err(|error| secure_error(path, error))
         })
+    }
+
+    /// Removes only the final entry beneath validated parent directories.
+    ///
+    /// This is for quarantining an invalid legacy entry after a normal private
+    /// open failed. The entry is never followed.
+    pub fn remove_untrusted_entry(&self, location: &SecretLocation) -> Result<(), SecretError> {
+        let path = file_path(location)?;
+        secure_file::remove_untrusted_entry(path).map_err(|error| secure_error(path, error))
+    }
+}
+
+impl SecretBackend for FileSecretBackend {
+    fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {
+        self.read_bounded(location, FILE_SECRET_MAX_BYTES)
+    }
+
+    fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {
+        self.write_bounded(location, value, FILE_SECRET_MAX_BYTES)
     }
 
     fn delete(&self, location: &SecretLocation) -> Result<(), SecretError> {
@@ -87,18 +113,18 @@ fn file_path(location: &SecretLocation) -> Result<&Path, SecretError> {
     }
 }
 
-fn secret_size_error(path: &Path) -> SecretError {
+fn secret_size_error(path: &Path, max_bytes: u64) -> SecretError {
     SecretError::invalid_location(format!(
         "{} exceeds safe size limit ({} bytes)",
         path.display(),
-        FILE_SECRET_MAX_BYTES
+        max_bytes
     ))
 }
 
 fn secure_error(path: &Path, error: io::Error) -> SecretError {
     match error.kind() {
         io::ErrorKind::InvalidData if error.to_string().contains("safe size limit") => {
-            secret_size_error(path)
+            SecretError::invalid_location(format!("{}: {error}", path.display()))
         }
         io::ErrorKind::InvalidInput
         | io::ErrorKind::InvalidData
