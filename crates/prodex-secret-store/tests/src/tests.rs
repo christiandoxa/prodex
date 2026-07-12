@@ -3,7 +3,8 @@ use crate::{
     RefreshLeaseDecision, RefreshLeaseError, RefreshLeaseErrorStatus, RefreshLeaseRole,
     SecretBackendSelection, SecretError, SecretLocation, SecretManager, SecretRevision,
     SecretStoreErrorStatus, SecretValue, auth_json_location, auth_json_path,
-    plan_refresh_lease_error_response, plan_secret_error_response,
+    plan_refresh_lease_error_response, plan_secret_error_response, read_private_file_bounded,
+    write_private_file_atomic,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -145,6 +146,106 @@ fn file_backend_honors_caller_specific_bounds() {
         .unwrap()
         .with_bytes(|bytes| assert_eq!(bytes, b"1234"));
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn private_file_facade_is_bounded_private_and_atomic() {
+    let root = temp_dir("private-file-facade");
+    let path = root.join("nested/profile-export.json");
+
+    write_private_file_atomic(&path, b"first").unwrap();
+    assert!(read_private_file_bounded(&path, 4).is_err());
+    assert_eq!(
+        read_private_file_bounded(&path, 5)
+            .unwrap()
+            .unwrap()
+            .as_slice(),
+        b"first"
+    );
+
+    #[cfg(unix)]
+    let first_inode = {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+        let metadata = fs::metadata(&path).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        assert_eq!(metadata.uid(), fs::metadata(&root).unwrap().uid());
+        metadata.ino()
+    };
+
+    write_private_file_atomic(&path, b"second").unwrap();
+    assert_eq!(
+        read_private_file_bounded(&path, 6)
+            .unwrap()
+            .unwrap()
+            .as_slice(),
+        b"second"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+
+        assert_ne!(first_inode, fs::metadata(&path).unwrap().ino());
+    }
+    assert!(fs::read_dir(path.parent().unwrap()).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".prodex-secret.")
+    }));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn private_file_facade_rejects_symlinks_and_untrusted_parents() {
+    use std::os::unix::fs::{PermissionsExt as _, symlink};
+
+    let root = temp_dir("private-file-facade-symlink");
+    let outside = root.with_extension("outside");
+    fs::write(&outside, "outside").unwrap();
+    fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
+    let path = root.join("profile-export.json");
+    symlink(&outside, &path).unwrap();
+
+    assert!(read_private_file_bounded(&path, 1024).is_err());
+    write_private_file_atomic(&path, b"inside").unwrap();
+    assert!(!path.is_symlink());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "inside");
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).unwrap();
+    let rejected = root.join("rejected.json");
+    assert!(write_private_file_atomic(&rejected, b"secret").is_err());
+    assert!(!rejected.exists());
+
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_file(outside);
+}
+
+#[cfg(windows)]
+#[test]
+fn private_file_facade_rejects_reparse_point_reads() {
+    use std::os::windows::fs::symlink_file;
+
+    let root = temp_dir("private-file-facade-reparse");
+    let target = root.join("target.json");
+    let path = root.join("profile-export.json");
+    write_private_file_atomic(&target, b"outside").unwrap();
+    if let Err(error) = symlink_file(&target, &path) {
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            let _ = fs::remove_dir_all(root);
+            return;
+        }
+        panic!("failed to create test reparse point: {error}");
+    }
+
+    assert!(read_private_file_bounded(&path, 1024).is_err());
+    assert_eq!(fs::read_to_string(target).unwrap(), "outside");
     let _ = fs::remove_dir_all(root);
 }
 
