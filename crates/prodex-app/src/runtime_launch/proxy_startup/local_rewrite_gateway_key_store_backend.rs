@@ -496,111 +496,6 @@ pub(super) fn runtime_gateway_redis_load_key_store_from_conn(
     })
 }
 
-pub(super) fn runtime_gateway_redis_save_key_store(
-    conn: &mut redis::Connection,
-    redis_key: &str,
-    store: &RuntimeGatewayVirtualKeyStoreFile,
-) -> Result<()> {
-    let key_index = runtime_gateway_redis_key_store_key_index(redis_key);
-    let old_names: Vec<String> = conn.smembers(&key_index)?;
-    for name in old_names {
-        let _: () = conn.del(runtime_gateway_redis_key_store_key_hash(redis_key, &name))?;
-    }
-    let user_index = runtime_gateway_redis_key_store_scim_index(redis_key);
-    let old_user_ids: Vec<String> = conn.smembers(&user_index)?;
-    for id in old_user_ids {
-        let _: () = conn.del(runtime_gateway_redis_key_store_scim_hash(redis_key, &id))?;
-    }
-    let _: () = conn.del(redis_key)?;
-    let _: () = conn.del(&key_index)?;
-    let _: () = conn.del(&user_index)?;
-
-    for record in &store.keys {
-        let hash_key = runtime_gateway_redis_key_store_key_hash(redis_key, &record.name);
-        let _: () = conn.sadd(&key_index, &record.name)?;
-        let _: () = redis::cmd("HSET")
-            .arg(hash_key)
-            .arg("name")
-            .arg(&record.name)
-            .arg("virtual_key_id")
-            .arg(record.virtual_key_id.as_deref().unwrap_or_default())
-            .arg("tenant_id")
-            .arg(record.tenant_id.as_deref().unwrap_or_default())
-            .arg("team_id")
-            .arg(record.team_id.as_deref().unwrap_or_default())
-            .arg("project_id")
-            .arg(record.project_id.as_deref().unwrap_or_default())
-            .arg("user_id")
-            .arg(record.user_id.as_deref().unwrap_or_default())
-            .arg("budget_id")
-            .arg(record.budget_id.as_deref().unwrap_or_default())
-            .arg("token_hash_base64")
-            .arg(&record.token_hash_base64)
-            .arg("allowed_models_json")
-            .arg(serde_json::to_string(&record.allowed_models)?)
-            .arg("budget_microusd")
-            .arg(runtime_gateway_redis_optional_u64_field(
-                record.budget_microusd,
-            ))
-            .arg("request_budget")
-            .arg(runtime_gateway_redis_optional_u64_field(
-                record.request_budget,
-            ))
-            .arg("rpm_limit")
-            .arg(runtime_gateway_redis_optional_u64_field(record.rpm_limit))
-            .arg("tpm_limit")
-            .arg(runtime_gateway_redis_optional_u64_field(record.tpm_limit))
-            .arg("disabled")
-            .arg(if record.disabled.unwrap_or(false) {
-                "1"
-            } else {
-                "0"
-            })
-            .arg("created_at_epoch")
-            .arg(record.created_at_epoch.to_string())
-            .arg("updated_at_epoch")
-            .arg(record.updated_at_epoch.to_string())
-            .query(conn)?;
-    }
-
-    for user in &store.scim_users {
-        let hash_key = runtime_gateway_redis_key_store_scim_hash(redis_key, &user.id);
-        let _: () = conn.sadd(&user_index, &user.id)?;
-        let _: () = redis::cmd("HSET")
-            .arg(hash_key)
-            .arg("id")
-            .arg(&user.id)
-            .arg("user_name")
-            .arg(&user.user_name)
-            .arg("tenant_id")
-            .arg(user.tenant_id.as_deref().unwrap_or_default())
-            .arg("team_id")
-            .arg(user.team_id.as_deref().unwrap_or_default())
-            .arg("project_id")
-            .arg(user.project_id.as_deref().unwrap_or_default())
-            .arg("user_id")
-            .arg(user.user_id.as_deref().unwrap_or_default())
-            .arg("budget_id")
-            .arg(user.budget_id.as_deref().unwrap_or_default())
-            .arg("external_id")
-            .arg(user.external_id.as_deref().unwrap_or_default())
-            .arg("display_name")
-            .arg(user.display_name.as_deref().unwrap_or_default())
-            .arg("active")
-            .arg(if user.active { "1" } else { "0" })
-            .arg("role")
-            .arg(user.role.as_deref().unwrap_or_default())
-            .arg("allowed_key_prefixes_json")
-            .arg(serde_json::to_string(&user.allowed_key_prefixes)?)
-            .arg("created_at_epoch")
-            .arg(user.created_at_epoch.to_string())
-            .arg("updated_at_epoch")
-            .arg(user.updated_at_epoch.to_string())
-            .query(conn)?;
-    }
-    Ok(())
-}
-
 pub(super) fn runtime_gateway_redis_key_store_key_index(redis_key: &str) -> String {
     format!("{redis_key}:keys")
 }
@@ -747,10 +642,6 @@ fn runtime_gateway_redis_hash_optional_u64(
     value.parse::<u64>().map(Some).with_context(|| {
         format!("gateway redis key-store field {name} must be an unsigned integer")
     })
-}
-
-fn runtime_gateway_redis_optional_u64_field(value: Option<u64>) -> String {
-    value.map(|value| value.to_string()).unwrap_or_default()
 }
 
 fn runtime_gateway_redis_hash_bool(
@@ -1419,8 +1310,6 @@ mod tests {
             runtime_gateway_redis_hash_optional_u64(&fields, "missing").unwrap(),
             None
         );
-        assert_eq!(runtime_gateway_redis_optional_u64_field(Some(0)), "0");
-        assert_eq!(runtime_gateway_redis_optional_u64_field(None), "");
     }
 
     #[test]

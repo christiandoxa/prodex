@@ -646,21 +646,6 @@ pub(super) fn runtime_gateway_redis_connection(url: &str) -> Result<redis::Conne
         .context("failed to connect to gateway redis state")
 }
 
-pub(super) fn runtime_gateway_redis_with_lock<F, G, T>(
-    url: &str,
-    lock_key: &str,
-    token_generator: G,
-    operation: F,
-) -> Result<T>
-where
-    F: FnOnce(&mut redis::Connection) -> Result<T>,
-    G: FnOnce() -> Result<String>,
-{
-    runtime_gateway_redis_with_lock_token(url, lock_key, token_generator, |conn, _token| {
-        operation(conn)
-    })
-}
-
 pub(super) fn runtime_gateway_redis_with_lock_token<F, G, T>(
     url: &str,
     lock_key: &str,
