@@ -3,7 +3,7 @@
 //! This binary stays a thin composition root. It exposes one-shot publication
 //! commands and a route-isolated async in-process control-plane listener.
 
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use prodex::{
     DedicatedServerMode, OtlpLogAttribute, compact_config_publication_transport,
@@ -48,6 +48,7 @@ use prodex_gateway_http::{
 };
 use prodex_storage::DurableStoreKind;
 use serde::Deserialize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const HELP: &str = "prodex-control-plane
 
@@ -123,11 +124,35 @@ struct ControlPlaneHttpPlanFile {
     body_digest: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct ControlPlaneHttpHeaderFile {
     name: String,
     value: String,
 }
+
+impl fmt::Debug for ControlPlaneHttpHeaderFile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ControlPlaneHttpHeaderFile")
+            .field("name", &self.name)
+            .field("value", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Zeroize for ControlPlaneHttpHeaderFile {
+    fn zeroize(&mut self) {
+        self.value.zeroize();
+    }
+}
+
+impl Drop for ControlPlaneHttpHeaderFile {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for ControlPlaneHttpHeaderFile {}
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -226,15 +251,12 @@ fn run_plan_http_control_plane(args: impl Iterator<Item = String>) -> Result<Str
         .ok_or_else(|| "plan-http-control-plane requires --request <path>".to_string())?;
     let request = load_control_plane_http_plan_request(&request_path)?;
     let (path, query) = split_path_and_query(&request.path);
+    let headers = control_plane_plan_headers(request.headers)?;
     let http = GatewayHttpRequestMeta {
         method: parse_gateway_http_method(&request.method)?,
         path,
         body_len: request.body_len,
-        headers: request
-            .headers
-            .into_iter()
-            .map(|header| GatewayHttpHeader::new(header.name, header.value))
-            .collect(),
+        headers,
     };
     let route = match plan_application_control_plane_http_route(&http) {
         Ok(route) => route,
@@ -1186,6 +1208,33 @@ fn parse_gateway_http_method(value: &str) -> Result<GatewayHttpMethod, String> {
     }
 }
 
+fn control_plane_plan_headers(
+    headers: Vec<ControlPlaneHttpHeaderFile>,
+) -> Result<Vec<GatewayHttpHeader>, String> {
+    if headers
+        .iter()
+        .any(|header| control_plane_plan_credential_header(&header.name))
+    {
+        return Err("control-plane plan input must not include credential headers".to_string());
+    }
+    Ok(headers
+        .into_iter()
+        .map(|mut header| {
+            GatewayHttpHeader::new(
+                std::mem::take(&mut header.name),
+                std::mem::take(&mut header.value),
+            )
+        })
+        .collect())
+}
+
+fn control_plane_plan_credential_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "authorization" | "proxy-authorization" | "x-api-key" | "api-key"
+    )
+}
+
 fn control_plane_operation_label(operation: ControlPlaneOperation) -> &'static str {
     match operation {
         ControlPlaneOperation::GatewayAdminRead => "gateway_admin_read",
@@ -1283,4 +1332,54 @@ fn parse_config_publication_targets(
         runtime
             .ok_or_else(|| "publication targets must include runtime_policy_reload".to_string())?,
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_plane_plan_header_debug_redacts_nested_values() {
+        let headers = vec![ControlPlaneHttpHeaderFile {
+            name: "Authorization".to_string(),
+            value: "Bearer control-plane-plan-secret".to_string(),
+        }];
+
+        let rendered = format!("{headers:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("control-plane-plan-secret"));
+    }
+
+    #[test]
+    fn control_plane_plan_rejects_credential_headers_without_echoing_values() {
+        for name in [
+            "Authorization",
+            "Proxy-Authorization",
+            "X-Api-Key",
+            "Api-Key",
+        ] {
+            let error = control_plane_plan_headers(vec![ControlPlaneHttpHeaderFile {
+                name: name.to_string(),
+                value: "Bearer control-plane-plan-secret".to_string(),
+            }])
+            .expect_err("separate principal evidence makes credential headers invalid here");
+
+            assert_eq!(
+                error,
+                "control-plane plan input must not include credential headers"
+            );
+            assert!(!error.contains("control-plane-plan-secret"));
+        }
+    }
+
+    #[test]
+    fn control_plane_plan_header_zeroize_clears_owned_value() {
+        let mut header = ControlPlaneHttpHeaderFile {
+            name: "X-Trace".to_string(),
+            value: "control-plane-plan-secret".to_string(),
+        };
+
+        header.zeroize();
+        assert!(header.value.is_empty());
+    }
 }
