@@ -87,7 +87,7 @@ const DEFERRED_GATEWAY_SECRET_CONFIG_FILES = new Set([
   "crates/prodex-app/src/app_commands/runtime_launch/gateway_observability_config.rs",
   "crates/prodex-app/src/app_commands/runtime_launch/gateway_guardrail_config.rs",
 ]);
-const TEST_PATH = /(?:^|\/)(?:tests?|fixtures?)(?:\/|$)|(?:^|\/)(?:tests?|[^/]+_tests?)\.rs$|\.test\.mjs$|^scripts\/ci\/secret-boundary-guard\.mjs$/u;
+const TEST_PATH = /(?:^|\/)(?:tests?|fixtures?|[^/]+_tests?)(?:\/|$)|(?:^|\/)(?:tests?|[^/]+_tests?)\.rs$|\.test\.mjs$|^scripts\/ci\/secret-boundary-guard\.mjs$/u;
 
 // Compatibility debt only: new occurrences exhaust these per-file budgets and fail.
 const LEGACY_SECRET_FLAG_BUDGET = new Map([
@@ -238,6 +238,10 @@ function selfTest() {
     },
     {
       filePath: "crates/example/tests/redaction.rs",
+      contents: 'let fixture = format!("https://example.test/run?token={secret}");',
+    },
+    {
+      filePath: "crates/example/src/runtime_tests/nested_fixture.rs",
       contents: 'let fixture = format!("https://example.test/run?token={secret}");',
     },
     {
