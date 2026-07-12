@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { chmod, mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -115,6 +115,12 @@ function parseArgs(argv) {
   return args;
 }
 
+function validateLaunchMode(args) {
+  if (args.gatewayBinary && args.startProxy) {
+    throw new Error("--gateway-binary and --start-proxy are mutually exclusive");
+  }
+}
+
 async function loadScenarios() {
   const raw = await readFile(SCENARIO_FILE, "utf8");
   const scenarios = JSON.parse(raw).scenarios;
@@ -210,11 +216,34 @@ function normalizeBaseUrl(target) {
   return target.replace(/\/+$/, "");
 }
 
-function routePath(route) {
-  if (route === "compact") {
-    return "/codex/responses/compact";
+function publicUpstreamUrl(value) {
+  const url = new URL(value);
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("gateway upstream URL must use http or https");
   }
-  return "/codex/responses";
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("gateway upstream URL must not contain credentials, query, or fragment");
+  }
+  return normalizeBaseUrl(url.toString());
+}
+
+function gatewayPolicy(upstreamBaseUrl) {
+  return `version = 1
+
+[secrets]
+production = false
+
+[gateway]
+base_url = ${JSON.stringify(publicUpstreamUrl(upstreamBaseUrl))}
+require_auth = false
+`;
+}
+
+function routePath(route, gatewayMode = false) {
+  if (route === "compact") {
+    return gatewayMode ? "/responses/compact" : "/codex/responses/compact";
+  }
+  return gatewayMode ? "/responses" : "/codex/responses";
 }
 
 function isPressureResponse(status, body) {
@@ -255,16 +284,16 @@ function requestPayload(route, id) {
   };
 }
 
-async function sendRequest(baseUrl, route, id, authToken, client) {
+async function sendRequest(baseUrl, route, id, authToken, client, gatewayMode) {
   const startedAt = performance.now();
   let status = 0;
   let firstByteAt = null;
   let body = "";
   try {
-    const response = await fetch(`${baseUrl}${routePath(route)}`, {
+    const response = await fetch(`${baseUrl}${routePath(route, gatewayMode)}`, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${authToken}`,
+        ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
         "content-type": "application/json",
         "chatgpt-account-id": "load-client-account",
         "session_id": `load-session-${id % 32}`,
@@ -347,6 +376,22 @@ function stagePlan(scenario, args) {
 }
 
 function selfTestScenarios(scenarios) {
+  assert.equal(
+    parseArgs(["node", "load", "--gateway-binary", "./prodex-gateway"]).gatewayBinary,
+    "./prodex-gateway",
+  );
+  assert.throws(
+    () => validateLaunchMode({ gatewayBinary: "./prodex-gateway", startProxy: true }),
+    /mutually exclusive/,
+  );
+  assert.equal(routePath("responses", true), "/responses");
+  assert.equal(routePath("compact", true), "/responses/compact");
+  assert.match(gatewayPolicy("http://127.0.0.1:1234/backend-api"), /require_auth = false/);
+  assert.doesNotMatch(
+    gatewayPolicy("http://127.0.0.1:1234/backend-api"),
+    /(?:token|api[_-]?key|password)\s*=/i,
+  );
+  assert.throws(() => publicUpstreamUrl("http://user:password@127.0.0.1/backend-api"));
   assert.ok(clientConfig(scenarios["slow-client"], {}).readDelayMs > 0);
   assert.ok(scenarios["slow-upstream"].mock.firstByteMs >= 500);
   assert.ok(scenarios["long-stream"].mock.outputChunks >= 32);
@@ -505,7 +550,16 @@ async function runStage(stage, scenario, args, baseUrl, state) {
       issued += 1;
       const id = ++state.sequence;
       const route = routeForRequest(scenario, args, id);
-      results.push(await sendRequest(baseUrl, route, id, args.authToken, client));
+      results.push(
+        await sendRequest(
+          baseUrl,
+          route,
+          id,
+          args.gatewayBinary ? null : args.authToken,
+          client,
+          Boolean(args.gatewayBinary),
+        ),
+      );
     }
   }
 
@@ -901,18 +955,26 @@ async function prepareProdexHome(root, profiles) {
   );
 }
 
-async function waitForHealth(url, child, spawnError) {
+async function waitForHealth(
+  url,
+  child,
+  spawnError,
+  healthPath = "/health",
+  processName = "prodex broker",
+) {
   const deadline = Date.now() + 15_000;
   let lastError = null;
   while (Date.now() < deadline) {
     if (spawnError()) {
       throw spawnError();
     }
-    if (child.exitCode !== null) {
-      throw new Error(`prodex broker exited before ready with code ${child.exitCode}`);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        `${processName} exited before ready with code ${child.exitCode} signal ${child.signalCode}`,
+      );
     }
     try {
-      const response = await fetch(`${url}/health`);
+      const response = await fetch(`${url}${healthPath}`);
       if (response.ok) {
         return;
       }
@@ -921,7 +983,7 @@ async function waitForHealth(url, child, spawnError) {
     }
     await sleep(100);
   }
-  throw new Error(`prodex broker health check timed out: ${lastError?.message ?? "no response"}`);
+  throw new Error(`${processName} health check timed out: ${lastError?.message ?? "no response"}`);
 }
 
 async function startProxy(args, upstreamBaseUrl) {
@@ -982,19 +1044,84 @@ async function startProxy(args, upstreamBaseUrl) {
   };
 }
 
+function gatewayBindRace(error, stderr) {
+  return /address already in use|failed to bind|os error 98/i.test(
+    `${error instanceof Error ? error.message : String(error)}\n${stderr}`,
+  );
+}
+
+async function startGateway(args, upstreamBaseUrl) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "prodex-load-gateway-"));
+  const runtimeLogDir = path.join(root, "runtime-logs");
+  try {
+    await mkdir(runtimeLogDir, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(root, "policy.toml"), gatewayPolicy(upstreamBaseUrl), {
+      mode: 0o600,
+    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const listenAddr = `127.0.0.1:${await freePort()}`;
+      const child = spawn(path.resolve(args.gatewayBinary), ["serve", "--listen", listenAddr], {
+        env: {
+          PRODEX_HOME: root,
+          PRODEX_RUNTIME_LOG_DIR: runtimeLogDir,
+          PRODEX_RUNTIME_LOG_FORMAT: "text",
+          NO_PROXY: "127.0.0.1,localhost,::1",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      let childSpawnError = null;
+      let stderr = "";
+      child.once("error", (error) => {
+        childSpawnError = error;
+      });
+      child.stdout.on("data", (chunk) => process.stdout.write(chunk));
+      child.stderr.on("data", (chunk) => {
+        stderr = `${stderr}${chunk}`.slice(-MAX_BODY_CAPTURE_BYTES);
+        process.stderr.write(chunk);
+      });
+      const gatewayRoot = `http://${listenAddr}`;
+      try {
+        await waitForHealth(
+          gatewayRoot,
+          child,
+          () => childSpawnError,
+          "/readyz",
+          "prodex gateway",
+        );
+        args.runtimeLogDir = runtimeLogDir;
+        return {
+          child,
+          target: `${gatewayRoot}/v1`,
+          cleanupRoot: root,
+          runtimeLogDir,
+        };
+      } catch (error) {
+        await stopChild(child);
+        if (attempt === 0 && gatewayBindRace(error, stderr)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error("prodex gateway could not reserve a loopback listen address");
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 async function stopChild(child) {
-  if (!child || child.exitCode !== null) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
     return;
   }
+  const exited = new Promise((resolve) => child.once("exit", () => resolve(true)));
   child.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    sleep(2_000).then(() => {
-      if (child.exitCode === null) {
-        child.kill("SIGKILL");
-      }
-    }),
-  ]);
+  if (!(await Promise.race([exited, sleep(2_000).then(() => false)]))) {
+    child.kill("SIGKILL");
+    await Promise.race([exited, sleep(2_000)]);
+  }
 }
 
 function printSummary(result) {
@@ -1029,6 +1156,7 @@ async function main() {
         "Useful local modes:",
         "  --start-mock                         Start mock upstream and load it directly.",
         "  --start-mock --start-proxy           Start mock upstream, temp Prodex home, and hidden runtime broker.",
+        "  --start-mock --gateway-binary PATH   Start mock upstream and a temp dedicated gateway.",
         "  --requests N --concurrency N         Override scenario stages.",
         "  --client-read-delay-ms N             Delay each response-body read after the first chunk.",
         "  --request-timeout-ms N               Bound each request independently.",
@@ -1040,6 +1168,7 @@ async function main() {
     return;
   }
 
+  validateLaunchMode(args);
   const scenarios = await loadScenarios();
   if (args.selfTest) {
     selfTestScenarios(scenarios);
@@ -1069,6 +1198,7 @@ async function main() {
 
   let mock = null;
   let proxy = null;
+  let gateway = null;
   try {
     if (args.startMock) {
       mock = await startMock(args);
@@ -1080,7 +1210,18 @@ async function main() {
       }
       proxy = await startProxy(args, upstreamBaseUrl ?? args.target);
     }
-    const target = normalizeBaseUrl(proxy?.target ?? args.target ?? mock?.baseUrl ?? "");
+    if (args.gatewayBinary) {
+      if (!upstreamBaseUrl && !args.target) {
+        throw new Error("--gateway-binary requires --start-mock or --target upstream base URL");
+      }
+      gateway = await startGateway(
+        args,
+        upstreamBaseUrl ? `${upstreamBaseUrl}/codex` : args.target,
+      );
+    }
+    const target = normalizeBaseUrl(
+      gateway?.target ?? proxy?.target ?? args.target ?? mock?.baseUrl ?? "",
+    );
     if (!target) {
       throw new Error("target required: pass --target or --start-mock");
     }
@@ -1103,7 +1244,7 @@ async function main() {
     const output = {
       scenario: args.scenario,
       target,
-      runtimeLogDir: proxy?.runtimeLogDir ?? args.runtimeLogDir,
+      runtimeLogDir: gateway?.runtimeLogDir ?? proxy?.runtimeLogDir ?? args.runtimeLogDir,
       stages,
       summary,
       evidence: performanceEvidence(Boolean(proxy), metricsStart, metricsEnd, summary.total),
@@ -1119,8 +1260,12 @@ async function main() {
       process.exitCode = 1;
     }
   } finally {
+    await stopChild(gateway?.child);
     await stopChild(proxy?.child);
     await stopChild(mock?.child);
+    if (gateway?.cleanupRoot) {
+      await rm(gateway.cleanupRoot, { recursive: true, force: true });
+    }
   }
 }
 
