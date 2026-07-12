@@ -111,8 +111,26 @@ const ALLOWLIST = Object.freeze([
       "gateway ledger and usage saves are moved onto the bounded blocking pool after request admission",
   },
   {
-    name: "local-rewrite-gateway-admin-store-openoptions-import",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_store_mutation.rs",
+    name: "in-process-gateway-bounded-worker",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_runtime.rs",
+    id: "spawn-blocking",
+    pattern: /\btokio::task::spawn_blocking\s*\(/,
+    maxHits: 1,
+    reason:
+      "in-process gateway requests are semaphore-bounded and move the synchronous rewrite pipeline off the async executor",
+  },
+  {
+    name: "gateway-reconciliation-bounded-worker",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_reconciliation_worker.rs",
+    id: "spawn-blocking",
+    pattern: /\bspawn_blocking\s*\(/,
+    maxHits: 1,
+    reason:
+      "durable reconciliation runs under the bounded gateway background-task guard on the blocking pool",
+  },
+  {
+    name: "local-rewrite-gateway-admin-atomic-openoptions-import",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_store_mutation/atomic.rs",
     id: "blocking-file-open",
     pattern: /\buse std::fs::OpenOptions;/,
     maxHits: 1,
@@ -120,8 +138,8 @@ const ALLOWLIST = Object.freeze([
       "OpenOptions is used by gateway admin store mutations, not by upstream stream forwarding",
   },
   {
-    name: "local-rewrite-gateway-admin-store-directory-create",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_store_mutation.rs",
+    name: "local-rewrite-gateway-admin-atomic-directory-create",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_store_mutation/atomic.rs",
     id: "blocking-disk-io",
     pattern: /\bstd::fs::create_dir_all\s*\(/,
     maxHits: 1,
