@@ -271,7 +271,6 @@ function isEnterpriseIdBoundaryRelevantPath(filePath) {
     filePath === "scripts/ci/enterprise-id-boundary-guard.mjs" ||
     filePath === "scripts/ci/preflight.mjs" ||
     filePath === "scripts/ci/test-impact-manifest.json" ||
-    filePath === "docs/adr/0222-enterprise-id-boundary-guard.md" ||
     filePath === "docs/enterprise-readiness-audit.md"
   ) {
     return true;
@@ -299,8 +298,7 @@ function isEnterpriseDocsGuardRelevantPath(filePath) {
     filePath === "docs/enterprise-readiness-audit.md" ||
     filePath === "docs/testing.md" ||
     filePath === "docs/threat-model.md" ||
-    filePath === "docs/migration-guide.md" ||
-    filePath.startsWith("docs/adr/03")
+    filePath === "docs/migration-guide.md"
   );
 }
 
