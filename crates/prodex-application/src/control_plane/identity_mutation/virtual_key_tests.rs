@@ -233,6 +233,7 @@ fn item_mutations_require_exact_resource_name() {
             ControlPlaneOperation::VirtualKeyRotateSecret,
             ApplicationGatewayVirtualKeyMutation::RotateSecret {
                 id,
+                patch: ApplicationGatewayVirtualKeyPatch::default(),
                 secret_fingerprint: fingerprint(),
             },
         ),
@@ -342,6 +343,43 @@ fn update_patch_preserves_sets_and_clears_fields() {
     assert_eq!(record.tenant_id.as_deref(), Some("tenant-a"));
     assert_eq!(record.team_id, None);
     assert_eq!(record.allowed_models, ["claude-4"]);
+    assert!(record.disabled);
+    assert_eq!(record.updated_at_unix_ms, NOW);
+}
+
+#[test]
+fn secret_rotation_applies_patch_atomically_under_rotate_authorization() {
+    let id = key_id("00000000-0000-7000-8000-000000000212");
+    let action = action_plan(
+        ControlPlaneOperation::VirtualKeyRotateSecret,
+        ResourceKind::VirtualKey,
+        Some("key-a"),
+    );
+    let result = plan(
+        &action,
+        &ApplicationControlPlaneGovernanceScope::default(),
+        &[record(id, "key-a")],
+        ApplicationGatewayVirtualKeyMutation::RotateSecret {
+            id,
+            patch: ApplicationGatewayVirtualKeyPatch {
+                team_id: ApplicationPatchValue::Clear,
+                disabled: ApplicationPatchValue::Set(true),
+                ..Default::default()
+            },
+            secret_fingerprint: fingerprint(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.authorized_action, action);
+    assert_eq!(
+        result.secret_mutation,
+        ApplicationSecretMutation::Rotate(fingerprint())
+    );
+    let ApplicationGatewayIdentityProjection::Replace { record, .. } = result.projection else {
+        panic!("rotation must replace");
+    };
+    assert_eq!(record.team_id, None);
     assert!(record.disabled);
     assert_eq!(record.updated_at_unix_ms, NOW);
 }
