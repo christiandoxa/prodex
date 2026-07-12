@@ -96,14 +96,20 @@ without redefining version 2.
   the old release to create its own version-1 encrypted file.
 - Malformed, corrupt, wrong-password, and excessive-resource inputs fail with
   bounded, redacted errors before profile import side effects.
-- This decision does not change bundle file security. Unix mode/identity checks
-  remain as before; no-follow handling and equivalent Windows handle/ACL checks
-  remain owned by the Phase 4 filesystem-hardening work.
+- Bundle reads and writes use the shared private-file boundary: trusted parent
+  directories, no-follow/reparse-point opens, owner and Unix mode or Windows
+  DACL validation, bounded zeroize-on-drop reads, and atomic private replacement
+  with flush/write-through and identity verification. A final symlink is safely
+  replaced during export without writing through to its target.
+- Import intentionally rejects existing bundles that are public, owned by a
+  different user, or stored below an untrusted parent. Secure and own an existing
+  bundle (including mode `0600` on Unix) before importing it, or re-export it.
 
 ## Verification
 
 ```bash
 cargo test --locked -p prodex-profile-export -- --test-threads=1
+cargo test --locked -p prodex-secret-store -- --test-threads=1
 cargo test --locked -p prodex-app profile_export_ -- --test-threads=1
-cargo clippy --locked -p prodex-profile-export -p prodex-app --all-targets -- -D warnings
+cargo clippy --locked -p prodex-secret-store -p prodex-profile-export -p prodex-app --all-targets -- -D warnings
 ```

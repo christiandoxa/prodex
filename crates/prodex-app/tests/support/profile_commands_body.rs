@@ -102,7 +102,7 @@ impl ProfileCommandsTestDir {
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        create_codex_home_if_missing(&path).expect("test dir should be created");
+        profile_commands_create_private_test_dir(&path);
         Self { path }
     }
 }
@@ -123,8 +123,9 @@ impl ProfileCommandsTestEnv {
     fn new(root: &Path) -> Self {
         let home = root.join("home");
         let prodex_home = root.join("prodex");
-        fs::create_dir_all(&home).expect("test home should be created");
-        fs::create_dir_all(&prodex_home).expect("test prodex home should be created");
+        profile_commands_create_private_test_dir(&home);
+        profile_commands_create_private_test_dir(&prodex_home);
+        profile_commands_create_private_test_dir(&prodex_home.join("profiles"));
         Self {
             _home_guard: TestEnvVarGuard::set("HOME", &home.display().to_string()),
             _prodex_guard: TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string()),
@@ -134,12 +135,29 @@ impl ProfileCommandsTestEnv {
 }
 
 fn profile_commands_test_paths(root: &Path) -> AppPaths {
-    AppPaths {
+    let paths = AppPaths {
         root: root.to_path_buf(),
         state_file: root.join("state.json"),
         managed_profiles_root: root.join("profiles"),
         shared_codex_root: root.join(".codex"),
         legacy_shared_codex_root: root.join("shared"),
+    };
+    profile_commands_create_private_test_dir(&paths.managed_profiles_root);
+    paths
+}
+
+fn profile_commands_create_private_test_dir(path: &Path) {
+    create_codex_home_if_missing(path).expect("private test directory should be created");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "{} should be a trusted private test parent",
+            path.display()
+        );
     }
 }
 

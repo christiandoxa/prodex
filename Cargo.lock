@@ -2696,6 +2696,7 @@ dependencies = [
  "base64",
  "getrandom 0.4.3",
  "pbkdf2",
+ "prodex-secret-store",
  "serde",
  "serde_json",
  "sha2",

@@ -160,6 +160,8 @@ prodex profile remove --all
 
 Protected exports use the version-2 Argon2id envelope. Imports remain compatible with existing version-1 PBKDF2 bundles.
 
+Imports require a current-user-owned private bundle below trusted directories. For an existing Unix bundle, correct its ownership and run `chmod 600 backup.json`, or re-export it. On Windows, the bundle must have a private current-user owner/DACL.
+
 `prodex profile import claude` imports the current Claude Code OAuth credentials from `CLAUDE_CONFIG_DIR` or `~/.claude` into a Prodex-managed Anthropic profile. `prodex profile import copilot` records the logged-in Copilot account and provider endpoint in Prodex while leaving the token in Copilot's own keychain/config storage. `prodex profile import kiro` reads the installed Kiro CLI auth database, snapshots the current auth payload into the managed profile, and refreshes a Kiro model catalog snapshot; override CLI discovery with `PRODEX_KIRO_BIN` when needed. Plain `prodex run` still targets OpenAI/Codex profiles, while `prodex s gemini` can use a Google sign-in profile and `prodex quota` can inspect Copilot, Kiro, Gemini, Antigravity CLI, Anthropic, DeepSeek, local, and custom provider snapshots. Profiles whose `config.toml` sets a non-OpenAI `model_provider` are not OpenAI quota-compatible, but they still render provider metadata in `prodex quota`.
 
 ## 3. Run Codex CLI with `prodex`
