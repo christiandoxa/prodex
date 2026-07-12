@@ -9,6 +9,7 @@ Common commands:
 ```bash
 npm run load:runtime-proxy -- --scenario baseline --start-mock
 npm run load:runtime-proxy -- --scenario baseline --start-mock --start-proxy --prodex ./target/debug/prodex
+npm run load:runtime-proxy -- --scenario baseline --start-mock --gateway-binary ./target/debug/prodex-gateway
 npm run load:runtime-proxy -- --scenario slow-client --start-mock --start-proxy --prodex ./target/debug/prodex
 npm run load:runtime-proxy -- --scenario slow-upstream --start-mock --start-proxy --prodex ./target/debug/prodex
 npm run load:runtime-proxy -- --scenario long-stream --start-mock --start-proxy --prodex ./target/debug/prodex
@@ -30,6 +31,16 @@ Attempted requests include failures. These are process-level normalizations, not
 proof that a specific request owned every allocation in the interval. The
 harness accepts only non-negative JavaScript safe-integer counters. Normal builds
 and direct-target runs report allocation evidence as unsupported.
+
+`--gateway-binary PATH` is an opt-in dedicated-gateway mode and is mutually
+exclusive with `--start-proxy`. It starts the binary with a loopback ephemeral
+listener and a temporary development policy that disables gateway auth and
+points at the mock (or the upstream base URL passed with `--target`). The child
+receives a filtered environment, readiness is bounded through `/readyz`, load
+uses the canonical `/v1/responses` and `/v1/responses/compact` routes, and
+shutdown escalates from SIGTERM to SIGKILL before removing the temporary files.
+Dedicated-gateway runs report broker-only allocation and wait evidence as
+unsupported; runtime pressure logs are still scanned.
 
 Build and run an allocation-instrumented proxy with:
 
