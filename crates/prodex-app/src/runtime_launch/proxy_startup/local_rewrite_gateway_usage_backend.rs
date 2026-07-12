@@ -234,17 +234,13 @@ pub(super) fn runtime_gateway_sqlite_usage_apply_deltas(
             )
             .optional()?
             .unwrap_or_default();
-        let admission = runtime_proxy_crate::RuntimeGatewayVirtualKeyAdmission {
-            key_name: delta.key_name.clone(),
-            model: None,
-            input_tokens: delta.input_tokens,
-            reserved_tokens: delta.reserved_tokens,
-            estimated_cost_microusd: delta.estimated_cost_microusd,
-        };
-        runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(
+        prodex_gateway_core::apply_gateway_virtual_key_usage_update(
             &mut usage,
-            &admission,
-            delta.minute_epoch,
+            prodex_gateway_core::GatewayVirtualKeyUsageUpdate {
+                minute_epoch: delta.minute_epoch,
+                reserved_tokens: delta.reserved_tokens,
+                estimated_cost_microusd: delta.estimated_cost_microusd,
+            },
         );
         tx.execute(
             r#"
