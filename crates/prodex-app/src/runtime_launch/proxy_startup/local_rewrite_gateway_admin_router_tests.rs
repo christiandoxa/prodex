@@ -7,23 +7,22 @@ use super::super::local_rewrite_application_boundary::{
 use super::super::local_rewrite_gateway_admin_auth::{
     RuntimeGatewayAdminAuthentication, RuntimeGatewayAdminCredentialEvidence,
 };
+use super::super::local_rewrite_gateway_admin_execution::runtime_gateway_admin_mutation_execution;
 use super::{
     ControlPlaneDecision, GatewayHttpMethod, GatewayHttpRequestMeta, RuntimeGatewayAdminAuth,
     RuntimeGatewayAdminRole, RuntimeProxyRequest, plan_application_control_plane,
-    runtime_gateway_admin_idempotency_replay_decision, runtime_gateway_admin_route_explain_plan,
-    runtime_gateway_http_headers, runtime_gateway_request_body_sha256,
+    runtime_gateway_admin_route_explain_plan, runtime_gateway_http_headers,
+    runtime_gateway_http_request_meta,
 };
 use prodex_application::{
     ApplicationRequestContext, ApplicationRequestDeadline,
     plan_application_control_plane_audit_from_http,
     plan_application_control_plane_idempotency_from_http_digest,
-    plan_application_control_plane_idempotency_replay,
 };
 use prodex_control_plane::ControlPlaneOperation;
-use prodex_domain::{
-    IdempotencyEntry, IdempotencyReplayDecision, RequestId, ResourceKind, TenantId,
-};
+use prodex_domain::{RequestId, ResourceKind, TenantId};
 use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpHeader};
+use std::io::Read;
 use std::time::{Duration, Instant};
 
 fn application_request_context<'a>(
@@ -198,6 +197,11 @@ fn admin_control_plane_action_binds_mutation_resource_and_time() {
             "example-key",
         ),
         (
+            GatewayHttpMethod::Post,
+            "/v1/prodex/gateway/keys/example-key/secret",
+            "example-key",
+        ),
+        (
             GatewayHttpMethod::Delete,
             "/v1/prodex/gateway/scim/v2/Users/user-1",
             "user-1",
@@ -277,56 +281,167 @@ fn admin_mutation_routes_match_application_idempotency_and_audit_planners() {
 }
 
 #[test]
-fn admin_idempotency_replay_adapter_matches_application_pending_semantics() {
+fn admin_mutation_execution_preserves_retained_authorization() {
     let admin = admin_auth_named("admin", None);
-    let http = GatewayHttpRequestMeta {
-        method: GatewayHttpMethod::Post,
-        path: "/v1/prodex/gateway/keys".to_string(),
-        body_len: 2,
-        headers: vec![GatewayHttpHeader::new("Idempotency-Key", "mutation-1")],
+    let captured = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/prodex/gateway/keys".to_string(),
+        headers: vec![("Idempotency-Key".to_string(), "mutation-1".to_string())],
+        body: b"{}".to_vec(),
     };
+    let http = runtime_gateway_http_request_meta(&captured, "/v1/prodex/gateway/keys");
     let action = runtime_gateway_admin_control_plane_action(&http, &admin).unwrap();
-    let operation = plan_application_control_plane_idempotency_from_http_digest(
-        action,
-        &http,
-        runtime_gateway_request_body_sha256(b"{}"),
+    let base = match plan_application_control_plane(action).decision {
+        ControlPlaneDecision::Authorized(base) => base,
+        ControlPlaneDecision::Denied { .. } => panic!("admin mutation should be authorized"),
+    };
+
+    let execution = match runtime_gateway_admin_mutation_execution(
+        &captured,
+        "/v1/prodex/gateway/keys",
+        &admin,
+        &base,
+        ControlPlaneOperation::VirtualKeyCreate,
+    ) {
+        Ok(execution) => execution,
+        Err(_) => panic!("mutation execution should plan"),
+    };
+
+    assert_eq!(execution.authorized_action, base);
+    assert_eq!(execution.atomic_write.audit_event, base.audit_event);
+    assert_eq!(
+        execution.atomic_write.operation.tenant_id,
+        base.tenant.tenant_id
+    );
+    assert!(
+        execution
+            .atomic_write
+            .operation
+            .key
+            .as_str()
+            .starts_with("cp:v1:")
+    );
+    assert!(execution.governance.dimensions_are_unrestricted());
+
+    let rendered = format!("{execution:?}");
+    let event_id = base.audit_event.id.to_string();
+    let tenant_id = base.tenant.tenant_id.to_string();
+    for sensitive in [
+        admin.name.as_str(),
+        event_id.as_str(),
+        tenant_id.as_str(),
+        "mutation-1",
+    ] {
+        assert!(!rendered.contains(sensitive));
+    }
+}
+
+#[test]
+fn admin_mutation_execution_reauthorizes_only_legacy_rotate_alias() {
+    let admin = admin_auth_named("admin", None);
+    let path = "/v1/prodex/gateway/keys/example-key";
+    let captured = RuntimeProxyRequest {
+        method: "PATCH".to_string(),
+        path_and_query: path.to_string(),
+        headers: vec![
+            ("Idempotency-Key".to_string(), "rotate-1".to_string()),
+            ("If-Match".to_string(), "W/\"42\"".to_string()),
+        ],
+        body: br#"{"rotate_secret":true}"#.to_vec(),
+    };
+    let http = runtime_gateway_http_request_meta(&captured, path);
+    let action = runtime_gateway_admin_control_plane_action(&http, &admin).unwrap();
+    let base = match plan_application_control_plane(action).decision {
+        ControlPlaneDecision::Authorized(base) => base,
+        ControlPlaneDecision::Denied { .. } => panic!("admin mutation should be authorized"),
+    };
+
+    let execution = match runtime_gateway_admin_mutation_execution(
+        &captured,
+        path,
+        &admin,
+        &base,
+        ControlPlaneOperation::VirtualKeyRotateSecret,
+    ) {
+        Ok(execution) => execution,
+        Err(_) => panic!("rotate alias should reauthorize"),
+    };
+
+    assert_eq!(base.operation, ControlPlaneOperation::VirtualKeyUpdate);
+    assert_eq!(
+        execution.authorized_action.operation,
+        ControlPlaneOperation::VirtualKeyRotateSecret
+    );
+    assert_eq!(
+        execution.authorized_action.audit_event.action.as_str(),
+        "control_plane.virtual_key.rotate_secret"
+    );
+    assert_eq!(
+        execution
+            .authorized_action
+            .audit_event
+            .resource
+            .id
+            .as_deref(),
+        Some("example-key")
+    );
+    assert_eq!(
+        execution.atomic_write.audit_event,
+        execution.authorized_action.audit_event
+    );
+    assert_eq!(
+        execution.entity_tag.as_ref().map(|tag| tag.as_str()),
+        Some("W/\"42\"")
+    );
+
+    let rejected = runtime_gateway_admin_mutation_execution(
+        &captured,
+        path,
+        &admin,
+        &base,
+        ControlPlaneOperation::VirtualKeyDelete,
     )
-    .unwrap()
-    .operation
-    .unwrap();
+    .unwrap_err();
+    assert_eq!(rejected.status_code().0, 400);
+}
 
-    assert_eq!(
-        runtime_gateway_admin_idempotency_replay_decision(&operation, None).unwrap(),
-        plan_application_control_plane_idempotency_replay::<()>(&operation, None).unwrap()
-    );
-    let existing = IdempotencyEntry::<()>::pending(operation.clone(), 0);
-    assert_eq!(
-        runtime_gateway_admin_idempotency_replay_decision(
-            &operation,
-            Some(operation.request_fingerprint.as_str()),
-        )
-        .unwrap(),
-        plan_application_control_plane_idempotency_replay(&operation, Some(&existing)).unwrap()
-    );
-    assert!(matches!(
-        runtime_gateway_admin_idempotency_replay_decision(
-            &operation,
-            Some(operation.request_fingerprint.as_str()),
-        )
-        .unwrap(),
-        IdempotencyReplayDecision::AlreadyInProgress {
-            started_at_unix_ms: 0
-        }
-    ));
+#[test]
+fn admin_mutation_execution_rejects_missing_idempotency_key_without_leaks() {
+    let admin = admin_auth_named("redacted-admin", None);
+    let path = "/v1/prodex/gateway/keys";
+    let captured = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: path.to_string(),
+        headers: Vec::new(),
+        body: br#"{"name":"sensitive-key"}"#.to_vec(),
+    };
+    let http = runtime_gateway_http_request_meta(&captured, path);
+    let action = runtime_gateway_admin_control_plane_action(&http, &admin).unwrap();
+    let base = match plan_application_control_plane(action).decision {
+        ControlPlaneDecision::Authorized(base) => base,
+        ControlPlaneDecision::Denied { .. } => panic!("admin mutation should be authorized"),
+    };
 
-    let mut conflicting_operation = operation.clone();
-    conflicting_operation.request_fingerprint = "sha256:different-mutation".to_string();
-    let conflicting = IdempotencyEntry::<()>::pending(conflicting_operation, 0);
-    assert_eq!(
-        runtime_gateway_admin_idempotency_replay_decision(
-            &operation,
-            Some("sha256:different-mutation"),
-        ),
-        plan_application_control_plane_idempotency_replay(&operation, Some(&conflicting))
-    );
+    let response = runtime_gateway_admin_mutation_execution(
+        &captured,
+        path,
+        &admin,
+        &base,
+        ControlPlaneOperation::VirtualKeyCreate,
+    )
+    .unwrap_err();
+    assert_eq!(response.status_code().0, 400);
+    let mut body = String::new();
+    response.into_reader().read_to_string(&mut body).unwrap();
+    assert!(body.contains("control_plane_idempotency_key_required"));
+    assert!(!body.contains("redacted-admin"));
+    assert!(!body.contains("sensitive-key"));
+}
+
+#[test]
+fn admin_router_has_no_process_local_idempotency_preclaim() {
+    let source = include_str!("local_rewrite_gateway_admin_router.rs");
+    assert!(!source.contains("gateway_admin_idempotency_keys"));
+    assert!(!source.contains("keys.insert"));
+    assert!(!source.contains("runtime_gateway_admin_if_match_response"));
 }

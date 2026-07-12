@@ -223,15 +223,35 @@ pub(super) fn runtime_gateway_admin_control_plane_action(
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> Option<ControlPlaneActionRequest> {
     let route = prodex_application::plan_application_control_plane_http_route(http).ok()?;
+    runtime_gateway_admin_control_plane_action_for_operation(http, admin_auth, route.operation)
+}
+
+pub(super) fn runtime_gateway_admin_control_plane_action_for_operation(
+    http: &GatewayHttpRequestMeta,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    operation: prodex_control_plane::ControlPlaneOperation,
+) -> Option<ControlPlaneActionRequest> {
+    let route = prodex_application::plan_application_control_plane_http_route(http).ok()?;
+    if route.operation != operation
+        && !matches!(
+            (route.operation, operation),
+            (
+                prodex_control_plane::ControlPlaneOperation::VirtualKeyUpdate,
+                prodex_control_plane::ControlPlaneOperation::VirtualKeyRotateSecret,
+            )
+        )
+    {
+        return None;
+    }
     let principal = runtime_gateway_admin_principal(admin_auth);
     let tenant_id = principal.tenant_id?;
     Some(ControlPlaneActionRequest {
         principal,
-        operation: route.operation,
+        operation,
         resource: ControlPlaneResourceRef::new(
             tenant_id,
-            route.operation.requirement().resource,
-            runtime_gateway_admin_resource_id(http, route.operation),
+            operation.requirement().resource,
+            runtime_gateway_admin_resource_id(http, operation),
         ),
         occurred_at_unix_ms: runtime_gateway_now_unix_ms(),
     })
@@ -252,14 +272,24 @@ fn runtime_gateway_admin_resource_id(
         }
         _ => return None,
     };
-    http.path
+    let resource_id = http
+        .path
         .split_once(marker)
-        .map(|(_, resource_id)| resource_id.trim())
+        .map(|(_, resource_id)| resource_id.trim())?;
+    let resource_id = if operation == ControlPlaneOperation::VirtualKeyRotateSecret {
+        resource_id
+            .strip_suffix("/secret")
+            .or_else(|| resource_id.strip_suffix("/secrets"))
+            .unwrap_or(resource_id)
+    } else {
+        resource_id
+    };
+    Some(resource_id)
         .filter(|resource_id| !resource_id.is_empty() && !resource_id.contains('/'))
         .map(str::to_string)
 }
 
-fn runtime_gateway_now_unix_ms() -> u64 {
+pub(super) fn runtime_gateway_now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
