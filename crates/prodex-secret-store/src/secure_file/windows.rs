@@ -267,7 +267,7 @@ fn open_regular(path: &Path, create: bool) -> io::Result<File> {
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     if create {
-        options.create_new(true);
+        options.write(true).create_new(true);
     }
     options.open(path)
 }
