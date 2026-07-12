@@ -1,4 +1,5 @@
 use super::*;
+use zeroize::Zeroize;
 
 #[derive(Debug)]
 struct PlanProfile {
@@ -580,6 +581,24 @@ fn copilot_config_parser_treats_empty_file_as_logged_out() {
 
     assert!(select_copilot_logged_in_user(&config).is_none());
     assert!(config.logged_in_users.is_empty());
+    assert!(config.copilot_tokens.is_empty());
+}
+
+#[test]
+fn copilot_config_debug_redacts_and_zeroize_clears_tokens() {
+    let mut config = parse_copilot_config_file(
+        r#"{
+            "lastLoggedInUser": {"host": "https://github.com", "login": "main"},
+            "copilotTokens": {"https://github.com:main": "copilot-debug-secret"}
+        }"#,
+    )
+    .expect("Copilot config should parse");
+
+    let rendered = format!("{config:?}");
+    assert!(rendered.contains("<redacted>"));
+    assert!(!rendered.contains("copilot-debug-secret"));
+
+    config.zeroize();
     assert!(config.copilot_tokens.is_empty());
 }
 
