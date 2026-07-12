@@ -1,4 +1,6 @@
 use super::*;
+use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RuntimeAnthropicServerToolUsage {
@@ -90,7 +92,7 @@ impl RuntimeAnthropicServerTools {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct RuntimeAnthropicMcpServer {
     pub name: String,
     pub url: Option<String>,
@@ -99,13 +101,97 @@ pub struct RuntimeAnthropicMcpServer {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+impl fmt::Debug for RuntimeAnthropicMcpServer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeAnthropicMcpServer")
+            .field("name", &self.name)
+            .field("url_configured", &self.url.is_some())
+            .field(
+                "authorization_token",
+                &self.authorization_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("header_count", &self.headers.len())
+            .field("headers", &"<redacted>")
+            .field("description_configured", &self.description.is_some())
+            .finish()
+    }
+}
+
+impl Zeroize for RuntimeAnthropicMcpServer {
+    fn zeroize(&mut self) {
+        self.url.zeroize();
+        self.authorization_token.zeroize();
+        for value in self.headers.values_mut() {
+            zeroize_json_secret_values(value);
+        }
+        self.headers.clear();
+    }
+}
+
+impl Drop for RuntimeAnthropicMcpServer {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for RuntimeAnthropicMcpServer {}
+
+#[derive(Default)]
 pub struct RuntimeAnthropicTranslatedTools {
     pub tools: Vec<serde_json::Value>,
     pub server_tools: RuntimeAnthropicServerTools,
     pub tool_name_aliases: BTreeMap<String, String>,
     pub native_tool_names: BTreeSet<String>,
     pub memory: bool,
+}
+
+impl fmt::Debug for RuntimeAnthropicTranslatedTools {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeAnthropicTranslatedTools")
+            .field("tool_count", &self.tools.len())
+            .field("tools", &"<redacted>")
+            .field("server_tools", &self.server_tools)
+            .field("tool_name_aliases", &self.tool_name_aliases)
+            .field("native_tool_names", &self.native_tool_names)
+            .field("memory", &self.memory)
+            .finish()
+    }
+}
+
+impl Zeroize for RuntimeAnthropicTranslatedTools {
+    fn zeroize(&mut self) {
+        for tool in &mut self.tools {
+            zeroize_json_secret_values(tool);
+        }
+        self.tools.clear();
+    }
+}
+
+impl Drop for RuntimeAnthropicTranslatedTools {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for RuntimeAnthropicTranslatedTools {}
+
+fn zeroize_json_secret_values(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(value) => value.zeroize(),
+        serde_json::Value::Array(values) => {
+            for value in values {
+                zeroize_json_secret_values(value);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            for value in values.values_mut() {
+                zeroize_json_secret_values(value);
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
 }
 
 impl RuntimeAnthropicTranslatedTools {

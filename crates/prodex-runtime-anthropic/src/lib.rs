@@ -23,12 +23,26 @@ pub use models::*;
 pub use output::*;
 pub use tools::*;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RuntimeProxyRequest {
     pub method: String,
     pub path_and_query: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+}
+
+impl std::fmt::Debug for RuntimeProxyRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeProxyRequest")
+            .field("method", &self.method)
+            .field("path_and_query", &"<redacted>")
+            .field("header_count", &self.headers.len())
+            .field("headers", &"<redacted>")
+            .field("body_len", &self.body.len())
+            .field("body", &"<redacted>")
+            .finish()
+    }
 }
 
 impl RuntimeProxyRequest {
@@ -537,6 +551,90 @@ pub fn runtime_proxy_claude_session_id(request: &RuntimeProxyRequest) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zeroize::Zeroize;
+
+    #[test]
+    fn runtime_request_debug_redacts_nested_secret_material() {
+        let request = RuntimeProxyRequest::from_parts(
+            "POST",
+            "/responses?api_key=anthropic-target-secret",
+            vec![(
+                "Authorization".to_string(),
+                "Bearer anthropic-header-secret".to_string(),
+            )],
+            b"anthropic-body-secret".to_vec(),
+        );
+        let messages = RuntimeAnthropicMessagesRequest {
+            translated_request: request.clone(),
+            requested_model: "claude-sonnet".to_string(),
+            stream: true,
+            want_thinking: false,
+            server_tools: RuntimeAnthropicServerTools::default(),
+            carried_web_search_requests: 0,
+            carried_web_fetch_requests: 0,
+            carried_code_execution_requests: 0,
+            carried_tool_search_requests: 0,
+        };
+        let followup = RuntimeAnthropicServerToolFollowup {
+            previous_response_id: "resp_example".to_string(),
+            attempt: 1,
+            request,
+        };
+
+        let rendered = format!("{messages:?} {followup:?}");
+        assert!(rendered.contains("<redacted>"));
+        for secret in [
+            "anthropic-target-secret",
+            "anthropic-header-secret",
+            "anthropic-body-secret",
+        ] {
+            assert!(!rendered.contains(secret));
+        }
+    }
+
+    #[test]
+    fn anthropic_mcp_debug_redacts_and_zeroize_clears_owned_secrets() {
+        let mut server = RuntimeAnthropicMcpServer {
+            name: "example".to_string(),
+            url: Some("https://mcp.example.test?token=mcp-url-secret".to_string()),
+            authorization_token: Some("mcp-authorization-secret".to_string()),
+            headers: serde_json::Map::from_iter([(
+                "X-Api-Key".to_string(),
+                serde_json::json!({"nested": ["mcp-header-secret"]}),
+            )]),
+            description: None,
+        };
+        let rendered = format!("{server:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("mcp-url-secret"));
+        assert!(!rendered.contains("mcp-authorization-secret"));
+        assert!(!rendered.contains("mcp-header-secret"));
+
+        server.zeroize();
+        assert!(
+            server
+                .authorization_token
+                .as_deref()
+                .is_none_or(str::is_empty)
+        );
+        assert!(server.headers.is_empty());
+    }
+
+    #[test]
+    fn anthropic_translated_tools_debug_redacts_embedded_mcp_secrets() {
+        let mut translated = RuntimeAnthropicTranslatedTools::default();
+        translated.tools.push(serde_json::json!({
+            "type": "mcp",
+            "authorization": "translated-mcp-secret",
+        }));
+
+        let rendered = format!("{translated:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("translated-mcp-secret"));
+
+        translated.zeroize();
+        assert!(translated.tools.is_empty());
+    }
 
     #[test]
     fn runtime_random_token_uses_uuidv7_not_process_local_counter() {
