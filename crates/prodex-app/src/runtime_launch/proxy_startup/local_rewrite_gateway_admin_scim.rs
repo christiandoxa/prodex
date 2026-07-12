@@ -14,7 +14,9 @@ use super::local_rewrite_gateway_scim::{
     runtime_gateway_apply_scim_user_patch, runtime_gateway_generate_scim_user_id,
     runtime_gateway_scim_user_json,
 };
-use super::local_rewrite_gateway_store_types::RuntimeGatewayScimUser;
+use super::local_rewrite_gateway_store_types::{
+    RuntimeGatewayScimUser, RuntimeGatewayVirtualKeyStoreFile,
+};
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
 use super::*;
 use prodex_application::{
@@ -41,6 +43,18 @@ const RUNTIME_GATEWAY_SCIM_USER_ID_REQUIRED_MESSAGE: &str =
     "gateway SCIM user user_id is required for durable user storage";
 const RUNTIME_GATEWAY_SCIM_USER_ID_INVALID_MESSAGE: &str =
     "gateway SCIM user user_id must be a valid principal identifier";
+
+#[derive(Debug)]
+enum RuntimeGatewayScimUpdateMutationError {
+    Admin(RuntimeGatewayAdminError),
+    ScopeForbidden { user_id: String },
+}
+
+impl From<RuntimeGatewayAdminError> for RuntimeGatewayScimUpdateMutationError {
+    fn from(err: RuntimeGatewayAdminError) -> Self {
+        Self::Admin(err)
+    }
+}
 
 fn runtime_gateway_admin_scim_user_generation_failed_error() -> RuntimeGatewayAdminError {
     RuntimeGatewayAdminError::new(
@@ -219,18 +233,11 @@ pub(super) fn runtime_gateway_admin_scim_update_user_response(
         );
     };
     if !admin_auth.can_access_scim_user(&current_user) {
-        runtime_gateway_audit_admin_authorization_denied_event(
+        return runtime_gateway_admin_scim_scope_forbidden_response(
             shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            "scim_user",
+            admin_auth,
             "update_scim_user",
             &current_user.id,
-        );
-        return build_runtime_proxy_json_error_response(
-            403,
-            "gateway_admin_key_scope_forbidden",
-            "gateway admin token is not allowed to access this tenant",
         );
     }
     let mut planned_user = current_user.clone();
@@ -238,18 +245,11 @@ pub(super) fn runtime_gateway_admin_scim_update_user_response(
         return err.into_response();
     }
     if !admin_auth.can_access_scim_user(&planned_user) {
-        runtime_gateway_audit_admin_authorization_denied_event(
+        return runtime_gateway_admin_scim_scope_forbidden_response(
             shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            "scim_user",
+            admin_auth,
             "update_scim_user",
             &planned_user.id,
-        );
-        return build_runtime_proxy_json_error_response(
-            403,
-            "gateway_admin_key_scope_forbidden",
-            "gateway admin token is not allowed to access this tenant",
         );
     }
     if let Some(response) = runtime_gateway_admin_scim_user_lifecycle_response(
@@ -262,30 +262,23 @@ pub(super) fn runtime_gateway_admin_scim_update_user_response(
     }
     let mut updated = None;
     let update_result = runtime_gateway_mutate_admin_key_store(shared, |store| {
-        let Some(index) = store.scim_users.iter().position(|user| user.id == id) else {
-            return Err(RuntimeGatewayAdminError::new(
-                404,
-                "gateway_scim_user_not_found",
-                "gateway SCIM user was not found",
-            ));
-        };
-        let previous_name = store.scim_users[index].user_name.clone();
-        runtime_gateway_apply_scim_user_patch(&mut store.scim_users[index], &body, partial)?;
-        let next_name = store.scim_users[index].user_name.clone();
-        if !previous_name.eq_ignore_ascii_case(&next_name)
-            && store.scim_users.iter().enumerate().any(|(other, user)| {
-                other != index && user.user_name.eq_ignore_ascii_case(&next_name)
-            })
-        {
-            return Err(RuntimeGatewayAdminError::new(
-                409,
-                "gateway_scim_user_exists",
-                "gateway SCIM userName already exists",
-            ));
+        match runtime_gateway_apply_authorized_scim_user_update(
+            store, id, &body, partial, admin_auth,
+        ) {
+            Ok(user) => {
+                updated = Some(user);
+                Ok(())
+            }
+            Err(RuntimeGatewayScimUpdateMutationError::ScopeForbidden { user_id }) => {
+                Err(runtime_gateway_admin_scim_scope_forbidden_error(
+                    shared,
+                    admin_auth,
+                    "update_scim_user",
+                    &user_id,
+                ))
+            }
+            Err(RuntimeGatewayScimUpdateMutationError::Admin(err)) => Err(err),
         }
-        store.scim_users[index].updated_at_epoch = runtime_gateway_unix_epoch_seconds();
-        updated = Some(store.scim_users[index].clone());
-        Ok(())
     });
     match update_result {
         Ok(()) => {
@@ -312,6 +305,57 @@ pub(super) fn runtime_gateway_admin_scim_update_user_response(
     }
 }
 
+fn runtime_gateway_apply_authorized_scim_user_update(
+    store: &mut RuntimeGatewayVirtualKeyStoreFile,
+    id: &str,
+    body: &serde_json::Value,
+    partial: bool,
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> Result<RuntimeGatewayScimUser, RuntimeGatewayScimUpdateMutationError> {
+    let Some(index) = store.scim_users.iter().position(|user| user.id == id) else {
+        return Err(RuntimeGatewayScimUpdateMutationError::Admin(
+            RuntimeGatewayAdminError::new(
+                404,
+                "gateway_scim_user_not_found",
+                "gateway SCIM user was not found",
+            ),
+        ));
+    };
+    let current_user = &store.scim_users[index];
+    if !admin_auth.can_access_scim_user(current_user) {
+        return Err(RuntimeGatewayScimUpdateMutationError::ScopeForbidden {
+            user_id: current_user.id.clone(),
+        });
+    }
+    let previous_name = current_user.user_name.clone();
+    let mut planned_user = current_user.clone();
+    runtime_gateway_apply_scim_user_patch(&mut planned_user, body, partial)?;
+    if !admin_auth.can_access_scim_user(&planned_user) {
+        return Err(RuntimeGatewayScimUpdateMutationError::ScopeForbidden {
+            user_id: planned_user.id.clone(),
+        });
+    }
+    let next_name = planned_user.user_name.clone();
+    if !previous_name.eq_ignore_ascii_case(&next_name)
+        && store
+            .scim_users
+            .iter()
+            .enumerate()
+            .any(|(other, user)| other != index && user.user_name.eq_ignore_ascii_case(&next_name))
+    {
+        return Err(RuntimeGatewayScimUpdateMutationError::Admin(
+            RuntimeGatewayAdminError::new(
+                409,
+                "gateway_scim_user_exists",
+                "gateway SCIM userName already exists",
+            ),
+        ));
+    }
+    planned_user.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
+    store.scim_users[index] = planned_user.clone();
+    Ok(planned_user)
+}
+
 pub(super) fn runtime_gateway_admin_scim_delete_user_response(
     id: &str,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -329,18 +373,11 @@ pub(super) fn runtime_gateway_admin_scim_delete_user_response(
         );
     };
     if !admin_auth.can_access_scim_user(&existing_user) {
-        runtime_gateway_audit_admin_authorization_denied_event(
+        return runtime_gateway_admin_scim_scope_forbidden_response(
             shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            "scim_user",
+            admin_auth,
             "delete_scim_user",
             &existing_user.id,
-        );
-        return build_runtime_proxy_json_error_response(
-            403,
-            "gateway_admin_key_scope_forbidden",
-            "gateway admin token is not allowed to access this tenant",
         );
     }
     if let Some(response) = runtime_gateway_admin_scim_user_lifecycle_response(
@@ -369,18 +406,11 @@ pub(super) fn runtime_gateway_admin_scim_delete_user_response(
             .scim_users
             .retain(|user| user.id != id || deleted.is_none());
         if let Some(user_id) = forbidden.as_deref() {
-            runtime_gateway_audit_admin_authorization_denied_event(
+            return Err(runtime_gateway_admin_scim_scope_forbidden_error(
                 shared,
-                &admin_auth.name,
-                admin_auth.role.as_str(),
-                "scim_user",
+                admin_auth,
                 "delete_scim_user",
                 user_id,
-            );
-            return Err(RuntimeGatewayAdminError::new(
-                403,
-                "gateway_admin_key_scope_forbidden",
-                "gateway admin token is not allowed to access this tenant",
             ));
         }
         if store.scim_users.len() == before {
@@ -420,6 +450,16 @@ fn runtime_gateway_admin_scim_scope_forbidden_response(
     action: &'static str,
     user_id: &str,
 ) -> tiny_http::ResponseBox {
+    runtime_gateway_admin_scim_scope_forbidden_error(shared, admin_auth, action, user_id)
+        .into_response()
+}
+
+fn runtime_gateway_admin_scim_scope_forbidden_error(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    action: &'static str,
+    user_id: &str,
+) -> RuntimeGatewayAdminError {
     runtime_gateway_audit_admin_authorization_denied_event(
         shared,
         &admin_auth.name,
@@ -428,10 +468,14 @@ fn runtime_gateway_admin_scim_scope_forbidden_response(
         action,
         user_id,
     );
-    build_runtime_proxy_json_error_response(
+    runtime_gateway_admin_scim_scope_forbidden_admin_error()
+}
+
+fn runtime_gateway_admin_scim_scope_forbidden_admin_error() -> RuntimeGatewayAdminError {
+    RuntimeGatewayAdminError::new(
         403,
         "gateway_admin_key_scope_forbidden",
-        "gateway admin token is not allowed to access this virtual key",
+        "gateway admin token is not allowed to access this tenant",
     )
 }
 
@@ -658,6 +702,47 @@ mod tests {
             budget_id: None,
             allowed_key_prefixes: Vec::new(),
         }
+    }
+
+    #[test]
+    fn scim_in_transaction_update_rejects_foreign_authoritative_preimage_without_write() {
+        let tenant_a = TenantId::new().to_string();
+        let tenant_b = TenantId::new().to_string();
+        let mut admin = admin_auth_named("tenant-a-admin");
+        admin.tenant_id = Some(tenant_a.clone());
+        let mut foreign_user = scim_user_with_tenant(Some(tenant_b));
+        foreign_user.display_name = Some("Tenant B User".to_string());
+        let mut store = RuntimeGatewayVirtualKeyStoreFile {
+            scim_users: vec![foreign_user],
+            ..RuntimeGatewayVirtualKeyStoreFile::default()
+        };
+        let before = serde_json::to_value(&store).expect("SCIM store should serialize");
+
+        let err = runtime_gateway_apply_authorized_scim_user_update(
+            &mut store,
+            "user_1",
+            &serde_json::json!({
+                "tenant_id": tenant_a,
+                "displayName": "Unauthorized Tenant Takeover"
+            }),
+            true,
+            &admin,
+        )
+        .expect_err("foreign authoritative pre-image must be rejected");
+
+        assert!(matches!(
+            err,
+            RuntimeGatewayScimUpdateMutationError::ScopeForbidden { ref user_id }
+                if user_id == "user_1"
+        ));
+        assert_eq!(
+            serde_json::to_value(&store).expect("SCIM store should serialize"),
+            before,
+            "scope denial must not mutate the authoritative store"
+        );
+        let stable = runtime_gateway_admin_scim_scope_forbidden_admin_error();
+        assert_eq!(stable.test_status(), 403);
+        assert_eq!(stable.test_code(), "gateway_admin_key_scope_forbidden");
     }
 
     #[test]
