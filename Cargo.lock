@@ -2513,7 +2513,6 @@ dependencies = [
  "prodex-storage-postgres",
  "prodex-storage-redis",
  "prodex-storage-sqlite",
- "sha2",
 ]
 
 [[package]]

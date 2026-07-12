@@ -22,8 +22,9 @@ use prodex_application::{
     ApplicationControlPlaneAuditErrorStatus,
     ApplicationControlPlaneAuditPersistenceSpanErrorStatus,
     ApplicationControlPlaneAuditPersistenceSpanRequest, ApplicationControlPlaneAuditRequest,
-    ApplicationControlPlaneAuditStoragePlan, ApplicationControlPlaneHttpRouteErrorStatus,
-    ApplicationControlPlaneHttpRoutePlan, ApplicationControlPlaneIdempotencyCompletedStoragePlan,
+    ApplicationControlPlaneAuditStoragePlan, ApplicationControlPlaneHttpRouteError,
+    ApplicationControlPlaneHttpRouteErrorStatus, ApplicationControlPlaneHttpRoutePlan,
+    ApplicationControlPlaneIdempotencyCompletedStoragePlan,
     ApplicationControlPlaneIdempotencyError, ApplicationControlPlaneIdempotencyErrorStatus,
     ApplicationControlPlaneIdempotencyLookupStoragePlan,
     ApplicationControlPlaneIdempotencyPendingStoragePlan,
@@ -2591,10 +2592,14 @@ fn application_virtual_key_rotate_accepts_legacy_patch_route_as_exact_action() {
     )
     .unwrap();
     let audit = plan_application_control_plane_audit_from_http(action.clone(), &http).unwrap();
-    let precondition = plan_application_control_plane_precondition_from_http(action, &http).unwrap();
+    let precondition =
+        plan_application_control_plane_precondition_from_http(action, &http).unwrap();
 
     assert!(idempotency.operation.is_some());
-    assert_eq!(audit.action.operation, ControlPlaneOperation::VirtualKeyRotateSecret);
+    assert_eq!(
+        audit.action.operation,
+        ControlPlaneOperation::VirtualKeyRotateSecret
+    );
     assert!(precondition.entity_tag.is_some());
 }
 
@@ -2629,6 +2634,41 @@ fn application_control_plane_http_route_maps_to_canonical_operation() {
     );
     assert!(scim_delete.http.requires_idempotency);
     assert!(scim_delete.http.requires_audit);
+
+    let scim_replace = plan_application_control_plane_http_route(&GatewayHttpRequestMeta {
+        method: GatewayHttpMethod::Put,
+        path: "/v1/scim/v2/Users/user-1".to_string(),
+        body_len: 128,
+        headers: vec![traceparent()],
+    })
+    .unwrap();
+    assert_eq!(
+        scim_replace.operation,
+        ControlPlaneOperation::ScimUserUpdate
+    );
+    assert_eq!(
+        scim_replace.http.operation,
+        GatewayControlPlaneOperation::ScimUserUpdate
+    );
+    assert!(scim_replace.http.requires_idempotency);
+    assert!(scim_replace.http.requires_audit);
+
+    let scim_post = plan_application_control_plane_http_route(&GatewayHttpRequestMeta {
+        method: GatewayHttpMethod::Post,
+        path: "/v1/scim/v2/Users/user-1".to_string(),
+        body_len: 0,
+        headers: vec![traceparent()],
+    })
+    .unwrap_err();
+    assert_eq!(
+        scim_post,
+        ApplicationControlPlaneHttpRouteError::Route(
+            prodex_gateway_http::GatewayControlPlaneRouteError::MethodNotAllowed {
+                operation: GatewayControlPlaneOperation::ScimUserUpdate,
+                method: GatewayHttpMethod::Post,
+            }
+        )
+    );
 }
 
 #[test]

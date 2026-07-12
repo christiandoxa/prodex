@@ -301,6 +301,7 @@ fn is_known_control_plane_route(path: &str) -> bool {
     [
         GatewayHttpMethod::Get,
         GatewayHttpMethod::Post,
+        GatewayHttpMethod::Put,
         GatewayHttpMethod::Patch,
         GatewayHttpMethod::Delete,
         GatewayHttpMethod::Options,
@@ -453,9 +454,11 @@ fn control_plane_operation_allows_method(
         | GatewayControlPlaneOperation::ConfigurationPublish
         | GatewayControlPlaneOperation::AuditExport => method == GatewayHttpMethod::Post,
         GatewayControlPlaneOperation::TenantUpdate
-        | GatewayControlPlaneOperation::ScimUserUpdate
         | GatewayControlPlaneOperation::VirtualKeyUpdate
         | GatewayControlPlaneOperation::BudgetUpdate => method == GatewayHttpMethod::Patch,
+        GatewayControlPlaneOperation::ScimUserUpdate => {
+            matches!(method, GatewayHttpMethod::Patch | GatewayHttpMethod::Put)
+        }
         GatewayControlPlaneOperation::ScimUserDelete
         | GatewayControlPlaneOperation::RoleBindingRevoke
         | GatewayControlPlaneOperation::VirtualKeyDelete
@@ -501,6 +504,7 @@ pub(super) fn validate_method(
             method,
             GatewayHttpMethod::Get
                 | GatewayHttpMethod::Post
+                | GatewayHttpMethod::Put
                 | GatewayHttpMethod::Patch
                 | GatewayHttpMethod::Delete
                 | GatewayHttpMethod::Options

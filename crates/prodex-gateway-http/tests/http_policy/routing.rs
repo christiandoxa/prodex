@@ -500,6 +500,20 @@ fn control_plane_route_planner_maps_scim_paths_and_methods() {
     assert!(update.requires_idempotency);
     assert!(update.requires_audit);
 
+    let replace = plan_control_plane_route(&GatewayHttpRequestMeta {
+        method: GatewayHttpMethod::Put,
+        path: "/v1/scim/v2/Users/user-1".to_string(),
+        body_len: 128,
+        headers: vec![traceparent()],
+    })
+    .unwrap();
+    assert_eq!(
+        replace.operation,
+        GatewayControlPlaneOperation::ScimUserUpdate
+    );
+    assert!(replace.requires_idempotency);
+    assert!(replace.requires_audit);
+
     let delete = plan_control_plane_route(&GatewayHttpRequestMeta {
         method: GatewayHttpMethod::Delete,
         path: "/scim/v2/Users/user-1".to_string(),
@@ -525,6 +539,18 @@ fn control_plane_route_planner_rejects_non_admin_or_wrong_method_paths() {
             headers: vec![traceparent()],
         }),
         Err(GatewayControlPlaneRouteError::NotControlPlaneRoute)
+    );
+    assert_eq!(
+        plan_control_plane_route(&GatewayHttpRequestMeta {
+            method: GatewayHttpMethod::Post,
+            path: "/v1/scim/v2/Users/user-1".to_string(),
+            body_len: 128,
+            headers: vec![traceparent()],
+        }),
+        Err(GatewayControlPlaneRouteError::MethodNotAllowed {
+            operation: GatewayControlPlaneOperation::ScimUserUpdate,
+            method: GatewayHttpMethod::Post,
+        })
     );
     assert_eq!(
         plan_control_plane_route(&GatewayHttpRequestMeta {
