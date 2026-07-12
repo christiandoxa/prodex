@@ -189,6 +189,37 @@ fn admin_control_plane_action_prefers_typed_tenant_scope() {
 }
 
 #[test]
+fn admin_control_plane_action_binds_mutation_resource_and_time() {
+    let admin = admin_auth_named("admin", None);
+    for (method, path, expected_resource_id) in [
+        (
+            GatewayHttpMethod::Patch,
+            "/v1/prodex/gateway/keys/example-key",
+            "example-key",
+        ),
+        (
+            GatewayHttpMethod::Delete,
+            "/v1/prodex/gateway/scim/v2/Users/user-1",
+            "user-1",
+        ),
+    ] {
+        let action = runtime_gateway_admin_control_plane_action(
+            &GatewayHttpRequestMeta {
+                method,
+                path: path.to_string(),
+                body_len: 0,
+                headers: Vec::new(),
+            },
+            &admin,
+        )
+        .expect("admin mutation should map to an application action");
+
+        assert_eq!(action.resource.id.as_deref(), Some(expected_resource_id));
+        assert!(action.occurred_at_unix_ms > 0);
+    }
+}
+
+#[test]
 fn admin_control_plane_action_does_not_synthesize_random_ids() {
     let source = include_str!("local_rewrite_application_boundary.rs");
     for fallback in [
