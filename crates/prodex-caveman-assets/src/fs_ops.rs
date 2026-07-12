@@ -97,7 +97,7 @@ pub(crate) fn remove_existing_dir_path(path: &Path) -> Result<()> {
     fs::remove_dir_all(path).with_context(|| format!("failed to remove {}", path.display()))
 }
 
-fn write_file_with_mode(path: &Path, contents: &[u8], mode: u32) -> Result<()> {
+fn write_file_with_mode(path: &Path, contents: &[u8], _mode: u32) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -112,7 +112,7 @@ fn write_file_with_mode(path: &Path, contents: &[u8], mode: u32) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(mode);
+        options.mode(_mode);
     }
 
     let mut file = options

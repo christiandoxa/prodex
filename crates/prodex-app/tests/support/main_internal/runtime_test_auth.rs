@@ -380,16 +380,14 @@ impl Drop for AuthRefreshServer {
 }
 
 pub(super) fn write_api_key_auth_json(path: &Path) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("failed to create auth parent dir");
-    }
-    fs::write(
-        path,
-        serde_json::json!({
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(
+            &secret_store::SecretLocation::file(path),
+            serde_json::json!({
             "auth_mode": "api_key",
             "OPENAI_API_KEY": "test-api-key",
         })
-        .to_string(),
-    )
-    .expect("failed to write api-key auth.json");
+            .to_string(),
+        )
+        .expect("failed to write api-key auth.json");
 }

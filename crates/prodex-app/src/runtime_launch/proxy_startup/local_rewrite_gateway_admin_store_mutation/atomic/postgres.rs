@@ -107,20 +107,23 @@ fn runtime_gateway_postgres_write_metadata(
     let tenant = write.operation.tenant_id.as_uuid();
     let started_at = i64::try_from(write.started_at_unix_ms)?;
     let completed_at = i64::try_from(write.completed_at_unix_ms)?;
-    let idempotency_params: &[&(dyn ::postgres::types::ToSql + Sync)] = &[
-        &tenant,
-        &write.operation.key.as_str(),
-        &write.operation.request_fingerprint,
-        &started_at,
-        &completed_at,
-    ];
     tx.execute(
         "INSERT INTO prodex_idempotency_records (tenant_id, idempotency_key, request_fingerprint, entry_status, started_at_unix_ms) VALUES ($1, $2, $3, 'pending', $4)",
-        &idempotency_params[..4],
+        &[
+            &tenant,
+            &write.operation.key.as_str(),
+            &write.operation.request_fingerprint,
+            &started_at,
+        ],
     )?;
     let updated = tx.execute(
-        "UPDATE prodex_idempotency_records SET entry_status = 'completed', completed_at_unix_ms = $5, response_body = NULL WHERE tenant_id = $1 AND idempotency_key = $2 AND request_fingerprint = $3 AND entry_status = 'pending'",
-        idempotency_params,
+        "UPDATE prodex_idempotency_records SET entry_status = 'completed', completed_at_unix_ms = $4, response_body = NULL WHERE tenant_id = $1 AND idempotency_key = $2 AND request_fingerprint = $3 AND entry_status = 'pending'",
+        &[
+            &tenant,
+            &write.operation.key.as_str(),
+            &write.operation.request_fingerprint,
+            &completed_at,
+        ],
     )?;
     if updated != 1 {
         anyhow::bail!("admin idempotency completion marker was not applied");

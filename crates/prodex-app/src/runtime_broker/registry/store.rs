@@ -110,6 +110,17 @@ fn read_runtime_broker_registry_bytes(path: &Path) -> Option<Vec<u8>> {
     (bytes.len() as u64 <= RUNTIME_BROKER_REGISTRY_MAX_BYTES).then_some(bytes)
 }
 
+#[cfg(unix)]
+fn runtime_broker_same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    before.dev() == after.dev() && before.ino() == after.ino()
+}
+
+#[cfg(not(unix))]
+fn runtime_broker_same_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
+    true
+}
+
 pub(crate) fn save_runtime_broker_registry(
     paths: &AppPaths,
     broker_key: &str,
@@ -264,32 +275,6 @@ fn remove_runtime_broker_file_checked(path: &Path) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err).with_context(|| format!("failed to remove {}", path.display())),
     }
-}
-
-#[cfg(unix)]
-fn runtime_broker_same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(windows)]
-fn runtime_broker_same_file_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    matches!(
-        (
-            before.volume_serial_number(),
-            before.file_index(),
-            after.volume_serial_number(),
-            after.file_index(),
-        ),
-        (Some(before_volume), Some(before_index), Some(after_volume), Some(after_index))
-            if before_volume == after_volume && before_index == after_index
-    )
-}
-
-#[cfg(not(any(unix, windows)))]
-fn runtime_broker_same_file_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 #[cfg(test)]
