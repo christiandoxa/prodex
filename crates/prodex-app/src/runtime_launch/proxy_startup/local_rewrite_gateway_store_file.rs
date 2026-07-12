@@ -24,8 +24,12 @@ pub(super) fn runtime_gateway_virtual_key_store_file_load(
     path: &Path,
 ) -> Result<RuntimeGatewayVirtualKeyStoreFile, RuntimeGatewayStoreFileLoadError> {
     match runtime_gateway_read_regular_file(path) {
-        Ok(Some(bytes)) => serde_json::from_slice::<RuntimeGatewayVirtualKeyStoreFile>(&bytes)
-            .map_err(|err| RuntimeGatewayStoreFileLoadError::Invalid(err.to_string())),
+        Ok(Some(bytes)) => {
+            let mut store = serde_json::from_slice::<RuntimeGatewayVirtualKeyStoreFile>(&bytes)
+                .map_err(|err| RuntimeGatewayStoreFileLoadError::Invalid(err.to_string()))?;
+            store.bound_admin_history();
+            Ok(store)
+        }
         Ok(None) => Ok(RuntimeGatewayVirtualKeyStoreFile::default()),
         Err(err) => Err(RuntimeGatewayStoreFileLoadError::Io(err.to_string())),
     }
@@ -113,6 +117,10 @@ pub(super) fn runtime_gateway_write_file_atomic(
     file.sync_all()?;
     drop(file);
     std::fs::rename(tmp_path, path)?;
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        File::open(parent)?.sync_all()?;
+    }
     Ok(())
 }
 
@@ -353,6 +361,7 @@ mod tests {
                 updated_at_epoch: 2,
             }],
             scim_users: Vec::new(),
+            ..RuntimeGatewayVirtualKeyStoreFile::default()
         };
 
         runtime_gateway_virtual_key_store_file_save(&path, &store).unwrap();

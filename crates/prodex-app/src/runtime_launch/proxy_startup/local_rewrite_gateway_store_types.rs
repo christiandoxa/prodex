@@ -76,6 +76,10 @@ pub(super) struct RuntimeGatewayVirtualKeyStoreFile {
     pub(super) keys: Vec<RuntimeGatewayStoredVirtualKey>,
     #[serde(default)]
     pub(super) scim_users: Vec<RuntimeGatewayScimUser>,
+    #[serde(default)]
+    pub(super) admin_idempotency: Vec<RuntimeGatewayAdminIdempotencyRecord>,
+    #[serde(default)]
+    pub(super) admin_audit: Vec<prodex_domain::AuditEnvelope>,
 }
 
 impl fmt::Debug for RuntimeGatewayVirtualKeyStoreFile {
@@ -84,6 +88,11 @@ impl fmt::Debug for RuntimeGatewayVirtualKeyStoreFile {
             .field("version", &self.version)
             .field("keys", &redacted_len(self.keys.len()))
             .field("scim_users", &redacted_len(self.scim_users.len()))
+            .field(
+                "admin_idempotency",
+                &redacted_len(self.admin_idempotency.len()),
+            )
+            .field("admin_audit", &redacted_len(self.admin_audit.len()))
             .finish()
     }
 }
@@ -105,6 +114,33 @@ impl RuntimeGatewayVirtualKeyStoreFile {
 
     pub(super) fn sort_keys(&mut self) {
         self.keys.sort_by(|left, right| left.name.cmp(&right.name));
+    }
+
+    pub(super) fn bound_admin_history(&mut self) {
+        const MAX_RECORDS: usize = 4_096;
+        if self.admin_idempotency.len() > MAX_RECORDS {
+            self.admin_idempotency
+                .drain(..self.admin_idempotency.len() - MAX_RECORDS);
+        }
+        if self.admin_audit.len() > MAX_RECORDS {
+            self.admin_audit
+                .drain(..self.admin_audit.len() - MAX_RECORDS);
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct RuntimeGatewayAdminIdempotencyRecord {
+    pub(super) entry: prodex_domain::IdempotencyEntry<()>,
+    pub(super) completed_at_unix_ms: u64,
+}
+
+impl fmt::Debug for RuntimeGatewayAdminIdempotencyRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGatewayAdminIdempotencyRecord")
+            .field("entry", &"<redacted>")
+            .field("completed_at_unix_ms", &"<redacted>")
+            .finish()
     }
 }
 
@@ -443,7 +479,7 @@ fn runtime_gateway_exact_optional_stored_scope(value: &Option<String>) -> Option
 }
 
 pub(super) fn runtime_gateway_virtual_key_store_version() -> u32 {
-    1
+    2
 }
 
 fn runtime_gateway_scim_user_active_default() -> bool {
@@ -762,6 +798,7 @@ mod tests {
             version: runtime_gateway_virtual_key_store_version(),
             keys: vec![stored.clone()],
             scim_users: vec![scim_user.clone()],
+            ..RuntimeGatewayVirtualKeyStoreFile::default()
         };
         let rendered = format!("{stored:?}\n{scim_user:?}\n{entry:?}\n{store:?}");
 
