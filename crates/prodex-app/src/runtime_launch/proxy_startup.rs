@@ -35,7 +35,6 @@ mod local_rewrite_gateway_admin_store_mutation;
 mod local_rewrite_gateway_backend_connection;
 mod local_rewrite_gateway_billing_csv;
 mod local_rewrite_gateway_billing_summary;
-mod local_rewrite_gateway_budget;
 mod local_rewrite_gateway_config;
 mod local_rewrite_gateway_credentials;
 mod local_rewrite_gateway_dashboard;

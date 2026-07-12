@@ -7,15 +7,8 @@ use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationAdmission, runtime_gateway_application_data_plane_admission,
 };
 use super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
-use super::local_rewrite_gateway_budget::{
-    runtime_gateway_budget_group_rejection, runtime_gateway_budget_storage_key,
-};
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
-use super::local_rewrite_gateway_distributed_rate_limit::{
-    runtime_gateway_distributed_rate_limit_admission,
-    runtime_gateway_distributed_rate_limit_required, runtime_gateway_durable_budget_enforced,
-    runtime_gateway_local_admission_usage,
-};
+use super::local_rewrite_gateway_distributed_rate_limit::runtime_gateway_distributed_rate_limit_admission;
 use super::local_rewrite_gateway_key_store_backend::{
     runtime_gateway_postgres_load_key_store, runtime_gateway_redis_load_key_store,
     runtime_gateway_sqlite_load_key_store,
@@ -33,14 +26,21 @@ use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
 use super::provider_bridge::runtime_provider_gateway_cost_for_request;
 use super::*;
 use anyhow::Result;
+use prodex_application::{
+    ApplicationVirtualKeyAdmissionError, ApplicationVirtualKeyAdmissionPlan,
+    plan_application_virtual_key_admission,
+};
 use prodex_domain::{
     BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey, RequestId, ReservationRecord,
     ReservationRequest, TenantId, UsageAmount,
 };
+use prodex_gateway_core::{
+    GatewayVirtualKeyAdmissionRequest, GatewayVirtualKeyReservationContext,
+    GatewayVirtualKeyUsageEntry, apply_gateway_virtual_key_usage_update,
+};
 use prodex_provider_core::{calculate_cost_microusd, estimate_request_input_tokens};
 use rusqlite::OptionalExtension;
 use std::path::Path;
-use std::str::FromStr;
 
 const RUNTIME_GATEWAY_RESERVATION_TTL_MS: u64 = 60_000;
 
@@ -225,6 +225,78 @@ fn runtime_gateway_prepare_virtual_key_store(
     store
 }
 
+struct RuntimeGatewayVirtualKeyPlanInput<'a> {
+    shared: &'a RuntimeLocalRewriteProxyShared,
+    key: &'a runtime_proxy_crate::RuntimeGatewayVirtualKey,
+    active_keys: &'a [runtime_proxy_crate::RuntimeGatewayVirtualKey],
+    usage:
+        &'a std::collections::BTreeMap<String, runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage>,
+    entry: Option<&'a RuntimeGatewayVirtualKeyEntry>,
+    tenant_id: TenantId,
+    call_id: CallId,
+    model: Option<String>,
+    input_tokens: u64,
+    reserved_tokens: u64,
+    estimated_cost_microusd: Option<u64>,
+    minute_epoch: u64,
+}
+
+fn runtime_gateway_application_virtual_key_admission(
+    input: RuntimeGatewayVirtualKeyPlanInput<'_>,
+) -> Result<
+    ApplicationVirtualKeyAdmissionPlan,
+    runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
+> {
+    let durable_store = match &input.shared.gateway_state_store {
+        RuntimeGatewayStateStore::Sqlite { .. } => Some(prodex_storage::DurableStoreKind::Sqlite),
+        RuntimeGatewayStateStore::Postgres { .. } => {
+            Some(prodex_storage::DurableStoreKind::Postgres)
+        }
+        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => None,
+    };
+    let grouped_usage = input
+        .active_keys
+        .iter()
+        .map(|key| GatewayVirtualKeyUsageEntry {
+            policy: runtime_proxy_crate::runtime_gateway_virtual_key_policy(key),
+            usage: input.usage.get(&key.name).cloned().unwrap_or_default(),
+        })
+        .collect();
+    plan_application_virtual_key_admission(GatewayVirtualKeyAdmissionRequest {
+        policy: runtime_proxy_crate::runtime_gateway_virtual_key_policy(input.key),
+        usage: input
+            .usage
+            .get(&input.key.name)
+            .cloned()
+            .unwrap_or_default(),
+        grouped_usage,
+        model: input.model,
+        input_tokens: input.input_tokens,
+        reserved_tokens: input.reserved_tokens,
+        estimated_cost_microusd: input.estimated_cost_microusd,
+        minute_epoch: input.minute_epoch,
+        reservation: Some(GatewayVirtualKeyReservationContext {
+            tenant_id: input.tenant_id,
+            virtual_key_id: input
+                .entry
+                .and_then(runtime_gateway_virtual_key_effective_id),
+            call_id: input.call_id,
+            reservation_id: prodex_domain::ReservationId::new(),
+            durable_store,
+            created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
+            ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
+        }),
+        distributed_rate_limit: input.shared.gateway_redis_rate_limit_executor.is_some(),
+        now_unix_ms: runtime_gateway_unix_epoch_millis(),
+    })
+    .map_err(|error| match error {
+        ApplicationVirtualKeyAdmissionError::Gateway(error) => error.into(),
+        ApplicationVirtualKeyAdmissionError::DistributedRateLimit(_) => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+        }
+    })
+}
+
 pub(super) fn runtime_gateway_virtual_key_admission(
     request_id: u64,
     captured: &RuntimeProxyRequest,
@@ -277,7 +349,9 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     {
         return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable);
     }
-    let model = runtime_proxy_crate::runtime_gateway_request_model(&captured.body)
+    let request_model = runtime_proxy_crate::runtime_gateway_request_model(&captured.body);
+    let model = request_model
+        .clone()
         .unwrap_or_else(|| "unknown".to_string());
     let input_tokens = estimate_request_input_tokens(&captured.body);
     let reserved_tokens = runtime_proxy_crate::runtime_gateway_estimated_tokens(&captured.body);
@@ -319,8 +393,6 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             );
         }
     };
-    let durable_budget_enforced =
-        runtime_gateway_durable_budget_enforced(shared, key, entry.as_ref());
     let Ok(usage) = shared.gateway_usage.usage.lock() else {
         runtime_proxy_log(
             &shared.runtime_shared,
@@ -335,40 +407,31 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     let usage_snapshot = usage
         .as_deref()
         .ok_or(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
-    if !durable_budget_enforced
-        && let Some(rejection) = runtime_gateway_budget_group_rejection(
-            key,
-            &active_keys,
-            usage_snapshot,
-            estimated_cost_microusd,
-        )
-    {
-        return Err(rejection);
-    }
-    let key_usage = runtime_gateway_local_admission_usage(
-        key,
-        usage_snapshot.get(&key.name),
-        durable_budget_enforced,
-    );
-    let admission = runtime_proxy_crate::runtime_gateway_virtual_key_admission(
-        key,
-        Some(&key_usage),
-        &captured.body,
-        estimated_cost_microusd,
-        minute_epoch,
-    )?;
+    let tenant_id = authorized_tenant
+        .ok_or(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
     let typed_request_id = authorized.request().request_id();
     let call_id = CallId::new();
-    let command = runtime_gateway_reservation_command(
-        shared,
-        key,
-        entry.as_ref(),
-        &admission,
-        authorized_tenant.ok_or(
+    let virtual_key_plan =
+        runtime_gateway_application_virtual_key_admission(RuntimeGatewayVirtualKeyPlanInput {
+            shared,
+            key,
+            active_keys: &active_keys,
+            usage: usage_snapshot,
+            entry: entry.as_ref(),
+            tenant_id,
+            call_id,
+            model: request_model,
+            input_tokens,
+            reserved_tokens,
+            estimated_cost_microusd,
+            minute_epoch,
+        })?;
+    let admission = virtual_key_plan.gateway.admission.clone();
+    let usage_update = virtual_key_plan.gateway.usage_update;
+    let command =
+        virtual_key_plan.gateway.reservation.clone().ok_or(
             runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
-        )?,
-        call_id,
-    );
+        )?;
     let application = runtime_gateway_application_data_plane_admission(
         authorized,
         captured,
@@ -376,18 +439,12 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         command.clone(),
     )
     .map_err(|_| runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
-    if runtime_gateway_distributed_rate_limit_required(shared, key) {
+    if let Some(rate_limit) = virtual_key_plan.distributed_rate_limit.as_ref() {
         drop(usage.take());
-        runtime_gateway_distributed_rate_limit_admission(
-            shared,
-            key,
-            entry.as_ref(),
-            &admission,
-            minute_epoch,
-        )?;
+        runtime_gateway_distributed_rate_limit_admission(shared, rate_limit)?;
     }
-    let durable_reservation = if let Some(entry) = entry.as_ref() {
-        match runtime_gateway_try_durable_reservation(shared, key, entry, &command, &application) {
+    let durable_reservation = if virtual_key_plan.gateway.durable_reservation {
+        match runtime_gateway_try_durable_reservation(shared, &command, &application) {
             Ok(state) => state,
             Err(error) => {
                 runtime_proxy_log(
@@ -432,11 +489,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable);
     };
     let usage_entry = usage_map.entry(admission.key_name.clone()).or_default();
-    runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(
-        usage_entry,
-        &admission,
-        minute_epoch,
-    );
+    apply_gateway_virtual_key_usage_update(usage_entry, usage_update);
     drop(usage);
     if let Ok(mut request_ids) = shared.gateway_usage.request_ids.lock() {
         request_ids.insert(request_id);
@@ -568,77 +621,13 @@ fn runtime_gateway_application_admission_without_virtual_key(
     })
 }
 
-fn runtime_gateway_reservation_command(
-    shared: &RuntimeLocalRewriteProxyShared,
-    key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
-    entry: Option<&RuntimeGatewayVirtualKeyEntry>,
-    admission: &runtime_proxy_crate::RuntimeGatewayVirtualKeyAdmission,
-    tenant_id: TenantId,
-    call_id: CallId,
-) -> prodex_storage::AtomicReservationCommand {
-    let reservation_id = prodex_domain::ReservationId::new();
-    let storage_key = entry
-        .and_then(runtime_gateway_virtual_key_effective_id)
-        .map(|virtual_key_id| runtime_gateway_budget_storage_key(tenant_id, virtual_key_id, key))
-        .unwrap_or_else(|| prodex_storage::TenantStorageKey::tenant(tenant_id));
-    let durable = matches!(
-        shared.gateway_state_store,
-        RuntimeGatewayStateStore::Sqlite { .. } | RuntimeGatewayStateStore::Postgres { .. }
-    ) && entry
-        .and_then(runtime_gateway_virtual_key_effective_id)
-        .is_some()
-        && key
-            .tenant_id
-            .as_deref()
-            .and_then(|value| value.parse::<TenantId>().ok())
-            .is_some();
-    let reserved_tokens = if durable {
-        admission.reserved_tokens
-    } else {
-        admission.reserved_tokens.max(1)
-    };
-    prodex_storage::AtomicReservationCommand {
-        storage_key,
-        idempotency_key: IdempotencyKey::from_call_reservation(call_id, reservation_id),
-        snapshot: BudgetSnapshot::default(),
-        limit: BudgetLimit::new(
-            i64::MAX as u64,
-            key.budget_microusd.unwrap_or(i64::MAX as u64),
-        )
-        .with_max_requests(key.request_budget.unwrap_or(i64::MAX as u64)),
-        request: ReservationRequest {
-            tenant_id,
-            call_id,
-            reservation_id,
-            estimate: UsageAmount::new(
-                reserved_tokens,
-                admission.estimated_cost_microusd.unwrap_or_default(),
-            ),
-        },
-        created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
-        ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
-    }
-}
-
 fn runtime_gateway_try_durable_reservation(
     shared: &RuntimeLocalRewriteProxyShared,
-    key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
-    entry: &RuntimeGatewayVirtualKeyEntry,
     command: &prodex_storage::AtomicReservationCommand,
     application: &RuntimeGatewayApplicationAdmission,
 ) -> Result<Option<RuntimeGatewayDurableReservationState>, RuntimeGatewayDurableReservationError> {
     let (RuntimeGatewayStateStore::Sqlite { .. } | RuntimeGatewayStateStore::Postgres { .. }) =
         &shared.gateway_state_store
-    else {
-        return Ok(None);
-    };
-    let Some(virtual_key_id) = runtime_gateway_virtual_key_effective_id(entry) else {
-        return Ok(None);
-    };
-    let Some(tenant_id) = key
-        .tenant_id
-        .as_deref()
-        .and_then(|tenant_id| TenantId::from_str(tenant_id).ok())
     else {
         return Ok(None);
     };
@@ -649,10 +638,6 @@ fn runtime_gateway_try_durable_reservation(
             return Ok(None);
         }
     };
-    let storage_key = runtime_gateway_budget_storage_key(tenant_id, virtual_key_id, key);
-    if command.storage_key != storage_key {
-        return Err(RuntimeGatewayDurableReservationError::Failed);
-    }
     let plan = prodex_application::plan_application_atomic_reservation(
         prodex_application::ApplicationAtomicReservationRequest {
             durable_store,
@@ -681,7 +666,7 @@ fn runtime_gateway_try_durable_reservation(
         return Err(RuntimeGatewayDurableReservationError::Failed);
     }
     Ok(Some(RuntimeGatewayDurableReservationState {
-        storage_key,
+        storage_key: command.storage_key,
         record,
     }))
 }

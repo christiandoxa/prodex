@@ -4,9 +4,8 @@ use super::{
     BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey, RUNTIME_GATEWAY_RESERVATION_TTL_MS,
     RequestId, ReservationRequest, RuntimeGatewayDurableReservationError, RuntimeGatewayStateStore,
     RuntimeGatewayVirtualKeyStoreFile, TenantId, UsageAmount, calculate_cost_microusd,
-    estimate_request_input_tokens, runtime_gateway_local_admission_usage,
-    runtime_gateway_sqlite_open, runtime_gateway_sqlite_reserve_usage,
-    runtime_gateway_virtual_key_store_load,
+    estimate_request_input_tokens, runtime_gateway_sqlite_open,
+    runtime_gateway_sqlite_reserve_usage, runtime_gateway_virtual_key_store_load,
 };
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_store_types::{
@@ -111,92 +110,6 @@ fn admission_cost_estimate_includes_reserved_output_tokens() {
     assert_eq!(reserved_tokens, 22);
     assert_eq!(reserved_output_tokens, 17);
     assert_eq!(estimated_cost, Some(39));
-}
-
-#[test]
-fn durable_budget_admission_ignores_stale_local_spend_and_requests() {
-    let key = runtime_proxy_crate::RuntimeGatewayVirtualKey {
-        name: "admin-managed-key".to_string(),
-        tenant_id: Some(TenantId::new().to_string()),
-        team_id: None,
-        project_id: None,
-        user_id: None,
-        budget_id: None,
-        token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("token"),
-        allowed_models: Vec::new(),
-        budget_microusd: Some(100),
-        request_budget: Some(10),
-        rpm_limit: Some(10),
-        tpm_limit: Some(1_000),
-    };
-    let usage = runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
-        minute_epoch: 10,
-        requests_this_minute: 1,
-        tokens_this_minute: 1,
-        requests_total: 1,
-        spend_microusd: 100,
-    };
-    let body = br#"{"model":"gpt-5.4","input":"hello"}"#;
-
-    assert!(matches!(
-        runtime_proxy_crate::runtime_gateway_virtual_key_admission(
-            &key,
-            Some(&usage),
-            body,
-            Some(1),
-            10,
-        ),
-        Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::BudgetExceeded)
-    ));
-
-    let local_usage = runtime_gateway_local_admission_usage(&key, Some(&usage), true);
-    let admitted = runtime_proxy_crate::runtime_gateway_virtual_key_admission(
-        &key,
-        Some(&local_usage),
-        body,
-        Some(1),
-        10,
-    )
-    .expect("durable-backed budget should not be blocked by stale local usage");
-
-    assert_eq!(admitted.key_name, "admin-managed-key");
-    assert_eq!(local_usage.requests_total, 0);
-    assert_eq!(local_usage.requests_this_minute, 1);
-    assert_eq!(local_usage.spend_microusd, 0);
-}
-
-#[test]
-fn durable_budget_admission_defers_request_budget_to_durable_store() {
-    let key = runtime_proxy_crate::RuntimeGatewayVirtualKey {
-        name: "admin-managed-key".to_string(),
-        tenant_id: Some(TenantId::new().to_string()),
-        team_id: None,
-        project_id: None,
-        user_id: None,
-        budget_id: None,
-        token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("token"),
-        allowed_models: Vec::new(),
-        budget_microusd: Some(100),
-        request_budget: Some(1),
-        rpm_limit: None,
-        tpm_limit: None,
-    };
-    let usage = runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
-        requests_total: 1,
-        spend_microusd: 100,
-        ..Default::default()
-    };
-    let local_usage = runtime_gateway_local_admission_usage(&key, Some(&usage), true);
-
-    assert_eq!(local_usage.requests_total, 0);
-    runtime_proxy_crate::runtime_gateway_virtual_key_admission(
-        &key,
-        Some(&local_usage),
-        br#"{"model":"gpt-5.4","input":"hello"}"#,
-        Some(1),
-        10,
-    )
-    .expect("durable-backed request budget should not be blocked by stale local usage");
 }
 
 #[test]
