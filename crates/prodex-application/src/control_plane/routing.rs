@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::*;
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationControlPlaneIdempotencyRequest {
@@ -405,6 +406,10 @@ pub fn plan_application_control_plane_idempotency(
         let key = request
             .idempotency_key
             .ok_or(ApplicationControlPlaneIdempotencyError::IdempotencyKeyRequired)?;
+        let key = application_control_plane_principal_scoped_idempotency_key(
+            request.action.principal.id,
+            &key,
+        );
         request
             .action
             .idempotent_operation(key, request.request_fingerprint)
@@ -416,6 +421,16 @@ pub fn plan_application_control_plane_idempotency(
         action: request.action,
         operation,
     })
+}
+
+pub fn application_control_plane_principal_scoped_idempotency_key(
+    principal_id: prodex_domain::PrincipalId,
+    presented_key: &IdempotencyKey,
+) -> IdempotencyKey {
+    let digest = Sha256::digest(presented_key.as_str().as_bytes());
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    IdempotencyKey::new(format!("cp:v1:{principal_id}:{hex}"))
+        .expect("principal-scoped control-plane idempotency key is valid")
 }
 
 pub fn plan_application_control_plane_http_route(

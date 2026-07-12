@@ -2,11 +2,13 @@
 //!
 //! Crate-root re-exports preserve the original `prodex_domain::*` API.
 
+mod digest;
 mod errors;
 mod event;
 mod query;
 mod retention;
 
+pub use digest::*;
 pub use errors::*;
 pub use event::*;
 pub use query::*;
