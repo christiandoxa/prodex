@@ -414,6 +414,26 @@ export function validateProductionBoundary(sources) {
 
   const virtualKeyAdmission =
     functionBody(sources.keys, "runtime_gateway_virtual_key_admission") ?? "";
+  const virtualKeyPlanner =
+    functionBody(sources.keys, "runtime_gateway_application_virtual_key_admission") ?? "";
+  requireText(
+    errors,
+    virtualKeyPlanner,
+    "plan_application_virtual_key_admission(",
+    `${FILES.keys}: virtual-key policy must enter the canonical application planner`,
+  );
+  requireOrdered(
+    errors,
+    virtualKeyAdmission,
+    [
+      "runtime_gateway_application_virtual_key_admission(",
+      "runtime_gateway_application_data_plane_admission(",
+      "runtime_gateway_distributed_rate_limit_admission(",
+      "runtime_gateway_try_durable_reservation(",
+      "apply_gateway_virtual_key_usage_update(",
+    ],
+    `${FILES.keys}: virtual-key policy planning must precede application admission, Redis/durable execution, and local usage writes`,
+  );
   requireBefore(
     errors,
     virtualKeyAdmission,
@@ -421,6 +441,17 @@ export function validateProductionBoundary(sources) {
     "runtime_gateway_try_durable_reservation(",
     `${FILES.keys}: application data-plane admission must precede durable reservation execution`,
   );
+  for (const duplicate of [
+    "runtime_proxy_crate::runtime_gateway_virtual_key_admission(",
+    "runtime_proxy_crate::runtime_gateway_record_virtual_key_usage(",
+  ]) {
+    forbidText(
+      errors,
+      sources.keys,
+      duplicate,
+      `${FILES.keys}: production virtual-key admission must not bypass the canonical application policy`,
+    );
+  }
   const durableReservation =
     functionBody(sources.keys, "runtime_gateway_try_durable_reservation") ?? "";
   requireBefore(
@@ -499,25 +530,26 @@ export function validateProductionBoundary(sources) {
     requireText(
       errors,
       admin,
-      "application.tenant_context()",
-      `${FILES.admin}: admin dispatch must carry the typed application authorization context`,
+      "preauthorized.control_plane_action()",
+      `${FILES.admin}: admin dispatch must consume the exact application authorization plan`,
     );
     requireText(
       errors,
       admin,
-      "action.operation.requires_idempotency()",
-      `${FILES.admin}: application operation policy must classify admin mutations`,
+      "authorized_action.operation.requires_idempotency()",
+      `${FILES.admin}: exact preauthorized operation must classify admin mutations`,
     );
     requireOrdered(
       errors,
       admin,
       [
+        "preauthorized.control_plane_action()",
         "runtime_gateway_admin_control_plane_action(&admin_http, admin_auth)",
         "runtime_gateway_admin_audit_boundary_response(",
         "runtime_gateway_admin_idempotency_response(",
         "runtime_gateway_admin_create_key_response(",
       ],
-      `${FILES.admin}: canonical action, audit, and idempotency planning must precede admin mutation handlers`,
+      `${FILES.admin}: exact preauthorization, canonical action, audit, and idempotency planning must precede admin mutation handlers`,
     );
   }
   requireText(
@@ -896,6 +928,22 @@ export function validateProductionBoundary(sources) {
       '.field("deadline", &"<redacted>")',
       `${FILES.application}: request-context Debug must redact deadline internals`,
     ],
+    [
+      "control_plane_action: Option<ControlPlaneActionPlan>",
+      `${FILES.application}: authorized context must retain the exact control-plane action plan`,
+    ],
+    [
+      "pub fn control_plane_action(&self) -> Option<&ControlPlaneActionPlan>",
+      `${FILES.application}: authorized context must expose the retained control-plane action plan`,
+    ],
+    [
+      '&self.control_plane_action.as_ref().map(|_| "<redacted>")',
+      `${FILES.application}: authorized-context Debug must redact the control-plane action plan`,
+    ],
+    [
+      "Some(plan)",
+      `${FILES.application}: control-plane authorization must retain the exact authorized plan`,
+    ],
   ]) requireText(errors, sources.application, needle, message);
   requireText(
     errors,
@@ -1233,10 +1281,16 @@ function runSelfTest() {
       ProviderRetryCause::RotateCredential;
       ProviderRetryDecision::DeniedNotRetryable;
     }`,
-    keys: `fn runtime_gateway_virtual_key_admission() {
+    keys: `fn runtime_gateway_application_virtual_key_admission() {
+      plan_application_virtual_key_admission();
+    }
+    fn runtime_gateway_virtual_key_admission() {
       let typed_request_id = authorized.request().request_id();
+      runtime_gateway_application_virtual_key_admission();
       runtime_gateway_application_data_plane_admission();
+      runtime_gateway_distributed_rate_limit_admission();
       runtime_gateway_try_durable_reservation();
+      apply_gateway_virtual_key_usage_update();
     }
     fn runtime_gateway_try_durable_reservation() {
       plan_application_atomic_reservation();
@@ -1259,10 +1313,10 @@ function runSelfTest() {
     observability: "schedule_runtime_gateway_billing_ledger_reconcile();",
     admin: `fn runtime_gateway_admin_response(preauthorized: Option<RuntimeGatewayAdminPreauthorization<'_>>) {
       let Some(preauthorized) = preauthorized;
-      application.tenant_context();
+      preauthorized.control_plane_action();
       runtime_gateway_admin_boundary_response();
       runtime_gateway_admin_control_plane_action(&admin_http, admin_auth);
-      action.operation.requires_idempotency();
+      authorized_action.operation.requires_idempotency();
       runtime_gateway_admin_audit_boundary_response();
       runtime_gateway_admin_idempotency_response();
       runtime_gateway_admin_create_key_response();
@@ -1359,6 +1413,14 @@ function runSelfTest() {
         correlation: CorrelationContext,
         metadata: ApplicationRequestMetadata,
       }
+      struct ApplicationAuthorizedRequestContext {
+        control_plane_action: Option<ControlPlaneActionPlan>,
+      }
+      impl ApplicationAuthorizedRequestContext {
+        pub fn control_plane_action(&self) -> Option<&ControlPlaneActionPlan> {
+          self.control_plane_action.as_ref()
+        }
+      }
       APPLICATION_REQUEST_METADATA_HEADER_LIMIT;
       classify_request_target(target);
       trace_context_from_headers(headers);
@@ -1366,10 +1428,12 @@ function runSelfTest() {
       correlation.with_tenant_id(tenant.tenant_id);
       debug.field("request_id", &"<redacted>");
       debug.field("deadline", &"<redacted>");
+      debug.field("control_plane_action", &self.control_plane_action.as_ref().map(|_| "<redacted>"));
       authenticate_verified_credential(VerifiedCredentialAuthenticationRequest { required_scope: request.required_credential_scope });
       authorize_boundary_scope(boundary, principal);
       authorize_boundary_role(boundary, principal);
       decide_control_plane_action(action);
+      Some(plan);
       principal.tenant_context(TenantMode::SingleTenant);`,
     gatewayRoute: "pub fn trace_context_from_headers() {}",
     applicationBoundaryTests:
@@ -1500,6 +1564,16 @@ function runSelfTest() {
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
+      application: valid.application.replace(
+        "control_plane_action: Option<ControlPlaneActionPlan>,",
+        "",
+      ),
+    }).some((error) => error.includes("retain the exact control-plane action plan")),
+    "authorized context without the exact control-plane action plan accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
       adapter: `${valid.adapter} plan_application_request_authentication_from_compatibility();`,
     }).some((error) => error.includes("compatibility authentication authority")),
     "compatibility production authentication accepted",
@@ -1558,6 +1632,13 @@ function runSelfTest() {
       admin: `${valid.admin} fn runtime_gateway_admin_write_authorized() {}`,
     }).some((error) => error.includes("duplicate legacy role policy")),
     "duplicate legacy role policy accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      admin: valid.admin.replace("preauthorized.control_plane_action();", ""),
+    }).some((error) => error.includes("exact preauthorization")),
+    "admin handlers without the exact preauthorization accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
@@ -1633,6 +1714,23 @@ function runSelfTest() {
       keys: valid.keys.replace("runtime_gateway_application_data_plane_admission();", ""),
     }).some((error) => error.includes("data-plane admission")),
     "durable reservation application admission bypass accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      keys: valid.keys.replace("plan_application_virtual_key_admission();", ""),
+    }).some((error) => error.includes("canonical application planner")),
+    "virtual-key application policy bypass accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      keys: valid.keys.replace(
+        "runtime_gateway_application_virtual_key_admission();\n      runtime_gateway_application_data_plane_admission();",
+        "runtime_gateway_application_data_plane_admission();\n      runtime_gateway_application_virtual_key_admission();",
+      ),
+    }).some((error) => error.includes("local usage writes")),
+    "virtual-key policy planning after application admission accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
