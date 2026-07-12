@@ -58,17 +58,10 @@ headers, reservation/accounting effects, streaming, and affinity behavior remain
 existing adapters. Anonymous data-plane operation remains possible only when the legacy
 configuration has no authentication mechanism enabled.
 
-This is an application-policy cutover, not a transport cutover. The production pipeline still
-accepts and answers a concrete `tiny_http::Request`; websocket handling also takes the
-request-owned connection. `prodex_app::GatewayBackend` consequently exposes a loopback address and
-drain handle, not a transport-neutral request handler. Adapting Hyper directly at this point would
-either expose the blocking listener or recreate the socket bridge with synchronous in-memory I/O,
-neither of which preserves the required streaming, cancellation, upgrade, and drain contracts.
-
-The next transport slice must first make the typed pipeline return a response stream or explicit
-upgrade handoff from transport-neutral request inputs. Hyper and `tiny_http` adapters must then pass
-the same response/side-effect differential corpus, including partial-stream cancellation and
-bounded drain, before the dedicated composition root removes the loopback backend.
+This decision originally cut over application policy without changing transport. ADR 1075 later
+completed the dedicated data-plane and control-plane transport slice: those binaries now pass a
+transport-neutral request to one in-process `RuntimeGatewayApplication`. The root `prodex gateway`
+command retains the loopback/TinyServer path only as a compatibility surface.
 
 Characterization coverage compares the established data-plane decision matrix with the application
 gate. Focused negative coverage exercises anonymous denial, both scope crossings, insufficient
@@ -88,14 +81,15 @@ duplicate router-level admin role policy is reintroduced.
 - `prodex-authn` and `prodex-application` now authenticate typed evidence on real gateway traffic.
 - Route, credential-scope, role, and tenant policy has one authoritative production boundary.
 - Two uncompiled request-entry/preparation prototypes containing duplicate auth and admission
-  branches are deleted (280 lines); the production handler is the single compatibility path.
-- Low-level secret parsing and signature verification, durable admission, reconciliation,
-  accounting, and provider invocation remain explicit migration gaps.
+  branches are deleted (280 lines). Dedicated production binaries now use the direct in-process
+  path; the root gateway handler is the single legacy compatibility path.
+- Low-level secret parsing and signature verification remain bounded adapter responsibilities.
+  Durable admission, provider dispatch, reconciliation, and canonical admin mutation planning are
+  now production slices guarded against compatibility-policy reintroduction.
 - The compatibility authentication API has no production callers and can be removed separately
   after downstream API compatibility is no longer required.
-- The compatibility gateway adapter can be removed only after provider, streaming, accounting, and
-  control-plane side-effect parity is proven on the dedicated server path, and after the pipeline
-  no longer owns `tiny_http::Request` response or upgrade I/O.
+- The compatibility gateway adapter can be removed when the root `prodex gateway` deprecation plan
+  no longer requires its CLI and side-effect compatibility contract.
 
 ## Verification
 
