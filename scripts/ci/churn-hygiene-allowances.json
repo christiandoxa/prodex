@@ -1,5 +1,20 @@
 [
   {
+    "id": "enterprise-refactor-release-0.277.0",
+    "requiredSubjects": [
+      "chore(docs): remove architecture decision records",
+      "chore(release): release 0.277.0",
+      "chore(ci): allow reviewed 0.277.0 integration range"
+    ],
+    "caps": {
+      "maxFiles": 635,
+      "maxBehaviorFiles": 534,
+      "maxLines": 103320,
+      "maxFileLines": 6199
+    },
+    "reason": "Reviewed the accumulated enterprise refactor and 0.277.0 release range with the full all-features local test suite, complete preflight guards, strict Clippy, release preparation, formatting, metadata checks, and credential scan before the first synchronized push."
+  },
+  {
     "id": "dedicated-in-process-gateway-transport-20260712",
     "requiredSubjects": [
       "feat(gateway): add in-process application transport"
