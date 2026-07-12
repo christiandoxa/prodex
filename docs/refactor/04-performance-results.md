@@ -126,6 +126,54 @@ The harness now starts the internal broker through the same bounded stdin bootst
 production and creates private synthetic credential files. This preserves the no-secret-argv/env
 contract instead of benchmarking a removed compatibility path.
 
+## Post-cutover five-sample validation
+
+Commit `caa0eb92efe91327255d2a2bb953198b4f872f5a` was sampled again after the canonical gateway
+admin mutation, idempotency, and audit cutover. The commands, host, governor, and five-run method
+were unchanged from the matched comparison above. This is a current-HEAD validation against the
+same historical baseline, not a new baseline selected after seeing the results.
+
+All five hot-path runs passed all eight fixed thresholds. Median samples and the comparison with
+the original clean baseline were:
+
+| Case | Five current medians (ns) | Current median-5 | Current CV | Delta vs baseline | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Quota fallback scan | 18,425 / 18,549 / 18,367 / 18,569 / 18,321 | 18,425 | 0.59% | -21.09% | improved |
+| Previous-response selection | 100,094 / 97,207 / 97,583 / 102,146 / 101,976 | 100,094 | 2.35% | -4.57% | within guard |
+| Mixed-pool response selection | 1,479,048 / 1,486,076 / 1,511,327 / 1,501,626 / 1,475,113 | 1,486,076 | 1.03% | -0.08% | no regression |
+| Compact session affinity | 9,267 / 9,524 / 8,589 / 8,650 / 9,463 | 9,267 | 4.92% | -3.84% | within guard |
+| WebSocket stale reuse | 9,718 / 9,844 / 9,896 / 8,966 / 9,866 | 9,844 | 4.07% | -10.80% | improved |
+| SSE lookahead | 110,346 / 114,275 / 111,768 / 112,844 / 110,425 | 111,768 | 1.49% | +4.99% | within guard |
+| Dead-lineage cleanup | 146,115 / 147,411 / 145,923 / 145,945 / 145,340 | 145,945 | 0.52% | +6.50% | fixed gate passed; historical guard exceeded |
+| Large tool-output rewrite | 1,600,620 / 1,602,859 / 1,621,150 / 1,631,259 / 1,676,815 | 1,621,150 | 1.90% | -0.06% | no regression |
+
+The dead-lineage result remains below its fixed 190,000 ns threshold with 23% headroom and is
+only 2.68% above the prior post-refactor median. The benchmark, fixture, cleanup implementation,
+and helper implementation have no source diff from the baseline commit. Because the historical
+delta nevertheless exceeds 5% with low current variance, it is reported as an unresolved
+cross-revision measurement drift; no performance improvement is claimed for that case and no
+unrelated hot-path rewrite was introduced to chase it.
+
+The five current end-to-end samples all completed 120/120 requests with no failures, admission
+pressure responses, or admission pressure markers:
+
+| Metric | Five current samples | Current median-5 | Current CV | Delta vs baseline | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| TTFT p95 (ms) | 97.70 / 100.61 / 100.61 / 148.74 / 106.35 | 100.61 | 19.35% | -0.27% | no regression |
+| TTFT p99 (ms) | 171.82 / 180.33 / 183.18 / 208.27 / 181.88 | 181.88 | 7.40% | -3.32% | improved |
+| Completion p95 (ms) | 123.94 / 126.37 / 123.08 / 148.81 / 131.21 | 126.37 | 8.12% | -0.30% | no regression |
+| Completion p99 (ms) | 197.37 / 207.31 / 209.04 / 233.76 / 209.07 | 209.04 | 6.37% | -2.07% | improved |
+| Throughput (requests/s) | 7.207 / 7.242 / 7.207 / 7.216 / 7.264 | 7.216 | 0.35% | -2.10% | within guard |
+| CPU/request (ms) | 123.50 / 124.25 / 124.25 / 125.83 / 123.83 | 124.25 | 0.72% | +1.29% | within guard |
+| Peak harness RSS (KiB) | 92,128 / 92,384 / 93,924 / 92,904 / 92,572 | 92,572 | 0.75% | -0.23% | no regression |
+
+Allocation/request remained explicitly unsupported because the sampled debug binary was not built
+with `allocation-bench-support`. Admission and long-lived queue wait deltas were zero in the four
+runs that captured broker metrics; one run could not read the broker snapshot. Those four runs each
+captured one runtime-state lock wait, with mean waits of 410, 620, 570, and 630 ns. The historical
+baseline did not capture these counters, so they are current bounded evidence only, not a matched
+no-regression claim.
+
 ## Allocator decision evidence
 
 The duplicated Linux/glibc `malloc_trim` calls were centralized and restricted to the existing
