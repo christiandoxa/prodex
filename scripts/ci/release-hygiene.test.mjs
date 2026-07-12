@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isVersionMetadataChangePath } from "./release-guard-common.mjs";
 import { RELEASE_HYGIENE_POLICY, releaseHygieneSteps } from "./release-hygiene.mjs";
+
+test("fuzz lock workspace versions count as release metadata", () => {
+  const filePath = "fuzz/Cargo.lock";
+  const change = {
+    changedLinesByFile: new Map([
+      [filePath, [{ hunkContext: 'name = "prodex-core"', text: 'version = "0.278.0"' }]],
+    ]),
+  };
+
+  assert.equal(isVersionMetadataChangePath(change, filePath), true);
+});
 
 test("release hygiene policy keeps ordered mandatory guards and fixtures", () => {
   assert.deepEqual(

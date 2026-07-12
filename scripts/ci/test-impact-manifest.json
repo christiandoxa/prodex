@@ -23,6 +23,7 @@
   "versionMetadataPatterns": [
     "Cargo.toml",
     "Cargo.lock",
+    "fuzz/Cargo.lock",
     "crates/*/Cargo.toml",
     "npm/prodex/package.json",
     "npm/prodex-gateway-sdk/package.json",
@@ -37,6 +38,7 @@
   "releaseMetadataPatterns": [
     "Cargo.toml",
     "Cargo.lock",
+    "fuzz/Cargo.lock",
     "CHANGELOG.md",
     "crates/*/Cargo.toml",
     "package-lock.json",
@@ -51,6 +53,7 @@
   "releaseCommitPaths": [
     "Cargo.toml",
     "Cargo.lock",
+    "fuzz/Cargo.lock",
     "CHANGELOG.md",
     "README.md",
     "QUICKSTART.md",
