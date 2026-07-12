@@ -9,7 +9,9 @@ use prodex_authn::{
     VerifiedCredentialAuthenticationError, VerifiedCredentialEvidence,
     VerifiedOidcCredentialEvidence, VerifiedOidcRoleEvidence,
 };
-use prodex_control_plane::{ControlPlaneActionRequest, ControlPlaneResourceRef};
+use prodex_control_plane::{
+    ControlPlaneActionPlan, ControlPlaneActionRequest, ControlPlaneResourceRef,
+};
 use prodex_domain::{
     CredentialScope, ExplicitRoleMapper, Principal, PrincipalId, PrincipalKind, RequestId, Role,
     TenantId,
@@ -39,6 +41,12 @@ pub(super) enum RuntimeGatewayApplicationBoundaryError {
 pub(super) struct RuntimeGatewayAdminPreauthorization<'a> {
     pub(super) auth: RuntimeGatewayAdminAuth,
     pub(super) application: Option<ApplicationAuthorizedRequestContext<'a>>,
+}
+
+impl RuntimeGatewayAdminPreauthorization<'_> {
+    pub(super) fn control_plane_action(&self) -> Option<&ControlPlaneActionPlan> {
+        self.application.as_ref()?.control_plane_action()
+    }
 }
 
 pub(super) fn runtime_gateway_application_request_context<'a>(
