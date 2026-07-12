@@ -57,6 +57,7 @@ fn smart_context_compact_session_body_does_not_panic() {
 
 #[test]
 fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
+    let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
     let shared = smart_context_test_shared("compact-explicit-fallback");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
@@ -79,16 +80,14 @@ fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
         body: body.into_bytes(),
     };
 
-    let rewritten = {
-        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
-        prepare_runtime_smart_context_http_body_for_profile(
-            43,
-            &request,
-            &shared,
-            RuntimeRouteKind::Compact,
-            Some("main"),
-        )
-    };
+    let rewritten = prepare_runtime_smart_context_http_body_for_profile(
+        43,
+        &request,
+        &shared,
+        RuntimeRouteKind::Compact,
+        Some("main"),
+    );
+    drop(fault);
     assert!(!runtime_take_fault_injection(
         "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE"
     ));
@@ -106,6 +105,7 @@ fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
 
 #[test]
 fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
+    let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE", "1");
     let shared = smart_context_test_shared("websocket-panic-fallback");
     register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
     smart_context_observe_minimal_budget(&shared);
@@ -129,16 +129,14 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
         body: Vec::new(),
     };
 
-    let rewritten = {
-        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE", "1");
-        prepare_runtime_smart_context_websocket_text(
-            44,
-            &request_text,
-            &handshake_request,
-            &shared,
-            "main",
-        )
-    };
+    let rewritten = prepare_runtime_smart_context_websocket_text(
+        44,
+        &request_text,
+        &handshake_request,
+        &shared,
+        "main",
+    );
+    drop(fault);
     assert!(!runtime_take_fault_injection(
         "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE"
     ));
@@ -150,7 +148,7 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
     assert!(log.contains("transport=websocket"));
     assert!(log.contains("route=websocket"));
     assert!(log.contains("profile=main"));
-    assert!(log.contains("panic=non_string_panic"));
+    assert!(log.contains("panic=runtime_smart_context_injected_panic"));
     assert!(log.contains("smart_context_disabled"));
     assert!(log.contains("decision=pass_through"));
     assert!(!log.contains("runtime_proxy_worker_panic"));
