@@ -5,17 +5,32 @@ mod status;
 
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 pub use self::status::{ProviderTransformLoss, TransformOutcome, TransformStatus};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderTransformInput {
     pub endpoint: ProviderEndpoint,
     pub model: Option<String>,
     pub headers: BTreeMap<String, String>,
     pub status: Option<u16>,
     pub body: Vec<u8>,
+}
+
+impl fmt::Debug for ProviderTransformInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderTransformInput")
+            .field("endpoint", &self.endpoint)
+            .field("model", &self.model)
+            .field("header_count", &self.headers.len())
+            .field("headers", &"<redacted>")
+            .field("status", &self.status)
+            .field("body_len", &self.body.len())
+            .field("body", &"<redacted>")
+            .finish()
+    }
 }
 
 impl ProviderTransformInput {
