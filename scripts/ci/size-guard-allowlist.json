@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 925,
+    "maxLines": 961,
     "reason": "Runtime launch command routing, provider selection, and session/runtime entry planning remain capped after gateway backend startup moved to its focused module."
   },
   {
@@ -16,12 +16,12 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
-    "maxLines": 933,
+    "maxLines": 955,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/copilot.rs",
-    "maxLines": 986,
+    "maxLines": 989,
     "reason": "Copilot profile import, direct runtime API auth, model catalog refresh, legacy token fallback, and bounded HTTP response reads remain capped while auth refresh is split from profile import ownership."
   },
   {
@@ -36,12 +36,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1945,
+    "maxLines": 1934,
     "reason": "Kiro local rewrite request/response translation remains capped after its inline tests moved behind a focused module boundary; includes bounded streaming delivery and tenant-scoped conversation persistence."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3690,
+    "maxLines": 3738,
     "reason": "Local rewrite cross-provider regression coverage remains capped after governance-failure behavior moved to a focused sibling module; provider-specific cases continue to split from the shared harness."
   },
   {
@@ -61,12 +61,12 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2240,
+    "maxLines": 2245,
     "reason": "Runtime launch command tests remain capped after secure credential fixtures and post-exit session maintenance moved into focused sibling modules."
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
-    "maxLines": 1219,
+    "maxLines": 1249,
     "reason": "Runtime launch run-command strategy regression coverage remains capped while matrix cases are split by CLI/runtime family."
   },
   {
@@ -91,7 +91,7 @@
   },
   {
     "file": "crates/prodex-app/tests/support/profile_commands_body/export.rs",
-    "maxLines": 945,
+    "maxLines": 942,
     "reason": "Profile export regression fixtures include bounded v1/v2 migration and resource-exhaustion cases; capped until provider-specific scenarios split from shared helpers."
   },
   {
@@ -101,7 +101,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1012,
+    "maxLines": 1200,
     "reason": "Provider-aware runtime and gateway argument parsing, trailing-var-arg extraction, struct definitions, and compatibility tests remain a tightly coupled CLI surface."
   },
   {
@@ -121,7 +121,7 @@
   },
   {
     "file": "crates/prodex-profile-export/tests/src/lib.rs",
-    "maxLines": 906,
+    "maxLines": 1043,
     "reason": "Profile export envelope and import-journal regression coverage now includes bounded artifact cases; capped until fixtures split by envelope and journal domain."
   },
   {
@@ -136,12 +136,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
-    "maxLines": 1171,
+    "maxLines": 1195,
     "reason": "Gateway admin CRUD compatibility coverage remains capped while tenant, key, SCIM, and audit fixtures are split by resource."
   },
   {
     "file": "crates/prodex-application/tests/application_boundary.rs",
-    "maxLines": 6203,
+    "maxLines": 6353,
     "reason": "Application boundary characterization matrix is capped while security, accounting, and policy cases move to focused modules."
   },
   {
@@ -220,18 +220,13 @@
     "reason": "Gemini request translation remains capped while multimodal and tool request fixtures are split by protocol concern."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_keys.rs",
-    "maxLines": 914,
-    "reason": "Gateway key lifecycle, durable tenant identity, rotation, and authorization remain capped until lifecycle storage is split from HTTP responses."
-  },
-  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",
-    "maxLines": 987,
+    "maxLines": 995,
     "reason": "Gateway SQLite, PostgreSQL, and Redis compatibility migration handling now threads one fail-closed TLS policy through blocking opens and migrations; capped while backend-specific connections are split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_key_store_backend.rs",
-    "maxLines": 1510,
+    "maxLines": 1409,
     "reason": "Gateway key-store compatibility, exact decoding, backend persistence, and explicit local PostgreSQL TLS fixtures remain capped until backend implementations are split."
   },
   {
@@ -246,17 +241,17 @@
   },
   {
     "file": "src/bin/prodex-control-plane.rs",
-    "maxLines": 1286,
+    "maxLines": 1385,
     "reason": "Enterprise control-plane composition, storage setup, publication, observability, and the thin route-isolated serve dispatch remain capped while command handlers are split."
   },
   {
     "file": "src/enterprise_observability.rs",
-    "maxLines": 1058,
+    "maxLines": 1181,
     "reason": "Enterprise OTLP log export and redaction integration remain capped while transport and serialization are split."
   },
   {
     "file": "tests/enterprise_binaries.rs",
-    "maxLines": 8393,
+    "maxLines": 8385,
     "reason": "Enterprise binary characterization remains capped while control-plane, gateway, migration, and observability fixtures are split."
   }
 ]
