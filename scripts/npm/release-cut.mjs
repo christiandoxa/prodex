@@ -330,6 +330,9 @@ async function releaseCut(args) {
     await runNodeScript("npm-sync-version", "scripts/npm/sync-version.mjs", ["--root", "npm"]);
     await runNodeScript("npm-sync-docs-version", "scripts/npm/sync-docs-version.mjs");
     await runStep("cargo-update-workspace", "cargo", ["update", "-w"]);
+    if (await pathExists("fuzz/Cargo.toml")) {
+      await runStep("cargo-update-fuzz", "cargo", ["update", "--manifest-path", "fuzz/Cargo.toml"]);
+    }
     await runNodeScript("changelog", "scripts/npm/changelog.mjs", ["--release-version", version]);
   } else {
     const subject = await headSubject();
