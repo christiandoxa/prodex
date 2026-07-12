@@ -190,6 +190,10 @@ default = []
 bench-support = ["prodex_app/bench-support"]
 allocation-bench-support = ["prodex_app/allocation-bench-support"]
 
+[[example]]
+name = "runtime_allocator_trim_evidence"
+required-features = ["bench-support"]
+
 [dependencies]
 prodex_app = { workspace = true }
 prodex_application = { workspace = true }
