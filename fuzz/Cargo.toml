@@ -13,7 +13,7 @@ prodex-authn = { path = "../crates/prodex-authn" }
 prodex-gateway-http = { path = "../crates/prodex-gateway-http" }
 prodex-profile-export = { path = "../crates/prodex-profile-export" }
 prodex-runtime-policy = { path = "../crates/prodex-runtime-policy" }
-serde_json = "=1.0.149"
+serde_json = "=1.0.150"
 toml = "=1.1.2"
 
 [[bin]]
