@@ -1,6 +1,8 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub fn deserialize_null_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
 where
@@ -174,7 +176,9 @@ impl QuotaAuthFilter {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Clone remains intentional because the runtime auth cache takes bounded
+/// snapshots before refresh and per-request handoff. Every copy zeroizes on drop.
+#[derive(Clone, PartialEq, Eq)]
 pub struct UsageAuth {
     pub access_token: String,
     pub account_id: Option<String>,
@@ -183,13 +187,47 @@ pub struct UsageAuth {
     pub last_refresh: Option<i64>,
 }
 
+impl fmt::Debug for UsageAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UsageAuth")
+            .field("access_token", &"<redacted>")
+            .field(
+                "account_id",
+                &self.account_id.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("expires_at", &self.expires_at)
+            .field("last_refresh", &self.last_refresh)
+            .finish()
+    }
+}
+
+impl Zeroize for UsageAuth {
+    fn zeroize(&mut self) {
+        self.access_token.zeroize();
+        self.account_id.zeroize();
+        self.refresh_token.zeroize();
+    }
+}
+
+impl Drop for UsageAuth {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for UsageAuth {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageAuthSyncSource {
     Reloaded,
     Refreshed,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct UsageAuthSyncOutcome {
     pub auth: UsageAuth,
     pub source: UsageAuthSyncSource,
@@ -274,7 +312,7 @@ pub struct UsageWindow {
     pub limit_window_seconds: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StoredAuth {
     pub auth_mode: Option<String>,
     pub tokens: Option<StoredTokens>,
@@ -286,19 +324,110 @@ pub struct StoredAuth {
     pub last_refresh: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for StoredAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StoredAuth")
+            .field("auth_mode", &self.auth_mode)
+            .field("tokens", &self.tokens)
+            .field(
+                "openai_api_key",
+                &self.openai_api_key.as_ref().map(|_| "<redacted>"),
+            )
+            .field("bedrock_api_key", &self.bedrock_api_key)
+            .field("last_refresh", &self.last_refresh)
+            .finish()
+    }
+}
+
+impl Zeroize for StoredAuth {
+    fn zeroize(&mut self) {
+        self.tokens.zeroize();
+        self.openai_api_key.zeroize();
+        self.bedrock_api_key.zeroize();
+    }
+}
+
+impl Drop for StoredAuth {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for StoredAuth {}
+
+#[derive(Serialize, Deserialize)]
 pub struct BedrockApiKeyAuth {
     pub api_key: Option<String>,
     pub region: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl fmt::Debug for BedrockApiKeyAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BedrockApiKeyAuth")
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("region", &self.region)
+            .finish()
+    }
+}
+
+impl Zeroize for BedrockApiKeyAuth {
+    fn zeroize(&mut self) {
+        self.api_key.zeroize();
+    }
+}
+
+impl Drop for BedrockApiKeyAuth {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for BedrockApiKeyAuth {}
+
+#[derive(Serialize, Deserialize)]
 pub struct StoredTokens {
     pub access_token: Option<String>,
     pub account_id: Option<String>,
     pub id_token: Option<String>,
     pub refresh_token: Option<String>,
 }
+
+impl fmt::Debug for StoredTokens {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StoredTokens")
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "account_id",
+                &self.account_id.as_ref().map(|_| "<redacted>"),
+            )
+            .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+impl Zeroize for StoredTokens {
+    fn zeroize(&mut self) {
+        self.access_token.zeroize();
+        self.account_id.zeroize();
+        self.id_token.zeroize();
+        self.refresh_token.zeroize();
+    }
+}
+
+impl Drop for StoredTokens {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for StoredTokens {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdTokenClaims {

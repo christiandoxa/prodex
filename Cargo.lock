@@ -2750,6 +2750,7 @@ dependencies = [
  "prodex-terminal-ui",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

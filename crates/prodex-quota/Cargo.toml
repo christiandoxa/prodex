@@ -17,6 +17,7 @@ chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 terminal_ui = { workspace = true }
+zeroize = { workspace = true }
 
 [lints]
 workspace = true
