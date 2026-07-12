@@ -68,6 +68,7 @@ use prodex_application::{
     ApplicationVirtualKeyLifecycleErrorStatus, ApplicationVirtualKeyLifecycleRequest,
     ApplicationVirtualKeySecretReferenceError, ApplicationVirtualKeySecretReferenceErrorStatus,
     ApplicationVirtualKeySecretReferenceRequest, ApplicationVirtualKeySecretReferenceStoragePlan,
+    application_control_plane_principal_scoped_idempotency_key,
     plan_application_atomic_reservation, plan_application_atomic_reservation_error_response,
     plan_application_audit_export, plan_application_audit_export_error_response,
     plan_application_audit_retention_purge, plan_application_audit_retention_purge_error_response,
@@ -2463,9 +2464,11 @@ fn application_control_plane_idempotency_rejects_empty_request_fingerprint() {
 fn application_control_plane_idempotency_plans_tenant_scoped_operation() {
     let tenant_id = TenantId::new();
     let key = IdempotencyKey::new("retention-purge-application-1").unwrap();
+    let principal = control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane);
+    let principal_id = principal.id;
     let action = control_plane_action(
         tenant_id,
-        control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
+        principal,
         ControlPlaneOperation::AuditRetentionPurge,
         ResourceKind::AuditLog,
     );
@@ -2484,16 +2487,54 @@ fn application_control_plane_idempotency_plans_tenant_scoped_operation() {
         ControlPlaneOperation::AuditRetentionPurge
     );
     assert_eq!(operation.tenant_id, tenant_id);
-    assert_eq!(operation.key, key);
+    assert_eq!(
+        operation.key,
+        application_control_plane_principal_scoped_idempotency_key(principal_id, &key)
+    );
+    assert!(!operation.key.as_str().contains(key.as_str()));
+    assert_eq!(
+        format!("{:?}", operation.key),
+        "IdempotencyKey(\"<redacted>\")"
+    );
     assert_eq!(operation.request_fingerprint, "sha256:retention-purge");
+}
+
+#[test]
+fn application_control_plane_idempotency_key_is_principal_scoped_and_redacted() {
+    let principal_id = "018f0000-0000-7000-8000-000000000001"
+        .parse::<PrincipalId>()
+        .unwrap();
+    let other_principal_id = "018f0000-0000-7000-8000-000000000002"
+        .parse::<PrincipalId>()
+        .unwrap();
+    let presented_key = IdempotencyKey::new("presented-key-example").unwrap();
+
+    let key =
+        application_control_plane_principal_scoped_idempotency_key(principal_id, &presented_key);
+
+    assert_eq!(
+        key.as_str(),
+        "cp:v1:018f0000-0000-7000-8000-000000000001:c58196082c6ea6f04a2677fddf0321bf736e9e516935cf9df31a6663b4e927c9"
+    );
+    assert_ne!(
+        key,
+        application_control_plane_principal_scoped_idempotency_key(
+            other_principal_id,
+            &presented_key,
+        )
+    );
+    assert!(!key.as_str().contains(presented_key.as_str()));
+    assert_eq!(format!("{key:?}"), "IdempotencyKey(\"<redacted>\")");
 }
 
 #[test]
 fn application_control_plane_idempotency_reads_key_from_http_header() {
     let tenant_id = TenantId::new();
+    let principal = control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane);
+    let principal_id = principal.id;
     let action = control_plane_action(
         tenant_id,
-        control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
+        principal,
         ControlPlaneOperation::AuditRetentionPurge,
         ResourceKind::AuditLog,
     );
@@ -2513,7 +2554,13 @@ fn application_control_plane_idempotency_reads_key_from_http_header() {
     let operation = plan.operation.unwrap();
 
     assert_eq!(operation.tenant_id, tenant_id);
-    assert_eq!(operation.key.as_str(), "retention-purge-http-1");
+    assert_eq!(
+        operation.key,
+        application_control_plane_principal_scoped_idempotency_key(
+            principal_id,
+            &IdempotencyKey::new("retention-purge-http-1").unwrap(),
+        )
+    );
     assert_eq!(operation.request_fingerprint, "sha256:retention-purge-http");
 }
 
@@ -2750,9 +2797,11 @@ fn application_control_plane_idempotency_http_header_errors_are_redacted() {
 #[test]
 fn application_control_plane_idempotency_from_http_digest_builds_canonical_fingerprint() {
     let tenant_id = TenantId::new();
+    let principal = control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane);
+    let principal_id = principal.id;
     let action = control_plane_action(
         tenant_id,
-        control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
+        principal,
         ControlPlaneOperation::PolicyPublish,
         ResourceKind::Policy,
     );
@@ -2770,7 +2819,13 @@ fn application_control_plane_idempotency_from_http_digest_builds_canonical_finge
     .unwrap();
     let operation = plan.operation.unwrap();
 
-    assert_eq!(operation.key.as_str(), "policy-publish-http-1");
+    assert_eq!(
+        operation.key,
+        application_control_plane_principal_scoped_idempotency_key(
+            principal_id,
+            &IdempotencyKey::new("policy-publish-http-1").unwrap(),
+        )
+    );
     assert_eq!(
         operation.request_fingerprint,
         "http:post:path:/admin/policies/revision-1:body:sha256:policy-body"
