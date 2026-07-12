@@ -61,12 +61,11 @@ pub fn translate_runtime_anthropic_messages_request(
     translated_body.insert("stream".to_string(), serde_json::Value::Bool(true));
     translated_body.insert("store".to_string(), serde_json::Value::Bool(false));
     let base_instructions = runtime_proxy_anthropic_system_instructions(&value)?;
-    let translated_tools = runtime_proxy_translate_anthropic_tools(
+    let mut translated_tools = runtime_proxy_translate_anthropic_tools(
         &value,
         native_shell_enabled,
         native_computer_enabled,
     )?;
-    let mut translated_tools = translated_tools;
     runtime_proxy_anthropic_register_server_tools_from_messages(
         messages,
         &mut translated_tools.server_tools,
@@ -79,10 +78,11 @@ pub fn translate_runtime_anthropic_messages_request(
             serde_json::Value::String(instructions),
         );
     }
+    let implicit_tool_choice = translated_tools.implicit_tool_choice();
     if !translated_tools.tools.is_empty() {
         translated_body.insert(
             "tools".to_string(),
-            serde_json::Value::Array(translated_tools.tools.clone()),
+            serde_json::Value::Array(std::mem::take(&mut translated_tools.tools)),
         );
     }
     if translated_tools.server_tools.web_search {
@@ -97,7 +97,7 @@ pub fn translate_runtime_anthropic_messages_request(
         &translated_tools.tool_name_aliases,
         &translated_tools.native_tool_names,
     )?
-    .or_else(|| translated_tools.implicit_tool_choice())
+    .or(implicit_tool_choice)
     {
         translated_body.insert("tool_choice".to_string(), tool_choice);
     }
@@ -144,7 +144,7 @@ pub fn translate_runtime_anthropic_messages_request(
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
         want_thinking: runtime_proxy_anthropic_wants_thinking(&value),
-        server_tools: translated_tools.server_tools,
+        server_tools: std::mem::take(&mut translated_tools.server_tools),
         carried_web_search_requests: carried_server_tool_usage.web_search_requests,
         carried_web_fetch_requests: carried_server_tool_usage.web_fetch_requests,
         carried_code_execution_requests: carried_server_tool_usage.code_execution_requests,

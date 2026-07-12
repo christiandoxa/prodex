@@ -2768,6 +2768,7 @@ dependencies = [
  "base64",
  "serde_json",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

@@ -4,7 +4,7 @@
 //! The bounded WebSocket TCP/DNS executor also lives here so the binary can keep
 //! transport policy wiring thin while still owning runtime state and persistence.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt};
 
 pub use prodex_runtime_state::{
     RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX, RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX,
@@ -99,12 +99,26 @@ pub const RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS: u64 =
     if cfg!(test) { 25 } else { 200 };
 pub const RUNTIME_PROXY_INTERACTIVE_WAIT_MULTIPLIER: u64 = 2;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RuntimeProxyRequest {
     pub method: String,
     pub path_and_query: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+}
+
+impl fmt::Debug for RuntimeProxyRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeProxyRequest")
+            .field("method", &self.method)
+            .field("path_and_query", &"<redacted>")
+            .field("header_count", &self.headers.len())
+            .field("headers", &"<redacted>")
+            .field("body_len", &self.body.len())
+            .field("body", &"<redacted>")
+            .finish()
+    }
 }
 
 pub fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static str {
