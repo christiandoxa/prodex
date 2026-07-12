@@ -55,10 +55,122 @@ pub(crate) struct RuntimeGeminiConfig {
     pub(crate) sticky_fresh_oauth: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct RuntimeGatewayConfig {
     pub(crate) replica_count: u16,
     pub(crate) require_multi_replica_accounting_checks: bool,
+    pub(crate) launch: RuntimeGatewayLaunchEnvironment,
+}
+
+#[derive(Clone, Default)]
+pub(crate) enum RuntimeGatewayLaunchEnvironment {
+    #[default]
+    Unspecified,
+    ControlPlane,
+    DataPlane {
+        upstream_base_url: String,
+        deepseek: Option<RuntimeGatewayDeepSeekConfig>,
+        gemini_model_resolution: Option<crate::RuntimeGeminiModelResolution>,
+        present_secret_env: BTreeSet<&'static str>,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) struct RuntimeGatewayDeepSeekConfig {
+    pub(crate) strict_tools: bool,
+    pub(crate) beta_base_url: String,
+    pub(crate) web_search_mode: crate::RuntimeDeepSeekWebSearchMode,
+}
+
+impl fmt::Debug for RuntimeGatewayLaunchEnvironment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unspecified => formatter.write_str("Unspecified"),
+            Self::ControlPlane => formatter.write_str("ControlPlane"),
+            Self::DataPlane {
+                deepseek,
+                gemini_model_resolution,
+                present_secret_env,
+                ..
+            } => formatter
+                .debug_struct("DataPlane")
+                .field("upstream_base_url", &"<redacted>")
+                .field("deepseek", deepseek)
+                .field(
+                    "gemini_model_resolution_configured",
+                    &gemini_model_resolution.is_some(),
+                )
+                .field("present_secret_env", present_secret_env)
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for RuntimeGatewayDeepSeekConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeGatewayDeepSeekConfig")
+            .field("strict_tools", &self.strict_tools)
+            .field("beta_base_url", &"<redacted>")
+            .field("web_search_mode", &self.web_search_mode)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RuntimeEnvironmentSecretRef {
+    pub(crate) name: &'static str,
+    pub(crate) list: bool,
+}
+
+impl RuntimeGatewayLaunchEnvironment {
+    pub(crate) fn upstream_base_url(&self) -> Option<&str> {
+        match self {
+            Self::DataPlane {
+                upstream_base_url, ..
+            } => Some(upstream_base_url),
+            Self::Unspecified | Self::ControlPlane => None,
+        }
+    }
+
+    pub(crate) fn deepseek(&self) -> Option<&RuntimeGatewayDeepSeekConfig> {
+        match self {
+            Self::DataPlane { deepseek, .. } => deepseek.as_ref(),
+            Self::Unspecified | Self::ControlPlane => None,
+        }
+    }
+
+    pub(crate) fn gemini_model_resolution(&self) -> Option<&crate::RuntimeGeminiModelResolution> {
+        match self {
+            Self::DataPlane {
+                gemini_model_resolution,
+                ..
+            } => gemini_model_resolution.as_ref(),
+            Self::Unspecified | Self::ControlPlane => None,
+        }
+    }
+
+    pub(crate) fn secret_env_present(&self, name: &str) -> bool {
+        matches!(
+            self,
+            Self::DataPlane {
+                present_secret_env,
+                ..
+            } if present_secret_env.contains(name)
+        )
+    }
+
+    pub(crate) fn first_secret_env(
+        &self,
+        names: &[&'static str],
+        list: bool,
+    ) -> Option<RuntimeEnvironmentSecretRef> {
+        names
+            .iter()
+            .copied()
+            .find(|name| self.secret_env_present(name))
+            .map(|name| RuntimeEnvironmentSecretRef { name, list })
+    }
 }
 
 impl RuntimeGeminiConfig {
@@ -150,7 +262,7 @@ pub(crate) struct RuntimeOidcTimingConfig {
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ConfigError {
     pub(super) key: &'static str,
-    pub(super) message: &'static str,
+    pub(super) message: String,
 }
 
 impl fmt::Debug for ConfigError {

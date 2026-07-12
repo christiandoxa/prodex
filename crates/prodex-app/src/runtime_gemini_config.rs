@@ -41,6 +41,16 @@ impl RuntimeGeminiModelResolution {
         Self::from_settings_sources(crate::gemini_settings_sources(cwd.as_deref()))
     }
 
+    pub(crate) fn from_runtime_config(config: &crate::RuntimeGeminiConfig) -> Self {
+        let cwd = std::env::current_dir().ok();
+        Self::from_settings_sources(crate::gemini_settings_sources_for_config_home(
+            config.config_dir.as_deref(),
+            cwd.as_deref(),
+            config.system_settings_path.as_deref(),
+            config.system_defaults_path.as_deref(),
+        ))
+    }
+
     fn from_settings_sources(sources: Vec<crate::GeminiSettingsSource>) -> Self {
         let mut resolution = Self::default();
         for source in sources {

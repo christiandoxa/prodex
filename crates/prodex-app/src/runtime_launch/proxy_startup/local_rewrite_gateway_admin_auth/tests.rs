@@ -6,7 +6,7 @@ use super::cache::*;
 use super::endpoint_policy::*;
 use super::token_claims::*;
 use super::transport::*;
-use crate::{RuntimeConfig, read_blocking_response_body_with_limit};
+use crate::{AppPaths, RuntimeConfig, read_blocking_response_body_with_limit};
 use jsonwebtoken::Algorithm;
 use prodex_authn::OidcEndpointPolicy;
 use std::collections::BTreeMap;
@@ -15,17 +15,58 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV: &str = "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS";
-const DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS: u64 = 2_000;
 const RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV: &str = "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS";
-const DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 300;
 const RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV: &str =
     "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS";
-const DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 30_000;
 const RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV: &str =
     "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS";
-const DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 86_400;
-const MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS: u64 = 10_000;
-const MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 3_600_000;
+
+fn assert_oidc_runtime_config_rejected(values: &[(&'static str, &str)], expected: &str) {
+    let _lock = crate::TestEnvVarGuard::lock();
+    let mut guards = [
+        RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV,
+        RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV,
+        RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV,
+        RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV,
+    ]
+    .into_iter()
+    .map(crate::TestEnvVarGuard::unset)
+    .collect::<Vec<_>>();
+    guards.extend(
+        values
+            .iter()
+            .map(|(key, value)| crate::TestEnvVarGuard::set(key, value)),
+    );
+    let root = std::env::temp_dir().join(format!(
+        "prodex-oidc-runtime-config-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let paths = AppPaths {
+        state_file: root.join("state.json"),
+        managed_profiles_root: root.join("profiles"),
+        shared_codex_root: root.join("shared-codex"),
+        legacy_shared_codex_root: root.join("shared"),
+        root: root.clone(),
+    };
+
+    let rendered = RuntimeConfig::from_env_policy_and_cli(&paths)
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        rendered,
+        format!("runtime configuration is invalid; {expected}")
+    );
+    for (_, value) in values {
+        assert!(!rendered.contains(value), "{rendered}");
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
 
 #[test]
 fn oidc_prefetch_timeout_uses_positive_env_override() {
@@ -39,12 +80,16 @@ fn oidc_prefetch_timeout_uses_positive_env_override() {
 
 #[test]
 fn oidc_prefetch_timeout_rejects_zero_and_invalid_values() {
-    for value in ["0", "not-a-number"] {
-        let _guard = crate::TestEnvVarGuard::set(RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV, value);
-
-        assert_eq!(
-            runtime_gateway_oidc_prefetch_timeout(),
-            Duration::from_millis(DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS)
+    for (value, message) in [
+        ("0", "must be greater than zero"),
+        (
+            "oidc-prefetch-secret-sentinel",
+            "must be an unsigned integer",
+        ),
+    ] {
+        assert_oidc_runtime_config_rejected(
+            &[(RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV, value)],
+            &format!("{RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV} {message}"),
         );
     }
 }
@@ -74,11 +119,12 @@ fn oidc_http_cache_ttl_allows_zero_and_rejects_invalid_values() {
 
     drop(_zero);
 
-    let _invalid =
-        crate::TestEnvVarGuard::set(RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV, "not-a-number");
-    assert_eq!(
-        runtime_gateway_oidc_http_cache_ttl(),
-        Duration::from_secs(DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS)
+    assert_oidc_runtime_config_rejected(
+        &[(
+            RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV,
+            "oidc-cache-secret-sentinel",
+        )],
+        &format!("{RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV} must be an unsigned integer"),
     );
 }
 
@@ -95,13 +141,16 @@ fn oidc_refresh_failure_backoff_uses_positive_env_override() {
 
 #[test]
 fn oidc_refresh_failure_backoff_rejects_zero_and_invalid_values() {
-    for value in ["0", "not-a-number"] {
-        let _guard =
-            crate::TestEnvVarGuard::set(RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV, value);
-
-        assert_eq!(
-            runtime_gateway_oidc_refresh_failure_backoff(),
-            Duration::from_millis(DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS)
+    for (value, message) in [
+        ("0", "must be greater than zero"),
+        (
+            "oidc-backoff-secret-sentinel",
+            "must be an unsigned integer",
+        ),
+    ] {
+        assert_oidc_runtime_config_rejected(
+            &[(RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV, value)],
+            &format!("{RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV} {message}"),
         );
     }
 }
@@ -124,11 +173,12 @@ fn oidc_last_known_good_window_allows_zero_and_rejects_invalid_values() {
 
     drop(_valid);
 
-    let _invalid =
-        crate::TestEnvVarGuard::set(RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV, "not-a-number");
-    assert_eq!(
-        runtime_gateway_oidc_last_known_good_window(),
-        Duration::from_secs(DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS)
+    assert_oidc_runtime_config_rejected(
+        &[(
+            RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV,
+            "oidc-lkg-secret-sentinel",
+        )],
+        &format!("{RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV} must be an unsigned integer"),
     );
 }
 
@@ -270,44 +320,35 @@ fn oidc_domain_snapshot_preserves_immutable_cache_deadlines() {
 }
 
 #[test]
-fn oidc_runtime_limits_clamp_untrusted_env_and_cache_headers() {
-    let _timeout = crate::TestEnvVarGuard::set(
-        RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV,
-        "18446744073709551615",
-    );
-    let _ttl = crate::TestEnvVarGuard::set(
-        RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV,
-        "18446744073709551615",
-    );
-    let _backoff = crate::TestEnvVarGuard::set(
-        RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV,
-        "18446744073709551615",
-    );
-    let _lkg = crate::TestEnvVarGuard::set(
-        RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV,
-        "18446744073709551615",
-    );
-
-    assert_eq!(
-        runtime_gateway_oidc_prefetch_timeout(),
-        Duration::from_millis(MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS)
-    );
-    assert_eq!(
-        runtime_gateway_oidc_http_cache_ttl(),
-        Duration::from_secs(MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS)
-    );
-    assert_eq!(
-        runtime_gateway_oidc_refresh_failure_backoff(),
-        Duration::from_millis(MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS)
-    );
-    assert_eq!(
-        runtime_gateway_oidc_last_known_good_window(),
-        Duration::from_secs(MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS)
+fn oidc_runtime_config_rejects_overflow_and_cache_headers_clamp() {
+    let overflow = u64::MAX.to_string();
+    assert_oidc_runtime_config_rejected(
+        &[
+            (RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV, &overflow),
+            (RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV, &overflow),
+            (RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV, &overflow),
+            (RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV, &overflow),
+        ],
+        &format!(
+            "{RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_ENV} must not exceed maximum; \
+             {RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_ENV} must not exceed maximum; \
+             {RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV} must not exceed maximum; \
+             {RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_ENV} must not exceed maximum"
+        ),
     );
     assert_eq!(
         runtime_gateway_oidc_cache_control_max_age(Some(&format!("max-age={}", u64::MAX))),
         Some(Duration::from_secs(
             MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS
+        ))
+    );
+    assert_eq!(
+        runtime_gateway_oidc_cache_control_stale_while_revalidate(Some(&format!(
+            "stale-while-revalidate={}",
+            u64::MAX
+        ))),
+        Some(Duration::from_secs(
+            MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS
         ))
     );
 }
