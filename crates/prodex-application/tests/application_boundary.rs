@@ -87,6 +87,7 @@ use prodex_application::{
     plan_application_control_plane_audit_emission_span,
     plan_application_control_plane_audit_emission_span_error_response,
     plan_application_control_plane_audit_error_response,
+    plan_application_control_plane_audit_from_http,
     plan_application_control_plane_audit_persistence_span,
     plan_application_control_plane_audit_persistence_span_error_response,
     plan_application_control_plane_http_route,
@@ -2562,6 +2563,39 @@ fn application_control_plane_idempotency_reads_key_from_http_header() {
         )
     );
     assert_eq!(operation.request_fingerprint, "sha256:retention-purge-http");
+}
+
+#[test]
+fn application_virtual_key_rotate_accepts_legacy_patch_route_as_exact_action() {
+    let tenant_id = TenantId::new();
+    let action = control_plane_action(
+        tenant_id,
+        control_plane_principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
+        ControlPlaneOperation::VirtualKeyRotateSecret,
+        ResourceKind::VirtualKey,
+    );
+    let http = GatewayHttpRequestMeta {
+        method: GatewayHttpMethod::Patch,
+        path: "/admin/keys/resource-1".to_string(),
+        body_len: 2,
+        headers: vec![
+            GatewayHttpHeader::new("Idempotency-Key", "rotate-key-1"),
+            GatewayHttpHeader::new("If-Match", "\"revision-1\""),
+        ],
+    };
+
+    let idempotency = plan_application_control_plane_idempotency_from_http_digest(
+        action.clone(),
+        &http,
+        "sha256:rotate-body",
+    )
+    .unwrap();
+    let audit = plan_application_control_plane_audit_from_http(action.clone(), &http).unwrap();
+    let precondition = plan_application_control_plane_precondition_from_http(action, &http).unwrap();
+
+    assert!(idempotency.operation.is_some());
+    assert_eq!(audit.action.operation, ControlPlaneOperation::VirtualKeyRotateSecret);
+    assert!(precondition.entity_tag.is_some());
 }
 
 #[test]
