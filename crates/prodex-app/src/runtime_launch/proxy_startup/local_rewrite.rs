@@ -225,6 +225,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
 ) -> Result<RuntimeRotationProxy> {
+    validate_credential_free_http_url(&options.upstream_base_url, "runtime upstream base URL")?;
     let (server, listen_addr) = runtime_local_rewrite_server(options.preferred_listen_addr)?;
     let prepared = prepare_runtime_local_rewrite_application(
         options,
@@ -321,6 +322,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         gateway_call_id_header,
         gateway_observability,
     } = options;
+    validate_credential_free_http_url(&upstream_base_url, "runtime upstream base URL")?;
     let (provider, provider_credential) = provider.into_runtime_parts();
     let log_path = runtime_local_rewrite_log_path(&runtime_config);
     initialize_runtime_probe_refresh_queue(runtime_config.tuning.probe_refresh_worker_count);

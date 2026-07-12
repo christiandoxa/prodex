@@ -85,13 +85,14 @@ impl RuntimeLaunchSelection {
             &codex_home,
             model_provider_override,
             profile_v2_name,
-        )
-        .or_else(|| {
-            profile_openai_compatible_model_provider_for_launch(
+        );
+        let non_openai_model_provider = match non_openai_model_provider {
+            Some(provider) => Some(provider),
+            None => profile_openai_compatible_model_provider_for_launch(
                 &codex_home,
                 model_provider_override,
-            )
-        });
+            )?,
+        };
 
         Ok(Self {
             initial_profile_name: profile_name.clone(),
@@ -116,13 +117,13 @@ impl RuntimeLaunchSelection {
             &self.codex_home,
             model_provider_override,
             profile_v2_name,
-        )
-        .or_else(|| {
-            profile_openai_compatible_model_provider_for_launch(
+        );
+        if self.non_openai_model_provider.is_none() {
+            self.non_openai_model_provider = profile_openai_compatible_model_provider_for_launch(
                 &self.codex_home,
                 model_provider_override,
-            )
-        });
+            )?;
+        }
         Ok(())
     }
 }
@@ -130,14 +131,16 @@ impl RuntimeLaunchSelection {
 fn profile_openai_compatible_model_provider_for_launch(
     codex_home: &Path,
     model_provider_override: Option<&str>,
-) -> Option<CodexModelProviderSetting> {
+) -> Result<Option<CodexModelProviderSetting>> {
     if model_provider_override.is_some() {
-        return None;
+        return Ok(None);
     }
-    read_profile_openai_compatible_base_url(codex_home).map(|_| CodexModelProviderSetting {
-        provider_id: PRODEX_OPENAI_COMPAT_PROVIDER_ID.to_string(),
-        source: CodexModelProviderSource::CliOverride,
-    })
+    Ok(
+        read_profile_openai_compatible_base_url(codex_home)?.map(|_| CodexModelProviderSetting {
+            provider_id: PRODEX_OPENAI_COMPAT_PROVIDER_ID.to_string(),
+            source: CodexModelProviderSource::CliOverride,
+        }),
+    )
 }
 
 pub(crate) fn resolve_runtime_launch_profile_name(

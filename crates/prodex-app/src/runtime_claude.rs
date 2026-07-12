@@ -96,6 +96,9 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
 }
 
 pub(super) fn handle_claude(args: ClaudeArgs) -> Result<()> {
+    if let Some(base_url) = args.base_url.as_deref() {
+        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
+    }
     execute_runtime_launch(ClaudeLaunchStrategy::new(args))
 }
 

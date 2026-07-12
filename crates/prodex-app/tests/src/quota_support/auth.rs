@@ -6,6 +6,21 @@ use std::{
 };
 
 #[test]
+fn chatgpt_refresh_request_debug_redacts_refresh_token() {
+    let sentinel = "chatgpt-refresh-debug-secret-sentinel";
+    let request = ChatgptRefreshRequest {
+        client_id: CHATGPT_AUTH_REFRESH_CLIENT_ID,
+        grant_type: "refresh_token",
+        refresh_token: sentinel.to_string(),
+    };
+
+    let rendered = format!("{request:?}");
+
+    assert!(rendered.contains("<redacted>"), "{rendered}");
+    assert!(!rendered.contains(sentinel), "{rendered}");
+}
+
+#[test]
 fn non_openai_model_provider_disables_quota_summary() {
     let root = temp_dir("non-openai-model-provider");
     fs::create_dir_all(&root).unwrap();
