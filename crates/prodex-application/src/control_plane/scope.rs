@@ -91,6 +91,38 @@ impl ApplicationControlPlaneGovernanceScope {
                 .iter()
                 .any(|prefix| name.starts_with(prefix))
     }
+
+    pub fn allows_resource_prefixes(&self, prefixes: &[String]) -> bool {
+        self.allowed_resource_prefixes.is_empty()
+            || (!prefixes.is_empty()
+                && prefixes
+                    .iter()
+                    .all(|prefix| self.matches_resource_name(prefix)))
+    }
+
+    pub(super) fn tenant_id(&self) -> Option<&str> {
+        self.tenant_id.as_deref()
+    }
+
+    pub(super) fn team_id(&self) -> Option<&str> {
+        self.team_id.as_deref()
+    }
+
+    pub(super) fn project_id(&self) -> Option<&str> {
+        self.project_id.as_deref()
+    }
+
+    pub(super) fn user_id(&self) -> Option<&str> {
+        self.user_id.as_deref()
+    }
+
+    pub(super) fn budget_id(&self) -> Option<&str> {
+        self.budget_id.as_deref()
+    }
+
+    pub(super) fn allowed_resource_prefixes(&self) -> &[String] {
+        &self.allowed_resource_prefixes
+    }
 }
 
 fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
@@ -137,6 +169,8 @@ mod tests {
             Some("budget-a"),
         ));
         assert!(scope.matches_resource_name("team-a-key"));
+        assert!(scope.allows_resource_prefixes(&["team-a-children".to_string()]));
+        assert!(!scope.allows_resource_prefixes(&[]));
         assert!(!scope.matches_resource_name("team-b-key"));
         assert!(!scope.matches(
             Some("tenant-b"),
