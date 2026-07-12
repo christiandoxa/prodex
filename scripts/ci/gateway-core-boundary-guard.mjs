@@ -16,6 +16,8 @@ const ALLOWED_DEPENDENCIES = new Set([
   "prodex_provider_core",
   "prodex_provider_spi",
   "prodex_storage",
+  "serde",
+  "sha2",
 ]);
 const ALLOWED_DEV_DEPENDENCIES = new Set([]);
 const FORBIDDEN_DEPENDENCIES = new Set([
@@ -182,6 +184,8 @@ prodex_observability = { workspace = true }
 prodex_provider_core = { workspace = true }
 prodex_provider_spi = { workspace = true }
 prodex_storage = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
 `;
   assertSelfTest(validateGatewayCoreManifest(valid, "valid/Cargo.toml").length === 0, "valid manifest rejected");
   assertSelfTest(
