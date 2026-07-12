@@ -2627,6 +2627,8 @@ dependencies = [
  "prodex-provider-core",
  "prodex-provider-spi",
  "prodex-storage",
+ "serde",
+ "sha2",
 ]
 
 [[package]]
@@ -2901,6 +2903,7 @@ name = "prodex-runtime-proxy"
 version = "0.276.0"
 dependencies = [
  "base64",
+ "prodex-gateway-core",
  "prodex-provider-core",
  "prodex-redaction",
  "prodex-runtime-state",

@@ -4,7 +4,11 @@ use crate::{
     LocalBridgeBearerTokenHash, local_bridge_authorization_bearer_token,
     runtime_gateway_request_model,
 };
-use serde::{Deserialize, Serialize};
+use prodex_gateway_core::{
+    GatewayVirtualKeyAdmissionError, GatewayVirtualKeyAdmissionRequest, GatewayVirtualKeyPolicy,
+    GatewayVirtualKeyUsageUpdate, apply_gateway_virtual_key_usage_update,
+    plan_gateway_virtual_key_admission,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeGatewayRouteAlias {
@@ -131,23 +135,8 @@ pub struct RuntimeGatewayVirtualKey {
     pub tpm_limit: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RuntimeGatewayVirtualKeyUsage {
-    pub minute_epoch: u64,
-    pub requests_this_minute: u64,
-    pub tokens_this_minute: u64,
-    pub requests_total: u64,
-    pub spend_microusd: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeGatewayVirtualKeyAdmission {
-    pub key_name: String,
-    pub model: Option<String>,
-    pub input_tokens: u64,
-    pub reserved_tokens: u64,
-    pub estimated_cost_microusd: Option<u64>,
-}
+pub type RuntimeGatewayVirtualKeyUsage = prodex_gateway_core::GatewayVirtualKeyUsage;
+pub type RuntimeGatewayVirtualKeyAdmission = prodex_gateway_core::GatewayVirtualKeyAdmission;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeGatewayVirtualKeyRejection {
@@ -183,6 +172,37 @@ impl RuntimeGatewayVirtualKeyRejection {
     }
 }
 
+impl From<GatewayVirtualKeyAdmissionError> for RuntimeGatewayVirtualKeyRejection {
+    fn from(error: GatewayVirtualKeyAdmissionError) -> Self {
+        match error {
+            GatewayVirtualKeyAdmissionError::ModelNotAllowed => Self::ModelNotAllowed,
+            GatewayVirtualKeyAdmissionError::RequestBudgetExceeded => Self::RequestBudgetExceeded,
+            GatewayVirtualKeyAdmissionError::BudgetExceeded => Self::BudgetExceeded,
+            GatewayVirtualKeyAdmissionError::RpmLimitExceeded => Self::RpmLimitExceeded,
+            GatewayVirtualKeyAdmissionError::TpmLimitExceeded => Self::TpmLimitExceeded,
+            GatewayVirtualKeyAdmissionError::PolicyStateUnavailable => Self::PolicyStateUnavailable,
+        }
+    }
+}
+
+pub fn runtime_gateway_virtual_key_policy(
+    key: &RuntimeGatewayVirtualKey,
+) -> GatewayVirtualKeyPolicy {
+    GatewayVirtualKeyPolicy {
+        name: key.name.clone(),
+        tenant_id: key.tenant_id.clone(),
+        team_id: key.team_id.clone(),
+        project_id: key.project_id.clone(),
+        user_id: key.user_id.clone(),
+        budget_id: key.budget_id.clone(),
+        allowed_models: key.allowed_models.clone(),
+        budget_microusd: key.budget_microusd,
+        request_budget: key.request_budget,
+        rpm_limit: key.rpm_limit,
+        tpm_limit: key.tpm_limit,
+    }
+}
+
 pub fn runtime_gateway_virtual_key_from_headers<'a>(
     headers: &[(String, String)],
     keys: &'a [RuntimeGatewayVirtualKey],
@@ -211,59 +231,23 @@ pub fn runtime_gateway_virtual_key_admission(
     minute_epoch: u64,
 ) -> Result<RuntimeGatewayVirtualKeyAdmission, RuntimeGatewayVirtualKeyRejection> {
     let model = runtime_gateway_request_model(body);
-    if !key.allowed_models.is_empty()
-        && model.as_ref().is_some_and(|model| {
-            !key.allowed_models
-                .iter()
-                .any(|allowed| allowed.trim().eq_ignore_ascii_case(model))
-        })
-    {
-        return Err(RuntimeGatewayVirtualKeyRejection::ModelNotAllowed);
-    }
-
     let input_tokens = prodex_provider_core::estimate_request_input_tokens(body);
     let reserved_tokens = runtime_gateway_estimated_tokens(body);
-    let usage = usage.cloned().unwrap_or_default();
-    let same_minute = usage.minute_epoch == minute_epoch;
-    let requests_this_minute = if same_minute {
-        usage.requests_this_minute
-    } else {
-        0
-    };
-    let tokens_this_minute = if same_minute {
-        usage.tokens_this_minute
-    } else {
-        0
-    };
-
-    if let Some(limit) = key.request_budget
-        && usage.requests_total >= limit
-    {
-        return Err(RuntimeGatewayVirtualKeyRejection::RequestBudgetExceeded);
-    }
-    if let (Some(limit), Some(cost)) = (key.budget_microusd, estimated_cost_microusd)
-        && usage.spend_microusd.saturating_add(cost) > limit
-    {
-        return Err(RuntimeGatewayVirtualKeyRejection::BudgetExceeded);
-    }
-    if let Some(limit) = key.rpm_limit
-        && requests_this_minute.saturating_add(1) > limit
-    {
-        return Err(RuntimeGatewayVirtualKeyRejection::RpmLimitExceeded);
-    }
-    if let Some(limit) = key.tpm_limit
-        && tokens_this_minute.saturating_add(reserved_tokens) > limit
-    {
-        return Err(RuntimeGatewayVirtualKeyRejection::TpmLimitExceeded);
-    }
-
-    Ok(RuntimeGatewayVirtualKeyAdmission {
-        key_name: key.name.clone(),
+    plan_gateway_virtual_key_admission(GatewayVirtualKeyAdmissionRequest {
+        policy: runtime_gateway_virtual_key_policy(key),
+        usage: usage.cloned().unwrap_or_default(),
+        grouped_usage: Vec::new(),
         model,
         input_tokens,
         reserved_tokens,
         estimated_cost_microusd,
+        minute_epoch,
+        reservation: None,
+        distributed_rate_limit: false,
+        now_unix_ms: 0,
     })
+    .map(|plan| plan.admission)
+    .map_err(Into::into)
 }
 
 pub fn runtime_gateway_record_virtual_key_usage(
@@ -271,19 +255,10 @@ pub fn runtime_gateway_record_virtual_key_usage(
     admission: &RuntimeGatewayVirtualKeyAdmission,
     minute_epoch: u64,
 ) {
-    if usage.minute_epoch != minute_epoch {
-        usage.minute_epoch = minute_epoch;
-        usage.requests_this_minute = 0;
-        usage.tokens_this_minute = 0;
-    }
-    usage.requests_this_minute = usage.requests_this_minute.saturating_add(1);
-    usage.tokens_this_minute = usage
-        .tokens_this_minute
-        .saturating_add(admission.reserved_tokens);
-    usage.requests_total = usage.requests_total.saturating_add(1);
-    if let Some(cost) = admission.estimated_cost_microusd {
-        usage.spend_microusd = usage.spend_microusd.saturating_add(cost);
-    }
+    apply_gateway_virtual_key_usage_update(
+        usage,
+        GatewayVirtualKeyUsageUpdate::from_admission(admission, minute_epoch),
+    );
 }
 
 pub fn runtime_gateway_minute_epoch() -> u64 {
