@@ -16,6 +16,7 @@ mod control_plane;
 mod data_plane;
 mod provider;
 mod request_context;
+mod virtual_key;
 
 pub use accounting::*;
 pub use auth::*;
@@ -31,6 +32,7 @@ pub use request_context::{
     plan_application_data_plane_authorization,
     plan_application_request_authentication_from_evidence, plan_application_request_context,
 };
+pub use virtual_key::*;
 
 use std::error::Error;
 use std::fmt;

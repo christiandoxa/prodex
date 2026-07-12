@@ -5,6 +5,10 @@
 //! contracts into a gateway request plan without depending on HTTP frameworks,
 //! async runtimes, storage drivers, filesystem, or provider SDKs.
 
+mod virtual_key;
+
+pub use virtual_key::*;
+
 use std::error::Error;
 use std::fmt;
 
