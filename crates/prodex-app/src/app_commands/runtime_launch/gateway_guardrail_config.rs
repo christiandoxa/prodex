@@ -150,24 +150,31 @@ fn gateway_guardrail_webhook_config_with_resolver(
     {
         bail!("gateway.guardrails.webhook_bearer_token_env must be non-empty without whitespace");
     }
-    let token_context = if policy.guardrails.webhook_bearer_token_ref.is_some() {
-        "gateway.guardrails.webhook_bearer_token_ref"
-    } else {
-        "gateway.guardrails.webhook"
-    };
-    let bearer_token = resolver.runtime_secret(
-        token_context,
-        policy.guardrails.webhook_bearer_token_ref.as_ref(),
-        policy.guardrails.webhook_bearer_token_env.as_deref(),
-        None,
-        SecretPurpose::WebhookSigningSecret,
-    )?;
+    let bearer_token = gateway_guardrail_webhook_secret_with_resolver(policy, resolver)?;
     Ok(RuntimeGatewayGuardrailWebhookConfig {
         url,
         phases,
         bearer_token,
         fail_closed: policy.guardrails.webhook_fail_closed.unwrap_or(false),
     })
+}
+
+pub(crate) fn gateway_guardrail_webhook_secret_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<Option<RuntimeGatewaySecret>> {
+    let token_context = if policy.guardrails.webhook_bearer_token_ref.is_some() {
+        "gateway.guardrails.webhook_bearer_token_ref"
+    } else {
+        "gateway.guardrails.webhook"
+    };
+    resolver.runtime_secret(
+        token_context,
+        policy.guardrails.webhook_bearer_token_ref.as_ref(),
+        policy.guardrails.webhook_bearer_token_env.as_deref(),
+        None,
+        SecretPurpose::WebhookSigningSecret,
+    )
 }
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {

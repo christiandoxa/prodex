@@ -17,17 +17,32 @@ pub(crate) fn resolve_gateway_auth_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<ResolvedGatewayAuthConfig> {
     let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
-    resolve_gateway_auth_config_with_resolver(args, policy, &resolver)
+    let token_env = (args.auth_token.is_none()
+        && policy.auth_token_ref.is_none()
+        && std::env::var_os("PRODEX_GATEWAY_TOKEN").is_some())
+    .then_some("PRODEX_GATEWAY_TOKEN");
+    resolve_gateway_auth_config_with_token_env(args, policy, &resolver, token_env)
 }
 
 pub(crate) fn resolve_gateway_auth_config_with_resolver(
     args: &GatewayArgs,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
+    environment: &RuntimeGatewayLaunchEnvironment,
 ) -> Result<ResolvedGatewayAuthConfig> {
     let token_env = (args.auth_token.is_none()
-        && std::env::var_os("PRODEX_GATEWAY_TOKEN").is_some())
+        && policy.auth_token_ref.is_none()
+        && environment.secret_env_present("PRODEX_GATEWAY_TOKEN"))
     .then_some("PRODEX_GATEWAY_TOKEN");
+    resolve_gateway_auth_config_with_token_env(args, policy, resolver, token_env)
+}
+
+fn resolve_gateway_auth_config_with_token_env(
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+    token_env: Option<&str>,
+) -> Result<ResolvedGatewayAuthConfig> {
     let auth_token = resolver.resolve(
         "gateway authentication token",
         policy.auth_token_ref.as_ref(),
