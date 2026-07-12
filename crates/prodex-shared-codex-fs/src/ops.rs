@@ -341,3 +341,22 @@ pub(super) fn ensure_shared_codex_target_is_directory_public(path: &Path) -> Res
 pub(super) fn ensure_shared_codex_target_is_file_public(path: &Path) -> Result<()> {
     ensure_shared_codex_target_is_file(path)
 }
+
+#[cfg(all(test, unix))]
+#[test]
+fn create_codex_home_repairs_legacy_directory_permissions() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = env::temp_dir().join(format!("prodex-private-home-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o775)).unwrap();
+
+    create_codex_home_if_missing(&path).unwrap();
+
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    fs::remove_dir(&path).unwrap();
+}
