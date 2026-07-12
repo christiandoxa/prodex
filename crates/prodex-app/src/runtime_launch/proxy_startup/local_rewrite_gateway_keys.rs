@@ -520,7 +520,14 @@ fn runtime_gateway_application_admission_without_virtual_key(
     let Some(tenant) = authorized.tenant_context() else {
         return Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
             namespace: None,
-            application: RuntimeGatewayApplicationAdmission::CompatibilityAnonymous,
+            application: RuntimeGatewayApplicationAdmission::compatibility_anonymous(
+                authorized.request().route(),
+                captured,
+                shared,
+            )
+            .map_err(|_| {
+                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+            })?,
         });
     };
     let call_id = CallId::new();

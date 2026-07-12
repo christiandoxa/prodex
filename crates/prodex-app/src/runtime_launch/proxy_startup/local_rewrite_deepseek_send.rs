@@ -7,6 +7,7 @@ use super::super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
     runtime_local_rewrite_model_selection,
 };
+use super::super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
 use super::super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::super::local_rewrite_search_fallback::{
     RuntimeLocalRewritePreparedSendResult, RuntimeLocalRewriteSearchFallbackRequest,
@@ -17,22 +18,20 @@ use super::super::local_rewrite_transport::{
     runtime_local_rewrite_api_key_attempts, send_runtime_local_rewrite_prepared_request,
 };
 use super::super::provider_bridge::{
-    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, RuntimeProviderRouteKind,
-    runtime_provider_error_class, runtime_provider_label, runtime_provider_log_request_conformance,
+    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
+    runtime_provider_label, runtime_provider_log_request_conformance,
     runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
-    runtime_provider_request_conformance_result, runtime_provider_route_kind,
-    runtime_provider_should_retry_with_next_model,
-    runtime_provider_should_rotate_auth_after_response,
+    runtime_provider_request_conformance_result,
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
 use prodex_provider_core::{
+    ProviderEndpoint,
     deepseek_provider_core_request_body as core_deepseek_provider_core_request_body,
     deepseek_provider_core_simple_request,
 };
-use runtime_proxy_crate::{
-    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
-};
+use prodex_provider_spi::ProviderRetryCause;
+use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 
 pub(in super::super) fn send_runtime_deepseek_upstream_request(
     request_id: u64,
@@ -40,6 +39,7 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
     shared: &RuntimeLocalRewriteProxyShared,
     body: Vec<u8>,
     api_keys: &[String],
+    endpoint: ProviderEndpoint,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let api_key_attempts = if shared.provider_credential.is_some() {
         vec![("projected".to_string(), None)]
@@ -53,10 +53,7 @@ pub(in super::super) fn send_runtime_deepseek_upstream_request(
         anyhow::bail!("DeepSeek provider has no API keys configured");
     }
     let api_key_attempt_count = api_key_attempts.len();
-    if matches!(
-        runtime_provider_route_kind(path_without_query(&request.path_and_query)),
-        Some(RuntimeProviderRouteKind::Responses)
-    ) {
+    if endpoint == ProviderEndpoint::Responses {
         send_runtime_deepseek_responses_request(
             request_id,
             request,
@@ -189,7 +186,12 @@ fn send_runtime_deepseek_responses_request(
                 } => (status, parts, class),
             };
             if model_index + 1 < model_chain.len()
-                && runtime_provider_should_retry_with_next_model(class)
+                && runtime_gateway_application_provider_retry_precommit(
+                    ProviderRetryCause::NextModel,
+                    class,
+                    model_index,
+                    model_chain.len(),
+                )
             {
                 runtime_proxy_log(
                     &shared.runtime_shared,
@@ -214,9 +216,12 @@ fn send_runtime_deepseek_responses_request(
                 );
                 continue;
             }
-            if api_key_index + 1 < api_key_attempt_count
-                && runtime_provider_should_rotate_auth_after_response(class)
-            {
+            if runtime_gateway_application_provider_retry_precommit(
+                ProviderRetryCause::RotateCredential,
+                class,
+                api_key_index,
+                api_key_attempt_count,
+            ) {
                 runtime_deepseek_log_auth_rotate(shared, request_id, &api_key_label, status, class);
                 break;
             }
@@ -259,9 +264,12 @@ fn send_runtime_deepseek_passthrough_request(
                 status,
                 &parts.body,
             );
-            if api_key_index + 1 < api_key_attempt_count
-                && runtime_provider_should_rotate_auth_after_response(class)
-            {
+            if runtime_gateway_application_provider_retry_precommit(
+                ProviderRetryCause::RotateCredential,
+                class,
+                api_key_index,
+                api_key_attempt_count,
+            ) {
                 runtime_deepseek_log_auth_rotate(shared, request_id, &api_key_label, status, class);
                 continue;
             }

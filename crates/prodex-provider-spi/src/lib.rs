@@ -13,7 +13,7 @@ use prodex_domain::{
     CredentialScope, ModelRouteCandidate, Principal, RequestId, SecretRef, TenantContext,
     UsageAmount, negotiate_capability, plan_capability_decision_error_response,
 };
-use prodex_provider_core::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+use prodex_provider_core::{ProviderEndpoint, ProviderErrorClass, ProviderId, ProviderWireFormat};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderRoute {
@@ -259,10 +259,17 @@ pub enum ProviderRetryStage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderRetryCause {
+    NextModel,
+    RotateCredential,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderRetryDecision {
     Allowed,
     DeniedCommitted,
     DeniedBudgetExhausted,
+    DeniedNotRetryable,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,6 +299,11 @@ pub fn plan_provider_retry_decision_response(
             code: "provider_retry_budget_exhausted",
             message: "provider retry budget is exhausted",
         }),
+        ProviderRetryDecision::DeniedNotRetryable => Some(ProviderRetryDecisionResponsePlan {
+            status: ProviderRetryDecisionStatus::ServiceUnavailable,
+            code: "provider_retry_not_eligible",
+            message: "provider response is not eligible for retry",
+        }),
     }
 }
 
@@ -317,6 +329,12 @@ impl ProviderRetryPolicy {
             max_precommit_attempts: 1,
         }
     }
+
+    pub const fn bounded(max_precommit_attempts: u8) -> Self {
+        Self {
+            max_precommit_attempts,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -330,6 +348,8 @@ pub struct ProviderRetryPlan {
 pub fn plan_provider_retry(
     policy: ProviderRetryPolicy,
     stage: ProviderRetryStage,
+    cause: ProviderRetryCause,
+    error_class: ProviderErrorClass,
     attempted_precommit_retries: u8,
 ) -> ProviderRetryPlan {
     let base_decision = evaluate_provider_retry(stage);
@@ -337,6 +357,9 @@ pub fn plan_provider_retry(
         .max_precommit_attempts
         .saturating_sub(attempted_precommit_retries);
     let decision = match base_decision {
+        ProviderRetryDecision::Allowed if !provider_retry_cause_is_eligible(cause, error_class) => {
+            ProviderRetryDecision::DeniedNotRetryable
+        }
         ProviderRetryDecision::Allowed if remaining_precommit_retries == 0 => {
             ProviderRetryDecision::DeniedBudgetExhausted
         }
@@ -348,6 +371,28 @@ pub fn plan_provider_retry(
         decision,
         attempted_precommit_retries,
         remaining_precommit_retries,
+    }
+}
+
+fn provider_retry_cause_is_eligible(
+    cause: ProviderRetryCause,
+    error_class: ProviderErrorClass,
+) -> bool {
+    match cause {
+        ProviderRetryCause::NextModel => matches!(
+            error_class,
+            ProviderErrorClass::Quota
+                | ProviderErrorClass::RateLimit
+                | ProviderErrorClass::Transient
+                | ProviderErrorClass::NotFound
+        ),
+        ProviderRetryCause::RotateCredential => matches!(
+            error_class,
+            ProviderErrorClass::Auth
+                | ProviderErrorClass::Quota
+                | ProviderErrorClass::RateLimit
+                | ProviderErrorClass::Transient
+        ),
     }
 }
 

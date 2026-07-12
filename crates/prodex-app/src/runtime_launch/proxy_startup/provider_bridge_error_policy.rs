@@ -19,30 +19,6 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_error_cooldown_
         .cooldown_ms
 }
 
-pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_should_retry_with_next_model(
-    class: RuntimeProviderErrorClass,
-) -> bool {
-    matches!(
-        class,
-        RuntimeProviderErrorClass::Quota
-            | RuntimeProviderErrorClass::RateLimit
-            | RuntimeProviderErrorClass::Transient
-            | RuntimeProviderErrorClass::NotFound
-    )
-}
-
-pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_should_rotate_auth_after_response(
-    class: RuntimeProviderErrorClass,
-) -> bool {
-    matches!(
-        class,
-        RuntimeProviderErrorClass::Auth
-            | RuntimeProviderErrorClass::Quota
-            | RuntimeProviderErrorClass::RateLimit
-            | RuntimeProviderErrorClass::Transient
-    )
-}
-
 fn runtime_provider_error_classification(
     kind: RuntimeProviderBridgeKind,
     status: u16,
@@ -63,18 +39,9 @@ fn runtime_provider_error_class_from_core(
     class: ProviderErrorClass,
     status: u16,
 ) -> RuntimeProviderErrorClass {
-    match class {
-        ProviderErrorClass::Auth => RuntimeProviderErrorClass::Auth,
-        ProviderErrorClass::Quota => RuntimeProviderErrorClass::Quota,
-        ProviderErrorClass::RateLimit => RuntimeProviderErrorClass::RateLimit,
-        ProviderErrorClass::Transient => RuntimeProviderErrorClass::Transient,
-        ProviderErrorClass::NotFound => RuntimeProviderErrorClass::NotFound,
-        ProviderErrorClass::Other => {
-            if status >= 500 {
-                RuntimeProviderErrorClass::Transient
-            } else {
-                RuntimeProviderErrorClass::Fatal
-            }
-        }
+    if class == ProviderErrorClass::Other && status >= 500 {
+        ProviderErrorClass::Transient
+    } else {
+        class
     }
 }

@@ -41,6 +41,20 @@ const FILES = Object.freeze({
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_governance.rs",
   dispatch:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs",
+  providerSender:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+  providerErrorPolicy:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_error_policy.rs",
+  providerCopilot:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_copilot.rs",
+  providerDeepSeek:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
+  providerGeminiOpenAi:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_openai.rs",
+  providerGemini:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs",
+  applicationProvider: "crates/prodex-application/src/provider.rs",
+  providerSpi: "crates/prodex-provider-spi/src/lib.rs",
   keys: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
   ledger: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
   responseSpend:
@@ -295,12 +309,107 @@ export function validateProductionBoundary(sources) {
   );
   const providerDispatch =
     functionBody(sources.dispatch, "runtime_local_rewrite_dispatch_provider") ?? "";
-  requireBefore(
+  requireOrdered(
     errors,
     providerDispatch,
-    "runtime_gateway_application_provider_dispatch(",
-    "send_runtime_local_rewrite_upstream_request(",
-    `${FILES.dispatch}: application provider validation must precede provider dispatch`,
+    [
+      "runtime_gateway_application_provider_dispatch(&request.application_admission)",
+      "send_runtime_local_rewrite_upstream_request(",
+      "&provider_dispatch",
+    ],
+    `${FILES.dispatch}: the concrete sender must consume the application provider dispatch plan`,
+  );
+  const providerPlan =
+    functionBody(sources.dataPlaneAdapter, "runtime_gateway_application_provider_dispatch") ?? "";
+  requirePattern(
+    errors,
+    providerPlan,
+    /RuntimeGatewayApplicationAdmissionKind::TenantBound\(plan\)[\s\S]*?&plan\.admission\.provider_invocation/,
+    `${FILES.dataPlaneAdapter}: tenant-bound provider dispatch must borrow the admitted application invocation`,
+  );
+  requirePattern(
+    errors,
+    sources.dataPlaneAdapter,
+    /struct RuntimeGatewayApplicationAdmission\(RuntimeGatewayApplicationAdmissionKind\);[\s\S]*?CompatibilityAnonymous\(RuntimeGatewayCompatibilityProviderInvocation\)/,
+    `${FILES.dataPlaneAdapter}: anonymous compatibility must remain explicit and non-forgeable outside the adapter`,
+  );
+  const providerSender =
+    functionBody(sources.providerSender, "send_runtime_local_rewrite_upstream_request") ?? "";
+  requireOrdered(
+    errors,
+    providerSender,
+    [
+      "let provider = dispatch.provider();",
+      "let endpoint = dispatch.endpoint();",
+      "let stream_mode = dispatch.stream_mode();",
+      "match (provider, &shared.provider)",
+    ],
+    `${FILES.providerSender}: sender must select the configured adapter from the application provider, endpoint, and stream plan`,
+  );
+  forbidText(
+    errors,
+    providerSender,
+    "runtime_provider_route_kind(",
+    `${FILES.providerSender}: sender must not re-derive the planned endpoint from the raw path`,
+  );
+  requireText(
+    errors,
+    sources.dataPlaneAdapter,
+    "plan_application_provider_retry(ApplicationProviderRetryRequest",
+    `${FILES.dataPlaneAdapter}: provider retry decisions must enter the canonical application planner`,
+  );
+  for (const [source, file] of [
+    [sources.providerSender, FILES.providerSender],
+    [sources.providerCopilot, FILES.providerCopilot],
+    [sources.providerDeepSeek, FILES.providerDeepSeek],
+    [sources.providerGeminiOpenAi, FILES.providerGeminiOpenAi],
+    [sources.providerGemini, FILES.providerGemini],
+  ]) {
+    requireText(
+      errors,
+      source,
+      "runtime_gateway_application_provider_retry_precommit(",
+      `${file}: provider retry loops must consume the application retry plan`,
+    );
+  }
+  for (const forbidden of [
+    "runtime_provider_should_retry_with_next_model",
+    "runtime_provider_should_rotate_auth_after_response",
+    "runtime_copilot_should_rotate_after_response",
+  ]) {
+    for (const [source, file] of [
+      [sources.providerErrorPolicy, FILES.providerErrorPolicy],
+      [sources.providerSender, FILES.providerSender],
+      [sources.providerCopilot, FILES.providerCopilot],
+      [sources.providerDeepSeek, FILES.providerDeepSeek],
+      [sources.providerGeminiOpenAi, FILES.providerGeminiOpenAi],
+      [sources.providerGemini, FILES.providerGemini],
+    ]) {
+      forbidText(
+        errors,
+        source,
+        forbidden,
+        `${file}: duplicate provider retry policy ${forbidden} is forbidden`,
+      );
+    }
+  }
+  for (const required of [
+    "ProviderRetryCause::NextModel",
+    "ProviderRetryCause::RotateCredential",
+    "ProviderRetryDecision::DeniedNotRetryable",
+  ]) {
+    requireText(
+      errors,
+      sources.providerSpi,
+      required,
+      `${FILES.providerSpi}: canonical provider retry causes and denial must remain typed`,
+    );
+  }
+  requireText(
+    errors,
+    sources.applicationProvider,
+    "request.cause",
+    `${FILES.applicationProvider}: application provider retry must forward the typed retry cause`,
   );
 
   const virtualKeyAdmission =
@@ -649,12 +758,16 @@ export function validateProductionBoundary(sources) {
       `${FILES.dataPlaneAdapter}: durable settlement must enter application reconciliation`,
     ],
     [
-      "RuntimeGatewayApplicationAdmission::CompatibilityAnonymous",
+      "RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous",
       `${FILES.dataPlaneAdapter}: intentionally open anonymous compatibility must remain explicit`,
     ],
     [
+      "ProviderRetryStage::BeforeFirstByte",
+      `${FILES.dataPlaneAdapter}: application retry authority must own precommit provider attempts`,
+    ],
+    [
       "ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation",
-      `${FILES.dataPlaneAdapter}: application retry authority must be limited to irreversible stages`,
+      `${FILES.dataPlaneAdapter}: application retry authority must deny irreversible stages`,
     ],
   ]) requireText(errors, sources.dataPlaneAdapter, needle, message);
   for (const [needle, message] of [
@@ -1099,8 +1212,26 @@ function runSelfTest() {
       runtime_gateway_virtual_key_admission();
     }`,
     dispatch: `fn runtime_local_rewrite_dispatch_provider() {
-      runtime_gateway_application_provider_dispatch();
-      send_runtime_local_rewrite_upstream_request();
+      let provider_dispatch = runtime_gateway_application_provider_dispatch(&request.application_admission);
+      send_runtime_local_rewrite_upstream_request(request, &provider_dispatch);
+    }`,
+    providerSender: `fn send_runtime_local_rewrite_upstream_request() {
+      let provider = dispatch.provider();
+      let endpoint = dispatch.endpoint();
+      let stream_mode = dispatch.stream_mode();
+      runtime_gateway_application_provider_retry_precommit();
+      match (provider, &shared.provider) {}
+    }`,
+    providerErrorPolicy: "",
+    providerCopilot: "runtime_gateway_application_provider_retry_precommit();",
+    providerDeepSeek: "runtime_gateway_application_provider_retry_precommit();",
+    providerGeminiOpenAi: "runtime_gateway_application_provider_retry_precommit();",
+    providerGemini: "runtime_gateway_application_provider_retry_precommit();",
+    applicationProvider: "fn retry() { request.cause; }",
+    providerSpi: `fn retry() {
+      ProviderRetryCause::NextModel;
+      ProviderRetryCause::RotateCredential;
+      ProviderRetryDecision::DeniedNotRetryable;
     }`,
     keys: `fn runtime_gateway_virtual_key_admission() {
       let typed_request_id = authorized.request().request_id();
@@ -1194,9 +1325,17 @@ function runSelfTest() {
       claimed_tenant_id.map(runtime_gateway_control_plane_tenant_id_from_text);
       "prodex:gateway-admin-control-plane-tenant-text:v1";`,
     dataPlaneAdapter:
-      `plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); RuntimeGatewayApplicationAdmission::CompatibilityAnonymous; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
+      `struct RuntimeGatewayApplicationAdmission(RuntimeGatewayApplicationAdmissionKind);
+      enum RuntimeGatewayApplicationAdmissionKind { TenantBound, CompatibilityAnonymous(RuntimeGatewayCompatibilityProviderInvocation) }
+      plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous; ProviderRetryStage::BeforeFirstByte; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
       let request_id = authorized.request().request_id();
       authorized.request().trace_context();
+      fn runtime_gateway_application_provider_dispatch() {
+        match admission { RuntimeGatewayApplicationAdmissionKind::TenantBound(plan) => &plan.admission.provider_invocation }
+      }
+      fn runtime_gateway_application_provider_retry_precommit() {
+        plan_application_provider_retry(ApplicationProviderRetryRequest {});
+      }
       fn runtime_gateway_provider_invocation() {
         shared.provider_credential.as_ref().map(|credential| credential.reference());
       }`,
@@ -1467,9 +1606,26 @@ function runSelfTest() {
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      dispatch: valid.dispatch.replace("runtime_gateway_application_provider_dispatch();", ""),
-    }).some((error) => error.includes("provider validation")),
+      dispatch: valid.dispatch.replace(
+        "runtime_gateway_application_provider_dispatch(&request.application_admission)",
+        "provider_bypass",
+      ),
+    }).some((error) => error.includes("concrete sender")),
     "provider dispatch application bypass accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      providerSender: valid.providerSender.replace("let endpoint = dispatch.endpoint();", ""),
+    }).some((error) => error.includes("application provider, endpoint, and stream plan")),
+    "provider sender endpoint re-derivation accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      providerCopilot: `${valid.providerCopilot}\nfn runtime_copilot_should_rotate_after_response() {}`,
+    }).some((error) => error.includes("duplicate provider retry policy")),
+    "duplicate Copilot retry policy accepted",
   );
   assertSelfTest(
     validateProductionBoundary({

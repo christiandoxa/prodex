@@ -8,17 +8,17 @@ use super::super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
     runtime_local_rewrite_model_selection,
 };
+use super::super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
 use super::super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::super::local_rewrite_search_fallback::runtime_local_rewrite_remember_accepted_model;
 use super::super::local_rewrite_transport::{
     RuntimeLocalRewritePreparedAuth, send_runtime_local_rewrite_prepared_request,
 };
 use super::super::provider_bridge::{
-    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, RuntimeProviderRouteKind,
-    runtime_provider_error_class, runtime_provider_error_cooldown_ms,
-    runtime_provider_log_request_conformance, runtime_provider_model_from_body,
-    runtime_provider_request_body_with_model, runtime_provider_request_conformance_result,
-    runtime_provider_route_kind, runtime_provider_should_retry_with_next_model,
+    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
+    runtime_provider_error_cooldown_ms, runtime_provider_log_request_conformance,
+    runtime_provider_model_from_body, runtime_provider_request_body_with_model,
+    runtime_provider_request_conformance_result,
 };
 use super::super::{
     local_rewrite_gemini_quota::{
@@ -59,17 +59,18 @@ use local_rewrite_gemini_send_short_circuit::{
 };
 use prodex_provider_core::{
     GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS as RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
+    ProviderEndpoint,
     gemini_provider_core_body_has_terminal_quota as runtime_gemini_body_has_terminal_quota,
     gemini_provider_core_invalid_stream_retry_delay_ms as runtime_gemini_invalid_stream_retry_delay_ms,
     gemini_provider_core_request_body,
+    gemini_provider_core_response_retryable_quota as runtime_gemini_response_retryable_quota,
     gemini_provider_core_retry_delay_ms as runtime_gemini_retry_delay_ms,
     gemini_provider_core_should_inline_rate_limit_retry as runtime_gemini_should_inline_rate_limit_retry,
-    gemini_provider_core_should_rotate_after_quota_response as runtime_gemini_should_rotate_after_quota_response,
     gemini_provider_core_simple_request, gemini_provider_core_unsupported_tool_fallback_body,
 };
+use prodex_provider_spi::{ProviderRetryCause, ProviderStreamMode};
 use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use redaction::redaction_redact_secret_like_text;
-use runtime_proxy_crate::path_without_query;
 use std::thread;
 use std::time::Duration;
 
@@ -82,11 +83,11 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
     shared: &RuntimeLocalRewriteProxyShared,
     body: Vec<u8>,
     auth: &RuntimeGeminiProviderAuth,
+    endpoint: ProviderEndpoint,
+    stream_mode: ProviderStreamMode,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let responses_route = matches!(
-        runtime_provider_route_kind(path_without_query(&request.path_and_query)),
-        Some(RuntimeProviderRouteKind::Responses)
-    );
+    let responses_route = endpoint == ProviderEndpoint::Responses;
+    let application_streaming = stream_mode == ProviderStreamMode::Streaming;
     if responses_route {
         match auth {
             RuntimeGeminiProviderAuth::ApiKeys { api_keys } => {
@@ -193,6 +194,9 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                     stream: false,
                 }
             };
+            if responses_route {
+                translated.stream = application_streaming;
+            }
             if responses_route
                 && gemini_provider_core_simple_request(&model_body)
                 && let Some(body) = conformance
@@ -309,14 +313,16 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                         translated.body = fallback_body;
                         continue;
                     }
-                    if runtime_gemini_should_rotate_after_quota_response(
-                        status,
-                        quota_blocked,
-                        selected.hard_affinity,
-                        selected.quota_fallback_allowed,
-                        attempt_index,
-                        attempt_count,
-                    ) {
+                    if quota_blocked
+                        && runtime_gemini_response_retryable_quota(status)
+                        && (!selected.hard_affinity || selected.quota_fallback_allowed)
+                        && runtime_gateway_application_provider_retry_precommit(
+                            ProviderRetryCause::RotateCredential,
+                            class,
+                            attempt_index,
+                            attempt_count,
+                        )
+                    {
                         runtime_gemini_log_quota_rotate(
                             shared,
                             request_id,
@@ -330,8 +336,13 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                         );
                         continue 'auth_attempts;
                     }
-                    if runtime_provider_should_retry_with_next_model(class)
-                        && model_index + 1 < model_chain.len()
+                    if model_index + 1 < model_chain.len()
+                        && runtime_gateway_application_provider_retry_precommit(
+                            ProviderRetryCause::NextModel,
+                            class,
+                            model_index,
+                            model_chain.len(),
+                        )
                     {
                         runtime_gemini_log_provider_model_fallback(
                             shared,
@@ -381,7 +392,14 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                                 }
                             }
                         }
-                        if !selected.hard_affinity && attempt_index + 1 < attempt_count {
+                        if !selected.hard_affinity
+                            && runtime_gateway_application_provider_retry_precommit(
+                                ProviderRetryCause::RotateCredential,
+                                class,
+                                attempt_index,
+                                attempt_count,
+                            )
+                        {
                             continue 'auth_attempts;
                         }
                     }
@@ -458,7 +476,14 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                                 thread::sleep(Duration::from_millis(delay_ms));
                                 continue;
                             }
-                            if model_index + 1 < model_chain.len() {
+                            if model_index + 1 < model_chain.len()
+                                && runtime_gateway_application_provider_retry_precommit(
+                                    ProviderRetryCause::NextModel,
+                                    RuntimeProviderErrorClass::Transient,
+                                    model_index,
+                                    model_chain.len(),
+                                )
+                            {
                                 runtime_gemini_log_invalid_stream_model_fallback(
                                     shared,
                                     request_id,

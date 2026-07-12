@@ -3,6 +3,9 @@ use super::chat_compatible_rewrite::{
 };
 use super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
+use super::local_rewrite_application_data_plane::{
+    RuntimeGatewayApplicationProviderDispatch, runtime_gateway_application_provider_retry_precommit,
+};
 use super::local_rewrite_copilot::{
     RuntimeCopilotRequestContext, send_runtime_copilot_upstream_request,
 };
@@ -23,22 +26,18 @@ use super::local_rewrite_transport::{
     runtime_openai_standard_provider_upstream_url, send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, RuntimeProviderRouteKind, runtime_provider_error_class,
-    runtime_provider_label, runtime_provider_log_request_conformance,
-    runtime_provider_model_fallback_chain, runtime_provider_request_body_with_model,
-    runtime_provider_request_conformance_result, runtime_provider_route_kind,
-    runtime_provider_should_retry_with_next_model,
-    runtime_provider_should_rotate_auth_after_response,
+    RuntimeProviderBridgeKind, runtime_provider_error_class, runtime_provider_label,
+    runtime_provider_log_request_conformance, runtime_provider_model_fallback_chain,
+    runtime_provider_request_body_with_model, runtime_provider_request_conformance_result,
 };
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeRouteKind,
-    prepare_runtime_smart_context_http_body, runtime_proxy_log, runtime_proxy_request_lane,
+    prepare_runtime_smart_context_http_body, runtime_proxy_log,
 };
 use anyhow::Result;
-use prodex_provider_core::provider_core_lossless_body;
-use runtime_proxy_crate::{
-    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
-};
+use prodex_provider_core::{ProviderEndpoint, ProviderId, provider_core_lossless_body};
+use prodex_provider_spi::ProviderRetryCause;
+use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -85,8 +84,12 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
+    dispatch: &RuntimeGatewayApplicationProviderDispatch<'_>,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let route_kind = runtime_local_rewrite_route_kind(&request.path_and_query);
+    let provider = dispatch.provider();
+    let endpoint = dispatch.endpoint();
+    let stream_mode = dispatch.stream_mode();
+    let route_kind = runtime_local_rewrite_route_kind(endpoint);
     let body = prepare_runtime_smart_context_http_body(
         request_id,
         request,
@@ -94,20 +97,17 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )
     .into_owned();
-    match &shared.provider {
-        RuntimeLocalRewriteProviderOptions::ProjectedCredential { .. } => {
+    match (provider, &shared.provider) {
+        (_, RuntimeLocalRewriteProviderOptions::ProjectedCredential { .. }) => {
             unreachable!("projected provider wrapper must be split before dispatch")
         }
-        RuntimeLocalRewriteProviderOptions::Anthropic { auth } => {
+        (ProviderId::Anthropic, RuntimeLocalRewriteProviderOptions::Anthropic { auth }) => {
             let auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
             if auth_attempts.is_empty() {
                 anyhow::bail!("Anthropic provider has no auth configured");
             }
             let auth_attempt_count = auth_attempts.len();
-            if matches!(
-                runtime_provider_route_kind(path_without_query(&request.path_and_query)),
-                Some(RuntimeProviderRouteKind::Responses)
-            ) {
+            if endpoint == ProviderEndpoint::Responses {
                 let model_selection = runtime_local_rewrite_model_selection(
                     shared,
                     RuntimeProviderBridgeKind::Anthropic,
@@ -195,7 +195,12 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             } => (status, parts, class),
                         };
                         if model_index + 1 < model_chain.len()
-                            && runtime_provider_should_retry_with_next_model(class)
+                            && runtime_gateway_application_provider_retry_precommit(
+                                ProviderRetryCause::NextModel,
+                                class,
+                                model_index,
+                                model_chain.len(),
+                            )
                         {
                             runtime_proxy_log(
                                 &shared.runtime_shared,
@@ -225,9 +230,12 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             );
                             continue;
                         }
-                        if auth_index + 1 < auth_attempt_count
-                            && runtime_provider_should_rotate_auth_after_response(class)
-                        {
+                        if runtime_gateway_application_provider_retry_precommit(
+                            ProviderRetryCause::RotateCredential,
+                            class,
+                            auth_index,
+                            auth_attempt_count,
+                        ) {
                             runtime_proxy_log(
                                 &shared.runtime_shared,
                                 runtime_proxy_structured_log_message(
@@ -288,9 +296,12 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             status,
                             &parts.body,
                         );
-                        if auth_index + 1 < auth_attempt_count
-                            && runtime_provider_should_rotate_auth_after_response(class)
-                        {
+                        if runtime_gateway_application_provider_retry_precommit(
+                            ProviderRetryCause::RotateCredential,
+                            class,
+                            auth_index,
+                            auth_attempt_count,
+                        ) {
                             runtime_proxy_log(
                                 &shared.runtime_shared,
                                 runtime_proxy_structured_log_message(
@@ -331,19 +342,16 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 anyhow::bail!("no Anthropic auth attempts were available")
             }
         }
-        RuntimeLocalRewriteProviderOptions::Copilot { auth } => {
-            send_runtime_copilot_upstream_request(request_id, request, shared, body, auth)
+        (ProviderId::Copilot, RuntimeLocalRewriteProviderOptions::Copilot { auth }) => {
+            send_runtime_copilot_upstream_request(request_id, request, shared, body, auth, endpoint)
         }
-        RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys } => {
+        (ProviderId::OpenAi, RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }) => {
             let upstream_url = runtime_local_rewrite_upstream_url(
                 &shared.upstream_base_url,
                 &shared.mount_path,
                 &request.path_and_query,
             );
-            let body = if matches!(
-                runtime_provider_route_kind(path_without_query(&request.path_and_query)),
-                Some(RuntimeProviderRouteKind::Responses)
-            ) {
+            let body = if endpoint == ProviderEndpoint::Responses {
                 runtime_local_rewrite_model_selection(
                     shared,
                     RuntimeProviderBridgeKind::OpenAiResponses,
@@ -379,8 +387,11 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 copilot_context: None,
             })
         }
-        RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { embedding_model } => {
-            let parts = if path_without_query(&request.path_and_query).ends_with("/embeddings") {
+        (
+            ProviderId::OpenAi,
+            RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { embedding_model },
+        ) => {
+            let parts = if endpoint == ProviderEndpoint::Embeddings {
                 runtime_local_embeddings_response_parts(request, embedding_model)
             } else {
                 runtime_local_embeddings_only_rejection_parts()
@@ -391,15 +402,34 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 copilot_context: None,
             })
         }
-        RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys, .. } => {
-            send_runtime_deepseek_upstream_request(request_id, request, shared, body, api_keys)
+        (ProviderId::DeepSeek, RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys, .. }) => {
+            send_runtime_deepseek_upstream_request(
+                request_id, request, shared, body, api_keys, endpoint,
+            )
         }
-        RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } => {
-            send_runtime_gemini_upstream_request(request_id, request, shared, body, auth)
+        (ProviderId::Gemini, RuntimeLocalRewriteProviderOptions::Gemini { auth, .. }) => {
+            send_runtime_gemini_upstream_request(
+                request_id,
+                request,
+                shared,
+                body,
+                auth,
+                endpoint,
+                stream_mode,
+            )
         }
-        RuntimeLocalRewriteProviderOptions::Kiro { auth } => {
-            send_runtime_kiro_upstream_request(request_id, request, shared, body, auth)
+        (ProviderId::Kiro, RuntimeLocalRewriteProviderOptions::Kiro { auth }) => {
+            send_runtime_kiro_upstream_request(
+                request_id,
+                request,
+                shared,
+                body,
+                auth,
+                endpoint,
+                stream_mode,
+            )
         }
+        _ => anyhow::bail!("application provider dispatch does not match configured adapter"),
     }
 }
 
@@ -541,13 +571,13 @@ fn runtime_local_rewrite_json_parts(
     }
 }
 
-fn runtime_local_rewrite_route_kind(path_and_query: &str) -> RuntimeRouteKind {
-    match runtime_provider_route_kind(path_without_query(path_and_query)) {
-        Some(RuntimeProviderRouteKind::Responses | RuntimeProviderRouteKind::ChatCompletions) => {
+fn runtime_local_rewrite_route_kind(endpoint: ProviderEndpoint) -> RuntimeRouteKind {
+    match endpoint {
+        ProviderEndpoint::Responses | ProviderEndpoint::ChatCompletions => {
             RuntimeRouteKind::Responses
         }
-        Some(RuntimeProviderRouteKind::ResponsesCompact) => RuntimeRouteKind::Compact,
-        _ => runtime_proxy_request_lane(path_and_query, false),
+        ProviderEndpoint::ResponsesCompact => RuntimeRouteKind::Compact,
+        _ => RuntimeRouteKind::Standard,
     }
 }
 

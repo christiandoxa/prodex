@@ -32,6 +32,8 @@ use crate::runtime_kiro_acp::{
 use crate::runtime_proxy_shared::{RuntimeResponsesReply, RuntimeStreamingResponse};
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest};
 use anyhow::{Context, Result};
+use prodex_provider_core::ProviderEndpoint;
+use prodex_provider_spi::{ProviderStreamMode, ProviderStreamMode::Streaming};
 use runtime_proxy_crate::path_without_query;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -118,11 +120,13 @@ pub(super) fn send_runtime_kiro_upstream_request(
     shared: &RuntimeLocalRewriteProxyShared,
     body: Vec<u8>,
     auth: &RuntimeKiroProfileAuth,
+    endpoint: ProviderEndpoint,
+    stream_mode: ProviderStreamMode,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let path = path_without_query(&request.path_and_query);
-    let chat_completions_route = path.ends_with("/chat/completions");
-    let messages_route = path.ends_with("/messages");
-    if !(path.ends_with("/responses") || chat_completions_route || messages_route) {
+    let chat_completions_route = endpoint == ProviderEndpoint::ChatCompletions;
+    let messages_route = endpoint == ProviderEndpoint::Messages;
+    if !(endpoint == ProviderEndpoint::Responses || chat_completions_route || messages_route) {
         return Ok(RuntimeLocalRewriteUpstreamResult {
             response: RuntimeLocalRewriteUpstreamResponse::Buffered(runtime_kiro_json_parts(
                 501,
@@ -158,19 +162,11 @@ pub(super) fn send_runtime_kiro_upstream_request(
     } else {
         None
     };
-    let client_stream = if messages_route {
-        serde_json::from_slice::<Value>(&request.body)
-            .ok()
-            .and_then(|value| value.get("stream").and_then(Value::as_bool))
-            .unwrap_or(false)
-    } else {
-        false
-    };
     let body = anthropic_request
         .as_ref()
         .map(|translated| translated.translated_request.body.clone())
         .unwrap_or(body);
-    let body = match runtime_kiro_request_body_for_path(path, body) {
+    let body = match runtime_kiro_request_body_for_endpoint(endpoint, body) {
         Ok(body) => body,
         Err(parts) => {
             return Ok(RuntimeLocalRewriteUpstreamResult {
@@ -183,14 +179,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
 
     let value: Value =
         serde_json::from_slice(&body).context("failed to parse Codex Responses request JSON")?;
-    let stream = if messages_route {
-        client_stream
-    } else {
-        value
-            .get("stream")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-    };
+    let stream = stream_mode == Streaming;
 
     let translated = runtime_provider_chat_compatible_request_body(
         &body,
@@ -555,11 +544,11 @@ fn runtime_kiro_chat_completion_finish_reason(
     "stop"
 }
 
-fn runtime_kiro_request_body_for_path(
-    path: &str,
+fn runtime_kiro_request_body_for_endpoint(
+    endpoint: ProviderEndpoint,
     body: Vec<u8>,
 ) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
-    if !path.ends_with("/chat/completions") {
+    if endpoint != ProviderEndpoint::ChatCompletions {
         return Ok(body);
     }
     let mut value: Value = serde_json::from_slice(&body).map_err(|_| {

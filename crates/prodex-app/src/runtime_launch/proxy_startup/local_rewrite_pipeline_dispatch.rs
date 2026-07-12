@@ -126,32 +126,13 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
     request: RuntimeLocalRewriteDispatchReadyRequest<'_>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<()> {
-    if let Err(err) = runtime_gateway_application_provider_dispatch(
-        &request.application_admission,
-        &request.captured,
-        shared,
-    ) {
-        runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_application_provider_dispatch_rejected",
-                [
-                    runtime_proxy_log_field("request", request.state.request_id.to_string()),
-                    runtime_proxy_log_field(
-                        "error",
-                        runtime_local_rewrite_error_log_value(&anyhow::Error::new(err)),
-                    ),
-                ],
-            ),
-        );
-        return Err(request
-            .state
-            .reject(runtime_local_rewrite_upstream_request_failed_response()));
-    }
+    let provider_dispatch =
+        runtime_gateway_application_provider_dispatch(&request.application_admission);
     let response = match send_runtime_local_rewrite_upstream_request(
         request.state.request_id,
         &request.captured,
         shared,
+        &provider_dispatch,
     ) {
         Ok(response) => response,
         Err(err) => {

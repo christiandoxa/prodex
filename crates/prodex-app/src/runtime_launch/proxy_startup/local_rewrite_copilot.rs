@@ -14,6 +14,7 @@ use super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
     runtime_local_rewrite_model_selection,
 };
+use super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
 pub(super) use super::local_rewrite_copilot_bindings::{
     RuntimeCopilotBindingRecorder, RuntimeCopilotResponsesSseBindingReader,
     runtime_copilot_remember_bindings_from_responses_body,
@@ -30,16 +31,14 @@ use super::local_rewrite_transport_copilot::{
     runtime_copilot_request_body_without_encrypted_content,
 };
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, RuntimeProviderErrorClass, RuntimeProviderRouteKind,
-    runtime_provider_label, runtime_provider_model_fallback_chain,
-    runtime_provider_request_body_with_model, runtime_provider_route_kind,
-    runtime_provider_should_retry_with_next_model,
+    RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_model_fallback_chain,
+    runtime_provider_request_body_with_model,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Result, bail};
-use runtime_proxy_crate::{
-    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
-};
+use prodex_provider_core::ProviderEndpoint;
+use prodex_provider_spi::ProviderRetryCause;
+use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 #[cfg(test)]
 use std::collections::BTreeMap;
 #[cfg(test)]
@@ -66,11 +65,9 @@ pub(super) fn send_runtime_copilot_upstream_request(
     shared: &RuntimeLocalRewriteProxyShared,
     body: Vec<u8>,
     auth: &RuntimeCopilotProviderAuth,
+    endpoint: ProviderEndpoint,
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
-    let responses_route = matches!(
-        runtime_provider_route_kind(path_without_query(&request.path_and_query)),
-        Some(RuntimeProviderRouteKind::Responses)
-    );
+    let responses_route = endpoint == ProviderEndpoint::Responses;
     if responses_route {
         return send_runtime_copilot_responses_request(request_id, request, shared, body, auth);
     }
@@ -145,7 +142,12 @@ pub(super) fn send_runtime_copilot_upstream_request(
                 } => (status, parts, class),
             };
             if model_index + 1 < model_chain.len()
-                && runtime_provider_should_retry_with_next_model(class)
+                && runtime_gateway_application_provider_retry_precommit(
+                    ProviderRetryCause::NextModel,
+                    class,
+                    model_index,
+                    model_chain.len(),
+                )
             {
                 runtime_proxy_log(
                     &shared.runtime_shared,
@@ -171,8 +173,12 @@ pub(super) fn send_runtime_copilot_upstream_request(
                 continue;
             }
             if !selected.hard_affinity
-                && attempt_index + 1 < attempt_count
-                && runtime_copilot_should_rotate_after_response(class)
+                && runtime_gateway_application_provider_retry_precommit(
+                    ProviderRetryCause::RotateCredential,
+                    class,
+                    attempt_index,
+                    attempt_count,
+                )
             {
                 runtime_proxy_log(
                     &shared.runtime_shared,
@@ -278,7 +284,12 @@ fn send_runtime_copilot_responses_request(
                 } => (status, parts, class),
             };
             if model_index + 1 < model_chain.len()
-                && runtime_provider_should_retry_with_next_model(class)
+                && runtime_gateway_application_provider_retry_precommit(
+                    ProviderRetryCause::NextModel,
+                    class,
+                    model_index,
+                    model_chain.len(),
+                )
             {
                 runtime_proxy_log(
                     &shared.runtime_shared,
@@ -304,8 +315,12 @@ fn send_runtime_copilot_responses_request(
                 continue;
             }
             if !selected.hard_affinity
-                && attempt_index + 1 < attempt_count
-                && runtime_copilot_should_rotate_after_response(class)
+                && runtime_gateway_application_provider_retry_precommit(
+                    ProviderRetryCause::RotateCredential,
+                    class,
+                    attempt_index,
+                    attempt_count,
+                )
             {
                 runtime_proxy_log(
                     &shared.runtime_shared,
@@ -362,16 +377,6 @@ fn runtime_copilot_request_context(
         profile_name,
         binding_recorder,
     }
-}
-
-fn runtime_copilot_should_rotate_after_response(class: RuntimeProviderErrorClass) -> bool {
-    matches!(
-        class,
-        RuntimeProviderErrorClass::Auth
-            | RuntimeProviderErrorClass::Quota
-            | RuntimeProviderErrorClass::RateLimit
-            | RuntimeProviderErrorClass::Transient
-    )
 }
 
 #[cfg(test)]

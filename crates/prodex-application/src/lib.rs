@@ -92,11 +92,12 @@ use prodex_gateway_http::{
 use prodex_observability::{
     ObservabilityErrorStatus, SpanPlan, SpanPlanError, plan_gateway_span, plan_span_error_response,
 };
+use prodex_provider_core::ProviderErrorClass;
 use prodex_provider_spi::{
     ProviderCapabilityNegotiationDecision, ProviderCapabilityNegotiationPlan,
     ProviderCircuitBreakerDecision, ProviderCircuitBreakerEvent, ProviderCircuitBreakerPlan,
-    ProviderCircuitBreakerPolicy, ProviderCircuitBreakerState, ProviderRetryPlan,
-    ProviderRetryPolicy, ProviderRetryStage, ProviderRouteCapabilityCandidate,
+    ProviderCircuitBreakerPolicy, ProviderCircuitBreakerState, ProviderRetryCause,
+    ProviderRetryPlan, ProviderRetryPolicy, ProviderRetryStage, ProviderRouteCapabilityCandidate,
     negotiate_provider_route_capability, plan_provider_capability_negotiation_error_response,
     plan_provider_circuit_breaker, plan_provider_circuit_breaker_event, plan_provider_retry,
 };
