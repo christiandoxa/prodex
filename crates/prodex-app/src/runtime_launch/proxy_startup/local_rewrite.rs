@@ -94,7 +94,6 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_oidc_http_cache:
         Arc<Mutex<BTreeMap<String, RuntimeGatewayOidcHttpCacheEntry>>>,
     pub(super) gateway_oidc_jwks_snapshot: Arc<ArcSwapOption<RuntimeGatewayOidcJwksSnapshot>>,
-    pub(super) gateway_admin_idempotency_keys: Arc<Mutex<BTreeSet<String>>>,
     pub(super) gateway_credentials: RuntimeGatewayCredentialState,
     pub(super) gateway_auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(super) gateway_admin_tokens: Vec<RuntimeGatewayAdminToken>,
@@ -478,7 +477,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         client: build_runtime_local_rewrite_http_client(&runtime_config)?,
         gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
         gateway_oidc_jwks_snapshot: Arc::new(ArcSwapOption::empty()),
-        gateway_admin_idempotency_keys: Arc::new(Mutex::new(BTreeSet::new())),
         gateway_credentials,
         gateway_auth_token_hash,
         gateway_admin_tokens,

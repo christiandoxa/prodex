@@ -195,7 +195,6 @@ struct RuntimeGatewaySideEffectSnapshot {
     model_memory_fingerprint: u64,
     api_key_cursor: usize,
     credential_fingerprint: [u8; 32],
-    admin_idempotency_fingerprint: u64,
     oidc_cache_entries: usize,
     pending_usage_deltas: usize,
     usage_request_ids: usize,
