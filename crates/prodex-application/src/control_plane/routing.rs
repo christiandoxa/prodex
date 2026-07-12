@@ -2,7 +2,6 @@
 
 use super::super::*;
 use super::*;
-use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplicationControlPlaneIdempotencyRequest {
@@ -427,10 +426,7 @@ pub fn application_control_plane_principal_scoped_idempotency_key(
     principal_id: prodex_domain::PrincipalId,
     presented_key: &IdempotencyKey,
 ) -> IdempotencyKey {
-    let digest = Sha256::digest(presented_key.as_str().as_bytes());
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    IdempotencyKey::new(format!("cp:v1:{principal_id}:{hex}"))
-        .expect("principal-scoped control-plane idempotency key is valid")
+    IdempotencyKey::from_control_plane_principal(principal_id, presented_key)
 }
 
 pub fn plan_application_control_plane_http_route(
@@ -749,7 +745,7 @@ fn control_plane_operation_allows_http_method(
     operation: ControlPlaneOperation,
     method: prodex_gateway_http::GatewayHttpMethod,
 ) -> bool {
-    use prodex_gateway_http::GatewayHttpMethod::{Delete, Get, Patch, Post};
+    use prodex_gateway_http::GatewayHttpMethod::{Delete, Get, Patch, Post, Put};
 
     match operation {
         ControlPlaneOperation::GatewayAdminRead
@@ -769,9 +765,9 @@ fn control_plane_operation_allows_http_method(
         | ControlPlaneOperation::ConfigurationPublish
         | ControlPlaneOperation::AuditExport => method == Post,
         ControlPlaneOperation::TenantUpdate
-        | ControlPlaneOperation::ScimUserUpdate
         | ControlPlaneOperation::VirtualKeyUpdate
         | ControlPlaneOperation::BudgetUpdate => method == Patch,
+        ControlPlaneOperation::ScimUserUpdate => matches!(method, Patch | Put),
         ControlPlaneOperation::ScimUserDelete
         | ControlPlaneOperation::RoleBindingRevoke
         | ControlPlaneOperation::VirtualKeyDelete

@@ -2,8 +2,9 @@ use std::error::Error;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::{CallId, ReservationId, TenantId};
+use crate::{CallId, PrincipalId, ReservationId, TenantId};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct IdempotencyKey(String);
@@ -30,6 +31,12 @@ impl IdempotencyKey {
 
     pub fn from_call_reservation(call_id: CallId, reservation_id: ReservationId) -> Self {
         Self(format!("call:{call_id}:reservation:{reservation_id}"))
+    }
+
+    pub fn from_control_plane_principal(principal_id: PrincipalId, presented_key: &Self) -> Self {
+        let digest = Sha256::digest(presented_key.as_str().as_bytes());
+        let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        Self(format!("cp:v1:{principal_id}:{hex}"))
     }
 
     pub fn as_str(&self) -> &str {
