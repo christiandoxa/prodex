@@ -99,6 +99,8 @@ The gateway serves `/v1/responses`, `/v1/chat/completions`, `/v1/embeddings`, `/
 
 The gateway can enforce optional model-aware request constraints under `[gateway.request_constraints]`; compatibility defaults leave enforcement disabled and oversized output requests unchanged. Admin/viewer principals can use the dashboard Route Workbench or `POST /v1/prodex/gateway/routes/explain` to inspect the same bounded planner trace without sending upstream traffic or mutating quota, billing, affinity, circuit, admission, or persisted runtime state. Explain payloads and prompt content are not logged or stored.
 
+Enterprise OTLP export endpoints from `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` must be absolute `http://` or `https://` URLs without whitespace, userinfo, query strings, or fragments; put collector credentials in `OTEL_EXPORTER_OTLP_HEADERS`. `prodex-control-plane plan-http-control-plane` request files must use the top-level `principal` field and non-credential HTTP headers, because `Authorization` headers are rejected.
+
 `[gateway.adaptive_routing]` is a shadow-mode foundation for owner-attributed quality feedback and route recommendations. Live gateway routing remains deterministic unless a future explicit adaptive policy is enabled, and continuation affinity still wins over any recommendation.
 
 JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/responses` plus gateway key, usage, billing ledger, metrics, and OpenAPI admin calls.

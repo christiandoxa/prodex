@@ -1,7 +1,9 @@
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Value, json};
+use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OtlpLogAttribute {
@@ -32,11 +34,65 @@ impl OtlpLogAttribute {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 struct OtlpHttpLogExportConfig {
     endpoint: String,
     headers: Vec<(String, String)>,
     timeout: Option<Duration>,
+}
+
+impl fmt::Debug for OtlpHttpLogExportConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OtlpHttpLogExportConfig")
+            .field("endpoint", &"<redacted>")
+            .field("header_count", &self.headers.len())
+            .field("headers", &"<redacted>")
+            .field("timeout", &self.timeout)
+            .finish()
+    }
+}
+
+impl Zeroize for OtlpHttpLogExportConfig {
+    fn zeroize(&mut self) {
+        self.endpoint.zeroize();
+        for (_, value) in &mut self.headers {
+            value.zeroize();
+        }
+        self.headers.clear();
+    }
+}
+
+impl Drop for OtlpHttpLogExportConfig {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for OtlpHttpLogExportConfig {}
+
+const INVALID_OTLP_HTTP_ENDPOINT: &str = "invalid OTLP HTTP endpoint";
+const MAX_OTLP_HTTP_ENDPOINT_BYTES: usize = 4 * 1024;
+
+fn validate_otlp_http_endpoint(endpoint: &str) -> Result<reqwest::Url, String> {
+    if endpoint.is_empty()
+        || endpoint.len() > MAX_OTLP_HTTP_ENDPOINT_BYTES
+        || endpoint.chars().any(char::is_whitespace)
+    {
+        return Err(INVALID_OTLP_HTTP_ENDPOINT.to_string());
+    }
+    let parsed =
+        reqwest::Url::parse(endpoint).map_err(|_| INVALID_OTLP_HTTP_ENDPOINT.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(INVALID_OTLP_HTTP_ENDPOINT.to_string());
+    }
+    Ok(parsed)
 }
 
 pub fn export_otlp_http_log_if_configured(
@@ -78,8 +134,11 @@ fn otlp_http_log_export_config_from_env() -> Result<Option<OtlpHttpLogExportConf
     let Some(endpoint) = endpoint else {
         return Ok(None);
     };
+    let endpoint = Zeroizing::new(endpoint);
+    validate_otlp_http_endpoint(&endpoint)?;
     let mut headers = Vec::new();
     if let Ok(raw_headers) = std::env::var("OTEL_EXPORTER_OTLP_HEADERS") {
+        let raw_headers = Zeroizing::new(raw_headers);
         for entry in raw_headers.split(',') {
             let entry = entry.trim();
             if entry.is_empty() {
@@ -113,7 +172,7 @@ fn otlp_http_log_export_config_from_env() -> Result<Option<OtlpHttpLogExportConf
         })
         .transpose()?;
     Ok(Some(OtlpHttpLogExportConfig {
-        endpoint,
+        endpoint: endpoint.to_string(),
         headers,
         timeout,
     }))
@@ -126,6 +185,7 @@ fn export_otlp_http_log(
     event_name: &str,
     attributes: Vec<OtlpLogAttribute>,
 ) -> Result<(), String> {
+    let endpoint = validate_otlp_http_endpoint(&config.endpoint)?;
     let mut client = Client::builder();
     if let Some(timeout) = config.timeout {
         client = client.timeout(timeout);
@@ -146,7 +206,7 @@ fn export_otlp_http_log(
         headers.insert(header_name, header_value);
     }
     client
-        .post(&config.endpoint)
+        .post(endpoint)
         .headers(headers)
         .json(&otlp_http_log_payload(
             service_name,
@@ -289,6 +349,69 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::thread;
+
+    #[test]
+    fn otlp_config_debug_redacts_and_zeroize_clears_header_values() {
+        let mut config = OtlpHttpLogExportConfig {
+            endpoint: "https://otel.example.test/v1/logs?api_key=otlp-endpoint-secret".to_string(),
+            headers: vec![(
+                "authorization".to_string(),
+                "Bearer otlp-header-secret".to_string(),
+            )],
+            timeout: Some(Duration::from_secs(1)),
+        };
+
+        let rendered = format!("{config:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("otlp-endpoint-secret"));
+        assert!(!rendered.contains("otlp-header-secret"));
+
+        zeroize::Zeroize::zeroize(&mut config);
+        assert!(config.headers.is_empty());
+    }
+
+    #[test]
+    fn otlp_endpoint_validation_rejects_credentials_query_fragment_and_whitespace_without_echo() {
+        for endpoint in [
+            "https://user:otlp-url-secret@otel.example.test/v1/logs",
+            "https://otel.example.test/v1/logs?api_key=otlp-url-secret",
+            "https://otel.example.test/v1/logs#otlp-url-secret",
+            " https://otel.example.test/v1/logs",
+        ] {
+            with_env_vars(
+                &[
+                    ("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", Some(endpoint)),
+                    ("OTEL_EXPORTER_OTLP_ENDPOINT", None),
+                    ("OTEL_EXPORTER_OTLP_HEADERS", None),
+                ],
+                || {
+                    let error = otlp_http_log_export_config_from_env()
+                        .expect_err("credential-bearing OTLP endpoint should fail");
+                    assert_eq!(error, INVALID_OTLP_HTTP_ENDPOINT);
+                    assert!(!error.contains("otlp-url-secret"));
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn otlp_export_revalidates_endpoint_before_network_use() {
+        let error = export_otlp_http_log(
+            &OtlpHttpLogExportConfig {
+                endpoint: "https://otel.example.test/v1/logs?token=otlp-url-secret".to_string(),
+                headers: Vec::new(),
+                timeout: None,
+            },
+            "prodex-control-plane",
+            "prodex.control-plane",
+            "config_publication.deliver",
+            Vec::new(),
+        )
+        .expect_err("credential-bearing OTLP endpoint should fail before export");
+
+        assert_eq!(error, INVALID_OTLP_HTTP_ENDPOINT);
+        assert!(!error.contains("otlp-url-secret"));
+    }
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
