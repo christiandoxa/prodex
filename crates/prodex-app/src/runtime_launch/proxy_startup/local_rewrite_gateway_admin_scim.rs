@@ -1,68 +1,36 @@
 use super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, runtime_gateway_virtual_key_store_load,
 };
-use super::local_rewrite_gateway_admin_audit::{
-    runtime_gateway_audit_admin_authorization_denied_event,
-    runtime_gateway_audit_admin_scim_user_event,
-};
+use super::local_rewrite_gateway_admin_audit::runtime_gateway_audit_admin_authorization_denied_event;
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
+use super::local_rewrite_gateway_admin_execution::{
+    RuntimeGatewayAdminMutationExecution, runtime_gateway_admin_mutation_execution,
+};
+use super::local_rewrite_gateway_admin_identity::{
+    RuntimeGatewayIdentityKind, runtime_gateway_apply_scim_user_projection,
+    runtime_gateway_identity_error, runtime_gateway_scim_create_mutation,
+    runtime_gateway_scim_delete_mutation, runtime_gateway_scim_update_mutation,
+    runtime_gateway_scim_user_record,
+};
 use super::local_rewrite_gateway_admin_response::{
     RuntimeGatewayAdminError, runtime_gateway_admin_json_body, runtime_gateway_admin_json_response,
 };
-use super::local_rewrite_gateway_admin_store_mutation::runtime_gateway_mutate_admin_key_store;
+use super::local_rewrite_gateway_admin_store_mutation::runtime_gateway_mutate_admin_key_store_atomic;
 use super::local_rewrite_gateway_scim::{
-    runtime_gateway_apply_scim_user_patch, runtime_gateway_generate_scim_user_id,
-    runtime_gateway_scim_user_json,
+    runtime_gateway_scim_user_etag, runtime_gateway_scim_user_json,
 };
 use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayScimUser, RuntimeGatewayVirtualKeyStoreFile,
 };
-use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
 use super::*;
 use prodex_application::{
-    ApplicationUserLifecycleErrorStatus, ApplicationUserLifecycleRequest,
-    plan_application_user_lifecycle, plan_application_user_lifecycle_error_response,
+    ApplicationControlPlaneGovernanceScope, ApplicationGatewayScimUserMutation,
+    ApplicationGatewayScimUserMutationRequest, plan_application_gateway_scim_user_mutation,
 };
-use prodex_control_plane::{
-    ControlPlaneActionRequest, ControlPlaneOperation, ControlPlaneResourceRef,
-};
-use prodex_domain::{
-    AuditDigest, CredentialScope, Principal, PrincipalId, PrincipalKind, Role, TenantId,
-};
-use prodex_storage::{DurableStoreKind, TenantStorageKey, UserLifecycleCommand, UserLifecycleKind};
-use sha2::{Digest, Sha256};
+use prodex_control_plane::{ControlPlaneActionPlan, ControlPlaneOperation};
+use prodex_domain::PrincipalId;
 
 const RUNTIME_GATEWAY_SCIM_LIST_SCHEMA: &str = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
-const RUNTIME_GATEWAY_SCIM_USER_GENERATION_FAILED_MESSAGE: &str =
-    "gateway SCIM user id could not be generated";
-const RUNTIME_GATEWAY_SCIM_USER_TENANT_REQUIRED_MESSAGE: &str =
-    "gateway SCIM user tenant_id is required for durable user storage";
-const RUNTIME_GATEWAY_SCIM_USER_TENANT_INVALID_MESSAGE: &str =
-    "gateway SCIM user tenant_id must be a valid tenant identifier";
-const RUNTIME_GATEWAY_SCIM_USER_ID_REQUIRED_MESSAGE: &str =
-    "gateway SCIM user user_id is required for durable user storage";
-const RUNTIME_GATEWAY_SCIM_USER_ID_INVALID_MESSAGE: &str =
-    "gateway SCIM user user_id must be a valid principal identifier";
-
-#[derive(Debug)]
-enum RuntimeGatewayScimUpdateMutationError {
-    Admin(RuntimeGatewayAdminError),
-    ScopeForbidden { user_id: String },
-}
-
-impl From<RuntimeGatewayAdminError> for RuntimeGatewayScimUpdateMutationError {
-    fn from(err: RuntimeGatewayAdminError) -> Self {
-        Self::Admin(err)
-    }
-}
-
-fn runtime_gateway_admin_scim_user_generation_failed_error() -> RuntimeGatewayAdminError {
-    RuntimeGatewayAdminError::new(
-        500,
-        "gateway_scim_user_generation_failed",
-        RUNTIME_GATEWAY_SCIM_USER_GENERATION_FAILED_MESSAGE,
-    )
-}
 
 pub(super) fn runtime_gateway_admin_scim_list_users_response(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -94,91 +62,42 @@ pub(super) fn runtime_gateway_admin_scim_create_user_response(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
 ) -> tiny_http::ResponseBox {
+    let path = path_without_query(&captured.path_and_query);
+    let execution = match runtime_gateway_admin_mutation_execution(
+        captured,
+        path,
+        admin_auth,
+        base_action,
+        ControlPlaneOperation::ScimUserCreate,
+    ) {
+        Ok(execution) => execution,
+        Err(response) => return response,
+    };
     let body = match runtime_gateway_admin_json_body(captured) {
         Ok(body) => body,
         Err(response) => return response,
     };
-    let now = runtime_gateway_unix_epoch_seconds();
-    let id = match runtime_gateway_generate_scim_user_id() {
-        Ok(id) => id,
-        Err(_err) => {
-            return runtime_gateway_admin_scim_user_generation_failed_error().into_response();
-        }
+    let mutation = match runtime_gateway_scim_create_mutation(PrincipalId::new(), &body) {
+        Ok(mutation) => mutation,
+        Err(error) => return error.into_response(),
     };
-    let mut user = RuntimeGatewayScimUser {
-        id,
-        user_name: String::new(),
-        external_id: None,
-        display_name: None,
-        active: true,
-        role: None,
-        tenant_id: admin_auth.tenant_id.clone(),
-        team_id: admin_auth.team_id.clone(),
-        project_id: admin_auth.project_id.clone(),
-        user_id: admin_auth.user_id.clone(),
-        budget_id: admin_auth.budget_id.clone(),
-        allowed_key_prefixes: Vec::new(),
-        created_at_epoch: now,
-        updated_at_epoch: now,
-    };
-    if let Err(err) = runtime_gateway_apply_scim_user_patch(&mut user, &body, false) {
-        return err.into_response();
-    }
-    if user.tenant_id.is_none() {
-        user.tenant_id = admin_auth.tenant_id.clone();
-    }
-    if user.team_id.is_none() {
-        user.team_id = admin_auth.team_id.clone();
-    }
-    if user.project_id.is_none() {
-        user.project_id = admin_auth.project_id.clone();
-    }
-    runtime_gateway_admin_scim_default_target_user_id(&mut user, admin_auth);
-    if user.budget_id.is_none() {
-        user.budget_id = admin_auth.budget_id.clone();
-    }
-    if !admin_auth.can_access_scim_user(&user) {
-        return runtime_gateway_admin_scim_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "create_scim_user",
-            &user.id,
-        );
-    }
-    if let Some(response) = runtime_gateway_admin_scim_user_lifecycle_response(
+    let mut committed = None;
+    match runtime_gateway_execute_scim_mutation(
         shared,
         admin_auth,
-        &user,
-        UserLifecycleKind::Create,
+        execution,
+        mutation,
+        &mut committed,
     ) {
-        return response;
-    }
-    let user_name = user.user_name.clone();
-    match runtime_gateway_mutate_admin_key_store(shared, |store| {
-        if store
-            .scim_users
-            .iter()
-            .any(|stored| stored.user_name.eq_ignore_ascii_case(&user_name))
-        {
-            return Err(RuntimeGatewayAdminError::new(
-                409,
-                "gateway_scim_user_exists",
-                "gateway SCIM userName already exists",
-            ));
-        }
-        store.scim_users.push(user.clone());
-        Ok(())
-    }) {
-        Ok(()) => {
-            runtime_gateway_audit_admin_scim_user_event(
-                shared,
-                "create_scim_user",
-                "success",
-                &user,
-            );
-            runtime_gateway_admin_json_response(201, runtime_gateway_scim_user_json(&user, shared))
-        }
+        Ok(()) => match committed {
+            Some(user) => runtime_gateway_admin_json_response(
+                201,
+                runtime_gateway_scim_user_json(&user, shared),
+            ),
+            None => runtime_gateway_scim_commit_missing_error().into_response(),
+        },
         Err(response) => response,
     }
 }
@@ -193,11 +112,7 @@ pub(super) fn runtime_gateway_admin_scim_get_user_response(
         &shared.runtime_shared.log_path,
     );
     let Some(user) = store.scim_users.iter().find(|user| user.id == id) else {
-        return build_runtime_proxy_json_error_response(
-            404,
-            "gateway_scim_user_not_found",
-            "gateway SCIM user was not found",
-        );
+        return runtime_gateway_scim_not_found_error().into_response();
     };
     if !admin_auth.can_access_scim_user(user) {
         return runtime_gateway_admin_scim_scope_forbidden_response(
@@ -215,233 +130,240 @@ pub(super) fn runtime_gateway_admin_scim_update_user_response(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
 ) -> tiny_http::ResponseBox {
+    let path = path_without_query(&captured.path_and_query);
+    let execution = match runtime_gateway_admin_mutation_execution(
+        captured,
+        path,
+        admin_auth,
+        base_action,
+        ControlPlaneOperation::ScimUserUpdate,
+    ) {
+        Ok(execution) => execution,
+        Err(response) => return response,
+    };
+    let id = match runtime_gateway_scim_principal_id(id) {
+        Ok(id) => id,
+        Err(error) => return error.into_response(),
+    };
     let body = match runtime_gateway_admin_json_body(captured) {
         Ok(body) => body,
         Err(response) => return response,
     };
-    let partial = !captured.method.eq_ignore_ascii_case("PUT");
-    let store = runtime_gateway_virtual_key_store_load(
-        &shared.gateway_state_store,
-        &shared.runtime_shared.log_path,
-    );
-    let Some(current_user) = store.scim_users.iter().find(|user| user.id == id).cloned() else {
-        return build_runtime_proxy_json_error_response(
-            404,
-            "gateway_scim_user_not_found",
-            "gateway SCIM user was not found",
-        );
+    let mode = if captured.method.eq_ignore_ascii_case("PUT") {
+        prodex_application::ApplicationScimUserUpdateMode::Replace
+    } else {
+        prodex_application::ApplicationScimUserUpdateMode::Patch
     };
-    if !admin_auth.can_access_scim_user(&current_user) {
-        return runtime_gateway_admin_scim_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "update_scim_user",
-            &current_user.id,
-        );
-    }
-    let mut planned_user = current_user.clone();
-    if let Err(err) = runtime_gateway_apply_scim_user_patch(&mut planned_user, &body, partial) {
-        return err.into_response();
-    }
-    if !admin_auth.can_access_scim_user(&planned_user) {
-        return runtime_gateway_admin_scim_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "update_scim_user",
-            &planned_user.id,
-        );
-    }
-    if let Some(response) = runtime_gateway_admin_scim_user_lifecycle_response(
+    let mutation = match runtime_gateway_scim_update_mutation(id, mode, &body) {
+        Ok(mutation) => mutation,
+        Err(error) => return error.into_response(),
+    };
+    let mut committed = None;
+    match runtime_gateway_execute_scim_mutation(
         shared,
         admin_auth,
-        &planned_user,
-        UserLifecycleKind::Update,
+        execution,
+        mutation,
+        &mut committed,
     ) {
-        return response;
-    }
-    let mut updated = None;
-    let update_result = runtime_gateway_mutate_admin_key_store(shared, |store| {
-        match runtime_gateway_apply_authorized_scim_user_update(
-            store, id, &body, partial, admin_auth,
-        ) {
-            Ok(user) => {
-                updated = Some(user);
-                Ok(())
-            }
-            Err(RuntimeGatewayScimUpdateMutationError::ScopeForbidden { user_id }) => {
-                Err(runtime_gateway_admin_scim_scope_forbidden_error(
-                    shared,
-                    admin_auth,
-                    "update_scim_user",
-                    &user_id,
-                ))
-            }
-            Err(RuntimeGatewayScimUpdateMutationError::Admin(err)) => Err(err),
-        }
-    });
-    match update_result {
-        Ok(()) => {
-            if let Some(user) = updated {
-                runtime_gateway_audit_admin_scim_user_event(
-                    shared,
-                    "update_scim_user",
-                    "success",
-                    &user,
-                );
-                runtime_gateway_admin_json_response(
-                    200,
-                    runtime_gateway_scim_user_json(&user, shared),
-                )
-            } else {
-                build_runtime_proxy_json_error_response(
-                    404,
-                    "gateway_scim_user_not_found",
-                    "gateway SCIM user was not found",
-                )
-            }
-        }
+        Ok(()) => match committed {
+            Some(user) => runtime_gateway_admin_json_response(
+                200,
+                runtime_gateway_scim_user_json(&user, shared),
+            ),
+            None => runtime_gateway_scim_commit_missing_error().into_response(),
+        },
         Err(response) => response,
     }
-}
-
-fn runtime_gateway_apply_authorized_scim_user_update(
-    store: &mut RuntimeGatewayVirtualKeyStoreFile,
-    id: &str,
-    body: &serde_json::Value,
-    partial: bool,
-    admin_auth: &RuntimeGatewayAdminAuth,
-) -> Result<RuntimeGatewayScimUser, RuntimeGatewayScimUpdateMutationError> {
-    let Some(index) = store.scim_users.iter().position(|user| user.id == id) else {
-        return Err(RuntimeGatewayScimUpdateMutationError::Admin(
-            RuntimeGatewayAdminError::new(
-                404,
-                "gateway_scim_user_not_found",
-                "gateway SCIM user was not found",
-            ),
-        ));
-    };
-    let current_user = &store.scim_users[index];
-    if !admin_auth.can_access_scim_user(current_user) {
-        return Err(RuntimeGatewayScimUpdateMutationError::ScopeForbidden {
-            user_id: current_user.id.clone(),
-        });
-    }
-    let previous_name = current_user.user_name.clone();
-    let mut planned_user = current_user.clone();
-    runtime_gateway_apply_scim_user_patch(&mut planned_user, body, partial)?;
-    if !admin_auth.can_access_scim_user(&planned_user) {
-        return Err(RuntimeGatewayScimUpdateMutationError::ScopeForbidden {
-            user_id: planned_user.id.clone(),
-        });
-    }
-    let next_name = planned_user.user_name.clone();
-    if !previous_name.eq_ignore_ascii_case(&next_name)
-        && store
-            .scim_users
-            .iter()
-            .enumerate()
-            .any(|(other, user)| other != index && user.user_name.eq_ignore_ascii_case(&next_name))
-    {
-        return Err(RuntimeGatewayScimUpdateMutationError::Admin(
-            RuntimeGatewayAdminError::new(
-                409,
-                "gateway_scim_user_exists",
-                "gateway SCIM userName already exists",
-            ),
-        ));
-    }
-    planned_user.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
-    store.scim_users[index] = planned_user.clone();
-    Ok(planned_user)
 }
 
 pub(super) fn runtime_gateway_admin_scim_delete_user_response(
     id: &str,
+    captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
 ) -> tiny_http::ResponseBox {
-    let store = runtime_gateway_virtual_key_store_load(
-        &shared.gateway_state_store,
-        &shared.runtime_shared.log_path,
-    );
-    let Some(existing_user) = store.scim_users.iter().find(|user| user.id == id).cloned() else {
-        return build_runtime_proxy_json_error_response(
-            404,
-            "gateway_scim_user_not_found",
-            "gateway SCIM user was not found",
-        );
+    let path = path_without_query(&captured.path_and_query);
+    let execution = match runtime_gateway_admin_mutation_execution(
+        captured,
+        path,
+        admin_auth,
+        base_action,
+        ControlPlaneOperation::ScimUserDelete,
+    ) {
+        Ok(execution) => execution,
+        Err(response) => return response,
     };
-    if !admin_auth.can_access_scim_user(&existing_user) {
-        return runtime_gateway_admin_scim_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "delete_scim_user",
-            &existing_user.id,
-        );
-    }
-    if let Some(response) = runtime_gateway_admin_scim_user_lifecycle_response(
+    let id = match runtime_gateway_scim_principal_id(id) {
+        Ok(id) => id,
+        Err(error) => return error.into_response(),
+    };
+    let mut committed = None;
+    match runtime_gateway_execute_scim_mutation(
         shared,
         admin_auth,
-        &existing_user,
-        UserLifecycleKind::Delete,
+        execution,
+        runtime_gateway_scim_delete_mutation(id),
+        &mut committed,
     ) {
-        return response;
-    }
-    let mut deleted = None;
-    let mut forbidden = None;
-    match runtime_gateway_mutate_admin_key_store(shared, |store| {
-        let before = store.scim_users.len();
-        for user in &store.scim_users {
-            if user.id != id {
-                continue;
-            }
-            if !admin_auth.can_access_scim_user(user) {
-                forbidden = Some(user.id.clone());
-                break;
-            }
-            deleted = Some(user.clone());
-        }
-        store
-            .scim_users
-            .retain(|user| user.id != id || deleted.is_none());
-        if let Some(user_id) = forbidden.as_deref() {
-            return Err(runtime_gateway_admin_scim_scope_forbidden_error(
-                shared,
-                admin_auth,
-                "delete_scim_user",
-                user_id,
-            ));
-        }
-        if store.scim_users.len() == before {
-            return Err(RuntimeGatewayAdminError::new(
-                404,
-                "gateway_scim_user_not_found",
-                "gateway SCIM user was not found",
-            ));
-        }
-        Ok(())
-    }) {
-        Ok(()) => {
-            if let Some(user) = deleted {
-                runtime_gateway_audit_admin_scim_user_event(
-                    shared,
-                    "delete_scim_user",
-                    "success",
-                    &user,
-                );
-            }
-            runtime_gateway_admin_json_response(
+        Ok(()) => match committed {
+            Some(user) => runtime_gateway_admin_json_response(
                 200,
                 serde_json::json!({
                     "object": "gateway.scim_user.deleted",
-                    "id": id,
+                    "id": user.id,
                     "deleted": true,
                 }),
-            )
-        }
+            ),
+            None => runtime_gateway_scim_commit_missing_error().into_response(),
+        },
         Err(response) => response,
     }
+}
+
+fn runtime_gateway_execute_scim_mutation(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    execution: RuntimeGatewayAdminMutationExecution,
+    mutation: ApplicationGatewayScimUserMutation,
+    committed: &mut Option<RuntimeGatewayScimUser>,
+) -> Result<(), tiny_http::ResponseBox> {
+    let RuntimeGatewayAdminMutationExecution {
+        authorized_action,
+        governance,
+        atomic_write,
+        entity_tag,
+    } = execution;
+    runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let user = runtime_gateway_plan_and_apply_scim_mutation(
+            store,
+            &authorized_action,
+            &governance,
+            mutation,
+            entity_tag.as_ref(),
+            shared,
+            admin_auth,
+        )?;
+        *committed = Some(user);
+        Ok(())
+    })
+}
+
+fn runtime_gateway_plan_and_apply_scim_mutation(
+    store: &mut RuntimeGatewayVirtualKeyStoreFile,
+    authorized_action: &ControlPlaneActionPlan,
+    governance: &ApplicationControlPlaneGovernanceScope,
+    mutation: ApplicationGatewayScimUserMutation,
+    entity_tag: Option<&prodex_domain::EntityTag>,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> Result<RuntimeGatewayScimUser, RuntimeGatewayAdminError> {
+    let (audit_action, audit_resource_id) = match &mutation {
+        ApplicationGatewayScimUserMutation::Create { id, .. } => {
+            ("create_scim_user", id.to_string())
+        }
+        ApplicationGatewayScimUserMutation::Update { id, .. } => {
+            ("update_scim_user", id.to_string())
+        }
+        ApplicationGatewayScimUserMutation::Delete { id } => ("delete_scim_user", id.to_string()),
+    };
+    enforce_scim_entity_tag(entity_tag, store, &mutation).inspect_err(|_| {
+        runtime_gateway_audit_admin_authorization_denied_event(
+            shared,
+            &admin_auth.name,
+            admin_auth.role.as_str(),
+            "scim_user",
+            audit_action,
+            &audit_resource_id,
+        );
+    })?;
+    let current_records = store
+        .scim_users
+        .iter()
+        .map(runtime_gateway_scim_user_record)
+        .collect::<Result<Vec<_>, _>>()?;
+    let plan =
+        plan_application_gateway_scim_user_mutation(ApplicationGatewayScimUserMutationRequest {
+            authorized_action,
+            governance,
+            current_records: &current_records,
+            mutation,
+            now_unix_ms: authorized_action.audit_event.occurred_at_unix_ms,
+        })
+        .map_err(|error| {
+            if matches!(
+            error,
+            prodex_application::ApplicationGatewayIdentityMutationError::GovernanceDenied
+                | prodex_application::ApplicationGatewayIdentityMutationError::TenantMismatch
+                | prodex_application::ApplicationGatewayIdentityMutationError::ResourceIdMismatch
+        ) {
+                runtime_gateway_audit_admin_authorization_denied_event(
+                    shared,
+                    &admin_auth.name,
+                    admin_auth.role.as_str(),
+                    "scim_user",
+                    audit_action,
+                    &audit_resource_id,
+                );
+            }
+            runtime_gateway_identity_error(RuntimeGatewayIdentityKind::ScimUser, error)
+        })?;
+    runtime_gateway_apply_scim_user_projection(store, &plan)
+}
+
+fn enforce_scim_entity_tag(
+    expected: Option<&prodex_domain::EntityTag>,
+    store: &RuntimeGatewayVirtualKeyStoreFile,
+    mutation: &ApplicationGatewayScimUserMutation,
+) -> Result<(), RuntimeGatewayAdminError> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let id = match mutation {
+        ApplicationGatewayScimUserMutation::Create { .. } => return Ok(()),
+        ApplicationGatewayScimUserMutation::Update { id, .. }
+        | ApplicationGatewayScimUserMutation::Delete { id } => id.to_string(),
+    };
+    let Some(current) = store.scim_users.iter().find(|user| user.id == id) else {
+        return Ok(());
+    };
+    if expected.as_str() == "*" || expected.as_str() == runtime_gateway_scim_user_etag(current) {
+        return Ok(());
+    }
+    Err(RuntimeGatewayAdminError::new(
+        412,
+        "precondition_failed",
+        "If-Match does not match the current SCIM user ETag",
+    ))
+}
+
+fn runtime_gateway_scim_principal_id(id: &str) -> Result<PrincipalId, RuntimeGatewayAdminError> {
+    id.parse::<PrincipalId>().map_err(|_| {
+        RuntimeGatewayAdminError::new(
+            400,
+            "gateway_scim_user_id_invalid",
+            "gateway SCIM user id must be a valid principal identifier",
+        )
+    })
+}
+
+fn runtime_gateway_scim_not_found_error() -> RuntimeGatewayAdminError {
+    RuntimeGatewayAdminError::new(
+        404,
+        "gateway_scim_user_not_found",
+        "gateway SCIM user was not found",
+    )
+}
+
+fn runtime_gateway_scim_commit_missing_error() -> RuntimeGatewayAdminError {
+    RuntimeGatewayAdminError::new(
+        500,
+        "gateway_scim_mutation_commit_missing",
+        "gateway SCIM mutation did not produce a committed projection",
+    )
 }
 
 fn runtime_gateway_admin_scim_scope_forbidden_response(
@@ -450,16 +372,6 @@ fn runtime_gateway_admin_scim_scope_forbidden_response(
     action: &'static str,
     user_id: &str,
 ) -> tiny_http::ResponseBox {
-    runtime_gateway_admin_scim_scope_forbidden_error(shared, admin_auth, action, user_id)
-        .into_response()
-}
-
-fn runtime_gateway_admin_scim_scope_forbidden_error(
-    shared: &RuntimeLocalRewriteProxyShared,
-    admin_auth: &RuntimeGatewayAdminAuth,
-    action: &'static str,
-    user_id: &str,
-) -> RuntimeGatewayAdminError {
     runtime_gateway_audit_admin_authorization_denied_event(
         shared,
         &admin_auth.name,
@@ -468,181 +380,12 @@ fn runtime_gateway_admin_scim_scope_forbidden_error(
         action,
         user_id,
     );
-    runtime_gateway_admin_scim_scope_forbidden_admin_error()
-}
-
-fn runtime_gateway_admin_scim_scope_forbidden_admin_error() -> RuntimeGatewayAdminError {
     RuntimeGatewayAdminError::new(
         403,
         "gateway_admin_key_scope_forbidden",
         "gateway admin token is not allowed to access this tenant",
     )
-}
-
-fn runtime_gateway_admin_scim_user_lifecycle_response(
-    shared: &RuntimeLocalRewriteProxyShared,
-    admin_auth: &RuntimeGatewayAdminAuth,
-    user: &RuntimeGatewayScimUser,
-    kind: UserLifecycleKind,
-) -> Option<tiny_http::ResponseBox> {
-    let durable_store = match &shared.gateway_state_store {
-        RuntimeGatewayStateStore::Postgres { .. } => DurableStoreKind::Postgres,
-        RuntimeGatewayStateStore::Sqlite { .. } => DurableStoreKind::Sqlite,
-        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
-            return None;
-        }
-    };
-    let operation = match kind {
-        UserLifecycleKind::Create => ControlPlaneOperation::ScimUserCreate,
-        UserLifecycleKind::Update => ControlPlaneOperation::ScimUserUpdate,
-        UserLifecycleKind::Delete => ControlPlaneOperation::ScimUserDelete,
-    };
-    let tenant_id = match runtime_gateway_admin_scim_durable_tenant_id(user) {
-        Ok(tenant_id) => tenant_id,
-        Err(err) => return Some(err.into_response()),
-    };
-    let principal_id = match runtime_gateway_admin_scim_durable_principal_id(user) {
-        Ok(principal_id) => principal_id,
-        Err(err) => return Some(err.into_response()),
-    };
-    let request = ApplicationUserLifecycleRequest {
-        durable_store,
-        action: ControlPlaneActionRequest {
-            principal: Principal::new(
-                runtime_gateway_admin_scim_actor_principal_id(admin_auth, tenant_id),
-                Some(tenant_id),
-                PrincipalKind::User,
-                runtime_gateway_admin_scim_domain_role(admin_auth.role),
-                CredentialScope::ControlPlane,
-            ),
-            operation,
-            resource: ControlPlaneResourceRef::new(
-                tenant_id,
-                prodex_domain::ResourceKind::User,
-                None::<String>,
-            ),
-            occurred_at_unix_ms: user.updated_at_epoch.saturating_mul(1000),
-        },
-        user: UserLifecycleCommand {
-            storage_key: TenantStorageKey::tenant(tenant_id),
-            tenant_id,
-            principal_id,
-            external_id: user.external_id.clone().unwrap_or_else(|| user.id.clone()),
-            display_name: user
-                .display_name
-                .clone()
-                .unwrap_or_else(|| user.user_name.clone()),
-            kind,
-            occurred_at_unix_ms: user.updated_at_epoch.saturating_mul(1000),
-        },
-        previous_digest: None,
-        event_digest: runtime_gateway_admin_scim_event_digest(kind),
-    };
-    match plan_application_user_lifecycle(request) {
-        Ok(_) => None,
-        Err(error) => {
-            let response = plan_application_user_lifecycle_error_response(&error);
-            Some(build_runtime_proxy_json_error_response(
-                runtime_gateway_application_user_lifecycle_status_code(response.status),
-                response.code,
-                response.message,
-            ))
-        }
-    }
-}
-
-fn runtime_gateway_admin_scim_durable_tenant_id(
-    user: &RuntimeGatewayScimUser,
-) -> Result<TenantId, RuntimeGatewayAdminError> {
-    let Some(tenant_id) = user.tenant_id.as_deref() else {
-        return Err(RuntimeGatewayAdminError::new(
-            400,
-            "gateway_scim_user_tenant_required",
-            RUNTIME_GATEWAY_SCIM_USER_TENANT_REQUIRED_MESSAGE,
-        ));
-    };
-    tenant_id.parse::<TenantId>().map_err(|_| {
-        RuntimeGatewayAdminError::new(
-            400,
-            "gateway_scim_user_tenant_invalid",
-            RUNTIME_GATEWAY_SCIM_USER_TENANT_INVALID_MESSAGE,
-        )
-    })
-}
-
-fn runtime_gateway_admin_scim_actor_principal_id(
-    admin_auth: &RuntimeGatewayAdminAuth,
-    tenant_id: TenantId,
-) -> PrincipalId {
-    let mut hasher = Sha256::new();
-    hasher.update(b"prodex:gateway-admin-scim-actor:v1");
-    hasher.update(tenant_id.to_string().as_bytes());
-    hasher.update([0]);
-    hasher.update(admin_auth.name.as_bytes());
-    let digest = hasher.finalize();
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    PrincipalId::from_uuid(uuid::Uuid::from_bytes(bytes))
-}
-
-fn runtime_gateway_admin_scim_durable_principal_id(
-    user: &RuntimeGatewayScimUser,
-) -> Result<PrincipalId, RuntimeGatewayAdminError> {
-    let Some(user_id) = user.user_id.as_deref() else {
-        return Err(RuntimeGatewayAdminError::new(
-            400,
-            "gateway_scim_user_id_required",
-            RUNTIME_GATEWAY_SCIM_USER_ID_REQUIRED_MESSAGE,
-        ));
-    };
-    user_id.parse::<PrincipalId>().map_err(|_| {
-        RuntimeGatewayAdminError::new(
-            400,
-            "gateway_scim_user_id_invalid",
-            RUNTIME_GATEWAY_SCIM_USER_ID_INVALID_MESSAGE,
-        )
-    })
-}
-
-fn runtime_gateway_admin_scim_default_target_user_id(
-    user: &mut RuntimeGatewayScimUser,
-    admin_auth: &RuntimeGatewayAdminAuth,
-) {
-    if user.user_id.is_none() {
-        user.user_id = admin_auth.user_id.clone().or_else(|| {
-            user.id
-                .parse::<PrincipalId>()
-                .ok()
-                .map(|principal_id| principal_id.to_string())
-        });
-    }
-}
-
-fn runtime_gateway_admin_scim_event_digest(kind: UserLifecycleKind) -> AuditDigest {
-    let value = match kind {
-        UserLifecycleKind::Create => "sha256:scim-user-create",
-        UserLifecycleKind::Update => "sha256:scim-user-update",
-        UserLifecycleKind::Delete => "sha256:scim-user-delete",
-    };
-    AuditDigest::new(value).expect("static SCIM lifecycle audit digest should be valid")
-}
-
-fn runtime_gateway_admin_scim_domain_role(role: RuntimeGatewayAdminRole) -> Role {
-    match role {
-        RuntimeGatewayAdminRole::Admin => Role::Admin,
-        RuntimeGatewayAdminRole::Viewer => Role::Viewer,
-    }
-}
-
-fn runtime_gateway_application_user_lifecycle_status_code(
-    status: ApplicationUserLifecycleErrorStatus,
-) -> u16 {
-    match status {
-        ApplicationUserLifecycleErrorStatus::BadRequest => 400,
-        ApplicationUserLifecycleErrorStatus::ServiceUnavailable => 503,
-    }
+    .into_response()
 }
 
 #[cfg(test)]
@@ -650,207 +393,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gateway_scim_user_generation_error_uses_stable_redacted_message() {
-        let err = runtime_gateway_admin_scim_user_generation_failed_error();
-        assert_eq!(err.test_status(), 500);
-        assert_eq!(err.test_code(), "gateway_scim_user_generation_failed");
-        assert_eq!(
-            err.test_message(),
-            "gateway SCIM user id could not be generated"
-        );
-        assert!(!err.test_message().contains("getrandom"));
-        assert!(
-            !err.test_message()
-                .contains("failed to generate gateway virtual key")
-        );
-    }
-
-    fn scim_user_with_tenant(tenant_id: Option<String>) -> RuntimeGatewayScimUser {
-        scim_user_with_ids(tenant_id, None)
-    }
-
-    fn scim_user_with_ids(
-        tenant_id: Option<String>,
-        user_id: Option<String>,
-    ) -> RuntimeGatewayScimUser {
-        RuntimeGatewayScimUser {
-            id: "user_1".to_string(),
-            user_name: "alice@example.com".to_string(),
-            external_id: None,
-            display_name: None,
-            active: true,
-            role: None,
-            tenant_id,
-            team_id: None,
-            project_id: None,
-            user_id,
-            budget_id: None,
-            allowed_key_prefixes: Vec::new(),
-            created_at_epoch: 1,
-            updated_at_epoch: 2,
-        }
-    }
-
-    fn admin_auth_named(name: &str) -> RuntimeGatewayAdminAuth {
-        RuntimeGatewayAdminAuth {
-            name: name.to_string(),
-            role: RuntimeGatewayAdminRole::Admin,
-            tenant_id: None,
-            team_id: None,
-            project_id: None,
-            user_id: None,
-            budget_id: None,
-            allowed_key_prefixes: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn scim_in_transaction_update_rejects_foreign_authoritative_preimage_without_write() {
-        let tenant_a = TenantId::new().to_string();
-        let tenant_b = TenantId::new().to_string();
-        let mut admin = admin_auth_named("tenant-a-admin");
-        admin.tenant_id = Some(tenant_a.clone());
-        let mut foreign_user = scim_user_with_tenant(Some(tenant_b));
-        foreign_user.display_name = Some("Tenant B User".to_string());
-        let mut store = RuntimeGatewayVirtualKeyStoreFile {
-            scim_users: vec![foreign_user],
+    fn scim_entity_tag_rejects_stale_mutation() {
+        let id = PrincipalId::new();
+        let store = RuntimeGatewayVirtualKeyStoreFile {
+            scim_users: vec![RuntimeGatewayScimUser {
+                id: id.to_string(),
+                user_name: "user@example.com".to_string(),
+                external_id: None,
+                display_name: None,
+                active: true,
+                role: None,
+                tenant_id: None,
+                team_id: None,
+                project_id: None,
+                user_id: None,
+                budget_id: None,
+                allowed_key_prefixes: Vec::new(),
+                created_at_epoch: 10,
+                updated_at_epoch: 20,
+            }],
             ..RuntimeGatewayVirtualKeyStoreFile::default()
         };
-        let before = serde_json::to_value(&store).expect("SCIM store should serialize");
+        let mutation = ApplicationGatewayScimUserMutation::Delete { id };
+        let current = prodex_domain::EntityTag::new("\"gateway-scim-user-20\"").unwrap();
+        assert!(enforce_scim_entity_tag(Some(&current), &store, &mutation).is_ok());
 
-        let err = runtime_gateway_apply_authorized_scim_user_update(
-            &mut store,
-            "user_1",
-            &serde_json::json!({
-                "tenant_id": tenant_a,
-                "displayName": "Unauthorized Tenant Takeover"
-            }),
-            true,
-            &admin,
-        )
-        .expect_err("foreign authoritative pre-image must be rejected");
-
-        assert!(matches!(
-            err,
-            RuntimeGatewayScimUpdateMutationError::ScopeForbidden { ref user_id }
-                if user_id == "user_1"
-        ));
-        assert_eq!(
-            serde_json::to_value(&store).expect("SCIM store should serialize"),
-            before,
-            "scope denial must not mutate the authoritative store"
-        );
-        let stable = runtime_gateway_admin_scim_scope_forbidden_admin_error();
-        assert_eq!(stable.test_status(), 403);
-        assert_eq!(stable.test_code(), "gateway_admin_key_scope_forbidden");
+        let stale = prodex_domain::EntityTag::new("\"gateway-scim-user-19\"").unwrap();
+        let error = enforce_scim_entity_tag(Some(&stale), &store, &mutation).unwrap_err();
+        assert_eq!(error.test_status(), 412);
+        assert_eq!(error.test_code(), "precondition_failed");
     }
 
     #[test]
-    fn durable_scim_lifecycle_rejects_missing_or_invalid_tenant_id() {
-        let missing = runtime_gateway_admin_scim_durable_tenant_id(&scim_user_with_tenant(None))
-            .expect_err("missing tenant should fail closed");
-        assert_eq!(missing.test_status(), 400);
-        assert_eq!(missing.test_code(), "gateway_scim_user_tenant_required");
-        assert_eq!(
-            missing.test_message(),
-            RUNTIME_GATEWAY_SCIM_USER_TENANT_REQUIRED_MESSAGE
-        );
-
-        let invalid = runtime_gateway_admin_scim_durable_tenant_id(&scim_user_with_tenant(Some(
-            "tenant-a".to_string(),
-        )))
-        .expect_err("non-UUID tenant should fail closed");
-        assert_eq!(invalid.test_status(), 400);
-        assert_eq!(invalid.test_code(), "gateway_scim_user_tenant_invalid");
-        assert_eq!(
-            invalid.test_message(),
-            RUNTIME_GATEWAY_SCIM_USER_TENANT_INVALID_MESSAGE
-        );
-
-        let valid_tenant_id = TenantId::new();
-        let parsed = runtime_gateway_admin_scim_durable_tenant_id(&scim_user_with_tenant(Some(
-            valid_tenant_id.to_string(),
-        )));
-        assert!(matches!(parsed, Ok(parsed) if parsed == valid_tenant_id));
-    }
-
-    #[test]
-    fn durable_scim_lifecycle_rejects_missing_or_invalid_user_id() {
-        let tenant_id = Some(TenantId::new().to_string());
-        let missing = runtime_gateway_admin_scim_durable_principal_id(&scim_user_with_ids(
-            tenant_id.clone(),
-            None,
-        ))
-        .expect_err("missing user id should fail closed");
-        assert_eq!(missing.test_status(), 400);
-        assert_eq!(missing.test_code(), "gateway_scim_user_id_required");
-        assert_eq!(
-            missing.test_message(),
-            RUNTIME_GATEWAY_SCIM_USER_ID_REQUIRED_MESSAGE
-        );
-
-        let invalid = runtime_gateway_admin_scim_durable_principal_id(&scim_user_with_ids(
-            tenant_id,
-            Some("user-a".to_string()),
-        ))
-        .expect_err("non-UUID user id should fail closed");
-        assert_eq!(invalid.test_status(), 400);
-        assert_eq!(invalid.test_code(), "gateway_scim_user_id_invalid");
-        assert_eq!(
-            invalid.test_message(),
-            RUNTIME_GATEWAY_SCIM_USER_ID_INVALID_MESSAGE
-        );
-
-        let principal_id = PrincipalId::new();
-        let parsed = runtime_gateway_admin_scim_durable_principal_id(&scim_user_with_ids(
-            Some(TenantId::new().to_string()),
-            Some(principal_id.to_string()),
-        ));
-        assert!(matches!(parsed, Ok(parsed) if parsed == principal_id));
-    }
-
-    #[test]
-    fn scim_create_defaults_missing_user_id_to_generated_resource_principal_id() {
-        let principal_id = PrincipalId::new();
-        let expected = principal_id.to_string();
-        let mut user = scim_user_with_ids(Some(TenantId::new().to_string()), None);
-        user.id = expected.clone();
-
-        runtime_gateway_admin_scim_default_target_user_id(&mut user, &admin_auth_named("admin"));
-
-        assert_eq!(user.user_id, Some(expected));
-    }
-
-    #[test]
-    fn durable_scim_lifecycle_actor_principal_id_is_stable_per_admin_and_tenant() {
-        let actor_tenant_id = TenantId::new();
-        let admin = admin_auth_named("admin-token");
-
-        assert_eq!(
-            runtime_gateway_admin_scim_actor_principal_id(&admin, actor_tenant_id),
-            runtime_gateway_admin_scim_actor_principal_id(&admin, actor_tenant_id)
-        );
-        assert_ne!(
-            runtime_gateway_admin_scim_actor_principal_id(&admin, actor_tenant_id),
-            runtime_gateway_admin_scim_actor_principal_id(
-                &admin_auth_named("other-admin"),
-                actor_tenant_id
-            )
-        );
-        assert_ne!(
-            runtime_gateway_admin_scim_actor_principal_id(&admin, actor_tenant_id),
-            runtime_gateway_admin_scim_actor_principal_id(&admin, TenantId::new())
-        );
-    }
-
-    #[test]
-    fn durable_scim_lifecycle_does_not_synthesize_tenant_or_user_ids() {
+    fn scim_mutations_have_one_application_and_atomic_write_path() {
         let source = include_str!("local_rewrite_gateway_admin_scim.rs");
-        for fallback in [
-            ["let tenant_id = ", "TenantId::new();"].join(""),
-            ["principal_id: ", "PrincipalId::new(),"].join(""),
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        assert_eq!(
+            production
+                .matches("plan_application_gateway_scim_user_mutation(")
+                .count(),
+            1
+        );
+        assert_eq!(
+            production
+                .matches("runtime_gateway_mutate_admin_key_store_atomic(")
+                .count(),
+            1
+        );
+        for forbidden in [
+            "runtime_gateway_mutate_admin_key_store(",
+            "plan_application_user_lifecycle(",
+            "runtime_gateway_audit_admin_scim_user_event(",
+            "sha256:scim-user-",
+            "runtime_gateway_apply_scim_user_patch(",
         ] {
-            assert!(!source.contains(&fallback));
+            assert!(
+                !production.contains(forbidden),
+                "legacy SCIM path remains: {forbidden}"
+            );
         }
     }
 }
