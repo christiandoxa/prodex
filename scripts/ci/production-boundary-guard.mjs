@@ -7,6 +7,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const FILES = Object.freeze({
   root: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
   admin: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_router.rs",
+  adminExecution:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_execution.rs",
   adminAuth:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/admin.rs",
   adminKeys:
@@ -628,20 +630,32 @@ export function validateProductionBoundary(sources) {
     requireText(
       errors,
       admin,
-      "authorized_action.operation.requires_idempotency()",
-      `${FILES.admin}: exact preauthorized operation must classify admin mutations`,
+      "let authorized_action = preauthorized.control_plane_action();",
+      `${FILES.admin}: admin dispatch must retain the preauthorized action before mutation execution`,
     );
-    requireOrdered(
+    requireText(
       errors,
       admin,
-      [
-        "preauthorized.control_plane_action()",
-        "runtime_gateway_admin_control_plane_action(&admin_http, admin_auth)",
-        "runtime_gateway_admin_audit_boundary_response(",
-        "runtime_gateway_admin_idempotency_response(",
-        "runtime_gateway_admin_create_key_response(",
-      ],
-      `${FILES.admin}: exact preauthorization, canonical action, audit, and idempotency planning must precede admin mutation handlers`,
+      "runtime_gateway_admin_create_key_response(",
+      `${FILES.admin}: admin key create must route through production key mutation handlers`,
+    );
+    requireText(
+      errors,
+      admin,
+      "runtime_gateway_admin_update_key_response(",
+      `${FILES.admin}: admin key update must route through production key mutation handlers`,
+    );
+    requireText(
+      errors,
+      admin,
+      "runtime_gateway_admin_delete_key_response(",
+      `${FILES.admin}: admin key delete must route through production key mutation handlers`,
+    );
+    requireText(
+      errors,
+      admin,
+      "runtime_gateway_admin_scim_create_user_response(",
+      `${FILES.admin}: admin SCIM mutations must execute through the application-identity mutation execution path`,
     );
   }
   requireText(
@@ -668,53 +682,61 @@ export function validateProductionBoundary(sources) {
     "let admin_write = (path == keys_path",
     `${FILES.admin}: legacy path/method mutation policy must not shadow the application operation`,
   );
-  const adminAudit = functionBody(sources.admin, "runtime_gateway_admin_audit_boundary_response") ?? "";
+  const adminExecution =
+    functionBody(sources.adminExecution, "runtime_gateway_admin_mutation_execution") ?? "";
   requireText(
     errors,
-    adminAudit,
-    "plan_application_control_plane_audit_from_http(action, http)",
-    `${FILES.admin}: production admin mutations must enter application audit routing`,
+    adminExecution,
+    "runtime_gateway_admin_control_plane_action_for_operation(&http, admin_auth, operation)",
+    `${FILES.adminExecution}: mutation execution must retain the control-plane base action and operation`,
   );
-  const adminIdempotency = functionBody(sources.admin, "runtime_gateway_admin_idempotency_response") ?? "";
   requireText(
     errors,
-    adminIdempotency,
+    adminExecution,
+    "plan_application_control_plane_audit_from_http(action.clone(), &http)",
+    `${FILES.adminExecution}: mutation execution must run canonical control-plane audit planning`,
+  );
+  requireText(
+    errors,
+    adminExecution,
     "plan_application_control_plane_idempotency_from_http_digest(",
-    `${FILES.admin}: production admin mutations must enter application idempotency planning`,
-  );
-  forbidText(
-    errors,
-    adminIdempotency,
-    "ApplicationControlPlaneIdempotencyError::IdempotencyKeyRequired) => return None",
-    `${FILES.admin}: canonical mutation idempotency must fail closed when the key is missing`,
+    `${FILES.adminExecution}: mutation execution must run canonical control-plane idempotency planning`,
   );
   requireText(
     errors,
-    adminIdempotency,
-    "runtime_gateway_admin_idempotency_replay_decision(",
-    `${FILES.admin}: production admin duplicate handling must enter application replay planning`,
+    adminExecution,
+    ".operation",
+    `${FILES.adminExecution}: mutation execution must keep exact operation retention and failure-closed semantics`,
+  );
+  requireText(
+    errors,
+    adminExecution,
+    "action.principal.id == base.audit_event.principal_id",
+    `${FILES.adminExecution}: mutation execution must retain exact principal/tenant/resource identity when reusing the base action`,
+  );
+  requireText(
+    errors,
+    adminExecution,
+    "action.resource.tenant_id == base.tenant.tenant_id",
+    `${FILES.adminExecution}: mutation execution must retain exact principal/tenant/resource identity when reusing the base action`,
+  );
+  requireText(
+    errors,
+    adminExecution,
+    "action.resource.id == base.audit_event.resource.id",
+    `${FILES.adminExecution}: mutation execution must retain exact principal/tenant/resource identity when reusing the base action`,
   );
   forbidText(
     errors,
-    adminIdempotency,
-    "if !keys.insert(cache_key)",
-    `${FILES.admin}: direct set insertion must not own duplicate idempotency policy`,
+    sources.root,
+    "gateway_admin_idempotency_keys",
+    `${FILES.root}: gateway_admin_idempotency_keys preclaim must be removed for control-plane mutations`,
   );
   forbidText(
     errors,
-    adminIdempotency,
-    "idempotency_key_from_headers",
-    `${FILES.admin}: gateway header parsing must not shadow application idempotency planning`,
-  );
-  const adminReplay = functionBody(
     sources.admin,
-    "runtime_gateway_admin_idempotency_replay_decision",
-  ) ?? "";
-  requireText(
-    errors,
-    adminReplay,
-    "plan_application_control_plane_idempotency_replay(operation, existing.as_ref())",
-    `${FILES.admin}: application replay planner must own duplicate idempotency semantics`,
+    "BTreeSet",
+    `${FILES.admin}: control-plane preclaim map must not use in-process BTreeSet`,
   );
 
   for (const [needle, message] of [
@@ -1190,59 +1212,141 @@ export function validateProductionBoundary(sources) {
     "prodex_application::ApplicationControlPlaneGovernanceScope",
     `${FILES.adminScope}: gateway mutation scope checks must retain the application-owned governance matcher`,
   );
-  const storedKeyAccess = functionBody(sources.adminAuth, "can_access_stored_key") ?? "";
-  requireOrdered(
+  requireText(
     errors,
-    storedKeyAccess,
-    ["self.governance_scope().matches(", "self.can_access_key(&key.name)"],
-    `${FILES.adminAuth}: authoritative stored-key authorization must use application-owned governance and resource-name scope`,
+    sources.adminExecution,
+    "governance: runtime_gateway_admin_governance_scope(admin_auth)",
+    `${FILES.adminExecution}: mutation execution must retain the exact application-owned governance scope`,
   );
   const keyUpdate =
     functionBody(sources.adminKeys, "runtime_gateway_admin_update_key_response") ?? "";
-  requirePattern(
-    errors,
-    keyUpdate,
-    /runtime_gateway_mutate_admin_key_store\(shared, \|store\| \{[\s\S]*?if !admin_auth\.can_access_stored_key\(current_record\)[\s\S]*?runtime_gateway_apply_virtual_key_patch\(&mut planned_record, &body, true\)\?;[\s\S]*?if !admin_auth\.can_access_stored_key\(&planned_record\)[\s\S]*?store\.keys\[index\] = planned_record;/,
-    `${FILES.adminKeys}: key update must authorize the authoritative pre-image and planned post-image inside the backend transaction before writing`,
-  );
   const keyDelete =
     functionBody(sources.adminKeys, "runtime_gateway_admin_delete_key_response") ?? "";
-  requireOrdered(
+  const keyCreate =
+    functionBody(sources.adminKeys, "runtime_gateway_admin_create_key_response") ?? "";
+  const legacyKeyPaths = keyCreate + keyUpdate + keyDelete;
+  forbidText(
     errors,
-    keyDelete,
-    [
-      "runtime_gateway_mutate_admin_key_store(shared, |store| {",
-      "if !admin_auth.can_access_stored_key(current_record)",
-      "store.keys.remove(index);",
-    ],
-    `${FILES.adminKeys}: key delete must authorize the authoritative record inside the backend transaction before removing it`,
+    legacyKeyPaths,
+    "runtime_gateway_mutate_admin_key_store(",
+    `${FILES.adminKeys}: key mutation handlers must use atomic key store mutation`,
+  );
+  for (const source of [keyCreate, keyUpdate, keyDelete]) {
+    requireText(
+      errors,
+      source,
+      "runtime_gateway_admin_mutation_execution(",
+      `${FILES.adminKeys}: key mutations must use application control-plane mutation execution`,
+    );
+    requireText(
+      errors,
+      source,
+      "runtime_gateway_mutate_admin_key_store_atomic(",
+      `${FILES.adminKeys}: key mutations must use atomic control-plane storage execution`,
+    );
+    requireText(
+      errors,
+      source,
+      "plan_application_gateway_virtual_key_mutation(",
+      `${FILES.adminKeys}: key mutations must use canonical virtual-key identity planner`,
+    );
+    requireText(
+      errors,
+      source,
+      "runtime_gateway_apply_virtual_key_projection",
+      `${FILES.adminKeys}: key mutations must apply canonical identity projections`,
+    );
+  }
+  forbidText(
+    errors,
+    legacyKeyPaths,
+    "runtime_gateway_audit_admin_key_event",
+    `${FILES.adminKeys}: key mutation handlers must not call direct success audit events`,
+  );
+  forbidText(
+    errors,
+    legacyKeyPaths,
+    "sha256:gateway-virtual-key-create",
+    `${FILES.adminKeys}: key mutations must not use static lifecycle digests`,
+  );
+  forbidText(
+    errors,
+    legacyKeyPaths,
+    "sha256:gateway-virtual-key-rotate",
+    `${FILES.adminKeys}: key mutations must not use static lifecycle digests`,
   );
   const scimUpdate =
     functionBody(sources.adminScim, "runtime_gateway_admin_scim_update_user_response") ?? "";
-  requirePattern(
-    errors,
-    scimUpdate,
-    /runtime_gateway_mutate_admin_key_store\(shared, \|store\| \{[\s\S]*?runtime_gateway_apply_authorized_scim_user_update\([\s\S]*?store, id, &body, partial, admin_auth,/,
-    `${FILES.adminScim}: SCIM update must invoke authoritative authorization from inside the backend transaction`,
-  );
-  const scimMutation =
-    functionBody(sources.adminScim, "runtime_gateway_apply_authorized_scim_user_update") ?? "";
-  requireOrdered(
+  const scimCreate =
+    functionBody(sources.adminScim, "runtime_gateway_admin_scim_create_user_response") ?? "";
+  const scimDelete =
+    functionBody(sources.adminScim, "runtime_gateway_admin_scim_delete_user_response") ?? "";
+  const scimPlan =
+    functionBody(sources.adminScim, "runtime_gateway_plan_and_apply_scim_mutation") ?? "";
+  const scimExecute =
+    functionBody(sources.adminScim, "runtime_gateway_execute_scim_mutation") ?? "";
+  const scimMutation = scimCreate + scimUpdate + scimDelete;
+  forbidText(
     errors,
     scimMutation,
-    [
-      "if !admin_auth.can_access_scim_user(current_user)",
-      "runtime_gateway_apply_scim_user_patch(&mut planned_user, body, partial)?;",
-      "if !admin_auth.can_access_scim_user(&planned_user)",
-      "store.scim_users[index] = planned_user.clone();",
-    ],
-    `${FILES.adminScim}: SCIM update must authorize the authoritative pre-image and planned post-image inside the backend transaction before writing`,
+    "runtime_gateway_mutate_admin_key_store(",
+    `${FILES.adminScim}: SCIM mutations must use atomic key store mutation`,
+  );
+  for (const source of [scimCreate, scimUpdate, scimDelete]) {
+    requireText(
+      errors,
+      source,
+      "runtime_gateway_admin_mutation_execution(",
+      `${FILES.adminScim}: SCIM mutations must use application control-plane mutation execution`,
+    );
+    requireText(
+      errors,
+      source,
+      "runtime_gateway_execute_scim_mutation(",
+      `${FILES.adminScim}: SCIM mutations must route through shared execution helper`,
+    );
+  }
+  requireText(
+    errors,
+    scimExecute,
+    "runtime_gateway_mutate_admin_key_store_atomic(",
+    `${FILES.adminScim}: SCIM mutations must write through atomic control-plane storage`,
   );
   requireText(
     errors,
-    sources.adminScim,
-    "scim_in_transaction_update_rejects_foreign_authoritative_preimage_without_write",
-    `${FILES.adminScim}: deterministic SCIM foreign-replacement no-write regression must remain compiled`,
+    scimPlan,
+    "plan_application_gateway_scim_user_mutation(",
+    `${FILES.adminScim}: SCIM mutation helper must use the canonical SCIM identity planner`,
+  );
+  requireText(
+    errors,
+    scimPlan,
+    "runtime_gateway_apply_scim_user_projection(",
+    `${FILES.adminScim}: SCIM mutation helper must apply canonical projections`,
+  );
+  requireText(
+    errors,
+    scimPlan,
+    "now_unix_ms: authorized_action.audit_event.occurred_at_unix_ms",
+    `${FILES.adminScim}: SCIM planner should stamp from the retained authorized action`,
+  );
+  forbidText(
+    errors,
+    scimMutation,
+    "runtime_gateway_audit_admin_scim_user_event",
+    `${FILES.adminScim}: SCIM mutations must not call direct success audit events`,
+  );
+  forbidText(
+    errors,
+    scimMutation,
+    "plan_application_user_lifecycle(",
+    `${FILES.adminScim}: SCIM mutations must use application-identity planner`,
+  );
+  forbidText(
+    errors,
+    scimMutation,
+    "sha256:scim-user-",
+    `${FILES.adminScim}: SCIM mutations must not use static lifecycle digests`,
   );
   for (const regression of [
     "gateway_file_admin_mutations_reject_foreign_records_replaced_by_second_proxy",
@@ -1432,54 +1536,109 @@ function runSelfTest() {
     observability: "schedule_runtime_gateway_billing_ledger_reconcile();",
     admin: `fn runtime_gateway_admin_response(preauthorized: Option<RuntimeGatewayAdminPreauthorization<'_>>) {
       let Some(preauthorized) = preauthorized;
-      preauthorized.control_plane_action();
+      let authorized_action = preauthorized.control_plane_action();
       runtime_gateway_admin_boundary_response();
-      runtime_gateway_admin_control_plane_action(&admin_http, admin_auth);
-      authorized_action.operation.requires_idempotency();
-      runtime_gateway_admin_audit_boundary_response();
-      runtime_gateway_admin_idempotency_response();
       runtime_gateway_admin_create_key_response();
-    }
-    fn runtime_gateway_admin_audit_boundary_response() {
-      plan_application_control_plane_audit_from_http(action, http);
-    }
-    fn runtime_gateway_admin_idempotency_response() {
-      plan_application_control_plane_idempotency_from_http_digest();
-      runtime_gateway_admin_idempotency_replay_decision(&operation, existing_fingerprint.as_deref());
-    }
-    fn runtime_gateway_admin_idempotency_replay_decision() {
-      plan_application_control_plane_idempotency_replay(operation, existing.as_ref());
+      runtime_gateway_admin_update_key_response();
+      runtime_gateway_admin_delete_key_response();
+      runtime_gateway_admin_scim_create_user_response();
+    }`,
+    adminExecution: `fn runtime_gateway_admin_mutation_execution() {
+      let alias = matches!(
+        (base.operation, operation),
+        (ControlPlaneOperation::VirtualKeyUpdate, ControlPlaneOperation::VirtualKeyRotateSecret)
+      );
+      let action = runtime_gateway_admin_control_plane_action_for_operation(&http, admin_auth, operation)
+        .filter(|action| {
+          action.principal.id == base.audit_event.principal_id &&
+          action.resource.tenant_id == base.tenant.tenant_id &&
+          action.resource.id == base.audit_event.resource.id
+        })
+        .ok_or_else(|| {
+          runtime_gateway_admin_execution_error(400, "control_plane_route_invalid", "control-plane route is invalid");
+        })?;
+      let operation = plan_application_control_plane_idempotency_from_http_digest(
+        action,
+        &http,
+        runtime_gateway_request_body_sha256(&captured.body),
+      )?.operation.ok_or_else(|| {
+        runtime_gateway_admin_execution_error(500, "control_plane_idempotency_plan_invalid", "control-plane idempotency planning failed");
+      })?;
+      plan_application_control_plane_audit_from_http(action.clone(), &http);
+      governance: runtime_gateway_admin_governance_scope(admin_auth);
     }`,
     adminAuth: `fn can_access_stored_key() {
       self.governance_scope().matches();
       self.can_access_key(&key.name);
     }`,
-    adminKeys: `fn runtime_gateway_admin_update_key_response() {
-      runtime_gateway_mutate_admin_key_store(shared, |store| {
-        if !admin_auth.can_access_stored_key(current_record) {}
-        runtime_gateway_apply_virtual_key_patch(&mut planned_record, &body, true)?;
-        if !admin_auth.can_access_stored_key(&planned_record) {}
-        store.keys[index] = planned_record;
+    adminKeys: `fn runtime_gateway_admin_create_key_response() {
+      runtime_gateway_admin_mutation_execution(captured, path, admin_auth, base_action, ControlPlaneOperation::VirtualKeyCreate);
+      runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let records = application_key_records(store)?;
+        let plan = plan_application_gateway_virtual_key_mutation(ApplicationGatewayVirtualKeyMutationRequest {
+          authorized_action: &authorized_action,
+          governance: &governance,
+          current_records: &records,
+          mutation: runtime_gateway_virtual_key_create_mutation(new_id, &body, fingerprint),
+          now_unix_ms,
+        });
+        runtime_gateway_apply_virtual_key_projection(store, &plan)?;
+      });
+    }
+    fn runtime_gateway_admin_update_key_response() {
+      runtime_gateway_admin_mutation_execution(captured, path, admin_auth, base_action, requested_operation);
+      runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let records = application_key_records(store)?;
+        let plan = plan_application_gateway_virtual_key_mutation(ApplicationGatewayVirtualKeyMutationRequest {
+          authorized_action: &authorized_action,
+          governance: &governance,
+          current_records: &records,
+          mutation: runtime_gateway_virtual_key_update_mutation(id, &body, fingerprint),
+          now_unix_ms,
+        });
+        runtime_gateway_apply_virtual_key_projection(store, &plan)?;
       });
     }
     fn runtime_gateway_admin_delete_key_response() {
-      runtime_gateway_mutate_admin_key_store(shared, |store| {
-        if !admin_auth.can_access_stored_key(current_record) {}
-        store.keys.remove(index);
+      runtime_gateway_admin_mutation_execution(captured, path, admin_auth, base_action, ControlPlaneOperation::VirtualKeyDelete);
+      runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let records = application_key_records(store)?;
+        let plan = plan_application_gateway_virtual_key_mutation(ApplicationGatewayVirtualKeyMutationRequest {
+          authorized_action: &authorized_action,
+          governance: &governance,
+          current_records: &records,
+          mutation: runtime_gateway_virtual_key_delete_mutation(id),
+          now_unix_ms,
+        });
+        runtime_gateway_apply_virtual_key_projection(store, &plan)?;
       });
     }`,
-    adminScim: `fn runtime_gateway_admin_scim_update_user_response() {
-      runtime_gateway_mutate_admin_key_store(shared, |store| {
-        runtime_gateway_apply_authorized_scim_user_update(
-          store, id, &body, partial, admin_auth,
-        );
+    adminScim: `fn runtime_gateway_admin_scim_create_user_response() {
+      runtime_gateway_admin_mutation_execution(captured, &path, admin_auth, base_action, ControlPlaneOperation::ScimUserCreate);
+      runtime_gateway_execute_scim_mutation(shared, execution, mutation, &mut committed);
+    }
+    fn runtime_gateway_admin_scim_update_user_response() {
+      runtime_gateway_admin_mutation_execution(captured, &path, admin_auth, base_action, ControlPlaneOperation::ScimUserUpdate);
+      runtime_gateway_execute_scim_mutation(shared, execution, mutation, &mut committed);
+    }
+    fn runtime_gateway_admin_scim_delete_user_response() {
+      runtime_gateway_admin_mutation_execution(captured, &path, admin_auth, base_action, ControlPlaneOperation::ScimUserDelete);
+      runtime_gateway_execute_scim_mutation(shared, execution, mutation, &mut committed);
+    }
+    fn runtime_gateway_execute_scim_mutation() {
+      runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let user = runtime_gateway_plan_and_apply_scim_mutation(store, &authorized_action, &governance, mutation)?;
       });
     }
-    fn runtime_gateway_apply_authorized_scim_user_update() {
-        if !admin_auth.can_access_scim_user(current_user) {}
-        runtime_gateway_apply_scim_user_patch(&mut planned_user, body, partial)?;
-        if !admin_auth.can_access_scim_user(&planned_user) {}
-        store.scim_users[index] = planned_user.clone();
+    fn runtime_gateway_plan_and_apply_scim_mutation() {
+      let plan = plan_application_gateway_scim_user_mutation(ApplicationGatewayScimUserMutationRequest {
+        authorized_action: &authorized_action,
+        governance: &governance,
+        current_records: &current_records,
+        mutation,
+        now_unix_ms: authorized_action.audit_event.occurred_at_unix_ms,
+      });
+      runtime_gateway_apply_scim_user_projection(store, &plan)?;
     }
     fn scim_in_transaction_update_rejects_foreign_authoritative_preimage_without_write() {}`,
     adminScope:
@@ -1759,46 +1918,106 @@ function runSelfTest() {
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      admin: valid.admin.replace("preauthorized.control_plane_action();", ""),
-    }).some((error) => error.includes("exact preauthorization")),
+      admin: valid.admin.replace("runtime_gateway_admin_create_key_response();", ""),
+    }).some((error) => error.includes("admin key create must route through production key mutation handlers")),
+    "admin SCIM/key mutation without key routing accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      admin: valid.admin.replace("let authorized_action = preauthorized.control_plane_action();", ""),
+    }).some((error) => error.includes("must consume the exact application authorization plan")),
     "admin handlers without the exact preauthorization accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      adminKeys: valid.adminKeys.replace(
-        "if !admin_auth.can_access_stored_key(current_record) {}",
+      adminKeys: valid.adminKeys.replace("runtime_gateway_mutate_admin_key_store_atomic(", "runtime_gateway_mutate_admin_key_store("),
+    }).some((error) => error.includes("atomic key store mutation")),
+    "legacy key mutation storage accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminExecution: valid.adminExecution.replace(
+        `.filter(|action| {\n          action.principal.id == base.audit_event.principal_id &&\n          action.resource.tenant_id == base.tenant.tenant_id &&\n          action.resource.id == base.audit_event.resource.id\n        })`,
         "",
       ),
-    }).some((error) => error.includes("authoritative pre-image")),
-    "key mutation without authoritative in-transaction scope authorization accepted",
+    }).some((error) => error.includes("exact principal/tenant/resource identity")),
+    "admin execution without request context accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminExecution: valid.adminExecution.replace(
+        "governance: runtime_gateway_admin_governance_scope(admin_auth);",
+        "",
+      ),
+    }).some((error) => error.includes("exact application-owned governance scope")),
+    "admin mutation execution without application governance scope accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminExecution: valid.adminExecution.replace("plan_application_control_plane_audit_from_http(action.clone(), &http);", ""),
+    }).some((error) => error.includes("canonical control-plane audit planning")),
+    "admin mutation execution without canonical audit planning accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminExecution: valid.adminExecution.replace("plan_application_control_plane_idempotency_from_http_digest(", "runtime_gateway_admin_idempotency_response("),
+    }).some((error) => error.includes("canonical control-plane idempotency planning")),
+    "admin mutation execution without canonical idempotency planning accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminKeys: valid.adminKeys.replace(
+        "let records = application_key_records(store)?;",
+        "runtime_gateway_audit_admin_key_event(shared, key);\nlet records = application_key_records(store)?;",
+      ),
+    }).some((error) => error.includes("direct success audit events")),
+    "admin key mutation with direct success audit accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
       adminScim: valid.adminScim.replace(
-        "if !admin_auth.can_access_scim_user(current_user) {}",
-        "",
+        "runtime_gateway_execute_scim_mutation(shared, execution, mutation, &mut committed);",
+        "runtime_gateway_audit_admin_scim_user_event(shared);\nruntime_gateway_execute_scim_mutation(shared, execution, mutation, &mut committed);",
       ),
-    }).some((error) => error.includes("SCIM update")),
-    "SCIM mutation without authoritative in-transaction scope authorization accepted",
+    }).some((error) => error.includes("direct success audit events")),
+    "admin SCIM mutation with direct success audit accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      admin: valid.admin.replace("runtime_gateway_admin_audit_boundary_response();", ""),
-    }).some((error) => error.includes("audit, and idempotency planning")),
-    "admin mutation audit bypass accepted",
+      adminScim: valid.adminScim.replace(
+        "plan_application_gateway_scim_user_mutation(ApplicationGatewayScimUserMutationRequest {",
+        "plan_application_user_lifecycle(ApplicationGatewayScimUserMutationRequest {",
+      ),
+    }).some((error) => error.includes("SCIM mutation helper must use the canonical SCIM identity planner")),
+    "SCIM mutation without application planner accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      admin: valid.admin.replace(
-        "plan_application_control_plane_idempotency_replay(operation, existing.as_ref());",
-        "already_seen",
+      adminScim: valid.adminScim.replace(
+        "runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {",
+        "runtime_gateway_mutate_admin_key_store(shared, |store| {",
       ),
-    }).some((error) => error.includes("replay planner")),
-    "shadow admin duplicate policy accepted",
+    }).some((error) => error.includes("SCIM mutations must write through atomic")),
+    "SCIM mutation with legacy key storage accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminScim: valid.adminScim
+        .split("runtime_gateway_execute_scim_mutation(shared, execution, mutation, &mut committed);")
+        .join("let _ = execution;"),
+    }).some((error) => error.includes("SCIM mutations must route through shared execution helper")),
+    "SCIM mutation without shared execution path accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
