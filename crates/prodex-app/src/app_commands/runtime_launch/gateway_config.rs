@@ -27,6 +27,7 @@ use gateway_auth_config::{
 };
 pub(super) use gateway_config_helpers::gateway_api_keys_from_list;
 use gateway_config_helpers::gateway_validate_listen_auth;
+use gateway_guardrail_config::gateway_guardrail_webhook_secret_with_resolver;
 #[cfg(test)]
 pub(super) use gateway_guardrail_config::resolve_gateway_guardrail_config;
 use gateway_guardrail_config::resolve_gateway_guardrail_config_with_resolver;
@@ -37,7 +38,9 @@ pub(super) use gateway_guardrail_config::{
 #[cfg(test)]
 pub(super) use gateway_observability_config::gateway_observability_config;
 use gateway_observability_config::gateway_observability_config_with_resolver;
+use gateway_observability_config::gateway_observability_secret_with_resolver;
 use gateway_provider_config::resolve_gateway_provider_config_with_resolver;
+use gateway_provider_config::resolve_gateway_provider_credentials_with_resolver;
 #[cfg(test)]
 pub(super) use gateway_provider_config::{gateway_openai_api_keys, gateway_upstream_base_url};
 #[cfg(test)]
@@ -52,6 +55,7 @@ use gateway_secret_config::GatewaySecretResolver;
 #[cfg(test)]
 pub(super) use gateway_sso_config::gateway_sso_config;
 use gateway_sso_config::gateway_sso_config_with_resolver;
+use gateway_sso_config::gateway_sso_secret_with_resolver;
 #[cfg(test)]
 pub(super) use gateway_state_store_config::gateway_state_store_config;
 use gateway_state_store_config::{
@@ -79,6 +83,92 @@ pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) credential_fingerprint: [u8; 32],
 }
 
+#[derive(Clone)]
+pub(super) struct GatewayCredentialRefreshTemplate {
+    sso: RuntimeGatewaySsoConfig,
+    guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig,
+    observability: RuntimeGatewayObservabilityConfig,
+}
+
+pub(super) fn gateway_credential_refresh_template(
+    gateway: &ResolvedGatewayLaunchConfig,
+) -> GatewayCredentialRefreshTemplate {
+    let mut sso = gateway.sso.clone();
+    sso.proxy_token_hash = None;
+    let mut guardrail_webhook = gateway.guardrail_webhook.clone();
+    guardrail_webhook.bearer_token = None;
+    let mut observability = gateway.observability.clone();
+    observability.http_bearer_token = None;
+    GatewayCredentialRefreshTemplate {
+        sso,
+        guardrail_webhook,
+        observability,
+    }
+}
+
+pub(super) fn resolve_gateway_refresh_candidate_for_service_mode(
+    state: &AppState,
+    args: &GatewayArgs,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+    runtime_config: &RuntimeConfig,
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+    template: &GatewayCredentialRefreshTemplate,
+) -> Result<RuntimeGatewayCredentialRefreshCandidate> {
+    let secret_resolver = GatewaySecretResolver::from_policy(secrets)?;
+    let (provider_options, auth) = match service_mode {
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway => {
+            let provider = resolve_gateway_provider_credentials_with_resolver(
+                state,
+                args,
+                policy,
+                &secret_resolver,
+                runtime_config,
+            )?;
+            let provider_options = match provider.provider_credential {
+                Some(credential) => provider
+                    .provider_options
+                    .with_projected_credential(credential),
+                None => provider.provider_options,
+            };
+            let auth = resolve_gateway_auth_config_with_resolver(
+                args,
+                policy,
+                &secret_resolver,
+                &runtime_config.gateway.launch,
+            )?;
+            (provider_options, auth)
+        }
+        prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane => (
+            RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+                api_keys: Vec::new(),
+            },
+            resolve_control_plane_auth_config_with_resolver(policy, &secret_resolver)?,
+        ),
+    };
+    let mut guardrail_webhook = template.guardrail_webhook.clone();
+    guardrail_webhook.bearer_token =
+        gateway_guardrail_webhook_secret_with_resolver(policy, &secret_resolver)?;
+    let mut sso = template.sso.clone();
+    sso.proxy_token_hash = gateway_sso_secret_with_resolver(policy, &secret_resolver)?;
+    let mut observability = template.observability.clone();
+    observability.http_bearer_token =
+        gateway_observability_secret_with_resolver(policy, &secret_resolver)?;
+    let fingerprint = secret_resolver.fingerprint()?;
+    let (provider, provider_credential) = provider_options.into_runtime_parts();
+    Ok(RuntimeGatewayCredentialRefreshCandidate {
+        fingerprint,
+        provider,
+        provider_credential,
+        auth_token_hash: auth.auth_token_hash,
+        admin_tokens: auth.admin_tokens,
+        sso,
+        virtual_keys: auth.virtual_keys,
+        guardrail_webhook,
+        observability,
+    })
+}
+
 #[cfg(test)]
 pub(super) fn resolve_gateway_launch_config(
     paths: &AppPaths,
@@ -97,7 +187,11 @@ pub(super) fn resolve_gateway_launch_config_with_secrets(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
 ) -> Result<ResolvedGatewayLaunchConfig> {
-    let runtime_config = RuntimeConfig::from_env_policy_and_cli(paths)?;
+    let runtime_config = RuntimeConfig::from_gateway_env_policy_and_cli(
+        paths,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        args,
+    )?;
     resolve_gateway_launch_config_with_runtime_config(
         paths,
         state,
@@ -154,15 +248,19 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
     let (provider_name, upstream_base_url, provider_options, auth, route_aliases) =
         match service_mode {
             prodex_runtime_policy::RuntimePolicyServiceMode::Gateway => {
-                gateway_validate_upstream_base_url_input(args, policy)?;
                 let provider = resolve_gateway_provider_config_with_resolver(
                     state,
                     args,
                     policy,
                     &secret_resolver,
+                    runtime_config,
                 )?;
-                let auth =
-                    resolve_gateway_auth_config_with_resolver(args, policy, &secret_resolver)?;
+                let auth = resolve_gateway_auth_config_with_resolver(
+                    args,
+                    policy,
+                    &secret_resolver,
+                    &runtime_config.gateway.launch,
+                )?;
                 if auth.auth_required
                     && provider.provider_credential.is_none()
                     && matches!(
@@ -214,7 +312,12 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
 
     let guardrail = resolve_gateway_guardrail_config_with_resolver(args, policy, &secret_resolver)?;
     let call_id_header = gateway_call_id_header_config(policy)?;
-    let state_store = gateway_state_store_config_with_resolver(paths, policy, &secret_resolver)?;
+    let state_store = gateway_state_store_config_with_resolver(
+        paths,
+        policy,
+        &secret_resolver,
+        &runtime_config.gateway.launch,
+    )?;
     gateway_validate_runtime_topology(&state_store, &runtime_config.gateway)?;
 
     let sso = gateway_sso_config_with_resolver(policy, &secret_resolver)?;
@@ -242,37 +345,6 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         presidio_redaction_enabled: guardrail.presidio_redaction_enabled,
         credential_fingerprint,
     })
-}
-
-fn gateway_validate_upstream_base_url_input(
-    args: &GatewayArgs,
-    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
-) -> Result<()> {
-    let configured = args.base_url.as_deref().or(policy.base_url.as_deref());
-    let provider = match args.provider {
-        Some(provider) => Some(provider),
-        None => policy
-            .provider
-            .as_deref()
-            .map(gateway_provider_config::gateway_policy_provider)
-            .transpose()?,
-    };
-    let selected = configured
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| provider.map(|provider| provider.default_base_url().to_string()))
-        .or_else(|| {
-            std::env::var("OPENAI_BASE_URL")
-                .ok()
-                .filter(|value| !value.is_empty())
-        });
-    if selected
-        .as_deref()
-        .is_some_and(|value| value.chars().any(char::is_whitespace))
-    {
-        bail!("gateway --base-url must not contain whitespace");
-    }
-    Ok(())
 }
 
 pub(super) fn gateway_call_id_header_config(
@@ -326,8 +398,11 @@ mod tests {
         let _provider_key = TestEnvVarGuard::set("OPENAI_API_KEY", "provider-secret-sentinel");
         let _gateway_token =
             TestEnvVarGuard::set("PRODEX_GATEWAY_TOKEN", "gateway-secret-sentinel");
+        let _base_url = TestEnvVarGuard::set("OPENAI_BASE_URL", " invalid ");
+        let _deepseek_tools = TestEnvVarGuard::set("PRODEX_DEEPSEEK_STRICT_TOOLS", "maybe");
+        let _deepseek_url = TestEnvVarGuard::set("PRODEX_DEEPSEEK_BETA_BASE_URL", "not-a-url");
+        let _deepseek_search = TestEnvVarGuard::set("PRODEX_DEEPSEEK_WEB_SEARCH_MODE", "enabled");
         let paths = AppPaths::discover().unwrap();
-        let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths).unwrap();
         let args = GatewayArgs {
             command: None,
             listen: Some("127.0.0.1:0".to_string()),
@@ -339,6 +414,12 @@ mod tests {
             presidio: false,
             no_presidio: false,
         };
+        let runtime_config = RuntimeConfig::from_gateway_env_policy_and_cli(
+            &paths,
+            prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane,
+            &args,
+        )
+        .unwrap();
 
         let config = resolve_gateway_launch_config_for_service_mode(
             &paths,
@@ -362,6 +443,74 @@ mod tests {
             panic!("control-plane compatibility backend must stay provider-neutral");
         };
         assert!(api_keys.is_empty());
+    }
+
+    #[test]
+    fn credential_refresh_reuses_non_secret_snapshot_and_skips_state_resolution() {
+        let root = temp_dir("credential-refresh-snapshot");
+        let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let _base_url = TestEnvVarGuard::unset("OPENAI_BASE_URL");
+        let _provider_key = TestEnvVarGuard::set("OPENAI_API_KEY", "provider-key-before");
+        let _gateway_token = TestEnvVarGuard::set("PRODEX_GATEWAY_TOKEN", "gateway-token");
+        let _state_url =
+            TestEnvVarGuard::set("PRODEX_REFRESH_STATE_URL", "redis://127.0.0.1:6379/0");
+        let paths = AppPaths::discover().unwrap();
+        let args = GatewayArgs {
+            command: None,
+            listen: Some("127.0.0.1:0".to_string()),
+            provider: None,
+            base_url: None,
+            api_key: None,
+            auth_token: None,
+            smart_context: false,
+            presidio: false,
+            no_presidio: false,
+        };
+        let runtime_config = RuntimeConfig::from_gateway_env_policy_and_cli(
+            &paths,
+            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+            &args,
+        )
+        .unwrap();
+        let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings {
+            require_auth: Some(true),
+            ..Default::default()
+        };
+        policy.state.backend = Some("redis".to_string());
+        policy.state.redis_url_env = Some("PRODEX_REFRESH_STATE_URL".to_string());
+        let secrets = prodex_runtime_policy::RuntimePolicySecretsSettings::default();
+        let initial = resolve_gateway_launch_config_for_service_mode(
+            &paths,
+            &AppState::default(),
+            &args,
+            &policy,
+            &secrets,
+            &runtime_config,
+            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        )
+        .unwrap();
+        let template = gateway_credential_refresh_template(&initial);
+
+        let _missing_state = TestEnvVarGuard::unset("PRODEX_REFRESH_STATE_URL");
+        let _changed_base = TestEnvVarGuard::set("OPENAI_BASE_URL", " invalid-after-start ");
+        let refreshed = resolve_gateway_refresh_candidate_for_service_mode(
+            &AppState::default(),
+            &args,
+            &policy,
+            &secrets,
+            &runtime_config,
+            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+            &template,
+        )
+        .unwrap();
+
+        assert_eq!(refreshed.fingerprint, initial.credential_fingerprint);
+        assert_eq!(refreshed.admin_tokens.len(), initial.admin_tokens.len());
+        assert_eq!(refreshed.virtual_keys.len(), initial.virtual_keys.len());
+        assert_eq!(
+            refreshed.auth_token_hash.is_some(),
+            initial.auth_token_hash.is_some()
+        );
     }
 
     #[test]
@@ -390,6 +539,7 @@ mod tests {
     #[test]
     fn gateway_provider_options_accepts_imported_kiro_profile() {
         let root = temp_dir("kiro");
+        let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
         let codex_home = root.join("kiro-home");
         fs::create_dir_all(&codex_home).expect("codex home should exist");
         fs::write(
@@ -422,8 +572,30 @@ mod tests {
             )]),
             ..Default::default()
         };
-        let options = gateway_provider_options(&state, Some(SuperExternalProvider::Kiro), None)
-            .expect("kiro gateway should use imported profile");
+        let args = GatewayArgs {
+            command: None,
+            listen: None,
+            provider: Some(SuperExternalProvider::Kiro),
+            base_url: None,
+            api_key: None,
+            auth_token: None,
+            smart_context: false,
+            presidio: false,
+            no_presidio: false,
+        };
+        let runtime_config = RuntimeConfig::from_gateway_env_policy_and_cli(
+            &AppPaths::discover().unwrap(),
+            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+            &args,
+        )
+        .unwrap();
+        let options = gateway_provider_options(
+            &state,
+            Some(SuperExternalProvider::Kiro),
+            None,
+            &runtime_config,
+        )
+        .expect("kiro gateway should use imported profile");
         let RuntimeLocalRewriteProviderOptions::Kiro { auth } = options else {
             panic!("expected kiro provider options");
         };

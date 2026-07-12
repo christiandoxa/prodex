@@ -59,6 +59,44 @@ const RUNTIME_GATEWAY_TOPOLOGY_ENV_KEYS = Object.freeze([
   "PRODEX_GATEWAY_REPLICA_COUNT",
   "PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS",
 ]);
+const RUNTIME_GATEWAY_STARTUP_CONFIG_FILES = Object.freeze([
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_config.rs",
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_provider_config.rs",
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_auth_config.rs",
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_state_store_config.rs",
+]);
+const RUNTIME_GATEWAY_STARTUP_FUNCTIONS = Object.freeze([
+  [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[0], "resolve_gateway_launch_config_for_service_mode"],
+  [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[0], "resolve_gateway_refresh_candidate_for_service_mode"],
+  [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[1], "resolve_gateway_provider_config_with_resolver"],
+  [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[1], "resolve_gateway_provider_credentials_with_resolver"],
+  [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[2], "resolve_gateway_auth_config_with_resolver"],
+  [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[3], "gateway_state_store_config_with_resolver"],
+]);
+const RUNTIME_GATEWAY_STARTUP_ENV_KEYS = Object.freeze([
+  "OPENAI_BASE_URL",
+  "PRODEX_DEEPSEEK_STRICT_TOOLS",
+  "PRODEX_DEEPSEEK_BETA_BASE_URL",
+  "PRODEX_DEEPSEEK_WEB_SEARCH_MODE",
+  "PRODEX_GATEWAY_TOKEN",
+  "PRODEX_GATEWAY_POSTGRES_URL",
+  "PRODEX_GATEWAY_REDIS_URL",
+  "OPENAI_API_KEYS",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEYS",
+  "ANTHROPIC_API_KEY",
+  "GITHUB_COPILOT_API_KEYS",
+  "GITHUB_COPILOT_API_KEY",
+  "DEEPSEEK_API_KEYS",
+  "DEEPSEEK_API_KEY",
+  "GEMINI_API_KEYS",
+  "GOOGLE_API_KEYS",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+]);
+const RUNTIME_GATEWAY_PROVIDER_CONFIG = RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[1];
+const RUNTIME_GATEWAY_SECRET_CONFIG =
+  "crates/prodex-app/src/app_commands/runtime_launch/gateway_secret_config.rs";
 const RUNTIME_OIDC_HOT_PATH_FILES = Object.freeze([
   "crates/prodex-app/src/app_commands/runtime_launch/gateway_sso_config.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/admin.rs",
@@ -306,13 +344,72 @@ export function validateRuntimeGatewayTopologyConfigBoundary(environmentSource, 
     }
   }
   const startup = hotPathSources.find(([file]) => file === RUNTIME_GATEWAY_STARTUP)?.[1] ?? "";
-  const snapshot = startup.indexOf("RuntimeConfig::from_env_policy_and_cli(&paths)");
-  const resolution = startup.indexOf("resolve_gateway_launch_config_with_runtime_config(");
+  const snapshot = startup.indexOf("RuntimeConfig::from_gateway_env_policy_and_cli(");
+  const resolution = startup.indexOf("resolve_gateway_launch_config_for_service_mode(");
   if (snapshot < 0 || resolution < 0 || snapshot >= resolution) {
     errors.push(`${RUNTIME_GATEWAY_STARTUP}: RuntimeConfig snapshot must precede gateway config resolution`);
   }
   if ((startup.match(/Arc::clone\(&runtime_config\)/gu) ?? []).length < 2) {
     errors.push(`${RUNTIME_GATEWAY_STARTUP}: refresh and proxy workers must share the gateway RuntimeConfig Arc`);
+  }
+  return errors;
+}
+
+function rustFunctionSource(source, name) {
+  const declaration = new RegExp(`\\bfn\\s+${name}\\s*\\(`, "u").exec(source);
+  if (!declaration) return "";
+  const brace = source.indexOf("{", declaration.index);
+  if (brace < 0) return "";
+  let depth = 0;
+  for (let index = brace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(declaration.index, index + 1);
+    }
+  }
+  return "";
+}
+
+export function validateRuntimeGatewayStartupConfigBoundary(environmentSource, sources) {
+  const errors = [];
+  const byFile = new Map(sources);
+  for (const key of RUNTIME_GATEWAY_STARTUP_ENV_KEYS) {
+    const count = environmentSource.split(`"${key}"`).length - 1;
+    if (count !== 1) {
+      errors.push(`${RUNTIME_CONFIG_ENVIRONMENT}: expected exactly one gateway startup entry for ${key}, found ${count}`);
+    }
+  }
+  for (const [file, name] of RUNTIME_GATEWAY_STARTUP_FUNCTIONS) {
+    const body = rustFunctionSource(byFile.get(file) ?? "", name);
+    if (!body) {
+      errors.push(`${file}: missing gateway startup function ${name}`);
+    } else if (RUNTIME_ENV_READ_PATTERN.test(body)) {
+      errors.push(`${file}: ${name} must consume RuntimeConfig instead of reading the environment`);
+    }
+  }
+  const provider = byFile.get(RUNTIME_GATEWAY_PROVIDER_CONFIG) ?? "";
+  for (const forbidden of ["_api_keys_from_request_or_env", "RuntimeGeminiModelResolution::from_current_settings"] ) {
+    if (provider.includes(forbidden)) {
+      errors.push(`${RUNTIME_GATEWAY_PROVIDER_CONFIG}: production gateway provider resolution must not use ${forbidden}`);
+    }
+  }
+  const secrets = byFile.get(RUNTIME_GATEWAY_SECRET_CONFIG) ?? "";
+  const secretEnvironmentReads = secrets
+    .split(/\r?\n/u)
+    .filter((line) => RUNTIME_ENV_READ_PATTERN.test(line)).length;
+  if (secretEnvironmentReads !== 1) {
+    errors.push(`${RUNTIME_GATEWAY_SECRET_CONFIG}: deferred secret resolver must own the sole gateway environment material read`);
+  }
+  const startup = byFile.get(RUNTIME_GATEWAY_STARTUP) ?? "";
+  if (!startup.includes("RuntimeConfig::from_gateway_env_policy_and_cli")) {
+    errors.push(`${RUNTIME_GATEWAY_STARTUP}: dedicated gateway startup must build the gateway RuntimeConfig snapshot`);
+  }
+  if ((startup.match(/resolve_gateway_launch_config_for_service_mode\s*\(/gu) ?? []).length !== 1) {
+    errors.push(`${RUNTIME_GATEWAY_STARTUP}: full gateway launch resolution must run exactly once`);
+  }
+  if (!startup.includes("resolve_gateway_refresh_candidate_for_service_mode(")) {
+    errors.push(`${RUNTIME_GATEWAY_STARTUP}: secret refresh must use the secret-only refresh adapter`);
   }
   return errors;
 }
@@ -367,6 +464,19 @@ async function validateRuntimeGatewayTopologyConfigSources() {
     ]),
   );
   return validateRuntimeGatewayTopologyConfigBoundary(environmentSource, hotPathSources);
+}
+
+async function validateRuntimeGatewayStartupConfigSources() {
+  const environmentSource = await fs.readFile(path.join(repoRoot, RUNTIME_CONFIG_ENVIRONMENT), "utf8");
+  const files = [...new Set([
+    ...RUNTIME_GATEWAY_STARTUP_CONFIG_FILES,
+    RUNTIME_GATEWAY_SECRET_CONFIG,
+    RUNTIME_GATEWAY_STARTUP,
+  ])];
+  const sources = await Promise.all(
+    files.map(async (file) => [file, await fs.readFile(path.join(repoRoot, file), "utf8")]),
+  );
+  return validateRuntimeGatewayStartupConfigBoundary(environmentSource, sources);
 }
 
 function assertSelfTest(condition, message) {
@@ -551,8 +661,8 @@ message: "configuration is not currently available"
   const topologySource =
     "let replicas = config.replica_count; let gate = config.require_multi_replica_accounting_checks;";
   const gatewayStartupSource = `
-    let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(&paths));
-    resolve_gateway_launch_config_with_runtime_config();
+    let runtime_config = Arc::new(RuntimeConfig::from_gateway_env_policy_and_cli(&paths));
+    resolve_gateway_launch_config_for_service_mode();
     let refresh_runtime_config = Arc::clone(&runtime_config);
     start_runtime_gateway_rewrite_proxy_with_runtime_config(Arc::clone(&runtime_config));`;
   const topologyHotPaths = [
@@ -570,6 +680,38 @@ message: "configuration is not currently available"
     ]).some((error) => error.includes("must use RuntimeConfig")),
     "gateway topology environment read accepted",
   );
+  const gatewayEnvironment = RUNTIME_GATEWAY_STARTUP_ENV_KEYS.map((key) => `"${key}",`).join("\n");
+  const gatewaySources = [
+    [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[0], `
+      fn resolve_gateway_launch_config_for_service_mode() {}
+      fn resolve_gateway_refresh_candidate_for_service_mode() {}
+    `],
+    [RUNTIME_GATEWAY_PROVIDER_CONFIG, `
+      fn resolve_gateway_provider_config_with_resolver() {}
+      fn resolve_gateway_provider_credentials_with_resolver() {}
+    `],
+    [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[2], "fn resolve_gateway_auth_config_with_resolver() {}"],
+    [RUNTIME_GATEWAY_STARTUP_CONFIG_FILES[3], "fn gateway_state_store_config_with_resolver() {}"],
+    [RUNTIME_GATEWAY_SECRET_CONFIG, "fn resolve() { env::var(name); }"],
+    [RUNTIME_GATEWAY_STARTUP, `
+      RuntimeConfig::from_gateway_env_policy_and_cli();
+      resolve_gateway_launch_config_for_service_mode();
+      resolve_gateway_refresh_candidate_for_service_mode();
+    `],
+  ];
+  assertSelfTest(
+    validateRuntimeGatewayStartupConfigBoundary(gatewayEnvironment, gatewaySources).length === 0,
+    "typed gateway startup config rejected",
+  );
+  assertSelfTest(
+    validateRuntimeGatewayStartupConfigBoundary(gatewayEnvironment, gatewaySources.map(([file, source]) => [
+      file,
+      file === RUNTIME_GATEWAY_PROVIDER_CONFIG
+        ? source.replace("fn resolve_gateway_provider_config_with_resolver() {}", "fn resolve_gateway_provider_config_with_resolver() { env::var(\"KEY\"); }")
+        : source,
+    ])).some((error) => error.includes("must consume RuntimeConfig")),
+    "gateway startup environment read accepted",
+  );
 }
 
 async function main() {
@@ -584,6 +726,7 @@ async function main() {
     ...(await validateRuntimeGeminiConfigSources()),
     ...(await validateRuntimeOidcConfigSources()),
     ...(await validateRuntimeGatewayTopologyConfigSources()),
+    ...(await validateRuntimeGatewayStartupConfigSources()),
   ];
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);

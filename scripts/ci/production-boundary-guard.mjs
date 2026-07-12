@@ -680,7 +680,7 @@ export function validateProductionBoundary(sources) {
   );
 
   const providerConfig =
-    functionBody(sources.providerConfig, "resolve_gateway_provider_config_with_resolver") ?? "";
+    functionBody(sources.providerConfig, "resolve_gateway_provider_credentials_with_resolver") ?? "";
   requireBefore(
     errors,
     providerConfig,
@@ -1072,7 +1072,7 @@ function runSelfTest() {
       fn runtime_gateway_provider_invocation() {
         shared.provider_credential.as_ref().map(|credential| credential.reference());
       }`,
-    providerConfig: `fn resolve_gateway_provider_config_with_resolver() {
+    providerConfig: `fn resolve_gateway_provider_credentials_with_resolver() {
       resolver.projected_provider_credential();
       gateway_projected_provider_options();
     }`,

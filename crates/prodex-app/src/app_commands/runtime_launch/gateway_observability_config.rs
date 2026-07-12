@@ -81,18 +81,7 @@ pub(crate) fn gateway_observability_config_with_resolver(
         })
         .transpose()?
         .unwrap_or_else(|| "generic".to_string());
-    let token_context = if policy.observability.http_bearer_token_ref.is_some() {
-        "gateway.observability.http_bearer_token_ref"
-    } else {
-        "gateway.observability.http_bearer_token_env"
-    };
-    let http_bearer_token = resolver.runtime_secret(
-        token_context,
-        policy.observability.http_bearer_token_ref.as_ref(),
-        policy.observability.http_bearer_token_env.as_deref(),
-        None,
-        SecretPurpose::TelemetryExportCredential,
-    )?;
+    let http_bearer_token = gateway_observability_secret_with_resolver(policy, resolver)?;
     Ok(RuntimeGatewayObservabilityConfig {
         sinks,
         jsonl_path,
@@ -100,6 +89,24 @@ pub(crate) fn gateway_observability_config_with_resolver(
         http_schema,
         http_bearer_token,
     })
+}
+
+pub(crate) fn gateway_observability_secret_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<Option<RuntimeGatewaySecret>> {
+    let token_context = if policy.observability.http_bearer_token_ref.is_some() {
+        "gateway.observability.http_bearer_token_ref"
+    } else {
+        "gateway.observability.http_bearer_token_env"
+    };
+    resolver.runtime_secret(
+        token_context,
+        policy.observability.http_bearer_token_ref.as_ref(),
+        policy.observability.http_bearer_token_env.as_deref(),
+        None,
+        SecretPurpose::TelemetryExportCredential,
+    )
 }
 
 fn gateway_observability_http_endpoint(field: &str, value: &str) -> Result<String> {

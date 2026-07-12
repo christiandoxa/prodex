@@ -4,7 +4,9 @@ use prodex_domain::{
     ProductionReadinessTopology, SecretPurpose, plan_deployment_security_error_response,
     plan_production_deployment_readiness,
 };
-use std::{env, path::PathBuf};
+#[cfg(test)]
+use std::env;
+use std::path::PathBuf;
 
 const PRODEX_GATEWAY_REDIS_URL_ENV: &str = "PRODEX_GATEWAY_REDIS_URL";
 
@@ -14,13 +16,33 @@ pub(crate) fn gateway_state_store_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<RuntimeGatewayStateStore> {
     let resolver = GatewaySecretResolver::from_policy(&Default::default())?;
-    gateway_state_store_config_with_resolver(paths, policy, &resolver)
+    gateway_state_store_config_with_redis_presence(
+        paths,
+        policy,
+        &resolver,
+        env::var_os(PRODEX_GATEWAY_REDIS_URL_ENV).is_some(),
+    )
 }
 
 pub(crate) fn gateway_state_store_config_with_resolver(
     paths: &AppPaths,
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
+    environment: &RuntimeGatewayLaunchEnvironment,
+) -> Result<RuntimeGatewayStateStore> {
+    gateway_state_store_config_with_redis_presence(
+        paths,
+        policy,
+        resolver,
+        environment.secret_env_present(PRODEX_GATEWAY_REDIS_URL_ENV),
+    )
+}
+
+fn gateway_state_store_config_with_redis_presence(
+    paths: &AppPaths,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+    development_redis_present: bool,
 ) -> Result<RuntimeGatewayStateStore> {
     let backend = match policy.state.backend.as_deref() {
         Some(value) if gateway_exact_policy_identifier(value) => value,
@@ -72,7 +94,8 @@ pub(crate) fn gateway_state_store_config_with_resolver(
                     SecretPurpose::DataPlaneCredential,
                 )?
                 .context("gateway.state.backend=postgres requires a secret source")?;
-            let coordination_redis_url = gateway_coordination_redis_url(policy, resolver)?;
+            let coordination_redis_url =
+                gateway_coordination_redis_url(policy, resolver, development_redis_present)?;
             let tls = gateway_postgres_tls_config(paths, policy, resolver)?;
             Ok(
                 RuntimeGatewayStateStore::postgres_with_coordination_and_tls(
@@ -227,6 +250,7 @@ fn gateway_application_runtime_topology(
 fn gateway_coordination_redis_url(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
+    development_redis_present: bool,
 ) -> Result<Option<String>> {
     if policy
         .state
@@ -239,8 +263,8 @@ fn gateway_coordination_redis_url(
     let development_env = (!resolver.production()
         && policy.state.redis_url_ref.is_none()
         && policy.state.redis_url_env.is_none()
-        && env::var_os(PRODEX_GATEWAY_REDIS_URL_ENV).is_some())
-    .then_some(PRODEX_GATEWAY_REDIS_URL_ENV);
+        && development_redis_present)
+        .then_some(PRODEX_GATEWAY_REDIS_URL_ENV);
     resolver.resolve_static(
         "gateway.state.redis_url",
         policy.state.redis_url_ref.as_ref(),

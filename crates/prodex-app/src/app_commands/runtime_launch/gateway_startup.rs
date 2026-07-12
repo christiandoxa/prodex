@@ -2,8 +2,8 @@ use super::gateway_config;
 use crate::app_state::AppStateIoExt;
 use crate::{
     AppPaths, AppState, GatewayApplication, GatewayArgs, GatewayBackend, RuntimeConfig,
-    RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
-    RuntimeLocalRewriteProxyStartOptions, start_runtime_gateway_application_with_runtime_config,
+    RuntimeGatewayCredentialRefreshPlan, RuntimeLocalRewriteProxyStartOptions,
+    start_runtime_gateway_application_with_runtime_config,
     start_runtime_gateway_rewrite_proxy_with_runtime_config,
 };
 use anyhow::Result;
@@ -92,7 +92,11 @@ fn start_gateway_runtime_for_service_mode<T>(
 ) -> Result<(T, &'static str, bool)> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
-    let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(&paths)?);
+    let runtime_config = Arc::new(RuntimeConfig::from_gateway_env_policy_and_cli(
+        &paths,
+        service_mode,
+        &args,
+    )?);
     let policy = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
     let secrets = prodex_runtime_policy::runtime_policy_secrets().unwrap_or_default();
     let gateway = gateway_config::resolve_gateway_launch_config_for_service_mode(
@@ -104,8 +108,8 @@ fn start_gateway_runtime_for_service_mode<T>(
         &runtime_config,
         service_mode,
     )?;
+    let refresh_template = gateway_config::gateway_credential_refresh_template(&gateway);
     let secret_refresh = secrets.projected_root.is_some().then(|| {
-        let refresh_paths = paths.clone();
         let refresh_state = state.clone();
         let refresh_args = gateway_refresh_args(&args);
         let refresh_policy = policy.clone();
@@ -114,16 +118,15 @@ fn start_gateway_runtime_for_service_mode<T>(
         RuntimeGatewayCredentialRefreshPlan::new(
             gateway.credential_fingerprint,
             Arc::new(move || {
-                let refreshed = gateway_config::resolve_gateway_launch_config_for_service_mode(
-                    &refresh_paths,
+                gateway_config::resolve_gateway_refresh_candidate_for_service_mode(
                     &refresh_state,
                     &refresh_args,
                     &refresh_policy,
                     &refresh_secrets,
                     &refresh_runtime_config,
                     service_mode,
-                )?;
-                Ok(gateway_refresh_candidate(&refreshed))
+                    &refresh_template,
+                )
             }),
         )
     });
@@ -163,30 +166,13 @@ fn start_gateway_runtime_for_service_mode<T>(
 fn gateway_refresh_args(args: &GatewayArgs) -> GatewayArgs {
     GatewayArgs {
         command: None,
-        listen: args.listen.clone(),
+        listen: None,
         provider: args.provider,
-        base_url: args.base_url.clone(),
+        base_url: None,
         api_key: args.api_key.clone(),
         auth_token: args.auth_token.clone(),
-        smart_context: args.smart_context,
-        presidio: args.presidio,
-        no_presidio: args.no_presidio,
-    }
-}
-
-fn gateway_refresh_candidate(
-    gateway: &gateway_config::ResolvedGatewayLaunchConfig,
-) -> RuntimeGatewayCredentialRefreshCandidate {
-    let (provider, provider_credential) = gateway.provider_options.clone().into_runtime_parts();
-    RuntimeGatewayCredentialRefreshCandidate {
-        fingerprint: gateway.credential_fingerprint,
-        provider,
-        provider_credential,
-        auth_token_hash: gateway.auth_token_hash.clone(),
-        admin_tokens: gateway.admin_tokens.clone(),
-        sso: gateway.sso.clone(),
-        virtual_keys: gateway.virtual_keys.clone(),
-        guardrail_webhook: gateway.guardrail_webhook.clone(),
-        observability: gateway.observability.clone(),
+        smart_context: false,
+        presidio: false,
+        no_presidio: false,
     }
 }
