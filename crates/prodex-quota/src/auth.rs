@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use super::{AuthSummary, StoredAuth, UsageAuth, UsageAuthSyncOutcome, UsageAuthSyncSource};
 
@@ -57,7 +59,7 @@ pub fn auth_summary_from_auth_text_result<E>(
     result: std::result::Result<Option<String>, E>,
 ) -> AuthSummary {
     match result {
-        Ok(Some(content)) => auth_summary_from_auth_text(&content),
+        Ok(Some(content)) => auth_summary_from_auth_text(&Zeroizing::new(content)),
         Ok(None) => AuthSummaryKind::MissingAuth.into_summary(),
         Err(_) => AuthSummaryKind::UnreadableAuth.into_summary(),
     }
@@ -303,7 +305,7 @@ where
     serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ChatgptRefreshResponse {
     #[serde(default)]
     pub id_token: Option<String>,
@@ -313,25 +315,53 @@ pub struct ChatgptRefreshResponse {
     pub refresh_token: Option<String>,
 }
 
+impl fmt::Debug for ChatgptRefreshResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChatgptRefreshResponse")
+            .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+impl Zeroize for ChatgptRefreshResponse {
+    fn zeroize(&mut self) {
+        self.id_token.zeroize();
+        self.access_token.zeroize();
+        self.refresh_token.zeroize();
+    }
+}
+
+impl Drop for ChatgptRefreshResponse {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for ChatgptRefreshResponse {}
+
 pub fn apply_chatgpt_refresh(
     auth_json: &mut serde_json::Value,
-    refreshed: ChatgptRefreshResponse,
+    mut refreshed: ChatgptRefreshResponse,
     refreshed_at: String,
 ) -> Result<()> {
-    let ChatgptRefreshResponse {
-        id_token,
-        access_token,
-        refresh_token,
-    } = refreshed;
-    let refreshed_account_id = access_token
+    let refreshed_account_id = refreshed
+        .access_token
         .as_deref()
         .and_then(|token| parse_jwt_chatgpt_account_id(token).ok().flatten());
     {
         let tokens_object = auth_tokens_object_mut(auth_json)?;
-        if let Some(id_token) = id_token {
+        if let Some(id_token) = refreshed.id_token.take() {
             tokens_object.insert("id_token".to_string(), serde_json::Value::String(id_token));
         }
-        if let Some(access_token) = access_token {
+        if let Some(access_token) = refreshed.access_token.take() {
             tokens_object.insert(
                 "access_token".to_string(),
                 serde_json::Value::String(access_token),
@@ -343,7 +373,7 @@ pub fn apply_chatgpt_refresh(
                 serde_json::Value::String(account_id),
             );
         }
-        if let Some(refresh_token) = refresh_token {
+        if let Some(refresh_token) = refreshed.refresh_token.take() {
             tokens_object.insert(
                 "refresh_token".to_string(),
                 serde_json::Value::String(refresh_token),
