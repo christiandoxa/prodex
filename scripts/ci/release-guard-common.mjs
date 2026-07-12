@@ -117,7 +117,7 @@ function isCargoManifestVersionMetadataChange(change, filePath) {
 }
 
 function isCargoLockVersionMetadataChange(change, filePath) {
-  if (normalizeGitPath(filePath) !== "Cargo.lock") {
+  if (!["Cargo.lock", "fuzz/Cargo.lock"].includes(normalizeGitPath(filePath))) {
     return false;
   }
   return changedLinesForPath(change, filePath).some((line) => {
