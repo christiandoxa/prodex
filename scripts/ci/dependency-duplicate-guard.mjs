@@ -42,8 +42,8 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
   },
   {
     name: "getrandom",
-    maxVersions: 3,
-    reason: "rand/proptest/tempfile/export crypto currently span getrandom 0.2, 0.3, and 0.4.",
+    maxVersions: 2,
+    reason: "legacy crypto and current rand/tempfile resolve getrandom 0.2 and 0.4.",
   },
   {
     name: "hashbrown",
@@ -62,13 +62,8 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
   },
   {
     name: "rand_core",
-    maxVersions: 3,
-    reason: "crypto-common, rand/proptest, and JWT AWS-LC dependencies currently span rand_core 0.6, 0.9, and 0.10.",
-  },
-  {
-    name: "rand",
     maxVersions: 2,
-    reason: "provider crypto and JWT AWS-LC support currently span rand 0.9 and 0.10.",
+    reason: "legacy crypto and current rand/JWT AWS-LC dependencies resolve rand_core 0.6 and 0.10.",
   },
   {
     name: "thiserror",
