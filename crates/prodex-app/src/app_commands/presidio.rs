@@ -42,7 +42,7 @@ struct PresidioPanel {
     fields: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 struct ProdexPresidioConfig {
     enabled: bool,
     analyzer_url: String,
@@ -553,6 +553,8 @@ fn load_presidio_config(paths: &AppPaths) -> Result<Option<ProdexPresidioConfig>
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let config = toml::from_str::<ProdexPresidioConfig>(&raw)
         .with_context(|| format!("failed to parse {}", path.display()))?;
+    validate_presidio_url(&config.analyzer_url, "analyzer_url")?;
+    validate_presidio_url(&config.anonymizer_url, "anonymizer_url")?;
     Ok(Some(config))
 }
 
@@ -707,6 +709,7 @@ fn merge_presidio_analyzer_results(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn presidio_tui_text_contains_fields() {
@@ -747,5 +750,47 @@ mod tests {
             presidio_value_style("Enabled", "false").fg,
             Some(Color::Red)
         );
+    }
+
+    #[test]
+    fn stored_presidio_url_secret_is_rejected_before_status_rendering() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-presidio-status-url-boundary-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join(PRODEX_PRESIDIO_FILE_NAME),
+            "enabled = true\n\
+             analyzer_url = 'https://user:presidio-status-secret-sentinel@example.test'\n\
+             anonymizer_url = 'https://example.test'\n\
+             language = 'en'\n\
+             language_mode = 'fixed'\n\
+             fail_mode = 'open'\n",
+        )
+        .unwrap();
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+
+        let error = match load_presidio_config(&paths) {
+            Ok(_) => panic!("credential-bearing Presidio URL should fail before rendering"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            error.contains("no credentials, query, or fragment"),
+            "{error}"
+        );
+        assert!(!error.contains("secret-sentinel"), "{error}");
+        let _ = fs::remove_dir_all(root);
     }
 }
