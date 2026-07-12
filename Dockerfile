@@ -29,5 +29,5 @@ ENV PRODEX_RUNTIME_LOG_DIR=/var/log/prodex
 USER prodex
 EXPOSE 4000
 
-ENTRYPOINT ["/usr/local/bin/prodex"]
-CMD ["gateway", "--listen", "0.0.0.0:4000"]
+ENTRYPOINT ["/usr/local/bin/prodex-gateway"]
+CMD ["serve", "--listen", "0.0.0.0:4000"]

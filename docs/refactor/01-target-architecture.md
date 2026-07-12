@@ -10,22 +10,24 @@ or transport redesign is part of the migration.
 
 ```mermaid
 flowchart LR
-    Dedicated[Dedicated binaries] --> Front[prodex-gateway-server compatibility front]
-    Front --> Legacy[prodex-app compatibility backend]
-    Deployed[Current Kubernetes prodex gateway] --> Legacy
-    Legacy --> Provider[provider/runtime adapters]
-    Legacy --> State[legacy state and accounting adapters]
-    Boundary[authn/application/gateway boundaries] -->|canonical target and scope gate| Legacy
+    Dedicated[Dedicated binaries] --> Front[prodex-gateway-server bounded HTTP front]
+    Front --> App[prodex-app in-process RuntimeGatewayApplication]
+    Deployed[Current Kubernetes gateway and control plane] --> Dedicated
+    App --> Pipeline[shared transport-neutral application pipeline]
+    Pipeline --> Provider[provider/runtime adapters]
+    Pipeline --> State[state and accounting adapters]
+    Boundary[authn/application/gateway boundaries] -->|same canonical target and scope gate| Pipeline
+    LegacyCli[legacy prodex gateway command] -. compatibility only .-> Tiny[tiny_http loopback listener]
+    Tiny --> Pipeline
 ```
 
 Current risks:
 
-- the checked-in Kubernetes deployment bypasses the async front and invokes the legacy root
-  gateway directly, although that root now uses the canonical target and application scope gate;
 - secret verification, principal construction, authorization, admission, accounting, routing, and
   provider policy remain split between boundary crates and compatibility code;
 - `prodex-app` still owns policy decisions that should live in domain/application boundaries;
-- an extra front-to-backend hop remains until the new path reaches parity.
+- the legacy root `prodex gateway` command retains its Tiny listener for CLI compatibility, while
+  dedicated production binaries use only the bounded in-process transport.
 
 ## Target Production Shape
 
@@ -98,6 +100,10 @@ parse and validate request target
   exact canonical target. Verified legacy data/admin outcomes enter `prodex-application` and
   `prodex-authn` as an authoritative scope gate before admission or use-case execution. ADR 1072
   owns the compatibility adapter and its deletion conditions.
+- Dedicated data-plane and control-plane binaries now move the async front's exact
+  `CanonicalRequestTarget` into one listener-free `RuntimeGatewayApplication`. Bounded request and
+  body channels preserve streaming backpressure, cancellation, overload, drain, and Gemini Live
+  upgrade semantics without a front-to-loopback socket hop. ADR 1075 owns this transport cutover.
 - Two uncompiled duplicate request-entry/authentication prototypes were removed. Credential
   decoding, principal/tenant construction, authz, durable admission, provider invocation, and
   reconciliation remain explicit later slices.
@@ -141,7 +147,7 @@ cohesive commit. Behavior tests ship in the same commit as each changed slice.
 
 ## Production Cutover Gate
 
-Do not point the deployment at the dedicated async front until route, auth, accounting, provider,
+The deployment points at the dedicated async front after route, auth, accounting, provider,
 streaming, upgrade, cancellation, drain, and credential-separation characterization tests pass.
-After cutover, add an architecture guard that rejects both direct deployment of the legacy handler
-and production data/control handlers that bypass the application authentication/use-case boundary.
+Architecture guards reject both restoration of a dedicated loopback backend and production
+data/control handlers that bypass the application authentication/use-case boundary.
