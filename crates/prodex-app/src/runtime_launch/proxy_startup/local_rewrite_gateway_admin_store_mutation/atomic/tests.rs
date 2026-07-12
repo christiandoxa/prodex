@@ -130,10 +130,11 @@ fn sqlite_compatibility_write_idempotency_and_audit_share_one_transaction() {
     std::fs::create_dir_all(&root).unwrap();
     let path = root.join("state.sqlite");
     runtime_gateway_sqlite_create_current_schema_for_tests(&path).unwrap();
+    let record_tenant_id = TenantId::new();
     let tenant_id = TenantId::new();
     let store = RuntimeGatewayVirtualKeyStoreFile {
         version: runtime_gateway_virtual_key_store_version(),
-        keys: vec![stored_key(tenant_id)],
+        keys: vec![stored_key(record_tenant_id)],
         ..RuntimeGatewayVirtualKeyStoreFile::default()
     };
 
@@ -144,6 +145,7 @@ fn sqlite_compatibility_write_idempotency_and_audit_share_one_transaction() {
             .unwrap();
         runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store).unwrap();
         let write = atomic_write(tenant_id, "request-1", "fingerprint-1");
+        runtime_gateway_sqlite_upsert_action_tenant(&tx, &write).unwrap();
         let audit = sqlite_audit_envelope(&tx, &write.audit_event);
         runtime_gateway_sqlite_write_metadata(&tx, &write, &audit).unwrap();
     }
@@ -168,6 +170,7 @@ fn sqlite_compatibility_write_idempotency_and_audit_share_one_transaction() {
         .unwrap();
     runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store).unwrap();
     let write = atomic_write(tenant_id, "request-1", "fingerprint-1");
+    runtime_gateway_sqlite_upsert_action_tenant(&tx, &write).unwrap();
     let audit = sqlite_audit_envelope(&tx, &write.audit_event);
     runtime_gateway_sqlite_write_metadata(&tx, &write, &audit).unwrap();
     tx.commit().unwrap();
@@ -205,6 +208,7 @@ fn sqlite_compatibility_write_idempotency_and_audit_share_one_transaction() {
         Some(first_digest.as_str())
     );
     runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store).unwrap();
+    runtime_gateway_sqlite_upsert_action_tenant(&tx, &second).unwrap();
     runtime_gateway_sqlite_write_metadata(&tx, &second, &second_audit).unwrap();
     tx.commit().unwrap();
     let audit_count: i64 = conn
