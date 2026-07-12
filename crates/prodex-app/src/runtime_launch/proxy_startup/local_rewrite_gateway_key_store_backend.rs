@@ -198,6 +198,8 @@ pub(super) fn runtime_gateway_sqlite_load_key_store_from_conn(
         version: runtime_gateway_virtual_key_store_version(),
         keys,
         scim_users: runtime_gateway_sqlite_load_scim_users_from_conn(conn)?,
+        admin_idempotency: Vec::new(),
+        admin_audit: Vec::new(),
     })
 }
 
@@ -290,6 +292,8 @@ pub(super) fn runtime_gateway_postgres_load_key_store_from_client<C: GenericClie
         version: runtime_gateway_virtual_key_store_version(),
         keys,
         scim_users: runtime_gateway_postgres_load_scim_users_from_client(client)?,
+        admin_idempotency: Vec::new(),
+        admin_audit: Vec::new(),
     })
 }
 
@@ -457,8 +461,10 @@ pub(super) fn runtime_gateway_redis_load_key_store_from_conn(
         let Some(payload) = payload else {
             return Ok(RuntimeGatewayVirtualKeyStoreFile::default());
         };
-        return serde_json::from_str::<RuntimeGatewayVirtualKeyStoreFile>(&payload)
-            .context("failed to parse legacy gateway redis virtual key store");
+        let mut store = serde_json::from_str::<RuntimeGatewayVirtualKeyStoreFile>(&payload)
+            .context("failed to parse legacy gateway redis virtual key store")?;
+        store.bound_admin_history();
+        return Ok(store);
     }
 
     let mut keys = Vec::new();
@@ -485,6 +491,8 @@ pub(super) fn runtime_gateway_redis_load_key_store_from_conn(
         version: runtime_gateway_virtual_key_store_version(),
         keys,
         scim_users,
+        admin_idempotency: Vec::new(),
+        admin_audit: Vec::new(),
     })
 }
 
@@ -593,19 +601,19 @@ pub(super) fn runtime_gateway_redis_save_key_store(
     Ok(())
 }
 
-fn runtime_gateway_redis_key_store_key_index(redis_key: &str) -> String {
+pub(super) fn runtime_gateway_redis_key_store_key_index(redis_key: &str) -> String {
     format!("{redis_key}:keys")
 }
 
-fn runtime_gateway_redis_key_store_key_hash(redis_key: &str, name: &str) -> String {
+pub(super) fn runtime_gateway_redis_key_store_key_hash(redis_key: &str, name: &str) -> String {
     format!("{redis_key}:key:{name}")
 }
 
-fn runtime_gateway_redis_key_store_scim_index(redis_key: &str) -> String {
+pub(super) fn runtime_gateway_redis_key_store_scim_index(redis_key: &str) -> String {
     format!("{redis_key}:scim_users")
 }
 
-fn runtime_gateway_redis_key_store_scim_hash(redis_key: &str, id: &str) -> String {
+pub(super) fn runtime_gateway_redis_key_store_scim_hash(redis_key: &str, id: &str) -> String {
     format!("{redis_key}:scim_user:{id}")
 }
 
@@ -1301,6 +1309,7 @@ mod tests {
                 created_at_epoch: 3,
                 updated_at_epoch: 4,
             }],
+            ..RuntimeGatewayVirtualKeyStoreFile::default()
         };
         runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store).unwrap();
         tx.commit().unwrap();
@@ -1360,6 +1369,7 @@ mod tests {
                 created_at_epoch: 3,
                 updated_at_epoch: 4,
             }],
+            ..RuntimeGatewayVirtualKeyStoreFile::default()
         };
 
         let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();

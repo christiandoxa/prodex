@@ -23,6 +23,13 @@ use fs2::FileExt;
 use rusqlite::TransactionBehavior;
 use std::fs::OpenOptions;
 
+#[allow(dead_code)]
+mod atomic;
+#[allow(unused_imports)]
+pub(super) use atomic::{
+    RuntimeGatewayAdminAtomicWrite, runtime_gateway_mutate_admin_key_store_atomic,
+};
+
 pub(super) fn runtime_gateway_mutate_admin_key_store<F>(
     shared: &RuntimeLocalRewriteProxyShared,
     mutation: F,
