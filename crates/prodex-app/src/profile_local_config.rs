@@ -1,3 +1,4 @@
+use crate::validate_credential_free_http_url;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
@@ -8,7 +9,7 @@ pub(crate) const PRODEX_OPENAI_COMPAT_PROVIDER_ID: &str = "prodex-openai-compati
 
 const PRODEX_PROFILE_CONFIG_FILE: &str = ".prodex-profile.toml";
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 struct ProdexProfileLocalConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     openai_compatible_base_url: Option<String>,
@@ -18,14 +19,22 @@ pub(crate) fn profile_local_config_path(codex_home: &Path) -> PathBuf {
     codex_home.join(PRODEX_PROFILE_CONFIG_FILE)
 }
 
-pub(crate) fn read_profile_openai_compatible_base_url(codex_home: &Path) -> Option<String> {
+pub(crate) fn read_profile_openai_compatible_base_url(codex_home: &Path) -> Result<Option<String>> {
     let config_path = profile_local_config_path(codex_home);
-    let contents = fs::read_to_string(config_path).ok()?;
-    let config: ProdexProfileLocalConfig = toml::from_str(&contents).ok()?;
-    config
-        .openai_compatible_base_url
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    let contents = match fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", config_path.display()));
+        }
+    };
+    let config: ProdexProfileLocalConfig = toml::from_str(&contents)
+        .with_context(|| format!("failed to parse {}", config_path.display()))?;
+    let Some(base_url) = config.openai_compatible_base_url else {
+        return Ok(None);
+    };
+    validate_credential_free_http_url(&base_url, "profile OpenAI-compatible base URL")?;
+    Ok(Some(base_url))
 }
 
 pub(crate) fn write_profile_openai_compatible_base_url(
@@ -33,10 +42,12 @@ pub(crate) fn write_profile_openai_compatible_base_url(
     base_url: Option<&str>,
 ) -> Result<()> {
     let config_path = profile_local_config_path(codex_home);
-    let base_url = base_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned);
+    let base_url = if let Some(value) = base_url {
+        validate_credential_free_http_url(value, "profile OpenAI-compatible base URL")?;
+        Some(value.to_string())
+    } else {
+        None
+    };
     if base_url.is_none() {
         match fs::remove_file(&config_path) {
             Ok(()) => return Ok(()),
@@ -66,13 +77,13 @@ pub(crate) fn write_profile_openai_compatible_base_url(
 pub(crate) fn profile_openai_compatible_codex_args(
     codex_home: &Path,
     user_args: &[OsString],
-) -> Vec<OsString> {
+) -> Result<Vec<OsString>> {
     if codex_config::codex_cli_config_override_value(user_args, "model_provider").is_some() {
-        return user_args.to_vec();
+        return Ok(user_args.to_vec());
     }
 
-    let Some(base_url) = read_profile_openai_compatible_base_url(codex_home) else {
-        return user_args.to_vec();
+    let Some(base_url) = read_profile_openai_compatible_base_url(codex_home)? else {
+        return Ok(user_args.to_vec());
     };
 
     let overrides = [
@@ -99,7 +110,7 @@ pub(crate) fn profile_openai_compatible_codex_args(
         args.push(OsString::from(override_entry));
     }
     args.extend(user_args.iter().cloned());
-    args
+    Ok(args)
 }
 
 fn toml_string_literal(value: &str) -> String {
@@ -145,8 +156,57 @@ mod tests {
                 .is_symlink()
         );
         assert_eq!(
-            read_profile_openai_compatible_base_url(&root).as_deref(),
+            read_profile_openai_compatible_base_url(&root)
+                .unwrap()
+                .as_deref(),
             Some("http://127.0.0.1:11434")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn profile_provider_args_reject_credential_bearing_url_before_generation() {
+        let root = temp_dir("url-secret-boundary");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            profile_local_config_path(&root),
+            "openai_compatible_base_url = 'https://user:profile-url-secret-sentinel@example.test/v1'\n",
+        )
+        .unwrap();
+
+        let error = profile_openai_compatible_codex_args(&root, &[])
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("no credentials, query, or fragment"),
+            "{error}"
+        );
+        assert!(!error.contains("secret-sentinel"), "{error}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn profile_provider_args_preserve_safe_url() {
+        let root = temp_dir("safe-url-args");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            profile_local_config_path(&root),
+            "openai_compatible_base_url = 'http://127.0.0.1:11434/v1'\n",
+        )
+        .unwrap();
+
+        let args = profile_openai_compatible_codex_args(&root, &[]).unwrap();
+        let rendered = args
+            .iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>();
+
+        assert!(
+            rendered
+                .iter()
+                .any(|arg| arg.contains("http://127.0.0.1:11434/v1")),
+            "{rendered:?}"
         );
         let _ = fs::remove_dir_all(root);
     }

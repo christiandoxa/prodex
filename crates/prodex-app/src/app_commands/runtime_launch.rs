@@ -324,7 +324,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?;
         let codex_args =
             runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args);
-        let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args);
+        let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
         let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
@@ -362,7 +362,11 @@ fn maintain_shared_codex_sessions_after_child_exit() {
 }
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
+    if let Some(base_url) = args.base_url.as_deref() {
+        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
+    }
     if run_launch_route(&args) == RunLaunchRoute::CodexCommandServerDirectPassthrough {
+        quota_base_url(args.base_url.as_deref())?;
         return handle_codex_command_server_direct_passthrough(args);
     }
 
@@ -518,7 +522,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             );
         }
 
-        if local_rewrite_proxy_upstream_base_url(&self.selection, &self.request).is_some() {
+        if local_rewrite_proxy_upstream_base_url(&self.selection, &self.request)?.is_some() {
             if let Some(provider) = self.request.external_provider {
                 let rotation = if runtime_external_provider_has_rotation_summary(provider) {
                     runtime_external_provider_rotation_summary(
@@ -610,7 +614,7 @@ impl RuntimeProxyStartupFactory {
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
         if let Some(local_upstream_base_url) =
-            local_rewrite_proxy_upstream_base_url(selection, request)
+            local_rewrite_proxy_upstream_base_url(selection, request)?
         {
             return Ok(Some(start_local_rewrite_proxy_endpoint(
                 paths,
@@ -625,7 +629,7 @@ impl RuntimeProxyStartupFactory {
             return Ok(None);
         }
 
-        let runtime_upstream_base_url = quota_base_url(request.base_url);
+        let runtime_upstream_base_url = quota_base_url(request.base_url)?;
         if request.presidio_redaction_enabled || request.smart_context_enabled {
             return Ok(Some(start_runtime_proxy_endpoint(
                 paths,
@@ -673,7 +677,7 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
-        if local_rewrite_proxy_upstream_base_url(selection, request).is_some() {
+        if local_rewrite_proxy_upstream_base_url(selection, request)?.is_some() {
             return Ok(Some(runtime_local_rewrite_proxy_dry_run_endpoint(
                 paths, selection, request,
             )?));
@@ -719,6 +723,7 @@ pub(super) fn prepare_runtime_launch_dry_run(
         request.external_provider,
         request.external_provider_api_key,
     )?;
+    validate_runtime_launch_upstream_base_url(&selection, &request)?;
     let managed = if selection.profileless_local_home {
         false
     } else {
@@ -751,6 +756,28 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
         _lease: None,
         _direct_proxy: None,
     })
+}
+
+fn validate_runtime_launch_upstream_base_url(
+    selection: &RuntimeLaunchSelection,
+    request: &RuntimeLaunchRequest<'_>,
+) -> Result<()> {
+    if let Some(base_url) = request.base_url {
+        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
+    }
+    if selection.non_openai_model_provider.is_none() {
+        quota_base_url(request.base_url)?;
+    } else if request.base_url.is_none()
+        && let Some(provider) = selection.non_openai_model_provider.as_ref()
+        && let Some(base_url) = codex_config_value_with_profile_v2(
+            &selection.codex_home,
+            &format!("model_providers.{}.base_url", provider.provider_id),
+            request.profile_v2_name,
+        )
+    {
+        validate_credential_free_http_url(&base_url, "runtime upstream base URL")?;
+    }
+    Ok(())
 }
 
 fn runtime_local_rewrite_proxy_dry_run_endpoint(
@@ -863,25 +890,27 @@ fn start_local_rewrite_proxy_endpoint(
 fn local_rewrite_proxy_upstream_base_url(
     selection: &RuntimeLaunchSelection,
     request: &RuntimeLaunchRequest<'_>,
-) -> Option<String> {
+) -> Result<Option<String>> {
     if request.force_runtime_proxy || !request.smart_context_enabled {
-        return None;
+        return Ok(None);
     }
-    let provider = selection.non_openai_model_provider.as_ref()?;
+    let Some(provider) = selection.non_openai_model_provider.as_ref() else {
+        return Ok(None);
+    };
     if !runtime_launch_model_provider_uses_local_rewrite(provider) {
-        return None;
+        return Ok(None);
     }
-    request
-        .base_url
-        .map(str::to_string)
-        .or_else(|| {
-            codex_config_value_with_profile_v2(
-                &selection.codex_home,
-                &format!("model_providers.{}.base_url", provider.provider_id.as_str()),
-                request.profile_v2_name,
-            )
-        })
-        .filter(|base_url| !base_url.trim().is_empty())
+    let base_url = request.base_url.map(str::to_string).or_else(|| {
+        codex_config_value_with_profile_v2(
+            &selection.codex_home,
+            &format!("model_providers.{}.base_url", provider.provider_id.as_str()),
+            request.profile_v2_name,
+        )
+    });
+    if let Some(base_url) = base_url.as_deref() {
+        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
+    }
+    Ok(base_url)
 }
 
 fn runtime_proxy_endpoint_state<'a>(

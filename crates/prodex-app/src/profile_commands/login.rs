@@ -51,8 +51,8 @@ use crate::{
     login_with_claude_oauth, login_with_google_oauth, managed_profile_home_path,
     persist_login_home, prepare_managed_codex_home, read_auth_summary, read_gemini_oauth_secret,
     remove_dir_if_exists, required_auth_json_text, resolve_profile_name, run_child_plan,
-    unique_profile_name_for_email, update_existing_profile_auth, write_gemini_oauth_secret,
-    write_profile_openai_compatible_base_url,
+    unique_profile_name_for_email, update_existing_profile_auth, validate_credential_free_http_url,
+    write_gemini_oauth_secret, write_profile_openai_compatible_base_url,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 
@@ -68,7 +68,6 @@ enum LoginMethod {
     Status,
 }
 
-#[derive(Debug)]
 struct LoginRequest {
     method: LoginMethod,
     codex_args: Vec<OsString>,
@@ -866,16 +865,39 @@ fn extract_login_base_url(
 }
 
 fn normalize_optional_base_url(value: &str) -> Result<Option<String>> {
-    let value = value.trim();
     if value.is_empty() {
         return Ok(None);
     }
-    let parsed =
-        reqwest::Url::parse(value).with_context(|| format!("invalid base URL: {value}"))?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        bail!("base URL must use http or https");
+    validate_credential_free_http_url(value, "profile OpenAI-compatible base URL")?;
+    Ok(Some(value.to_string()))
+}
+
+#[cfg(test)]
+mod url_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn login_base_url_rejects_secrets_without_echoing_or_stripping() {
+        for value in [
+            "https://user:login-password-secret-sentinel@example.test/v1",
+            "https://example.test/v1?token=login-query-secret-sentinel",
+            "https://example.test/v1#login-fragment-secret-sentinel",
+            " not-a-url-login-parse-secret-sentinel ",
+        ] {
+            let error = normalize_optional_base_url(value).unwrap_err().to_string();
+
+            assert!(
+                error.contains("no credentials, query, or fragment"),
+                "{error}"
+            );
+            assert!(!error.contains("secret-sentinel"), "{error}");
+        }
+
+        assert_eq!(
+            normalize_optional_base_url("https://example.test/v1/").unwrap(),
+            Some("https://example.test/v1/".to_string())
+        );
     }
-    Ok(Some(value.trim_end_matches('/').to_string()))
 }
 
 fn success_exit_status() -> ExitStatus {

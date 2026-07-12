@@ -280,6 +280,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
     smart_context_enabled: bool,
     model_context_window_tokens: Option<u64>,
 ) -> Result<RuntimeProxyEndpoint> {
+    validate_credential_free_http_url(upstream_base_url, "runtime upstream base URL")?;
     let runtime_config = RuntimeConfig::from_env_policy_and_cli(paths)?;
     let ready_timeout = Duration::from_millis(runtime_config.broker_ready_timeout_ms);
     let broker_key = runtime_broker_key_with_smart_context(
@@ -420,4 +421,53 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         current_profile,
     )?;
     runtime_proxy_endpoint_from_registry(paths, &broker_key, &registry)
+}
+
+#[cfg(test)]
+mod url_boundary_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn runtime_broker_rejects_url_secret_before_registry_or_lock_creation() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-url-registry-boundary-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+        let sentinel = "runtime-registry-url-secret-sentinel";
+
+        let error = match ensure_runtime_rotation_proxy_endpoint(
+            &paths,
+            "main",
+            &format!("https://user:{sentinel}@example.test"),
+            false,
+            false,
+            false,
+            None,
+        ) {
+            Ok(_) => panic!("credential-bearing URL should fail before broker setup"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            error.contains("no credentials, query, or fragment"),
+            "{error}"
+        );
+        assert!(!error.contains(sentinel), "{error}");
+        assert!(
+            !root.exists(),
+            "invalid URL must fail before broker registry or lock creation"
+        );
+    }
 }

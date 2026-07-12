@@ -160,7 +160,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         ),
         (
             "Quota endpoint".to_string(),
-            usage_url(&quota_base_url(None)),
+            usage_url(&quota_base_url(None)?),
         ),
         (
             "Runtime policy".to_string(),

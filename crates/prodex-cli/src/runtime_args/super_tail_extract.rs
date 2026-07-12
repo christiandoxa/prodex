@@ -1,6 +1,11 @@
-use super::{SuperArgs, SuperCliAgent, parse_super_external_provider, parse_super_local_url};
+use super::{
+    SuperArgs, SuperCliAgent, parse_runtime_base_url, parse_super_external_provider,
+    parse_super_local_url,
+};
 
-pub(super) fn extract_provider_overrides_from_codex_args(args: &mut SuperArgs) {
+pub(super) fn extract_provider_overrides_from_codex_args(
+    args: &mut SuperArgs,
+) -> Result<(), String> {
     let mut i = 0;
     while i < args.codex_args.len() {
         let Some(arg) = args.codex_args[i].to_str() else {
@@ -114,34 +119,31 @@ pub(super) fn extract_provider_overrides_from_codex_args(args: &mut SuperArgs) {
             }
             "--base-url" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
                 Some(val) => {
-                    args.base_url = Some(val.to_string());
+                    args.base_url = Some(parse_runtime_base_url(val)?);
                     (2, true)
                 }
                 None => (1, false),
             },
             a if a.starts_with("--base-url=") => {
-                args.base_url = a.strip_prefix("--base-url=").map(|v| v.to_string());
+                args.base_url = a
+                    .strip_prefix("--base-url=")
+                    .map(parse_runtime_base_url)
+                    .transpose()?;
                 (1, true)
             }
             "--url" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => match parse_super_local_url(val) {
-                    Ok(url) => {
-                        args.url = Some(url);
-                        (2, true)
-                    }
-                    Err(_) => (2, false),
-                },
+                Some(val) => {
+                    args.url = Some(parse_super_local_url(val)?);
+                    (2, true)
+                }
                 None => (1, false),
             },
             a if a.starts_with("--url=") => {
-                if let Some(val) = a.strip_prefix("--url=")
-                    && let Ok(url) = parse_super_local_url(val)
-                {
-                    args.url = Some(url);
-                    (1, true)
-                } else {
-                    (1, false)
-                }
+                args.url = a
+                    .strip_prefix("--url=")
+                    .map(parse_super_local_url)
+                    .transpose()?;
+                (1, true)
             }
             "--context-window" | "--local-context-window" => {
                 match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
@@ -243,6 +245,7 @@ pub(super) fn extract_provider_overrides_from_codex_args(args: &mut SuperArgs) {
             i += consumed;
         }
     }
+    Ok(())
 }
 
 fn parse_super_cli_agent(value: &str) -> Option<SuperCliAgent> {

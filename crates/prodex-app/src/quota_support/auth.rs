@@ -25,13 +25,32 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use serde::Serialize;
 use std::env;
+use std::fmt;
 use std::path::Path;
+use zeroize::{Zeroize, Zeroizing};
 
-#[derive(Debug, Serialize)]
-struct ChatgptRefreshRequest<'a> {
+#[derive(Serialize)]
+struct ChatgptRefreshRequest {
     client_id: &'static str,
     grant_type: &'static str,
-    refresh_token: &'a str,
+    refresh_token: String,
+}
+
+impl fmt::Debug for ChatgptRefreshRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ChatgptRefreshRequest")
+            .field("client_id", &self.client_id)
+            .field("grant_type", &self.grant_type)
+            .field("refresh_token", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Drop for ChatgptRefreshRequest {
+    fn drop(&mut self) {
+        self.refresh_token.zeroize();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
@@ -86,6 +105,7 @@ impl<'a> RateLimitResetCreditConsumeFlow<'a> {
         base_url: Option<&str>,
         upstream_no_proxy: bool,
     ) -> Result<Self> {
+        let consume_url = rate_limit_reset_credit_consume_url(&quota_base_url(base_url)?);
         let mut auth = read_usage_auth(codex_home)?;
         if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp())
             && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
@@ -99,7 +119,7 @@ impl<'a> RateLimitResetCreditConsumeFlow<'a> {
 
         Ok(Self {
             codex_home,
-            consume_url: rate_limit_reset_credit_consume_url(&quota_base_url(base_url)),
+            consume_url,
             client: build_upstream_blocking_http_client(
                 "rate-limit reset credit HTTP",
                 upstream_no_proxy,
@@ -213,6 +233,7 @@ impl<'a> UsageFetchFlow<'a> {
         base_url: Option<&str>,
         upstream_no_proxy: bool,
     ) -> Result<Self> {
+        let usage_url = usage_url(&quota_base_url(base_url)?);
         let mut auth = read_usage_auth(codex_home)?;
         if usage_auth_needs_proactive_refresh(&auth, Local::now().timestamp())
             && let Ok(outcome) = sync_usage_auth_from_disk_or_refresh_with_proxy_policy(
@@ -226,7 +247,7 @@ impl<'a> UsageFetchFlow<'a> {
 
         Ok(Self {
             codex_home,
-            usage_url: usage_url(&quota_base_url(base_url)),
+            usage_url,
             client: build_upstream_blocking_http_client("quota HTTP", upstream_no_proxy)?,
             auth,
             upstream_no_proxy,
@@ -335,6 +356,7 @@ pub(crate) fn read_usage_auth(codex_home: &Path) -> Result<UsageAuth> {
             auth_location.display()
         );
     };
+    let content = Zeroizing::new(content);
     let stored_auth: StoredAuth = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", auth_location.display()))?;
     prodex_quota::usage_auth_from_stored_auth(&stored_auth)
@@ -344,6 +366,7 @@ pub(crate) fn read_profile_workspace_from_auth(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<Option<ChatgptWorkspaceSummary>> {
+    let accounts_url = chatgpt_accounts_check_url(&quota_base_url(base_url)?);
     let auth = read_usage_auth(codex_home)?;
     let Some(account_id) = auth
         .account_id
@@ -362,7 +385,6 @@ pub(crate) fn read_profile_workspace_from_auth(
     let Ok(client) = build_upstream_blocking_http_client("accounts HTTP", false) else {
         return Ok(fallback());
     };
-    let accounts_url = chatgpt_accounts_check_url(&quota_base_url(base_url));
     let mut request = codex_openai_auth_headers_for_home(client.get(&accounts_url), codex_home)
         .header("Authorization", format!("Bearer {}", auth.access_token));
     request = request.header("ChatGPT-Account-Id", &account_id);
@@ -637,6 +659,7 @@ fn read_auth_json_value(codex_home: &Path) -> Result<serde_json::Value> {
             auth_location.display()
         );
     };
+    let content = Zeroizing::new(content);
     serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", auth_location.display()))
 }
@@ -652,13 +675,16 @@ fn request_chatgpt_auth_refresh_with_lease(
         .map_err(anyhow::Error::new)?
     {
         secret_store::RefreshLeaseDecision::Follower { result_json } => {
+            let result_json = Zeroizing::new(result_json);
             serde_json::from_str(&result_json).context("failed to parse shared auth refresh JSON")
         }
         secret_store::RefreshLeaseDecision::Owner(owner) => {
             let refreshed =
                 request_chatgpt_auth_refresh_direct(codex_home, refresh_token, upstream_no_proxy)?;
-            let result_json = serde_json::to_string(&refreshed)
-                .context("failed to serialize shared auth refresh JSON")?;
+            let result_json = Zeroizing::new(
+                serde_json::to_string(&refreshed)
+                    .context("failed to serialize shared auth refresh JSON")?,
+            );
             let _ = owner.commit_result(&result_json);
             Ok(refreshed)
         }
@@ -687,21 +713,21 @@ fn request_chatgpt_auth_refresh_direct(
             .json(&ChatgptRefreshRequest {
                 client_id: CHATGPT_AUTH_REFRESH_CLIENT_ID,
                 grant_type: "refresh_token",
-                refresh_token,
+                refresh_token: refresh_token.to_string(),
             })
             .send()
             .context("failed to request ChatGPT auth refresh")?;
     let status = response.status();
-    let body = read_blocking_response_text_with_limit(
+    let body = Zeroizing::new(read_blocking_response_text_with_limit(
         response,
         RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
         "failed to read auth refresh body",
-    )?;
+    )?);
     if !status.is_success() {
         bail!(
             "failed to refresh ChatGPT auth (HTTP {}): {}",
             status.as_u16(),
-            body
+            body.as_str()
         );
     }
 

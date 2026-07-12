@@ -24,6 +24,7 @@ use crate::{
     runtime_caveman_extract_launch_prefixes, runtime_caveman_extract_presidio_prefix,
     runtime_launch_cli_gemini_thinking_budget_tokens,
     runtime_launch_cli_model_context_window_tokens, runtime_launch_openai_spark_context_codex_args,
+    validate_credential_free_http_url,
 };
 pub(crate) use prodex_runtime_launch::{
     RuntimeLaunchDryRunChild, default_child_removed_env, extract_prodex_dry_run_flag,
@@ -222,6 +223,9 @@ pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {
 }
 
 pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
+    if let Some(base_url) = args.base_url.as_deref() {
+        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
+    }
     let (rtk_enabled, super_optimizer_overlay, codex_args) =
         runtime_caveman_extract_launch_prefixes(&args.codex_args);
     let (presidio_enabled, codex_args) = runtime_caveman_extract_presidio_prefix(codex_args);
@@ -413,7 +417,7 @@ fn profile_openai_compatible_dry_run_child(
         RuntimeLaunchDryRunChild::Codex { codex_args } => {
             let codex_args =
                 runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args);
-            let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args);
+            let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_deepseek_provider_codex_args(codex_home, &codex_args)?;
@@ -423,7 +427,7 @@ fn profile_openai_compatible_dry_run_child(
         RuntimeLaunchDryRunChild::Caveman { codex_args } => {
             let codex_args =
                 runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args);
-            let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args);
+            let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_deepseek_provider_codex_args(codex_home, &codex_args)?;
@@ -448,6 +452,7 @@ fn runtime_proxy_codex_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn runtime_launch_dry_run_tui_text_keeps_report_content() {
@@ -485,5 +490,39 @@ mod tests {
             runtime_launch_dry_run_value_color("Command", "codex"),
             Color::Cyan
         );
+    }
+
+    #[test]
+    fn dry_run_rejects_profile_url_secret_before_building_child_plan() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-dry-run-url-boundary-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join(".prodex-profile.toml"),
+            "openai_compatible_base_url = 'https://user:dry-run-plan-secret-sentinel@example.test/v1'\n",
+        )
+        .unwrap();
+
+        let error = profile_openai_compatible_dry_run_child(
+            &root,
+            RuntimeLaunchDryRunChild::Codex {
+                codex_args: Vec::new(),
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("no credentials, query, or fragment"),
+            "{error}"
+        );
+        assert!(!error.contains("secret-sentinel"), "{error}");
+        let _ = fs::remove_dir_all(root);
     }
 }

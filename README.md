@@ -239,6 +239,8 @@ Interactive `prodex login` now asks for the login method before starting a brows
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
 ```
 
+Migration note: endpoint and base-URL inputs are credential-free. Runtime and quota `--base-url` values, Super `--url`, `CODEX_CHATGPT_BASE_URL`, stored OpenAI-compatible profile URLs, Presidio Analyzer/Anonymizer URLs, and gateway webhook/HTTP telemetry endpoints must be absolute `http` or `https` URLs with a host and no userinfo, password, query, or fragment. Move credentials to the existing API-key, auth-token, bearer-token environment, or secret-file inputs. Legacy embedded-credential URLs now fail closed before a request, log, broker registry, or child launch plan is created instead of being normalized or partially stripped.
+
 </details>
 
 <details>

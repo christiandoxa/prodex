@@ -1,6 +1,7 @@
 use crate::CodexRuntimeFeatureArgs;
 use clap::{ArgGroup, Args, Subcommand};
 use std::ffi::OsString;
+use std::fmt;
 use std::path::PathBuf;
 
 #[path = "runtime_args/super_tail_extract.rs"]
@@ -8,7 +9,7 @@ mod super_tail_extract;
 
 pub const SUPER_OPTIMIZER_PREFIXES: [&str; 1] = ["ponytail"];
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct RunArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
@@ -44,7 +45,26 @@ pub struct RunArgs {
     pub codex_args: Vec<OsString>,
 }
 
-#[derive(Args, Debug)]
+impl fmt::Debug for RunArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RunArgs")
+            .field("profile_configured", &self.profile.is_some())
+            .field("auto_rotate", &self.auto_rotate)
+            .field("no_auto_rotate", &self.no_auto_rotate)
+            .field("auto_redeem", &self.auto_redeem)
+            .field("skip_quota_check", &self.skip_quota_check)
+            .field("full_access", &self.full_access)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("no_proxy", &self.no_proxy)
+            .field("dry_run", &self.dry_run)
+            .field("codex_features", &self.codex_features)
+            .field("codex_args_count", &self.codex_args.len())
+            .finish()
+    }
+}
+
+#[derive(Args)]
 pub struct ClaudeArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
@@ -72,7 +92,23 @@ pub struct ClaudeArgs {
     pub claude_args: Vec<OsString>,
 }
 
-#[derive(Args, Debug)]
+impl fmt::Debug for ClaudeArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ClaudeArgs")
+            .field("profile_configured", &self.profile.is_some())
+            .field("auto_rotate", &self.auto_rotate)
+            .field("no_auto_rotate", &self.no_auto_rotate)
+            .field("auto_redeem", &self.auto_redeem)
+            .field("skip_quota_check", &self.skip_quota_check)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("no_proxy", &self.no_proxy)
+            .field("claude_args_count", &self.claude_args.len())
+            .finish()
+    }
+}
+
+#[derive(Args)]
 pub struct CavemanArgs {
     /// Starting profile for the run. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
@@ -120,7 +156,35 @@ pub struct CavemanArgs {
     pub codex_args: Vec<OsString>,
 }
 
-#[derive(Args, Debug)]
+impl fmt::Debug for CavemanArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CavemanArgs")
+            .field("profile_configured", &self.profile.is_some())
+            .field("auto_rotate", &self.auto_rotate)
+            .field("no_auto_rotate", &self.no_auto_rotate)
+            .field("auto_redeem", &self.auto_redeem)
+            .field("skip_quota_check", &self.skip_quota_check)
+            .field("full_access", &self.full_access)
+            .field("dry_run", &self.dry_run)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("no_proxy", &self.no_proxy)
+            .field("smart_context", &self.smart_context)
+            .field("super_optimizer_overlay", &self.super_optimizer_overlay)
+            .field("external_provider", &self.external_provider)
+            .field(
+                "external_provider_api_key",
+                &self
+                    .external_provider_api_key
+                    .as_ref()
+                    .map(|_| "<redacted>"),
+            )
+            .field("codex_features", &self.codex_features)
+            .field("codex_args_count", &self.codex_args.len())
+            .finish()
+    }
+}
+
+#[derive(Args)]
 #[command(group(
     ArgGroup::new("provider_or_url")
         .args(["provider", "url"])
@@ -158,12 +222,7 @@ pub struct SuperArgs {
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
     /// Route Codex directly to a local OpenAI-compatible /v1 endpoint.
-    #[arg(
-        long,
-        value_name = "URL",
-        value_parser = parse_super_local_url,
-        conflicts_with = "provider"
-    )]
+    #[arg(long, value_name = "URL", conflicts_with = "provider")]
     pub url: Option<String>,
     /// External provider preset to use through Codex/Super.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
@@ -203,6 +262,35 @@ pub struct SuperArgs {
     /// Arguments passed through to `codex` after the implied optimizer prefixes.
     #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
     pub codex_args: Vec<OsString>,
+}
+
+impl fmt::Debug for SuperArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SuperArgs")
+            .field("profile_configured", &self.profile.is_some())
+            .field("auto_rotate", &self.auto_rotate)
+            .field("no_auto_rotate", &self.no_auto_rotate)
+            .field("auto_redeem", &self.auto_redeem)
+            .field("skip_quota_check", &self.skip_quota_check)
+            .field("dry_run", &self.dry_run)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("no_proxy", &self.no_proxy)
+            .field("presidio", &self.presidio)
+            .field("no_presidio", &self.no_presidio)
+            .field("url_configured", &self.url.is_some())
+            .field("provider", &self.provider)
+            .field("cli", &self.cli)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("local_model", &self.local_model)
+            .field("local_context_window", &self.local_context_window)
+            .field(
+                "local_auto_compact_token_limit",
+                &self.local_auto_compact_token_limit,
+            )
+            .field("codex_features", &self.codex_features)
+            .field("codex_args_count", &self.codex_args.len())
+            .finish()
+    }
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,7 +409,7 @@ pub struct AppServerBrokerArgs {
     pub experimental_stdio_validate_passthrough: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct GatewayArgs {
     #[command(subcommand)]
     pub command: Option<GatewayCommands>,
@@ -349,6 +437,25 @@ pub struct GatewayArgs {
     /// Disable policy-enabled Presidio redaction for this gateway process.
     #[arg(long, conflicts_with = "presidio")]
     pub no_presidio: bool,
+}
+
+impl fmt::Debug for GatewayArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayArgs")
+            .field("command", &self.command)
+            .field("listen", &self.listen)
+            .field("provider", &self.provider)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field(
+                "auth_token",
+                &self.auth_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("smart_context", &self.smart_context)
+            .field("presidio", &self.presidio)
+            .field("no_presidio", &self.no_presidio)
+            .finish()
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -379,8 +486,20 @@ impl SuperArgs {
     /// The first positional arg can look like a session ID when `trailing_var_arg=true`
     /// leaves Super flags unseen by clap. Extract the small set of Super-only flags that
     /// users commonly place after a session id so they do not leak into `codex resume`.
-    pub fn extract_provider_overrides_from_codex_args(&mut self) {
-        super_tail_extract::extract_provider_overrides_from_codex_args(self);
+    pub fn extract_provider_overrides_from_codex_args(
+        &mut self,
+    ) -> std::result::Result<(), String> {
+        super_tail_extract::extract_provider_overrides_from_codex_args(self)
+    }
+
+    pub fn validate_urls(&self) -> std::result::Result<(), String> {
+        if let Some(base_url) = self.base_url.as_deref() {
+            parse_runtime_base_url(base_url)?;
+        }
+        if let Some(url) = self.url.as_deref() {
+            parse_super_local_url(url)?;
+        }
+        Ok(())
     }
 
     pub fn presidio_preference(&self) -> Option<bool> {
@@ -776,44 +895,51 @@ pub fn super_external_provider_codex_args(
 }
 
 fn super_local_provider_base_url(url: &str) -> String {
-    let trimmed = url.trim();
-    if let Ok(mut parsed) = reqwest::Url::parse(trimmed) {
+    if let Ok(mut parsed) = reqwest::Url::parse(url) {
         let path = parsed.path().trim_end_matches('/');
         if path.is_empty() || path == "/" {
             parsed.set_path("/v1");
             return parsed.as_str().trim_end_matches('/').to_string();
         }
     }
-    trimmed.trim_end_matches('/').to_string()
+    url.trim_end_matches('/').to_string()
 }
 
 fn super_external_provider_base_url(url: &str) -> String {
-    url.trim().trim_end_matches('/').to_string()
+    url.trim_end_matches('/').to_string()
 }
 
 fn parse_super_local_url(url: &str) -> std::result::Result<String, String> {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return Err("invalid --url: value cannot be empty".to_string());
-    }
-    if trimmed.starts_with("http:///") || trimmed.starts_with("https:///") {
-        return Err("invalid --url: expected a URL host".to_string());
-    }
-    let parsed = reqwest::Url::parse(trimmed).map_err(|err| {
+    parse_credential_free_http_url(url, "--url")?;
+    Ok(url.to_string())
+}
+
+fn parse_runtime_base_url(url: &str) -> std::result::Result<String, String> {
+    parse_credential_free_http_url(url, "--base-url")?;
+    Ok(url.to_string())
+}
+
+fn parse_credential_free_http_url(
+    url: &str,
+    option: &str,
+) -> std::result::Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| {
         format!(
-            "invalid --url: expected an absolute http(s) URL such as http://127.0.0.1:11434 ({err})"
+            "invalid {option}: expected an absolute http(s) URL with host and no credentials, query, or fragment"
         )
     })?;
-    if !matches!(parsed.scheme(), "http" | "https") {
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
         return Err(format!(
-            "invalid --url: expected http or https scheme, got {}",
-            parsed.scheme()
+            "invalid {option}: expected an absolute http(s) URL with host and no credentials, query, or fragment"
         ));
     }
-    if parsed.host_str().is_none() {
-        return Err("invalid --url: expected a URL host".to_string());
-    }
-    Ok(trimmed.to_string())
+    Ok(parsed)
 }
 
 fn toml_string_literal(value: &str) -> String {
@@ -863,7 +989,7 @@ mod tests {
             "--api-key",
             "sk-test",
         ]);
-        args.extract_provider_overrides_from_codex_args();
+        args.extract_provider_overrides_from_codex_args().unwrap();
         assert_eq!(args.provider, Some(SuperExternalProvider::DeepSeek));
         assert_eq!(args.local_model.as_deref(), Some("deepseek-v4-pro"));
         assert_eq!(args.api_key.as_deref(), Some("sk-test"));
@@ -883,7 +1009,7 @@ mod tests {
             "--provider=gemini",
             "--model=gemini-2.5-pro",
         ]);
-        args.extract_provider_overrides_from_codex_args();
+        args.extract_provider_overrides_from_codex_args().unwrap();
         assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
         assert_eq!(args.local_model.as_deref(), Some("gemini-2.5-pro"));
         assert_eq!(
@@ -904,7 +1030,7 @@ mod tests {
             "--model",
             "claude-sonnet-4",
         ]);
-        args.extract_provider_overrides_from_codex_args();
+        args.extract_provider_overrides_from_codex_args().unwrap();
         assert_eq!(args.provider, Some(SuperExternalProvider::Kiro));
         assert_eq!(args.local_model.as_deref(), Some("claude-sonnet-4"));
         assert_eq!(
@@ -977,7 +1103,7 @@ mod tests {
     #[test]
     fn extract_noop_when_no_provider_flags_in_codex_args() {
         let mut args = super_args_from(&["just", "some", "codex", "args"]);
-        args.extract_provider_overrides_from_codex_args();
+        args.extract_provider_overrides_from_codex_args().unwrap();
         assert_eq!(args.provider, None);
         assert_eq!(
             args.codex_args
@@ -997,7 +1123,7 @@ mod tests {
         ]);
         // Simulate clap already setting provider
         args.provider = Some(SuperExternalProvider::DeepSeek);
-        args.extract_provider_overrides_from_codex_args();
+        args.extract_provider_overrides_from_codex_args().unwrap();
         // Should overwrite with extracted value (same here but structurally ok)
         assert_eq!(args.provider, Some(SuperExternalProvider::DeepSeek));
         // codex_args should be cleaned of provider flags
@@ -1008,5 +1134,67 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["019ef8ae-c7cc-75c3-8575-a8d247ad291b"]
         );
+    }
+
+    #[test]
+    fn super_url_validation_rejects_secrets_without_echoing_them() {
+        for (base_url, url) in [
+            (
+                Some("https://user:super-base-secret-sentinel@example.test"),
+                None,
+            ),
+            (
+                None,
+                Some("https://example.test/v1?token=super-url-secret-sentinel"),
+            ),
+        ] {
+            let mut args = super_args_from(&[]);
+            args.base_url = base_url.map(str::to_string);
+            args.url = url.map(str::to_string);
+
+            let error = args.validate_urls().unwrap_err();
+
+            assert!(
+                error.contains("no credentials, query, or fragment"),
+                "{error}"
+            );
+            assert!(!error.contains("secret-sentinel"), "{error}");
+        }
+    }
+
+    #[test]
+    fn runtime_arg_debug_redacts_url_and_passthrough_values() {
+        let sentinel = "runtime-args-debug-secret-sentinel";
+        let run = RunArgs {
+            profile: None,
+            auto_rotate: false,
+            no_auto_rotate: false,
+            auto_redeem: false,
+            skip_quota_check: false,
+            full_access: false,
+            base_url: Some(format!("https://user:{sentinel}@example.test")),
+            no_proxy: false,
+            dry_run: false,
+            codex_features: CodexRuntimeFeatureArgs::default(),
+            codex_args: vec![OsString::from(sentinel)],
+        };
+        let claude = ClaudeArgs {
+            profile: None,
+            auto_rotate: false,
+            no_auto_rotate: false,
+            auto_redeem: false,
+            skip_quota_check: false,
+            base_url: Some(format!("https://user:{sentinel}@example.test")),
+            no_proxy: false,
+            claude_args: vec![OsString::from(sentinel)],
+        };
+
+        for rendered in [
+            format!("{:?}", crate::Commands::Run(run)),
+            format!("{:?}", crate::Commands::Claude(claude)),
+        ] {
+            assert!(rendered.contains("base_url_configured: true"), "{rendered}");
+            assert!(!rendered.contains(sentinel), "{rendered}");
+        }
     }
 }

@@ -92,6 +92,8 @@ prodex login --with-antigravity
 printf '%s\n' "$OPENAI_API_KEY" | prodex login --with-api-key --base-url http://localhost:11434/v1
 ```
 
+Endpoint/base URLs must be absolute credential-free `http` or `https` URLs with a host. Do not embed userinfo, passwords, query tokens, or fragments in runtime/quota `--base-url`, Super `--url`, `CODEX_CHATGPT_BASE_URL`, stored profile URLs, Presidio endpoints, or gateway webhook/HTTP telemetry endpoints; use the dedicated API-key, bearer-token environment, or secret-file input instead. Older embedded-credential values now fail before requests, logs, registries, or child plans are created.
+
 Interactive `prodex login` asks for ChatGPT browser login, device-code login, API-key login, Google sign-in for Gemini, Claude sign-in through Claude Code, or Antigravity CLI sign-in through `agy auth login` before opening any browser. Antigravity login is global to the `agy` CLI and does not create a Prodex profile.
 
 If you want a fixed profile name first:

@@ -19,6 +19,7 @@ pub(super) fn select_runtime_launch_profile(
         request.external_provider,
         request.external_provider_api_key,
     )?;
+    validate_runtime_launch_upstream_base_url(&selection, request)?;
     if selection.non_openai_model_provider.is_some() {
         return Ok(selection);
     }
