@@ -137,6 +137,15 @@ impl GatewaySecretResolver {
         self.resolve_with_rotation_tracking(context, reference, env_name, direct, purpose, false)
     }
 
+    pub(crate) fn resolve_environment_raw(&self, context: &str, env_name: &str) -> Result<String> {
+        if self.production {
+            bail!("{context} raw CLI/environment credentials are forbidden in production");
+        }
+        let value = read_environment(context, env_name)?;
+        self.track_resolved_value(context, Some(&value))?;
+        Ok(value)
+    }
+
     fn resolve_with_rotation_tracking(
         &self,
         context: &str,
@@ -167,11 +176,8 @@ impl GatewaySecretResolver {
         } else if let Some(value) = direct {
             (Some(value.to_string()), context.to_string())
         } else if let Some(env_name) = env_name {
-            if env_name.is_empty() || env_name.chars().any(char::is_whitespace) {
-                bail!("{context} must be non-empty without whitespace");
-            }
             (
-                Some(env::var(env_name).with_context(|| format!("{context} requires {env_name}"))?),
+                Some(read_environment(context, env_name)?),
                 format!("{context} env {env_name}"),
             )
         } else {
@@ -181,22 +187,27 @@ impl GatewaySecretResolver {
             .map(|value| validate_secret_value(&source_context, value))
             .transpose()?;
         if track_rotation {
-            let mut fingerprint = self
-                .fingerprint
-                .lock()
-                .map_err(|_| anyhow::anyhow!("gateway secret fingerprint state is unavailable"))?;
-            fingerprint.update(context.as_bytes());
-            fingerprint.update([0]);
-            match value.as_deref() {
-                Some(value) => {
-                    fingerprint.update([1]);
-                    fingerprint.update((value.len() as u64).to_le_bytes());
-                    fingerprint.update(value.as_bytes());
-                }
-                None => fingerprint.update([0]),
-            }
+            self.track_resolved_value(context, value.as_deref())?;
         }
         Ok(value)
+    }
+
+    fn track_resolved_value(&self, context: &str, value: Option<&str>) -> Result<()> {
+        let mut fingerprint = self
+            .fingerprint
+            .lock()
+            .map_err(|_| anyhow::anyhow!("gateway secret fingerprint state is unavailable"))?;
+        fingerprint.update(context.as_bytes());
+        fingerprint.update([0]);
+        match value {
+            Some(value) => {
+                fingerprint.update([1]);
+                fingerprint.update((value.len() as u64).to_le_bytes());
+                fingerprint.update(value.as_bytes());
+            }
+            None => fingerprint.update([0]),
+        }
+        Ok(())
     }
 
     pub(crate) fn fingerprint(&self) -> Result<[u8; 32]> {
@@ -208,6 +219,13 @@ impl GatewaySecretResolver {
             .finalize();
         Ok(fingerprint.into())
     }
+}
+
+fn read_environment(context: &str, env_name: &str) -> Result<String> {
+    if env_name.is_empty() || env_name.chars().any(char::is_whitespace) {
+        bail!("{context} must be non-empty without whitespace");
+    }
+    env::var(env_name).with_context(|| format!("{context} requires {env_name}"))
 }
 
 fn validate_secret_value(context: &str, value: String) -> Result<String> {

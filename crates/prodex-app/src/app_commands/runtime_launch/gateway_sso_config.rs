@@ -15,21 +15,7 @@ pub(crate) fn gateway_sso_config_with_resolver(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
     resolver: &GatewaySecretResolver,
 ) -> Result<RuntimeGatewaySsoConfig> {
-    let proxy_token_context = if policy.sso.proxy_token_ref.is_some() {
-        "gateway.sso.proxy_token_ref"
-    } else {
-        "gateway.sso.proxy_token_env"
-    };
-    let proxy_token_hash = resolver
-        .resolve(
-            proxy_token_context,
-            policy.sso.proxy_token_ref.as_ref(),
-            policy.sso.proxy_token_env.as_deref(),
-            None,
-            SecretPurpose::ControlPlaneCredential,
-        )?
-        .as_deref()
-        .map(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token);
+    let proxy_token_hash = gateway_sso_secret_with_resolver(policy, resolver)?;
     let oidc = gateway_sso_oidc_config(policy)?;
     Ok(RuntimeGatewaySsoConfig {
         proxy_token_hash,
@@ -61,6 +47,27 @@ pub(crate) fn gateway_sso_config_with_resolver(
         )?,
         oidc,
     })
+}
+
+pub(crate) fn gateway_sso_secret_with_resolver(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+) -> Result<Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>> {
+    let proxy_token_context = if policy.sso.proxy_token_ref.is_some() {
+        "gateway.sso.proxy_token_ref"
+    } else {
+        "gateway.sso.proxy_token_env"
+    };
+    let token = resolver.resolve(
+        proxy_token_context,
+        policy.sso.proxy_token_ref.as_ref(),
+        policy.sso.proxy_token_env.as_deref(),
+        None,
+        SecretPurpose::ControlPlaneCredential,
+    )?;
+    Ok(token
+        .as_deref()
+        .map(runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token))
 }
 
 fn gateway_sso_oidc_config(
