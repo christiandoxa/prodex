@@ -104,9 +104,13 @@ parse and validate request target
   `CanonicalRequestTarget` into one listener-free `RuntimeGatewayApplication`. Bounded request and
   body channels preserve streaming backpressure, cancellation, overload, drain, and Gemini Live
   upgrade semantics without a front-to-loopback socket hop. ADR 1075 owns this transport cutover.
+- Gateway key and SCIM writes now retain the exact authorized action through application-owned
+  governance, idempotency, audit, identity, and precondition planning. File, SQLite, PostgreSQL,
+  and Redis adapters commit the projection, completed idempotency marker, and canonical audit link
+  under one lock or transaction. ADR 1076 owns this control-mutation cutover.
 - Two uncompiled duplicate request-entry/authentication prototypes were removed. Credential
-  decoding, principal/tenant construction, authz, durable admission, provider invocation, and
-  reconciliation remain explicit later slices.
+  decoding remains in bounded adapters; principal/tenant construction, authz, durable admission,
+  provider dispatch, reconciliation, and admin mutation now pass their application-owned planners.
 - Navigability work preserved flat APIs while splitting `prodex-observability` into nine owned
   signal modules and domain audit into event, query, retention, and error modules. Their facades
   are now 30 and 13 lines respectively; no function body or dependency direction changed.

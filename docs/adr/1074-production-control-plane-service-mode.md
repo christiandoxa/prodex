@@ -3,7 +3,8 @@
 ## Status
 
 Accepted. Supersedes the production placeholder in ADR 0098 and the
-control-plane deployment portions of ADRs 0287, 0289, and 1061.
+control-plane deployment portions of ADRs 0287, 0289, and 1061. ADR 1075
+supersedes this ADR's original loopback transport staging.
 
 ## Context
 
@@ -22,10 +23,9 @@ dedicated binary's requested mode before secret resolution or listener bind.
 Control-plane policy requires production projected secrets, an explicit
 projected admin-role token, and shared PostgreSQL or Redis state. It rejects
 provider, data-plane authentication, routing, virtual-key, SSO, outbound
-observability, request-constraint, and guardrail configuration. The current
-route-isolated composition still uses a loopback compatibility backend with an
-empty provider-shaped value; remove that placeholder when the control plane
-moves fully in-process.
+observability, request-constraint, and guardrail configuration. ADR 1075 later
+moved the route-isolated control plane fully in-process and removed the empty
+provider-shaped loopback placeholder from the dedicated production entrypoint.
 
 Run one control-plane replica on port 4100 with a dedicated policy ConfigMap and
 an ExternalSecret containing only the admin token plus PostgreSQL and Redis
