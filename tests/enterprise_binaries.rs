@@ -8,6 +8,22 @@ fn bin(name: &str) -> String {
     std::env::var(format!("CARGO_BIN_EXE_{name}")).expect("cargo should expose binary path")
 }
 
+fn assert_scoped_idempotency_key(
+    stdout: &serde_json::Value,
+    principal_id: &str,
+    presented_key: &str,
+) {
+    let principal_id = principal_id.parse().expect("principal id should parse");
+    let presented_key = prodex_domain::IdempotencyKey::new(presented_key)
+        .expect("presented idempotency key should be valid");
+    let expected =
+        prodex_domain::IdempotencyKey::from_control_plane_principal(principal_id, &presented_key);
+    assert_eq!(
+        stdout["idempotency"]["key"].as_str(),
+        Some(expected.as_str())
+    );
+}
+
 fn start_otlp_capture_server() -> (String, thread::JoinHandle<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind OTLP test listener");
     let addr = listener.local_addr().expect("resolve OTLP listener addr");
@@ -2993,7 +3009,11 @@ fn control_plane_binary_plans_http_control_plane_configuration_publish_route() {
         "prodex.control_plane.audit.persist"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "config-publish-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000030",
+        "config-publish-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(
         stdout["precondition"]["entity_tag"],
@@ -3779,7 +3799,11 @@ fn control_plane_binary_plans_http_control_plane_budget_update_route() {
         "control_plane.budget.update"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "budget-update-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000046",
+        "budget-update-1",
+    );
     assert_eq!(stdout["precondition"]["present"], true);
     assert_eq!(stdout["precondition"]["entity_tag"], "W/\"7\"");
     assert_eq!(stdout["otlp_log_export"], "disabled");
@@ -3916,7 +3940,11 @@ fn control_plane_binary_plans_http_control_plane_scim_user_create_route() {
         "control_plane.scim_user.create"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "scim-create-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000050",
+        "scim-create-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -4061,7 +4089,11 @@ fn control_plane_binary_plans_http_control_plane_scim_user_update_route() {
         "control_plane.scim_user.update"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "scim-update-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000051",
+        "scim-update-1",
+    );
     assert_eq!(stdout["precondition"]["present"], true);
     assert_eq!(stdout["precondition"]["entity_tag"], "W/\"9\"");
     assert_eq!(stdout["otlp_log_export"], "disabled");
@@ -4135,7 +4167,11 @@ fn control_plane_binary_plans_http_control_plane_scim_user_delete_route() {
         "control_plane.scim_user.delete"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "scim-delete-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000052",
+        "scim-delete-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -4943,7 +4979,11 @@ fn control_plane_binary_plans_http_control_plane_role_binding_grant_route() {
         "control_plane.role_binding.grant"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "role-binding-grant-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000053",
+        "role-binding-grant-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -5016,7 +5056,11 @@ fn control_plane_binary_plans_http_control_plane_role_binding_revoke_route() {
         "control_plane.role_binding.revoke"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "role-binding-revoke-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000054",
+        "role-binding-revoke-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -5212,7 +5256,11 @@ fn control_plane_binary_plans_http_control_plane_service_identity_create_route()
         "control_plane.service_identity.create"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "service-identity-create-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000055",
+        "service-identity-create-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -5285,7 +5333,11 @@ fn control_plane_binary_plans_http_control_plane_provider_credential_rotate_rout
         "control_plane.provider_credential.rotate_secret"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "provider-credential-rotate-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000056",
+        "provider-credential-rotate-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -5608,7 +5660,11 @@ fn control_plane_binary_plans_http_control_plane_tenant_create_route() {
         "control_plane.tenant.create"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "tenant-create-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000057",
+        "tenant-create-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -5682,7 +5738,11 @@ fn control_plane_binary_plans_http_control_plane_tenant_update_route() {
         "control_plane.tenant.update"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "tenant-update-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000058",
+        "tenant-update-1",
+    );
     assert_eq!(stdout["precondition"]["present"], true);
     assert_eq!(stdout["precondition"]["entity_tag"], "W/\"3\"");
     assert_eq!(stdout["otlp_log_export"], "disabled");
@@ -5875,7 +5935,11 @@ fn control_plane_binary_plans_http_control_plane_user_invite_route() {
     assert_eq!(stdout["audit"]["storage_backend"], "sqlite");
     assert_eq!(stdout["audit"]["audit_action"], "control_plane.user.invite");
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "user-invite-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000059",
+        "user-invite-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -5948,7 +6012,11 @@ fn control_plane_binary_plans_http_control_plane_policy_publish_route() {
         "control_plane.policy.publish"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "policy-publish-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000060",
+        "policy-publish-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -6021,7 +6089,11 @@ fn control_plane_binary_plans_http_control_plane_audit_retention_purge_route() {
         "control_plane.audit.retention_purge"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "audit-retention-purge-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000072",
+        "audit-retention-purge-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -6733,7 +6805,11 @@ fn control_plane_binary_plans_http_control_plane_virtual_key_create_route() {
         "control_plane.virtual_key.create"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "virtual-key-create-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000048",
+        "virtual-key-create-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -6879,7 +6955,11 @@ fn control_plane_binary_plans_http_control_plane_virtual_key_rotate_route() {
         "control_plane.virtual_key.rotate_secret"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "virtual-key-rotate-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000049",
+        "virtual-key-rotate-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -6952,7 +7032,11 @@ fn control_plane_binary_plans_http_control_plane_virtual_key_delete_route() {
         "control_plane.virtual_key.delete"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "virtual-key-delete-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000062",
+        "virtual-key-delete-1",
+    );
     assert_eq!(stdout["precondition"]["present"], false);
     assert_eq!(stdout["otlp_log_export"], "disabled");
 
@@ -7739,7 +7823,11 @@ fn control_plane_binary_plans_http_control_plane_virtual_key_update_route() {
         "control_plane.virtual_key.update"
     );
     assert_eq!(stdout["idempotency"]["required"], true);
-    assert_eq!(stdout["idempotency"]["key"], "virtual-key-update-1");
+    assert_scoped_idempotency_key(
+        &stdout,
+        "00000000-0000-7000-8000-000000000074",
+        "virtual-key-update-1",
+    );
     assert_eq!(stdout["precondition"]["present"], true);
     assert_eq!(stdout["precondition"]["entity_tag"], "W/\"5\"");
     assert_eq!(stdout["otlp_log_export"], "disabled");
