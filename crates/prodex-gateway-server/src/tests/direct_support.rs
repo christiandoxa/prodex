@@ -1,7 +1,9 @@
 use std::{
     convert::Infallible,
     future::Future,
+    num::NonZeroUsize,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
     time::Duration,
 };
@@ -9,14 +11,19 @@ use std::{
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{
-    Response,
+    Response, StatusCode,
     body::{Body, Frame},
 };
-use tokio::{net::TcpListener, sync::oneshot};
+use tokio::{
+    io::{AsyncReadExt as _, AsyncWriteExt as _},
+    net::{TcpListener, TcpStream},
+    sync::oneshot,
+    time::timeout,
+};
 
 use crate::{
     GatewayHandlerRequest, GatewayHandlerResponse, GatewayHandlerResult, GatewayServerConfig,
-    GatewayServerMode, run_with_handler,
+    GatewayServerMode, bounded_in_process_upgrade, run_with_handler,
 };
 
 use super::TestFrontend;
@@ -120,4 +127,93 @@ where
         stop_rx.await.map_err(anyhow::Error::from)
     }));
     (addr, stop_tx, task)
+}
+
+#[tokio::test]
+async fn in_process_upgrade_preserves_byte_order_and_closes_before_drain() {
+    let (closed_tx, closed_rx) = oneshot::channel();
+    let closed_tx = Arc::new(Mutex::new(Some(closed_tx)));
+    let handler_closed = Arc::clone(&closed_tx);
+    let (front_addr, stop, mut front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        move |_| {
+            let closed = Arc::clone(&handler_closed);
+            async move {
+                let (mut application, handoff) = bounded_in_process_upgrade(NonZeroUsize::MIN);
+                std::thread::spawn(move || {
+                    let mut payload = [0_u8; 8];
+                    std::io::Read::read_exact(&mut application, &mut payload).unwrap();
+                    assert_eq!(&payload, b"pingpong");
+                    std::io::Write::write_all(&mut application, b"firstsecond").unwrap();
+                    let mut byte = [0_u8; 1];
+                    assert_eq!(std::io::Read::read(&mut application, &mut byte).unwrap(), 0);
+                    closed.lock().unwrap().take().unwrap().send(()).unwrap();
+                });
+                let response = Response::builder()
+                    .status(StatusCode::SWITCHING_PROTOCOLS)
+                    .header(hyper::header::CONNECTION, "Upgrade")
+                    .header(hyper::header::UPGRADE, "websocket")
+                    .body(Full::new(Bytes::new()))
+                    .unwrap();
+                Ok(GatewayHandlerResponse::with_in_process_upgrade(
+                    response, handoff,
+                ))
+            }
+        },
+    )
+    .await;
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(
+            b"GET /realtime HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    assert!(
+        super::read_headers(&mut client)
+            .await
+            .starts_with("HTTP/1.1 101")
+    );
+    client.write_all(b"ping").await.unwrap();
+    client.write_all(b"pong").await.unwrap();
+    let mut payload = [0_u8; 11];
+    client.read_exact(&mut payload).await.unwrap();
+    assert_eq!(&payload, b"firstsecond");
+
+    stop.send(()).unwrap();
+    timeout(Duration::from_secs(1), &mut front)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let mut byte = [0_u8; 1];
+    assert_eq!(client.read(&mut byte).await.unwrap(), 0);
+    timeout(Duration::from_secs(1), closed_rx)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn handler_overload_is_a_fail_fast_service_unavailable() {
+    let (front_addr, stop, front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        |_| async { Err(crate::GatewayHandlerError::Overloaded) },
+    )
+    .await;
+    let started = tokio::time::Instant::now();
+    let mut client = TcpStream::connect(front_addr).await.unwrap();
+    client
+        .write_all(b"POST /responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n")
+        .await
+        .unwrap();
+
+    let headers = super::read_headers(&mut client).await;
+    assert!(headers.starts_with("HTTP/1.1 503"));
+    assert!(started.elapsed() < Duration::from_millis(100));
+
+    stop.send(()).unwrap();
+    front.await.unwrap().unwrap();
 }

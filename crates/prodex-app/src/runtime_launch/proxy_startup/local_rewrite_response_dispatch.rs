@@ -3,6 +3,7 @@ use super::super::local_rewrite::{
 };
 use super::super::local_rewrite_copilot::RuntimeCopilotRequestContext;
 use super::super::local_rewrite_gemini::RuntimeGeminiRequestContext;
+use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_upstream::RuntimeLocalRewriteLiveResponse;
 use super::local_rewrite_response_chat_compatible::{
     RuntimeChatCompatibleRewriteContext, respond_runtime_chat_compatible_rewrite,
@@ -20,7 +21,7 @@ use runtime_proxy_crate::path_without_query;
 
 pub(super) fn respond_runtime_local_rewrite_live_response(
     request_id: u64,
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     live_response: RuntimeLocalRewriteLiveResponse,
     gemini_context: Option<RuntimeGeminiRequestContext>,
     copilot_context: Option<RuntimeCopilotRequestContext>,

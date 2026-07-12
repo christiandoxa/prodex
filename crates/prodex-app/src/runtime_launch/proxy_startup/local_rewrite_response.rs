@@ -3,6 +3,7 @@ use super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult, runtime_gateway_guardrail_webhook_block,
 };
+use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_response_guardrails::runtime_gateway_guardrail_stream_body;
 use super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
@@ -10,7 +11,6 @@ use super::local_rewrite_response_spend::{
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeStreamingResponse,
     build_runtime_proxy_json_error_response, build_runtime_proxy_response_from_parts,
-    write_runtime_streaming_response,
 };
 use anyhow::{Context, Result};
 use prodex_domain::CallId;
@@ -138,7 +138,7 @@ pub(super) fn runtime_local_rewrite_response_with_call_id(
 
 pub(super) fn respond_runtime_local_rewrite_proxy_request(
     request_id: u64,
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     response: RuntimeLocalRewriteUpstreamResult,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
@@ -149,7 +149,6 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         copilot_context,
     } = response;
     if let RuntimeLocalRewriteUpstreamResponse::Streaming(streaming_response) = response {
-        let writer = request.into_writer();
         let mut headers = streaming_response.headers;
         runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
         let body = runtime_gateway_spend_stream_body(
@@ -169,7 +168,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        let _ = write_runtime_streaming_response(writer, streaming);
+        let _ = request.stream(streaming, None);
         return;
     }
     let live_response = match response {

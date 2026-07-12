@@ -1,9 +1,10 @@
 use super::gateway_config;
 use crate::app_state::AppStateIoExt;
 use crate::{
-    AppPaths, AppState, GatewayArgs, GatewayBackend, RuntimeConfig,
+    AppPaths, AppState, GatewayApplication, GatewayArgs, GatewayBackend, RuntimeConfig,
     RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
-    RuntimeLocalRewriteProxyStartOptions, start_runtime_gateway_rewrite_proxy_with_runtime_config,
+    RuntimeLocalRewriteProxyStartOptions, start_runtime_gateway_application_with_runtime_config,
+    start_runtime_gateway_rewrite_proxy_with_runtime_config,
 };
 use anyhow::Result;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use std::sync::Arc;
 #[path = "gateway_startup/tests.rs"]
 mod tests;
 
-pub(super) fn start_policy_gateway_backend(
+pub(crate) fn start_policy_gateway_backend(
     preferred_listen_addr: Option<String>,
 ) -> Result<GatewayBackend> {
     let service_mode = prodex_runtime_policy::runtime_policy_service_mode()?;
@@ -32,7 +33,7 @@ pub(super) fn start_policy_gateway_backend(
     )
 }
 
-pub(super) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend> {
+pub(crate) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend> {
     prodex_runtime_policy::ensure_runtime_policy_service_mode(
         prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
     )?;
@@ -42,10 +43,53 @@ pub(super) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend>
     )
 }
 
+pub(crate) fn start_policy_gateway_application(
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+) -> Result<GatewayApplication> {
+    let (runtime, provider_name, auth_required) = start_gateway_runtime_for_service_mode(
+        GatewayArgs {
+            command: None,
+            listen: None,
+            provider: None,
+            base_url: None,
+            api_key: None,
+            auth_token: None,
+            smart_context: false,
+            presidio: false,
+            no_presidio: false,
+        },
+        service_mode,
+        start_runtime_gateway_application_with_runtime_config,
+    )?;
+    Ok(GatewayApplication::new(
+        runtime,
+        provider_name,
+        auth_required,
+    ))
+}
+
 fn start_gateway_backend_for_service_mode(
     args: GatewayArgs,
     service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
 ) -> Result<GatewayBackend> {
+    let (proxy, provider_name, auth_required) = start_gateway_runtime_for_service_mode(
+        args,
+        service_mode,
+        start_runtime_gateway_rewrite_proxy_with_runtime_config,
+    )?;
+    Ok(GatewayBackend::new(proxy, provider_name, auth_required))
+}
+
+fn start_gateway_runtime_for_service_mode<T>(
+    args: GatewayArgs,
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+    start: impl FnOnce(
+        RuntimeLocalRewriteProxyStartOptions<'_>,
+        Arc<RuntimeConfig>,
+        Option<RuntimeGatewayCredentialRefreshPlan>,
+        prodex_provider_core::ProviderRequestConstraintPolicy,
+    ) -> Result<T>,
+) -> Result<(T, &'static str, bool)> {
     let paths = AppPaths::discover()?;
     let state = AppState::load(&paths)?;
     let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(&paths)?);
@@ -84,6 +128,8 @@ fn start_gateway_backend_for_service_mode(
         )
     });
     let request_constraints = gateway.request_constraints;
+    let provider_name = gateway.provider_name.unwrap_or("openai-compatible");
+    let auth_required = gateway.auth_required;
     let options = RuntimeLocalRewriteProxyStartOptions {
         paths: &paths,
         state: &state,
@@ -105,18 +151,13 @@ fn start_gateway_backend_for_service_mode(
         gateway_call_id_header: Some(gateway.call_id_header),
         gateway_observability: gateway.observability,
     };
-    let proxy = start_runtime_gateway_rewrite_proxy_with_runtime_config(
+    let runtime = start(
         options,
         Arc::clone(&runtime_config),
         secret_refresh,
         request_constraints,
     )?;
-    debug_assert!(Arc::ptr_eq(&proxy.runtime_config, &runtime_config));
-    Ok(GatewayBackend::new(
-        proxy,
-        gateway.provider_name.unwrap_or("openai-compatible"),
-        gateway.auth_required,
-    ))
+    Ok((runtime, provider_name, auth_required))
 }
 
 fn gateway_refresh_args(args: &GatewayArgs) -> GatewayArgs {

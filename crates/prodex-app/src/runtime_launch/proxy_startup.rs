@@ -15,6 +15,7 @@ mod gemini_thought_signatures;
 mod local_rewrite;
 mod local_rewrite_application_boundary;
 mod local_rewrite_application_data_plane;
+mod local_rewrite_application_runtime;
 mod local_rewrite_constraints;
 mod local_rewrite_copilot;
 mod local_rewrite_copilot_bindings;
@@ -80,6 +81,7 @@ mod local_rewrite_model_memory;
 mod local_rewrite_options;
 mod local_rewrite_pipeline;
 mod local_rewrite_rate_limits;
+mod local_rewrite_request;
 mod local_rewrite_response;
 mod local_rewrite_response_guardrails;
 mod local_rewrite_response_spend;
@@ -110,6 +112,9 @@ pub(crate) use local_rewrite::{
     RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, RuntimeProjectedProviderCredential,
     start_runtime_gateway_rewrite_proxy_with_runtime_config, start_runtime_local_rewrite_proxy,
+};
+pub(crate) use local_rewrite_application_runtime::{
+    RuntimeGatewayApplication, start_runtime_gateway_application_with_runtime_config,
 };
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 pub(crate) use local_rewrite_gateway_backend_connection::{

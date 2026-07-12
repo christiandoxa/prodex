@@ -3,6 +3,7 @@ use super::super::local_rewrite_copilot::{
     RuntimeCopilotRequestContext, RuntimeCopilotResponsesSseBindingReader,
     runtime_copilot_remember_bindings_from_responses_body,
 };
+use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_response_guardrails::runtime_gateway_guardrail_stream_body;
 use super::super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
@@ -10,16 +11,14 @@ use super::super::local_rewrite_response_spend::{
 use super::runtime_local_rewrite_append_call_id_header;
 use super::runtime_local_rewrite_buffered_response_parts;
 use super::runtime_local_rewrite_response_with_call_id;
-use crate::{
-    RuntimeStreamingResponse, build_runtime_proxy_text_response, write_runtime_streaming_response,
-};
+use crate::{RuntimeStreamingResponse, build_runtime_proxy_text_response};
 use std::io::Read;
 use std::time::Instant;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn respond_runtime_copilot_rewrite(
     request_id: u64,
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     response: reqwest::blocking::Response,
     status: u16,
     content_type: &str,
@@ -37,7 +36,6 @@ pub(super) fn respond_runtime_copilot_rewrite(
         .as_ref()
         .and_then(|context| context.binding_recorder.clone());
     if content_type.contains("text/event-stream") {
-        let writer = request.into_writer();
         let mut headers = text_headers;
         runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
         let body: Box<dyn Read + Send> = Box::new(RuntimeCopilotResponsesSseBindingReader::new(
@@ -61,7 +59,7 @@ pub(super) fn respond_runtime_copilot_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        let _ = write_runtime_streaming_response(writer, streaming);
+        let _ = request.stream(streaming, None);
         return;
     }
 

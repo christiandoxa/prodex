@@ -1,4 +1,5 @@
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_response_guardrails::runtime_gateway_guardrail_stream_body;
 use super::super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
@@ -6,16 +7,13 @@ use super::super::local_rewrite_response_spend::{
 use super::runtime_local_rewrite_append_call_id_header;
 use super::runtime_local_rewrite_buffered_response_parts;
 use super::runtime_local_rewrite_response_with_call_id;
-use crate::{
-    RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_text_response,
-    write_runtime_streaming_response,
-};
+use crate::{RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_text_response};
 use std::time::Instant;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn respond_runtime_passthrough_rewrite(
     request_id: u64,
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     response: reqwest::blocking::Response,
     status: u16,
     text_headers: Vec<(String, String)>,
@@ -26,7 +24,6 @@ pub(super) fn respond_runtime_passthrough_rewrite(
     stream: bool,
 ) {
     if stream {
-        let writer = request.into_writer();
         let mut headers = text_headers;
         runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
         let body = runtime_gateway_spend_stream_body(
@@ -46,7 +43,7 @@ pub(super) fn respond_runtime_passthrough_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        let _ = write_runtime_streaming_response(writer, streaming);
+        let _ = request.stream(streaming, None);
         return;
     }
 

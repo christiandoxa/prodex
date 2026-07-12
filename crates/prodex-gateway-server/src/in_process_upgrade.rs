@@ -16,6 +16,7 @@ pub struct GatewayInProcessUpgrade {
 pub struct GatewayInProcessUpgradeHandoff {
     inbound: mpsc::Sender<Bytes>,
     outbound: mpsc::Receiver<Bytes>,
+    guard: Box<dyn Send>,
 }
 
 pub fn bounded_in_process_upgrade(
@@ -33,13 +34,26 @@ pub fn bounded_in_process_upgrade(
         GatewayInProcessUpgradeHandoff {
             inbound: inbound_sender,
             outbound: outbound_receiver,
+            guard: Box::new(()),
         },
     )
 }
 
 impl GatewayInProcessUpgradeHandoff {
-    pub(crate) fn into_channels(self) -> (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>) {
-        (self.inbound, self.outbound)
+    pub fn with_guard(mut self, guard: impl Send + 'static) -> Self {
+        self.guard = Box::new(guard);
+        self
+    }
+
+    pub(crate) fn into_channels(
+        self,
+    ) -> (mpsc::Sender<Bytes>, mpsc::Receiver<Bytes>, Box<dyn Send>) {
+        let Self {
+            inbound,
+            outbound,
+            guard,
+        } = self;
+        (inbound, outbound, guard)
     }
 }
 

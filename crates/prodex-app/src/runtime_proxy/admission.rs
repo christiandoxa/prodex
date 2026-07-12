@@ -29,13 +29,23 @@ pub(crate) fn reject_runtime_proxy_overloaded_request(
 ) {
     let path = request.url().to_string();
     let websocket = is_tiny_http_websocket_upgrade(&request);
+    let response = runtime_proxy_overloaded_response(shared, &path, websocket, reason);
+    let _ = request.respond(response);
+}
+
+pub(crate) fn runtime_proxy_overloaded_response(
+    shared: &RuntimeRotationProxyShared,
+    path: &str,
+    websocket: bool,
+    reason: &str,
+) -> tiny_http::ResponseBox {
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
             "runtime_proxy_queue_overloaded",
             [
                 runtime_proxy_log_field("transport", if websocket { "websocket" } else { "http" }),
-                runtime_proxy_log_field("path", runtime_proxy_log_url(&path)),
+                runtime_proxy_log_field("path", runtime_proxy_log_url(path)),
                 runtime_proxy_log_field("reason", reason),
             ],
         ),
@@ -45,13 +55,13 @@ pub(crate) fn reject_runtime_proxy_overloaded_request(
             503,
             "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
         )
-    } else if is_runtime_anthropic_messages_path(&path) {
+    } else if is_runtime_anthropic_messages_path(path) {
         build_runtime_proxy_response_from_parts(build_runtime_anthropic_error_parts(
             503,
             runtime_anthropic_error_type_for_status(503),
             "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
         ))
-    } else if is_runtime_responses_path(&path) || is_runtime_compact_path(&path) {
+    } else if is_runtime_responses_path(path) || is_runtime_compact_path(path) {
         build_runtime_proxy_json_error_response(
             503,
             "service_unavailable",
@@ -63,7 +73,7 @@ pub(crate) fn reject_runtime_proxy_overloaded_request(
             "Runtime auto-rotate proxy is temporarily saturated. Retry the request.",
         )
     };
-    let _ = request.respond(runtime_proxy_response_with_retry_after(response));
+    runtime_proxy_response_with_retry_after(response)
 }
 
 fn runtime_proxy_response_with_retry_after(

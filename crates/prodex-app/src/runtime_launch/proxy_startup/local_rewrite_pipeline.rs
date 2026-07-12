@@ -64,6 +64,7 @@ use super::local_rewrite_kiro::{
     runtime_kiro_models_buffered_response,
 };
 use super::local_rewrite_options::RuntimeLocalRewriteProviderOptions;
+use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_response::{
     respond_runtime_local_rewrite_proxy_request, runtime_local_rewrite_response_with_call_id,
 };
@@ -74,10 +75,8 @@ use super::provider_bridge::{
 use crate::runtime_proxy::{
     RuntimeProxyAdmissionRejection, acquire_runtime_proxy_active_request_slot_with_wait,
     build_runtime_proxy_json_error_response, build_runtime_proxy_text_response,
-    capture_runtime_proxy_request, capture_runtime_proxy_websocket_request,
-    is_tiny_http_websocket_upgrade, mark_runtime_proxy_local_overload,
-    reject_runtime_proxy_overloaded_request, runtime_proxy_error_is_body_too_large,
-    runtime_route_kind_label,
+    mark_runtime_proxy_local_overload, runtime_proxy_error_is_body_too_large,
+    runtime_proxy_overloaded_response, runtime_route_kind_label,
 };
 use crate::runtime_proxy_shared::RuntimeProxyActiveRequestGuard;
 use crate::{runtime_proxy_log, runtime_proxy_next_request_id};
@@ -100,7 +99,7 @@ struct RuntimeLocalRewritePipelineGuards {
 }
 
 struct RuntimeLocalRewriteRequestState<'target> {
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     context: prodex_application::ApplicationRequestContext<'target>,
     path: String,
     request_id: u64,
@@ -151,7 +150,7 @@ struct RuntimeLocalRewriteDispatchReadyRequest<'target> {
 }
 
 struct RuntimeLocalRewritePipelineReply {
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     response: tiny_http::ResponseBox,
     _guards: RuntimeLocalRewritePipelineGuards,
 }
@@ -198,20 +197,21 @@ impl RuntimeLocalRewritePipelineExit {
 }
 
 pub(super) fn run_runtime_local_rewrite_pipeline(
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
+    target: prodex_gateway_http::CanonicalRequestTarget,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
-    if let Err(exit) = try_run_runtime_local_rewrite_pipeline(request, shared) {
+    if let Err(exit) = try_run_runtime_local_rewrite_pipeline(request, &target, shared) {
         exit.finish();
     }
 }
 
 fn try_run_runtime_local_rewrite_pipeline(
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
+    target: &prodex_gateway_http::CanonicalRequestTarget,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<()> {
-    let (request, target) = runtime_local_rewrite_canonical_target(request)?;
-    let canonical = runtime_local_rewrite_canonical_context(request, &target, shared)?;
+    let canonical = runtime_local_rewrite_canonical_context(request, target, shared)?;
     let authenticated = runtime_local_rewrite_authenticate(canonical, shared)?;
     let admitted = runtime_local_rewrite_bounded_admission(authenticated, shared)?;
     let admitted = runtime_local_rewrite_dispatch_websocket(admitted, shared)?;
@@ -227,30 +227,8 @@ fn try_run_runtime_local_rewrite_pipeline(
     runtime_local_rewrite_dispatch_provider(ready, shared)
 }
 
-fn runtime_local_rewrite_canonical_target(
-    request: tiny_http::Request,
-) -> RuntimeLocalRewritePipelineResult<(
-    tiny_http::Request,
-    prodex_gateway_http::CanonicalRequestTarget,
-)> {
-    match prodex_gateway_http::CanonicalRequestTarget::parse(request.url()) {
-        Ok(target) => Ok((request, target)),
-        Err(_) => Err(RuntimeLocalRewritePipelineExit::Rejected(Box::new(
-            RuntimeLocalRewritePipelineReply {
-                request,
-                response: build_runtime_proxy_json_error_response(
-                    400,
-                    "invalid_request_target",
-                    "request target is invalid",
-                ),
-                _guards: RuntimeLocalRewritePipelineGuards::default(),
-            },
-        ))),
-    }
-}
-
 fn runtime_local_rewrite_canonical_context<'target>(
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     target: &'target prodex_gateway_http::CanonicalRequestTarget,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteCanonicalRequest<'target>> {
@@ -269,7 +247,7 @@ fn runtime_local_rewrite_canonical_context<'target>(
             .checked_add(request_timeout)
             .unwrap_or(started_at),
     );
-    let header_request = capture_runtime_proxy_websocket_request(&request);
+    let header_request = request.header_request();
     let context = match runtime_gateway_application_request_context(
         target,
         typed_request_id,
@@ -296,11 +274,9 @@ fn runtime_local_rewrite_canonical_context<'target>(
         application: None,
         guards: RuntimeLocalRewritePipelineGuards::default(),
     };
-    if let Some(response) = runtime_gateway_operational_probe_response(
-        state.request.method().as_str(),
-        &state.path,
-        shared,
-    ) {
+    if let Some(response) =
+        runtime_gateway_operational_probe_response(state.request.method(), &state.path, shared)
+    {
         return Err(state.respond(response));
     }
     Ok(RuntimeLocalRewriteCanonicalRequest(state))
@@ -359,7 +335,7 @@ fn runtime_local_rewrite_preauthorize_admin<'target>(
     if !runtime_gateway_request_path_requires_admin_auth(&state.path, shared) {
         return Ok(None);
     }
-    let header_request = capture_runtime_proxy_websocket_request(&state.request);
+    let header_request = state.request.header_request();
     let Some(authentication) = runtime_gateway_admin_auth(&header_request, shared) else {
         return Err(runtime_local_rewrite_admin_auth_rejection(state, shared));
     };
@@ -374,7 +350,7 @@ fn runtime_local_rewrite_preauthorize_admin<'target>(
             Err(RuntimeGatewayApplicationBoundaryError::Authorization(_)) => {
                 return Err(runtime_gateway_admin_authorization_rejection_response(
                     state.request_id,
-                    state.request.method().as_str(),
+                    state.request.method(),
                     path_without_query(&state.path),
                     shared,
                     admin_auth,
@@ -434,7 +410,7 @@ fn runtime_local_rewrite_admin_auth_rejection(
         "failure",
         serde_json::json!({
             "reason": reason,
-            "method": state.request.method().as_str(),
+            "method": state.request.method(),
             "path": path_without_query(&state.path),
         }),
     );
@@ -558,7 +534,7 @@ fn runtime_local_rewrite_bounded_admission<'target>(
             )));
         }
     }
-    let websocket = is_tiny_http_websocket_upgrade(&state.request);
+    let websocket = state.request.is_websocket_upgrade();
     let transport = if websocket { "websocket" } else { "http" };
     state.guards.active = match acquire_runtime_proxy_active_request_slot_with_wait(
         &shared.runtime_shared,
@@ -568,17 +544,23 @@ fn runtime_local_rewrite_bounded_admission<'target>(
         Ok(guard) => Some(guard),
         Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
             mark_runtime_proxy_local_overload(&shared.runtime_shared, "active_request_limit");
-            reject_runtime_proxy_overloaded_request(
-                state.request,
+            let response = runtime_proxy_overloaded_response(
                 &shared.runtime_shared,
+                &state.path,
+                websocket,
                 "active_request_limit",
             );
-            return Err(RuntimeLocalRewritePipelineExit::Handled);
+            return Err(state.reject(response));
         }
         Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
             let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-            reject_runtime_proxy_overloaded_request(state.request, &shared.runtime_shared, &reason);
-            return Err(RuntimeLocalRewritePipelineExit::Handled);
+            let response = runtime_proxy_overloaded_response(
+                &shared.runtime_shared,
+                &state.path,
+                websocket,
+                &reason,
+            );
+            return Err(state.reject(response));
         }
     };
     Ok(RuntimeLocalRewriteAdmittedRequest(state))
@@ -588,7 +570,7 @@ fn runtime_local_rewrite_dispatch_websocket<'target>(
     admitted: RuntimeLocalRewriteAdmittedRequest<'target>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAdmittedRequest<'target>> {
-    if !is_tiny_http_websocket_upgrade(&admitted.0.request) {
+    if !admitted.0.request.is_websocket_upgrade() {
         return Ok(admitted);
     }
     let state = admitted.0;
@@ -622,10 +604,10 @@ fn runtime_local_rewrite_capture_body<'target>(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteCapturedRequest<'target>> {
     let mut state = admitted.0;
-    let mut captured = match capture_runtime_proxy_request(
-        &mut state.request,
-        shared.runtime_shared.runtime_config.max_request_body_bytes,
-    ) {
+    let mut captured = match state
+        .request
+        .capture(shared.runtime_shared.runtime_config.max_request_body_bytes)
+    {
         Ok(captured) => captured,
         Err(err) => {
             let response = runtime_local_rewrite_capture_rejection(&state, shared, &err);

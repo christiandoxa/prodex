@@ -1,5 +1,18 @@
 [
   {
+    "id": "dedicated-in-process-gateway-transport-20260712",
+    "requiredSubjects": [
+      "feat(gateway): add in-process application transport"
+    ],
+    "caps": {
+      "maxFiles": 39,
+      "maxBehaviorFiles": 37,
+      "maxLines": 2120,
+      "maxFileLines": 447
+    },
+    "reason": "Reviewed the transport-neutral request adapter, bounded request/response channels, direct application runtime, streaming and Gemini Live upgrade parity, cancellation and drain ownership, focused unit tests, strict Clippy, formatting, and size guard before the dedicated production cutover."
+  },
+  {
     "id": "constraint-aware-routing-0.276.0",
     "requiredSubjects": [
       "feat(routing): add explainable constraint-aware routing"

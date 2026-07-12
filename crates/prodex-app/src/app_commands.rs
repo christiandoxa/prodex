@@ -75,6 +75,12 @@ pub(crate) fn start_policy_gateway_backend_inner(
     runtime_launch::start_policy_gateway_backend_inner(preferred_listen_addr)
 }
 
+pub(crate) fn start_policy_gateway_application_inner(
+    service_mode: RuntimePolicyServiceMode,
+) -> Result<GatewayApplication> {
+    runtime_launch::start_policy_gateway_application_inner(service_mode)
+}
+
 pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     let use_presidio = match args.presidio_preference() {
         Some(use_presidio) => use_presidio,

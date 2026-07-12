@@ -1,6 +1,7 @@
 use super::local_rewrite::{
-    RUNTIME_GATEWAY_REDIS_LEDGER_KEY, RUNTIME_GATEWAY_REDIS_LEDGER_LOCK, RuntimeGatewayStateStore,
-    RuntimeLocalRewriteProxyShared, runtime_gateway_generate_virtual_key_token,
+    RUNTIME_GATEWAY_REDIS_LEDGER_KEY, RUNTIME_GATEWAY_REDIS_LEDGER_LOCK,
+    RuntimeGatewayBackgroundTaskGuard, RuntimeGatewayStateStore, RuntimeLocalRewriteProxyShared,
+    runtime_gateway_generate_virtual_key_token,
 };
 use super::local_rewrite_gateway_file_ledger::{
     runtime_gateway_file_ledger_append_deltas, runtime_gateway_file_ledger_load,
@@ -134,7 +135,9 @@ pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
     let dirty = Arc::clone(&shared.gateway_usage.save_dirty);
     let in_flight = Arc::clone(&shared.gateway_usage.save_in_flight);
     let log_path = shared.runtime_shared.log_path.clone();
+    let background_task = RuntimeGatewayBackgroundTaskGuard::new(shared);
     drop(shared.runtime_shared.async_runtime.spawn_blocking(move || {
+        let _background_task = background_task;
         loop {
             dirty.store(false, Ordering::Release);
             let deltas = pending_deltas

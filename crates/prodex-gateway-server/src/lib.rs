@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Async HTTP/1 compatibility front for a loopback Prodex gateway backend.
+//! Bounded async HTTP/1 front for in-process or compatibility gateway handlers.
 
 use std::{
     convert::Infallible, error::Error, fmt, future::Future, net::SocketAddr, sync::Arc,
@@ -12,7 +12,7 @@ use http_body_util::{BodyExt as _, Full, Limited, combinators::UnsyncBoxBody};
 use hyper::{
     Request, Response, StatusCode, Uri,
     body::{Body, Incoming},
-    header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, HeaderValue},
+    header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, HeaderName, HeaderValue},
     server::conn::http1,
     service::service_fn,
     upgrade,
@@ -36,7 +36,9 @@ use tokio::{
 mod channel_body;
 mod in_process_upgrade;
 
-pub use channel_body::{GatewayResponseBodySender, bounded_response_body};
+pub use channel_body::{
+    GatewayResponseBodySender, bounded_response_body, bounded_response_body_with_guard,
+};
 pub use in_process_upgrade::{
     GatewayInProcessUpgrade, GatewayInProcessUpgradeHandoff, bounded_in_process_upgrade,
 };
@@ -58,6 +60,8 @@ const BACKEND_TIMEOUT: &[u8] =
     br#"{"error":{"code":"backend_timeout","message":"gateway backend timed out"}}"#;
 const BACKEND_UNAVAILABLE: &[u8] =
     br#"{"error":{"code":"backend_unavailable","message":"gateway backend is unavailable"}}"#;
+const LOCAL_OVERLOAD: &[u8] =
+    br#"{"error":{"code":"service_unavailable","message":"gateway is temporarily overloaded"}}"#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GatewayServerMode {
@@ -133,6 +137,43 @@ impl GatewayHandlerResponse {
         handled.backend_upgrade = Some(GatewayHandlerUpgrade::InProcess(upgrade));
         handled
     }
+
+    pub fn from_parts(
+        status: u16,
+        headers: Vec<(String, Vec<u8>)>,
+        content_length: Option<usize>,
+        body: GatewayResponseBody,
+    ) -> GatewayHandlerResult {
+        let mut response = Response::new(body);
+        *response.status_mut() =
+            StatusCode::from_u16(status).map_err(|_| GatewayHandlerError::Unavailable)?;
+        for (name, value) in headers {
+            let name = HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| GatewayHandlerError::Unavailable)?;
+            let value =
+                HeaderValue::from_bytes(&value).map_err(|_| GatewayHandlerError::Unavailable)?;
+            response.headers_mut().append(name, value);
+        }
+        if let Some(content_length) = content_length {
+            response.headers_mut().insert(
+                CONTENT_LENGTH,
+                HeaderValue::from_str(&content_length.to_string())
+                    .map_err(|_| GatewayHandlerError::Unavailable)?,
+            );
+        }
+        Ok(Self {
+            response,
+            backend_upgrade: None,
+        })
+    }
+
+    pub fn with_in_process_upgrade_handoff(
+        mut self,
+        upgrade: GatewayInProcessUpgradeHandoff,
+    ) -> Self {
+        self.backend_upgrade = Some(GatewayHandlerUpgrade::InProcess(upgrade));
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,6 +181,7 @@ pub enum GatewayHandlerError {
     InvalidRequest,
     InvalidRequestTarget,
     RequestBodyTooLarge,
+    Overloaded,
     Unavailable,
 }
 
@@ -489,6 +531,9 @@ fn handler_error_response(error: GatewayHandlerError) -> Response<GatewayRespons
         GatewayHandlerError::RequestBodyTooLarge => {
             json_error(StatusCode::PAYLOAD_TOO_LARGE, BODY_TOO_LARGE)
         }
+        GatewayHandlerError::Overloaded => {
+            json_error(StatusCode::SERVICE_UNAVAILABLE, LOCAL_OVERLOAD)
+        }
         GatewayHandlerError::Unavailable => {
             json_error(StatusCode::BAD_GATEWAY, BACKEND_UNAVAILABLE)
         }
@@ -582,7 +627,7 @@ async fn tunnel_in_process_upgrade(
     }) else {
         return;
     };
-    let (to_application, mut from_application) = handoff.into_channels();
+    let (to_application, mut from_application, _request_guard) = handoff.into_channels();
     let frontend = TokioIo::new(frontend);
     let (mut frontend_read, mut frontend_write) = tokio::io::split(frontend);
     let upload = async move {

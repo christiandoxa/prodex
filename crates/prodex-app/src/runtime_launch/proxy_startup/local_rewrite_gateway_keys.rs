@@ -185,7 +185,7 @@ pub(super) fn runtime_gateway_virtual_key_store_load(
 
 pub(super) fn runtime_gateway_request_header_virtual_key(
     request_id: u64,
-    request: &tiny_http::Request,
+    request: &super::local_rewrite_request::RuntimeLocalRewriteRequest,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<
     Option<runtime_proxy_crate::RuntimeGatewayVirtualKey>,
@@ -210,13 +210,11 @@ pub(super) fn runtime_gateway_request_header_virtual_key(
     if snapshot.active_keys.is_empty() && snapshot.configured_count > 0 {
         return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken);
     }
-    let headers = request
-        .headers()
-        .iter()
-        .map(|header| (header.field.to_string(), header.value.as_str().to_string()))
-        .collect::<Vec<_>>();
-    runtime_proxy_crate::runtime_gateway_virtual_key_from_headers(&headers, &snapshot.active_keys)
-        .map(|key| key.cloned())
+    runtime_proxy_crate::runtime_gateway_virtual_key_from_headers(
+        request.headers(),
+        &snapshot.active_keys,
+    )
+    .map(|key| key.cloned())
 }
 
 fn runtime_gateway_prepare_virtual_key_store(
@@ -789,7 +787,7 @@ fn runtime_gateway_sqlite_reserve_usage(
 }
 
 pub(super) fn runtime_local_rewrite_request_is_authorized(
-    request: &tiny_http::Request,
+    request: &super::local_rewrite_request::RuntimeLocalRewriteRequest,
     auth_token_hash: &runtime_proxy_crate::LocalBridgeBearerTokenHash,
 ) -> bool {
     let path = path_without_query(request.url());
@@ -798,9 +796,9 @@ pub(super) fn runtime_local_rewrite_request_is_authorized(
     {
         return true;
     }
-    request.headers().iter().any(|header| {
-        header.field.equiv("Authorization")
-            && auth_token_hash.verify_authorization_header(header.value.as_str())
+    request.headers().iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("authorization")
+            && auth_token_hash.verify_authorization_header(value)
     })
 }
 

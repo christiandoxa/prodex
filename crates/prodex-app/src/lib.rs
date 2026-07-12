@@ -49,6 +49,7 @@ mod core_constants;
 mod dashboard;
 mod dashboard_html;
 mod expose;
+mod gateway_application;
 mod gateway_backend;
 mod housekeeping;
 mod presidio_runtime;
@@ -161,6 +162,9 @@ pub fn migrate_gateway_compatibility_state_postgres(
 ) -> anyhow::Result<()> {
     runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url, tls)
 }
+pub use gateway_application::{
+    GatewayApplication, start_policy_gateway_application, start_policy_gateway_application_for_mode,
+};
 pub use gateway_backend::{
     GatewayBackend, start_policy_gateway_backend, start_policy_gateway_backend_for_mode,
 };

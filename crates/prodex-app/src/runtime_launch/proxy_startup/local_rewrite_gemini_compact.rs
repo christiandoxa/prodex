@@ -4,6 +4,7 @@ use super::local_rewrite::{
     RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
 };
 use super::local_rewrite_gemini::send_runtime_gemini_upstream_request;
+use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_response::runtime_local_rewrite_response_with_call_id;
 use super::*;
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
@@ -28,7 +29,7 @@ fn runtime_gemini_compact_error_log_value(err: &anyhow::Error) -> String {
 
 pub(super) fn respond_runtime_gemini_compact_request(
     request_id: u64,
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     auth: &RuntimeGeminiProviderAuth,

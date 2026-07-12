@@ -23,6 +23,7 @@ use gateway_config::{
 #[cfg(test)]
 use gateway_config::{resolve_gateway_launch_config, resolve_gateway_launch_config_with_secrets};
 use gateway_startup::start_gateway_backend;
+pub(crate) use gateway_startup::start_policy_gateway_backend as start_policy_gateway_backend_inner;
 use gateway_status::print_gateway_status;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
 use rusqlite::OptionalExtension;
@@ -34,9 +35,8 @@ use session_delete::{
 };
 use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
-use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::{fs::File, path::Path};
 use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 
 struct RunCommandStrategy {
@@ -383,10 +383,10 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     gateway_shutdown::wait_for_signal_and_drain(&backend)
 }
 
-pub(crate) fn start_policy_gateway_backend_inner(
-    preferred_listen_addr: Option<String>,
-) -> Result<GatewayBackend> {
-    gateway_startup::start_policy_gateway_backend(preferred_listen_addr)
+pub(crate) fn start_policy_gateway_application_inner(
+    service_mode: RuntimePolicyServiceMode,
+) -> Result<GatewayApplication> {
+    gateway_startup::start_policy_gateway_application(service_mode)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

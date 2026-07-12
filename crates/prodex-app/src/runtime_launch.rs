@@ -29,11 +29,12 @@ pub(super) use proxy_startup::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeAnthropicOAuthProfileAuth,
     RuntimeAnthropicProviderAuth, RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth,
     RuntimeDeepSeekWebSearchMode, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
-    RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
-    RuntimeGatewayOidcConfig, RuntimeGatewaySecret, RuntimeGatewaySsoConfig,
-    RuntimeGatewayStateStore, RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth,
-    RuntimeKiroProfileAuth, RuntimeLocalRewriteProviderOptions,
+    RuntimeGatewayApplication, RuntimeGatewayGuardrailWebhookConfig,
+    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySecret,
+    RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeGeminiOAuthProfileAuth,
+    RuntimeGeminiProviderAuth, RuntimeKiroProfileAuth, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, RuntimeProjectedProviderCredential,
+    start_runtime_gateway_application_with_runtime_config,
     start_runtime_gateway_rewrite_proxy_with_runtime_config, start_runtime_local_rewrite_proxy,
 };
 pub(super) use proxy_startup::{

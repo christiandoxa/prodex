@@ -13,19 +13,31 @@ use tokio::sync::mpsc;
 use crate::{GatewayBoxError, GatewayResponseBody};
 
 pub struct GatewayResponseBodySender {
-    sender: mpsc::Sender<Result<Bytes, GatewayBoxError>>,
+    sender: mpsc::Sender<ChannelBodyMessage>,
+}
+
+enum ChannelBodyMessage {
+    Data(Bytes),
+    End,
+    Error(GatewayBoxError),
 }
 
 impl GatewayResponseBodySender {
     pub fn blocking_send(&self, bytes: Bytes) -> io::Result<()> {
         self.sender
-            .blocking_send(Ok(bytes))
+            .blocking_send(ChannelBodyMessage::Data(bytes))
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "gateway response closed"))
     }
 
     pub fn blocking_send_error(self, error: io::Error) -> io::Result<()> {
         self.sender
-            .blocking_send(Err(Box::new(error)))
+            .blocking_send(ChannelBodyMessage::Error(Box::new(error)))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "gateway response closed"))
+    }
+
+    pub fn finish(self) -> io::Result<()> {
+        self.sender
+            .blocking_send(ChannelBodyMessage::End)
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "gateway response closed"))
     }
 }
@@ -33,15 +45,29 @@ impl GatewayResponseBodySender {
 pub fn bounded_response_body(
     capacity: NonZeroUsize,
 ) -> (GatewayResponseBodySender, GatewayResponseBody) {
+    bounded_response_body_with_guard(capacity, ())
+}
+
+pub fn bounded_response_body_with_guard(
+    capacity: NonZeroUsize,
+    guard: impl Send + 'static,
+) -> (GatewayResponseBodySender, GatewayResponseBody) {
     let (sender, receiver) = mpsc::channel(capacity.get());
     (
         GatewayResponseBodySender { sender },
-        ChannelBody { receiver }.boxed_unsync(),
+        ChannelBody {
+            receiver,
+            ended: false,
+            _guard: Box::new(guard),
+        }
+        .boxed_unsync(),
     )
 }
 
 struct ChannelBody {
-    receiver: mpsc::Receiver<Result<Bytes, GatewayBoxError>>,
+    receiver: mpsc::Receiver<ChannelBodyMessage>,
+    ended: bool,
+    _guard: Box<dyn Send>,
 }
 
 impl Body for ChannelBody {
@@ -52,9 +78,30 @@ impl Body for ChannelBody {
         mut self: Pin<&mut Self>,
         context: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        Pin::new(&mut self.receiver)
-            .poll_recv(context)
-            .map(|item| item.map(|item| item.map(Frame::data)))
+        if self.ended {
+            return Poll::Ready(None);
+        }
+        match Pin::new(&mut self.receiver).poll_recv(context) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(ChannelBodyMessage::Data(bytes))) => {
+                Poll::Ready(Some(Ok(Frame::data(bytes))))
+            }
+            Poll::Ready(Some(ChannelBodyMessage::End)) => {
+                self.ended = true;
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(ChannelBodyMessage::Error(error))) => {
+                self.ended = true;
+                Poll::Ready(Some(Err(error)))
+            }
+            Poll::Ready(None) => {
+                self.ended = true;
+                Poll::Ready(Some(Err(Box::new(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "gateway response producer ended without an end marker",
+                )))))
+            }
+        }
     }
 }
 
@@ -101,5 +148,24 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[tokio::test]
+    async fn producer_drop_after_head_is_a_transport_error() {
+        let (sender, mut body) = bounded_response_body(NonZeroUsize::MIN);
+        let producer = thread::spawn(move || {
+            sender
+                .blocking_send(Bytes::from_static(b"partial"))
+                .unwrap();
+        });
+
+        assert_eq!(
+            body.frame().await.unwrap().unwrap().into_data().unwrap(),
+            "partial"
+        );
+        let error = body.frame().await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("without an end marker"));
+        assert!(body.frame().await.is_none());
+        producer.join().unwrap();
     }
 }
