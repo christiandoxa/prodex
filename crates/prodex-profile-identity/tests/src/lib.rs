@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn stored_auth_debug_redacts_bearer_material() {
+    let sentinel = "profile-identity-debug-secret-sentinel";
+    let stored = StoredAuth {
+        tokens: Some(StoredTokens {
+            access_token: Some(format!("access-{sentinel}")),
+            account_id: Some(format!("account-{sentinel}")),
+            id_token: Some(format!("id-{sentinel}")),
+        }),
+    };
+
+    let rendered = format!("{stored:?}");
+    assert!(rendered.contains("<redacted>"), "{rendered}");
+    assert!(!rendered.contains(sentinel), "{rendered}");
+}
+
+#[test]
+fn stored_auth_zeroizes_owned_material() {
+    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<StoredAuth>();
+    assert_zeroize_on_drop::<StoredTokens>();
+
+    let mut stored = StoredAuth {
+        tokens: Some(StoredTokens {
+            access_token: Some("access-secret".to_string()),
+            account_id: Some("account-secret".to_string()),
+            id_token: Some("id-secret".to_string()),
+        }),
+    };
+    stored.zeroize();
+
+    assert!(stored.tokens.is_none());
+}
+
+#[test]
 fn parses_identity_from_auth_json_with_id_token_account_priority() {
     let identity = parse_identity_from_auth_json(&format!(
         r#"{{
