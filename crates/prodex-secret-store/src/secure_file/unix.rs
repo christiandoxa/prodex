@@ -195,7 +195,11 @@ fn validate_directory(metadata: &Metadata) -> io::Result<()> {
     let euid = effective_uid();
     let mode = metadata.mode();
     let trusted_owner = metadata.uid() == euid || metadata.uid() == 0;
-    let sticky_root = metadata.uid() == 0 && mode & libc::S_ISVTX != 0;
+    #[cfg(target_vendor = "apple")]
+    let sticky_mask = u32::from(libc::S_ISVTX);
+    #[cfg(not(target_vendor = "apple"))]
+    let sticky_mask = libc::S_ISVTX;
+    let sticky_root = metadata.uid() == 0 && mode & sticky_mask != 0;
     if !trusted_owner || (mode & 0o022 != 0 && !sticky_root) {
         return Err(permission_denied("secret parent directory is not trusted"));
     }
