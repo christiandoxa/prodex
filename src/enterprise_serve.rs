@@ -1,6 +1,6 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use prodex_gateway_server::{GatewayServerConfig, GatewayServerMode, serve};
+use prodex_gateway_server::{GatewayServerConfig, GatewayServerMode, serve_with_handler};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DedicatedServerMode {
@@ -34,23 +34,26 @@ fn run_enterprise_serve(
             GatewayServerMode::ControlPlane,
         ),
     };
-    let backend = prodex_app::start_policy_gateway_backend_for_mode(
-        Some("127.0.0.1:0".to_string()),
-        policy_mode,
-    )
-    .map_err(|error| format!("failed to start gateway backend: {error}"))?;
-    let server_result = serve(
+    let application = Arc::new(
+        prodex_app::start_policy_gateway_application_for_mode(policy_mode)
+            .map_err(|error| format!("failed to start gateway application: {error}"))?,
+    );
+    let handler_application = Arc::clone(&application);
+    let server_result = serve_with_handler(
         GatewayServerConfig::production(listen_addr, server_mode),
-        backend.listen_addr(),
+        move |request| {
+            let application = Arc::clone(&handler_application);
+            async move { application.handle(request).await }
+        },
     )
     .map_err(|_| "gateway server failed".to_string());
     let drain_timeout = Duration::from_millis(
         prodex_gateway_http::GatewayHttpPolicy::production_default().connection_drain_timeout_ms,
     );
-    let drained = backend.shutdown_and_drain(drain_timeout);
+    let drained = application.shutdown_and_drain(drain_timeout);
     server_result?;
     if !drained {
-        return Err("gateway backend drain timed out".to_string());
+        return Err("gateway application drain timed out".to_string());
     }
     Ok(())
 }

@@ -1,7 +1,7 @@
 //! Prodex control-plane entrypoint.
 //!
 //! This binary stays a thin composition root. It exposes one-shot publication
-//! commands and a route-isolated async control-plane compatibility listener.
+//! commands and a route-isolated async in-process control-plane listener.
 
 use std::path::PathBuf;
 
@@ -65,7 +65,7 @@ USAGE:
 
 STATUS:
     The dedicated control-plane composition root uses an async listener that
-    rejects data-plane routes. Execution remains on a bounded loopback backend.
+    rejects data-plane routes and dispatches through the in-process application.
 ";
 
 const CONTROL_PLANE_SERVICE_NAME: &str = "prodex-control-plane";

@@ -1,7 +1,7 @@
 //! Prodex data-plane gateway entrypoint.
 //!
-//! The public listener uses the bounded async compatibility front while the
-//! existing gateway backend remains isolated on loopback.
+//! The bounded async listener dispatches directly into the in-process gateway
+//! application.
 
 use prodex::{
     DedicatedServerMode, GatewayMigrationTarget, OtlpLogAttribute,
@@ -25,7 +25,7 @@ USAGE:
 
 STATUS:
     The dedicated data-plane composition root uses an async, route-isolated
-    listener. Compatibility execution remains on a bounded loopback backend.
+    listener with bounded in-process application execution.
 ";
 
 const GATEWAY_SERVICE_NAME: &str = "prodex-gateway";
