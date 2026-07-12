@@ -1,7 +1,7 @@
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::super::local_rewrite_gateway_scope::RuntimeGatewayGovernanceScope;
 use super::super::local_rewrite_gateway_store_types::{
-    RuntimeGatewayScimUser, RuntimeGatewayVirtualKeyEntry,
+    RuntimeGatewayScimUser, RuntimeGatewayStoredVirtualKey, RuntimeGatewayVirtualKeyEntry,
     runtime_gateway_scim_user_auth_entry_from_stored,
 };
 use super::super::*;
@@ -320,6 +320,19 @@ impl RuntimeGatewayAdminAuth {
             entry.key.user_id.as_deref(),
             entry.key.budget_id.as_deref(),
         ) && self.can_access_key(&entry.key.name)
+    }
+
+    pub(in super::super) fn can_access_stored_key(
+        &self,
+        key: &RuntimeGatewayStoredVirtualKey,
+    ) -> bool {
+        self.governance_scope().matches(
+            key.tenant_id.as_deref(),
+            key.team_id.as_deref(),
+            key.project_id.as_deref(),
+            key.user_id.as_deref(),
+            key.budget_id.as_deref(),
+        ) && self.can_access_key(&key.name)
     }
 
     pub(in super::super) fn can_access_scim_user(&self, user: &RuntimeGatewayScimUser) -> bool {

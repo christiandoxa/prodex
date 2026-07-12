@@ -7,6 +7,16 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const FILES = Object.freeze({
   root: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
   admin: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_router.rs",
+  adminAuth:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_auth/admin.rs",
+  adminKeys:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_keys.rs",
+  adminScim:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_scim.rs",
+  adminScope:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_scope.rs",
+  adminToctouTests:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_toctou.rs",
   adapter:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_boundary.rs",
   dataPlaneAdapter:
@@ -920,6 +930,83 @@ export function validateProductionBoundary(sources) {
     "mod local_rewrite_request;",
     `${FILES.modules}: production transport-neutral request adapter is not compiled`,
   );
+
+  requireText(
+    errors,
+    sources.adminScope,
+    "prodex_application::ApplicationControlPlaneGovernanceScope",
+    `${FILES.adminScope}: gateway mutation scope checks must retain the application-owned governance matcher`,
+  );
+  const storedKeyAccess = functionBody(sources.adminAuth, "can_access_stored_key") ?? "";
+  requireOrdered(
+    errors,
+    storedKeyAccess,
+    ["self.governance_scope().matches(", "self.can_access_key(&key.name)"],
+    `${FILES.adminAuth}: authoritative stored-key authorization must use application-owned governance and resource-name scope`,
+  );
+  const keyUpdate =
+    functionBody(sources.adminKeys, "runtime_gateway_admin_update_key_response") ?? "";
+  requirePattern(
+    errors,
+    keyUpdate,
+    /runtime_gateway_mutate_admin_key_store\(shared, \|store\| \{[\s\S]*?if !admin_auth\.can_access_stored_key\(current_record\)[\s\S]*?runtime_gateway_apply_virtual_key_patch\(&mut planned_record, &body, true\)\?;[\s\S]*?if !admin_auth\.can_access_stored_key\(&planned_record\)[\s\S]*?store\.keys\[index\] = planned_record;/,
+    `${FILES.adminKeys}: key update must authorize the authoritative pre-image and planned post-image inside the backend transaction before writing`,
+  );
+  const keyDelete =
+    functionBody(sources.adminKeys, "runtime_gateway_admin_delete_key_response") ?? "";
+  requireOrdered(
+    errors,
+    keyDelete,
+    [
+      "runtime_gateway_mutate_admin_key_store(shared, |store| {",
+      "if !admin_auth.can_access_stored_key(current_record)",
+      "store.keys.remove(index);",
+    ],
+    `${FILES.adminKeys}: key delete must authorize the authoritative record inside the backend transaction before removing it`,
+  );
+  const scimUpdate =
+    functionBody(sources.adminScim, "runtime_gateway_admin_scim_update_user_response") ?? "";
+  requirePattern(
+    errors,
+    scimUpdate,
+    /runtime_gateway_mutate_admin_key_store\(shared, \|store\| \{[\s\S]*?runtime_gateway_apply_authorized_scim_user_update\([\s\S]*?store, id, &body, partial, admin_auth,/,
+    `${FILES.adminScim}: SCIM update must invoke authoritative authorization from inside the backend transaction`,
+  );
+  const scimMutation =
+    functionBody(sources.adminScim, "runtime_gateway_apply_authorized_scim_user_update") ?? "";
+  requireOrdered(
+    errors,
+    scimMutation,
+    [
+      "if !admin_auth.can_access_scim_user(current_user)",
+      "runtime_gateway_apply_scim_user_patch(&mut planned_user, body, partial)?;",
+      "if !admin_auth.can_access_scim_user(&planned_user)",
+      "store.scim_users[index] = planned_user.clone();",
+    ],
+    `${FILES.adminScim}: SCIM update must authorize the authoritative pre-image and planned post-image inside the backend transaction before writing`,
+  );
+  requireText(
+    errors,
+    sources.adminScim,
+    "scim_in_transaction_update_rejects_foreign_authoritative_preimage_without_write",
+    `${FILES.adminScim}: deterministic SCIM foreign-replacement no-write regression must remain compiled`,
+  );
+  for (const regression of [
+    "gateway_file_admin_mutations_reject_foreign_records_replaced_by_second_proxy",
+    "gateway_sqlite_admin_mutations_reject_foreign_records_replaced_by_second_proxy",
+    "let proxy_a = start_toctou_proxy(",
+    "let proxy_b = start_toctou_proxy(",
+    "assert_scope_forbidden(stale_update);",
+    "assert_scope_forbidden(stale_delete);",
+    "assert_scope_forbidden(stale_scim_update);",
+  ]) {
+    requireText(
+      errors,
+      sources.adminToctouTests,
+      regression,
+      `${FILES.adminToctouTests}: file and SQLite two-proxy foreign-replacement regressions must remain compiled`,
+    );
+  }
   return errors;
 }
 
@@ -1059,6 +1146,47 @@ function runSelfTest() {
     fn runtime_gateway_admin_idempotency_replay_decision() {
       plan_application_control_plane_idempotency_replay(operation, existing.as_ref());
     }`,
+    adminAuth: `fn can_access_stored_key() {
+      self.governance_scope().matches();
+      self.can_access_key(&key.name);
+    }`,
+    adminKeys: `fn runtime_gateway_admin_update_key_response() {
+      runtime_gateway_mutate_admin_key_store(shared, |store| {
+        if !admin_auth.can_access_stored_key(current_record) {}
+        runtime_gateway_apply_virtual_key_patch(&mut planned_record, &body, true)?;
+        if !admin_auth.can_access_stored_key(&planned_record) {}
+        store.keys[index] = planned_record;
+      });
+    }
+    fn runtime_gateway_admin_delete_key_response() {
+      runtime_gateway_mutate_admin_key_store(shared, |store| {
+        if !admin_auth.can_access_stored_key(current_record) {}
+        store.keys.remove(index);
+      });
+    }`,
+    adminScim: `fn runtime_gateway_admin_scim_update_user_response() {
+      runtime_gateway_mutate_admin_key_store(shared, |store| {
+        runtime_gateway_apply_authorized_scim_user_update(
+          store, id, &body, partial, admin_auth,
+        );
+      });
+    }
+    fn runtime_gateway_apply_authorized_scim_user_update() {
+        if !admin_auth.can_access_scim_user(current_user) {}
+        runtime_gateway_apply_scim_user_patch(&mut planned_user, body, partial)?;
+        if !admin_auth.can_access_scim_user(&planned_user) {}
+        store.scim_users[index] = planned_user.clone();
+    }
+    fn scim_in_transaction_update_rejects_foreign_authoritative_preimage_without_write() {}`,
+    adminScope:
+      "pub(super) use prodex_application::ApplicationControlPlaneGovernanceScope;",
+    adminToctouTests: `fn gateway_file_admin_mutations_reject_foreign_records_replaced_by_second_proxy() {}
+      fn gateway_sqlite_admin_mutations_reject_foreign_records_replaced_by_second_proxy() {}
+      let proxy_a = start_toctou_proxy();
+      let proxy_b = start_toctou_proxy();
+      assert_scope_forbidden(stale_update);
+      assert_scope_forbidden(stale_delete);
+      assert_scope_forbidden(stale_scim_update);`,
     adapter:
       `plan_application_request_context(target, request_id, deadline, &headers); plan_application_request_authentication_from_evidence(); plan_application_data_plane_authorization(); plan_application_control_plane_authorization(); RuntimeGatewayAdminPreauthorization; CredentialScope::DataPlane; CredentialScope::ControlPlane; VerifiedCredentialEvidence::Principal; VerifiedCredentialEvidence::Oidc; token.canonical_claims(principal_id); VerifiedOidcRoleEvidence::Claim(ExplicitRoleMapper::new([])); VerifiedOidcRoleEvidence::TrustedMissingClaimFallback;
       let oidc_name = format!("oidc:{subject_name}");
@@ -1291,6 +1419,26 @@ function runSelfTest() {
       admin: `${valid.admin} fn runtime_gateway_admin_write_authorized() {}`,
     }).some((error) => error.includes("duplicate legacy role policy")),
     "duplicate legacy role policy accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminKeys: valid.adminKeys.replace(
+        "if !admin_auth.can_access_stored_key(current_record) {}",
+        "",
+      ),
+    }).some((error) => error.includes("authoritative pre-image")),
+    "key mutation without authoritative in-transaction scope authorization accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      adminScim: valid.adminScim.replace(
+        "if !admin_auth.can_access_scim_user(current_user) {}",
+        "",
+      ),
+    }).some((error) => error.includes("SCIM update")),
+    "SCIM mutation without authoritative in-transaction scope authorization accepted",
   );
   assertSelfTest(
     validateProductionBoundary({

@@ -401,9 +401,25 @@ pub(super) fn runtime_gateway_admin_update_key_response(
                 "gateway virtual key was not found",
             );
         };
+        if !admin_auth.can_access_stored_key(&planned_record) {
+            return runtime_gateway_admin_key_scope_forbidden_response(
+                shared,
+                admin_auth,
+                "rotate_key",
+                &planned_record.name,
+            );
+        }
         if let Err(err) = runtime_gateway_apply_virtual_key_patch(&mut planned_record, &body, true)
         {
             return err.into_response();
+        }
+        if !admin_auth.can_access_stored_key(&planned_record) {
+            return runtime_gateway_admin_key_scope_forbidden_response(
+                shared,
+                admin_auth,
+                "rotate_key",
+                &planned_record.name,
+            );
         }
         planned_record.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
         if let Some(response) = runtime_gateway_admin_virtual_key_lifecycle_response(
@@ -417,10 +433,10 @@ pub(super) fn runtime_gateway_admin_update_key_response(
     }
     let mut rotated_token = None;
     let update_result = runtime_gateway_mutate_admin_key_store(shared, |store| {
-        let Some(record) = store
+        let Some(index) = store
             .keys
-            .iter_mut()
-            .find(|key| key.name.eq_ignore_ascii_case(name))
+            .iter()
+            .position(|key| key.name.eq_ignore_ascii_case(name))
         else {
             return Err(RuntimeGatewayAdminError::new(
                 404,
@@ -428,23 +444,44 @@ pub(super) fn runtime_gateway_admin_update_key_response(
                 "gateway virtual key was not found",
             ));
         };
+        let current_record = &store.keys[index];
+        if !admin_auth.can_access_stored_key(current_record) {
+            return Err(runtime_gateway_admin_key_scope_forbidden_error(
+                shared,
+                admin_auth,
+                "update_key",
+                &current_record.name,
+            ));
+        }
+        let mut planned_record = current_record.clone();
+        let mut generated_rotated_token = None;
         if rotate {
             let token = runtime_gateway_generate_virtual_key_token()
                 .map_err(|_err| runtime_gateway_admin_key_generation_failed_error())?;
-            record.token_hash_base64 =
+            planned_record.token_hash_base64 =
                 runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token).hash_base64();
-            rotated_token = Some(token);
+            generated_rotated_token = Some(token);
         } else if let Some(token) = body
             .get("token")
             .and_then(serde_json::Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            record.token_hash_base64 =
+            planned_record.token_hash_base64 =
                 runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(token).hash_base64();
         }
-        runtime_gateway_apply_virtual_key_patch(record, &body, true)?;
-        record.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
+        runtime_gateway_apply_virtual_key_patch(&mut planned_record, &body, true)?;
+        if !admin_auth.can_access_stored_key(&planned_record) {
+            return Err(runtime_gateway_admin_key_scope_forbidden_error(
+                shared,
+                admin_auth,
+                "update_key",
+                &planned_record.name,
+            ));
+        }
+        planned_record.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
+        store.keys[index] = planned_record;
+        rotated_token = generated_rotated_token;
         Ok(())
     });
     match update_result {
@@ -512,17 +549,27 @@ pub(super) fn runtime_gateway_admin_delete_key_response(
         );
     }
     match runtime_gateway_mutate_admin_key_store(shared, |store| {
-        let before = store.keys.len();
-        store
+        let Some(index) = store
             .keys
-            .retain(|key| !key.name.eq_ignore_ascii_case(name));
-        if store.keys.len() == before {
+            .iter()
+            .position(|key| key.name.eq_ignore_ascii_case(name))
+        else {
             return Err(RuntimeGatewayAdminError::new(
                 404,
                 "gateway_key_not_found",
                 "gateway virtual key was not found",
             ));
+        };
+        let current_record = &store.keys[index];
+        if !admin_auth.can_access_stored_key(current_record) {
+            return Err(runtime_gateway_admin_key_scope_forbidden_error(
+                shared,
+                admin_auth,
+                "delete_key",
+                &current_record.name,
+            ));
         }
+        store.keys.remove(index);
         Ok(())
     }) {
         Ok(()) => runtime_gateway_admin_json_response(
@@ -555,6 +602,16 @@ fn runtime_gateway_admin_key_scope_forbidden_response(
     action: &'static str,
     key_name: &str,
 ) -> tiny_http::ResponseBox {
+    runtime_gateway_admin_key_scope_forbidden_error(shared, admin_auth, action, key_name)
+        .into_response()
+}
+
+fn runtime_gateway_admin_key_scope_forbidden_error(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    action: &'static str,
+    key_name: &str,
+) -> RuntimeGatewayAdminError {
     runtime_gateway_audit_admin_authorization_denied_event(
         shared,
         &admin_auth.name,
@@ -563,7 +620,7 @@ fn runtime_gateway_admin_key_scope_forbidden_response(
         action,
         key_name,
     );
-    build_runtime_proxy_json_error_response(
+    RuntimeGatewayAdminError::new(
         403,
         "gateway_admin_key_scope_forbidden",
         "gateway admin token is not allowed to access this virtual key",
