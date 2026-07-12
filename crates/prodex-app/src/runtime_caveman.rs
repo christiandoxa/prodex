@@ -90,7 +90,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             self.codex_args.clone()
         };
         let codex_args = runtime_launch_openai_spark_context_codex_args(&overlay_home, &codex_args);
-        let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args);
+        let codex_args = profile_openai_compatible_codex_args(&overlay_home, &codex_args)?;
         let codex_args = prepare_local_provider_catalog_codex_args(&overlay_home, &codex_args)?;
         let codex_args = prepare_external_provider_catalog_codex_args(&overlay_home, &codex_args)?;
         let codex_args = prepare_deepseek_provider_codex_args(&overlay_home, &codex_args)?;
@@ -195,6 +195,9 @@ pub(super) fn prepend_child_path(child: &mut ChildProcessPlan, path: PathBuf) {
 }
 
 pub(super) fn handle_caveman(args: CavemanArgs) -> Result<()> {
+    if let Some(base_url) = args.base_url.as_deref() {
+        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
+    }
     execute_runtime_launch(CavemanLaunchStrategy::new(args))
 }
 

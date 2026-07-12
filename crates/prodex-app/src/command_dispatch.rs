@@ -280,7 +280,9 @@ impl CommandExecute for SetupArgs {
 
 impl CommandExecute for SuperArgs {
     fn execute(mut self) -> Result<()> {
-        self.extract_provider_overrides_from_codex_args();
+        self.extract_provider_overrides_from_codex_args()
+            .map_err(anyhow::Error::msg)?;
+        self.validate_urls().map_err(anyhow::Error::msg)?;
         if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
             if matches!(
                 self.cli,

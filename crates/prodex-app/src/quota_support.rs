@@ -596,13 +596,44 @@ pub(crate) fn fetch_usage_json_with_proxy_policy(
     UsageFetchFlow::new_with_proxy_policy(codex_home, base_url, upstream_no_proxy)?.execute()
 }
 
-pub(crate) fn quota_base_url(explicit: Option<&str>) -> String {
-    explicit
-        .map(ToOwned::to_owned)
-        .or_else(|| env::var("CODEX_CHATGPT_BASE_URL").ok())
-        .unwrap_or_else(|| DEFAULT_CHATGPT_BASE_URL.to_string())
-        .trim_end_matches('/')
-        .to_string()
+pub(crate) fn validate_credential_free_http_url(value: &str, field: &str) -> Result<()> {
+    let parsed = reqwest::Url::parse(value).with_context(|| {
+        format!("{field} must be an http(s) URL with host and no credentials, query, or fragment")
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        bail!("{field} must be an http(s) URL with host and no credentials, query, or fragment");
+    }
+    Ok(())
+}
+
+pub(crate) fn quota_base_url(explicit: Option<&str>) -> Result<String> {
+    let environment = if explicit.is_none() {
+        env::var_os("CODEX_CHATGPT_BASE_URL")
+            .map(|value| {
+                value
+                    .into_string()
+                    .map_err(|_| anyhow::anyhow!("CODEX_CHATGPT_BASE_URL must be valid Unicode"))
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let (field, value) = explicit
+        .map(|value| ("quota base URL", value))
+        .or_else(|| {
+            environment
+                .as_deref()
+                .map(|value| ("CODEX_CHATGPT_BASE_URL", value))
+        })
+        .unwrap_or(("quota base URL", DEFAULT_CHATGPT_BASE_URL));
+    validate_credential_free_http_url(value, field)?;
+    Ok(value.trim_end_matches('/').to_string())
 }
 
 pub(crate) fn usage_url(base_url: &str) -> String {
@@ -712,6 +743,49 @@ mod tests {
             rate_limit_reset_credit_consume_url("http://127.0.0.1:8080"),
             "http://127.0.0.1:8080/api/codex/rate-limit-reset-credits/consume"
         );
+    }
+
+    #[test]
+    fn quota_base_url_accepts_safe_url_and_normalizes_trailing_slashes() {
+        assert_eq!(
+            quota_base_url(Some("https://example.test/backend-api///")).unwrap(),
+            "https://example.test/backend-api"
+        );
+    }
+
+    #[test]
+    fn quota_base_url_rejects_credentials_query_and_fragment_without_echoing_values() {
+        for value in [
+            "https://quota-user-secret-sentinel@example.test/backend-api",
+            "https://user:quota-password-secret-sentinel@example.test/backend-api",
+            "https://example.test/backend-api?token=quota-query-secret-sentinel",
+            "https://example.test/backend-api#quota-fragment-secret-sentinel",
+        ] {
+            let error = quota_base_url(Some(value)).unwrap_err().to_string();
+
+            assert!(
+                error.contains("no credentials, query, or fragment"),
+                "{error}"
+            );
+            assert!(!error.contains("secret-sentinel"), "{error}");
+        }
+    }
+
+    #[test]
+    fn quota_base_url_rejects_credential_bearing_environment_url_without_echoing_it() {
+        let _base_url = crate::TestEnvVarGuard::set(
+            "CODEX_CHATGPT_BASE_URL",
+            "https://user:quota-env-secret-sentinel@example.test/backend-api",
+        );
+
+        let error = quota_base_url(None).unwrap_err().to_string();
+
+        assert!(error.contains("CODEX_CHATGPT_BASE_URL"), "{error}");
+        assert!(
+            error.contains("no credentials, query, or fragment"),
+            "{error}"
+        );
+        assert!(!error.contains("secret-sentinel"), "{error}");
     }
 
     #[test]

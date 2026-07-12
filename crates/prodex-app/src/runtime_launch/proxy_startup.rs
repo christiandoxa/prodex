@@ -201,6 +201,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         model_context_window_tokens,
         preferred_listen_addr,
     } = options;
+    validate_credential_free_http_url(&upstream_base_url, "runtime upstream base URL")?;
     let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(paths)?);
     let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config);
     for key in runtime_config.compatibility_defaults() {
@@ -533,4 +534,63 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         gateway_side_effect_snapshot: None,
         owner_lock,
     })
+}
+
+#[cfg(test)]
+mod url_boundary_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn runtime_proxy_rejects_url_secret_before_creating_log() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-url-log-boundary-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        let log_dir = root.join("runtime-logs");
+        let _log_dir =
+            crate::TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", log_dir.to_str().unwrap());
+        let paths = AppPaths {
+            root: root.join("prodex"),
+            state_file: root.join("prodex/state.json"),
+            managed_profiles_root: root.join("prodex/profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("prodex/shared"),
+        };
+        let state = AppState::default();
+        let sentinel = "runtime-log-url-secret-sentinel";
+
+        let error =
+            match start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
+                paths: &paths,
+                state: &state,
+                current_profile: "main",
+                upstream_base_url: format!("https://user:{sentinel}@example.test"),
+                include_code_review: false,
+                upstream_no_proxy: false,
+                auto_redeem: false,
+                smart_context_enabled: false,
+                presidio_redaction_enabled: false,
+                model_context_window_tokens: None,
+                preferred_listen_addr: None,
+            }) {
+                Ok(_) => panic!("credential-bearing URL should fail before proxy startup"),
+                Err(error) => error.to_string(),
+            };
+
+        assert!(
+            error.contains("no credentials, query, or fragment"),
+            "{error}"
+        );
+        assert!(!error.contains(sentinel), "{error}");
+        assert!(
+            !log_dir.exists(),
+            "invalid URL must fail before the runtime log directory is created"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

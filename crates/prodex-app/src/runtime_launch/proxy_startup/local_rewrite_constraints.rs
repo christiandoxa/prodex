@@ -16,7 +16,7 @@ use super::local_rewrite_options::RuntimeLocalRewriteProxyStartOptions;
 use super::provider_bridge::{RuntimeProviderRouteKind, runtime_provider_route_kind};
 use crate::{
     RuntimeConfig, RuntimeProxyRequest, RuntimeRotationProxy,
-    build_runtime_proxy_json_error_response, runtime_proxy_log,
+    build_runtime_proxy_json_error_response, runtime_proxy_log, validate_credential_free_http_url,
 };
 
 pub(crate) fn start_runtime_local_rewrite_proxy(
@@ -65,6 +65,7 @@ pub(crate) fn start_runtime_gateway_rewrite_proxy_with_runtime_config(
 fn runtime_local_rewrite_compatibility_config(
     options: &RuntimeLocalRewriteProxyStartOptions<'_>,
 ) -> anyhow::Result<Arc<RuntimeConfig>> {
+    validate_credential_free_http_url(&options.upstream_base_url, "runtime upstream base URL")?;
     Ok(Arc::new(RuntimeConfig::from_env_policy_and_cli(
         options.paths,
     )?))

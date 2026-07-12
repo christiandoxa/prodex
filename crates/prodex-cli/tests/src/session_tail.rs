@@ -14,7 +14,7 @@ fn s_session_tail_profile_and_no_auto_rotate_are_prodex_flags() {
     let Commands::Super(mut args) = command else {
         panic!("expected super command");
     };
-    args.extract_provider_overrides_from_codex_args();
+    args.extract_provider_overrides_from_codex_args().unwrap();
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert!(args.no_auto_rotate);
     assert_eq!(
@@ -37,7 +37,7 @@ fn s_session_tail_profile_does_not_override_existing_profile() {
     let Commands::Super(mut args) = command else {
         panic!("expected super command");
     };
-    args.extract_provider_overrides_from_codex_args();
+    args.extract_provider_overrides_from_codex_args().unwrap();
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert_eq!(
         args.codex_args,
@@ -65,7 +65,7 @@ fn s_session_tail_super_launch_flags_are_prodex_flags() {
     let Commands::Super(mut args) = command else {
         panic!("expected super command");
     };
-    args.extract_provider_overrides_from_codex_args();
+    args.extract_provider_overrides_from_codex_args().unwrap();
     assert!(args.skip_quota_check);
     assert!(args.dry_run);
     assert!(args.auto_redeem);
@@ -104,7 +104,7 @@ fn s_session_tail_super_local_provider_flags_are_prodex_flags() {
     let Commands::Super(mut args) = command else {
         panic!("expected super command");
     };
-    args.extract_provider_overrides_from_codex_args();
+    args.extract_provider_overrides_from_codex_args().unwrap();
     assert_eq!(args.url.as_deref(), Some("http://127.0.0.1:8131/v1"));
     assert_eq!(args.local_model.as_deref(), Some("local-model"));
     assert_eq!(args.local_context_window, Some(32000));
@@ -117,14 +117,13 @@ fn s_session_tail_super_local_provider_flags_are_prodex_flags() {
 }
 
 #[test]
-fn s_session_tail_invalid_super_values_stay_for_codex_to_reject() {
+fn s_session_tail_invalid_non_url_values_stay_for_codex_to_reject() {
     let command = parse_cli_command_from([
         "prodex",
         "s",
         "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
         "--provider",
         "unknown",
-        "--url=not-a-url",
         "--local-context-window",
         "many",
         "--cli=unknown",
@@ -133,7 +132,7 @@ fn s_session_tail_invalid_super_values_stay_for_codex_to_reject() {
     let Commands::Super(mut args) = command else {
         panic!("expected super command");
     };
-    args.extract_provider_overrides_from_codex_args();
+    args.extract_provider_overrides_from_codex_args().unwrap();
     assert_eq!(args.provider, None);
     assert_eq!(args.url, None);
     assert_eq!(args.local_context_window, None);
@@ -144,10 +143,38 @@ fn s_session_tail_invalid_super_values_stay_for_codex_to_reject() {
             "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
             "--provider",
             "unknown",
-            "--url=not-a-url",
             "--local-context-window",
             "many",
             "--cli=unknown",
         ])
     );
+}
+
+#[test]
+fn s_session_tail_rejects_credential_bearing_urls_without_echoing_them() {
+    for argument in [
+        "--url=https://user:tail-url-secret-sentinel@example.test/v1",
+        "--base-url=https://example.test/backend-api?token=tail-base-secret-sentinel",
+    ] {
+        let command = parse_cli_command_from([
+            "prodex",
+            "s",
+            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            argument,
+        ])
+        .expect("s session command should parse before tail extraction");
+        let Commands::Super(mut args) = command else {
+            panic!("expected super command");
+        };
+
+        let error = args
+            .extract_provider_overrides_from_codex_args()
+            .unwrap_err();
+
+        assert!(
+            error.contains("no credentials, query, or fragment"),
+            "{error}"
+        );
+        assert!(!error.contains("secret-sentinel"), "{error}");
+    }
 }

@@ -118,6 +118,54 @@ fn runtime_broker_hidden_command_accepts_no_secret_arguments() {
         .is_err()
     );
 }
+
+#[test]
+fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
+    const API_KEY: &str = "debug-api-key-sentinel";
+    const AUTH_TOKEN: &str = "debug-auth-token-sentinel";
+    const BASE_URL: &str = "https://debug-base-url-sentinel.example";
+    const CODEX_ARG: &str = "debug-codex-arg-sentinel";
+
+    let super_command = parse_cli_command_from([
+        "prodex",
+        "super",
+        "--provider",
+        "deepseek",
+        "--base-url",
+        BASE_URL,
+        "--api-key",
+        API_KEY,
+        CODEX_ARG,
+    ])
+    .expect("super command should parse");
+    let super_debug = format!("{super_command:?}");
+    let Commands::Super(super_args) = super_command else {
+        panic!("expected super command");
+    };
+    let caveman_debug = format!("{:?}", Commands::Caveman(super_args.into_caveman_args()));
+
+    let gateway_debug = format!(
+        "{:?}",
+        parse_cli_command_from([
+            "prodex",
+            "gateway",
+            "--base-url",
+            BASE_URL,
+            "--api-key",
+            API_KEY,
+            "--auth-token",
+            AUTH_TOKEN,
+        ])
+        .expect("gateway command should parse")
+    );
+
+    for rendered in [super_debug, caveman_debug, gateway_debug] {
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+        for secret in [API_KEY, AUTH_TOKEN, BASE_URL, CODEX_ARG] {
+            assert!(!rendered.contains(secret), "{rendered}");
+        }
+    }
+}
 #[test]
 fn setup_parse_as_top_level_command() {
     let command =
