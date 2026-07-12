@@ -523,6 +523,9 @@ fn validate_control_plane_http_action(
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlaneIdempotencyError::HttpRoute)?;
     if route.operation != action.operation {
+        if control_plane_http_action_alias_allowed(route.operation, action.operation, http.method) {
+            return Ok(());
+        }
         if control_plane_operations_share_route_family(route.operation, action.operation)
             && !control_plane_operation_allows_http_method(action.operation, http.method)
         {
@@ -564,7 +567,9 @@ fn validate_control_plane_http_action_for_precondition(
 ) -> Result<(), ApplicationControlPlanePreconditionError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlanePreconditionError::HttpRoute)?;
-    if route.operation != action.operation {
+    if route.operation != action.operation
+        && !control_plane_http_action_alias_allowed(route.operation, action.operation, http.method)
+    {
         return Err(
             ApplicationControlPlanePreconditionError::OperationMismatch {
                 route_operation: route.operation,
@@ -581,7 +586,9 @@ pub(crate) fn validate_control_plane_http_action_for_audit(
 ) -> Result<ApplicationControlPlaneHttpRoutePlan, ApplicationControlPlaneAuditError> {
     let route = plan_application_control_plane_http_route(http)
         .map_err(ApplicationControlPlaneAuditError::HttpRoute)?;
-    if route.operation != action.operation {
+    if route.operation != action.operation
+        && !control_plane_http_action_alias_allowed(route.operation, action.operation, http.method)
+    {
         return Err(ApplicationControlPlaneAuditError::OperationMismatch {
             route_operation: route.operation,
             action_operation: action.operation,
@@ -679,6 +686,21 @@ fn control_plane_operations_share_route_family(
                 AuditExport | AuditRetentionPurge,
                 AuditExport | AuditRetentionPurge
             )
+    )
+}
+
+fn control_plane_http_action_alias_allowed(
+    route_operation: ControlPlaneOperation,
+    action_operation: ControlPlaneOperation,
+    method: prodex_gateway_http::GatewayHttpMethod,
+) -> bool {
+    matches!(
+        (route_operation, action_operation, method),
+        (
+            ControlPlaneOperation::VirtualKeyUpdate,
+            ControlPlaneOperation::VirtualKeyRotateSecret,
+            prodex_gateway_http::GatewayHttpMethod::Patch,
+        )
     )
 }
 
