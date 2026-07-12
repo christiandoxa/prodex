@@ -1,6 +1,7 @@
-use crate::{RuntimeDeepSeekWebSearchMode, codex_config_value};
+use crate::RuntimeDeepSeekWebSearchMode;
 use anyhow::{Context, Result, bail};
 use std::env;
+#[cfg(test)]
 use std::fs;
 use std::path::Path;
 
@@ -16,61 +17,20 @@ pub(crate) fn runtime_deepseek_api_keys_from_request_or_env(
 }
 
 pub(crate) fn runtime_deepseek_strict_tools_enabled(codex_home: &Path) -> Result<bool> {
-    if let Some(value) = runtime_deepseek_toml_config_value(codex_home, "deepseek.strict_tools") {
-        return match value {
-            toml::Value::Boolean(enabled) => Ok(enabled),
-            toml::Value::String(value) => {
-                runtime_deepseek_parse_bool("deepseek.strict_tools", &value)
-            }
-            _ => bail!("deepseek.strict_tools must be a boolean"),
-        };
-    }
-    let Ok(value) = env::var("PRODEX_DEEPSEEK_STRICT_TOOLS") else {
-        return Ok(false);
-    };
-    runtime_deepseek_parse_bool("PRODEX_DEEPSEEK_STRICT_TOOLS", &value)
+    let value = env::var_os("PRODEX_DEEPSEEK_STRICT_TOOLS");
+    crate::runtime_deepseek_gateway_strict_tools(codex_home, value.as_deref())
 }
 
 pub(crate) fn runtime_deepseek_beta_base_url(codex_home: &Path) -> Result<String> {
-    let Some((name, value)) = codex_config_value(codex_home, "deepseek.beta_base_url")
-        .map(|value| ("deepseek.beta_base_url", value))
-        .or_else(|| {
-            env::var("PRODEX_DEEPSEEK_BETA_BASE_URL")
-                .ok()
-                .map(|value| ("PRODEX_DEEPSEEK_BETA_BASE_URL", value))
-        })
-    else {
-        return Ok("https://api.deepseek.com/beta".to_string());
-    };
-    if value.is_empty() {
-        bail!("{name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{name} must not contain whitespace");
-    }
-    let normalized = value.trim_end_matches('/').to_string();
-    let parsed = reqwest::Url::parse(&normalized)
-        .with_context(|| format!("{name} must be an http(s) URL with host"))?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-        bail!("{name} must be an http(s) URL with host");
-    }
-    Ok(normalized)
+    let value = env::var_os("PRODEX_DEEPSEEK_BETA_BASE_URL");
+    crate::runtime_deepseek_gateway_beta_base_url(codex_home, value.as_deref())
 }
 
 pub(crate) fn runtime_deepseek_web_search_mode(
     codex_home: &Path,
 ) -> Result<RuntimeDeepSeekWebSearchMode> {
-    if let Some(value) = runtime_deepseek_toml_config_value(codex_home, "deepseek.web_search_mode")
-    {
-        let toml::Value::String(value) = value else {
-            bail!("deepseek.web_search_mode must be a string");
-        };
-        return runtime_deepseek_parse_web_search_mode("deepseek.web_search_mode", &value);
-    }
-    let Ok(value) = env::var("PRODEX_DEEPSEEK_WEB_SEARCH_MODE") else {
-        return Ok(RuntimeDeepSeekWebSearchMode::default());
-    };
-    runtime_deepseek_parse_web_search_mode("PRODEX_DEEPSEEK_WEB_SEARCH_MODE", &value)
+    let value = env::var_os("PRODEX_DEEPSEEK_WEB_SEARCH_MODE");
+    crate::runtime_deepseek_gateway_web_search_mode(codex_home, value.as_deref())
 }
 
 pub(crate) fn runtime_anthropic_api_keys_from_request_or_env(
@@ -104,50 +64,6 @@ pub(crate) fn runtime_gemini_api_keys_from_request_or_env(
         &["GEMINI_API_KEYS", "GOOGLE_API_KEYS"],
         &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
     )
-}
-
-fn runtime_deepseek_parse_web_search_mode(
-    name: &str,
-    value: &str,
-) -> Result<RuntimeDeepSeekWebSearchMode> {
-    if value.is_empty() {
-        bail!("{name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{name} must not contain whitespace");
-    }
-    match value.to_ascii_lowercase().as_str() {
-        "auto" => Ok(RuntimeDeepSeekWebSearchMode::Auto),
-        "off" | "disabled" | "disable" => Ok(RuntimeDeepSeekWebSearchMode::Off),
-        "openai_chat" | "openai-chat" | "chat" => Ok(RuntimeDeepSeekWebSearchMode::OpenAiChat),
-        "anthropic" => Ok(RuntimeDeepSeekWebSearchMode::Anthropic),
-        "function_proxy" | "function-proxy" => Ok(RuntimeDeepSeekWebSearchMode::FunctionProxy),
-        _ => bail!("{name} must be auto, off, openai_chat, anthropic, or function_proxy"),
-    }
-}
-
-fn runtime_deepseek_parse_bool(name: &str, value: &str) -> Result<bool> {
-    if value.is_empty() {
-        bail!("{name} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        bail!("{name} must not contain whitespace");
-    }
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => bail!("{name} must be true or false"),
-    }
-}
-
-fn runtime_deepseek_toml_config_value(codex_home: &Path, key: &str) -> Option<toml::Value> {
-    let contents = fs::read_to_string(codex_home.join("config.toml")).ok()?;
-    let value = toml::from_str::<toml::Value>(&contents).ok()?;
-    let mut current = &value;
-    for part in key.split('.') {
-        current = current.get(part)?;
-    }
-    Some(current.clone())
 }
 
 fn runtime_provider_api_keys_from_list(value: &str) -> Option<Vec<String>> {

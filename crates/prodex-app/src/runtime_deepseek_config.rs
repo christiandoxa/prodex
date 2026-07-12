@@ -1,15 +1,15 @@
 use crate::{
-    codex_cli_config_override_exact_value, codex_cli_config_override_value,
-    codex_config_exact_value, codex_config_value,
+    RuntimeDeepSeekWebSearchMode, codex_cli_config_override_exact_value,
+    codex_cli_config_override_value, codex_config_exact_value, codex_config_value,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use prodex_cli::{
     SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
     SUPER_DEEPSEEK_DEFAULT_MODEL, SUPER_DEEPSEEK_PROVIDER_ID,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -56,6 +56,141 @@ const DEEPSEEK_BASE_INSTRUCTIONS: &str = r#"You are Codex, a coding agent. You a
 Focus on the user's software task. Inspect the codebase before changing behavior, make narrow edits, preserve user changes, and verify with relevant tests or commands when feasible.
 
 Use tools deliberately. For shell work, prefer fast focused commands. For file edits, keep changes minimal and explain non-obvious logic in short comments only when useful."#;
+
+pub(crate) fn runtime_deepseek_gateway_strict_tools(
+    codex_home: &Path,
+    environment: Option<&OsStr>,
+) -> Result<bool> {
+    if let Some(value) = runtime_deepseek_gateway_toml_value(codex_home, "deepseek.strict_tools") {
+        return match value {
+            toml::Value::Boolean(enabled) => Ok(enabled),
+            toml::Value::String(value) => {
+                runtime_deepseek_gateway_bool("deepseek.strict_tools", &value)
+            }
+            _ => bail!("deepseek.strict_tools must be a boolean"),
+        };
+    }
+    let Some(value) = environment else {
+        return Ok(false);
+    };
+    runtime_deepseek_gateway_bool(
+        "PRODEX_DEEPSEEK_STRICT_TOOLS",
+        runtime_deepseek_gateway_environment_text("PRODEX_DEEPSEEK_STRICT_TOOLS", value)?,
+    )
+}
+
+pub(crate) fn runtime_deepseek_gateway_beta_base_url(
+    codex_home: &Path,
+    environment: Option<&OsStr>,
+) -> Result<String> {
+    let configured = codex_config_value(codex_home, "deepseek.beta_base_url")
+        .map(|value| ("deepseek.beta_base_url", value));
+    let environment = if configured.is_none() {
+        environment
+            .map(|value| {
+                runtime_deepseek_gateway_environment_text("PRODEX_DEEPSEEK_BETA_BASE_URL", value)
+                    .map(str::to_string)
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let Some((name, value)) =
+        configured.or_else(|| environment.map(|value| ("PRODEX_DEEPSEEK_BETA_BASE_URL", value)))
+    else {
+        return Ok("https://api.deepseek.com/beta".to_string());
+    };
+    if value.is_empty() {
+        bail!("{name} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        bail!("{name} must not contain whitespace");
+    }
+    let normalized = value.trim_end_matches('/').to_string();
+    let parsed = reqwest::Url::parse(&normalized).with_context(|| {
+        format!("{name} must be an http(s) URL with host and no credentials, query, or fragment")
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        bail!("{name} must be an http(s) URL with host and no credentials, query, or fragment");
+    }
+    Ok(normalized)
+}
+
+pub(crate) fn runtime_deepseek_gateway_web_search_mode(
+    codex_home: &Path,
+    environment: Option<&OsStr>,
+) -> Result<RuntimeDeepSeekWebSearchMode> {
+    if let Some(value) = runtime_deepseek_gateway_toml_value(codex_home, "deepseek.web_search_mode")
+    {
+        let toml::Value::String(value) = value else {
+            bail!("deepseek.web_search_mode must be a string");
+        };
+        return runtime_deepseek_gateway_web_search_value("deepseek.web_search_mode", &value);
+    }
+    let Some(value) = environment else {
+        return Ok(RuntimeDeepSeekWebSearchMode::default());
+    };
+    runtime_deepseek_gateway_web_search_value(
+        "PRODEX_DEEPSEEK_WEB_SEARCH_MODE",
+        runtime_deepseek_gateway_environment_text("PRODEX_DEEPSEEK_WEB_SEARCH_MODE", value)?,
+    )
+}
+
+fn runtime_deepseek_gateway_bool(name: &str, value: &str) -> Result<bool> {
+    if value.is_empty() {
+        bail!("{name} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        bail!("{name} must not contain whitespace");
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => bail!("{name} must be true or false"),
+    }
+}
+
+fn runtime_deepseek_gateway_web_search_value(
+    name: &str,
+    value: &str,
+) -> Result<RuntimeDeepSeekWebSearchMode> {
+    if value.is_empty() {
+        bail!("{name} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        bail!("{name} must not contain whitespace");
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "auto" => Ok(RuntimeDeepSeekWebSearchMode::Auto),
+        "off" | "disabled" | "disable" => Ok(RuntimeDeepSeekWebSearchMode::Off),
+        "openai_chat" | "openai-chat" | "chat" => Ok(RuntimeDeepSeekWebSearchMode::OpenAiChat),
+        "anthropic" => Ok(RuntimeDeepSeekWebSearchMode::Anthropic),
+        "function_proxy" | "function-proxy" => Ok(RuntimeDeepSeekWebSearchMode::FunctionProxy),
+        _ => bail!("{name} must be auto, off, openai_chat, anthropic, or function_proxy"),
+    }
+}
+
+fn runtime_deepseek_gateway_toml_value(codex_home: &Path, key: &str) -> Option<toml::Value> {
+    let contents = fs::read_to_string(codex_home.join("config.toml")).ok()?;
+    let value = toml::from_str::<toml::Value>(&contents).ok()?;
+    let mut current = &value;
+    for part in key.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current.clone())
+}
+
+fn runtime_deepseek_gateway_environment_text<'a>(name: &str, value: &'a OsStr) -> Result<&'a str> {
+    value
+        .to_str()
+        .with_context(|| format!("{name} must be valid Unicode"))
+}
 
 pub(crate) fn prepare_deepseek_provider_codex_args(
     codex_home: &Path,

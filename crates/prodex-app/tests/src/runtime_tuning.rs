@@ -46,6 +46,20 @@ fn test_app_paths(root: PathBuf) -> AppPaths {
     }
 }
 
+fn gateway_args(provider: Option<SuperExternalProvider>) -> GatewayArgs {
+    GatewayArgs {
+        command: None,
+        listen: None,
+        provider,
+        base_url: None,
+        api_key: None,
+        auth_token: None,
+        smart_context: false,
+        presidio: false,
+        no_presidio: false,
+    }
+}
+
 #[test]
 fn runtime_config_reads_each_environment_key_once() {
     let policy_dir = with_test_policy_dir("version = 1\n");
@@ -91,6 +105,165 @@ fn runtime_config_aggregates_errors_without_values() {
     );
     assert!(!rendered.contains("super-secret-bearer-token"));
     assert!(!rendered.contains("also-secret"));
+}
+
+#[test]
+fn gateway_runtime_config_aggregates_selected_provider_errors_without_secrets() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let values = BTreeMap::from([
+        ("PRODEX_GATEWAY_REPLICA_COUNT", OsString::from("0")),
+        (
+            "PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS",
+            OsString::from("sometimes"),
+        ),
+        ("PRODEX_DEEPSEEK_STRICT_TOOLS", OsString::from("maybe")),
+        ("PRODEX_DEEPSEEK_BETA_BASE_URL", OsString::from("not-a-url")),
+        ("PRODEX_DEEPSEEK_WEB_SEARCH_MODE", OsString::from("enabled")),
+        ("DEEPSEEK_API_KEY", OsString::from("secret-sentinel")),
+    ]);
+    let environment =
+        RuntimeConfigEnvironment::read_with_gateway(|key| values.get(key).cloned(), true);
+
+    let rendered = RuntimeConfig::from_gateway_environment(
+        &paths,
+        environment,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        &gateway_args(Some(SuperExternalProvider::DeepSeek)),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(
+        rendered,
+        "runtime configuration is invalid; \
+         PRODEX_GATEWAY_REPLICA_COUNT must be at least 1; \
+         PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS must be one of true,false,1,0,yes,no,on,off; \
+         PRODEX_DEEPSEEK_STRICT_TOOLS must be true or false; \
+         PRODEX_DEEPSEEK_BETA_BASE_URL must be an http(s) URL with host and no credentials, query, or fragment; \
+         PRODEX_DEEPSEEK_WEB_SEARCH_MODE must be auto, off, openai_chat, anthropic, or function_proxy"
+    );
+    assert!(!rendered.contains("secret-sentinel"), "{rendered}");
+}
+
+#[test]
+fn gateway_runtime_config_keeps_only_secret_environment_names() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let values = BTreeMap::from([
+        ("OPENAI_API_KEY", OsString::from("provider-secret-sentinel")),
+        (
+            "PRODEX_GATEWAY_TOKEN",
+            OsString::from("gateway-secret-sentinel"),
+        ),
+    ]);
+    let environment =
+        RuntimeConfigEnvironment::read_with_gateway(|key| values.get(key).cloned(), true);
+    let config = RuntimeConfig::from_gateway_environment(
+        &paths,
+        environment,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        &gateway_args(None),
+    )
+    .unwrap();
+
+    let rendered = format!("{config:?}");
+    assert!(rendered.contains("OPENAI_API_KEY"), "{rendered}");
+    assert!(rendered.contains("PRODEX_GATEWAY_TOKEN"), "{rendered}");
+    assert!(!rendered.contains("provider-secret-sentinel"), "{rendered}");
+    assert!(!rendered.contains("gateway-secret-sentinel"), "{rendered}");
+}
+
+#[test]
+fn gateway_runtime_config_rejects_url_secrets_without_rendering_them() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let values = BTreeMap::from([(
+        "PRODEX_DEEPSEEK_BETA_BASE_URL",
+        OsString::from(
+            "https://deepseek-user:deepseek-password@example.test/beta?deepseek-query#deepseek-fragment",
+        ),
+    )]);
+    let environment =
+        RuntimeConfigEnvironment::read_with_gateway(|key| values.get(key).cloned(), true);
+    let mut args = gateway_args(Some(SuperExternalProvider::DeepSeek));
+    args.base_url = Some(
+        "https://upstream-user:upstream-password@example.test/v1?upstream-query#upstream-fragment"
+            .to_string(),
+    );
+
+    let rendered = RuntimeConfig::from_gateway_environment(
+        &paths,
+        environment,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        &args,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        rendered.contains(
+            "gateway --base-url must be an http(s) URL with host and no credentials, query, or fragment"
+        ),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(
+            "PRODEX_DEEPSEEK_BETA_BASE_URL must be an http(s) URL with host and no credentials, query, or fragment"
+        ),
+        "{rendered}"
+    );
+    for secret in [
+        "upstream-user",
+        "upstream-password",
+        "upstream-query",
+        "upstream-fragment",
+        "deepseek-user",
+        "deepseek-password",
+        "deepseek-query",
+        "deepseek-fragment",
+    ] {
+        assert!(!rendered.contains(secret), "{rendered}");
+    }
+}
+
+#[test]
+fn gateway_runtime_config_debug_redacts_captured_urls() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let values = BTreeMap::from([(
+        "PRODEX_DEEPSEEK_BETA_BASE_URL",
+        OsString::from("https://example.test/deepseek-beta-sentinel"),
+    )]);
+    let environment =
+        RuntimeConfigEnvironment::read_with_gateway(|key| values.get(key).cloned(), true);
+    let mut args = gateway_args(Some(SuperExternalProvider::DeepSeek));
+    args.base_url = Some("https://example.test/upstream-sentinel".to_string());
+
+    let config = RuntimeConfig::from_gateway_environment(
+        &paths,
+        environment,
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        &args,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.gateway.launch.upstream_base_url(),
+        Some("https://example.test/upstream-sentinel")
+    );
+    assert_eq!(
+        config
+            .gateway
+            .launch
+            .deepseek()
+            .map(|config| config.beta_base_url.as_str()),
+        Some("https://example.test/deepseek-beta-sentinel")
+    );
+    let rendered = format!("{config:?}");
+    assert!(rendered.contains("<redacted>"), "{rendered}");
+    assert!(!rendered.contains("upstream-sentinel"), "{rendered}");
+    assert!(!rendered.contains("deepseek-beta-sentinel"), "{rendered}");
 }
 
 #[test]

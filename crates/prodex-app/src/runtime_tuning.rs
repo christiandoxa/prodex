@@ -28,6 +28,25 @@ const MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 86_400;
 const MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 3_600_000;
 const MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 604_800;
 
+struct RuntimeGatewayConfigInput<'a> {
+    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+    provider_override: Option<SuperExternalProvider>,
+    base_url_override: Option<&'a str>,
+}
+
+impl<'a> RuntimeGatewayConfigInput<'a> {
+    fn new(
+        service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+        args: &'a GatewayArgs,
+    ) -> Self {
+        Self {
+            service_mode,
+            provider_override: args.provider,
+            base_url_override: args.base_url.as_deref(),
+        }
+    }
+}
+
 #[path = "runtime_config/environment.rs"]
 mod environment;
 #[path = "runtime_config/types.rs"]
@@ -41,9 +60,45 @@ impl RuntimeConfig {
         Self::from_environment(paths, environment)
     }
 
+    pub(crate) fn from_gateway_env_policy_and_cli(
+        paths: &AppPaths,
+        service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+        args: &GatewayArgs,
+    ) -> Result<Self, ConfigErrors> {
+        let data_plane = service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway;
+        let environment = RuntimeConfigEnvironment::read_gateway_process(data_plane);
+        Self::from_environment_with_gateway(
+            paths,
+            environment,
+            Some(RuntimeGatewayConfigInput::new(service_mode, args)),
+        )
+    }
+
     fn from_environment(
         paths: &AppPaths,
         environment: RuntimeConfigEnvironment,
+    ) -> Result<Self, ConfigErrors> {
+        Self::from_environment_with_gateway(paths, environment, None)
+    }
+
+    #[cfg(test)]
+    fn from_gateway_environment(
+        paths: &AppPaths,
+        environment: RuntimeConfigEnvironment,
+        service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+        args: &GatewayArgs,
+    ) -> Result<Self, ConfigErrors> {
+        Self::from_environment_with_gateway(
+            paths,
+            environment,
+            Some(RuntimeGatewayConfigInput::new(service_mode, args)),
+        )
+    }
+
+    fn from_environment_with_gateway(
+        paths: &AppPaths,
+        environment: RuntimeConfigEnvironment,
+        gateway_input: Option<RuntimeGatewayConfigInput<'_>>,
     ) -> Result<Self, ConfigErrors> {
         let mut parser = RuntimeConfigParser::new(environment);
         let loaded_policy = match prodex_runtime_policy::load_runtime_policy_cached(&paths.root) {
@@ -51,14 +106,15 @@ impl RuntimeConfig {
             Err(_) => {
                 parser.errors.push(ConfigError {
                     key: "runtime.policy",
-                    message: "could not be loaded",
+                    message: "could not be loaded".to_string(),
                 });
                 None
             }
         };
         let runtime_policy = loaded_policy.as_ref().map(|policy| policy.runtime.clone());
         let mut proxy_policy = loaded_policy
-            .map(|policy| policy.runtime_proxy)
+            .as_ref()
+            .map(|policy| policy.runtime_proxy.clone())
             .unwrap_or_default();
         let preset_key = prodex_runtime_policy::PRODEX_RUNTIME_PROXY_PRESET_ENV;
         let preset = parser.environment.get(preset_key).and_then(|value| {
@@ -71,7 +127,15 @@ impl RuntimeConfig {
             parsed
         });
         proxy_policy = proxy_policy.with_effective_preset(preset);
-        let config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
+        let mut config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
+        if let Some(input) = gateway_input {
+            config.gateway.launch = Self::parse_gateway_launch(
+                &mut parser,
+                loaded_policy.as_ref(),
+                input,
+                &config.gemini,
+            );
+        }
         if parser.errors.is_empty() {
             let config = RuntimeConfig {
                 compatibility_defaults: parser.compatibility_defaults,
@@ -84,6 +148,89 @@ impl RuntimeConfig {
             Ok(config)
         } else {
             Err(ConfigErrors(parser.errors))
+        }
+    }
+
+    fn parse_gateway_launch(
+        parser: &mut RuntimeConfigParser,
+        policy: Option<&prodex_runtime_policy::RuntimePolicyConfig>,
+        input: RuntimeGatewayConfigInput<'_>,
+        gemini: &RuntimeGeminiConfig,
+    ) -> RuntimeGatewayLaunchEnvironment {
+        if input.service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane {
+            return RuntimeGatewayLaunchEnvironment::ControlPlane;
+        }
+        let gateway = policy.map(|policy| &policy.gateway);
+        let provider = input.provider_override.or_else(|| {
+            gateway
+                .and_then(|gateway| gateway.provider.as_deref())
+                .and_then(runtime_gateway_policy_provider)
+        });
+        let upstream_base_url = runtime_gateway_upstream_base_url(
+            parser,
+            input.base_url_override,
+            gateway.and_then(|gateway| gateway.base_url.as_deref()),
+            provider,
+        );
+        let deepseek = (provider == Some(SuperExternalProvider::DeepSeek)).then(|| {
+            let strict_environment = parser
+                .environment
+                .get("PRODEX_DEEPSEEK_STRICT_TOOLS")
+                .cloned();
+            let beta_environment = parser
+                .environment
+                .get("PRODEX_DEEPSEEK_BETA_BASE_URL")
+                .cloned();
+            let search_environment = parser
+                .environment
+                .get("PRODEX_DEEPSEEK_WEB_SEARCH_MODE")
+                .cloned();
+            let strict_tools = runtime_gateway_capture(
+                parser,
+                "PRODEX_DEEPSEEK_STRICT_TOOLS",
+                crate::runtime_deepseek_gateway_strict_tools(
+                    Path::new(""),
+                    strict_environment.as_deref(),
+                ),
+                false,
+            );
+            let beta_base_url = runtime_gateway_capture(
+                parser,
+                "PRODEX_DEEPSEEK_BETA_BASE_URL",
+                crate::runtime_deepseek_gateway_beta_base_url(
+                    Path::new(""),
+                    beta_environment.as_deref(),
+                ),
+                "https://api.deepseek.com/beta".to_string(),
+            );
+            let web_search_mode = runtime_gateway_capture(
+                parser,
+                "PRODEX_DEEPSEEK_WEB_SEARCH_MODE",
+                crate::runtime_deepseek_gateway_web_search_mode(
+                    Path::new(""),
+                    search_environment.as_deref(),
+                ),
+                RuntimeDeepSeekWebSearchMode::default(),
+            );
+            RuntimeGatewayDeepSeekConfig {
+                strict_tools,
+                beta_base_url,
+                web_search_mode,
+            }
+        });
+        let gemini_model_resolution = (provider == Some(SuperExternalProvider::Gemini))
+            .then(|| RuntimeGeminiModelResolution::from_runtime_config(gemini));
+        let production = policy.is_some_and(|policy| policy.secrets.production);
+        let present_secret_env = if production {
+            BTreeSet::new()
+        } else {
+            parser.environment.present_gateway_secret_env()
+        };
+        RuntimeGatewayLaunchEnvironment::DataPlane {
+            upstream_base_url,
+            deepseek,
+            gemini_model_resolution,
+            present_secret_env,
         }
     }
 
@@ -468,6 +615,7 @@ impl RuntimeConfig {
             replica_count: parser.positive_u16("PRODEX_GATEWAY_REPLICA_COUNT", 1),
             require_multi_replica_accounting_checks: parser
                 .strict_bool("PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS", false),
+            launch: RuntimeGatewayLaunchEnvironment::default(),
         };
         let gemini = Self::parse_gemini(parser);
         Self {
@@ -705,6 +853,105 @@ impl RuntimeConfig {
             live_url,
             live_model,
             sticky_fresh_oauth,
+        }
+    }
+}
+
+fn runtime_gateway_policy_provider(value: &str) -> Option<SuperExternalProvider> {
+    match value.to_ascii_lowercase().as_str() {
+        "anthropic" | "claude" => Some(SuperExternalProvider::Anthropic),
+        "copilot" | "github-copilot" | "github_copilot" => Some(SuperExternalProvider::Copilot),
+        "deepseek" => Some(SuperExternalProvider::DeepSeek),
+        "gemini" => Some(SuperExternalProvider::Gemini),
+        "kiro" => Some(SuperExternalProvider::Kiro),
+        _ => None,
+    }
+}
+
+fn runtime_gateway_upstream_base_url(
+    parser: &mut RuntimeConfigParser,
+    cli: Option<&str>,
+    policy: Option<&str>,
+    provider: Option<SuperExternalProvider>,
+) -> String {
+    let (key, raw) = if let Some(value) = cli {
+        ("gateway --base-url", value)
+    } else if let Some(value) = policy {
+        ("gateway.base_url", value)
+    } else if let Some(provider) = provider {
+        ("gateway provider base URL", provider.default_base_url())
+    } else if let Some(value) = parser.environment.get("OPENAI_BASE_URL") {
+        let Some(value) = value.to_str() else {
+            parser.errors.push(ConfigError {
+                key: "OPENAI_BASE_URL",
+                message: "must be valid Unicode".to_string(),
+            });
+            return "https://api.openai.com/v1".to_string();
+        };
+        ("OPENAI_BASE_URL", value)
+    } else {
+        ("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    };
+    if raw.is_empty() {
+        parser.errors.push(ConfigError {
+            key,
+            message: "cannot be empty".to_string(),
+        });
+        return "https://api.openai.com/v1".to_string();
+    }
+    if raw.chars().any(char::is_whitespace) {
+        parser.errors.push(ConfigError {
+            key,
+            message: "must not contain whitespace".to_string(),
+        });
+        return "https://api.openai.com/v1".to_string();
+    }
+    let normalized = raw.trim_end_matches('/');
+    let parsed = reqwest::Url::parse(normalized);
+    let valid = parsed.as_ref().is_ok_and(|url| {
+        matches!(url.scheme(), "http" | "https")
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+    });
+    if !valid {
+        parser.errors.push(ConfigError {
+            key,
+            message: "must be an http(s) URL with host and no credentials, query, or fragment"
+                .to_string(),
+        });
+        return "https://api.openai.com/v1".to_string();
+    }
+    if provider.is_none()
+        && parsed
+            .ok()
+            .is_some_and(|url| url.path().trim_matches('/').is_empty())
+    {
+        format!("{normalized}/v1")
+    } else {
+        normalized.to_string()
+    }
+}
+
+fn runtime_gateway_capture<T>(
+    parser: &mut RuntimeConfigParser,
+    key: &'static str,
+    result: anyhow::Result<T>,
+    default: T,
+) -> T {
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            let message = error.to_string();
+            let message = message
+                .strip_prefix(key)
+                .and_then(|message| message.strip_prefix(' '))
+                .unwrap_or(&message)
+                .to_string();
+            parser.errors.push(ConfigError { key, message });
+            default
         }
     }
 }

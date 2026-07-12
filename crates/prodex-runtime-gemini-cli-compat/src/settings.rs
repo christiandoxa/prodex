@@ -13,7 +13,24 @@ pub struct GeminiSettingsSource {
 }
 
 pub fn gemini_settings_sources(cwd: Option<&Path>) -> Vec<GeminiSettingsSource> {
-    let paths = gemini_settings_source_paths(cwd);
+    gemini_settings_sources_from_paths(gemini_settings_source_paths(cwd))
+}
+
+pub fn gemini_settings_sources_for_config_home(
+    config_home: Option<&Path>,
+    cwd: Option<&Path>,
+    system_settings: Option<&Path>,
+    system_defaults: Option<&Path>,
+) -> Vec<GeminiSettingsSource> {
+    gemini_settings_sources_from_paths(gemini_settings_source_paths_for_config_home(
+        config_home,
+        cwd,
+        system_settings,
+        system_defaults,
+    ))
+}
+
+fn gemini_settings_sources_from_paths(paths: Vec<(String, PathBuf)>) -> Vec<GeminiSettingsSource> {
     let mut sources = Vec::new();
     for (name, path) in paths {
         let Some(text) = crate::fs_utils::read_text_limited(&path, GEMINI_SETTINGS_FILE_LIMIT)
