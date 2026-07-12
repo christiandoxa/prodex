@@ -326,10 +326,7 @@ fn profile_export_rejects_symlink_provider_secret_file() {
     let err = build_profile_export_payload(&source_state, &["gemini-main".to_string()])
         .expect_err("symlink provider secret should not export");
 
-    assert!(
-        err.to_string().contains("not a regular secret file"),
-        "unexpected export error: {err:#}"
-    );
+    assert_eq!(err.to_string(), "invalid secret location");
 }
 
 #[test]

@@ -750,6 +750,10 @@ prodex profile remove --all
 Password-protected exports now use the version-2 Argon2id envelope. Imports stay
 compatible with existing version-1 PBKDF2 bundles.
 
+Imports require a current-user-owned private bundle below trusted directories.
+For an existing Unix bundle, correct its ownership and run `chmod 600 backup.json`,
+or re-export it. On Windows, the bundle must have a private current-user owner/DACL.
+
 </details>
 
 ## Local model support

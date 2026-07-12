@@ -1,9 +1,4 @@
-use std::fs;
-use std::fs::OpenOptions;
-use std::io::{Read as _, Write as _};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
 use aes_gcm_siv::{
     Aes256GcmSiv, Nonce,
@@ -32,7 +27,6 @@ use crate::{
     PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, ProfileExportEnvelope, ProfileExportKdfParameters,
 };
 
-static PROFILE_EXPORT_BUNDLE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub const PROFILE_EXPORT_BUNDLE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 pub const PROFILE_EXPORT_CIPHERTEXT_MAX_BYTES: usize =
     PROFILE_EXPORT_PLAINTEXT_MAX_BYTES + PROFILE_EXPORT_AUTH_TAG_BYTES;
@@ -75,7 +69,7 @@ pub fn read_profile_export_envelope<T>(path: &Path) -> Result<(ProfileExportEnve
 where
     T: DeserializeOwned,
 {
-    let content = Zeroizing::new(read_profile_export_bundle(path)?);
+    let content = read_profile_export_bundle(path)?;
     let envelope = parse_profile_export_envelope(&content)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     let encrypted = matches!(
@@ -125,50 +119,10 @@ fn redacted_decrypted_payload_parse_error(error: serde_json::Error) -> anyhow::E
     }
 }
 
-fn read_profile_export_bundle(path: &Path) -> Result<Vec<u8>> {
-    let metadata =
-        fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
-    if !metadata.file_type().is_file() {
-        bail!("profile export bundle {} is not a file", path.display());
-    }
-    if metadata.len() > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
-        bail!(
-            "profile export bundle {} exceeds safe size limit ({} bytes)",
-            path.display(),
-            PROFILE_EXPORT_BUNDLE_MAX_BYTES
-        );
-    }
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    if !profile_export_same_file_metadata(&metadata, &file.metadata()?) {
-        bail!(
-            "profile export bundle changed while opening {}",
-            path.display()
-        );
-    }
-    let mut bytes = Vec::new();
-    file.take(PROFILE_EXPORT_BUNDLE_MAX_BYTES.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    if bytes.len() as u64 > PROFILE_EXPORT_BUNDLE_MAX_BYTES {
-        bail!(
-            "profile export bundle {} exceeds safe size limit ({} bytes)",
-            path.display(),
-            PROFILE_EXPORT_BUNDLE_MAX_BYTES
-        );
-    }
-    Ok(bytes)
-}
-
-#[cfg(unix)]
-fn profile_export_same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
-#[cfg(not(unix))]
-fn profile_export_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
+fn read_profile_export_bundle(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
+    secret_store::read_private_file_bounded(path, PROFILE_EXPORT_BUNDLE_MAX_BYTES)
+        .with_context(|| format!("failed to read {}", path.display()))?
+        .with_context(|| format!("failed to read {}", path.display()))
 }
 
 pub fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
@@ -179,22 +133,8 @@ pub fn write_profile_export_bundle(path: &Path, content: &[u8]) -> Result<()> {
             PROFILE_EXPORT_BUNDLE_MAX_BYTES
         );
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let temp_path = unique_profile_export_temp_file_path(path);
-    write_profile_export_temp_file(&temp_path, content)?;
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("failed to replace {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("failed to secure {}", path.display()))?;
-    }
-    Ok(())
+    secret_store::write_private_file_atomic(path, content)
+        .with_context(|| format!("failed to replace {}", path.display()))
 }
 
 pub fn decode_profile_export_envelope<T>(
@@ -576,42 +516,6 @@ where
         nonce_base64: base64::engine::general_purpose::STANDARD.encode(nonce.as_ref()),
         ciphertext_base64: base64::engine::general_purpose::STANDARD.encode(ciphertext.as_slice()),
     })
-}
-
-fn unique_profile_export_temp_file_path(path: &Path) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = PROFILE_EXPORT_BUNDLE_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let file_name = format!(
-        "{}.{}.{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("profile-export.json"),
-        std::process::id(),
-        nanos,
-        sequence
-    );
-    path.with_file_name(file_name)
-}
-
-fn write_profile_export_temp_file(path: &Path, content: &[u8]) -> Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("failed to create {}", path.display()))?;
-    file.write_all(content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
 }
 
 #[cfg(test)]
