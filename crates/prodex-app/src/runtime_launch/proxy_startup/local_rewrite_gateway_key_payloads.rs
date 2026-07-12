@@ -128,13 +128,6 @@ pub(super) fn runtime_gateway_admin_stored_key_json(
     })
 }
 
-pub(super) fn runtime_gateway_virtual_key_name_exists(
-    shared: &RuntimeLocalRewriteProxyShared,
-    name: &str,
-) -> bool {
-    runtime_gateway_virtual_key_entry_by_name(shared, name).is_some()
-}
-
 pub(super) fn runtime_gateway_virtual_key_entry_by_name(
     shared: &RuntimeLocalRewriteProxyShared,
     name: &str,

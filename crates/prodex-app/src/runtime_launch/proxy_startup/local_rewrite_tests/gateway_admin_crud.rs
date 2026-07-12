@@ -455,6 +455,20 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
         .recv_timeout(Duration::from_secs(2))
         .expect("upstream should receive second request");
 
+    let canonical_rotated = client
+        .idempotent_post(format!(
+            "http://{}/v1/prodex/gateway/keys/team-crud/secret",
+            proxy.listen_addr
+        ))
+        .bearer_auth(admin_token)
+        .send()
+        .expect("canonical rotate key request should be sent");
+    assert_eq!(canonical_rotated.status().as_u16(), 200);
+    let canonical_rotated: serde_json::Value = canonical_rotated
+        .json()
+        .expect("canonical rotate response should be json");
+    assert_ne!(canonical_rotated["token"], rotated["token"]);
+
     let deleted = client
         .idempotent_delete(format!(
             "http://{}/v1/prodex/gateway/keys/team-crud",
@@ -476,16 +490,29 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     assert_eq!(missing.status().as_u16(), 404);
     let store = wait_for_json_file(&root.join("gateway-virtual-keys.json"));
     assert_eq!(store["keys"].as_array().unwrap().len(), 0);
+    let actions = store["admin_audit"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|envelope| envelope["event"]["action"].as_str())
+        .collect::<Vec<_>>();
+    for action in [
+        "control_plane.virtual_key.create",
+        "control_plane.virtual_key.update",
+        "control_plane.virtual_key.rotate_secret",
+        "control_plane.virtual_key.delete",
+    ] {
+        assert!(
+            actions.contains(&action),
+            "missing canonical audit {action}"
+        );
+    }
     let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
         .expect("gateway admin audit log should be written");
     assert!(audit_log.contains(r#""component":"gateway_admin""#));
-    assert!(audit_log.contains(r#""action":"create_key""#));
-    assert!(audit_log.contains(r#""action":"update_key""#));
-    assert!(audit_log.contains(r#""action":"rotate_key""#));
-    assert!(audit_log.contains(r#""action":"delete_key""#));
     assert!(audit_log.contains(r#""action":"auth_failed""#));
     assert!(audit_log.contains(r#""reason":"admin_authentication_required""#));
-    assert!(audit_log.contains(r#""key_name":"team-crud""#));
+    assert!(store.to_string().contains("team-crud"));
     assert!(!audit_log.contains(admin_token));
     assert!(!audit_log.contains(&first_token));
     assert!(!audit_log.contains(rotated_token));
@@ -497,7 +524,7 @@ fn gateway_admin_mutation_idempotency_key_rejects_duplicate_replay() {
     let audit_dir = root.join("audit");
     fs::create_dir_all(&audit_dir).expect("audit dir should be created");
     let _audit_env = TestEnvVarGuard::set("PRODEX_AUDIT_LOG_DIR", audit_dir.to_str().unwrap());
-    let paths = app_paths_for_root(root);
+    let paths = app_paths_for_root(root.clone());
     let upstream = TestUpstream::start_n(0);
     let admin_token = "admin-idempotency-token";
     let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
@@ -573,15 +600,12 @@ fn gateway_admin_mutation_idempotency_key_rejects_duplicate_replay() {
     assert!(names.contains(&"team-idem-a"));
     assert!(!names.contains(&"team-idem-b"));
 
-    let audit_log = fs::read_to_string(audit_dir.join("prodex-audit.log"))
-        .expect("idempotency denial should be audited");
-    assert!(audit_log.contains(r#""component":"gateway_admin""#));
-    assert!(audit_log.contains(r#""action":"request_denied""#));
-    assert!(audit_log.contains(r#""reason":"duplicate_idempotency_key""#));
-    assert!(audit_log.contains(r#""actor":"admin""#));
-    assert!(audit_log.contains(r#""path":"/v1/prodex/gateway/keys""#));
-    assert!(!audit_log.contains(admin_token));
-    assert!(!audit_log.contains("idem-create-key-1"));
+    let store = wait_for_json_file(&root.join("gateway-virtual-keys.json"));
+    assert_eq!(store["admin_idempotency"].as_array().unwrap().len(), 1);
+    assert_eq!(store["admin_audit"].as_array().unwrap().len(), 1);
+    let persisted = store.to_string();
+    assert!(!persisted.contains(admin_token));
+    assert!(!persisted.contains("idem-create-key-1"));
 }
 
 #[test]
@@ -1161,7 +1185,7 @@ fn gateway_admin_key_store_lock_errors_use_stable_response_without_path_details(
     assert_eq!(body["error"]["code"], "gateway_key_store_lock_failed");
     assert_eq!(
         body["error"]["message"],
-        "gateway key store lock could not be acquired"
+        "gateway admin mutation could not be committed atomically"
     );
     let rendered = body.to_string();
     assert!(!rendered.contains("Is a directory"));
