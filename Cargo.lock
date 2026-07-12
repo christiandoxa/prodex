@@ -2513,6 +2513,7 @@ dependencies = [
  "prodex-storage-postgres",
  "prodex-storage-redis",
  "prodex-storage-sqlite",
+ "sha2",
 ]
 
 [[package]]
@@ -2613,6 +2614,7 @@ version = "0.276.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "uuid",
  "zeroize",
 ]

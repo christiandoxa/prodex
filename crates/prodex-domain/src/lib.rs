@@ -82,7 +82,7 @@ pub use audit::{
     AuditRetentionPolicy, AuditRetentionPolicyError, AuditRetentionPurgeBatch,
     AuditRetentionPurgeBatchError, AuditRetentionPurgeKey, AuditSortOrder, AuditSortOrderError,
     AuditTimeRange, AuditTimeRangeError, AuditTimestamp, AuditTimestampError,
-    plan_audit_action_error_response, plan_audit_chain_error_response,
+    compute_audit_chain_digest, plan_audit_action_error_response, plan_audit_chain_error_response,
     plan_audit_digest_error_response, plan_audit_export_format_error_response,
     plan_audit_outcome_error_response, plan_audit_page_limit_error_response,
     plan_audit_query_cursor_error_response, plan_audit_query_page_error_response,

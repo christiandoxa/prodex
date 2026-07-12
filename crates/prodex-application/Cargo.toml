@@ -25,6 +25,7 @@ prodex_storage = { workspace = true }
 prodex_storage_postgres = { workspace = true }
 prodex_storage_redis = { workspace = true }
 prodex_storage_sqlite = { workspace = true }
+sha2 = { workspace = true }
 
 [lints]
 workspace = true
