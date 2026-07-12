@@ -31,11 +31,6 @@ fn runtime_gateway_side_effect_snapshot(
         .lock()
         .map(|memory| fingerprint(&*memory))
         .unwrap_or(u64::MAX);
-    let admin_idempotency_fingerprint = shared
-        .gateway_admin_idempotency_keys
-        .lock()
-        .map(|keys| fingerprint(&*keys))
-        .unwrap_or(u64::MAX);
     macro_rules! lock_len {
         ($lock:expr) => {
             $lock
@@ -50,7 +45,6 @@ fn runtime_gateway_side_effect_snapshot(
         model_memory_fingerprint,
         api_key_cursor: shared.api_key_cursor.load(Ordering::Relaxed),
         credential_fingerprint: shared.gateway_credentials.current.load().fingerprint,
-        admin_idempotency_fingerprint,
         oidc_cache_entries: lock_len!(shared.gateway_oidc_http_cache),
         pending_usage_deltas: lock_len!(shared.gateway_usage.pending_deltas),
         usage_request_ids: lock_len!(shared.gateway_usage.request_ids),

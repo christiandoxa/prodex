@@ -23,8 +23,8 @@ mod local_rewrite_deepseek;
 mod local_rewrite_gateway_admin_audit;
 mod local_rewrite_gateway_admin_auth;
 mod local_rewrite_gateway_admin_dispatch;
+mod local_rewrite_gateway_admin_execution;
 mod local_rewrite_gateway_admin_fields;
-#[cfg(test)]
 mod local_rewrite_gateway_admin_identity;
 mod local_rewrite_gateway_admin_keys;
 mod local_rewrite_gateway_admin_ledger;
@@ -44,7 +44,6 @@ mod local_rewrite_gateway_data_plane_audit;
 mod local_rewrite_gateway_distributed_rate_limit;
 mod local_rewrite_gateway_file_ledger;
 mod local_rewrite_gateway_guardrail_webhook;
-mod local_rewrite_gateway_key_patch;
 mod local_rewrite_gateway_key_payloads;
 mod local_rewrite_gateway_key_store_backend;
 mod local_rewrite_gateway_keys;
