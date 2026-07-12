@@ -128,8 +128,8 @@ fn kiro_messages_translation_preserves_anthropic_user_text() {
 
 #[test]
 fn kiro_chat_request_tolerates_default_noop_controls() {
-    let translated = match runtime_kiro_request_body_for_path(
-        "/v1/chat/completions",
+    let translated = match runtime_kiro_request_body_for_endpoint(
+        ProviderEndpoint::ChatCompletions,
         serde_json::to_vec(&json!({
             "model": "claude-sonnet-4",
             "messages": [{
@@ -162,8 +162,8 @@ fn kiro_chat_request_tolerates_default_noop_controls() {
 
 #[test]
 fn kiro_chat_request_rejects_semantic_parallel_tool_calls_control() {
-    let error = match runtime_kiro_request_body_for_path(
-        "/v1/chat/completions",
+    let error = match runtime_kiro_request_body_for_endpoint(
+        ProviderEndpoint::ChatCompletions,
         serde_json::to_vec(&json!({
             "model": "claude-sonnet-4",
             "messages": [{
@@ -183,8 +183,8 @@ fn kiro_chat_request_rejects_semantic_parallel_tool_calls_control() {
 
 #[test]
 fn kiro_chat_request_tolerates_token_limit_controls_as_noop() {
-    let translated = match runtime_kiro_request_body_for_path(
-        "/v1/chat/completions",
+    let translated = match runtime_kiro_request_body_for_endpoint(
+        ProviderEndpoint::ChatCompletions,
         serde_json::to_vec(&json!({
             "model": "claude-sonnet-4",
             "messages": [{
@@ -209,8 +209,8 @@ fn kiro_chat_request_tolerates_token_limit_controls_as_noop() {
 
 #[test]
 fn kiro_chat_request_rejects_invalid_token_limit_controls() {
-    let error = match runtime_kiro_request_body_for_path(
-        "/v1/chat/completions",
+    let error = match runtime_kiro_request_body_for_endpoint(
+        ProviderEndpoint::ChatCompletions,
         serde_json::to_vec(&json!({
             "model": "claude-sonnet-4",
             "messages": [{

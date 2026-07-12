@@ -166,11 +166,12 @@ use prodex_gateway_http::{
     GatewayControlPlaneOperation, GatewayHttpErrorStatus, GatewayHttpHeader, GatewayHttpMethod,
     GatewayHttpPolicy, GatewayHttpRequestMeta, GatewayHttpRouteKind,
 };
-use prodex_provider_core::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+use prodex_provider_core::{ProviderEndpoint, ProviderErrorClass, ProviderId, ProviderWireFormat};
 use prodex_provider_spi::{
     ProviderCircuitBreakerDecision, ProviderCircuitBreakerEvent, ProviderCircuitBreakerPolicy,
-    ProviderCircuitBreakerState, ProviderInvocation, ProviderRetryDecision, ProviderRetryPolicy,
-    ProviderRetryStage, ProviderRoute, ProviderRouteCapabilityCandidate, ProviderStreamMode,
+    ProviderCircuitBreakerState, ProviderInvocation, ProviderRetryCause, ProviderRetryDecision,
+    ProviderRetryPolicy, ProviderRetryStage, ProviderRoute, ProviderRouteCapabilityCandidate,
+    ProviderStreamMode,
 };
 use prodex_storage::{
     AtomicReservationCommand, AuditExportQueryCommand, AuditRetentionPurgeCommand,
@@ -1118,14 +1119,30 @@ fn application_provider_retry_is_bounded_to_precommit_stages() {
     let allowed = plan_application_provider_retry(ApplicationProviderRetryRequest {
         policy: ProviderRetryPolicy::single_retry(),
         stage: ProviderRetryStage::BeforeFirstByte,
+        cause: ProviderRetryCause::NextModel,
+        error_class: ProviderErrorClass::Transient,
         attempted_precommit_retries: 0,
     });
     assert_eq!(allowed.retry.decision, ProviderRetryDecision::Allowed);
     assert_eq!(allowed.retry.remaining_precommit_retries, 1);
 
+    let ineligible = plan_application_provider_retry(ApplicationProviderRetryRequest {
+        policy: ProviderRetryPolicy::single_retry(),
+        stage: ProviderRetryStage::BeforeFirstByte,
+        cause: ProviderRetryCause::RotateCredential,
+        error_class: ProviderErrorClass::NotFound,
+        attempted_precommit_retries: 0,
+    });
+    assert_eq!(
+        ineligible.retry.decision,
+        ProviderRetryDecision::DeniedNotRetryable
+    );
+
     let exhausted = plan_application_provider_retry(ApplicationProviderRetryRequest {
         policy: ProviderRetryPolicy::single_retry(),
         stage: ProviderRetryStage::BeforeDispatch,
+        cause: ProviderRetryCause::RotateCredential,
+        error_class: ProviderErrorClass::Auth,
         attempted_precommit_retries: 1,
     });
     assert_eq!(
@@ -1137,6 +1154,8 @@ fn application_provider_retry_is_bounded_to_precommit_stages() {
     let committed = plan_application_provider_retry(ApplicationProviderRetryRequest {
         policy: ProviderRetryPolicy::single_retry(),
         stage: ProviderRetryStage::AfterFirstByte,
+        cause: ProviderRetryCause::RotateCredential,
+        error_class: ProviderErrorClass::Auth,
         attempted_precommit_retries: 0,
     });
     assert_eq!(
@@ -1147,6 +1166,8 @@ fn application_provider_retry_is_bounded_to_precommit_stages() {
     let cancelled = plan_application_provider_retry(ApplicationProviderRetryRequest {
         policy: ProviderRetryPolicy::single_retry(),
         stage: ProviderRetryStage::AfterCancellation,
+        cause: ProviderRetryCause::NextModel,
+        error_class: ProviderErrorClass::Transient,
         attempted_precommit_retries: 0,
     });
     assert_eq!(

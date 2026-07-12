@@ -19,11 +19,11 @@ use prodex_gateway_core::{GatewayAdmissionRequest, GatewayUsageReconciliationReq
 use prodex_gateway_http::{GatewayHttpExecutionPlan, GatewayHttpPolicy, GatewayHttpRouteKind};
 use prodex_observability::{TraceContext, TraceContextError};
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderEndpoint, ProviderId, provider_adapter,
+    ProviderAdapterContract, ProviderEndpoint, ProviderErrorClass, ProviderId, provider_adapter,
 };
 use prodex_provider_spi::{
-    ProviderInvocation, ProviderRetryDecision, ProviderRetryPolicy, ProviderRetryStage,
-    ProviderRoute, ProviderRouteError, ProviderStreamMode,
+    ProviderInvocation, ProviderRetryCause, ProviderRetryDecision, ProviderRetryPolicy,
+    ProviderRetryStage, ProviderRoute, ProviderRouteError, ProviderStreamMode,
 };
 use prodex_storage::{
     AtomicReservationCommand, DurableStoreKind, TenantStorageKey, UsageReconciliationCommand,
@@ -43,17 +43,44 @@ impl TenantScopedResource for RuntimeGatewayTenantResource {
 }
 
 #[derive(Clone)]
-pub(super) enum RuntimeGatewayApplicationAdmission {
+pub(super) struct RuntimeGatewayApplicationAdmission(RuntimeGatewayApplicationAdmissionKind);
+
+#[derive(Clone)]
+enum RuntimeGatewayApplicationAdmissionKind {
     TenantBound(Box<ApplicationDataPlanePlan>),
-    CompatibilityAnonymous,
+    CompatibilityAnonymous(RuntimeGatewayCompatibilityProviderInvocation),
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeGatewayCompatibilityProviderInvocation {
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    stream_mode: ProviderStreamMode,
 }
 
 impl RuntimeGatewayApplicationAdmission {
     pub(super) fn tenant_bound(&self) -> Option<&ApplicationDataPlanePlan> {
-        match self {
-            Self::TenantBound(plan) => Some(plan),
-            Self::CompatibilityAnonymous => None,
+        match &self.0 {
+            RuntimeGatewayApplicationAdmissionKind::TenantBound(plan) => Some(plan),
+            RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous(_) => None,
         }
+    }
+
+    /// Compatibility is owned here until intentionally open anonymous data-plane access is
+    /// removed; callers cannot forge provider routing fields outside this adapter.
+    pub(super) fn compatibility_anonymous(
+        route: GatewayHttpRouteKind,
+        captured: &RuntimeProxyRequest,
+        shared: &RuntimeLocalRewriteProxyShared,
+    ) -> Result<Self, RuntimeGatewayApplicationDataPlaneError> {
+        runtime_gateway_compatibility_provider_invocation(
+            shared.provider.bridge_kind().provider_id(),
+            route,
+            captured,
+        )
+        .map(|invocation| {
+            Self(RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous(invocation))
+        })
     }
 }
 
@@ -65,7 +92,6 @@ pub(super) enum RuntimeGatewayApplicationDataPlaneError {
     ProviderRoute(ProviderRouteError),
     TraceContext(TraceContextError),
     Admission(ApplicationDataPlaneError),
-    DispatchMismatch,
 }
 
 impl fmt::Display for RuntimeGatewayApplicationDataPlaneError {
@@ -75,7 +101,7 @@ impl fmt::Display for RuntimeGatewayApplicationDataPlaneError {
             Self::Admission(error) => error.fmt(f),
             Self::ProviderRoute(error) => error.fmt(f),
             Self::TraceContext(error) => error.fmt(f),
-            Self::MissingPrincipal | Self::RouteUnavailable | Self::DispatchMismatch => {
+            Self::MissingPrincipal | Self::RouteUnavailable => {
                 write!(f, "application data-plane request is invalid")
             }
         }
@@ -126,7 +152,11 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
     reservation: AtomicReservationCommand,
 ) -> Result<RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError> {
     let Some(tenant) = authorized.tenant_context() else {
-        return Ok(RuntimeGatewayApplicationAdmission::CompatibilityAnonymous);
+        return RuntimeGatewayApplicationAdmission::compatibility_anonymous(
+            authorized.request().route(),
+            captured,
+            shared,
+        );
     };
     let principal = authorized
         .principal()
@@ -163,8 +193,27 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
         },
     };
     plan_application_data_plane(runtime_gateway_application_http_policy(shared), request)
-        .map(|plan| RuntimeGatewayApplicationAdmission::TenantBound(Box::new(plan)))
+        .map(|plan| {
+            RuntimeGatewayApplicationAdmission(RuntimeGatewayApplicationAdmissionKind::TenantBound(
+                Box::new(plan),
+            ))
+        })
         .map_err(RuntimeGatewayApplicationDataPlaneError::Admission)
+}
+
+fn runtime_gateway_compatibility_provider_invocation(
+    provider: ProviderId,
+    route: GatewayHttpRouteKind,
+    captured: &RuntimeProxyRequest,
+) -> Result<RuntimeGatewayCompatibilityProviderInvocation, RuntimeGatewayApplicationDataPlaneError>
+{
+    let endpoint = runtime_gateway_provider_endpoint(route)
+        .ok_or(RuntimeGatewayApplicationDataPlaneError::RouteUnavailable)?;
+    Ok(RuntimeGatewayCompatibilityProviderInvocation {
+        provider,
+        endpoint,
+        stream_mode: runtime_gateway_provider_stream_mode(captured),
+    })
 }
 
 struct RuntimeGatewayProviderInvocationInput<'a> {
@@ -232,6 +281,72 @@ mod provider_credential_tests {
     }
 }
 
+#[cfg(test)]
+mod provider_dispatch_tests {
+    use super::*;
+
+    fn captured(stream: bool) -> RuntimeProxyRequest {
+        RuntimeProxyRequest {
+            method: "POST".to_string(),
+            path_and_query: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: serde_json::to_vec(&serde_json::json!({ "stream": stream })).unwrap(),
+        }
+    }
+
+    #[test]
+    fn anonymous_compatibility_owns_typed_provider_dispatch() {
+        let invocation = runtime_gateway_compatibility_provider_invocation(
+            ProviderId::Gemini,
+            GatewayHttpRouteKind::DataPlaneResponses,
+            &captured(true),
+        )
+        .unwrap();
+        assert_eq!(invocation.provider, ProviderId::Gemini);
+        assert_eq!(invocation.endpoint, ProviderEndpoint::Responses);
+        assert_eq!(invocation.stream_mode, ProviderStreamMode::Streaming);
+
+        assert!(
+            runtime_gateway_compatibility_provider_invocation(
+                ProviderId::Gemini,
+                GatewayHttpRouteKind::Unknown,
+                &captured(false),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn application_retry_uses_nonzero_bounded_candidate_counts() {
+        for (attempt_index, candidate_count, expected) in [
+            (0, 0, false),
+            (0, 1, false),
+            (0, 2, true),
+            (1, 2, false),
+            (2, 2, false),
+            (254, 257, true),
+            (255, 257, false),
+        ] {
+            assert_eq!(
+                runtime_gateway_application_provider_retry_precommit(
+                    ProviderRetryCause::NextModel,
+                    ProviderErrorClass::Transient,
+                    attempt_index,
+                    candidate_count,
+                ),
+                expected,
+                "attempt_index={attempt_index} candidate_count={candidate_count}",
+            );
+        }
+        assert!(!runtime_gateway_application_provider_retry_precommit(
+            ProviderRetryCause::RotateCredential,
+            ProviderErrorClass::NotFound,
+            0,
+            2,
+        ));
+    }
+}
+
 fn runtime_gateway_provider_endpoint(route: GatewayHttpRouteKind) -> Option<ProviderEndpoint> {
     match route {
         GatewayHttpRouteKind::DataPlaneResponses | GatewayHttpRouteKind::DataPlaneWebSocket => {
@@ -283,25 +398,89 @@ fn runtime_gateway_application_trace_context(
     TraceContext::new(&trace_id, &trace_id[..16], "01")
 }
 
+pub(super) struct RuntimeGatewayApplicationProviderDispatch<'a>(
+    RuntimeGatewayApplicationProviderDispatchKind<'a>,
+);
+
+enum RuntimeGatewayApplicationProviderDispatchKind<'a> {
+    Application(&'a ProviderInvocation),
+    CompatibilityAnonymous(&'a RuntimeGatewayCompatibilityProviderInvocation),
+}
+
+impl RuntimeGatewayApplicationProviderDispatch<'_> {
+    pub(super) fn provider(&self) -> ProviderId {
+        match &self.0 {
+            RuntimeGatewayApplicationProviderDispatchKind::Application(invocation) => {
+                invocation.route.provider
+            }
+            RuntimeGatewayApplicationProviderDispatchKind::CompatibilityAnonymous(invocation) => {
+                invocation.provider
+            }
+        }
+    }
+
+    pub(super) fn endpoint(&self) -> ProviderEndpoint {
+        match &self.0 {
+            RuntimeGatewayApplicationProviderDispatchKind::Application(invocation) => {
+                invocation.route.endpoint
+            }
+            RuntimeGatewayApplicationProviderDispatchKind::CompatibilityAnonymous(invocation) => {
+                invocation.endpoint
+            }
+        }
+    }
+
+    pub(super) fn stream_mode(&self) -> ProviderStreamMode {
+        match &self.0 {
+            RuntimeGatewayApplicationProviderDispatchKind::Application(invocation) => {
+                invocation.stream_mode
+            }
+            RuntimeGatewayApplicationProviderDispatchKind::CompatibilityAnonymous(invocation) => {
+                invocation.stream_mode
+            }
+        }
+    }
+}
+
 pub(super) fn runtime_gateway_application_provider_dispatch(
     admission: &RuntimeGatewayApplicationAdmission,
-    captured: &RuntimeProxyRequest,
-    shared: &RuntimeLocalRewriteProxyShared,
-) -> Result<(), RuntimeGatewayApplicationDataPlaneError> {
-    let Some(plan) = admission.tenant_bound() else {
-        return Ok(());
-    };
-    let expected_provider = shared.provider.bridge_kind().provider_id();
-    let expected_endpoint = runtime_gateway_provider_endpoint(plan.http.route)
-        .ok_or(RuntimeGatewayApplicationDataPlaneError::RouteUnavailable)?;
-    if plan.admission.provider_invocation.route.provider != expected_provider
-        || plan.admission.provider_invocation.route.endpoint != expected_endpoint
-        || plan.admission.provider_invocation.stream_mode
-            != runtime_gateway_provider_stream_mode(captured)
-    {
-        return Err(RuntimeGatewayApplicationDataPlaneError::DispatchMismatch);
+) -> RuntimeGatewayApplicationProviderDispatch<'_> {
+    match &admission.0 {
+        RuntimeGatewayApplicationAdmissionKind::TenantBound(plan) => {
+            RuntimeGatewayApplicationProviderDispatch(
+                RuntimeGatewayApplicationProviderDispatchKind::Application(
+                    &plan.admission.provider_invocation,
+                ),
+            )
+        }
+        RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous(invocation) => {
+            RuntimeGatewayApplicationProviderDispatch(
+                RuntimeGatewayApplicationProviderDispatchKind::CompatibilityAnonymous(invocation),
+            )
+        }
     }
-    Ok(())
+}
+
+pub(super) fn runtime_gateway_application_provider_retry_precommit(
+    cause: ProviderRetryCause,
+    error_class: ProviderErrorClass,
+    attempt_index: usize,
+    candidate_count: usize,
+) -> bool {
+    if candidate_count == 0 || attempt_index >= candidate_count {
+        return false;
+    }
+    let policy = ProviderRetryPolicy::bounded(
+        u8::try_from(candidate_count.saturating_sub(1)).unwrap_or(u8::MAX),
+    );
+    let plan = plan_application_provider_retry(ApplicationProviderRetryRequest {
+        policy,
+        stage: ProviderRetryStage::BeforeFirstByte,
+        cause,
+        error_class,
+        attempted_precommit_retries: u8::try_from(attempt_index).unwrap_or(u8::MAX),
+    });
+    plan.retry.decision == ProviderRetryDecision::Allowed
 }
 
 pub(super) fn runtime_gateway_application_provider_stage_is_committed(
@@ -317,6 +496,8 @@ pub(super) fn runtime_gateway_application_provider_stage_is_committed(
     let plan = plan_application_provider_retry(ApplicationProviderRetryRequest {
         policy: ProviderRetryPolicy::single_retry(),
         stage,
+        cause: ProviderRetryCause::NextModel,
+        error_class: ProviderErrorClass::Transient,
         attempted_precommit_retries: 0,
     });
     plan.retry.decision == ProviderRetryDecision::DeniedCommitted

@@ -3,11 +3,11 @@ use prodex_domain::{
     ModelCapability, Principal, PrincipalId, PrincipalKind, RequestId, Role, SecretRef,
     TenantContext, TenantId, UsageAmount,
 };
-use prodex_provider_core::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+use prodex_provider_core::{ProviderEndpoint, ProviderErrorClass, ProviderId, ProviderWireFormat};
 use prodex_provider_spi::{
     ProviderCapabilityNegotiationDecision, ProviderCircuitBreakerDecision,
     ProviderCircuitBreakerEvent, ProviderCircuitBreakerPolicy, ProviderCircuitBreakerState,
-    ProviderInvocation, ProviderInvocationError, ProviderInvocationErrorStatus,
+    ProviderInvocation, ProviderInvocationError, ProviderInvocationErrorStatus, ProviderRetryCause,
     ProviderRetryDecision, ProviderRetryDecisionStatus, ProviderRetryPolicy, ProviderRetryStage,
     ProviderRoute, ProviderRouteCapabilityCandidate, ProviderRouteError, ProviderRouteErrorStatus,
     ProviderStreamMode, evaluate_provider_retry, negotiate_provider_route_capability,
@@ -279,21 +279,78 @@ fn provider_retry_is_denied_after_stream_commit_or_cancellation() {
 #[test]
 fn provider_retry_plan_is_bounded_to_precommit_attempts() {
     let policy = ProviderRetryPolicy::single_retry();
-    let allowed = plan_provider_retry(policy, ProviderRetryStage::BeforeFirstByte, 0);
+    let allowed = plan_provider_retry(
+        policy,
+        ProviderRetryStage::BeforeFirstByte,
+        ProviderRetryCause::NextModel,
+        ProviderErrorClass::Transient,
+        0,
+    );
     assert_eq!(allowed.stage, ProviderRetryStage::BeforeFirstByte);
     assert_eq!(allowed.decision, ProviderRetryDecision::Allowed);
     assert_eq!(allowed.remaining_precommit_retries, 1);
 
-    let exhausted = plan_provider_retry(policy, ProviderRetryStage::BeforeDispatch, 1);
+    let exhausted = plan_provider_retry(
+        policy,
+        ProviderRetryStage::BeforeDispatch,
+        ProviderRetryCause::RotateCredential,
+        ProviderErrorClass::Auth,
+        1,
+    );
     assert_eq!(
         exhausted.decision,
         ProviderRetryDecision::DeniedBudgetExhausted
     );
     assert_eq!(exhausted.remaining_precommit_retries, 0);
 
-    let committed = plan_provider_retry(policy, ProviderRetryStage::AfterFirstByte, 0);
+    let committed = plan_provider_retry(
+        policy,
+        ProviderRetryStage::AfterFirstByte,
+        ProviderRetryCause::RotateCredential,
+        ProviderErrorClass::Auth,
+        0,
+    );
     assert_eq!(committed.decision, ProviderRetryDecision::DeniedCommitted);
     assert_eq!(committed.remaining_precommit_retries, 1);
+}
+
+#[test]
+fn provider_retry_eligibility_is_cause_specific() {
+    for (cause, class, expected) in [
+        (
+            ProviderRetryCause::NextModel,
+            ProviderErrorClass::NotFound,
+            ProviderRetryDecision::Allowed,
+        ),
+        (
+            ProviderRetryCause::NextModel,
+            ProviderErrorClass::Auth,
+            ProviderRetryDecision::DeniedNotRetryable,
+        ),
+        (
+            ProviderRetryCause::RotateCredential,
+            ProviderErrorClass::Auth,
+            ProviderRetryDecision::Allowed,
+        ),
+        (
+            ProviderRetryCause::RotateCredential,
+            ProviderErrorClass::NotFound,
+            ProviderRetryDecision::DeniedNotRetryable,
+        ),
+    ] {
+        assert_eq!(
+            plan_provider_retry(
+                ProviderRetryPolicy::single_retry(),
+                ProviderRetryStage::BeforeFirstByte,
+                cause,
+                class,
+                0,
+            )
+            .decision,
+            expected,
+            "cause={cause:?} class={class:?}",
+        );
+    }
 }
 
 #[test]
@@ -322,7 +379,15 @@ fn provider_retry_decision_responses_are_stable_and_redacted() {
     assert_eq!(exhausted.code, "provider_retry_budget_exhausted");
     assert_eq!(exhausted.message, "provider retry budget is exhausted");
 
-    let rendered = format!("{committed:?} {exhausted:?}");
+    let not_retryable =
+        plan_provider_retry_decision_response(ProviderRetryDecision::DeniedNotRetryable).unwrap();
+    assert_eq!(not_retryable.code, "provider_retry_not_eligible");
+    assert_eq!(
+        not_retryable.message,
+        "provider response is not eligible for retry"
+    );
+
+    let rendered = format!("{committed:?} {exhausted:?} {not_retryable:?}");
     for sensitive in [
         "BeforeFirstByte",
         "AfterFirstByte",
