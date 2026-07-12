@@ -45,6 +45,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
                 "crates/prodex-app/src/app_commands/doctor.rs",
                 "crates/prodex-app/src/runtime_proxy/selection.rs",
                 "crates/prodex-app/src/runtime_proxy/selection/next.rs",
+                "crates/prodex-app/src/runtime_proxy/selection/next/candidates.rs",
                 "crates/prodex-app/src/runtime_proxy/selection_plan.rs",
             ],
             required: &["Runtime proxy contract", "selection_plan", "selection_pick"],
