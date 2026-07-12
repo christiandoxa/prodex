@@ -656,6 +656,8 @@ fn gateway_guardrail_webhook_config_rejects_invalid_url_value() {
         " https://guardrails.example/check ",
         "file:///tmp/check",
         "https://user@guardrails.example/check",
+        "https://guardrails.example/check?token=webhook-query-secret-sentinel",
+        "https://guardrails.example/check#webhook-fragment-secret-sentinel",
     ] {
         let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
         policy.guardrails.webhook_url = Some(value.to_string());
@@ -666,20 +668,20 @@ fn gateway_guardrail_webhook_config_rejects_invalid_url_value() {
             err.to_string().contains("gateway.guardrails.webhook_url"),
             "{value:?}: {err}"
         );
+        assert!(!err.to_string().contains("secret-sentinel"), "{err}");
     }
 }
 
 #[test]
 fn gateway_guardrail_webhook_config_preserves_valid_url_value() {
     let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
-    policy.guardrails.webhook_url =
-        Some("https://guardrails.example/check?mode=strict".to_string());
+    policy.guardrails.webhook_url = Some("https://guardrails.example/check".to_string());
 
     let config = gateway_guardrail_webhook_config(&policy).unwrap();
 
     assert_eq!(
         config.url.as_deref(),
-        Some("https://guardrails.example/check?mode=strict")
+        Some("https://guardrails.example/check")
     );
 }
 
@@ -861,6 +863,8 @@ fn gateway_observability_config_rejects_invalid_http_endpoint_value() {
         " https://otel-collector.example/v1/events ",
         "file:///tmp/otel",
         "https://user@otel-collector.example/v1/events",
+        "https://otel-collector.example/v1/events?token=telemetry-query-secret-sentinel",
+        "https://otel-collector.example/v1/events#telemetry-fragment-secret-sentinel",
     ] {
         let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
         policy.observability.http_endpoint = Some(value.to_string());
@@ -872,6 +876,7 @@ fn gateway_observability_config_rejects_invalid_http_endpoint_value() {
                 .contains("gateway.observability.http_endpoint"),
             "{value:?}: {err}"
         );
+        assert!(!err.to_string().contains("secret-sentinel"), "{err}");
     }
 }
 

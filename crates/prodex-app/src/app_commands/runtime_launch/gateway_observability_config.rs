@@ -116,14 +116,17 @@ fn gateway_observability_http_endpoint(field: &str, value: &str) -> Result<Strin
     if value.chars().any(char::is_whitespace) {
         bail!("{field} must not contain whitespace");
     }
-    let parsed = reqwest::Url::parse(value)
-        .with_context(|| format!("{field} must be an http(s) URL with host"))?;
+    let parsed = reqwest::Url::parse(value).with_context(|| {
+        format!("{field} must be an http(s) URL with host and no credentials, query, or fragment")
+    })?;
     if !matches!(parsed.scheme(), "http" | "https")
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
     {
-        bail!("{field} must be an http(s) URL with host");
+        bail!("{field} must be an http(s) URL with host and no credentials, query, or fragment");
     }
     Ok(value.to_string())
 }

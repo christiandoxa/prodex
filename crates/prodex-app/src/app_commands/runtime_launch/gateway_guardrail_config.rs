@@ -115,14 +115,20 @@ fn gateway_guardrail_webhook_config_with_resolver(
                 bail!("gateway.guardrails.webhook_url must not contain whitespace");
             }
             let parsed = reqwest::Url::parse(value).with_context(
-                || "gateway.guardrails.webhook_url must be an http(s) URL with host",
+                || {
+                    "gateway.guardrails.webhook_url must be an http(s) URL with host and no credentials, query, or fragment"
+                },
             )?;
             if !matches!(parsed.scheme(), "http" | "https")
                 || parsed.host_str().is_none()
                 || !parsed.username().is_empty()
                 || parsed.password().is_some()
+                || parsed.query().is_some()
+                || parsed.fragment().is_some()
             {
-                bail!("gateway.guardrails.webhook_url must be an http(s) URL with host");
+                bail!(
+                    "gateway.guardrails.webhook_url must be an http(s) URL with host and no credentials, query, or fragment"
+                );
             }
             Ok(value.to_string())
         })
