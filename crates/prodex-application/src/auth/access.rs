@@ -3,6 +3,9 @@
 use super::super::*;
 use crate::control_plane::control_plane_audit_write;
 
+mod role_binding_mutation_error;
+pub use role_binding_mutation_error::*;
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct ApplicationRoleBindingMutationRequest {
     pub durable_store: DurableStoreKind,
@@ -62,63 +65,6 @@ impl fmt::Display for ApplicationRoleBindingMutationError {
 }
 
 impl Error for ApplicationRoleBindingMutationError {}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ApplicationRoleBindingMutationErrorStatus {
-    ServiceUnavailable,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ApplicationRoleBindingMutationErrorResponsePlan {
-    pub status: ApplicationRoleBindingMutationErrorStatus,
-    pub code: &'static str,
-    pub message: &'static str,
-}
-
-pub fn plan_application_role_binding_mutation_error_response(
-    error: &ApplicationRoleBindingMutationError,
-) -> ApplicationRoleBindingMutationErrorResponsePlan {
-    match error {
-        ApplicationRoleBindingMutationError::Postgres(error) => {
-            application_role_binding_mutation_response_from_postgres(
-                plan_postgres_storage_error_response(error),
-            )
-        }
-        ApplicationRoleBindingMutationError::Sqlite(error) => {
-            application_role_binding_mutation_response_from_sqlite(
-                plan_sqlite_storage_error_response(error),
-            )
-        }
-    }
-}
-
-fn application_role_binding_mutation_response_from_postgres(
-    response: PostgresStorageErrorResponsePlan,
-) -> ApplicationRoleBindingMutationErrorResponsePlan {
-    ApplicationRoleBindingMutationErrorResponsePlan {
-        status: match response.status {
-            PostgresStorageErrorStatus::ServiceUnavailable => {
-                ApplicationRoleBindingMutationErrorStatus::ServiceUnavailable
-            }
-        },
-        code: "role_binding_storage_unavailable",
-        message: "role-binding storage is temporarily unavailable",
-    }
-}
-
-fn application_role_binding_mutation_response_from_sqlite(
-    response: SqliteStorageErrorResponsePlan,
-) -> ApplicationRoleBindingMutationErrorResponsePlan {
-    ApplicationRoleBindingMutationErrorResponsePlan {
-        status: match response.status {
-            SqliteStorageErrorStatus::ServiceUnavailable => {
-                ApplicationRoleBindingMutationErrorStatus::ServiceUnavailable
-            }
-        },
-        code: "role_binding_storage_unavailable",
-        message: "role-binding storage is temporarily unavailable",
-    }
-}
 
 pub fn plan_application_role_binding_mutation(
     request: ApplicationRoleBindingMutationRequest,
