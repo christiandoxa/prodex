@@ -142,8 +142,10 @@ fn profile_import_rejects_existing_managed_profile_home_outside_root() {
     let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
     let target_dir = ProfileCommandsTestDir::new("import-existing-outside-root");
     let target_paths = profile_commands_test_paths(&target_dir.path);
-    let outside_home = target_dir.path.join("outside/main");
-    create_codex_home_if_missing(&outside_home).expect("outside home should exist");
+    let outside_root = target_dir.path.join("outside");
+    profile_commands_create_private_test_dir(&outside_root);
+    let outside_home = outside_root.join("main");
+    profile_commands_create_private_test_dir(&outside_home);
     write_secret_text_file(
         &outside_home.join("auth.json"),
         &profile_commands_auth_json_with_email("main@example.com", "old-token", "main-account"),
@@ -235,9 +237,7 @@ fn profile_import_rejects_symlink_managed_profiles_root() {
     let target_dir = ProfileCommandsTestDir::new("import-symlink-managed-root");
     let target_paths = profile_commands_test_paths(&target_dir.path);
     let outside = target_dir.path.join("outside-profiles");
-    fs::create_dir_all(&outside).expect("outside target should exist");
-    std::os::unix::fs::symlink(&outside, &target_paths.managed_profiles_root)
-        .expect("managed root symlink should be created");
+    profile_commands_replace_test_dir_with_symlink(&target_paths.managed_profiles_root, &outside);
     let payload = ProfileExportPayload {
         exported_at: Local::now().to_rfc3339(),
         source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),

@@ -16,16 +16,6 @@ sync_probe_pressure_pause_ms = 2
     )
     .expect("policy file should write");
 
-    let shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
-    shared.local_overload_backoff_until.store(
-        Local::now().timestamp().max(0) as u64 + 60,
-        Ordering::SeqCst,
-    );
-    assert!(runtime_proxy_sync_probe_pressure_mode_active_for_route(
-        &shared,
-        RuntimeRouteKind::Responses
-    ));
-
     let _env_lock = TestEnvVarGuard::lock();
     let _home_guard = TestEnvVarGuard::set(
         "PRODEX_HOME",
@@ -35,6 +25,15 @@ sync_probe_pressure_pause_ms = 2
         TestEnvVarGuard::unset("PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS");
     clear_runtime_policy_cache();
 
+    let shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
+    shared.local_overload_backoff_until.store(
+        Local::now().timestamp().max(0) as u64 + 60,
+        Ordering::SeqCst,
+    );
+    assert!(runtime_proxy_sync_probe_pressure_mode_active_for_route(
+        &shared,
+        RuntimeRouteKind::Responses
+    ));
     runtime_proxy_sync_probe_pressure_pause(&shared, RuntimeRouteKind::Responses);
     runtime_proxy_flush_logs_for_path(&shared.log_path);
     let policy_log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
@@ -48,9 +47,14 @@ sync_probe_pressure_pause_ms = 2
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS", "1");
     clear_runtime_policy_cache();
 
-    runtime_proxy_sync_probe_pressure_pause(&shared, RuntimeRouteKind::Responses);
-    runtime_proxy_flush_logs_for_path(&shared.log_path);
-    let env_log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let env_shared = RuntimeProxyFixtureBuilder::new().build_shared(&temp_dir);
+    env_shared.local_overload_backoff_until.store(
+        Local::now().timestamp().max(0) as u64 + 60,
+        Ordering::SeqCst,
+    );
+    runtime_proxy_sync_probe_pressure_pause(&env_shared, RuntimeRouteKind::Responses);
+    runtime_proxy_flush_logs_for_path(&env_shared.log_path);
+    let env_log = fs::read_to_string(&env_shared.log_path).expect("runtime log should be readable");
     assert!(
         env_log.contains("runtime_proxy_sync_probe_pressure_pause route=responses pause_ms=1"),
         "env pause override should beat policy and be logged as effective pause: {env_log}"

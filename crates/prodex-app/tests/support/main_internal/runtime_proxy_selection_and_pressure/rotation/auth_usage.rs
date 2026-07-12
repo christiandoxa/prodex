@@ -705,8 +705,12 @@ fn concurrent_quota_fetches_share_refresh_result_for_same_refresh_token() {
 fn read_auth_summary_classifies_invalid_auth_json() {
     let temp_dir = TestDir::isolated();
     let codex_home = temp_dir.path.join("homes/main");
-    fs::create_dir_all(&codex_home).expect("failed to create codex home");
-    fs::write(codex_home.join("auth.json"), "{").expect("failed to write invalid auth.json");
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(
+            &secret_store::SecretLocation::file(codex_home.join("auth.json")),
+            "{".to_string(),
+        )
+        .expect("failed to write invalid auth.json");
     let summary = read_auth_summary(&codex_home);
     assert_eq!(summary.label, "invalid-auth");
     assert!(!summary.quota_compatible);

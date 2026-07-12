@@ -226,6 +226,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
 
 #[test]
 fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
+    let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
     let backend = RuntimeProxyBackend::start();
     let harness =
         RuntimeProxyProfileHarnessBuilder::single_openai_profile(
@@ -260,11 +261,9 @@ fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
         body: body.as_bytes().to_vec(),
     };
 
-    let response = {
-        let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
-        proxy_runtime_standard_request(44, &request, shared)
-            .expect("compact request should survive smart-context prepare fallback")
-    };
+    let response = proxy_runtime_standard_request(44, &request, shared)
+        .expect("compact request should survive smart-context prepare fallback");
+    drop(fault);
     assert!(!runtime_take_fault_injection(
         "PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE"
     ));

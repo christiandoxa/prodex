@@ -476,7 +476,13 @@ fn super_command_url_expands_to_local_openai_provider_config() {
 #[test]
 fn super_command_url_rejects_invalid_or_empty_values() {
     for url in ["", "not-a-url", "file:///tmp/model.sock", "http:///v1"] {
-        let err = parse_cli_command_from(["prodex", "super", "--url", url, "exec", "hello"])
+        let command = parse_cli_command_from(["prodex", "super", "--url", url, "exec", "hello"])
+            .expect("super command should parse before runtime validation");
+        let Commands::Super(args) = command else {
+            panic!("expected super command");
+        };
+        let err = args
+            .validate_urls()
             .expect_err("invalid super local provider URL should fail");
         let message = err.to_string();
         assert!(
