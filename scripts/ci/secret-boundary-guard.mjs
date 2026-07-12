@@ -80,6 +80,21 @@ const RUNTIME_GATEWAY_SECRET_BOUNDARIES = new Map([
   ],
 ]);
 const RAW_RUNTIME_GATEWAY_SECRET = /(?:http_bearer_token|bearer_token)\s*:\s*Option\s*<\s*String\s*>|(?:http_bearer_token|bearer_token)\.as_deref\s*\(/gu;
+const SECRET_BEARING_DEBUG_TYPES = [
+  "RuntimeProxyRequest",
+  "ProviderTransformInput",
+  "RuntimeAnthropicMcpServer",
+  "RuntimeAnthropicTranslatedTools",
+  "CopilotConfigFile",
+  "OtlpHttpLogExportConfig",
+  "ControlPlaneHttpHeaderFile",
+];
+const RAW_SECRET_DERIVED_DEBUG = new RegExp(
+  `#\\s*\\[\\s*derive\\s*\\([^)]*\\bDebug\\b[^)]*\\)\\s*\\]\\s*(?:#\\s*\\[[^\\]]*\\]\\s*)*(?:pub(?:\\([^)]*\\))?\\s+)?struct\\s+(?<type>${SECRET_BEARING_DEBUG_TYPES.join("|")})\\b`,
+  "gu",
+);
+const PROVIDER_CONFORMANCE_ALL_HEADERS =
+  /input\.headers\s*=\s*request\.headers\.iter\(\)\.cloned\(\)\.collect\(\)/gu;
 const DEVELOPMENT_GATEWAY_SECRET_CONSTRUCTION = /RuntimeGatewaySecret::development_compatibility\s*\(/gu;
 const GATEWAY_SECRET_RESOLVER =
   "crates/prodex-app/src/app_commands/runtime_launch/gateway_secret_config.rs";
@@ -163,6 +178,28 @@ export function validateFiles(files) {
       for (const match of contents.matchAll(pattern)) {
         pushViolation(violations, filePath, contents, match.index, kind);
       }
+    }
+
+    RAW_SECRET_DERIVED_DEBUG.lastIndex = 0;
+    for (const match of contents.matchAll(RAW_SECRET_DERIVED_DEBUG)) {
+      pushViolation(
+        violations,
+        filePath,
+        contents,
+        match.index,
+        `derived Debug on secret-bearing DTO ${match.groups.type}`,
+      );
+    }
+
+    PROVIDER_CONFORMANCE_ALL_HEADERS.lastIndex = 0;
+    for (const match of contents.matchAll(PROVIDER_CONFORMANCE_ALL_HEADERS)) {
+      pushViolation(
+        violations,
+        filePath,
+        contents,
+        match.index,
+        "provider conformance copies credential-bearing headers",
+      );
     }
 
     if (PRODUCTION_WEBSOCKET_URL_FILES.has(filePath)) {
@@ -263,6 +300,31 @@ function selfTest() {
     assert.equal(hits.length, 1, `${expected} fixture was not rejected`);
     assert.match(hits[0].kind, new RegExp(expected, "iu"));
   }
+
+  for (const typeName of SECRET_BEARING_DEBUG_TYPES) {
+    const hits = validateFiles([
+      {
+        filePath: "src/bad.rs",
+        contents: `#[derive(Clone, Debug)] struct ${typeName} { value: String }`,
+      },
+    ]);
+    assert.ok(
+      hits.some((hit) => hit.kind.includes("derived Debug on secret-bearing DTO")),
+      `${typeName} derived Debug fixture was not rejected`,
+    );
+  }
+
+  const providerHeaderHits = validateFiles([
+    {
+      filePath:
+        "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_conformance.rs",
+      contents: "input.headers = request.headers.iter().cloned().collect();",
+    },
+  ]);
+  assert.ok(
+    providerHeaderHits.some((hit) => hit.kind.includes("credential-bearing headers")),
+    "provider conformance all-header fixture was not rejected",
+  );
 
   const websocketHits = validateFiles([
     {
