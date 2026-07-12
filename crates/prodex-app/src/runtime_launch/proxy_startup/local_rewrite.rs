@@ -52,6 +52,7 @@ pub(crate) use super::local_rewrite_options::{
 use super::local_rewrite_pipeline::run_runtime_local_rewrite_pipeline;
 #[cfg(test)]
 pub(super) use super::local_rewrite_pipeline::runtime_local_rewrite_remote_compact_unsupported_message;
+use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 pub(super) use super::local_rewrite_upstream::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult,
@@ -116,6 +117,7 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_call_id_header: Option<String>,
     pub(super) gateway_observability: RuntimeGatewayObservabilityConfig,
     pub(super) gateway_observability_slots: Arc<tokio::sync::Semaphore>,
+    pub(super) gateway_background_task_count: Arc<AtomicUsize>,
     pub(super) allow_local_file_access: bool,
     pub(super) gateway_draining: Arc<AtomicBool>,
 }
@@ -195,6 +197,27 @@ pub(super) fn runtime_gateway_try_reserve_background_task(
     Arc::clone(slots).try_acquire_owned().ok()
 }
 
+pub(super) struct RuntimeGatewayBackgroundTaskGuard {
+    count: Arc<AtomicUsize>,
+}
+
+impl RuntimeGatewayBackgroundTaskGuard {
+    pub(super) fn new(shared: &RuntimeLocalRewriteProxyShared) -> Self {
+        shared
+            .gateway_background_task_count
+            .fetch_add(1, Ordering::AcqRel);
+        Self {
+            count: Arc::clone(&shared.gateway_background_task_count),
+        }
+    }
+}
+
+impl Drop for RuntimeGatewayBackgroundTaskGuard {
+    fn drop(&mut self) {
+        self.count.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
     runtime_config: Arc<RuntimeConfig>,
@@ -202,6 +225,81 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
 ) -> Result<RuntimeRotationProxy> {
+    let (server, listen_addr) = runtime_local_rewrite_server(options.preferred_listen_addr)?;
+    let prepared = prepare_runtime_local_rewrite_application(
+        options,
+        runtime_config,
+        allow_local_file_access,
+        secret_refresh,
+        gateway_request_constraints,
+        "loopback",
+        Some(listen_addr),
+    )?;
+    let RuntimeLocalRewritePrepared {
+        runtime_config,
+        shared,
+        shutdown,
+        worker_count,
+        secret_refresh,
+        log_path,
+    } = prepared;
+    let RuntimeLocalRewriteWorkers {
+        worker_threads,
+        gemini_live_sidecar_addr,
+    } = spawn_runtime_local_rewrite_workers(
+        &shared,
+        Some(&server),
+        &shutdown,
+        worker_count,
+        secret_refresh,
+        true,
+    )?;
+
+    Ok(RuntimeRotationProxy {
+        runtime_config: Arc::clone(&runtime_config),
+        server,
+        shutdown,
+        worker_threads,
+        accept_worker_count: worker_count,
+        listen_addr,
+        gemini_live_sidecar_addr,
+        gemini_live_sidecar_model: gemini_live_sidecar_addr.map(|_| {
+            super::local_rewrite_gemini_live::runtime_gemini_live_default_model().to_string()
+        }),
+        log_path,
+        active_request_count: Arc::clone(&shared.runtime_shared.active_request_count),
+        #[cfg(test)]
+        request_sequence: Arc::clone(&shared.runtime_shared.request_sequence),
+        #[cfg(test)]
+        lane_admission: shared.runtime_shared.lane_admission.clone(),
+        #[cfg(test)]
+        gateway_route_load: Some(Arc::clone(&shared.gateway_route_load)),
+        #[cfg(test)]
+        gateway_usage: Some(Arc::clone(&shared.gateway_usage.usage)),
+        #[cfg(test)]
+        gateway_side_effect_snapshot: Some(super::gateway_snapshot_handle(shared.clone())),
+        owner_lock: None,
+    })
+}
+
+pub(super) struct RuntimeLocalRewritePrepared {
+    pub(super) runtime_config: Arc<RuntimeConfig>,
+    pub(super) shared: RuntimeLocalRewriteProxyShared,
+    pub(super) shutdown: Arc<AtomicBool>,
+    pub(super) worker_count: usize,
+    pub(super) secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
+    pub(super) log_path: PathBuf,
+}
+
+pub(super) fn prepare_runtime_local_rewrite_application(
+    options: RuntimeLocalRewriteProxyStartOptions<'_>,
+    runtime_config: Arc<RuntimeConfig>,
+    allow_local_file_access: bool,
+    secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
+    gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
+    transport: &str,
+    listen_addr: Option<std::net::SocketAddr>,
+) -> Result<RuntimeLocalRewritePrepared> {
     let RuntimeLocalRewriteProxyStartOptions {
         paths,
         state,
@@ -211,7 +309,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         smart_context_enabled,
         presidio_redaction_enabled,
         model_context_window_tokens,
-        preferred_listen_addr,
+        preferred_listen_addr: _,
         gateway_auth_token_hash,
         gateway_admin_tokens,
         gateway_sso,
@@ -225,7 +323,6 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     } = options;
     let (provider, provider_credential) = provider.into_runtime_parts();
     let log_path = runtime_local_rewrite_log_path(&runtime_config);
-    let (server, listen_addr) = runtime_local_rewrite_server(preferred_listen_addr)?;
     initialize_runtime_probe_refresh_queue(runtime_config.tuning.probe_refresh_worker_count);
     let worker_count = runtime_config.tuning.worker_count;
     let active_request_limit = runtime_config.tuning.active_request_limit;
@@ -315,7 +412,8 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     runtime_proxy_log_to_path(
         &log_path,
         &format!(
-            "runtime local rewrite proxy started listen_addr={listen_addr} smart_context_enabled={smart_context_enabled} presidio_redaction_enabled={presidio_redaction_enabled} upstream_base_url={upstream_base_url} upstream_proxy_mode={} provider={} client_format={} upstream_format={} response_format={} endpoint={} auth_required={} virtual_keys={} route_aliases={} guardrail_blocked_keywords={} guardrail_blocked_output_keywords={} guardrail_allowed_models={} observability_sinks={}",
+            "runtime local rewrite application started transport={transport} listen_addr={} smart_context_enabled={smart_context_enabled} presidio_redaction_enabled={presidio_redaction_enabled} upstream_base_url={upstream_base_url} upstream_proxy_mode={} provider={} client_format={} upstream_format={} response_format={} endpoint={} auth_required={} virtual_keys={} route_aliases={} guardrail_blocked_keywords={} guardrail_blocked_output_keywords={} guardrail_allowed_models={} observability_sinks={}",
+            listen_addr.map_or_else(|| "-".to_string(), |addr| addr.to_string()),
             runtime_upstream_proxy_mode_label(true),
             super::provider_bridge::runtime_provider_label(bridge_kind),
             openai_contract.client_request_format.label(),
@@ -407,50 +505,23 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         gateway_observability_slots: Arc::new(tokio::sync::Semaphore::new(
             RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT,
         )),
+        gateway_background_task_count: Arc::new(AtomicUsize::new(0)),
         allow_local_file_access,
         gateway_draining: Arc::clone(&shutdown),
     };
-    let RuntimeLocalRewriteWorkers {
-        worker_threads,
-        gemini_live_sidecar_addr,
-    } = spawn_runtime_local_rewrite_workers(
-        &shared,
-        &server,
-        &shutdown,
+    Ok(RuntimeLocalRewritePrepared {
+        runtime_config,
+        shared,
+        shutdown,
         worker_count,
         secret_refresh,
-    )?;
-
-    Ok(RuntimeRotationProxy {
-        runtime_config: Arc::clone(&runtime_config),
-        server,
-        shutdown,
-        worker_threads,
-        accept_worker_count: worker_count,
-        listen_addr,
-        gemini_live_sidecar_addr,
-        gemini_live_sidecar_model: gemini_live_sidecar_addr.map(|_| {
-            super::local_rewrite_gemini_live::runtime_gemini_live_default_model().to_string()
-        }),
         log_path,
-        active_request_count: Arc::clone(&runtime_shared.active_request_count),
-        #[cfg(test)]
-        request_sequence: Arc::clone(&shared.runtime_shared.request_sequence),
-        #[cfg(test)]
-        lane_admission: shared.runtime_shared.lane_admission.clone(),
-        #[cfg(test)]
-        gateway_route_load: Some(Arc::clone(&shared.gateway_route_load)),
-        #[cfg(test)]
-        gateway_usage: Some(Arc::clone(&shared.gateway_usage.usage)),
-        #[cfg(test)]
-        gateway_side_effect_snapshot: Some(super::gateway_snapshot_handle(shared.clone())),
-        owner_lock: None,
     })
 }
 
-struct RuntimeLocalRewriteWorkers {
-    worker_threads: Vec<thread::JoinHandle<()>>,
-    gemini_live_sidecar_addr: Option<std::net::SocketAddr>,
+pub(super) struct RuntimeLocalRewriteWorkers {
+    pub(super) worker_threads: Vec<thread::JoinHandle<()>>,
+    pub(super) gemini_live_sidecar_addr: Option<std::net::SocketAddr>,
 }
 
 fn runtime_local_rewrite_usage_state(
@@ -499,17 +570,20 @@ fn runtime_local_rewrite_server(
     Ok((server, listen_addr))
 }
 
-fn spawn_runtime_local_rewrite_workers(
+pub(super) fn spawn_runtime_local_rewrite_workers(
     shared: &RuntimeLocalRewriteProxyShared,
-    server: &Arc<TinyServer>,
+    server: Option<&Arc<TinyServer>>,
     shutdown: &Arc<AtomicBool>,
     worker_count: usize,
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
+    spawn_gemini_sidecar_listener: bool,
 ) -> Result<RuntimeLocalRewriteWorkers> {
-    if let Some(pool) = shared.gemini_oauth_pool.as_ref() {
-        pool.spawn_quota_refresh(shared.runtime_shared.log_path.clone());
-    }
     let mut worker_threads = Vec::new();
+    if let Some(pool) = shared.gemini_oauth_pool.as_ref()
+        && let Some(worker) = pool.spawn_quota_refresh(shared.runtime_shared.log_path.clone())
+    {
+        worker_threads.push(worker);
+    }
     if shared.gateway_sso.oidc.is_some() {
         let shared = shared.clone();
         let shutdown = Arc::clone(shutdown);
@@ -524,10 +598,11 @@ fn spawn_runtime_local_rewrite_workers(
             secret_refresh,
         ));
     }
-    let gemini_live_sidecar_addr = if matches!(
-        &shared.provider,
-        RuntimeLocalRewriteProviderOptions::Gemini { .. }
-    ) {
+    let gemini_live_sidecar_addr = if spawn_gemini_sidecar_listener
+        && matches!(
+            &shared.provider,
+            RuntimeLocalRewriteProviderOptions::Gemini { .. }
+        ) {
         Some(spawn_runtime_gemini_live_sidecar(
             shared.clone(),
             Arc::clone(shutdown),
@@ -537,6 +612,9 @@ fn spawn_runtime_local_rewrite_workers(
         None
     };
     for _ in 0..worker_count {
+        let Some(server) = server else {
+            break;
+        };
         let server = Arc::clone(server);
         let shutdown = Arc::clone(shutdown);
         let shared = shared.clone();
@@ -597,7 +675,18 @@ fn handle_runtime_local_rewrite_proxy_request(
     request: tiny_http::Request,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
-    run_runtime_local_rewrite_pipeline(request, shared);
+    let target = match prodex_gateway_http::CanonicalRequestTarget::parse(request.url()) {
+        Ok(target) => target,
+        Err(_) => {
+            let _ = request.respond(build_runtime_proxy_json_error_response(
+                400,
+                "invalid_request_target",
+                "request target is invalid",
+            ));
+            return;
+        }
+    };
+    run_runtime_local_rewrite_pipeline(RuntimeLocalRewriteRequest::tiny(request), target, shared);
 }
 #[cfg(test)]
 mod request_guard_tests {

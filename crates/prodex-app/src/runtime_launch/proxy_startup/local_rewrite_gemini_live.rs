@@ -1,6 +1,7 @@
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_gateway_credentials::runtime_gateway_pin_request_credentials;
 use super::local_rewrite_gemini::runtime_gemini_live_auth_attempts;
+use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use crate::{
     WsMessage, WsRole, WsSocket, acquire_runtime_proxy_active_request_slot_with_wait,
     build_runtime_proxy_text_response, mark_runtime_proxy_local_overload, runtime_proxy_log,
@@ -144,7 +145,7 @@ pub(super) fn spawn_runtime_gemini_live_sidecar(
 
 pub(super) fn handle_runtime_gemini_live_websocket_request(
     request_id: u64,
-    request: tiny_http::Request,
+    request: RuntimeLocalRewriteRequest,
     shared: &RuntimeLocalRewriteProxyShared,
 ) {
     let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider else {
@@ -210,7 +211,9 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
             return;
         }
     };
-    let upgraded = request.upgrade("websocket", response);
+    let Ok(upgraded) = request.upgrade("websocket", response.boxed()) else {
+        return;
+    };
     let mut local_socket = WsSocket::from_raw_socket(upgraded, WsRole::Server, None);
     runtime_proxy_log(
         &shared.runtime_shared,

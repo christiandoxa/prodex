@@ -3,20 +3,20 @@ use super::local_rewrite_application_boundary::RuntimeGatewayAdminPreauthorizati
 use super::local_rewrite_gateway_admin_audit::runtime_gateway_audit_admin_request_denied_event;
 use super::local_rewrite_gateway_admin_route_explain::RUNTIME_GATEWAY_ROUTE_EXPLAIN_MAX_BODY_BYTES;
 use super::local_rewrite_gateway_admin_router::runtime_gateway_admin_response;
+use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::{
-    build_runtime_proxy_json_error_response, capture_runtime_proxy_request_with_limit,
-    path_without_query, runtime_proxy_error_is_body_too_large,
+    build_runtime_proxy_json_error_response, path_without_query,
+    runtime_proxy_error_is_body_too_large,
 };
 
 pub(super) fn runtime_gateway_respond_route_explain(
-    mut request: tiny_http::Request,
+    mut request: RuntimeLocalRewriteRequest,
     request_path: &str,
     shared: &RuntimeLocalRewriteProxyShared,
     request_context: prodex_application::ApplicationRequestContext<'_>,
     preauthorized_admin: Option<RuntimeGatewayAdminPreauthorization<'_>>,
 ) {
-    let mut captured = match capture_runtime_proxy_request_with_limit(
-        &mut request,
+    let mut captured = match request.capture_with_limit(
         shared.runtime_shared.runtime_config.max_request_body_bytes,
         RUNTIME_GATEWAY_ROUTE_EXPLAIN_MAX_BODY_BYTES as u64,
     ) {
@@ -41,7 +41,7 @@ pub(super) fn runtime_gateway_respond_route_explain(
                     &admin_auth.auth.name,
                     admin_auth.auth.role.as_str(),
                     code,
-                    request.method().as_str(),
+                    request.method(),
                     path_without_query(request_path),
                 );
             }

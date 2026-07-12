@@ -2,6 +2,7 @@
 
 use super::super::gemini_rewrite::RuntimeGeminiAuth;
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_transport::runtime_local_rewrite_with_projected_provider_secret;
 use super::GEMINI_LIVE_WEBSOCKET_URL;
 use crate::{
@@ -76,12 +77,12 @@ fn runtime_gemini_live_insert_api_key(
     Ok(())
 }
 
-pub(super) fn runtime_gemini_live_websocket_key(request: &tiny_http::Request) -> Option<String> {
-    request.headers().iter().find_map(|header| {
-        header
-            .field
-            .equiv("Sec-WebSocket-Key")
-            .then(|| header.value.as_str().trim().to_string())
+pub(super) fn runtime_gemini_live_websocket_key(
+    request: &RuntimeLocalRewriteRequest,
+) -> Option<String> {
+    request.headers().iter().find_map(|(name, value)| {
+        name.eq_ignore_ascii_case("Sec-WebSocket-Key")
+            .then(|| value.trim().to_string())
             .filter(|value| !value.is_empty())
     })
 }

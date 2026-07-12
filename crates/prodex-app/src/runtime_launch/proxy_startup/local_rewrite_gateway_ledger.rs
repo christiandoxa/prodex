@@ -1,6 +1,7 @@
 use super::local_rewrite::{
     RUNTIME_GATEWAY_REDIS_LEDGER_KEY, RUNTIME_GATEWAY_REDIS_LEDGER_LOCK,
-    RuntimeGatewayDurableReservationState, RuntimeLocalRewriteProxyShared,
+    RuntimeGatewayBackgroundTaskGuard, RuntimeGatewayDurableReservationState,
+    RuntimeLocalRewriteProxyShared,
 };
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationReconciliationInput, runtime_gateway_application_usage_reconciliation,
@@ -93,7 +94,9 @@ pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
     let call_ids = Arc::clone(&shared.gateway_usage.call_ids);
     let ledger_scopes = Arc::clone(&shared.gateway_usage.ledger_scopes);
     let durable_reservations = Arc::clone(&shared.gateway_usage.durable_reservations);
+    let background_task = RuntimeGatewayBackgroundTaskGuard::new(shared);
     shared.runtime_shared.async_runtime.spawn_blocking(move || {
+        let _background_task = background_task;
         let mut last_error = None;
         for attempt in 0..25 {
             match runtime_gateway_billing_ledger_reconcile_response(&state_store, &event) {
