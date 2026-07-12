@@ -203,6 +203,7 @@ where
     store.version = runtime_gateway_virtual_key_store_version();
     store.sort_for_rendering();
     runtime_gateway_sqlite_save_key_store_in_tx(&tx, &store)
+        .and_then(|_| runtime_gateway_sqlite_upsert_action_tenant(&tx, &write))
         .and_then(|_| runtime_gateway_sqlite_write_metadata(&tx, &write, &audit))
         .map_err(|_| {
             runtime_gateway_atomic_error(503, "gateway_admin_atomic_storage_unavailable")
@@ -211,6 +212,18 @@ where
         runtime_gateway_atomic_error(503, "gateway_admin_atomic_storage_unavailable")
     })?;
     runtime_gateway_apply_admin_virtual_key_store(shared, &store);
+    Ok(())
+}
+
+fn runtime_gateway_sqlite_upsert_action_tenant(
+    tx: &rusqlite::Transaction<'_>,
+    write: &RuntimeGatewayAdminAtomicWrite,
+) -> anyhow::Result<()> {
+    let tenant = write.operation.tenant_id.to_string();
+    tx.execute(
+        "INSERT INTO prodex_tenants (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms) VALUES (?1, ?1, ?2, ?2) ON CONFLICT(tenant_id) DO NOTHING",
+        params![tenant, i64::try_from(write.started_at_unix_ms)?],
+    )?;
     Ok(())
 }
 
