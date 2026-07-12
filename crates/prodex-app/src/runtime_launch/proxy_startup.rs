@@ -52,6 +52,7 @@ mod local_rewrite_gateway_metrics;
 mod local_rewrite_gateway_openapi;
 mod local_rewrite_gateway_reconciliation_audit;
 mod local_rewrite_gateway_reconciliation_runtime;
+mod local_rewrite_gateway_reconciliation_worker;
 mod local_rewrite_gateway_redis_ledger;
 mod local_rewrite_gateway_reservation;
 mod local_rewrite_gateway_route_load;

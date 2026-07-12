@@ -57,6 +57,10 @@ const FILES = Object.freeze({
   providerSpi: "crates/prodex-provider-spi/src/lib.rs",
   keys: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
   ledger: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_ledger.rs",
+  reconciliationWorker:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_reconciliation_worker.rs",
+  reconciliationAudit:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_reconciliation_audit.rs",
   responseSpend:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_spend.rs",
   observability:
@@ -481,6 +485,94 @@ export function validateProductionBoundary(sources) {
     durableReconciliation,
     "plan_sqlite_usage_reconciliation(",
     `${FILES.ledger}: durable settlement must not bypass application storage planning`,
+  );
+  const reconciliationSchedule =
+    functionBody(sources.reconciliationWorker, "schedule_runtime_gateway_billing_ledger_reconcile") ?? "";
+  requireOrdered(
+    errors,
+    reconciliationSchedule,
+    [
+      "runtime_gateway_application_reconciliation_execution(",
+      "spawn_blocking(move ||",
+      "reconciliation.retry.attempts()",
+      "runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt)",
+      "runtime_gateway_record_reconciliation_audit(",
+    ],
+    `${FILES.reconciliationWorker}: every backend must consume application reconciliation policy before retry and audit side effects`,
+  );
+  for (const duplicate of ["0..25", "Duration::from_millis(20)"]) {
+    forbidText(
+      errors,
+      sources.reconciliationWorker,
+      duplicate,
+      `${FILES.reconciliationWorker}: app-local reconciliation retry policy '${duplicate}' is forbidden`,
+    );
+  }
+  requireText(
+    errors,
+    reconciliationSchedule,
+    "reconciliation.exhausted(storage_error_observed)",
+    `${FILES.reconciliationWorker}: exhausted reconciliation schedules must receive an application failure classification`,
+  );
+  for (const failureSideEffect of [
+    "ApplicationUsageReconciliationAuditOutcome::Failure",
+    '"gateway_billing_ledger_reconcile_failed"',
+  ]) {
+    requireText(
+      errors,
+      reconciliationSchedule,
+      failureSideEffect,
+      `${FILES.reconciliationWorker}: exhausted pending reconciliation must emit failure audit and log side effects`,
+    );
+  }
+  const reconciliationAudit =
+    functionBody(sources.reconciliationAudit, "runtime_gateway_audit_usage_reconciliation") ?? "";
+  for (const getter of [
+    "plan.component()",
+    "plan.action()",
+    "plan.outcome()",
+    "plan.backend()",
+    "plan.reason()",
+  ]) {
+    requireText(
+      errors,
+      reconciliationAudit,
+      getter,
+      `${FILES.reconciliationAudit}: reconciliation audit serialization must consume the canonical application plan`,
+    );
+  }
+  const reconciliationAuditCaller =
+    functionBody(sources.reconciliationWorker, "runtime_gateway_record_reconciliation_audit") ?? "";
+  requireText(
+    errors,
+    reconciliationAuditCaller,
+    "runtime_gateway_audit_usage_reconciliation(runtime_shared, audit).is_err()",
+    `${FILES.reconciliationWorker}: reconciliation audit write failures must be handled explicitly`,
+  );
+  requireText(
+    errors,
+    reconciliationAuditCaller,
+    "gateway_usage_reconciliation_audit_failed",
+    `${FILES.reconciliationWorker}: reconciliation audit write failures must emit a stable runtime log marker`,
+  );
+  for (const backend of [
+    "ApplicationUsageReconciliationBackend::File",
+    "ApplicationUsageReconciliationBackend::Sqlite",
+    "ApplicationUsageReconciliationBackend::Postgres",
+    "ApplicationUsageReconciliationBackend::Redis",
+  ]) {
+    requireText(
+      errors,
+      sources.dataPlaneAdapter,
+      backend,
+      `${FILES.dataPlaneAdapter}: every reconciliation backend must enter application execution planning`,
+    );
+  }
+  requireText(
+    errors,
+    sources.dataPlaneAdapter,
+    "plan_application_usage_reconciliation_execution(",
+    `${FILES.dataPlaneAdapter}: compatibility settlement must enter application reconciliation execution planning`,
   );
   const streamCommit = functionBody(sources.responseSpend, "commit_stream") ?? "";
   requireText(
@@ -1297,9 +1389,36 @@ function runSelfTest() {
       ApplicationAtomicReservationStoragePlan::Postgres(storage);
       runtime_gateway_sqlite_reserve_usage();
     }`,
+    reconciliationWorker: `fn schedule_runtime_gateway_billing_ledger_reconcile() {
+      runtime_gateway_application_reconciliation_execution();
+      spawn_blocking(move || {
+        let storage_error_observed = false;
+        for attempt in reconciliation.retry.attempts() {
+          runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt);
+          runtime_gateway_record_reconciliation_audit();
+        }
+        ApplicationUsageReconciliationAuditOutcome::Failure;
+        "gateway_billing_ledger_reconcile_failed";
+        reconciliation.exhausted(storage_error_observed);
+      });
+    }
+    fn runtime_gateway_record_reconciliation_audit() {
+      if runtime_gateway_audit_usage_reconciliation(runtime_shared, audit).is_err() {
+        gateway_usage_reconciliation_audit_failed;
+      }
+    }`,
     ledger: `fn runtime_gateway_durable_reconcile_response() {
       runtime_gateway_application_usage_reconciliation();
       runtime_gateway_sqlite_reconcile_usage();
+    }`,
+    reconciliationAudit: `fn runtime_gateway_audit_usage_reconciliation() {
+      append_audit_event(
+        plan.component(),
+        plan.action(),
+        plan.outcome(),
+        plan.backend(),
+        plan.reason(),
+      );
     }`,
     responseSpend: `fn commit_stream() {
       runtime_gateway_application_provider_stage_is_committed();
@@ -1381,7 +1500,11 @@ function runSelfTest() {
     dataPlaneAdapter:
       `struct RuntimeGatewayApplicationAdmission(RuntimeGatewayApplicationAdmissionKind);
       enum RuntimeGatewayApplicationAdmissionKind { TenantBound, CompatibilityAnonymous(RuntimeGatewayCompatibilityProviderInvocation) }
-      plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous; ProviderRetryStage::BeforeFirstByte; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
+      plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); plan_application_usage_reconciliation_execution(); RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous; ProviderRetryStage::BeforeFirstByte; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
+      ApplicationUsageReconciliationBackend::File;
+      ApplicationUsageReconciliationBackend::Sqlite;
+      ApplicationUsageReconciliationBackend::Postgres;
+      ApplicationUsageReconciliationBackend::Redis;
       let request_id = authorized.request().request_id();
       authorized.request().trace_context();
       fn runtime_gateway_application_provider_dispatch() {
@@ -1738,6 +1861,46 @@ function runSelfTest() {
       ledger: valid.ledger.replace("runtime_gateway_application_usage_reconciliation();", ""),
     }).some((error) => error.includes("usage reconciliation")),
     "durable reconciliation application bypass accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      reconciliationWorker: valid.reconciliationWorker.replace(
+        "runtime_gateway_application_reconciliation_execution();",
+        "",
+      ),
+    }).some((error) => error.includes("before retry and audit side effects")),
+    "compatibility reconciliation policy bypass accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      reconciliationWorker: valid.reconciliationWorker.replace(
+        "reconciliation.exhausted(storage_error_observed);",
+        "",
+      ),
+    }).some((error) => error.includes("failure classification")),
+    "silent reconciliation retry exhaustion accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      reconciliationWorker: valid.reconciliationWorker.replace(
+        "ApplicationUsageReconciliationAuditOutcome::Failure;",
+        "",
+      ),
+    }).some((error) => error.includes("failure audit and log side effects")),
+    "silent pending reconciliation failure accepted",
+  );
+  assertSelfTest(
+    validateProductionBoundary({
+      ...valid,
+      reconciliationWorker: valid.reconciliationWorker.replace(
+        "runtime_gateway_audit_usage_reconciliation(runtime_shared, audit).is_err()",
+        "false",
+      ),
+    }).some((error) => error.includes("write failures must be handled")),
+    "reconciliation audit write failure bypass accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
