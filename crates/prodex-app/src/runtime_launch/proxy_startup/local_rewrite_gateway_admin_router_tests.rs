@@ -1,5 +1,6 @@
 use super::super::local_rewrite_application_boundary::{
-    runtime_gateway_admin_control_plane_action, runtime_gateway_admin_control_plane_tenant_id,
+    RuntimeGatewayAdminPreauthorization, runtime_gateway_admin_control_plane_action,
+    runtime_gateway_admin_control_plane_tenant_id,
     runtime_gateway_application_control_plane_authorization,
     runtime_gateway_application_request_context,
 };
@@ -18,7 +19,10 @@ use prodex_application::{
     plan_application_control_plane_idempotency_from_http_digest,
     plan_application_control_plane_idempotency_replay,
 };
-use prodex_domain::{IdempotencyEntry, IdempotencyReplayDecision, RequestId, TenantId};
+use prodex_control_plane::ControlPlaneOperation;
+use prodex_domain::{
+    IdempotencyEntry, IdempotencyReplayDecision, RequestId, ResourceKind, TenantId,
+};
 use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpHeader};
 use std::time::{Duration, Instant};
 
@@ -94,8 +98,21 @@ fn runtime_gateway_admin_authorization_uses_the_application_boundary() {
     assert!(
         runtime_gateway_application_control_plane_authorization(&request, &http, &viewer).is_err()
     );
-    assert!(
-        runtime_gateway_application_control_plane_authorization(&request, &http, &admin).is_ok()
+    let authorized =
+        runtime_gateway_application_control_plane_authorization(&request, &http, &admin)
+            .expect("admin authorization should produce an application plan");
+    let preauthorized = RuntimeGatewayAdminPreauthorization {
+        auth: admin_auth_named("admin", None),
+        application: Some(authorized),
+    };
+    let action = preauthorized
+        .control_plane_action()
+        .expect("preauthorization should retain the exact application action");
+    assert_eq!(action.operation, ControlPlaneOperation::VirtualKeyCreate);
+    assert_eq!(action.requirement.resource, ResourceKind::VirtualKey);
+    assert_eq!(
+        action.tenant.tenant_id,
+        runtime_gateway_admin_control_plane_tenant_id(&preauthorized.auth)
     );
 
     let explain_http = GatewayHttpRequestMeta {

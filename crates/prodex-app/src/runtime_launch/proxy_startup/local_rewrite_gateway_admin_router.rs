@@ -222,10 +222,7 @@ pub(super) fn runtime_gateway_admin_response(
         ));
     };
     let admin_auth = &preauthorized.auth;
-    let _application_tenant = preauthorized
-        .application
-        .as_ref()
-        .and_then(|application| application.tenant_context());
+    let authorized_action = preauthorized.control_plane_action();
 
     if path == route_explain_path && !captured.method.eq_ignore_ascii_case("POST") {
         runtime_gateway_audit_admin_request_denied_event(
@@ -253,8 +250,9 @@ pub(super) fn runtime_gateway_admin_response(
     }
     let admin_method = captured.method.to_ascii_uppercase();
     let admin_http = runtime_gateway_http_request_meta(captured, path);
-    if let Some(action) = runtime_gateway_admin_control_plane_action(&admin_http, admin_auth)
-        .filter(|action| action.operation.requires_idempotency())
+    if authorized_action
+        .is_some_and(|authorized_action| authorized_action.operation.requires_idempotency())
+        && let Some(action) = runtime_gateway_admin_control_plane_action(&admin_http, admin_auth)
     {
         if let Some(response) = runtime_gateway_admin_audit_boundary_response(
             shared,
