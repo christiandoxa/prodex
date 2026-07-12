@@ -523,6 +523,36 @@ fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
     assert!(codex_args.contains(&"model_provider=\"prodex-gemini\"".to_string()));
     assert!(codex_args.contains(&"resume".to_string()));
     assert!(codex_args.contains(&session_id.to_string()));
+
+    let mut child = ChildProcessPlan {
+        binary: OsString::from("codex"),
+        args: Vec::new(),
+        codex_home: root.join("profile"),
+        extra_env: vec![(
+            OsString::from("UNRELATED_CHILD_ENV"),
+            OsString::from("keep-me"),
+        )],
+        removed_env: vec![OsString::from("EXISTING_REMOVED_ENV")],
+    };
+    strategy.isolate_auto_external_provider_child_env(&mut child);
+
+    for key in PROVIDER_SECRET_ENV_KEYS {
+        assert!(
+            child.removed_env.contains(&OsString::from(key)),
+            "provider secret env {key} should be removed"
+        );
+    }
+    assert!(
+        child
+            .removed_env
+            .contains(&OsString::from("EXISTING_REMOVED_ENV"))
+    );
+    assert!(
+        child
+            .extra_env
+            .iter()
+            .any(|(key, value)| { key == "UNRELATED_CHILD_ENV" && value == "keep-me" })
+    );
 }
 
 #[test]

@@ -3,20 +3,6 @@ use super::*;
 pub(crate) use prodex_caveman_assets::PRODEX_CAVEMAN_FULL_ASSETS_ENV;
 
 const PRODEX_PROVIDER_CODEX_API_KEY: &str = "prodex-runtime-provider";
-const PROVIDER_SECRET_ENV_KEYS: [&str; 12] = [
-    "OPENAI_API_KEYS",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEYS",
-    "ANTHROPIC_API_KEY",
-    "DEEPSEEK_API_KEYS",
-    "DEEPSEEK_API_KEY",
-    "GEMINI_API_KEYS",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEYS",
-    "GOOGLE_API_KEY",
-    "GITHUB_COPILOT_API_KEYS",
-    "GITHUB_COPILOT_API_KEY",
-];
 
 pub(crate) struct CavemanLaunchStrategy {
     args: CavemanArgs,
@@ -122,7 +108,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         let mut child = codex_child_plan(overlay_home.clone(), runtime_args);
         if self.provider_runtime_uses_local_proxy_auth() {
             force_codex_api_key_auth_for_provider_runtime(&mut child);
-            remove_provider_secret_env_for_provider_runtime(&mut child);
+            remove_provider_secret_env(&mut child);
         }
         prepend_child_path(&mut child, overlay_home.join("bin"));
         if self.rtk_enabled {
@@ -169,12 +155,6 @@ fn force_codex_api_key_auth_for_provider_runtime(child: &mut ChildProcessPlan) {
             .extra_env
             .push((key, OsString::from(PRODEX_PROVIDER_CODEX_API_KEY)));
     }
-}
-
-fn remove_provider_secret_env_for_provider_runtime(child: &mut ChildProcessPlan) {
-    let mut removed = BTreeSet::<OsString>::from_iter(child.removed_env.iter().cloned());
-    removed.extend(PROVIDER_SECRET_ENV_KEYS.into_iter().map(OsString::from));
-    child.removed_env = removed.into_iter().collect();
 }
 
 fn write_provider_runtime_codex_auth(codex_home: &std::path::Path) -> Result<()> {
@@ -668,7 +648,7 @@ mod tests {
         };
 
         force_codex_api_key_auth_for_provider_runtime(&mut child);
-        remove_provider_secret_env_for_provider_runtime(&mut child);
+        remove_provider_secret_env(&mut child);
 
         let values = child
             .extra_env

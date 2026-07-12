@@ -3,6 +3,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io;
@@ -29,8 +30,29 @@ pub(crate) use prodex_runtime_launch::{
     prepare_codex_launch_args, prodex_dry_run_requested, remove_upstream_proxy_env,
 };
 
+pub(crate) const PROVIDER_SECRET_ENV_KEYS: [&str; 12] = [
+    "OPENAI_API_KEYS",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEYS",
+    "ANTHROPIC_API_KEY",
+    "DEEPSEEK_API_KEYS",
+    "DEEPSEEK_API_KEY",
+    "GEMINI_API_KEYS",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEYS",
+    "GOOGLE_API_KEY",
+    "GITHUB_COPILOT_API_KEYS",
+    "GITHUB_COPILOT_API_KEY",
+];
+
 pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
     prodex_runtime_launch::codex_child_plan(codex_bin(), codex_home, args, SUPER_LOCAL_PROVIDER_ID)
+}
+
+pub(crate) fn remove_provider_secret_env(child: &mut ChildProcessPlan) {
+    let mut removed = BTreeSet::<OsString>::from_iter(child.removed_env.iter().cloned());
+    removed.extend(PROVIDER_SECRET_ENV_KEYS.into_iter().map(OsString::from));
+    child.removed_env = removed.into_iter().collect();
 }
 
 pub(crate) fn run_child_plan(
