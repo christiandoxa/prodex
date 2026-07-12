@@ -24,6 +24,8 @@ mod local_rewrite_gateway_admin_audit;
 mod local_rewrite_gateway_admin_auth;
 mod local_rewrite_gateway_admin_dispatch;
 mod local_rewrite_gateway_admin_fields;
+#[cfg(test)]
+mod local_rewrite_gateway_admin_identity;
 mod local_rewrite_gateway_admin_keys;
 mod local_rewrite_gateway_admin_ledger;
 mod local_rewrite_gateway_admin_payloads;
