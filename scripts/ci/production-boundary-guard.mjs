@@ -11,6 +11,9 @@ const FILES = Object.freeze({
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_boundary.rs",
   dataPlaneAdapter:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
+  directRuntime:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_runtime.rs",
+  serve: "src/enterprise_serve.rs",
   providerConfig:
     "crates/prodex-app/src/app_commands/runtime_launch/gateway_provider_config.rs",
   providerAdapter:
@@ -89,7 +92,7 @@ export function validateProductionBoundary(sources) {
     requireText(
       errors,
       root,
-      "run_runtime_local_rewrite_pipeline(request, shared);",
+      "run_runtime_local_rewrite_pipeline(RuntimeLocalRewriteRequest::tiny(request), target, shared);",
       `${FILES.root}: production handler must delegate to the typed request pipeline`,
     );
   }
@@ -102,8 +105,7 @@ export function validateProductionBoundary(sources) {
       errors,
       pipeline,
       [
-        "runtime_local_rewrite_canonical_target(request)",
-        "runtime_local_rewrite_canonical_context(request, &target, shared)",
+        "runtime_local_rewrite_canonical_context(request, target, shared)",
         "runtime_local_rewrite_authenticate(canonical, shared)",
         "runtime_local_rewrite_bounded_admission(authenticated, shared)",
         "runtime_local_rewrite_dispatch_websocket(admitted, shared)",
@@ -149,7 +151,7 @@ export function validateProductionBoundary(sources) {
       "let started_at = Instant::now();",
       "Duration::from_millis(runtime_gateway_application_http_policy(shared).request_timeout_ms)",
       "ApplicationRequestDeadline::at(",
-      "capture_runtime_proxy_websocket_request(&request)",
+      "let header_request = request.header_request();",
       "runtime_gateway_application_request_context(",
     ],
     `${FILES.pipeline}: canonical stage must construct one typed request context from the request sequence, monotonic deadline, and original headers`,
@@ -173,6 +175,57 @@ export function validateProductionBoundary(sources) {
     "SystemTime",
     `${FILES.pipeline}: application deadline must use a monotonic clock`,
   );
+  const directHandle = functionBody(sources.directRuntime, "handle") ?? "";
+  requireOrdered(
+    errors,
+    directHandle,
+    [
+      "try_acquire_gateway_request_permit(",
+      "let GatewayHandlerRequest {",
+      "target,",
+      "tokio::spawn(async move",
+      "tokio::task::spawn_blocking(move",
+      "run_runtime_local_rewrite_pipeline(request, target, &shared)",
+    ],
+    `${FILES.directRuntime}: direct requests must acquire bounded admission and move the front's exact target into the pipeline`,
+  );
+  forbidText(
+    errors,
+    sources.directRuntime,
+    "CanonicalRequestTarget::parse",
+    `${FILES.directRuntime}: direct requests must not reparse the canonical target`,
+  );
+  requireCount(
+    errors,
+    directHandle,
+    "run_runtime_local_rewrite_pipeline(request, target, &shared)",
+    1,
+    `${FILES.directRuntime}: direct requests must enter the typed pipeline exactly once`,
+  );
+  const serve = functionBody(sources.serve, "run_enterprise_serve(") ?? "";
+  requireOrdered(
+    errors,
+    serve,
+    [
+      "start_policy_gateway_application_for_mode(policy_mode)",
+      "serve_with_handler(",
+      "application.handle(request).await",
+      "application.shutdown_and_drain(drain_timeout)",
+    ],
+    `${FILES.serve}: dedicated serving must dispatch in process and drain the owned application`,
+  );
+  for (const forbidden of [
+    "start_policy_gateway_backend",
+    "backend.listen_addr()",
+    '"127.0.0.1:0"',
+  ]) {
+    forbidText(
+      errors,
+      serve,
+      forbidden,
+      `${FILES.serve}: dedicated serving must not restore loopback backend transport`,
+    );
+  }
   requireText(
     errors,
     sources.pipeline,
@@ -855,6 +908,18 @@ export function validateProductionBoundary(sources) {
     "mod local_rewrite_application_data_plane;",
     `${FILES.modules}: production data-plane application adapter is not compiled`,
   );
+  requireText(
+    errors,
+    sources.modules,
+    "mod local_rewrite_application_runtime;",
+    `${FILES.modules}: production in-process application runtime is not compiled`,
+  );
+  requireText(
+    errors,
+    sources.modules,
+    "mod local_rewrite_request;",
+    `${FILES.modules}: production transport-neutral request adapter is not compiled`,
+  );
   return errors;
 }
 
@@ -865,7 +930,7 @@ function assertSelfTest(condition, message) {
 function runSelfTest() {
   const valid = {
     root: `fn handle_runtime_local_rewrite_proxy_request() {
-      run_runtime_local_rewrite_pipeline(request, shared);
+      run_runtime_local_rewrite_pipeline(RuntimeLocalRewriteRequest::tiny(request), target, shared);
     }`,
     pipeline: `struct RuntimeLocalRewriteCanonicalRequest;
     struct RuntimeLocalRewriteAuthenticatedRequest;
@@ -877,8 +942,7 @@ function runSelfTest() {
     struct RuntimeLocalRewriteDispatchReadyRequest;
     enum RuntimeLocalRewritePipelineExit { Rejected(Box<RuntimeLocalRewritePipelineReply>) }
     fn try_run_runtime_local_rewrite_pipeline() {
-      runtime_local_rewrite_canonical_target(request);
-      runtime_local_rewrite_canonical_context(request, &target, shared);
+      runtime_local_rewrite_canonical_context(request, target, shared);
       runtime_local_rewrite_authenticate(canonical, shared);
       runtime_local_rewrite_bounded_admission(authenticated, shared);
       runtime_local_rewrite_dispatch_websocket(admitted, shared);
@@ -897,7 +961,7 @@ function runSelfTest() {
       let started_at = Instant::now();
       Duration::from_millis(runtime_gateway_application_http_policy(shared).request_timeout_ms);
       ApplicationRequestDeadline::at(started_at.checked_add(timeout));
-      capture_runtime_proxy_websocket_request(&request);
+      let header_request = request.header_request();
       runtime_gateway_application_request_context(
         target,
         typed_request_id,
@@ -922,6 +986,24 @@ function runSelfTest() {
     fn runtime_local_rewrite_bounded_admission() {
       runtime_gateway_application_local_admission(application, shared);
       acquire_runtime_proxy_active_request_slot_with_wait();
+    }`,
+    directRuntime: `async fn handle() {
+      try_acquire_gateway_request_permit();
+      let GatewayHandlerRequest {
+        target,
+        request,
+      } = handler_request;
+      tokio::spawn(async move {});
+      tokio::task::spawn_blocking(move || {
+        run_runtime_local_rewrite_pipeline(request, target, &shared);
+      });
+    }`,
+    serve: `fn run_enterprise_serve() {
+      start_policy_gateway_application_for_mode(policy_mode);
+      serve_with_handler(config, move |request| async move {
+        application.handle(request).await
+      });
+      application.shutdown_and_drain(drain_timeout);
     }`,
     governance: `fn runtime_local_rewrite_dispatch_control_plane() {
       runtime_gateway_admin_response(&request.state.context);
@@ -1048,7 +1130,7 @@ function runSelfTest() {
       JwtAlgorithm::Es384;
       fn canonical_claims(principal_id: PrincipalId) {}`,
     modules:
-      "mod local_rewrite_application_boundary; mod local_rewrite_application_data_plane; mod local_rewrite_pipeline;",
+      "mod local_rewrite_application_boundary; mod local_rewrite_application_data_plane; mod local_rewrite_application_runtime; mod local_rewrite_pipeline; mod local_rewrite_request;",
   };
   const validErrors = validateProductionBoundary(valid);
   assertSelfTest(

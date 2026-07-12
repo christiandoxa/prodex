@@ -719,6 +719,20 @@ export function validateDeploymentSecurity(inputs) {
     dockerfilePath,
     "prodex-control-plane binary copy",
   );
+  requireIncludes(
+    checks,
+    dockerfile,
+    'ENTRYPOINT ["/usr/local/bin/prodex-gateway"]',
+    dockerfilePath,
+    "dedicated gateway default entrypoint",
+  );
+  requireIncludes(
+    checks,
+    dockerfile,
+    'CMD ["serve", "--listen", "0.0.0.0:4000"]',
+    dockerfilePath,
+    "dedicated gateway default serve command",
+  );
 
   if (/healthcheck:[\s\S]*Authorization:\s*Bearer/u.test(compose)) {
     checks.push(`${composePath}: healthcheck must not place bearer tokens in process arguments`);
@@ -828,6 +842,8 @@ redis_url_ref = { provider = "compose", name = "PRODEX_GATEWAY_REDIS_URL" }
 COPY --from=builder /workspace/target/release/prodex-gateway /usr/local/bin/prodex-gateway
 COPY --from=builder /workspace/target/release/prodex-control-plane /usr/local/bin/prodex-control-plane
 USER prodex
+ENTRYPOINT ["/usr/local/bin/prodex-gateway"]
+CMD ["serve", "--listen", "0.0.0.0:4000"]
 `,
     kubernetes: `
 kind: Namespace

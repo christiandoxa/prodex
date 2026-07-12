@@ -48,40 +48,53 @@ function validateBinary(binary) {
 
 function validateServeComposition(source) {
   const errors = [];
-  const loopbackBackend =
-    'prodex_app::start_policy_gateway_backend(Some("127.0.0.1:0".to_string()))';
-  const asyncFront = "let server_result = serve(";
-  const backendDrain = "backend.shutdown_and_drain(drain_timeout)";
+  const applicationStart = "prodex_app::start_policy_gateway_application_for_mode(policy_mode)";
+  const asyncFront = "let server_result = serve_with_handler(";
+  const applicationDispatch = "application.handle(request).await";
+  const applicationDrain = "application.shutdown_and_drain(drain_timeout)";
   for (const [needle, message] of [
     [
-      loopbackBackend,
-      `${SERVE_COMPOSITION_PATH}: compatibility backend must stay ephemeral and loopback-only until the typed transport port replaces it`,
+      applicationStart,
+      `${SERVE_COMPOSITION_PATH}: dedicated serve must start the in-process gateway application`,
     ],
     [
       "GatewayServerConfig::production(listen_addr, server_mode)",
       `${SERVE_COMPOSITION_PATH}: public traffic must enter the route-isolated async server`,
     ],
     [
-      "backend.listen_addr()",
-      `${SERVE_COMPOSITION_PATH}: async server must target only the owned compatibility backend`,
+      applicationDispatch,
+      `${SERVE_COMPOSITION_PATH}: async server must dispatch the exact handler request in process`,
     ],
     [
-      backendDrain,
-      `${SERVE_COMPOSITION_PATH}: compatibility backend must drain after the async server stops`,
+      applicationDrain,
+      `${SERVE_COMPOSITION_PATH}: in-process application must drain after the async server stops`,
     ],
   ]) {
     if (!source.includes(needle)) errors.push(message);
   }
-  const start = source.indexOf(loopbackBackend);
+  const start = source.indexOf(applicationStart);
   const serve = source.indexOf(asyncFront);
-  const drain = source.indexOf(backendDrain);
+  const dispatch = source.indexOf(applicationDispatch);
+  const drain = source.indexOf(applicationDrain);
   if (start < 0 || serve < 0 || drain < 0 || !(start < serve && serve < drain)) {
     errors.push(
-      `${SERVE_COMPOSITION_PATH}: startup, route-isolated serving, and backend drain must remain ordered`,
+      `${SERVE_COMPOSITION_PATH}: startup, route-isolated serving, and application drain must remain ordered`,
     );
   }
-  if ((source.match(/start_policy_gateway_backend\s*\(/gu) ?? []).length !== 1) {
-    errors.push(`${SERVE_COMPOSITION_PATH}: dedicated serve must own exactly one compatibility backend`);
+  if (dispatch < serve || dispatch > drain) {
+    errors.push(`${SERVE_COMPOSITION_PATH}: in-process dispatch must remain inside the serve phase`);
+  }
+  if ((source.match(/start_policy_gateway_application_for_mode\s*\(/gu) ?? []).length !== 1) {
+    errors.push(`${SERVE_COMPOSITION_PATH}: dedicated serve must own exactly one application`);
+  }
+  for (const forbidden of [
+    "start_policy_gateway_backend",
+    "backend.listen_addr()",
+    '"127.0.0.1:0"',
+  ]) {
+    if (source.includes(forbidden)) {
+      errors.push(`${SERVE_COMPOSITION_PATH}: dedicated serve must not use loopback backend transport`);
+    }
   }
   return errors;
 }
@@ -92,21 +105,24 @@ function runSelfTest() {
     throw new Error("self-test failed: forbidden pattern did not match");
   }
   const validServe = `
-    let backend = prodex_app::start_policy_gateway_backend(Some("127.0.0.1:0".to_string()));
-    let server_result = serve(
+    let application = prodex_app::start_policy_gateway_application_for_mode(policy_mode);
+    let server_result = serve_with_handler(
       GatewayServerConfig::production(listen_addr, server_mode),
-      backend.listen_addr(),
+      move |request| async move { application.handle(request).await },
     );
-    backend.shutdown_and_drain(drain_timeout);
+    application.shutdown_and_drain(drain_timeout);
   `;
   if (validateServeComposition(validServe).length !== 0) {
-    throw new Error("self-test failed: valid transitional serve composition was rejected");
+    throw new Error("self-test failed: valid in-process serve composition was rejected");
   }
-  const publicLegacy = validServe.replace('"127.0.0.1:0".to_string()', "listen_addr.to_string()");
-  if (validateServeComposition(publicLegacy).length === 0) {
-    throw new Error("self-test failed: public legacy listener was accepted");
+  const loopbackLegacy = validServe
+    .replace("start_policy_gateway_application_for_mode(policy_mode)", 'start_policy_gateway_backend(Some("127.0.0.1:0".to_string()))')
+    .replace("serve_with_handler(", "serve(")
+    .replace("move |request| async move { application.handle(request).await },", "backend.listen_addr(),");
+  if (validateServeComposition(loopbackLegacy).length === 0) {
+    throw new Error("self-test failed: loopback legacy backend was accepted");
   }
-  const bypassedFront = validServe.replace("let server_result = serve(", "let server_result = direct(");
+  const bypassedFront = validServe.replace("let server_result = serve_with_handler(", "let server_result = direct(");
   if (validateServeComposition(bypassedFront).length === 0) {
     throw new Error("self-test failed: route-isolated async front bypass was accepted");
   }
