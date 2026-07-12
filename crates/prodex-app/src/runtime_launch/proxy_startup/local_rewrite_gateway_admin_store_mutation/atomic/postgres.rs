@@ -73,6 +73,7 @@ where
     mutation(&mut store).map_err(RuntimeGatewayAdminError::into_response)?;
     store.sort_for_rendering();
     runtime_gateway_postgres_save_key_store_in_tx(&mut tx, &store)
+        .and_then(|_| runtime_gateway_postgres_upsert_action_tenant(&mut tx, &write))
         .and_then(|_| runtime_gateway_postgres_write_metadata(&mut tx, &write, &audit))
         .map_err(|_| {
             runtime_gateway_atomic_error(503, "gateway_admin_atomic_storage_unavailable")
@@ -81,6 +82,20 @@ where
         runtime_gateway_atomic_error(503, "gateway_admin_atomic_storage_unavailable")
     })?;
     runtime_gateway_apply_admin_virtual_key_store(shared, &store);
+    Ok(())
+}
+
+fn runtime_gateway_postgres_upsert_action_tenant(
+    tx: &mut ::postgres::Transaction<'_>,
+    write: &RuntimeGatewayAdminAtomicWrite,
+) -> anyhow::Result<()> {
+    let tenant = write.operation.tenant_id.as_uuid();
+    let display_name = write.operation.tenant_id.to_string();
+    let started_at = i64::try_from(write.started_at_unix_ms)?;
+    tx.execute(
+        "INSERT INTO prodex_tenants (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms) VALUES ($1, $2, $3, $3) ON CONFLICT(tenant_id) DO NOTHING",
+        &[&tenant, &display_name, &started_at],
+    )?;
     Ok(())
 }
 
