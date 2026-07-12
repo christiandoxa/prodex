@@ -10,8 +10,8 @@ use prodex_authz::{
     BoundaryAuthorizationError, BoundaryKind, authorize_boundary_role, authorize_boundary_scope,
 };
 use prodex_control_plane::{
-    ControlPlaneActionRequest, ControlPlaneAuthorizationError, ControlPlaneDecision,
-    decide_control_plane_action,
+    ControlPlaneActionPlan, ControlPlaneActionRequest, ControlPlaneAuthorizationError,
+    ControlPlaneDecision, decide_control_plane_action,
 };
 use prodex_domain::{
     CorrelationContext, CredentialScope, Principal, RequestId, TenantContext, TenantMode,
@@ -229,6 +229,7 @@ impl fmt::Debug for ApplicationAuthenticatedRequestContext<'_> {
 pub struct ApplicationAuthorizedRequestContext<'a> {
     authenticated: ApplicationAuthenticatedRequestContext<'a>,
     tenant: Option<TenantContext>,
+    control_plane_action: Option<ControlPlaneActionPlan>,
     correlation: CorrelationContext,
 }
 
@@ -245,6 +246,10 @@ impl<'a> ApplicationAuthorizedRequestContext<'a> {
         self.tenant
     }
 
+    pub fn control_plane_action(&self) -> Option<&ControlPlaneActionPlan> {
+        self.control_plane_action.as_ref()
+    }
+
     pub const fn correlation_context(&self) -> &CorrelationContext {
         &self.correlation
     }
@@ -259,6 +264,10 @@ impl fmt::Debug for ApplicationAuthorizedRequestContext<'_> {
                 &self.authenticated.principal.as_ref().map(|_| "<redacted>"),
             )
             .field("tenant", &self.tenant.map(|_| "<redacted>"))
+            .field(
+                "control_plane_action",
+                &self.control_plane_action.as_ref().map(|_| "<redacted>"),
+            )
             .field("correlation", &"<redacted>")
             .finish()
     }
@@ -379,7 +388,11 @@ pub fn plan_application_data_plane_authorization(
         return Err(ApplicationRequestAuthorizationError::WrongPlane);
     }
     let Some(principal) = authenticated.principal.as_ref() else {
-        return Ok(application_authorized_request_context(authenticated, None));
+        return Ok(application_authorized_request_context(
+            authenticated,
+            None,
+            None,
+        ));
     };
     let boundary = if authenticated.request.route == GatewayHttpRouteKind::DataPlaneQuota {
         BoundaryKind::DataPlaneQuota
@@ -396,6 +409,7 @@ pub fn plan_application_data_plane_authorization(
     Ok(application_authorized_request_context(
         authenticated,
         Some(tenant),
+        None,
     ))
 }
 
@@ -413,21 +427,23 @@ pub fn plan_application_control_plane_authorization(
     if principal != &action.principal {
         return Err(ApplicationRequestAuthorizationError::PrincipalMismatch);
     }
-    let tenant = match decide_control_plane_action(action) {
-        ControlPlaneDecision::Authorized(plan) => plan.tenant,
+    let plan = match decide_control_plane_action(action) {
+        ControlPlaneDecision::Authorized(plan) => plan,
         ControlPlaneDecision::Denied { error, .. } => {
             return Err(ApplicationRequestAuthorizationError::ControlPlane(error));
         }
     };
     Ok(application_authorized_request_context(
         authenticated,
-        Some(tenant),
+        Some(plan.tenant),
+        Some(plan),
     ))
 }
 
 fn application_authorized_request_context(
     authenticated: ApplicationAuthenticatedRequestContext<'_>,
     tenant: Option<TenantContext>,
+    control_plane_action: Option<ControlPlaneActionPlan>,
 ) -> ApplicationAuthorizedRequestContext<'_> {
     let correlation = match tenant {
         Some(tenant) => authenticated
@@ -440,6 +456,7 @@ fn application_authorized_request_context(
     ApplicationAuthorizedRequestContext {
         authenticated,
         tenant,
+        control_plane_action,
         correlation,
     }
 }
@@ -557,6 +574,7 @@ mod tests {
             authorized.tenant_context().unwrap().tenant_id,
             expected_tenant
         );
+        assert!(authorized.control_plane_action().is_none());
         assert!(!format!("{authorized:?}").contains(&expected_tenant.to_string()));
 
         let viewer = plan_application_request_authentication_from_evidence(
@@ -596,7 +614,7 @@ mod tests {
             resource: ControlPlaneResourceRef::new(
                 resource_tenant_id,
                 ResourceKind::VirtualKey,
-                None::<String>,
+                Some("key-1"),
             ),
             occurred_at_unix_ms: 1,
         };
@@ -628,6 +646,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(authorized.tenant_context().unwrap().tenant_id, tenant_id);
+        let authorized_action = authorized.control_plane_action().unwrap();
+        assert_eq!(
+            authorized_action.operation,
+            ControlPlaneOperation::VirtualKeyCreate
+        );
+        assert_eq!(
+            authorized_action.requirement.resource,
+            ResourceKind::VirtualKey
+        );
+        assert_eq!(authorized_action.tenant.tenant_id, tenant_id);
+        assert_eq!(authorized_action.audit_event.resource.kind, "virtual_key");
+        assert_eq!(
+            authorized_action.audit_event.resource.id.as_deref(),
+            Some("key-1")
+        );
+        assert_eq!(
+            authorized_action.audit_event.resource.tenant_id,
+            Some(tenant_id)
+        );
+        let debug = format!("{authorized:?}");
+        assert!(!debug.contains(&tenant_id.to_string()));
+        assert!(!debug.contains("virtual_key"));
 
         let authenticated = plan_application_request_authentication_from_evidence(
             request.clone(),
