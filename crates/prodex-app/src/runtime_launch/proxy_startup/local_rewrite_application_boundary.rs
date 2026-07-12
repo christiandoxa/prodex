@@ -1,7 +1,7 @@
 use prodex_application::{
     ApplicationAuthenticatedRequestContext, ApplicationAuthorizedRequestContext,
-    ApplicationRequestAuthorizationError, ApplicationRequestContext,
-    ApplicationRequestContextError, ApplicationRequestDeadline,
+    ApplicationControlPlaneGovernanceScope, ApplicationRequestAuthorizationError,
+    ApplicationRequestContext, ApplicationRequestContextError, ApplicationRequestDeadline,
     plan_application_control_plane_authorization, plan_application_data_plane_authorization,
     plan_application_request_authentication_from_evidence, plan_application_request_context,
 };
@@ -18,6 +18,7 @@ use prodex_domain::{
 };
 use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpHeader, GatewayHttpRequestMeta};
 use sha2::{Digest, Sha256};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::local_rewrite_gateway_admin_auth::{
     RuntimeGatewayAdminAuth, RuntimeGatewayAdminAuthentication,
@@ -47,6 +48,19 @@ impl RuntimeGatewayAdminPreauthorization<'_> {
     pub(super) fn control_plane_action(&self) -> Option<&ControlPlaneActionPlan> {
         self.application.as_ref()?.control_plane_action()
     }
+}
+
+pub(super) fn runtime_gateway_admin_governance_scope(
+    admin_auth: &RuntimeGatewayAdminAuth,
+) -> ApplicationControlPlaneGovernanceScope {
+    ApplicationControlPlaneGovernanceScope::new(
+        admin_auth.tenant_id.clone(),
+        admin_auth.team_id.clone(),
+        admin_auth.project_id.clone(),
+        admin_auth.user_id.clone(),
+        admin_auth.budget_id.clone(),
+        admin_auth.allowed_key_prefixes.clone(),
+    )
 }
 
 pub(super) fn runtime_gateway_application_request_context<'a>(
@@ -217,10 +231,41 @@ pub(super) fn runtime_gateway_admin_control_plane_action(
         resource: ControlPlaneResourceRef::new(
             tenant_id,
             route.operation.requirement().resource,
-            None::<String>,
+            runtime_gateway_admin_resource_id(http, route.operation),
         ),
-        occurred_at_unix_ms: 0,
+        occurred_at_unix_ms: runtime_gateway_now_unix_ms(),
     })
+}
+
+fn runtime_gateway_admin_resource_id(
+    http: &GatewayHttpRequestMeta,
+    operation: prodex_control_plane::ControlPlaneOperation,
+) -> Option<String> {
+    use prodex_control_plane::ControlPlaneOperation;
+
+    let marker = match operation {
+        ControlPlaneOperation::VirtualKeyUpdate
+        | ControlPlaneOperation::VirtualKeyDelete
+        | ControlPlaneOperation::VirtualKeyRotateSecret => "/keys/",
+        ControlPlaneOperation::ScimUserUpdate | ControlPlaneOperation::ScimUserDelete => {
+            "/scim/v2/Users/"
+        }
+        _ => return None,
+    };
+    http.path
+        .split_once(marker)
+        .map(|(_, resource_id)| resource_id.trim())
+        .filter(|resource_id| !resource_id.is_empty() && !resource_id.contains('/'))
+        .map(str::to_string)
+}
+
+fn runtime_gateway_now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 pub(super) fn runtime_gateway_admin_control_plane_tenant_id(
@@ -380,6 +425,18 @@ mod tests {
             auth: admin(role),
             evidence: RuntimeGatewayAdminCredentialEvidence::Principal,
         }
+    }
+
+    #[test]
+    fn admin_governance_scope_preserves_exact_credential_limits() {
+        let mut auth = admin(RuntimeGatewayAdminRole::Admin);
+        auth.team_id = Some("team-a".to_string());
+        auth.allowed_key_prefixes = vec!["team-a-".to_string()];
+
+        let scope = runtime_gateway_admin_governance_scope(&auth);
+        assert!(scope.matches(auth.tenant_id.as_deref(), Some("team-a"), None, None, None,));
+        assert!(scope.matches_resource_name("team-a-key"));
+        assert!(!scope.matches_resource_name("team-b-key"));
     }
 
     fn oidc_admin_authentication(
