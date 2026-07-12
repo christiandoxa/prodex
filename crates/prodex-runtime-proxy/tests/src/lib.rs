@@ -4,6 +4,29 @@ use super::*;
 mod local_bridge;
 
 #[test]
+fn runtime_proxy_request_debug_redacts_target_headers_and_body() {
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/responses?api_key=runtime-target-secret".to_string(),
+        headers: vec![(
+            "Authorization".to_string(),
+            "Bearer runtime-header-secret".to_string(),
+        )],
+        body: b"runtime-body-secret".to_vec(),
+    };
+
+    let rendered = format!("{request:?}");
+    assert!(rendered.contains("<redacted>"));
+    for secret in [
+        "runtime-target-secret",
+        "runtime-header-secret",
+        "runtime-body-secret",
+    ] {
+        assert!(!rendered.contains(secret));
+    }
+}
+
+#[test]
 fn normalizes_prodex_openai_mount_paths() {
     assert_eq!(
         runtime_proxy_normalize_openai_path("/backend-api/prodex/responses?x=1").as_ref(),
