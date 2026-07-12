@@ -44,6 +44,8 @@ root `prodex gateway` command keeps TinyServer compatibility without becoming a 
 
 - Dedicated production requests have one HTTP listener and one canonical request-target object.
 - Route-plane rejection remains in the async front before application work.
+- Control-plane key and SCIM writes retain that exact target and authorized action through the
+  canonical atomic mutation execution defined by ADR 1076.
 - Blocking provider and persistence adapters remain isolated behind explicit bounded permits.
 - Streaming, cancellation, overload, upgrade, accounting, and drain behavior have focused parity
   tests and CI source guards.
