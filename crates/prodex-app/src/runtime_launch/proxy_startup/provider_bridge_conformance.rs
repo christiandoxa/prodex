@@ -9,6 +9,7 @@ use prodex_provider_core::{
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
+use std::collections::BTreeMap;
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_conformance_result(
     kind: RuntimeProviderBridgeKind,
@@ -24,8 +25,19 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_conform
     };
     let mut input = ProviderTransformInput::new(endpoint, body.to_vec());
     input.model = runtime_provider_model_from_body(body);
-    input.headers = request.headers.iter().cloned().collect();
+    input.headers = runtime_provider_conformance_headers(&request.headers);
     Some(provider_translator(kind.provider_id()).transform_request(input))
+}
+
+fn runtime_provider_conformance_headers(headers: &[(String, String)]) -> BTreeMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name = name.to_ascii_lowercase();
+            matches!(name.as_str(), "x-codex-turn-state" | "session_id")
+                .then(|| (name, value.clone()))
+        })
+        .collect()
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_log_request_conformance(
@@ -230,5 +242,38 @@ pub(super) fn runtime_provider_loss_log_fields(
         ProviderTransformLoss::DegradedButSafe { reason, .. } => Some(("degraded", reason)),
         ProviderTransformLoss::Rejected { reason } => Some(("rejected", reason)),
         ProviderTransformLoss::UnsupportedUpstream { reason } => Some(("unsupported", reason)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conformance_headers_allowlist_only_continuation_metadata() {
+        let headers = runtime_provider_conformance_headers(&[
+            (
+                "Authorization".to_string(),
+                "Bearer conformance-secret".to_string(),
+            ),
+            ("X-Codex-Turn-State".to_string(), "turn-a".to_string()),
+            ("SESSION_ID".to_string(), "session-a".to_string()),
+            ("X-Request-Id".to_string(), "request-a".to_string()),
+        ]);
+
+        assert_eq!(headers.len(), 2);
+        assert_eq!(
+            headers.get("x-codex-turn-state").map(String::as_str),
+            Some("turn-a")
+        );
+        assert_eq!(
+            headers.get("session_id").map(String::as_str),
+            Some("session-a")
+        );
+        assert!(
+            !headers
+                .values()
+                .any(|value| value.contains("conformance-secret"))
+        );
     }
 }

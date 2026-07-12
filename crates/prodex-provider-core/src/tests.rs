@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn provider_transform_input_debug_redacts_headers_and_body() {
+    let mut input = ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        b"provider-transform-body-secret".to_vec(),
+    );
+    input.headers.insert(
+        "authorization".to_string(),
+        "Bearer provider-transform-header-secret".to_string(),
+    );
+
+    let rendered = format!("{input:?}");
+    assert!(rendered.contains("<redacted>"));
+    assert!(!rendered.contains("provider-transform-header-secret"));
+    assert!(!rendered.contains("provider-transform-body-secret"));
+}
+
+#[test]
 fn catalog_covers_gateway_providers() {
     for provider in [
         ProviderId::OpenAi,
