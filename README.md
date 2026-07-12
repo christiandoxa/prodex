@@ -588,6 +588,8 @@ prodex s --provider anthropic --model claude-sonnet-4-6
 
 If `--api-key` is omitted, Prodex uses the Anthropic profile created by `prodex login --with-claude` or `prodex profile import claude`. API-key mode still reads `ANTHROPIC_API_KEY`; `ANTHROPIC_API_KEYS` may contain multiple comma-, semicolon-, or newline-separated keys for round-robin request rotation and pre-commit retry on auth/quota/rate/temporary failures. This path injects a temporary `prodex-anthropic` Codex provider, exposes a local `/v1/responses` adapter to Codex, forwards to Anthropic's OpenAI-compatible chat API, and keeps quota preflight disabled. `prodex quota --all --provider anthropic` shows OAuth readiness for Anthropic profiles; set `ANTHROPIC_ADMIN_KEY` when you want Anthropic Admin rate-limit groups included.
 
+Provider-backed Super launches consume supported provider API-key environment variables in the local Prodex proxy and remove them from the spawned Codex environment. Child MCP servers or tools that previously relied on inheriting those variables must configure their own credential source explicitly.
+
 Use `--provider copilot` when you want the Codex/Super front end with GitHub Copilot upstream:
 
 ```bash
