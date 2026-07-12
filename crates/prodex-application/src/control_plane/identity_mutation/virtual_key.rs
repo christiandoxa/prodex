@@ -75,6 +75,7 @@ pub enum ApplicationGatewayVirtualKeyMutation {
     },
     RotateSecret {
         id: VirtualKeyId,
+        patch: ApplicationGatewayVirtualKeyPatch,
         secret_fingerprint: ApplicationSecretFingerprint,
     },
     Delete {
@@ -166,6 +167,7 @@ pub fn plan_application_gateway_virtual_key_mutation(
         ),
         ApplicationGatewayVirtualKeyMutation::RotateSecret {
             id,
+            patch,
             secret_fingerprint,
         } => plan_rotate(
             authorized_action,
@@ -173,6 +175,7 @@ pub fn plan_application_gateway_virtual_key_mutation(
             current_records,
             now_unix_ms,
             id,
+            patch,
             secret_fingerprint,
         ),
         ApplicationGatewayVirtualKeyMutation::Delete { id } => plan_delete(
@@ -283,6 +286,7 @@ fn plan_rotate(
     current_records: &[ApplicationGatewayVirtualKeyRecord],
     now_unix_ms: u64,
     id: VirtualKeyId,
+    patch: ApplicationGatewayVirtualKeyPatch,
     secret_fingerprint: ApplicationSecretFingerprint,
 ) -> Result<ApplicationGatewayVirtualKeyMutationPlan, ApplicationGatewayIdentityMutationError> {
     let (index, current) = find_virtual_key(current_records, id)?;
@@ -293,6 +297,7 @@ fn plan_rotate(
     )?;
     validate_mutable_current(governance, now_unix_ms, current)?;
     let mut record = current.clone();
+    apply_virtual_key_patch(&mut record, patch);
     record.updated_at_unix_ms = now_unix_ms;
     validate_virtual_key_record(&record)?;
     if !governance_allows_virtual_key(governance, &record) {
