@@ -76,6 +76,7 @@ fn key_store_load_filters_malformed_scim_rows_from_active_state() {
         version: runtime_gateway_virtual_key_store_version(),
         keys: Vec::new(),
         scim_users: vec![malformed, valid.clone()],
+        ..RuntimeGatewayVirtualKeyStoreFile::default()
     };
     std::fs::write(&key_store_path, serde_json::to_vec_pretty(&store).unwrap()).unwrap();
     let state_store = RuntimeGatewayStateStore::File {

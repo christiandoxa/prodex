@@ -6,7 +6,6 @@ use anyhow::{Context, Result, anyhow, bail};
 use postgres::Client as PostgresClient;
 #[cfg(test)]
 use prodex_storage_sqlite::{SqliteRuntimeMode, plan_sqlite_migrations};
-use redis::Commands;
 use rusqlite::{Connection, OptionalExtension};
 
 const RUNTIME_GATEWAY_SCHEMA_VERSION: i64 = 3;
@@ -531,6 +530,8 @@ fn runtime_gateway_sqlite_require_enterprise_schema(conn: &Connection) -> Result
         "prodex_budget_counters",
         "prodex_reservations",
         "prodex_usage_ledger",
+        "prodex_audit_log",
+        "prodex_idempotency_records",
     ] {
         let exists: bool = conn.query_row(
             "SELECT EXISTS(
@@ -582,6 +583,8 @@ fn runtime_gateway_postgres_require_enterprise_schema(client: &mut PostgresClien
         "prodex_budget_counters",
         "prodex_reservations",
         "prodex_usage_ledger",
+        "prodex_audit_log",
+        "prodex_idempotency_records",
     ] {
         let exists: bool = client
             .query_one(
@@ -653,6 +656,21 @@ where
     F: FnOnce(&mut redis::Connection) -> Result<T>,
     G: FnOnce() -> Result<String>,
 {
+    runtime_gateway_redis_with_lock_token(url, lock_key, token_generator, |conn, _token| {
+        operation(conn)
+    })
+}
+
+pub(super) fn runtime_gateway_redis_with_lock_token<F, G, T>(
+    url: &str,
+    lock_key: &str,
+    token_generator: G,
+    operation: F,
+) -> Result<T>
+where
+    F: FnOnce(&mut redis::Connection, &str) -> Result<T>,
+    G: FnOnce() -> Result<String>,
+{
     let token = token_generator()?;
     let mut conn = runtime_gateway_redis_connection(url)?;
     let mut acquired = false;
@@ -674,10 +692,15 @@ where
         bail!("timed out waiting for redis lock {lock_key}");
     }
 
-    let result = operation(&mut conn);
-    let release_result: redis::RedisResult<()> = conn.del(lock_key);
-    if result.is_ok() {
-        release_result.context("failed to release gateway redis lock")?;
+    let result = operation(&mut conn, &token);
+    let release_result: redis::RedisResult<i64> = redis::cmd("EVAL")
+        .arg("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end")
+        .arg(1)
+        .arg(lock_key)
+        .arg(&token)
+        .query(&mut conn);
+    if result.is_ok() && release_result.context("failed to release gateway redis lock")? != 1 {
+        bail!("gateway redis lock ownership changed before release");
     }
     result
 }
