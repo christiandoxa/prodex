@@ -364,7 +364,7 @@ fn prepare_runtime_smart_context_body_safely<'a>(
                 transport,
                 profile_name,
                 request.body.len(),
-                &panic,
+                panic.as_ref(),
             );
             runtime_proxy_log(
                 shared,
