@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 pub use settings::{
     GeminiSettingsSource, gemini_cli_config_home_for, gemini_settings_source_paths,
     gemini_settings_source_paths_for, gemini_settings_source_paths_for_config_home,
-    gemini_settings_sources, parse_gemini_settings_json,
+    gemini_settings_sources, gemini_settings_sources_for_config_home, parse_gemini_settings_json,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;

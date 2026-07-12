@@ -4,7 +4,7 @@ use terminal_ui::print_panel;
 
 pub(crate) use prodex_runtime_gemini_cli_compat::{
     GeminiSettingsSource, gemini_settings_source_paths_for_config_home, gemini_settings_sources,
-    parse_gemini_settings_json,
+    gemini_settings_sources_for_config_home, parse_gemini_settings_json,
 };
 
 pub(crate) fn prepare_gemini_cli_compat(codex_home: &Path) -> Result<()> {
