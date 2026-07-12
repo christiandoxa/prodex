@@ -378,6 +378,7 @@ fn main_entry_error_message(err: &anyhow::Error) -> String {
 
 fn run() -> Result<()> {
     let command = parse_cli_command_or_exit();
+    create_codex_home_if_missing(&AppPaths::discover()?.root)?;
     if command.should_show_update_notice() {
         let _ = show_update_notice_if_available(&command);
     }
