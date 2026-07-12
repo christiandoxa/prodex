@@ -90,15 +90,15 @@ fn file_backend_preserves_binary_values() {
 fn file_backend_rejects_oversized_secret_reads() {
     let root = temp_dir("oversized-read");
     let path = root.join("auth.json");
-    let file = fs::File::create(&path).unwrap();
-    file.set_len(1024 * 1024 + 1).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-    }
     let store = SecretManager::new(FileSecretBackend::new());
     let location = SecretLocation::file(&path);
+    store.write(&location, SecretValue::bytes([0])).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(1024 * 1024 + 1)
+        .unwrap();
 
     let err = store.read(&location).unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
