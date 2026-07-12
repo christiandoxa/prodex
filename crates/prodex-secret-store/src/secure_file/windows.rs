@@ -246,7 +246,7 @@ fn open_directory(path: &Path, needs_write_dac: bool) -> io::Result<File> {
     let mut options = OpenOptions::new();
     let mut access = FILE_GENERIC_READ;
     if needs_write_dac {
-        access |= WRITE_DAC;
+        access |= WRITE_DAC | WRITE_OWNER;
     }
     options
         .access_mode(access)
@@ -258,7 +258,7 @@ fn open_directory(path: &Path, needs_write_dac: bool) -> io::Result<File> {
 fn open_regular(path: &Path, create: bool) -> io::Result<File> {
     let mut options = OpenOptions::new();
     let access = if create {
-        FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | READ_CONTROL | DELETE
+        FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER | READ_CONTROL | DELETE
     } else {
         FILE_GENERIC_READ
     };
@@ -377,8 +377,10 @@ fn set_private_acl(file: &File, directory: bool) -> io::Result<()> {
         let status = SetSecurityInfo(
             file.as_raw_handle().cast(),
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            std::ptr::null_mut(),
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            user.sid(),
             std::ptr::null_mut(),
             acl,
             std::ptr::null_mut(),
