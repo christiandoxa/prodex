@@ -56,10 +56,7 @@ fallible-iterator v0.3.0
 getrandom v0.2.17
     rand_core v0.6.4
 
-getrandom v0.3.4
-    rand_core v0.9.5
-
-getrandom v0.4.2
+getrandom v0.4.3
     tempfile v3.27.0
 
 hashbrown v0.16.1
@@ -80,18 +77,10 @@ nix v0.28.0
 nix v0.31.3
     os_info v3.15.0
 
-rand v0.9.4
-    provider crypto v0.1.0
-
-rand v0.10.1
-    jsonwebtoken v10.4.0
-
 rand_core v0.6.4 (*)
 
-rand_core v0.9.5 (*)
-
 rand_core v0.10.1
-    rand v0.10.1
+    rand v0.10.2
 
 thiserror v1.0.69
     filedescriptor v0.8.3
@@ -128,12 +117,11 @@ test("default budget accepts current duplicate families", () => {
       ["crypto-common", 2],
       ["digest", 2],
       ["fallible-iterator", 2],
-      ["getrandom", 3],
+      ["getrandom", 2],
       ["hashbrown", 2],
       ["itertools", 2],
       ["nix", 2],
-      ["rand", 2],
-      ["rand_core", 3],
+      ["rand_core", 2],
       ["thiserror", 2],
       ["thiserror-impl", 2],
       ["untrusted", 2],
@@ -161,9 +149,9 @@ test("allowed family over version budget fails", () => {
   assert.deepEqual(summary.overBudgetFamilies, [
     {
       name: "rand_core",
-      versions: ["0.6.4", "0.9.5", "0.10.1", "0.11.0"],
-      maxVersions: 3,
-      reason: "crypto-common, rand/proptest, and JWT AWS-LC dependencies currently span rand_core 0.6, 0.9, and 0.10.",
+      versions: ["0.6.4", "0.10.1", "0.11.0"],
+      maxVersions: 2,
+      reason: "legacy crypto and current rand/JWT AWS-LC dependencies resolve rand_core 0.6 and 0.10.",
     },
   ]);
 });
