@@ -345,6 +345,7 @@ fn method_fingerprint_token(method: GatewayHttpMethod) -> &'static str {
     match method {
         GatewayHttpMethod::Get => "get",
         GatewayHttpMethod::Post => "post",
+        GatewayHttpMethod::Put => "put",
         GatewayHttpMethod::Patch => "patch",
         GatewayHttpMethod::Delete => "delete",
         GatewayHttpMethod::Options => "options",

@@ -4,6 +4,7 @@ use super::*;
 pub enum GatewayHttpMethod {
     Get,
     Post,
+    Put,
     Patch,
     Delete,
     Options,
