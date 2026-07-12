@@ -1,5 +1,6 @@
 use clap::{Args, Subcommand};
 use std::ffi::OsString;
+use std::fmt;
 use std::path::PathBuf;
 
 #[derive(Subcommand, Debug)]
@@ -116,7 +117,7 @@ impl LogoutArgs {
     }
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct CodexPassthroughArgs {
     /// Existing profile to log into. If omitted, prodex creates or reuses a profile by workspace identity.
     #[arg(short, long, value_name = "NAME")]
@@ -126,6 +127,16 @@ pub struct CodexPassthroughArgs {
     pub codex_args: Vec<OsString>,
 }
 
+impl fmt::Debug for CodexPassthroughArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CodexPassthroughArgs")
+            .field("profile_configured", &self.profile.is_some())
+            .field("codex_args_count", &self.codex_args.len())
+            .finish()
+    }
+}
+
 #[derive(Args, Debug)]
 pub struct CodexUpdateArgs {
     /// Extra arguments passed through to `codex update` unchanged.
@@ -133,7 +144,7 @@ pub struct CodexUpdateArgs {
     pub codex_args: Vec<OsString>,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 pub struct QuotaArgs {
     /// Inspect a single profile. If omitted, prodex uses the active profile.
     #[arg(short, long, value_name = "NAME")]
@@ -168,7 +179,24 @@ pub struct QuotaArgs {
     pub base_url: Option<String>,
 }
 
-#[derive(Args, Debug)]
+impl fmt::Debug for QuotaArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("QuotaArgs")
+            .field("profile_configured", &self.profile.is_some())
+            .field("all", &self.all)
+            .field("auth", &self.auth)
+            .field("provider", &self.provider)
+            .field("detail", &self.detail)
+            .field("raw", &self.raw)
+            .field("watch", &self.watch)
+            .field("once", &self.once)
+            .field("base_url_configured", &self.base_url.is_some())
+            .finish()
+    }
+}
+
+#[derive(Args)]
 pub struct RedeemArgs {
     /// OpenAI/Codex profile whose reset credit should be redeemed.
     #[arg(value_name = "PROFILE")]
@@ -184,7 +212,19 @@ pub struct RedeemArgs {
     pub no_proxy: bool,
 }
 
-#[derive(Args, Debug)]
+impl fmt::Debug for RedeemArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RedeemArgs")
+            .field("profile_configured", &!self.profile.is_empty())
+            .field("yes", &self.yes)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("no_proxy", &self.no_proxy)
+            .finish()
+    }
+}
+
+#[derive(Args)]
 pub struct DashboardArgs {
     /// Interface to bind. Defaults to localhost only.
     #[arg(long, default_value = "127.0.0.1", value_name = "HOST")]
@@ -195,4 +235,66 @@ pub struct DashboardArgs {
     /// Override the ChatGPT backend base URL used for quota requests.
     #[arg(long, value_name = "URL")]
     pub base_url: Option<String>,
+}
+
+impl fmt::Debug for DashboardArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DashboardArgs")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("base_url_configured", &self.base_url.is_some())
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quota_family_debug_redacts_base_urls() {
+        let sentinel = "quota-args-debug-secret-sentinel";
+        let base_url = Some(format!("https://user:{sentinel}@example.test"));
+        let quota = QuotaArgs {
+            profile: None,
+            all: false,
+            auth: None,
+            provider: None,
+            detail: false,
+            raw: false,
+            watch: false,
+            once: true,
+            base_url: base_url.clone(),
+        };
+        let redeem = RedeemArgs {
+            profile: sentinel.to_string(),
+            yes: false,
+            base_url: base_url.clone(),
+            no_proxy: false,
+        };
+        let dashboard = DashboardArgs {
+            host: "127.0.0.1".to_string(),
+            port: 8765,
+            base_url,
+        };
+
+        for rendered in [
+            format!("{quota:?}"),
+            format!("{redeem:?}"),
+            format!("{dashboard:?}"),
+            format!(
+                "{:?}",
+                CodexPassthroughArgs {
+                    profile: None,
+                    codex_args: vec![OsString::from(format!(
+                        "--base-url=https://user:{sentinel}@example.test"
+                    ))],
+                }
+            ),
+        ] {
+            assert!(!rendered.contains(sentinel), "{rendered}");
+        }
+        assert!(format!("{quota:?}").contains("base_url_configured: true"));
+    }
 }
