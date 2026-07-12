@@ -194,6 +194,12 @@ impl RunCommandStrategy {
         }
         Ok(())
     }
+
+    fn isolate_auto_external_provider_child_env(&self, child: &mut ChildProcessPlan) {
+        if self.auto_external_provider.is_some() {
+            remove_provider_secret_env(child);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,6 +328,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
+        self.isolate_auto_external_provider_child_env(&mut child);
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
         }
