@@ -298,23 +298,16 @@ fn perform_prodex_cleanup_keeps_same_email_profiles_when_workspace_differs() {
         shared_codex_root: temp_dir.path.join("shared"),
         legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
     };
-    fs::create_dir_all(&paths.root).expect("prodex root should exist");
-    fs::create_dir_all(&paths.managed_profiles_root).expect("managed profiles root should exist");
+    create_codex_home_if_missing(&paths.root).expect("prodex root should exist");
+    create_codex_home_if_missing(&paths.managed_profiles_root)
+        .expect("managed profiles root should exist");
 
     let first_home = paths.managed_profiles_root.join("first");
     let second_home = paths.managed_profiles_root.join("second");
-    fs::create_dir_all(&first_home).expect("first home should exist");
-    fs::create_dir_all(&second_home).expect("second home should exist");
-    fs::write(
-        first_home.join("auth.json"),
-        r#"{"tokens":{"access_token":"token-one","account_id":"acct-one"}}"#,
-    )
-    .expect("first auth should write");
-    fs::write(
-        second_home.join("auth.json"),
-        r#"{"tokens":{"access_token":"token-two","account_id":"acct-two"}}"#,
-    )
-    .expect("second auth should write");
+    create_codex_home_if_missing(&first_home).expect("first home should exist");
+    create_codex_home_if_missing(&second_home).expect("second home should exist");
+    write_auth_json(&first_home.join("auth.json"), "acct-one");
+    write_auth_json(&second_home.join("auth.json"), "acct-two");
 
     let mut state = AppState {
         active_profile: Some("first".to_string()),

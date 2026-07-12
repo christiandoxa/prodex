@@ -261,6 +261,7 @@ fn open_private_file(path: &Path) -> io::Result<fs::File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::collections::BTreeMap;
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};

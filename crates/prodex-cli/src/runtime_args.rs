@@ -923,21 +923,23 @@ fn parse_credential_free_http_url(
     url: &str,
     option: &str,
 ) -> std::result::Result<reqwest::Url, String> {
-    let parsed = reqwest::Url::parse(url).map_err(|_| {
+    let invalid = || {
         format!(
-            "invalid {option}: expected an absolute http(s) URL with host and no credentials, query, or fragment"
+            "invalid {option}: expected an absolute http(s) URL with host and no credentials, \
+         query, or fragment"
         )
-    })?;
-    if !matches!(parsed.scheme(), "http" | "https")
+    };
+    let parsed = reqwest::Url::parse(url).map_err(|_| invalid())?;
+    if url.starts_with("http:///")
+        || url.starts_with("https:///")
+        || !matches!(parsed.scheme(), "http" | "https")
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
         || parsed.query().is_some()
         || parsed.fragment().is_some()
     {
-        return Err(format!(
-            "invalid {option}: expected an absolute http(s) URL with host and no credentials, query, or fragment"
-        ));
+        return Err(invalid());
     }
     Ok(parsed)
 }

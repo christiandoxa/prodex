@@ -50,6 +50,7 @@ pub(super) fn runtime_gemini_path_has_symlink_component(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]

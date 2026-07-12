@@ -58,6 +58,7 @@ mod runtime_proxy_continuations;
 mod runtime_broker_tuning;
 
 #[path = "main_internal/runtime_broker_registry.rs"]
+#[cfg(unix)]
 mod runtime_broker_registry;
 
 #[path = "main_internal_body/claude_launch.rs"]

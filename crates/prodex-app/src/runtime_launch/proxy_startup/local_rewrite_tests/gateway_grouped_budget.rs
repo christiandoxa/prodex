@@ -52,6 +52,7 @@ fn create_grouped_key(
     let response = client
         .post(format!("http://{listen_addr}/v1/prodex/gateway/keys"))
         .bearer_auth(admin_token)
+        .header("Idempotency-Key", format!("create-{tenant_id}-{name}"))
         .json(&serde_json::json!({
             "name": name,
             "tenant_id": tenant_id,

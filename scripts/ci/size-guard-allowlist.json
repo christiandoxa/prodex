@@ -86,7 +86,7 @@
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/admission/compact.rs",
-    "maxLines": 922,
+    "maxLines": 921,
     "reason": "Compact admission and quota/transport rotation regression coverage now carries the two explicit immutable RuntimeConfig fixture fields and remains capped while fixture setup is split from route-specific assertions."
   },
   {
@@ -101,8 +101,8 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1200,
-    "reason": "Provider-aware runtime and gateway argument parsing, trailing-var-arg extraction, struct definitions, and compatibility tests remain a tightly coupled CLI surface."
+    "maxLines": 1202,
+    "reason": "Provider-aware runtime and gateway argument parsing now explicitly rejects normalized triple-slash URLs; the tightly coupled CLI surface remains capped."
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",

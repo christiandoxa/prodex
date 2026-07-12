@@ -161,6 +161,13 @@ fn profile_commands_create_private_test_dir(path: &Path) {
     }
 }
 
+#[cfg(unix)]
+fn profile_commands_replace_test_dir_with_symlink(path: &Path, target: &Path) {
+    fs::remove_dir(path).expect("test directory should be removable");
+    fs::create_dir_all(target).expect("symlink target should exist");
+    std::os::unix::fs::symlink(target, path).expect("test directory symlink should be created");
+}
+
 fn profile_commands_sample_auth_json(profile_name: &str) -> String {
     serde_json::json!({
         "auth_mode": "chatgpt",
