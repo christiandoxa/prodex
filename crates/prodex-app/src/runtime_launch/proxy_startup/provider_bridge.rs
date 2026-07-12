@@ -4,6 +4,7 @@ mod provider_bridge_conformance;
 mod provider_bridge_error_policy;
 #[path = "provider_bridge_routing.rs"]
 mod provider_bridge_routing;
+pub(super) use prodex_provider_core::ProviderErrorClass as RuntimeProviderErrorClass;
 #[cfg(test)]
 use prodex_provider_core::ProviderTransformLoss;
 use prodex_provider_core::{
@@ -20,8 +21,6 @@ pub(super) use self::provider_bridge_conformance::{
 };
 pub(super) use self::provider_bridge_error_policy::{
     runtime_provider_error_class, runtime_provider_error_cooldown_ms,
-    runtime_provider_should_retry_with_next_model,
-    runtime_provider_should_rotate_auth_after_response,
 };
 #[cfg(test)]
 pub(super) use self::provider_bridge_routing::runtime_provider_native_passthrough;
@@ -120,16 +119,6 @@ pub(super) struct RuntimeProviderOpenAiContract {
     pub(super) model_list_endpoint: &'static str,
     pub(super) supports_streaming: bool,
     pub(super) supports_model_fallback: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RuntimeProviderErrorClass {
-    Auth,
-    Quota,
-    RateLimit,
-    Transient,
-    NotFound,
-    Fatal,
 }
 
 pub(super) fn runtime_provider_label(kind: RuntimeProviderBridgeKind) -> &'static str {

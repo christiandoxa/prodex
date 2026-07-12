@@ -12,11 +12,13 @@ use anyhow::{Context, Result, bail};
 #[cfg(test)]
 use prodex_provider_core::GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX;
 use prodex_provider_core::{
-    gemini_provider_core_compact_response_body, gemini_provider_core_local_compact_summary,
+    ProviderEndpoint, gemini_provider_core_compact_response_body,
+    gemini_provider_core_local_compact_summary,
     gemini_provider_core_semantic_compact_continuation_summary,
     gemini_provider_core_semantic_compact_request_body,
     gemini_provider_core_semantic_compact_summary,
 };
+use prodex_provider_spi::ProviderStreamMode;
 use redaction::redaction_redact_secret_like_text;
 use std::io::Read;
 
@@ -49,6 +51,8 @@ pub(super) fn respond_runtime_gemini_compact_request(
                 shared,
                 body,
                 auth,
+                ProviderEndpoint::Responses,
+                ProviderStreamMode::Unary,
             )?;
             let RuntimeLocalRewriteUpstreamResult {
                 response,

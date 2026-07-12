@@ -85,6 +85,8 @@ pub fn plan_application_provider_capability(
 pub struct ApplicationProviderRetryRequest {
     pub policy: ProviderRetryPolicy,
     pub stage: ProviderRetryStage,
+    pub cause: ProviderRetryCause,
+    pub error_class: ProviderErrorClass,
     pub attempted_precommit_retries: u8,
 }
 
@@ -100,6 +102,8 @@ pub fn plan_application_provider_retry(
         retry: plan_provider_retry(
             request.policy,
             request.stage,
+            request.cause,
+            request.error_class,
             request.attempted_precommit_retries,
         ),
     }
