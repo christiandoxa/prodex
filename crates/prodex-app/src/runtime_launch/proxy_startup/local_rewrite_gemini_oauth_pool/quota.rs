@@ -4,24 +4,29 @@ use super::super::super::local_rewrite_rate_limits::runtime_gemini_quota_codex_h
 use super::RuntimeGeminiOAuthPool;
 use crate::{
     fetch_gemini_quota_with_code_assist_endpoint, gemini_code_assist_endpoint,
-    runtime_proxy_log_to_path, spawn_runtime_background_worker_or_log,
+    runtime_proxy_log_to_path, try_spawn_runtime_background_worker,
 };
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::path::PathBuf;
+use std::thread::JoinHandle;
 
 impl RuntimeGeminiOAuthPool {
-    pub(in crate::runtime_launch::proxy_startup) fn spawn_quota_refresh(&self, log_path: PathBuf) {
+    pub(in crate::runtime_launch::proxy_startup) fn spawn_quota_refresh(
+        &self,
+        log_path: PathBuf,
+    ) -> Option<JoinHandle<()>> {
         let profiles = match self.state.lock() {
             Ok(state) => state.profiles.clone(),
-            Err(_) => return,
+            Err(_) => return None,
         };
         if profiles.is_empty() {
-            return;
+            return None;
         }
         let pool = self.clone();
         let code_assist_endpoint = gemini_code_assist_endpoint();
-        spawn_runtime_background_worker_or_log(
+        let worker_log_path = log_path.clone();
+        match try_spawn_runtime_background_worker(
             "prodex-gemini-quota-refresh",
             Some(log_path.clone()),
             move || {
@@ -40,7 +45,7 @@ impl RuntimeGeminiOAuthPool {
                             );
                             pool.remember_quota_headers(&profile.profile_name, headers);
                             runtime_proxy_log_to_path(
-                                &log_path,
+                                &worker_log_path,
                                 &runtime_proxy_structured_log_message(
                                     "local_rewrite_gemini_quota_status_ready",
                                     [
@@ -58,7 +63,7 @@ impl RuntimeGeminiOAuthPool {
                         }
                         Err(err) => {
                             runtime_proxy_log_to_path(
-                                &log_path,
+                                &worker_log_path,
                                 &runtime_proxy_structured_log_message(
                                     "local_rewrite_gemini_quota_status_unavailable",
                                     [
@@ -79,7 +84,25 @@ impl RuntimeGeminiOAuthPool {
                     }
                 }
             },
-        );
+        ) {
+            Ok(worker) => Some(worker),
+            Err(error) => {
+                runtime_proxy_log_to_path(
+                    &log_path,
+                    &runtime_proxy_structured_log_message(
+                        "runtime_background_worker_spawn_error",
+                        [
+                            runtime_proxy_log_field("worker", "prodex-gemini-quota-refresh"),
+                            runtime_proxy_log_field(
+                                "error",
+                                runtime_gemini_oauth_pool_error_log_value(&error.to_string()),
+                            ),
+                        ],
+                    ),
+                );
+                None
+            }
+        }
     }
 
     pub(in crate::runtime_launch::proxy_startup) fn quota_headers_for_profile(

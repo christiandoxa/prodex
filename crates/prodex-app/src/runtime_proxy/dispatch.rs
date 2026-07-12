@@ -14,6 +14,12 @@ pub(crate) struct RuntimeProxyBodyTooLarge {
     actual: Option<u64>,
 }
 
+impl RuntimeProxyBodyTooLarge {
+    pub(crate) const fn new(limit: u64, actual: Option<u64>) -> Self {
+        Self { limit, actual }
+    }
+}
+
 impl fmt::Display for RuntimeProxyBodyTooLarge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.actual {
@@ -36,8 +42,7 @@ impl std::error::Error for RuntimeProxyBodyTooLarge {}
 mod websocket;
 
 pub(crate) use websocket::{
-    capture_runtime_proxy_websocket_request, is_tiny_http_websocket_upgrade,
-    proxy_runtime_responses_websocket_request,
+    is_tiny_http_websocket_upgrade, proxy_runtime_responses_websocket_request,
 };
 
 fn runtime_proxy_log_dispatch_error(
@@ -385,15 +390,6 @@ pub(crate) fn capture_runtime_proxy_request(
     request: &mut tiny_http::Request,
     max_body_bytes: u64,
 ) -> Result<RuntimeProxyRequest> {
-    capture_runtime_proxy_request_with_max(request, max_body_bytes)
-}
-
-pub(crate) fn capture_runtime_proxy_request_with_limit(
-    request: &mut tiny_http::Request,
-    configured_max_body_bytes: u64,
-    limit: u64,
-) -> Result<RuntimeProxyRequest> {
-    let max_body_bytes = configured_max_body_bytes.min(limit);
     capture_runtime_proxy_request_with_max(request, max_body_bytes)
 }
 

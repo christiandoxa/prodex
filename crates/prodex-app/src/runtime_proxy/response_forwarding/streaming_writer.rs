@@ -1,12 +1,108 @@
 use super::*;
+use bytes::Bytes;
+use prodex_gateway_server::GatewayResponseBodySender;
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::runtime_stream_response_should_flush_each_chunk;
 
 pub(crate) fn write_runtime_streaming_response(
     writer: Box<dyn Write + Send + 'static>,
+    response: RuntimeStreamingResponse,
+) -> io::Result<()> {
+    write_runtime_streaming_response_to_sink(RuntimeHttp1StreamSink { writer }, response)
+}
+
+pub(crate) fn write_runtime_gateway_streaming_response(
+    sender: GatewayResponseBodySender,
+    response: RuntimeStreamingResponse,
+) -> io::Result<()> {
+    write_runtime_streaming_response_to_sink(
+        RuntimeGatewayStreamSink {
+            sender: Some(sender),
+        },
+        response,
+    )
+}
+
+trait RuntimeStreamingSink {
+    fn write_head(&mut self, status: u16, headers: &[(String, String)]) -> io::Result<()>;
+    fn write_chunk(&mut self, chunk: &[u8], flush: bool) -> io::Result<()>;
+    fn finish(&mut self) -> io::Result<()>;
+    fn send_error(&mut self, error: &io::Error);
+}
+
+struct RuntimeHttp1StreamSink {
+    writer: Box<dyn Write + Send + 'static>,
+}
+
+impl RuntimeStreamingSink for RuntimeHttp1StreamSink {
+    fn write_head(&mut self, status: u16, headers: &[(String, String)]) -> io::Result<()> {
+        let reason = reqwest::StatusCode::from_u16(status)
+            .ok()
+            .and_then(|status| status.canonical_reason().map(str::to_string))
+            .unwrap_or_else(|| "OK".to_string());
+        write!(
+            self.writer,
+            "HTTP/1.1 {status} {reason}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n"
+        )?;
+        for (name, value) in headers {
+            write!(self.writer, "{name}: {value}\r\n")?;
+        }
+        self.writer.write_all(b"\r\n")?;
+        self.writer.flush()
+    }
+
+    fn write_chunk(&mut self, chunk: &[u8], flush: bool) -> io::Result<()> {
+        write!(self.writer, "{:X}\r\n", chunk.len())?;
+        self.writer.write_all(chunk)?;
+        self.writer.write_all(b"\r\n")?;
+        if flush {
+            self.writer.flush()?;
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
+        self.writer.write_all(b"0\r\n\r\n")?;
+        self.writer.flush()
+    }
+
+    fn send_error(&mut self, _error: &io::Error) {}
+}
+
+struct RuntimeGatewayStreamSink {
+    sender: Option<GatewayResponseBodySender>,
+}
+
+impl RuntimeStreamingSink for RuntimeGatewayStreamSink {
+    fn write_head(&mut self, _status: u16, _headers: &[(String, String)]) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn write_chunk(&mut self, chunk: &[u8], _flush: bool) -> io::Result<()> {
+        self.sender
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "gateway response closed"))?
+            .blocking_send(Bytes::copy_from_slice(chunk))
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
+        self.sender
+            .take()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "gateway response closed"))?
+            .finish()
+    }
+
+    fn send_error(&mut self, error: &io::Error) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.blocking_send_error(io::Error::new(error.kind(), error.to_string()));
+        }
+    }
+}
+
+fn write_runtime_streaming_response_to_sink(
+    mut sink: impl RuntimeStreamingSink,
     mut response: RuntimeStreamingResponse,
 ) -> io::Result<()> {
-    let mut writer = writer;
     let flush_each_chunk = runtime_stream_response_should_flush_each_chunk(
         response
             .headers
@@ -39,80 +135,19 @@ pub(crate) fn write_runtime_streaming_response(
             response.request_id, response.profile_name, response.status
         ),
     );
-    let status = reqwest::StatusCode::from_u16(response.status)
-        .ok()
-        .and_then(|status| status.canonical_reason().map(str::to_string))
-        .unwrap_or_else(|| "OK".to_string());
-    write!(
-        writer,
-        "HTTP/1.1 {} {}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n",
-        response.status, status
-    )
-    .map_err(|err| {
-        log_writer_error("headers_start", 0, 0, &err);
-        err
-    })?;
-    for (name, value) in &response.headers {
-        write!(writer, "{name}: {value}\r\n").map_err(|err| {
-            log_writer_error("header_line", 0, 0, &err);
-            err
-        })?;
-    }
-    writer.write_all(b"\r\n").inspect_err(|err| {
-        log_writer_error("headers_end", 0, 0, err);
-    })?;
-    writer.flush().inspect_err(|err| {
-        log_writer_error("headers_flush", 0, 0, err);
-    })?;
+    sink.write_head(response.status, &response.headers)
+        .inspect_err(|error| log_writer_error("headers", 0, 0, error))?;
 
     let mut buffer = [0_u8; 8192];
     let mut total_bytes = 0usize;
     let mut chunk_count = 0usize;
-    let chunk_context = RuntimeStreamChunkContext {
-        request_id: response.request_id,
-        log_path: response.log_path.clone(),
-        profile_name: response.profile_name.clone(),
-        shared: response.shared.clone(),
-        started_at: &started_at,
-        log_writer_error: &log_writer_error,
-        flush_each_chunk,
-    };
     loop {
         let read = match response.body.read(&mut buffer) {
             Ok(read) => read,
-            Err(err) => {
-                runtime_proxy_log_to_path(
-                    &response.log_path,
-                    &runtime_proxy_structured_log_message(
-                        "stream_read_error",
-                        [
-                            runtime_proxy_log_field("request", response.request_id.to_string()),
-                            runtime_proxy_log_field("transport", "http"),
-                            runtime_proxy_log_field("profile", response.profile_name.as_str()),
-                            runtime_proxy_log_field("chunks", chunk_count.to_string()),
-                            runtime_proxy_log_field("bytes", total_bytes.to_string()),
-                            runtime_proxy_log_field(
-                                "elapsed_ms",
-                                started_at.elapsed().as_millis().to_string(),
-                            ),
-                            runtime_proxy_log_field(
-                                "error",
-                                runtime_streaming_error_log_value(&err),
-                            ),
-                        ],
-                    ),
-                );
-                let transport_error =
-                    anyhow::Error::new(io::Error::new(err.kind(), err.to_string()));
-                if is_runtime_proxy_transport_failure(&transport_error) {
-                    note_runtime_profile_latency_failure(
-                        &response.shared,
-                        &response.profile_name,
-                        RuntimeRouteKind::Responses,
-                        "stream_read_error",
-                    );
-                }
-                return Err(err);
+            Err(error) => {
+                runtime_stream_read_error(&response, &started_at, chunk_count, total_bytes, &error);
+                sink.send_error(&error);
+                return Err(error);
             }
         };
         if read == 0 {
@@ -124,50 +159,27 @@ pub(crate) fn write_runtime_streaming_response(
                 response.shared.runtime_config.fault_stream_read_error_once,
             )
         {
-            let err = io::Error::new(
+            let error = io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "injected runtime stream read failure",
             );
-            runtime_proxy_log_to_path(
-                &response.log_path,
-                &runtime_proxy_structured_log_message(
-                    "stream_read_error",
-                    [
-                        runtime_proxy_log_field("request", response.request_id.to_string()),
-                        runtime_proxy_log_field("transport", "http"),
-                        runtime_proxy_log_field("profile", response.profile_name.as_str()),
-                        runtime_proxy_log_field("chunks", chunk_count.to_string()),
-                        runtime_proxy_log_field("bytes", total_bytes.to_string()),
-                        runtime_proxy_log_field(
-                            "elapsed_ms",
-                            started_at.elapsed().as_millis().to_string(),
-                        ),
-                        runtime_proxy_log_field("error", runtime_streaming_error_log_value(&err)),
-                    ],
-                ),
-            );
-            note_runtime_profile_latency_failure(
-                &response.shared,
-                &response.profile_name,
-                RuntimeRouteKind::Responses,
-                "stream_read_error",
-            );
-            return Err(err);
+            runtime_stream_read_error(&response, &started_at, chunk_count, total_bytes, &error);
+            sink.send_error(&error);
+            return Err(error);
         }
         write_runtime_stream_chunk(
-            &mut writer,
-            &chunk_context,
+            &mut sink,
+            &response,
+            &started_at,
             &buffer[..read],
+            flush_each_chunk,
             &mut chunk_count,
             &mut total_bytes,
-        )?;
+        )
+        .inspect_err(|error| log_writer_error("chunk", chunk_count, total_bytes, error))?;
     }
-    writer.write_all(b"0\r\n\r\n").inspect_err(|err| {
-        log_writer_error("trailer", chunk_count, total_bytes, err);
-    })?;
-    writer.flush().inspect_err(|err| {
-        log_writer_error("trailer_flush", chunk_count, total_bytes, err);
-    })?;
+    sink.finish()
+        .inspect_err(|error| log_writer_error("finish", chunk_count, total_bytes, error))?;
     runtime_proxy_log_to_path(
         &response.log_path,
         &format!(
@@ -189,51 +201,62 @@ pub(crate) fn write_runtime_streaming_response(
     Ok(())
 }
 
-fn runtime_streaming_error_log_value(err: &io::Error) -> String {
-    redaction_redact_secret_like_text(&err.to_string()).replace('\n', " ")
-}
-
-struct RuntimeStreamChunkContext<'a> {
-    request_id: u64,
-    log_path: PathBuf,
-    profile_name: String,
-    shared: RuntimeRotationProxyShared,
-    started_at: &'a Instant,
-    log_writer_error: &'a dyn Fn(&str, usize, usize, &io::Error),
-    flush_each_chunk: bool,
+fn runtime_stream_read_error(
+    response: &RuntimeStreamingResponse,
+    started_at: &Instant,
+    chunk_count: usize,
+    total_bytes: usize,
+    error: &io::Error,
+) {
+    runtime_proxy_log_to_path(
+        &response.log_path,
+        &runtime_proxy_structured_log_message(
+            "stream_read_error",
+            [
+                runtime_proxy_log_field("request", response.request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("profile", response.profile_name.as_str()),
+                runtime_proxy_log_field("chunks", chunk_count.to_string()),
+                runtime_proxy_log_field("bytes", total_bytes.to_string()),
+                runtime_proxy_log_field("elapsed_ms", started_at.elapsed().as_millis().to_string()),
+                runtime_proxy_log_field("error", runtime_streaming_error_log_value(error)),
+            ],
+        ),
+    );
+    let transport_error = anyhow::Error::new(io::Error::new(error.kind(), error.to_string()));
+    if is_runtime_proxy_transport_failure(&transport_error) {
+        note_runtime_profile_latency_failure(
+            &response.shared,
+            &response.profile_name,
+            RuntimeRouteKind::Responses,
+            "stream_read_error",
+        );
+    }
 }
 
 fn write_runtime_stream_chunk(
-    writer: &mut Box<dyn Write + Send + 'static>,
-    context: &RuntimeStreamChunkContext<'_>,
+    sink: &mut impl RuntimeStreamingSink,
+    response: &RuntimeStreamingResponse,
+    started_at: &Instant,
     chunk: &[u8],
+    flush_each_chunk: bool,
     chunk_count: &mut usize,
     total_bytes: &mut usize,
 ) -> io::Result<()> {
-    let RuntimeStreamChunkContext {
-        request_id,
-        log_path,
-        profile_name,
-        shared,
-        started_at,
-        log_writer_error,
-        flush_each_chunk,
-    } = context;
     if chunk.is_empty() {
         return Ok(());
     }
-
     *chunk_count += 1;
     *total_bytes += chunk.len();
     if *chunk_count == 1 {
         runtime_proxy_log_to_path(
-            log_path,
+            &response.log_path,
             &runtime_proxy_structured_log_message(
                 "first_local_chunk",
                 [
-                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("request", response.request_id.to_string()),
                     runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("profile", profile_name.as_str()),
+                    runtime_proxy_log_field("profile", response.profile_name.as_str()),
                     runtime_proxy_log_field("bytes", chunk.len().to_string()),
                     runtime_proxy_log_field(
                         "elapsed_ms",
@@ -243,29 +266,18 @@ fn write_runtime_stream_chunk(
             ),
         );
         note_runtime_profile_latency_observation(
-            shared,
-            profile_name,
+            &response.shared,
+            &response.profile_name,
             RuntimeRouteKind::Responses,
             "ttfb",
             started_at.elapsed().as_millis() as u64,
         );
     }
-    write!(writer, "{:X}\r\n", chunk.len()).map_err(|err| {
-        log_writer_error("chunk_size", *chunk_count, *total_bytes, &err);
-        err
-    })?;
-    writer.write_all(chunk).inspect_err(|err| {
-        log_writer_error("chunk_body", *chunk_count, *total_bytes, err);
-    })?;
-    writer.write_all(b"\r\n").inspect_err(|err| {
-        log_writer_error("chunk_suffix", *chunk_count, *total_bytes, err);
-    })?;
-    if *flush_each_chunk || *chunk_count == 1 {
-        writer.flush().inspect_err(|err| {
-            log_writer_error("chunk_flush", *chunk_count, *total_bytes, err);
-        })?;
-    }
-    Ok(())
+    sink.write_chunk(chunk, flush_each_chunk || *chunk_count == 1)
+}
+
+fn runtime_streaming_error_log_value(error: &io::Error) -> String {
+    redaction_redact_secret_like_text(&error.to_string()).replace('\n', " ")
 }
 
 #[cfg(test)]
@@ -274,10 +286,10 @@ mod tests {
 
     #[test]
     fn streaming_error_log_value_redacts_secret_like_material() {
-        let err = io::Error::other(
+        let error = io::Error::other(
             "stream failed\nAuthorization: Bearer stream-token\napi_key=stream-key",
         );
-        let message = runtime_streaming_error_log_value(&err);
+        let message = runtime_streaming_error_log_value(&error);
 
         assert!(!message.contains('\n'));
         assert!(message.contains("Authorization: Bearer <redacted>"));

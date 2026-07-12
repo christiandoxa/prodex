@@ -1,8 +1,8 @@
 //! Gateway spend event logging and optional external observability sinks.
 
 use super::super::local_rewrite::{
-    RuntimeLocalRewriteProxyShared, runtime_gateway_try_reserve_background_task,
-    schedule_runtime_gateway_billing_ledger_reconcile,
+    RuntimeGatewayBackgroundTaskGuard, RuntimeLocalRewriteProxyShared,
+    runtime_gateway_try_reserve_background_task, schedule_runtime_gateway_billing_ledger_reconcile,
 };
 use super::super::provider_bridge::{
     RuntimeProviderGatewaySpendEvent, runtime_provider_gateway_spend_apply_admission_ids,
@@ -76,12 +76,14 @@ pub(in crate::runtime_launch::proxy_startup) fn emit_runtime_gateway_spend_event
         return;
     };
     let shared = shared.clone();
+    let background_task = RuntimeGatewayBackgroundTaskGuard::new(&shared);
     drop(
         shared
             .runtime_shared
             .async_runtime
             .clone()
             .spawn_blocking(move || {
+                let _background_task = background_task;
                 let _permit = permit;
                 emit_runtime_gateway_observability_sinks_blocking(&shared, &event);
             }),
