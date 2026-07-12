@@ -1,7 +1,6 @@
 use super::local_rewrite::{
     RUNTIME_GATEWAY_REDIS_LEDGER_KEY, RUNTIME_GATEWAY_REDIS_LEDGER_LOCK,
-    RuntimeGatewayBackgroundTaskGuard, RuntimeGatewayDurableReservationState,
-    RuntimeLocalRewriteProxyShared,
+    RuntimeGatewayDurableReservationState,
 };
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationReconciliationInput, runtime_gateway_application_usage_reconciliation,
@@ -12,7 +11,6 @@ use super::local_rewrite_gateway_file_ledger::{
     runtime_gateway_file_ledger_load, runtime_gateway_file_ledger_reconcile_response,
 };
 use super::local_rewrite_gateway_ledger_types::RuntimeGatewayBillingLedgerEntry;
-use super::local_rewrite_gateway_reconciliation_audit::runtime_gateway_audit_usage_reconciliation;
 use super::local_rewrite_gateway_reconciliation_runtime::{
     runtime_gateway_durable_actual_usage, runtime_gateway_postgres_load_durable_reservation_state,
     runtime_gateway_postgres_reconcile_usage,
@@ -36,9 +34,6 @@ use rusqlite::OptionalExtension;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-const RUNTIME_GATEWAY_LEDGER_PERSISTENCE_FAILED_ERROR_KIND: &str =
-    "gateway_ledger_persistence_failed";
-
 pub(super) fn runtime_gateway_billing_ledger_load(
     state_store: &RuntimeGatewayStateStore,
     limit: usize,
@@ -60,156 +55,7 @@ pub(super) fn runtime_gateway_billing_ledger_load(
     }
 }
 
-pub(super) fn schedule_runtime_gateway_billing_ledger_reconcile(
-    shared: &RuntimeLocalRewriteProxyShared,
-    event: RuntimeProviderGatewaySpendEvent,
-) {
-    if event.phase != "response" {
-        return;
-    }
-    let should_reconcile = shared
-        .gateway_usage
-        .request_ids
-        .lock()
-        .map(|request_ids| request_ids.contains(&event.request))
-        .unwrap_or(false);
-    if !should_reconcile {
-        crate::runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_billing_ledger_reconcile_skipped",
-                [
-                    runtime_proxy_log_field("request", event.request.to_string()),
-                    runtime_proxy_log_field("backend", shared.gateway_state_store.label()),
-                ],
-            ),
-        );
-        return;
-    }
-    let state_store = shared.gateway_state_store.clone();
-    let runtime_shared = shared.runtime_shared.clone();
-    let postgres_repository = shared.gateway_postgres_repository.clone();
-    let request_ids = Arc::clone(&shared.gateway_usage.request_ids);
-    let typed_request_ids = Arc::clone(&shared.gateway_usage.typed_request_ids);
-    let call_ids = Arc::clone(&shared.gateway_usage.call_ids);
-    let ledger_scopes = Arc::clone(&shared.gateway_usage.ledger_scopes);
-    let durable_reservations = Arc::clone(&shared.gateway_usage.durable_reservations);
-    let background_task = RuntimeGatewayBackgroundTaskGuard::new(shared);
-    shared.runtime_shared.async_runtime.spawn_blocking(move || {
-        let _background_task = background_task;
-        let mut last_error = None;
-        for attempt in 0..25 {
-            match runtime_gateway_billing_ledger_reconcile_response(&state_store, &event) {
-                Ok(true) => {
-                    match runtime_gateway_durable_reconcile_response(
-                        &runtime_shared,
-                        &state_store,
-                        postgres_repository.as_ref(),
-                        &durable_reservations,
-                        &event,
-                    ) {
-                        Ok(()) => {}
-                        Err(err) => {
-                            last_error = Some(err);
-                            if attempt < 24 {
-                                std::thread::sleep(std::time::Duration::from_millis(20));
-                            }
-                            continue;
-                        }
-                    }
-                    runtime_gateway_audit_usage_reconciliation(
-                        &runtime_shared,
-                        &state_store,
-                        &event,
-                        "success",
-                    );
-                    if let Ok(mut request_ids) = request_ids.lock() {
-                        request_ids.remove(&event.request);
-                    }
-                    if let Ok(mut typed_request_ids) = typed_request_ids.lock() {
-                        typed_request_ids.remove(&event.request);
-                    }
-                    if let Ok(mut call_ids) = call_ids.lock() {
-                        call_ids.remove(&event.request);
-                    }
-                    if let Ok(mut ledger_scopes) = ledger_scopes.lock() {
-                        ledger_scopes.remove(&event.request);
-                    }
-                    if let Ok(mut durable_reservations) = durable_reservations.lock() {
-                        durable_reservations.remove(&event.request);
-                    }
-                    return;
-                }
-                Ok(false) => {
-                    match runtime_gateway_durable_reconcile_response(
-                        &runtime_shared,
-                        &state_store,
-                        postgres_repository.as_ref(),
-                        &durable_reservations,
-                        &event,
-                    ) {
-                        Ok(()) => {}
-                        Err(err) => {
-                            last_error = Some(err);
-                            if attempt < 24 {
-                                std::thread::sleep(std::time::Duration::from_millis(20));
-                            }
-                            continue;
-                        }
-                    }
-                    if attempt < 24 {
-                        std::thread::sleep(std::time::Duration::from_millis(20));
-                    }
-                }
-                Err(err) => {
-                    last_error = Some(err);
-                    if attempt < 24 {
-                        std::thread::sleep(std::time::Duration::from_millis(20));
-                    }
-                }
-            }
-        }
-        if let Ok(mut request_ids) = request_ids.lock() {
-            request_ids.remove(&event.request);
-        }
-        if let Ok(mut typed_request_ids) = typed_request_ids.lock() {
-            typed_request_ids.remove(&event.request);
-        }
-        if let Ok(mut call_ids) = call_ids.lock() {
-            call_ids.remove(&event.request);
-        }
-        if let Ok(mut ledger_scopes) = ledger_scopes.lock() {
-            ledger_scopes.remove(&event.request);
-        }
-        if let Ok(mut durable_reservations) = durable_reservations.lock() {
-            durable_reservations.remove(&event.request);
-        }
-        if let Some(_err) = last_error {
-            runtime_gateway_audit_usage_reconciliation(
-                &runtime_shared,
-                &state_store,
-                &event,
-                "failure",
-            );
-            crate::runtime_proxy_log(
-                &runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_billing_ledger_reconcile_failed",
-                    [
-                        runtime_proxy_log_field("request", event.request.to_string()),
-                        runtime_proxy_log_field("backend", state_store.label()),
-                        runtime_proxy_log_field(
-                            "error_kind",
-                            RUNTIME_GATEWAY_LEDGER_PERSISTENCE_FAILED_ERROR_KIND,
-                        ),
-                    ],
-                ),
-            );
-        }
-    });
-}
-
-fn runtime_gateway_durable_reconcile_response(
+pub(super) fn runtime_gateway_durable_reconcile_response(
     runtime_shared: &RuntimeRotationProxyShared,
     state_store: &RuntimeGatewayStateStore,
     postgres_repository: Option<&prodex_storage_postgres_runtime::PostgresRepository>,
@@ -477,7 +323,7 @@ fn runtime_gateway_sqlite_reconcile_usage(
     Ok(())
 }
 
-fn runtime_gateway_billing_ledger_reconcile_response(
+pub(super) fn runtime_gateway_billing_ledger_reconcile_response(
     state_store: &RuntimeGatewayStateStore,
     event: &RuntimeProviderGatewaySpendEvent,
 ) -> std::io::Result<bool> {
@@ -528,28 +374,6 @@ mod tests {
         BudgetSnapshot, IdempotencyKey, ReservationRecord, ReservationRequest, TenantId,
         VirtualKeyId,
     };
-
-    #[test]
-    fn ledger_persistence_failure_log_uses_stable_redacted_error_kind() {
-        let message = runtime_proxy_structured_log_message(
-            "gateway_billing_ledger_reconcile_failed",
-            [
-                runtime_proxy_log_field("request", "123"),
-                runtime_proxy_log_field("backend", "file"),
-                runtime_proxy_log_field(
-                    "error_kind",
-                    RUNTIME_GATEWAY_LEDGER_PERSISTENCE_FAILED_ERROR_KIND,
-                ),
-            ],
-        );
-        assert!(message.contains("gateway_billing_ledger_reconcile_failed"));
-        assert!(message.contains("backend=file"));
-        assert!(message.contains("error_kind=gateway_ledger_persistence_failed"));
-        assert!(!message.contains("gateway-billing-ledger.jsonl"));
-        assert!(!message.contains("/tmp/"));
-        assert!(!message.contains("Is a directory"));
-        assert!(!message.contains("permission denied"));
-    }
 
     #[test]
     fn durable_actual_usage_prefers_actual_when_reservation_covers_it() {

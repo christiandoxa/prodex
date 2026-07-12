@@ -6,10 +6,12 @@ use crate::RuntimeProxyRequest;
 use prodex_application::{
     ApplicationAuthorizedRequestContext, ApplicationDataPlaneError, ApplicationDataPlanePlan,
     ApplicationDataPlaneRequest, ApplicationProviderRetryRequest,
-    ApplicationUsageReconciliationError, ApplicationUsageReconciliationPlan,
-    ApplicationUsageReconciliationRequest, plan_application_data_plane,
-    plan_application_data_plane_execution, plan_application_provider_retry,
-    plan_application_usage_reconciliation,
+    ApplicationUsageReconciliationBackend, ApplicationUsageReconciliationError,
+    ApplicationUsageReconciliationExecutionPlan, ApplicationUsageReconciliationExecutionRequest,
+    ApplicationUsageReconciliationPlan, ApplicationUsageReconciliationRequest,
+    plan_application_data_plane, plan_application_data_plane_execution,
+    plan_application_provider_retry, plan_application_usage_reconciliation,
+    plan_application_usage_reconciliation_execution,
 };
 use prodex_domain::{
     Principal, RequestId, ReservationReconciliationReason, ReservationRecord, SecretRef,
@@ -511,6 +513,28 @@ pub(super) struct RuntimeGatewayApplicationReconciliationInput<'a> {
     pub(super) event: &'a RuntimeProviderGatewaySpendEvent,
 }
 
+pub(super) fn runtime_gateway_application_reconciliation_execution(
+    state_store: &RuntimeGatewayStateStore,
+    event: &RuntimeProviderGatewaySpendEvent,
+) -> ApplicationUsageReconciliationExecutionPlan {
+    let backend = match state_store {
+        RuntimeGatewayStateStore::File { .. } => ApplicationUsageReconciliationBackend::File,
+        RuntimeGatewayStateStore::Sqlite { .. } => ApplicationUsageReconciliationBackend::Sqlite,
+        RuntimeGatewayStateStore::Postgres { .. } => {
+            ApplicationUsageReconciliationBackend::Postgres
+        }
+        RuntimeGatewayStateStore::Redis { .. } => ApplicationUsageReconciliationBackend::Redis,
+    };
+    plan_application_usage_reconciliation_execution(
+        ApplicationUsageReconciliationExecutionRequest {
+            backend,
+            reason: event
+                .reconciliation_reason
+                .unwrap_or(ReservationReconciliationReason::Completed),
+        },
+    )
+}
+
 pub(super) struct RuntimeGatewayApplicationReconciliationPlan {
     pub(super) application: ApplicationUsageReconciliationPlan,
     pub(super) command: UsageReconciliationCommand,
@@ -672,6 +696,10 @@ mod tests {
                 },
             )
             .unwrap();
+            let execution =
+                runtime_gateway_application_reconciliation_execution(&state_store, &event);
+            let audit = execution
+                .audit(prodex_application::ApplicationUsageReconciliationAuditOutcome::Success);
 
             assert_eq!(
                 plan.application
@@ -699,6 +727,15 @@ mod tests {
                     .expect("partial usage releases the unconsumed reservation")
                     .amount,
                 UsageAmount::new(95, 950),
+            );
+            assert_eq!(audit.backend(), "sqlite");
+            assert_eq!(
+                audit.reason(),
+                match reason {
+                    ReservationReconciliationReason::Cancelled => "cancelled",
+                    ReservationReconciliationReason::StreamInterrupted => "stream_interrupted",
+                    ReservationReconciliationReason::Completed => "completed",
+                }
             );
         }
     }

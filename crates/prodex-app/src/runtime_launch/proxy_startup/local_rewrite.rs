@@ -27,9 +27,8 @@ pub(super) use super::local_rewrite_gateway_keys::{
     RuntimeGatewayDurableReservationState, runtime_gateway_virtual_key_entries_from_sources,
     runtime_gateway_virtual_key_store_load, runtime_gateway_virtual_key_store_load_strict,
 };
-pub(super) use super::local_rewrite_gateway_ledger::{
-    runtime_gateway_billing_ledger_load, schedule_runtime_gateway_billing_ledger_reconcile,
-};
+pub(super) use super::local_rewrite_gateway_ledger::runtime_gateway_billing_ledger_load;
+pub(super) use super::local_rewrite_gateway_reconciliation_worker::schedule_runtime_gateway_billing_ledger_reconcile;
 use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 #[cfg(test)]
 pub(super) use super::local_rewrite_gateway_usage::runtime_gateway_virtual_key_usage_apply_deltas;

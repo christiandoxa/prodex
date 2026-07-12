@@ -1,5 +1,9 @@
 //! Admission accounting, reconciliation, recovery, and billing plans.
 
+mod reconciliation_execution;
+
+pub use reconciliation_execution::*;
+
 use super::*;
 use crate::config::application_runtime_response_from_storage;
 use crate::control_plane::control_plane_audit_write;
