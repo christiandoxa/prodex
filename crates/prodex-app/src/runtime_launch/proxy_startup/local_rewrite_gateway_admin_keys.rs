@@ -1,67 +1,50 @@
-use super::local_rewrite::{
-    RuntimeLocalRewriteProxyShared, runtime_gateway_virtual_key_store_load,
+use prodex_application::{
+    ApplicationGatewayIdentityMutationError, ApplicationGatewayVirtualKeyMutationRequest,
+    ApplicationSecretFingerprint, plan_application_gateway_virtual_key_mutation,
 };
+use prodex_control_plane::{ControlPlaneActionPlan, ControlPlaneOperation};
+use zeroize::Zeroizing;
+
+use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_admin_audit::{
-    runtime_gateway_audit_admin_authorization_denied_event, runtime_gateway_audit_admin_key_event,
+    runtime_gateway_audit_admin_authorization_denied_event,
     runtime_gateway_audit_admin_key_mutation_denied_event,
+    runtime_gateway_audit_admin_request_denied_event,
 };
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
-use super::local_rewrite_gateway_admin_fields::{
-    runtime_gateway_admin_body_tenant_id, runtime_gateway_admin_key_patch_fields,
-    runtime_gateway_admin_optional_dimension_from_body, runtime_gateway_admin_request_dimension,
-    runtime_gateway_validate_virtual_key_name,
+use super::local_rewrite_gateway_admin_execution::{
+    RuntimeGatewayAdminMutationExecution, runtime_gateway_admin_mutation_execution,
+};
+use super::local_rewrite_gateway_admin_identity::{
+    RuntimeGatewayIdentityKind, runtime_gateway_apply_virtual_key_projection,
+    runtime_gateway_identity_error, runtime_gateway_virtual_key_create_mutation,
+    runtime_gateway_virtual_key_delete_mutation, runtime_gateway_virtual_key_record,
+    runtime_gateway_virtual_key_update_mutation,
 };
 use super::local_rewrite_gateway_admin_response::{
-    RuntimeGatewayAdminError, runtime_gateway_admin_json_body, runtime_gateway_admin_json_response,
+    RuntimeGatewayAdminError, runtime_gateway_admin_json_response,
 };
-use super::local_rewrite_gateway_admin_store_mutation::runtime_gateway_mutate_admin_key_store;
-use super::local_rewrite_gateway_key_patch::runtime_gateway_apply_virtual_key_patch;
+use super::local_rewrite_gateway_admin_store_mutation::runtime_gateway_mutate_admin_key_store_atomic;
 use super::local_rewrite_gateway_key_payloads::{
     runtime_gateway_admin_key_json, runtime_gateway_admin_stored_key_json,
-    runtime_gateway_virtual_key_entry_by_name, runtime_gateway_virtual_key_name_exists,
+    runtime_gateway_virtual_key_entry_by_name,
 };
 use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayStoredVirtualKey, RuntimeGatewayVirtualKeySource,
+    RuntimeGatewayVirtualKeyStoreFile,
 };
-use super::local_rewrite_gateway_util::{
-    runtime_gateway_generate_virtual_key_token, runtime_gateway_unix_epoch_seconds,
-};
+use super::local_rewrite_gateway_util::runtime_gateway_generate_virtual_key_token;
 use super::*;
-use prodex_application::{
-    ApplicationVirtualKeyLifecycleErrorStatus, ApplicationVirtualKeyLifecycleRequest,
-    plan_application_virtual_key_lifecycle, plan_application_virtual_key_lifecycle_error_response,
-};
-use prodex_control_plane::{
-    ControlPlaneActionRequest, ControlPlaneOperation, ControlPlaneResourceRef,
-};
-use prodex_domain::{
-    AuditDigest, CredentialScope, Principal, PrincipalId, PrincipalKind, ResourceKind, Role,
-    SecretRef, TenantId, VirtualKeyId,
-};
-use prodex_storage::{
-    DurableStoreKind, TenantStorageKey, VirtualKeySecretReferenceCommand,
-    VirtualKeySecretReferenceKind,
-};
-use sha2::{Digest, Sha256};
+
+mod intent;
+use intent::RuntimeGatewayKeyMutationIntent;
+
+#[cfg(test)]
+#[path = "local_rewrite_gateway_admin_keys_tests.rs"]
+mod tests;
 
 const RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE: &str =
     "gateway key token could not be generated";
-const RUNTIME_GATEWAY_KEY_TENANT_REQUIRED_MESSAGE: &str =
-    "gateway virtual key tenant_id is required for durable key storage";
-const RUNTIME_GATEWAY_KEY_TENANT_INVALID_MESSAGE: &str =
-    "gateway virtual key tenant_id must be a valid tenant identifier";
-const RUNTIME_GATEWAY_KEY_ID_REQUIRED_MESSAGE: &str =
-    "gateway virtual key id is required for durable key storage";
-const RUNTIME_GATEWAY_KEY_ID_INVALID_MESSAGE: &str =
-    "gateway virtual key id must be a valid virtual key identifier";
-
-fn runtime_gateway_admin_key_generation_failed_error() -> RuntimeGatewayAdminError {
-    RuntimeGatewayAdminError::new(
-        500,
-        "gateway_key_generation_failed",
-        RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE,
-    )
-}
 
 pub(super) fn runtime_gateway_admin_get_key_response(
     name: &str,
@@ -111,188 +94,77 @@ pub(super) fn runtime_gateway_admin_create_key_response(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
 ) -> tiny_http::ResponseBox {
-    let body = match runtime_gateway_admin_json_body(captured) {
-        Ok(body) => body,
+    let execution = match runtime_gateway_admin_mutation_execution(
+        captured,
+        request_path(captured),
+        admin_auth,
+        base_action,
+        ControlPlaneOperation::VirtualKeyCreate,
+    ) {
+        Ok(execution) => execution,
         Err(response) => return response,
     };
-    let name = match body
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.is_empty())
-    {
-        Some(name) => name.to_string(),
-        None => {
-            return build_runtime_proxy_json_error_response(
-                400,
-                "invalid_gateway_key_name",
-                "gateway virtual key name is required",
-            );
-        }
-    };
-    if let Err(message) = runtime_gateway_validate_virtual_key_name(&name) {
-        return build_runtime_proxy_json_error_response(400, "invalid_gateway_key_name", message);
-    }
-    let requested_tenant_id = runtime_gateway_admin_request_tenant_id(&body, admin_auth);
-    if !admin_auth.can_access_tenant(requested_tenant_id.as_deref())
-        || !admin_auth.can_access_dimensions(
-            runtime_gateway_admin_request_dimension(
-                &body,
-                "team_id",
-                admin_auth.team_id.as_deref(),
-            )
-            .as_deref(),
-            runtime_gateway_admin_request_dimension(
-                &body,
-                "project_id",
-                admin_auth.project_id.as_deref(),
-            )
-            .as_deref(),
-            runtime_gateway_admin_request_dimension(
-                &body,
-                "user_id",
-                admin_auth.user_id.as_deref(),
-            )
-            .as_deref(),
-            runtime_gateway_admin_request_dimension(
-                &body,
-                "budget_id",
-                admin_auth.budget_id.as_deref(),
-            )
-            .as_deref(),
+    let RuntimeGatewayAdminMutationExecution {
+        authorized_action,
+        governance,
+        atomic_write,
+        entity_tag: _,
+    } = execution;
+    let now_unix_ms = atomic_write.completed_at_unix_ms;
+    let mut created = None;
+    let mut returned_token = None;
+    let result = runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let mut body = mutation_json(captured)?;
+        let records = application_key_records(store)?;
+        let supplied = take_supplied_token(&mut body);
+        let token = match supplied {
+            Some(token) => token,
+            None => Zeroizing::new(
+                runtime_gateway_generate_virtual_key_token()
+                    .map_err(|_| runtime_gateway_admin_key_generation_failed_error())?,
+            ),
+        };
+        let fingerprint = token_fingerprint(&token)?;
+        let mutation = runtime_gateway_virtual_key_create_mutation(
+            prodex_domain::VirtualKeyId::new(),
+            &body,
+            fingerprint,
+        )?;
+        let plan = plan_application_gateway_virtual_key_mutation(
+            ApplicationGatewayVirtualKeyMutationRequest {
+                authorized_action: &authorized_action,
+                governance: &governance,
+                current_records: &records,
+                mutation,
+                now_unix_ms,
+            },
         )
-        || !admin_auth.can_access_key(&name)
-    {
-        let requested_name = body
-            .get("name")
-            .and_then(|value| value.as_str())
-            .unwrap_or("<invalid>");
-        return runtime_gateway_admin_key_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "create_key",
-            requested_name,
-        );
-    }
-    if runtime_gateway_virtual_key_name_exists(shared, &name) {
-        return build_runtime_proxy_json_error_response(
-            409,
-            "gateway_key_exists",
-            "gateway virtual key name already exists",
-        );
-    }
-    let supplied_token = body
-        .get("token")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    let generated_token = match supplied_token {
-        Some(token) => token,
-        None => match runtime_gateway_generate_virtual_key_token() {
-            Ok(token) => token,
-            Err(_err) => {
-                return build_runtime_proxy_json_error_response(
-                    500,
-                    "gateway_key_generation_failed",
-                    RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE,
-                );
-            }
-        },
-    };
-    let now = runtime_gateway_unix_epoch_seconds();
-    let mut record = RuntimeGatewayStoredVirtualKey {
-        name: name.clone(),
-        tenant_id: requested_tenant_id,
-        virtual_key_id: Some(prodex_domain::VirtualKeyId::new().to_string()),
-        team_id: None,
-        project_id: None,
-        user_id: None,
-        budget_id: None,
-        token_hash_base64: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(
-            &generated_token,
-        )
-        .hash_base64(),
-        allowed_models: Vec::new(),
-        budget_microusd: None,
-        request_budget: None,
-        rpm_limit: None,
-        tpm_limit: None,
-        disabled: Some(false),
-        created_at_epoch: now,
-        updated_at_epoch: now,
-    };
-    if let Err(err) = runtime_gateway_apply_virtual_key_patch(&mut record, &body, false) {
-        return err.into_response();
-    }
-    if runtime_gateway_admin_body_tenant_id(&body).is_none() && record.tenant_id.is_none() {
-        record.tenant_id = admin_auth.tenant_id.clone();
-    }
-    if body.get("team_id").is_none() && record.team_id.is_none() {
-        record.team_id = admin_auth.team_id.clone();
-    }
-    if body.get("project_id").is_none() && record.project_id.is_none() {
-        record.project_id = admin_auth.project_id.clone();
-    }
-    if body.get("user_id").is_none() && record.user_id.is_none() {
-        record.user_id = admin_auth.user_id.clone();
-    }
-    if body.get("budget_id").is_none() && record.budget_id.is_none() {
-        record.budget_id = admin_auth.budget_id.clone();
-    }
-    if let Some(response) = runtime_gateway_admin_virtual_key_lifecycle_response(
-        shared,
-        admin_auth,
-        &record,
-        VirtualKeySecretReferenceKind::Create,
-    ) {
-        return response;
-    }
-    match runtime_gateway_mutate_admin_key_store(shared, |store| {
-        if store
-            .keys
-            .iter()
-            .any(|key| key.name.eq_ignore_ascii_case(&name))
-        {
-            return Err(RuntimeGatewayAdminError::new(
-                409,
-                "gateway_key_exists",
-                "gateway virtual key name already exists",
-            ));
-        }
-        store.keys.push(record.clone());
-        Ok(())
-    }) {
-        Ok(()) => {
-            runtime_gateway_audit_admin_key_event(
+        .map_err(|error| {
+            audit_key_identity_denial(
                 shared,
+                admin_auth,
                 "create_key",
-                "success",
-                &name,
-                serde_json::json!({
-                    "generated_token": body.get("token").is_none(),
-                    "tenant_id": record.tenant_id,
-                    "team_id": record.team_id,
-                    "project_id": record.project_id,
-                    "user_id": record.user_id,
-                    "budget_id": record.budget_id,
-                    "allowed_models": record.allowed_models,
-                    "disabled": record.disabled.unwrap_or(false),
-                    "request_budget": record.request_budget,
-                    "rpm_limit": record.rpm_limit,
-                    "tpm_limit": record.tpm_limit,
-                    "budget_microusd": record.budget_microusd,
-                }),
-            );
-            runtime_gateway_admin_json_response(
-                201,
-                serde_json::json!({
-                    "object": "gateway.key",
-                    "key": runtime_gateway_admin_stored_key_json(&record),
-                    "token": generated_token,
-                }),
+                body.get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("<invalid>"),
+                error,
             )
-        }
+        })?;
+        created = Some(runtime_gateway_apply_virtual_key_projection(store, &plan)?);
+        returned_token = Some(token);
+        Ok(())
+    });
+    match result {
+        Ok(()) => runtime_gateway_admin_json_response(
+            201,
+            serde_json::json!({
+                "object": "gateway.key",
+                "key": created.as_ref().map(runtime_gateway_admin_stored_key_json),
+                "token": returned_token.as_ref().map(|token| token.as_str()),
+            }),
+        ),
         Err(response) => response,
     }
 }
@@ -302,210 +174,110 @@ pub(super) fn runtime_gateway_admin_update_key_response(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+    force_rotate: bool,
 ) -> tiny_http::ResponseBox {
-    let Some(entry) = runtime_gateway_virtual_key_entry_by_name(shared, name) else {
-        return build_runtime_proxy_json_error_response(
-            404,
-            "gateway_key_not_found",
-            "gateway virtual key was not found",
-        );
+    if let Some(response) = policy_key_mutation_denied(shared, admin_auth, name, "update_key") {
+        return response;
+    }
+    let intent = match force_rotate && captured.body.is_empty() {
+        true => RuntimeGatewayKeyMutationIntent::default(),
+        false => match RuntimeGatewayKeyMutationIntent::parse(&captured.body) {
+            Ok(intent) => intent,
+            Err(error) => return error.into_response(),
+        },
     };
-    if !admin_auth.can_access_entry(&entry) {
-        return runtime_gateway_admin_key_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "update_key",
-            &entry.key.name,
-        );
-    }
-    if entry.source != RuntimeGatewayVirtualKeySource::Admin {
-        runtime_gateway_audit_admin_key_mutation_denied_event(
-            shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            "gateway_key_read_only",
-            "update_key",
-            &entry.key.name,
-        );
-        return build_runtime_proxy_json_error_response(
-            403,
-            "gateway_key_read_only",
-            "policy-backed gateway virtual keys cannot be edited through the admin API",
-        );
-    }
-    let body = match runtime_gateway_admin_json_body(captured) {
-        Ok(body) => body,
+    let requested_operation = if force_rotate || intent.rotates_secret() {
+        ControlPlaneOperation::VirtualKeyRotateSecret
+    } else {
+        ControlPlaneOperation::VirtualKeyUpdate
+    };
+    let execution = match runtime_gateway_admin_mutation_execution(
+        captured,
+        request_path(captured),
+        admin_auth,
+        base_action,
+        requested_operation,
+    ) {
+        Ok(execution) => execution,
         Err(response) => return response,
     };
-    if let Some(tenant_id) = runtime_gateway_admin_body_tenant_id(&body)
-        && !admin_auth.can_access_tenant(tenant_id.as_deref())
-    {
-        return runtime_gateway_admin_key_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "update_key",
-            &entry.key.name,
-        );
-    }
-    let requested_team_id = runtime_gateway_admin_optional_dimension_from_body(
-        &body,
-        "team_id",
-        entry.key.team_id.as_deref(),
-    );
-    let requested_project_id = runtime_gateway_admin_optional_dimension_from_body(
-        &body,
-        "project_id",
-        entry.key.project_id.as_deref(),
-    );
-    let requested_user_id = runtime_gateway_admin_optional_dimension_from_body(
-        &body,
-        "user_id",
-        entry.key.user_id.as_deref(),
-    );
-    let requested_budget_id = runtime_gateway_admin_optional_dimension_from_body(
-        &body,
-        "budget_id",
-        entry.key.budget_id.as_deref(),
-    );
-    if !admin_auth.can_access_dimensions(
-        requested_team_id.as_deref(),
-        requested_project_id.as_deref(),
-        requested_user_id.as_deref(),
-        requested_budget_id.as_deref(),
-    ) {
-        return runtime_gateway_admin_key_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "update_key",
-            &entry.key.name,
-        );
-    }
-    let rotate = body
-        .get("rotate")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if rotate {
-        let store = runtime_gateway_virtual_key_store_load(
-            &shared.gateway_state_store,
-            &shared.runtime_shared.log_path,
-        );
-        let Some(mut planned_record) = store
+    let RuntimeGatewayAdminMutationExecution {
+        authorized_action,
+        governance,
+        atomic_write,
+        entity_tag,
+    } = execution;
+    let now_unix_ms = atomic_write.completed_at_unix_ms;
+    let mut returned_token = None;
+    let result = runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let current = store
             .keys
             .iter()
             .find(|record| record.name.eq_ignore_ascii_case(name))
-            .cloned()
-        else {
-            return build_runtime_proxy_json_error_response(
-                404,
-                "gateway_key_not_found",
-                "gateway virtual key was not found",
-            );
-        };
-        if !admin_auth.can_access_stored_key(&planned_record) {
-            return runtime_gateway_admin_key_scope_forbidden_response(
-                shared,
-                admin_auth,
-                "rotate_key",
-                &planned_record.name,
-            );
-        }
-        if let Err(err) = runtime_gateway_apply_virtual_key_patch(&mut planned_record, &body, true)
-        {
-            return err.into_response();
-        }
-        if !admin_auth.can_access_stored_key(&planned_record) {
-            return runtime_gateway_admin_key_scope_forbidden_response(
-                shared,
-                admin_auth,
-                "rotate_key",
-                &planned_record.name,
-            );
-        }
-        planned_record.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
-        if let Some(response) = runtime_gateway_admin_virtual_key_lifecycle_response(
+            .ok_or_else(|| {
+                runtime_gateway_identity_error(
+                    RuntimeGatewayIdentityKind::VirtualKey,
+                    ApplicationGatewayIdentityMutationError::NotFound,
+                )
+            })?;
+        enforce_key_entity_tag_with_audit(
+            entity_tag.as_ref(),
+            current,
             shared,
             admin_auth,
-            &planned_record,
-            VirtualKeySecretReferenceKind::Rotate,
-        ) {
-            return response;
-        }
-    }
-    let mut rotated_token = None;
-    let update_result = runtime_gateway_mutate_admin_key_store(shared, |store| {
-        let Some(index) = store
-            .keys
-            .iter()
-            .position(|key| key.name.eq_ignore_ascii_case(name))
-        else {
-            return Err(RuntimeGatewayAdminError::new(
-                404,
-                "gateway_key_not_found",
-                "gateway virtual key was not found",
-            ));
+            captured,
+        )?;
+        let id = runtime_gateway_virtual_key_record(current)?.id;
+        let records = application_key_records(store)?;
+        let mut body = if force_rotate && captured.body.is_empty() {
+            serde_json::json!({})
+        } else {
+            mutation_json(captured)?
         };
-        let current_record = &store.keys[index];
-        if !admin_auth.can_access_stored_key(current_record) {
-            return Err(runtime_gateway_admin_key_scope_forbidden_error(
-                shared,
-                admin_auth,
-                "update_key",
-                &current_record.name,
-            ));
+        let supplied = take_supplied_token(&mut body);
+        let secret = if force_rotate || intent.rotate {
+            drop(supplied);
+            Some(Zeroizing::new(
+                runtime_gateway_generate_virtual_key_token()
+                    .map_err(|_| runtime_gateway_admin_key_generation_failed_error())?,
+            ))
+        } else {
+            supplied
+        };
+        let fingerprint = secret.as_ref().map(token_fingerprint).transpose()?;
+        let mutation = runtime_gateway_virtual_key_update_mutation(id, &body, fingerprint)?;
+        let plan = plan_application_gateway_virtual_key_mutation(
+            ApplicationGatewayVirtualKeyMutationRequest {
+                authorized_action: &authorized_action,
+                governance: &governance,
+                current_records: &records,
+                mutation,
+                now_unix_ms,
+            },
+        )
+        .map_err(|error| {
+            audit_key_identity_denial(shared, admin_auth, "update_key", name, error)
+        })?;
+        runtime_gateway_apply_virtual_key_projection(store, &plan)?;
+        if force_rotate || intent.rotate {
+            returned_token = secret;
         }
-        let mut planned_record = current_record.clone();
-        let mut generated_rotated_token = None;
-        if rotate {
-            let token = runtime_gateway_generate_virtual_key_token()
-                .map_err(|_err| runtime_gateway_admin_key_generation_failed_error())?;
-            planned_record.token_hash_base64 =
-                runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(&token).hash_base64();
-            generated_rotated_token = Some(token);
-        } else if let Some(token) = body
-            .get("token")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            planned_record.token_hash_base64 =
-                runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(token).hash_base64();
-        }
-        runtime_gateway_apply_virtual_key_patch(&mut planned_record, &body, true)?;
-        if !admin_auth.can_access_stored_key(&planned_record) {
-            return Err(runtime_gateway_admin_key_scope_forbidden_error(
-                shared,
-                admin_auth,
-                "update_key",
-                &planned_record.name,
-            ));
-        }
-        planned_record.updated_at_epoch = runtime_gateway_unix_epoch_seconds();
-        store.keys[index] = planned_record;
-        rotated_token = generated_rotated_token;
         Ok(())
     });
-    match update_result {
+    match result {
         Ok(()) => {
             let entry = runtime_gateway_virtual_key_entry_by_name(shared, name);
-            runtime_gateway_audit_admin_key_event(
-                shared,
-                if rotate { "rotate_key" } else { "update_key" },
-                "success",
-                name,
-                serde_json::json!({
-                    "rotated": rotate,
-                    "token_replaced": !rotate && body.get("token").is_some(),
-                    "updated_fields": runtime_gateway_admin_key_patch_fields(&body),
-                }),
-            );
             runtime_gateway_admin_json_response(
                 200,
                 serde_json::json!({
                     "object": "gateway.key",
-                    "key": entry.map(|entry| {
-                        runtime_gateway_admin_key_json(&entry, shared.gateway_usage.usage.lock().ok().and_then(|usage| usage.get(&entry.key.name).cloned()))
-                    }),
-                    "token": rotated_token,
+                    "key": entry.map(|entry| runtime_gateway_admin_key_json(
+                        &entry,
+                        shared.gateway_usage.usage.lock().ok()
+                            .and_then(|usage| usage.get(&entry.key.name).cloned()),
+                    )),
+                    "token": returned_token.as_ref().map(|token| token.as_str()),
                 }),
             )
         }
@@ -515,85 +287,210 @@ pub(super) fn runtime_gateway_admin_update_key_response(
 
 pub(super) fn runtime_gateway_admin_delete_key_response(
     name: &str,
+    captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
 ) -> tiny_http::ResponseBox {
-    let Some(entry) = runtime_gateway_virtual_key_entry_by_name(shared, name) else {
-        return build_runtime_proxy_json_error_response(
-            404,
-            "gateway_key_not_found",
-            "gateway virtual key was not found",
-        );
+    if let Some(response) = policy_key_mutation_denied(shared, admin_auth, name, "delete_key") {
+        return response;
+    }
+    let execution = match runtime_gateway_admin_mutation_execution(
+        captured,
+        request_path(captured),
+        admin_auth,
+        base_action,
+        ControlPlaneOperation::VirtualKeyDelete,
+    ) {
+        Ok(execution) => execution,
+        Err(response) => return response,
     };
-    if !admin_auth.can_access_entry(&entry) {
-        return runtime_gateway_admin_key_scope_forbidden_response(
-            shared,
-            admin_auth,
-            "delete_key",
-            &entry.key.name,
-        );
-    }
-    if entry.source != RuntimeGatewayVirtualKeySource::Admin {
-        runtime_gateway_audit_admin_key_mutation_denied_event(
-            shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            "gateway_key_read_only",
-            "delete_key",
-            &entry.key.name,
-        );
-        return build_runtime_proxy_json_error_response(
-            403,
-            "gateway_key_read_only",
-            "policy-backed gateway virtual keys cannot be deleted through the admin API",
-        );
-    }
-    match runtime_gateway_mutate_admin_key_store(shared, |store| {
-        let Some(index) = store
+    let RuntimeGatewayAdminMutationExecution {
+        authorized_action,
+        governance,
+        atomic_write,
+        entity_tag,
+    } = execution;
+    let now_unix_ms = atomic_write.completed_at_unix_ms;
+    let mut deleted = None;
+    let result = runtime_gateway_mutate_admin_key_store_atomic(shared, atomic_write, |store| {
+        let current = store
             .keys
             .iter()
-            .position(|key| key.name.eq_ignore_ascii_case(name))
-        else {
-            return Err(RuntimeGatewayAdminError::new(
-                404,
-                "gateway_key_not_found",
-                "gateway virtual key was not found",
-            ));
-        };
-        let current_record = &store.keys[index];
-        if !admin_auth.can_access_stored_key(current_record) {
-            return Err(runtime_gateway_admin_key_scope_forbidden_error(
-                shared,
-                admin_auth,
-                "delete_key",
-                &current_record.name,
-            ));
-        }
-        store.keys.remove(index);
-        Ok(())
-    }) {
-        Ok(()) => runtime_gateway_admin_json_response(
-            {
-                runtime_gateway_audit_admin_key_event(
-                    shared,
-                    "delete_key",
-                    "success",
-                    &entry.key.name,
-                    serde_json::json!({
-                        "source": entry.source.as_str(),
-                        "disabled": entry.disabled,
-                    }),
-                );
-                200
+            .find(|record| record.name.eq_ignore_ascii_case(name))
+            .ok_or_else(|| {
+                runtime_gateway_identity_error(
+                    RuntimeGatewayIdentityKind::VirtualKey,
+                    ApplicationGatewayIdentityMutationError::NotFound,
+                )
+            })?;
+        enforce_key_entity_tag_with_audit(
+            entity_tag.as_ref(),
+            current,
+            shared,
+            admin_auth,
+            captured,
+        )?;
+        let id = runtime_gateway_virtual_key_record(current)?.id;
+        let records = application_key_records(store)?;
+        let plan = plan_application_gateway_virtual_key_mutation(
+            ApplicationGatewayVirtualKeyMutationRequest {
+                authorized_action: &authorized_action,
+                governance: &governance,
+                current_records: &records,
+                mutation: runtime_gateway_virtual_key_delete_mutation(id),
+                now_unix_ms,
             },
+        )
+        .map_err(|error| {
+            audit_key_identity_denial(shared, admin_auth, "delete_key", name, error)
+        })?;
+        deleted = Some(runtime_gateway_apply_virtual_key_projection(store, &plan)?);
+        Ok(())
+    });
+    match result {
+        Ok(()) => runtime_gateway_admin_json_response(
+            200,
             serde_json::json!({
                 "object": "gateway.key.deleted",
-                "name": entry.key.name,
+                "name": deleted.as_ref().map(|record| record.name.as_str()),
                 "deleted": true,
             }),
         ),
         Err(response) => response,
     }
+}
+
+fn application_key_records(
+    store: &RuntimeGatewayVirtualKeyStoreFile,
+) -> Result<Vec<prodex_application::ApplicationGatewayVirtualKeyRecord>, RuntimeGatewayAdminError> {
+    store
+        .keys
+        .iter()
+        .map(runtime_gateway_virtual_key_record)
+        .collect()
+}
+
+fn mutation_json(
+    captured: &RuntimeProxyRequest,
+) -> Result<serde_json::Value, RuntimeGatewayAdminError> {
+    serde_json::from_slice(&captured.body).map_err(|_| {
+        RuntimeGatewayAdminError::new(400, "invalid_json", "request body is not valid JSON")
+    })
+}
+
+fn take_supplied_token(body: &mut serde_json::Value) -> Option<Zeroizing<String>> {
+    let serde_json::Value::String(raw) = body.get_mut("token")? else {
+        return None;
+    };
+    let raw = Zeroizing::new(std::mem::take(raw));
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| Zeroizing::new(trimmed.to_string()))
+}
+
+fn token_fingerprint(
+    token: &Zeroizing<String>,
+) -> Result<ApplicationSecretFingerprint, RuntimeGatewayAdminError> {
+    ApplicationSecretFingerprint::new(
+        runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(token).hash_base64(),
+    )
+    .map_err(|error| runtime_gateway_identity_error(RuntimeGatewayIdentityKind::VirtualKey, error))
+}
+
+fn enforce_key_entity_tag(
+    expected: Option<&prodex_domain::EntityTag>,
+    current: &RuntimeGatewayStoredVirtualKey,
+) -> Result<(), RuntimeGatewayAdminError> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    if expected.as_str() == "*"
+        || expected.as_str()
+            == runtime_gateway_admin_key_etag(Some(current.updated_at_epoch)).as_str()
+    {
+        return Ok(());
+    }
+    Err(RuntimeGatewayAdminError::new(
+        412,
+        "precondition_failed",
+        "If-Match does not match the current gateway key ETag",
+    ))
+}
+
+fn enforce_key_entity_tag_with_audit(
+    expected: Option<&prodex_domain::EntityTag>,
+    current: &RuntimeGatewayStoredVirtualKey,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    captured: &RuntimeProxyRequest,
+) -> Result<(), RuntimeGatewayAdminError> {
+    let Some(error) = enforce_key_entity_tag(expected, current).err() else {
+        return Ok(());
+    };
+    runtime_gateway_audit_admin_request_denied_event(
+        shared,
+        &admin_auth.name,
+        admin_auth.role.as_str(),
+        "precondition_failed",
+        &captured.method,
+        request_path(captured),
+    );
+    Err(error)
+}
+
+fn audit_key_identity_denial(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    action: &'static str,
+    key_name: &str,
+    error: ApplicationGatewayIdentityMutationError,
+) -> RuntimeGatewayAdminError {
+    if matches!(
+        error,
+        ApplicationGatewayIdentityMutationError::GovernanceDenied
+            | ApplicationGatewayIdentityMutationError::TenantMismatch
+            | ApplicationGatewayIdentityMutationError::ResourceIdMismatch
+    ) {
+        runtime_gateway_audit_admin_authorization_denied_event(
+            shared,
+            &admin_auth.name,
+            admin_auth.role.as_str(),
+            "key",
+            action,
+            key_name,
+        );
+    }
+    runtime_gateway_identity_error(RuntimeGatewayIdentityKind::VirtualKey, error)
+}
+
+fn policy_key_mutation_denied(
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    name: &str,
+    action: &'static str,
+) -> Option<tiny_http::ResponseBox> {
+    let entry = runtime_gateway_virtual_key_entry_by_name(shared, name)?;
+    if entry.source != RuntimeGatewayVirtualKeySource::Policy {
+        return None;
+    }
+    // Policy keys live outside the mutable admin store, so source routing must reject them here.
+    runtime_gateway_audit_admin_key_mutation_denied_event(
+        shared,
+        &admin_auth.name,
+        admin_auth.role.as_str(),
+        "gateway_key_read_only",
+        action,
+        &entry.key.name,
+    );
+    Some(build_runtime_proxy_json_error_response(
+        403,
+        "gateway_key_read_only",
+        if action == "delete_key" {
+            "policy-backed gateway virtual keys cannot be deleted through the admin API"
+        } else {
+            "policy-backed gateway virtual keys cannot be edited through the admin API"
+        },
+    ))
 }
 
 fn runtime_gateway_admin_key_scope_forbidden_response(
@@ -602,16 +499,6 @@ fn runtime_gateway_admin_key_scope_forbidden_response(
     action: &'static str,
     key_name: &str,
 ) -> tiny_http::ResponseBox {
-    runtime_gateway_admin_key_scope_forbidden_error(shared, admin_auth, action, key_name)
-        .into_response()
-}
-
-fn runtime_gateway_admin_key_scope_forbidden_error(
-    shared: &RuntimeLocalRewriteProxyShared,
-    admin_auth: &RuntimeGatewayAdminAuth,
-    action: &'static str,
-    key_name: &str,
-) -> RuntimeGatewayAdminError {
     runtime_gateway_audit_admin_authorization_denied_event(
         shared,
         &admin_auth.name,
@@ -620,169 +507,23 @@ fn runtime_gateway_admin_key_scope_forbidden_error(
         action,
         key_name,
     );
-    RuntimeGatewayAdminError::new(
+    build_runtime_proxy_json_error_response(
         403,
         "gateway_admin_key_scope_forbidden",
         "gateway admin token is not allowed to access this virtual key",
     )
 }
 
-fn runtime_gateway_admin_request_tenant_id(
-    body: &serde_json::Value,
-    admin_auth: &RuntimeGatewayAdminAuth,
-) -> Option<String> {
-    runtime_gateway_admin_body_tenant_id(body).unwrap_or_else(|| admin_auth.tenant_id.clone())
+fn runtime_gateway_admin_key_generation_failed_error() -> RuntimeGatewayAdminError {
+    RuntimeGatewayAdminError::new(
+        500,
+        "gateway_key_generation_failed",
+        RUNTIME_GATEWAY_KEY_GENERATION_FAILED_MESSAGE,
+    )
 }
 
-fn runtime_gateway_admin_virtual_key_lifecycle_response(
-    shared: &RuntimeLocalRewriteProxyShared,
-    admin_auth: &RuntimeGatewayAdminAuth,
-    record: &RuntimeGatewayStoredVirtualKey,
-    kind: VirtualKeySecretReferenceKind,
-) -> Option<tiny_http::ResponseBox> {
-    let durable_store = match &shared.gateway_state_store {
-        RuntimeGatewayStateStore::Postgres { .. } => DurableStoreKind::Postgres,
-        RuntimeGatewayStateStore::Sqlite { .. } => DurableStoreKind::Sqlite,
-        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
-            return None;
-        }
-    };
-    let tenant_id = match runtime_gateway_admin_durable_key_tenant_id(record) {
-        Ok(tenant_id) => tenant_id,
-        Err(err) => return Some(err.into_response()),
-    };
-    let virtual_key_id = match runtime_gateway_admin_durable_key_virtual_key_id(record) {
-        Ok(virtual_key_id) => virtual_key_id,
-        Err(err) => return Some(err.into_response()),
-    };
-    let principal_id = runtime_gateway_admin_key_actor_principal_id(admin_auth, tenant_id);
-    let occurred_at_unix_ms = record.updated_at_epoch.saturating_mul(1000);
-    let request = ApplicationVirtualKeyLifecycleRequest {
-        durable_store,
-        action: ControlPlaneActionRequest {
-            principal: Principal::new(
-                principal_id,
-                Some(tenant_id),
-                PrincipalKind::User,
-                runtime_gateway_admin_key_domain_role(admin_auth.role),
-                CredentialScope::ControlPlane,
-            ),
-            operation: match kind {
-                VirtualKeySecretReferenceKind::Create => ControlPlaneOperation::VirtualKeyCreate,
-                VirtualKeySecretReferenceKind::Rotate => {
-                    ControlPlaneOperation::VirtualKeyRotateSecret
-                }
-            },
-            resource: ControlPlaneResourceRef::new(
-                tenant_id,
-                ResourceKind::VirtualKey,
-                Some(record.name.clone()),
-            ),
-            occurred_at_unix_ms,
-        },
-        reference: VirtualKeySecretReferenceCommand {
-            storage_key: TenantStorageKey::virtual_key(tenant_id, virtual_key_id),
-            tenant_id,
-            virtual_key_id,
-            principal_id,
-            display_name: record.name.clone(),
-            secret_ref: SecretRef::new(
-                "gateway-admin",
-                format!("virtual-keys/{}", record.name),
-                Some("compat"),
-            ),
-            kind,
-            occurred_at_unix_ms,
-        },
-        previous_digest: None,
-        event_digest: AuditDigest::new(match kind {
-            VirtualKeySecretReferenceKind::Create => "sha256:gateway-virtual-key-create",
-            VirtualKeySecretReferenceKind::Rotate => "sha256:gateway-virtual-key-rotate",
-        })
-        .expect("static virtual-key lifecycle audit digest should be valid"),
-    };
-    match plan_application_virtual_key_lifecycle(request) {
-        Ok(_) => None,
-        Err(error) => {
-            let response = plan_application_virtual_key_lifecycle_error_response(&error);
-            Some(build_runtime_proxy_json_error_response(
-                runtime_gateway_application_virtual_key_lifecycle_status_code(response.status),
-                response.code,
-                response.message,
-            ))
-        }
-    }
-}
-
-fn runtime_gateway_admin_key_actor_principal_id(
-    admin_auth: &RuntimeGatewayAdminAuth,
-    tenant_id: TenantId,
-) -> PrincipalId {
-    let mut hasher = Sha256::new();
-    hasher.update(b"prodex:gateway-admin-key-actor:v1");
-    hasher.update(tenant_id.to_string().as_bytes());
-    hasher.update([0]);
-    hasher.update(admin_auth.name.as_bytes());
-    let digest = hasher.finalize();
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    PrincipalId::from_uuid(uuid::Uuid::from_bytes(bytes))
-}
-
-fn runtime_gateway_admin_durable_key_tenant_id(
-    record: &RuntimeGatewayStoredVirtualKey,
-) -> Result<TenantId, RuntimeGatewayAdminError> {
-    let Some(tenant_id) = record.tenant_id.as_deref() else {
-        return Err(RuntimeGatewayAdminError::new(
-            400,
-            "gateway_key_tenant_required",
-            RUNTIME_GATEWAY_KEY_TENANT_REQUIRED_MESSAGE,
-        ));
-    };
-    tenant_id.parse::<TenantId>().map_err(|_| {
-        RuntimeGatewayAdminError::new(
-            400,
-            "gateway_key_tenant_invalid",
-            RUNTIME_GATEWAY_KEY_TENANT_INVALID_MESSAGE,
-        )
-    })
-}
-
-fn runtime_gateway_admin_durable_key_virtual_key_id(
-    record: &RuntimeGatewayStoredVirtualKey,
-) -> Result<VirtualKeyId, RuntimeGatewayAdminError> {
-    let Some(virtual_key_id) = record.virtual_key_id.as_deref() else {
-        return Err(RuntimeGatewayAdminError::new(
-            400,
-            "gateway_key_id_required",
-            RUNTIME_GATEWAY_KEY_ID_REQUIRED_MESSAGE,
-        ));
-    };
-    virtual_key_id.parse::<VirtualKeyId>().map_err(|_| {
-        RuntimeGatewayAdminError::new(
-            400,
-            "gateway_key_id_invalid",
-            RUNTIME_GATEWAY_KEY_ID_INVALID_MESSAGE,
-        )
-    })
-}
-
-fn runtime_gateway_admin_key_domain_role(role: RuntimeGatewayAdminRole) -> Role {
-    match role {
-        RuntimeGatewayAdminRole::Admin => Role::Admin,
-        RuntimeGatewayAdminRole::Viewer => Role::Viewer,
-    }
-}
-
-fn runtime_gateway_application_virtual_key_lifecycle_status_code(
-    status: ApplicationVirtualKeyLifecycleErrorStatus,
-) -> u16 {
-    match status {
-        ApplicationVirtualKeyLifecycleErrorStatus::BadRequest => 400,
-        ApplicationVirtualKeyLifecycleErrorStatus::ServiceUnavailable => 503,
-    }
+fn request_path(captured: &RuntimeProxyRequest) -> &str {
+    runtime_proxy_crate::path_without_query(&captured.path_and_query)
 }
 
 pub(super) fn runtime_gateway_admin_key_etag(updated_at_epoch: Option<u64>) -> String {
@@ -808,164 +549,4 @@ fn runtime_gateway_admin_key_json_response_with_etag(
         ],
         body: body.into(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gateway_key_generation_error_uses_stable_redacted_message() {
-        let err = runtime_gateway_admin_key_generation_failed_error();
-        assert_eq!(err.test_status(), 500);
-        assert_eq!(err.test_code(), "gateway_key_generation_failed");
-        assert_eq!(
-            err.test_message(),
-            "gateway key token could not be generated"
-        );
-        assert!(!err.test_message().contains("getrandom"));
-        assert!(
-            !err.test_message()
-                .contains("failed to generate gateway virtual key")
-        );
-    }
-
-    fn stored_key_with_tenant(tenant_id: Option<String>) -> RuntimeGatewayStoredVirtualKey {
-        stored_key_with_ids(tenant_id, Some(VirtualKeyId::new().to_string()))
-    }
-
-    fn stored_key_with_ids(
-        tenant_id: Option<String>,
-        virtual_key_id: Option<String>,
-    ) -> RuntimeGatewayStoredVirtualKey {
-        RuntimeGatewayStoredVirtualKey {
-            name: "alpha".to_string(),
-            tenant_id,
-            virtual_key_id,
-            team_id: None,
-            project_id: None,
-            user_id: None,
-            budget_id: None,
-            token_hash_base64: "hash".to_string(),
-            allowed_models: Vec::new(),
-            budget_microusd: None,
-            request_budget: None,
-            rpm_limit: None,
-            tpm_limit: None,
-            disabled: Some(false),
-            created_at_epoch: 1,
-            updated_at_epoch: 2,
-        }
-    }
-
-    fn admin_auth_named(name: &str) -> RuntimeGatewayAdminAuth {
-        RuntimeGatewayAdminAuth {
-            name: name.to_string(),
-            role: RuntimeGatewayAdminRole::Admin,
-            tenant_id: None,
-            team_id: None,
-            project_id: None,
-            user_id: None,
-            budget_id: None,
-            allowed_key_prefixes: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn durable_key_lifecycle_rejects_missing_or_invalid_tenant_id() {
-        let missing = runtime_gateway_admin_durable_key_tenant_id(&stored_key_with_tenant(None))
-            .expect_err("missing tenant should fail closed");
-        assert_eq!(missing.test_status(), 400);
-        assert_eq!(missing.test_code(), "gateway_key_tenant_required");
-        assert_eq!(
-            missing.test_message(),
-            RUNTIME_GATEWAY_KEY_TENANT_REQUIRED_MESSAGE
-        );
-
-        let invalid = runtime_gateway_admin_durable_key_tenant_id(&stored_key_with_tenant(Some(
-            "tenant-a".to_string(),
-        )))
-        .expect_err("non-UUID tenant should fail closed");
-        assert_eq!(invalid.test_status(), 400);
-        assert_eq!(invalid.test_code(), "gateway_key_tenant_invalid");
-        assert_eq!(
-            invalid.test_message(),
-            RUNTIME_GATEWAY_KEY_TENANT_INVALID_MESSAGE
-        );
-
-        let tenant_id = TenantId::new();
-        let parsed = runtime_gateway_admin_durable_key_tenant_id(&stored_key_with_tenant(Some(
-            tenant_id.to_string(),
-        )));
-        assert!(matches!(parsed, Ok(parsed) if parsed == tenant_id));
-    }
-
-    #[test]
-    fn durable_key_lifecycle_rejects_missing_or_invalid_virtual_key_id() {
-        let tenant_id = Some(TenantId::new().to_string());
-        let missing = runtime_gateway_admin_durable_key_virtual_key_id(&stored_key_with_ids(
-            tenant_id.clone(),
-            None,
-        ))
-        .expect_err("missing virtual-key id should fail closed");
-        assert_eq!(missing.test_status(), 400);
-        assert_eq!(missing.test_code(), "gateway_key_id_required");
-        assert_eq!(
-            missing.test_message(),
-            RUNTIME_GATEWAY_KEY_ID_REQUIRED_MESSAGE
-        );
-
-        let invalid = runtime_gateway_admin_durable_key_virtual_key_id(&stored_key_with_ids(
-            tenant_id,
-            Some("key-a".to_string()),
-        ))
-        .expect_err("non-UUID virtual-key id should fail closed");
-        assert_eq!(invalid.test_status(), 400);
-        assert_eq!(invalid.test_code(), "gateway_key_id_invalid");
-        assert_eq!(
-            invalid.test_message(),
-            RUNTIME_GATEWAY_KEY_ID_INVALID_MESSAGE
-        );
-
-        let virtual_key_id = VirtualKeyId::new();
-        let parsed = runtime_gateway_admin_durable_key_virtual_key_id(&stored_key_with_ids(
-            Some(TenantId::new().to_string()),
-            Some(virtual_key_id.to_string()),
-        ));
-        assert!(matches!(parsed, Ok(parsed) if parsed == virtual_key_id));
-    }
-
-    #[test]
-    fn durable_key_lifecycle_actor_principal_id_is_stable_per_admin_and_tenant() {
-        let tenant_id = TenantId::new();
-        let admin = admin_auth_named("admin-token");
-
-        assert_eq!(
-            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id),
-            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id)
-        );
-        assert_ne!(
-            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id),
-            runtime_gateway_admin_key_actor_principal_id(
-                &admin_auth_named("other-admin"),
-                tenant_id
-            )
-        );
-        assert_ne!(
-            runtime_gateway_admin_key_actor_principal_id(&admin, tenant_id),
-            runtime_gateway_admin_key_actor_principal_id(&admin, TenantId::new())
-        );
-    }
-
-    #[test]
-    fn durable_key_lifecycle_does_not_synthesize_tenant_virtual_key_or_actor_ids() {
-        let source = include_str!("local_rewrite_gateway_admin_keys.rs");
-        for fallback in [
-            ["unwrap_or_else", "(TenantId::new"].join(""),
-            ["unwrap_or_else", "(VirtualKeyId::new"].join(""),
-            ["PrincipalId", "::new()"].join(""),
-        ] {
-            assert!(!source.contains(&fallback));
-        }
-    }
 }
