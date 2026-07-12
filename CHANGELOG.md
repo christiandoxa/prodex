@@ -2,6 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.278.0 - 2026-07-12
+
+### Deps
+
+- Merge pull request #26 (`5b5c912`)
+- Merge pull request #25 (`107ee85`)
+- Bump serde_json (`3d7c05f`)
+- Bump tungstenite from 0.29.0 to 0.30.0 in the cargo group (`0ab418d`)
+
+### Misc
+
+- Migrate legacy prodex root permissions (`5b03d95`)
+
 ## 0.277.0 - 2026-07-12
 
 ### Runtime
@@ -32,6 +45,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Normalize apple sticky bit mask (`10d41c9`)
+- Own private windows files (`42dc008`)
+- Request write access for windows temp files (`4a66527`)
 - Gate allocator evidence example (`7a20b62`)
 - Ensure atomic action tenant exists (`78904db`)
 - Support scim replace routing (`b02c123`)
@@ -169,9 +185,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Connect stacked panel borders (`7e0c16f`)
-
-## 0.265.0 - 2026-07-08
-
-### CLI
-
-- Simplify log quota header (`5bf9567`)
