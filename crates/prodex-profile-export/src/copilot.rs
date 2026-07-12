@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::SummaryFields;
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopilotConfigFile {
     #[serde(default)]
@@ -15,6 +16,35 @@ pub struct CopilotConfigFile {
     #[serde(default)]
     pub copilot_tokens: BTreeMap<String, String>,
 }
+
+impl fmt::Debug for CopilotConfigFile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CopilotConfigFile")
+            .field("last_logged_in_user", &self.last_logged_in_user)
+            .field("logged_in_user_count", &self.logged_in_users.len())
+            .field("copilot_token_count", &self.copilot_tokens.len())
+            .field("copilot_tokens", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Zeroize for CopilotConfigFile {
+    fn zeroize(&mut self) {
+        for token in self.copilot_tokens.values_mut() {
+            token.zeroize();
+        }
+        self.copilot_tokens.clear();
+    }
+}
+
+impl Drop for CopilotConfigFile {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for CopilotConfigFile {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct CopilotConfigUser {
@@ -144,11 +174,12 @@ pub fn parse_copilot_config_file(raw: &str) -> Result<CopilotConfigFile> {
     match serde_json::from_str(raw) {
         Ok(config) => Ok(config),
         Err(original_error) => {
-            let without_comments = strip_json_line_comments(raw);
-            if without_comments == raw || without_comments.trim().is_empty() {
+            let without_comments = Zeroizing::new(strip_json_line_comments(raw));
+            if without_comments.as_str() == raw || without_comments.trim().is_empty() {
                 return Err(original_error).context("failed to parse Copilot config");
             }
-            serde_json::from_str(&without_comments).context("failed to parse Copilot config")
+            serde_json::from_str(without_comments.as_str())
+                .context("failed to parse Copilot config")
         }
     }
 }

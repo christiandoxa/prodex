@@ -7,6 +7,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use zeroize::Zeroizing;
 
 use super::manage::print_profile_panel;
 use crate::{
@@ -273,8 +274,10 @@ fn copilot_import_candidate_users(
 fn read_copilot_config() -> Result<CopilotConfigFile> {
     let config_root = discover_copilot_config_root()?;
     let config_path = config_root.join("config.json");
-    let raw = fs::read_to_string(&config_path)
-        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let raw = Zeroizing::new(
+        fs::read_to_string(&config_path)
+            .with_context(|| format!("failed to read {}", config_path.display()))?,
+    );
     parse_copilot_config_file(&raw)
         .with_context(|| format!("failed to parse {}", config_path.display()))
 }
