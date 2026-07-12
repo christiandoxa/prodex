@@ -2,6 +2,8 @@ use anyhow::{Context, Result, bail};
 use base64::Engine;
 use serde::Deserialize;
 use std::collections::BTreeSet;
+use std::fmt;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfileIdentity {
@@ -72,17 +74,73 @@ fn profile_identity_email_matches_target(
         .is_some_and(|email| normalize_email(email) == target_email)
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 struct StoredAuth {
     tokens: Option<StoredTokens>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl fmt::Debug for StoredAuth {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StoredAuth")
+            .field("tokens", &self.tokens)
+            .finish()
+    }
+}
+
+impl Zeroize for StoredAuth {
+    fn zeroize(&mut self) {
+        self.tokens.zeroize();
+    }
+}
+
+impl Drop for StoredAuth {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for StoredAuth {}
+
+#[derive(Deserialize)]
 struct StoredTokens {
     access_token: Option<String>,
     account_id: Option<String>,
     id_token: Option<String>,
 }
+
+impl fmt::Debug for StoredTokens {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StoredTokens")
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "account_id",
+                &self.account_id.as_ref().map(|_| "<redacted>"),
+            )
+            .field("id_token", &self.id_token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+impl Zeroize for StoredTokens {
+    fn zeroize(&mut self) {
+        self.access_token.zeroize();
+        self.account_id.zeroize();
+        self.id_token.zeroize();
+    }
+}
+
+impl Drop for StoredTokens {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for StoredTokens {}
 
 #[derive(Debug, Clone, Deserialize)]
 struct IdTokenClaims {
@@ -212,10 +270,12 @@ where
         _ => bail!("invalid JWT format"),
     };
 
-    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload_b64)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
-        .context("failed to decode JWT payload")?;
+    let payload_bytes = Zeroizing::new(
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload_b64)
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
+            .context("failed to decode JWT payload")?,
+    );
     serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")
 }
 
