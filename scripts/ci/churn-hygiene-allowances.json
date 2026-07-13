@@ -1,5 +1,21 @@
 [
   {
+    "id": "status-dashboard-and-hook-trust-0.284.0",
+    "requiredSubjects": [
+      "fix(super): trust hooks on launch",
+      "feat(status): add live monitoring dashboard",
+      "chore(release): release 0.284.0",
+      "chore(ci): allow reviewed 0.284.0 release range"
+    ],
+    "caps": {
+      "maxFiles": 24,
+      "maxBehaviorFiles": 10,
+      "maxLines": 1850,
+      "maxFileLines": 1400
+    },
+    "reason": "Reviewed the Super hook-trust launch fix and responsive status dashboard with focused CLI/render/parser regressions, full workspace tests, strict Clippy, formatting, release preparation, and credential hygiene before the 0.284.0 release."
+  },
+  {
     "id": "enterprise-governance-kiro-parity-0.282.0",
     "requiredSubjects": [
       "feat(governance): add enterprise controls and Kiro parity"
