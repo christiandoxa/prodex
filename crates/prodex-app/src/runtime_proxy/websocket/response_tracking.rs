@@ -111,10 +111,7 @@ pub(crate) fn attempt_runtime_websocket_request(
                 mark_runtime_websocket_upstream_frame_seen(
                     &mut upstream_socket,
                     &mut first_upstream_frame_seen,
-                    shared
-                        .runtime_config
-                        .tuning
-                        .websocket_precommit_progress_timeout_ms,
+                    shared.runtime_config.tuning.stream_idle_timeout_ms,
                 )?;
 
                 let mut inspected = inspect_runtime_websocket_text_frame(text.as_str());

@@ -69,6 +69,34 @@ fn weekly_only_quota_is_ready_and_exhaustion_still_wins() {
 }
 
 #[test]
+fn legacy_weekly_only_snapshot_is_ready() {
+    let summary = runtime_proxy_quota_summary_from_usage_snapshot_at(
+        RuntimeProxyUsageSnapshot {
+            checked_at: 100,
+            five_hour_status: RuntimeSelectionQuotaWindowStatus::Unknown,
+            five_hour_remaining_percent: 0,
+            five_hour_reset_at: i64::MAX,
+            weekly_status: RuntimeSelectionQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 80,
+            weekly_reset_at: 3_600,
+        },
+        RuntimeRouteKind::Websocket,
+        200,
+    );
+
+    assert_eq!(
+        summary.five_hour.status,
+        RuntimeSelectionQuotaWindowStatus::Ready
+    );
+    assert_eq!(summary.five_hour.remaining_percent, 100);
+    assert_eq!(summary.weekly.remaining_percent, 80);
+    assert_eq!(
+        summary.route_band,
+        RuntimeSelectionQuotaPressureBand::Healthy
+    );
+}
+
+#[test]
 fn snapshot_hold_preserves_active_exhaustion_until_reset() {
     let snapshot = RuntimeProxyUsageSnapshot {
         checked_at: 100,
