@@ -889,7 +889,7 @@ fn websocket_precommit_hold_response_created_commits_previous_response_affinity(
 }
 
 #[test]
-fn websocket_precommit_hold_response_created_commits_reused_session() {
+fn websocket_rate_limits_keeps_reused_session_alive_past_progress_timeout() {
     let _guard = acquire_test_runtime_lock();
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("upstream websocket listener should bind");
@@ -922,12 +922,11 @@ fn websocket_precommit_hold_response_created_commits_reused_session() {
             .read()
             .expect("upstream websocket should receive reused-session request");
         socket
-            .send(WsMessage::Text(
-                r#"{"type":"response.created","response":{"id":"resp-reuse-hold"}}"#
-                    .to_string()
-                    .into(),
-            ))
-            .expect("upstream should send reused response.created");
+            .send(WsMessage::Text(r#"{"type":"codex.rate_limits"}"#.into()))
+            .expect("upstream should send reused codex.rate_limits");
+        thread::sleep(Duration::from_millis(
+            runtime_proxy_websocket_precommit_progress_timeout_ms() + 40,
+        ));
         socket
             .send(WsMessage::Text(
                 r#"{"type":"response.completed","response":{"id":"resp-reuse-hold"}}"#
@@ -989,18 +988,18 @@ fn websocket_precommit_hold_response_created_commits_reused_session() {
             promote_committed_profile: true,
         })
     });
-    let reused_created = client_socket
+    let reused_rate_limits = client_socket
         .read()
-        .expect("client should receive reused response.created");
+        .expect("client should receive reused codex.rate_limits");
     let reused_completed = client_socket
         .read()
         .expect("client should receive reused response.completed");
     let reused_attempt = reused_attempt
         .join()
         .expect("reused websocket attempt thread should finish")
-        .expect("reused websocket response.created should commit without timeout");
+        .expect("reused websocket rate limits should keep waiting for model output");
     assert!(matches!(reused_attempt, RuntimeWebsocketAttempt::Delivered));
-    assert!(reused_created.to_string().contains("response.created"));
+    assert!(reused_rate_limits.to_string().contains("codex.rate_limits"));
     assert!(reused_completed.to_string().contains("response.completed"));
     upstream
         .join()
@@ -1015,7 +1014,7 @@ fn websocket_precommit_hold_response_created_commits_reused_session() {
             && log.contains("request=34 transport=websocket committed profile=main")
             && !log.contains("websocket_precommit_hold_promoted")
             && !log.contains("websocket_precommit_hold_timeout"),
-        "reused-session response.created should stay buffered until terminal commit: {log}"
+        "reused-session rate limits should keep the upstream alive past the progress timeout: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }

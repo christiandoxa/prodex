@@ -76,7 +76,7 @@
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs",
-    "maxLines": 1021,
+    "maxLines": 1020,
     "reason": "WebSocket precommit hold regressions now include oversized response-created quota retry boundaries; capped until sideband and terminal suites split."
   },
   {

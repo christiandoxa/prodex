@@ -250,18 +250,36 @@ pub fn runtime_proxy_quota_summary_from_usage_snapshot_at(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> RuntimeProxyQuotaSummary {
-    let five_hour = runtime_proxy_quota_window_summary_from_usage_snapshot_at(
+    let mut five_hour = runtime_proxy_quota_window_summary_from_usage_snapshot_at(
         snapshot.five_hour_status,
         snapshot.five_hour_remaining_percent,
         snapshot.five_hour_reset_at,
         now,
     );
-    let weekly = runtime_proxy_quota_window_summary_from_usage_snapshot_at(
+    let mut weekly = runtime_proxy_quota_window_summary_from_usage_snapshot_at(
         snapshot.weekly_status,
         snapshot.weekly_remaining_percent,
         snapshot.weekly_reset_at,
         now,
     );
+    let neutral = RuntimeProxyQuotaWindowSummary {
+        status: RuntimeSelectionQuotaWindowStatus::Ready,
+        remaining_percent: 100,
+        reset_at: i64::MAX,
+    };
+    match (five_hour.status, weekly.status) {
+        (RuntimeSelectionQuotaWindowStatus::Unknown, status)
+            if status != RuntimeSelectionQuotaWindowStatus::Unknown =>
+        {
+            five_hour = neutral;
+        }
+        (status, RuntimeSelectionQuotaWindowStatus::Unknown)
+            if status != RuntimeSelectionQuotaWindowStatus::Unknown =>
+        {
+            weekly = neutral;
+        }
+        _ => {}
+    }
     let route_band = [
         five_hour.status,
         weekly.status,
