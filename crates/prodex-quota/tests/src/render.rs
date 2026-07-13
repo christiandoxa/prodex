@@ -153,7 +153,23 @@ fn missing_five_hour_window_does_not_block_available_weekly_window() {
         additional_rate_limits: Vec::new(),
     };
 
-    assert!(collect_blocked_limits(&usage, false).is_empty());
+    for plan in [
+        "free",
+        "plus",
+        "pro",
+        "team",
+        "business",
+        "enterprise",
+        "edu",
+        "future-openai-plan",
+    ] {
+        let mut plan_usage = usage.clone();
+        plan_usage.plan_type = Some(plan.to_string());
+        assert!(
+            collect_blocked_limits(&plan_usage, false).is_empty(),
+            "weekly-only quota should be ready for plan {plan}"
+        );
+    }
     let fields = quota_pool_summary_fields(&[openai_report("weekly-only", usage)]);
     assert!(fields.contains(&("Available".to_string(), "1/1 profile".to_string())));
     assert!(fields.contains(&(

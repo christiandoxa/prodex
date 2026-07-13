@@ -367,23 +367,25 @@ fn runtime_launch_snapshot_reports(
         .collect()
 }
 
-fn runtime_launch_usage_from_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> UsageResponse {
+pub(super) fn runtime_launch_usage_from_snapshot(
+    snapshot: &RuntimeProfileUsageSnapshot,
+) -> UsageResponse {
     UsageResponse {
         email: None,
         plan_type: None,
         rate_limit: Some(WindowPair {
-            primary_window: Some(runtime_launch_window_from_snapshot(
+            primary_window: runtime_launch_window_from_snapshot(
                 snapshot.five_hour_status,
                 snapshot.five_hour_remaining_percent,
                 snapshot.five_hour_reset_at,
                 18_000,
-            )),
-            secondary_window: Some(runtime_launch_window_from_snapshot(
+            ),
+            secondary_window: runtime_launch_window_from_snapshot(
                 snapshot.weekly_status,
                 snapshot.weekly_remaining_percent,
                 snapshot.weekly_reset_at,
                 604_800,
-            )),
+            ),
         }),
         code_review_rate_limit: None,
         rate_limit_reset_credits: None,
@@ -396,7 +398,7 @@ fn runtime_launch_window_from_snapshot(
     remaining_percent: i64,
     reset_at: i64,
     limit_window_seconds: i64,
-) -> UsageWindow {
+) -> Option<UsageWindow> {
     let now = Local::now().timestamp();
     let effective_status = if reset_at != i64::MAX && reset_at <= now {
         RuntimeQuotaWindowStatus::Ready
@@ -408,9 +410,9 @@ fn runtime_launch_window_from_snapshot(
         | RuntimeQuotaWindowStatus::Thin
         | RuntimeQuotaWindowStatus::Critical => Some((100 - remaining_percent).clamp(0, 99)),
         RuntimeQuotaWindowStatus::Exhausted => Some(100),
-        RuntimeQuotaWindowStatus::Unknown => None,
+        RuntimeQuotaWindowStatus::Unknown => return None,
     };
-    UsageWindow {
+    Some(UsageWindow {
         used_percent,
         reset_at: if reset_at == i64::MAX {
             None
@@ -418,7 +420,7 @@ fn runtime_launch_window_from_snapshot(
             Some(reset_at)
         },
         limit_window_seconds: Some(limit_window_seconds),
-    }
+    })
 }
 
 fn runtime_launch_blocked_snapshot_message(blocked: &[BlockedLimit]) -> String {
