@@ -33,13 +33,12 @@ fn blocks_when_main_window_is_exhausted() {
     };
 
     let blocked = collect_blocked_limits(&usage, false);
-    assert_eq!(blocked.len(), 2);
+    assert_eq!(blocked.len(), 1);
     assert!(blocked[0].message.starts_with("5h exhausted until "));
-    assert_eq!(blocked[1].message, "weekly quota unavailable");
 }
 
 #[test]
-fn blocks_when_weekly_window_is_missing() {
+fn allows_available_main_window_when_weekly_window_is_missing() {
     let usage = UsageResponse {
         email: None,
         plan_type: None,
@@ -56,9 +55,28 @@ fn blocks_when_weekly_window_is_missing() {
         additional_rate_limits: Vec::new(),
     };
 
-    let blocked = collect_blocked_limits(&usage, false);
-    assert_eq!(blocked.len(), 1);
-    assert_eq!(blocked[0].message, "weekly quota unavailable");
+    assert!(collect_blocked_limits(&usage, false).is_empty());
+}
+
+#[test]
+fn allows_available_weekly_window_when_five_hour_window_is_missing() {
+    let usage = UsageResponse {
+        email: None,
+        plan_type: None,
+        rate_limit: Some(WindowPair {
+            primary_window: None,
+            secondary_window: Some(UsageWindow {
+                used_percent: Some(0),
+                reset_at: Some(1_700_000_000),
+                limit_window_seconds: Some(604_800),
+            }),
+        }),
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: Vec::new(),
+    };
+
+    assert!(collect_blocked_limits(&usage, false).is_empty());
 }
 
 #[test]

@@ -92,10 +92,15 @@ fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
 
 fn window_pair_has_ready_windows(pair: &WindowPair) -> bool {
     let now = Local::now().timestamp();
-    ["5h", "weekly"].into_iter().all(|label| {
-        required_window_snapshot_at(pair, label, now)
-            .is_some_and(|window| window.remaining_percent > 0)
-    })
+    let windows = ["5h", "weekly"]
+        .into_iter()
+        .filter_map(|label| required_window_snapshot_at(pair, label, now))
+        .collect::<Vec<_>>();
+
+    !windows.is_empty()
+        && windows
+            .into_iter()
+            .all(|window| window.remaining_percent > 0)
 }
 
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
@@ -424,8 +429,8 @@ pub fn collect_blocked_limits(
 
     if !openai_quota_has_ready_limit(usage) {
         if let Some(main) = usage.rate_limit.as_ref() {
-            push_required_main_window(&mut blocked, main, "5h");
-            push_required_main_window(&mut blocked, main, "weekly");
+            push_main_window_if_present(&mut blocked, main, "5h");
+            push_main_window_if_present(&mut blocked, main, "weekly");
         } else {
             blocked.push(BlockedLimit {
                 message: "5h quota unavailable".to_string(),
@@ -451,6 +456,12 @@ pub fn collect_blocked_limits(
                 additional.rate_limit.secondary_window.as_ref(),
             );
         }
+
+        if blocked.is_empty() {
+            blocked.push(BlockedLimit {
+                message: "quota unavailable".to_string(),
+            });
+        }
     }
 
     if include_code_review && let Some(code_review) = usage.code_review_rate_limit.as_ref() {
@@ -469,15 +480,8 @@ pub fn collect_blocked_limits(
     blocked
 }
 
-fn push_required_main_window(
-    blocked: &mut Vec<BlockedLimit>,
-    main: &WindowPair,
-    required_label: &str,
-) {
-    let Some(window) = find_main_window(main, required_label) else {
-        blocked.push(BlockedLimit {
-            message: format!("{required_label} quota unavailable"),
-        });
+fn push_main_window_if_present(blocked: &mut Vec<BlockedLimit>, main: &WindowPair, label: &str) {
+    let Some(window) = find_main_window(main, label) else {
         return;
     };
 
@@ -485,12 +489,12 @@ fn push_required_main_window(
         Some(used) if used < 100 => {}
         Some(_) => blocked.push(BlockedLimit {
             message: format!(
-                "{required_label} exhausted until {}",
+                "{label} exhausted until {}",
                 format_reset_time(window.reset_at)
             ),
         }),
         None => blocked.push(BlockedLimit {
-            message: format!("{required_label} quota unknown"),
+            message: format!("{label} quota unknown"),
         }),
     }
 }
