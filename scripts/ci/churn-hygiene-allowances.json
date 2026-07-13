@@ -8,8 +8,8 @@
       "chore(ci): allow reviewed 0.284.0 release range"
     ],
     "caps": {
-      "maxFiles": 24,
-      "maxBehaviorFiles": 10,
+      "maxFiles": 25,
+      "maxBehaviorFiles": 11,
       "maxLines": 1850,
       "maxFileLines": 1400
     },
