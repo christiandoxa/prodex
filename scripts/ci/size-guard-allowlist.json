@@ -1,5 +1,10 @@
 [
   {
+    "file": "crates/prodex-app/src/app_commands/status.rs",
+    "maxLines": 1396,
+    "reason": "The live status command keeps quota, token-history, Linux process sampling, responsive terminal rendering, and focused regressions together; capped until resource collection or rendering needs independent ownership."
+  },
+  {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
     "maxLines": 961,
     "reason": "Runtime launch command routing, provider selection, and session/runtime entry planning remain capped after gateway backend startup moved to its focused module."
