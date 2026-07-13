@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.285.0 - 2026-07-14
+
+### Misc
+
+- Add enterprise governance platform (`e07e2cc`)
+
 ## 0.284.0 - 2026-07-13
 
 ### CLI
@@ -193,9 +199,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Add control-plane publication delivery command (`c8253c3`)
 - Unblock local preflight and provider bridge tests (`aa74651`)
 - Checkpoint enterprise readiness refactor (`71e4274`)
-
-## 0.273.0 - 2026-07-10
-
-### CLI
-
-- Skip workspace trust prompt (`0c2e464`)
