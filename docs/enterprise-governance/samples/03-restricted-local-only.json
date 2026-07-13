@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "artifact_status": "target-example-not-runtime-config",
+  "scenario": "restricted data forced to local/on-prem providers",
+  "governance_mode": "enterprise_enforce",
+  "input": {
+    "tenant": "tenant-example",
+    "classification": "restricted",
+    "inspection_coverage": "full",
+    "operation": "model_inference"
+  },
+  "policy": {
+    "effect": "allow_with_obligations",
+    "deployment_boundary": "on_prem_only",
+    "network_egress": "prohibited",
+    "maximum_retention_days": 0,
+    "tools": "disabled",
+    "mandatory_audit": true
+  },
+  "registry_candidates": [
+    {"id": "on-prem-model", "approved": true, "deployment_boundary": "on_prem", "network_egress": false},
+    {"id": "private-cloud-model", "approved": true, "deployment_boundary": "private_cloud", "network_egress": true},
+    {"id": "public-cloud-model", "approved": true, "deployment_boundary": "public_cloud", "network_egress": true}
+  ],
+  "expected": {
+    "effect": "allow_with_obligations",
+    "eligible_providers": ["on-prem-model"],
+    "excluded_providers": {
+      "private-cloud-model": "not_on_prem",
+      "public-cloud-model": "not_on_prem"
+    },
+    "on_missing_local_provider": "deny"
+  }
+}

@@ -204,6 +204,11 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     } = options;
     validate_credential_free_http_url(&upstream_base_url, "runtime upstream base URL")?;
     let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(paths)?);
+    if runtime_config.governance.mode.is_enforcing() {
+        bail!(
+            "enterprise governance enforcement requires the authenticated unified gateway data plane"
+        );
+    }
     let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config);
     for key in runtime_config.compatibility_defaults() {
         runtime_proxy_log_to_path(
@@ -428,10 +433,14 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),
     );
+    validate_runtime_governance_inspection_enabled(&runtime_config, presidio_redaction_enabled)?;
     register_runtime_presidio_redaction_proxy_state(
         &log_path,
         if presidio_redaction_enabled {
-            Some(runtime_presidio_redaction_config(paths)?)
+            Some(runtime_governed_presidio_redaction_config(
+                paths,
+                &runtime_config,
+            )?)
         } else {
             None
         },

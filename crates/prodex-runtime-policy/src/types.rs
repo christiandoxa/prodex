@@ -1,4 +1,4 @@
-use prodex_domain::SecretRef;
+use prodex_domain::{PolicyRevisionId, SecretRef};
 use secret_store::SecretBackendKind;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use std::path::PathBuf;
@@ -29,6 +29,123 @@ impl RuntimePolicyServiceMode {
 pub enum RuntimeLogFormat {
     Text,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernanceMode {
+    #[default]
+    Personal,
+    EnterpriseObserve,
+    EnterpriseEnforce,
+    BankEnforce,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernanceRolloutMode {
+    #[default]
+    Off,
+    Observe,
+    Enforce,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernanceDataClassification {
+    Public,
+    #[default]
+    Internal,
+    Confidential,
+    Restricted,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernanceProviderTrustTier {
+    #[default]
+    Standard,
+    Enterprise,
+    RestrictedApproved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGovernanceProviderSettings {
+    pub descriptor_revision: u64,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub trust_tier: RuntimeGovernanceProviderTrustTier,
+    #[serde(default)]
+    pub local_execution: bool,
+    pub maximum_classification: RuntimeGovernanceDataClassification,
+    #[serde(default)]
+    pub regions: Vec<String>,
+    #[serde(default)]
+    pub retention_seconds: u32,
+    #[serde(default)]
+    pub training_use: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGovernanceSettings {
+    #[serde(default)]
+    pub mode: RuntimeGovernanceMode,
+    #[serde(default)]
+    pub inspection: RuntimeGovernanceRolloutMode,
+    #[serde(default)]
+    pub classification: RuntimeGovernanceRolloutMode,
+    #[serde(default)]
+    pub policy: RuntimeGovernanceRolloutMode,
+    #[serde(default)]
+    pub routing: RuntimeGovernanceRolloutMode,
+    #[serde(default)]
+    pub mandatory_audit: bool,
+    #[serde(default = "default_true")]
+    pub anonymous_data_plane: bool,
+    #[serde(default = "default_true")]
+    pub raw_secret_sources: bool,
+    #[serde(default)]
+    pub policy_revision: Option<PolicyRevisionId>,
+    #[serde(default)]
+    pub policy_valid_until_unix_ms: Option<u64>,
+    #[serde(default)]
+    pub classification_revision: Option<String>,
+    #[serde(default)]
+    pub classification_checksum: Option<String>,
+    #[serde(default)]
+    pub provider_registry_revision: Option<u64>,
+    #[serde(default)]
+    pub routing_score_revision: Option<u64>,
+    #[serde(default)]
+    pub provider: Option<RuntimePolicyGovernanceProviderSettings>,
+}
+
+impl Default for RuntimePolicyGovernanceSettings {
+    fn default() -> Self {
+        Self {
+            mode: RuntimeGovernanceMode::Personal,
+            inspection: RuntimeGovernanceRolloutMode::Off,
+            classification: RuntimeGovernanceRolloutMode::Off,
+            policy: RuntimeGovernanceRolloutMode::Off,
+            routing: RuntimeGovernanceRolloutMode::Off,
+            mandatory_audit: false,
+            anonymous_data_plane: true,
+            raw_secret_sources: true,
+            policy_revision: None,
+            policy_valid_until_unix_ms: None,
+            classification_revision: None,
+            classification_checksum: None,
+            provider_registry_revision: None,
+            routing_score_revision: None,
+            provider: None,
+        }
+    }
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 impl RuntimeLogFormat {
@@ -63,6 +180,7 @@ pub struct RuntimePolicyConfig {
     pub runtime_proxy: RuntimePolicyProxySettings,
     pub gateway: RuntimePolicyGatewaySettings,
     pub secrets: RuntimePolicySecretsSettings,
+    pub governance: RuntimePolicyGovernanceSettings,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -534,6 +652,8 @@ pub struct RuntimePolicyFile {
     pub gateway: RuntimePolicyGatewaySettings,
     #[serde(default)]
     pub secrets: RuntimePolicySecretsFile,
+    #[serde(default)]
+    pub governance: RuntimePolicyGovernanceSettings,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

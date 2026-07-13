@@ -1,3 +1,6 @@
+#[path = "support/governance.rs"]
+mod governance_support;
+
 use prodex_application::{
     ApplicationAtomicReservationError, ApplicationAtomicReservationErrorStatus,
     ApplicationAtomicReservationRequest, ApplicationAtomicReservationStoragePlan,
@@ -297,6 +300,18 @@ fn data_plane_request(tenant_id: TenantId) -> ApplicationDataPlaneRequest<Resour
     let reservation_id = ReservationId::new();
     let request_id = RequestId::new();
     let principal = principal(tenant_id);
+    let inspection = prodex_application::plan_application_request_inspection(
+        prodex_application::ApplicationInspectionRequest {
+            sources: Vec::new(),
+            default_classification: prodex_domain::DataClassification::Internal,
+            trusted_label: None,
+            prior_classification: None,
+            detector_revision: prodex_domain::DetectorRevisionId::new("test-v1").unwrap(),
+            limits: prodex_domain::InspectionLimits::default(),
+        },
+    )
+    .unwrap();
+    let governance = governance_support::test_governance_plan(tenant_id, &principal, &inspection);
     ApplicationDataPlaneRequest {
         http: GatewayHttpRequestMeta {
             method: GatewayHttpMethod::Post,
@@ -308,6 +323,8 @@ fn data_plane_request(tenant_id: TenantId) -> ApplicationDataPlaneRequest<Resour
                 GatewayHttpHeader::new("Authorization", "Bearer should-strip"),
             ],
         },
+        inspection,
+        governance,
         admission: GatewayAdmissionRequest {
             tenant: TenantContext { tenant_id },
             principal: principal.clone(),
@@ -1257,6 +1274,14 @@ fn application_data_plane_composes_http_policy_and_gateway_admission() {
     assert!(!plan_debug.contains("/v1/responses"));
 
     assert_eq!(plan.http.route, GatewayHttpRouteKind::DataPlaneResponses);
+    assert_eq!(
+        plan.inspection.result.coverage(),
+        prodex_domain::InspectionCoverage::Unsupported
+    );
+    assert_eq!(
+        plan.inspection.result.classification(),
+        prodex_domain::DataClassification::Internal
+    );
     assert_eq!(plan.admission.tenant.tenant_id, tenant_id);
     assert_eq!(plan.admission.reservation.storage_key.tenant_id, tenant_id);
     assert_eq!(

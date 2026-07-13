@@ -330,13 +330,13 @@ export function validateProductionBoundary(sources) {
   requirePattern(
     errors,
     providerPlan,
-    /RuntimeGatewayApplicationAdmissionKind::TenantBound\(plan\)[\s\S]*?&plan\.admission\.provider_invocation/,
+    /RuntimeGatewayApplicationAdmissionKind::TenantBound\s*\{\s*plan,\s*\.\.\s*\}[\s\S]*?&plan\.admission\.provider_invocation/,
     `${FILES.dataPlaneAdapter}: tenant-bound provider dispatch must borrow the admitted application invocation`,
   );
   requirePattern(
     errors,
     sources.dataPlaneAdapter,
-    /struct RuntimeGatewayApplicationAdmission\(RuntimeGatewayApplicationAdmissionKind\);[\s\S]*?CompatibilityAnonymous\(RuntimeGatewayCompatibilityProviderInvocation\)/,
+    /struct RuntimeGatewayApplicationAdmission\(RuntimeGatewayApplicationAdmissionKind\);[\s\S]*?CompatibilityAnonymous\s*\{\s*invocation:\s*RuntimeGatewayCompatibilityProviderInvocation/,
     `${FILES.dataPlaneAdapter}: anonymous compatibility must remain explicit and non-forgeable outside the adapter`,
   );
   const providerSender =
@@ -1658,7 +1658,10 @@ function runSelfTest() {
       "prodex:gateway-admin-control-plane-tenant-text:v1";`,
     dataPlaneAdapter:
       `struct RuntimeGatewayApplicationAdmission(RuntimeGatewayApplicationAdmissionKind);
-      enum RuntimeGatewayApplicationAdmissionKind { TenantBound, CompatibilityAnonymous(RuntimeGatewayCompatibilityProviderInvocation) }
+      enum RuntimeGatewayApplicationAdmissionKind {
+        TenantBound { plan: Box<ApplicationDataPlanePlan>, routing: Option<GovernedRoutingPlan> },
+        CompatibilityAnonymous { invocation: RuntimeGatewayCompatibilityProviderInvocation, inspection: ApplicationInspectionPlan }
+      }
       plan_application_data_plane_execution(); plan_application_data_plane(); plan_application_usage_reconciliation(); plan_application_usage_reconciliation_execution(); RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous; ProviderRetryStage::BeforeFirstByte; ProviderRetryStage::AfterFirstByte | ProviderRetryStage::AfterCancellation;
       ApplicationUsageReconciliationBackend::File;
       ApplicationUsageReconciliationBackend::Sqlite;
@@ -1667,7 +1670,7 @@ function runSelfTest() {
       let request_id = authorized.request().request_id();
       authorized.request().trace_context();
       fn runtime_gateway_application_provider_dispatch() {
-        match admission { RuntimeGatewayApplicationAdmissionKind::TenantBound(plan) => &plan.admission.provider_invocation }
+        match admission { RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, .. } => &plan.admission.provider_invocation }
       }
       fn runtime_gateway_application_provider_retry_precommit() {
         plan_application_provider_retry(ApplicationProviderRetryRequest {});

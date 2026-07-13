@@ -48,6 +48,7 @@ fn gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_lea
             languages: vec!["en".to_string()],
             language_mode: crate::PresidioLanguageMode::Fixed,
             fail_closed: true,
+            trusted_hosts: Vec::new(),
         }),
     );
 

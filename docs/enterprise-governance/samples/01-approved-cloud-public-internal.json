@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "artifact_status": "target-example-not-runtime-config",
+  "scenario": "public/internal data to approved cloud providers",
+  "governance_mode": "enterprise_enforce",
+  "input": {
+    "tenant": "tenant-example",
+    "classifications": ["public", "internal"],
+    "inspection_coverage": "full",
+    "operation": "model_inference",
+    "tools_requested": false
+  },
+  "policy": {
+    "effect": "allow_with_obligations",
+    "provider_allow_set": ["cloud-primary", "cloud-secondary"],
+    "minimum_provider_trust_tier": "approved_enterprise",
+    "required_regions": ["id", "sg"],
+    "maximum_retention_days": 30,
+    "training_use": "prohibited",
+    "mandatory_audit": true
+  },
+  "registry_candidates": [
+    {"id": "cloud-primary", "approved": true, "region": "id", "retention_days": 0, "training_use": "prohibited"},
+    {"id": "cloud-secondary", "approved": true, "region": "sg", "retention_days": 30, "training_use": "prohibited"},
+    {"id": "unapproved-cloud", "approved": false, "region": "id", "retention_days": 0, "training_use": "prohibited"}
+  ],
+  "expected": {
+    "effect": "allow_with_obligations",
+    "eligible_providers": ["cloud-primary", "cloud-secondary"],
+    "excluded_providers": {"unapproved-cloud": "not_approved"}
+  }
+}

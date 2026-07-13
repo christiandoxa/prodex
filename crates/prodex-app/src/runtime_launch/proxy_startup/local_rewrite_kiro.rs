@@ -1,6 +1,7 @@
 use super::chat_compatible_request::runtime_provider_chat_compatible_request_body;
 use super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, runtime_deepseek_store_conversation,
+    RuntimeDeepSeekConversationStore, RuntimeDeepSeekRewriteOptions, RuntimeDeepSeekWebSearchMode,
+    runtime_deepseek_store_conversation,
 };
 use super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
@@ -11,6 +12,7 @@ use super::local_rewrite_gemini_compact::{
 };
 use super::local_rewrite_upstream::RuntimeLocalRewriteStreamingResponse;
 use super::provider_bridge::runtime_provider_stream_function_call_arguments_delta_event;
+use super::provider_bridge::{RuntimeProviderBridgeKind, runtime_provider_canonical_model};
 use super::provider_sse_events::{
     runtime_provider_sse_event, runtime_provider_sse_output_text_item_added_event,
     runtime_provider_sse_output_text_item_done_event,
@@ -26,8 +28,9 @@ use crate::runtime_kiro_acp::{
     RuntimeKiroAcpClientInfo, RuntimeKiroAcpEnvelope, RuntimeKiroAcpPromptTurnResult,
     RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate,
     runtime_kiro_acp_chat_assistant_messages_from_prompt_turn, runtime_kiro_acp_initialize_request,
-    runtime_kiro_acp_prompt_turn_with_command, runtime_kiro_acp_responses_value_from_prompt_turn,
-    runtime_kiro_acp_session_new_request, runtime_kiro_acp_session_prompt_request,
+    runtime_kiro_acp_prompt_turn_with_command_and_options,
+    runtime_kiro_acp_responses_value_from_prompt_turn, runtime_kiro_acp_session_new_request,
+    runtime_kiro_acp_session_prompt_request,
 };
 use crate::runtime_proxy_shared::{RuntimeResponsesReply, RuntimeStreamingResponse};
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest};
@@ -54,6 +57,13 @@ Preserve the user's goals, repository instructions, decisions, files changed, ex
 commands and test results, unresolved failures, current worktree state, and the next concrete steps. \
 Remove redundant narration and obsolete intermediate reasoning. Do not call tools. \
 Return only the continuation summary, with no preamble or completion claim.";
+
+fn runtime_kiro_rewrite_options() -> RuntimeDeepSeekRewriteOptions {
+    RuntimeDeepSeekRewriteOptions {
+        web_search_mode: RuntimeDeepSeekWebSearchMode::OpenAiChat,
+        ..Default::default()
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct RuntimeKiroProfileAuth {
@@ -184,13 +194,61 @@ pub(super) fn send_runtime_kiro_upstream_request(
     let translated = runtime_provider_chat_compatible_request_body(
         &body,
         &shared.deepseek_conversations,
-        super::provider_bridge::RuntimeProviderBridgeKind::Kiro,
+        RuntimeProviderBridgeKind::Kiro,
         "",
         false,
-        Default::default(),
+        runtime_kiro_rewrite_options(),
     )?;
     let prompt_messages = translated.messages.clone();
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
+    let requested_model = value
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(|model| runtime_provider_canonical_model(RuntimeProviderBridgeKind::Kiro, model));
+    let requested_effort = value
+        .pointer("/reasoning/effort")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+        .map(str::to_string);
+    if stream {
+        let response =
+            RuntimeLocalRewriteUpstreamResponse::Streaming(RuntimeLocalRewriteStreamingResponse {
+                status: 200,
+                headers: vec![(
+                    "content-type".to_string(),
+                    "text/event-stream; charset=utf-8".to_string(),
+                )],
+                body: Box::new(runtime_kiro_streaming_reader(
+                    request_id,
+                    prompt,
+                    prompt_messages,
+                    auth,
+                    requested_model,
+                    requested_effort,
+                    chat_completions_route,
+                    shared,
+                )?),
+                profile_name: auth.profile_name.clone(),
+            });
+        let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
+            runtime_kiro_anthropic_streaming_local_response(
+                response,
+                anthropic_request,
+                request_id,
+                &shared.runtime_shared,
+            )?
+        } else {
+            response
+        };
+        return Ok(RuntimeLocalRewriteUpstreamResult {
+            response,
+            gemini_context: None,
+            copilot_context: None,
+        });
+    }
     let overlay_root = create_private_kiro_temp_root("runtime")?;
     let result = (|| {
         let secret = read_kiro_auth_secret(&auth.codex_home)?;
@@ -212,15 +270,18 @@ pub(super) fn send_runtime_kiro_upstream_request(
             .as_deref()
             .map(Path::as_os_str)
             .unwrap_or(default_command.as_os_str());
-        let turn = runtime_kiro_acp_prompt_turn_with_command(command, &cwd, &extra_env, &prompt)?;
+        let turn = runtime_kiro_acp_prompt_turn_with_command_and_options(
+            command,
+            &cwd,
+            &extra_env,
+            requested_model.as_deref(),
+            requested_effort.as_deref(),
+            &prompt,
+        )?;
         let mut response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
         response["metadata"]["kiro"]["profile_name"] = Value::String(auth.profile_name.clone());
-        if let Some(model) = value
-            .get("model")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-        {
-            response["requested_model"] = Value::String(model.to_string());
+        if let Some(model) = requested_model.as_ref() {
+            response["requested_model"] = Value::String(model.clone());
         }
         if response.get("status").and_then(Value::as_str) != Some("failed")
             && let Some(response_id) = response.get("id").and_then(Value::as_str)
@@ -232,80 +293,36 @@ pub(super) fn send_runtime_kiro_upstream_request(
                 runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(&turn),
             );
         }
-        if stream {
-            let response = RuntimeLocalRewriteUpstreamResponse::Streaming(
-                RuntimeLocalRewriteStreamingResponse {
-                    status: 200,
-                    headers: vec![(
-                        "content-type".to_string(),
-                        "text/event-stream; charset=utf-8".to_string(),
-                    )],
-                    body: Box::new(runtime_kiro_streaming_reader(
-                        request_id,
-                        prompt,
-                        prompt_messages,
-                        auth,
-                        value
-                            .get("model")
-                            .and_then(Value::as_str)
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string),
-                        chat_completions_route,
-                        shared,
-                    )?),
-                    profile_name: auth.profile_name.clone(),
-                },
-            );
-            let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
-                runtime_kiro_anthropic_streaming_local_response(
-                    response,
-                    anthropic_request,
-                    request_id,
-                    &shared.runtime_shared,
-                )?
-            } else {
-                response
-            };
-            Ok(RuntimeLocalRewriteUpstreamResult {
-                response,
-                gemini_context: None,
-                copilot_context: None,
-            })
+        let body = if chat_completions_route {
+            serde_json::to_vec(&runtime_kiro_chat_completion_value_from_response(
+                &response, request_id,
+            ))
+            .context("failed to serialize Kiro chat completion JSON")?
         } else {
-            let body = if chat_completions_route {
-                serde_json::to_vec(&runtime_kiro_chat_completion_value_from_response(
-                    &response, request_id,
-                ))
-                .context("failed to serialize Kiro chat completion JSON")?
-            } else {
-                serde_json::to_vec(&response).context("failed to serialize Kiro response JSON")?
-            };
-            let response = RuntimeLocalRewriteUpstreamResponse::Buffered(
-                RuntimeHeapTrimmedBufferedResponseParts {
-                    status: 200,
-                    headers: vec![(
-                        "content-type".to_string(),
-                        b"application/json; charset=utf-8".to_vec(),
-                    )],
-                    body: body.into(),
-                },
-            );
-            let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
-                RuntimeLocalRewriteUpstreamResponse::Buffered(
-                    runtime_kiro_anthropic_message_parts_from_response(
-                        &response,
-                        anthropic_request,
-                    ),
-                )
-            } else {
-                response
-            };
-            Ok(RuntimeLocalRewriteUpstreamResult {
-                response,
-                gemini_context: None,
-                copilot_context: None,
-            })
-        }
+            serde_json::to_vec(&response).context("failed to serialize Kiro response JSON")?
+        };
+        let response = RuntimeLocalRewriteUpstreamResponse::Buffered(
+            RuntimeHeapTrimmedBufferedResponseParts {
+                status: 200,
+                headers: vec![(
+                    "content-type".to_string(),
+                    b"application/json; charset=utf-8".to_vec(),
+                )],
+                body: body.into(),
+            },
+        );
+        let response = if let Some(anthropic_request) = anthropic_request.as_ref() {
+            RuntimeLocalRewriteUpstreamResponse::Buffered(
+                runtime_kiro_anthropic_message_parts_from_response(&response, anthropic_request),
+            )
+        } else {
+            response
+        };
+        Ok(RuntimeLocalRewriteUpstreamResult {
+            response,
+            gemini_context: None,
+            copilot_context: None,
+        })
     })();
     schedule_runtime_kiro_overlay_cleanup(&shared.runtime_shared.async_runtime, overlay_root);
     result
@@ -362,10 +379,10 @@ fn runtime_kiro_semantic_compact_summary(
     let translated = runtime_provider_chat_compatible_request_body(
         &serde_json::to_vec(&value).context("failed to serialize Kiro compact request")?,
         &RuntimeDeepSeekConversationStore::default(),
-        super::provider_bridge::RuntimeProviderBridgeKind::Kiro,
+        RuntimeProviderBridgeKind::Kiro,
         "",
         false,
-        Default::default(),
+        runtime_kiro_rewrite_options(),
     )?;
     let prompt = runtime_kiro_prompt_from_messages(&translated.messages);
     let overlay_root = create_private_kiro_temp_root("compact")?;
@@ -389,7 +406,25 @@ fn runtime_kiro_semantic_compact_summary(
             .as_deref()
             .map(Path::as_os_str)
             .unwrap_or(default_command.as_os_str());
-        let turn = runtime_kiro_acp_prompt_turn_with_command(command, &cwd, &extra_env, &prompt)?;
+        let requested_model = value
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .map(|model| runtime_provider_canonical_model(RuntimeProviderBridgeKind::Kiro, model));
+        let requested_effort = value
+            .pointer("/reasoning/effort")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|effort| !effort.is_empty());
+        let turn = runtime_kiro_acp_prompt_turn_with_command_and_options(
+            command,
+            &cwd,
+            &extra_env,
+            requested_model.as_deref(),
+            requested_effort,
+            &prompt,
+        )?;
         let response = runtime_kiro_acp_responses_value_from_prompt_turn(&turn, request_id);
         runtime_kiro_compact_summary_from_response(&response)
     })();
@@ -1188,12 +1223,14 @@ fn runtime_kiro_anthropic_streaming_local_response(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn runtime_kiro_streaming_reader(
     request_id: u64,
     prompt: String,
     prompt_messages: Vec<Value>,
     auth: &RuntimeKiroProfileAuth,
     requested_model: Option<String>,
+    requested_effort: Option<String>,
     chat_completions_route: bool,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeKiroStreamingReader> {
@@ -1232,6 +1269,7 @@ fn runtime_kiro_streaming_reader(
             &command,
             &profile_name,
             requested_model,
+            requested_effort,
             chat_completions_route,
             conversations,
         );
@@ -1260,11 +1298,27 @@ fn runtime_kiro_streaming_worker(
     command: &Path,
     profile_name: &str,
     requested_model: Option<String>,
+    requested_effort: Option<String>,
     chat_completions_route: bool,
     conversations: RuntimeDeepSeekConversationStore,
 ) -> Result<()> {
-    let mut child = Command::new(command)
-        .arg("acp")
+    let mut acp_command = Command::new(command);
+    acp_command.arg("acp");
+    if let Some(model) = requested_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+    {
+        acp_command.arg("--model").arg(model);
+    }
+    if let Some(effort) = requested_effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+    {
+        acp_command.arg("--effort").arg(effort);
+    }
+    let mut child = acp_command
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

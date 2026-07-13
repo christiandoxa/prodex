@@ -657,8 +657,10 @@ pub(crate) fn write_kiro_model_catalog_snapshot(
             extra_env.push((OsString::from("AWS_REGION"), OsString::from(region)));
         }
         let cwd = env::current_dir().unwrap_or_else(|_| codex_home.to_path_buf());
-        let bootstrap = runtime_kiro_acp_bootstrap(&cwd, &extra_env)?;
-        let models = runtime_kiro_acp_model_catalog(&bootstrap.session);
+        let models = native_kiro_model_catalog(&cwd, &extra_env).or_else(|_| {
+            let bootstrap = runtime_kiro_acp_bootstrap(&cwd, &extra_env)?;
+            Ok::<_, anyhow::Error>(runtime_kiro_acp_model_catalog(&bootstrap.session))
+        })?;
         let path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
         if models.is_empty() {
             let _ = std::fs::remove_file(&path);
@@ -672,6 +674,62 @@ pub(crate) fn write_kiro_model_catalog_snapshot(
     })();
     let _ = std::fs::remove_dir_all(overlay_root);
     result
+}
+
+fn native_kiro_model_catalog(cwd: &Path, extra_env: &[(OsString, OsString)]) -> Result<Vec<Value>> {
+    let output = Command::new(kiro_bin())
+        .args(["chat", "--list-models", "--format", "json"])
+        .current_dir(cwd)
+        .envs(extra_env.iter().cloned())
+        .output()
+        .context("failed to query the Kiro model catalog")?;
+    if !output.status.success() {
+        bail!("Kiro model catalog command failed with {}", output.status);
+    }
+    let value: Value =
+        serde_json::from_slice(&output.stdout).context("failed to parse the Kiro model catalog")?;
+    let models = value
+        .get("models")
+        .and_then(Value::as_array)
+        .context("Kiro model catalog is missing models")?;
+    let models = models
+        .iter()
+        .filter_map(|model| {
+            let id = model
+                .get("model_id")
+                .or_else(|| model.get("id"))
+                .and_then(Value::as_str)?
+                .trim();
+            if id.is_empty() {
+                return None;
+            }
+            let name = model
+                .get("model_name")
+                .or_else(|| model.get("name"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .unwrap_or(id);
+            let mut normalized = serde_json::json!({
+                "id": id,
+                "name": name,
+                "object": "model",
+                "owned_by": "kiro-cli",
+            });
+            if let Some(description) = model.get("description").and_then(Value::as_str) {
+                normalized["description"] = Value::String(description.to_string());
+            }
+            if let Some(context_window) = model.get("context_window_tokens").and_then(Value::as_u64)
+            {
+                normalized["context_window_tokens"] = Value::from(context_window);
+            }
+            Some(normalized)
+        })
+        .collect::<Vec<_>>();
+    if models.is_empty() {
+        bail!("Kiro model catalog returned no usable models");
+    }
+    Ok(models)
 }
 
 pub(crate) fn create_private_kiro_temp_root(name: &str) -> Result<PathBuf> {
@@ -926,6 +984,9 @@ mod tests {
             &script,
             r#"#!/usr/bin/env python3
 import json, sys
+if len(sys.argv) > 2 and sys.argv[1] == 'chat' and sys.argv[2] == '--list-models':
+    print(json.dumps({"models":[{"model_name":"auto","description":"Models chosen by task","model_id":"auto","context_window_tokens":1000000},{"model_name":"claude-sonnet-4.5","description":"Claude Sonnet 4.5 model","model_id":"claude-sonnet-4.5","context_window_tokens":200000}],"default_model":"auto"}))
+    sys.exit(0)
 if len(sys.argv) > 1 and sys.argv[1] == 'acp':
     first = json.loads(sys.stdin.readline())
     second = json.loads(sys.stdin.readline())
@@ -1035,8 +1096,14 @@ sys.exit(1)
                 .unwrap()
                 .as_nanos()
         ));
+        fs::create_dir_all(&root).expect("test root should exist");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let codex_home = root.join("codex-home");
-        fs::create_dir_all(&codex_home).expect("codex home should exist");
+        create_codex_home_if_missing(&codex_home).expect("codex home should exist");
         let fake_kiro = write_fake_kiro_binary(&root);
         let _guard = EnvGuard::set_kiro_bin(&fake_kiro);
 
@@ -1062,7 +1129,8 @@ sys.exit(1)
         let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
         let catalog_text = fs::read_to_string(&catalog_path).expect("catalog should exist");
         let value: Value = serde_json::from_str(&catalog_text).expect("catalog json should parse");
-        assert_eq!(value["models"][0]["id"], "claude-sonnet-4");
+        assert_eq!(value["models"][0]["id"], "auto");
+        assert_eq!(value["models"][0]["context_window_tokens"], 1_000_000);
         assert_eq!(value["models"][1]["id"], "claude-sonnet-4.5");
         let _ = fs::remove_dir_all(root);
     }

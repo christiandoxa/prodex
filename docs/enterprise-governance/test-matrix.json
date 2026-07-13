@@ -1,0 +1,340 @@
+{
+  "schema_version": 1,
+  "artifact_status": "target-control-matrix",
+  "status_definitions": {
+    "partial": "Relevant production or test foundations exist, but the complete target invariant is not proven.",
+    "planned": "The target control or its required evidence is not complete. This is not a passing result."
+  },
+  "tests": [
+    {
+      "id": "SEC-ID-001",
+      "phase": 5,
+      "threat": "Caller forges forwarded identity, role, tenant, or client address headers.",
+      "control": "Trusted-proxy canonicalization and server-side identity/tenant binding.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "integration_security",
+      "expected": "Untrusted forwarding headers are ignored or rejected; no privilege or tenant change occurs.",
+      "implementation_status": "planned",
+      "evidence_required": "Gateway tests through trusted and untrusted proxy hops with duplicate and conflicting headers."
+    },
+    {
+      "id": "SEC-ID-002",
+      "phase": 5,
+      "threat": "Authenticated principal crosses tenant boundaries or exploits missing database isolation.",
+      "control": "Single tenant binding plus PostgreSQL RLS and transaction-local tenant context.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "postgresql_integration_security",
+      "expected": "Cross-tenant reads and writes fail through every API and direct repository operation.",
+      "implementation_status": "planned",
+      "evidence_required": "Multi-tenant API and PostgreSQL RLS suite using synthetic tenants."
+    },
+    {
+      "id": "SEC-ID-003",
+      "phase": 5,
+      "threat": "Session fixation, replay, stale privilege, or incomplete multi-replica revocation.",
+      "control": "Opaque bound sessions, rotation, expiry, credential/policy epochs, and durable revocation.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "integration_security",
+      "expected": "Fixed, expired, revoked, replayed, or privilege-stale sessions are rejected on every replica.",
+      "implementation_status": "planned",
+      "evidence_required": "Clock-controlled fixation/expiry/revocation tests across at least two gateway replicas."
+    },
+    {
+      "id": "SEC-INS-001",
+      "phase": 1,
+      "threat": "Unicode detector offsets are applied as bytes incorrectly, masking the wrong content.",
+      "control": "Per-field Unicode-scalar to UTF-8 byte-range conversion with bounded typed findings.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "unit_property",
+      "expected": "Finding locations and masking remain correct for multibyte prefixes and nested tool arguments.",
+      "implementation_status": "partial",
+      "evidence_required": "Focused Presidio adapter Unicode and nested-argument regression tests."
+    },
+    {
+      "id": "SEC-INS-002",
+      "phase": 1,
+      "threat": "Adversarial JSON causes unbounded inspection work or false full coverage.",
+      "control": "Depth, value, byte, finding, detector, reason and tag limits with explicit coverage.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "unit_fuzz",
+      "expected": "Work remains bounded and truncated/opaque inputs never report full coverage.",
+      "implementation_status": "partial",
+      "evidence_required": "Limit boundary tests plus retained parser/walker fuzz corpus."
+    },
+    {
+      "id": "SEC-INS-003",
+      "phase": 2,
+      "threat": "Unsupported modality or unavailable detector silently bypasses sensitive-data controls.",
+      "control": "Explicit partial/unsupported coverage with mode- and policy-specific enforcement.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "integration_security",
+      "expected": "Observe records would-deny; enforce constrains/denies; bank denies required unresolved inspection.",
+      "implementation_status": "planned",
+      "evidence_required": "Text, image, audio, file, non-UTF8, timeout and detector-outage matrix."
+    },
+    {
+      "id": "SEC-INS-004",
+      "phase": 2,
+      "threat": "Sensitive output spans stream chunks and escapes a per-chunk detector.",
+      "control": "Incremental bounded response inspection with overlap and one precommit deadline.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "stream_integration_fuzz",
+      "expected": "Boundary-spanning findings are enforced before local commit without unbounded buffering.",
+      "implementation_status": "planned",
+      "evidence_required": "Random chunk-boundary corpus for SSE and WebSocket response streams."
+    },
+    {
+      "id": "SEC-POL-001",
+      "phase": 3,
+      "threat": "Policy result changes with rule order, hash-map iteration, or missing attributes.",
+      "control": "Pure deterministic typed PDP with stable precedence and reason codes.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "golden_property",
+      "expected": "Equivalent inputs produce identical effect, obligations and reason codes; mandatory unknowns fail safely.",
+      "implementation_status": "planned",
+      "evidence_required": "Golden vectors and randomized rule/input permutation properties."
+    },
+    {
+      "id": "SEC-POL-002",
+      "phase": 3,
+      "threat": "Conflicting obligations weaken a deny, region, retention, tool, audit, or provider constraint.",
+      "control": "Most-restrictive effect precedence and typed obligation conflict resolution.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "unit_property",
+      "expected": "Deny is absorbing and unresolved mandatory conflicts deny rather than choose a weaker value.",
+      "implementation_status": "planned",
+      "evidence_required": "Pairwise and generated obligation merge properties."
+    },
+    {
+      "id": "SEC-POL-003",
+      "phase": 3,
+      "threat": "Invalid, stale or revoked policy snapshot is served from cache or LKG.",
+      "control": "Checksum validation, atomic activation, revisioned cache keys and invalidation precedence.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "integration_chaos",
+      "expected": "Invalid snapshots never activate; revocation beats cache/LKG; bank denies without valid mandatory state.",
+      "implementation_status": "planned",
+      "evidence_required": "Corruption, refresh race, activation acknowledgement, invalidation and LKG outage suite."
+    },
+    {
+      "id": "SEC-APR-001",
+      "phase": 3,
+      "threat": "Maker self-approves, replays, races, or approves a changed policy revision.",
+      "control": "Independent quorum bound to immutable checksum with transactional activation.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "state_machine_concurrency",
+      "expected": "Self, stale, replayed, expired and conflicting approvals fail; one valid activation is audited.",
+      "implementation_status": "planned",
+      "evidence_required": "Model/state-machine and real-database concurrency tests."
+    },
+    {
+      "id": "SEC-APR-002",
+      "phase": 3,
+      "threat": "Execution approval is replayed for a changed request, tenant, policy, provider or operation.",
+      "control": "Decision/input/revision-bound approval with atomic expiry/use/idempotency consumption.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "integration_security",
+      "expected": "Mismatched, revoked, expired or exhausted approval denies and cannot expand policy eligibility.",
+      "implementation_status": "planned",
+      "evidence_required": "Mutation/replay/race matrix matching sample 05."
+    },
+    {
+      "id": "SEC-APR-003",
+      "phase": 3,
+      "threat": "Break-glass becomes a broad persistent bypass or escapes review.",
+      "control": "Narrow independently approved scope, TTL, use cap, revocation and mandatory after-action review.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "state_machine_security",
+      "expected": "Over-scope/expired/exhausted grants deny and non-bypassable invariants remain enforced.",
+      "implementation_status": "planned",
+      "evidence_required": "Grant lifecycle and every forbidden-override test."
+    },
+    {
+      "id": "SEC-RTE-001",
+      "phase": 4,
+      "threat": "A high soft score restores a provider excluded by classification, region, retention or approval.",
+      "control": "Hard compliance filter before deterministic eligible-set-only scoring.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "unit_property",
+      "expected": "Ineligible providers are never scored or selected under any soft input.",
+      "implementation_status": "planned",
+      "evidence_required": "Generated provider/constraint sets and seven synthetic scenario assertions."
+    },
+    {
+      "id": "SEC-RTE-002",
+      "phase": 4,
+      "threat": "Floating-point, iteration or replica variance makes routing unauditable.",
+      "control": "Bounded integer/fixed-point components and stable tie-break ordering.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "golden_property",
+      "expected": "The same eligible snapshot/input produces byte-stable score components and selection across replicas.",
+      "implementation_status": "planned",
+      "evidence_required": "Cross-process golden vectors and permutation properties."
+    },
+    {
+      "id": "SEC-RTE-003",
+      "phase": 4,
+      "threat": "Load, transport backoff or health heuristics break a hard continuation binding.",
+      "control": "Hard affinity precedes fresh heuristics; explicit revocation alone overrides eligibility.",
+      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "runtime_regression",
+      "expected": "Existing owner remains selected under local heuristics; tenant mismatch/revocation fails safely.",
+      "implementation_status": "partial",
+      "evidence_required": "Existing runtime affinity regressions extended with tenant and governance epochs."
+    },
+    {
+      "id": "SEC-RTE-004",
+      "phase": 4,
+      "threat": "Proxy retries or rotates after model output has begun.",
+      "control": "One response commitment boundary and no postcommit retry/rotation.",
+      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "stream_runtime_regression",
+      "expected": "Postcommit failure is surfaced naturally; no second upstream target receives the continuation.",
+      "implementation_status": "partial",
+      "evidence_required": "HTTP/SSE/WebSocket fault injection before and after first committed chunk."
+    },
+    {
+      "id": "SEC-AUD-001",
+      "phase": 5,
+      "threat": "Governance mutation succeeds while its mandatory audit or SIEM outbox record is lost.",
+      "control": "One database transaction for business state, audit chain head/event and outbox.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "database_fault_injection",
+      "expected": "Failure at every statement/commit boundary rolls back all state and returns no success.",
+      "implementation_status": "planned",
+      "evidence_required": "SQLite and PostgreSQL transactional fault matrix."
+    },
+    {
+      "id": "SEC-AUD-002",
+      "phase": 5,
+      "threat": "Audit events are deleted, reordered, altered, forked or contain raw sensitive data.",
+      "control": "Versioned content-free schema, per-partition hash chain and deterministic verification.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "unit_integration_security",
+      "expected": "Tamper/fork is detected at the first affected event and synthetic content canaries never appear.",
+      "implementation_status": "partial",
+      "evidence_required": "Existing audit-log tests extended to governance schemas, concurrent heads and canary scan."
+    },
+    {
+      "id": "SEC-AUD-003",
+      "phase": 5,
+      "threat": "SIEM retries duplicate, lose, poison or indefinitely lease events.",
+      "control": "Transactional outbox, idempotent event IDs, bounded leases/retries and visible dead-letter state.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "integration_chaos",
+      "expected": "Every committed event is retained and eventually delivered or visibly dead-lettered without hot-path SIEM calls.",
+      "implementation_status": "planned",
+      "evidence_required": "Sink outage, duplicate ack, worker crash, lease expiry, poison and backlog-capacity suite."
+    },
+    {
+      "id": "SEC-SEC-001",
+      "phase": 5,
+      "threat": "Secret values enter config, policy, logs, audit, errors or diagnostics.",
+      "control": "Opaque secret references, redacted types and repository/runtime canary scans.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "static_dynamic_security",
+      "expected": "Raw canary values are rejected at boundaries and absent from every captured artifact.",
+      "implementation_status": "partial",
+      "evidence_required": "Existing redaction/secret-store tests plus end-to-end canary scan."
+    },
+    {
+      "id": "SEC-SEC-002",
+      "phase": 5,
+      "threat": "Wrong tenant/purpose resolves a secret or stale lease survives rotation/revocation/Vault outage.",
+      "control": "Namespace authorization, bounded leases and explicit invalidation/failure behavior.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "integration_chaos",
+      "expected": "Cross-namespace access and expired/revoked leases deny; bank never falls back to raw local secrets.",
+      "implementation_status": "planned",
+      "evidence_required": "External secret manager namespace, rotation, revocation and outage tests."
+    },
+    {
+      "id": "SEC-STO-001",
+      "phase": 5,
+      "threat": "Migration or rollback mixes incompatible schemas or loses tenant/audit/policy state.",
+      "control": "Versioned expand/migrate/contract migrations, compatibility window and export/restore proof.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "migration_restore_integration",
+      "expected": "Old/new supported images interoperate and restored durable state preserves isolation, hashes and pointers.",
+      "implementation_status": "planned",
+      "evidence_required": "SQLite/PostgreSQL forward/back compatibility, export/import and point-in-time restore drill."
+    },
+    {
+      "id": "SEC-STO-002",
+      "phase": 5,
+      "threat": "Replica race or Redis loss creates split-brain activation, approval use or session state.",
+      "control": "PostgreSQL durable authority, optimistic concurrency/leases and rebuildable Redis coordination.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "multi_replica_chaos",
+      "expected": "One authoritative mutation wins; Redis loss degrades boundedly and rebuilds without losing durable state.",
+      "implementation_status": "planned",
+      "evidence_required": "At least two replicas with concurrent activation/use, Redis restart and DB failover."
+    },
+    {
+      "id": "SEC-GWY-001",
+      "phase": 5,
+      "threat": "HTTP, SSE, WebSocket, compatibility or Gemini paths bypass governed inspection/policy/audit.",
+      "control": "One application admission/decision boundary plus architecture dependency guards.",
+      "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "architecture_integration",
+      "expected": "Every supported channel records the same required stage/revision evidence before provider dispatch.",
+      "implementation_status": "partial",
+      "evidence_required": "Channel parity tests and CI guard forbidding direct provider dispatch from adapters."
+    },
+    {
+      "id": "SEC-GWY-002",
+      "phase": 5,
+      "threat": "Local proxy converts upstream errors into misleading quota/governance errors.",
+      "control": "Pass-through after upstream response; local stable errors only for pre-upstream local failure.",
+      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "runtime_regression",
+      "expected": "Generic upstream 429/status/body/stream is preserved; local precommit exhaustion is a local service-unavailable result.",
+      "implementation_status": "partial",
+      "evidence_required": "Existing runtime quota/transport transparency regressions plus governed precommit failures."
+    },
+    {
+      "id": "SEC-BNK-001",
+      "phase": 5,
+      "threat": "Bank label starts with a public listener, bypass, missing mandatory dependency, raw secret or broad egress.",
+      "control": "Typed bank startup validator and deployment security policy.",
+      "modes": ["bank_enforce"],
+      "test_type": "configuration_deployment_security",
+      "expected": "Every insecure combination rejects startup with a stable content-free reason.",
+      "implementation_status": "planned",
+      "evidence_required": "Generated configuration matrix plus Compose/Kubernetes/container policy tests."
+    },
+    {
+      "id": "SEC-BNK-002",
+      "phase": 5,
+      "threat": "Bank runtime fails open when identity, inspection, policy, registry, audit or secret dependencies fail.",
+      "control": "Mandatory fail-closed runtime matrix with no generic break-glass override.",
+      "modes": ["bank_enforce"],
+      "test_type": "end_to_end_chaos_security",
+      "expected": "Each missing mandatory dependency denies before upstream commit and emits bounded durable evidence when possible.",
+      "implementation_status": "planned",
+      "evidence_required": "Complete sample 07 scenario under dependency fault injection."
+    },
+    {
+      "id": "SEC-DEP-001",
+      "phase": 5,
+      "threat": "Container privilege, writable root, public bind or unrestricted egress bypasses application controls.",
+      "control": "Non-root/read-only runtime, private exposure, least privilege and allow-listed provider/secret/SIEM egress.",
+      "modes": ["enterprise_enforce", "bank_enforce"],
+      "test_type": "deployment_static_integration",
+      "expected": "CI rejects insecure manifests and a deployed pod cannot reach unapproved endpoints.",
+      "implementation_status": "planned",
+      "evidence_required": "Manifest policy, image/provenance/vulnerability scan and network-policy connectivity tests."
+    },
+    {
+      "id": "SEC-PERF-001",
+      "phase": 5,
+      "threat": "Governance creates unbounded latency, allocation, cardinality or concurrency pressure.",
+      "control": "Immutable local snapshots, bounded stages/admission/labels and declared p99 budgets.",
+      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "benchmark_load_soak",
+      "expected": "Disabled regression is at most 5%; governed local overhead at most 5 ms p99; PDP at most 1 ms; routing at most 2 ms.",
+      "implementation_status": "planned",
+      "evidence_required": "Five comparable samples with machine metadata, raw output, load/soak errors and variance."
+    }
+  ]
+}

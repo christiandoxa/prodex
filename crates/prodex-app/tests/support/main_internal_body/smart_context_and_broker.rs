@@ -394,6 +394,7 @@ fn runtime_proxy_presidio_redaction_failure_uses_generic_response_and_logs_no_en
             languages: vec!["en".to_string()],
             language_mode: PresidioLanguageMode::Fixed,
             fail_closed: true,
+            trusted_hosts: Vec::new(),
         }),
     );
 

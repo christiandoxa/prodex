@@ -11,7 +11,7 @@ services:
       PRODEX_RUNTIME_LOG_DIR: /var/log/prodex
     command: ["serve", "--listen", "0.0.0.0:4000"]
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     secrets:
       - source: prodex_gateway_token
         target: PRODEX_GATEWAY_TOKEN

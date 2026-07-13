@@ -20,6 +20,7 @@ use prodex_domain::{
 
 mod accounting;
 mod audit;
+mod governance;
 mod idempotency;
 mod identity;
 mod policy;
@@ -30,6 +31,7 @@ mod verification;
 
 pub use accounting::*;
 pub use audit::*;
+pub use governance::*;
 pub use idempotency::*;
 pub use identity::*;
 pub use policy::*;

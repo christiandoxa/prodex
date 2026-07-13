@@ -1,10 +1,12 @@
 //! Gemini Live websocket session pumps and translated event forwarding.
 
 use super::super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::super::local_rewrite_application_data_plane::runtime_gateway_application_websocket_governance;
 use super::GEMINI_LIVE_IDLE_SLEEP;
 use super::local_rewrite_gemini_live_translation::RuntimeGeminiLiveState;
 use crate::{
-    RuntimeUpstreamWebSocket, WsMessage, WsSocket, runtime_proxy_log, runtime_proxy_log_field,
+    RuntimeUpstreamWebSocket, WsMessage, WsSocket,
+    apply_runtime_presidio_redaction_to_websocket_text, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_structured_log_message, runtime_set_upstream_websocket_io_timeout,
 };
 use anyhow::{Context, Result};
@@ -18,6 +20,7 @@ pub(super) fn runtime_gemini_live_session<S>(
     local_socket: &mut WsSocket<S>,
     upstream_socket: &mut RuntimeUpstreamWebSocket,
     shared: &RuntimeLocalRewriteProxyShared,
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) -> Result<()>
 where
     S: Read + Write,
@@ -34,7 +37,19 @@ where
     loop {
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
-                let translated = state.translate_client_message(text.as_ref())?;
+                let inspected = apply_runtime_presidio_redaction_to_websocket_text(
+                    request_id,
+                    text.as_ref(),
+                    &shared.runtime_shared,
+                )?;
+                runtime_gateway_application_websocket_governance(
+                    authorized,
+                    inspected.text.as_ref(),
+                    shared,
+                    &inspected.inspection,
+                )
+                .context("Gemini Live governance denied the client frame")?;
+                let translated = state.translate_client_message(inspected.text.as_ref())?;
                 for event in translated.local_events {
                     runtime_gemini_live_send_json(local_socket, event)?;
                 }
@@ -96,6 +111,7 @@ pub(super) fn runtime_gemini_live_duplex_session<S>(
     local_socket: &mut WsSocket<S>,
     upstream_socket: &mut RuntimeUpstreamWebSocket,
     shared: &RuntimeLocalRewriteProxyShared,
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) -> Result<()>
 where
     S: Read + Write,
@@ -114,7 +130,19 @@ where
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
                 progressed = true;
-                let translated = state.translate_client_message(text.as_ref())?;
+                let inspected = apply_runtime_presidio_redaction_to_websocket_text(
+                    request_id,
+                    text.as_ref(),
+                    &shared.runtime_shared,
+                )?;
+                runtime_gateway_application_websocket_governance(
+                    authorized,
+                    inspected.text.as_ref(),
+                    shared,
+                    &inspected.inspection,
+                )
+                .context("Gemini Live governance denied the client frame")?;
+                let translated = state.translate_client_message(inspected.text.as_ref())?;
                 for event in translated.local_events {
                     runtime_gemini_live_send_json(local_socket, event)?;
                 }

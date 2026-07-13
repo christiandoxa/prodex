@@ -17,7 +17,7 @@ const COPILOT_ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
 const COPILOT_GEMINI_CONTEXT_WINDOW_TOKENS: u64 = 1_048_576;
 const DEEPSEEK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
 const GEMINI_CONTEXT_WINDOW_TOKENS: u64 = 1_048_576;
-const KIRO_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
+const KIRO_CONTEXT_WINDOW_TOKENS: u64 = 1_000_000;
 
 macro_rules! model {
     ($provider:expr, $owned_by:expr, $id:expr, $display:expr, $description:expr, $ctx:expr, $in_cost:expr, $out_cost:expr, $endpoints:expr, [$($alias:expr),* $(,)?]) => {

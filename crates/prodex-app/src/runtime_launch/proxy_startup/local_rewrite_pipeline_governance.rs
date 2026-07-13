@@ -10,44 +10,61 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
         Ok(plan) => plan,
         Err(response) => return Err(request.state.reject(response)),
     };
-    if apply_runtime_presidio_redaction_to_request(
+    let inspection = match apply_runtime_presidio_redaction_to_request(
         request.state.request_id,
         &mut request.captured,
         &shared.runtime_shared,
-    )
-    .is_err()
-    {
-        if let Some(plan) = constraints.as_mut() {
-            plan.reject_governance("presidio_redaction_failed");
+    ) {
+        Ok(inspection) => inspection,
+        Err(_) => {
+            if let Some(plan) = constraints.as_mut() {
+                plan.reject_governance("presidio_redaction_failed");
+            }
+            runtime_gateway_audit_data_plane_presidio_redaction_failed(
+                shared,
+                &request.captured.path_and_query,
+            );
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "local_rewrite_presidio_redaction_failed",
+                    [
+                        runtime_proxy_log_field("request", request.state.request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("reason", "presidio_redaction_failed"),
+                        runtime_proxy_log_field("path", &request.captured.path_and_query),
+                    ],
+                ),
+            );
+            return Err(request.state.reject(build_runtime_proxy_text_response(
+                502,
+                "gateway PII redaction failed",
+            )));
         }
-        runtime_gateway_audit_data_plane_presidio_redaction_failed(
-            shared,
-            &request.captured.path_and_query,
-        );
-        runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "local_rewrite_presidio_redaction_failed",
-                [
-                    runtime_proxy_log_field("request", request.state.request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("reason", "presidio_redaction_failed"),
-                    runtime_proxy_log_field("path", &request.captured.path_and_query),
-                ],
-            ),
-        );
-        let response = build_runtime_proxy_text_response(502, "gateway PII redaction failed");
-        return Err(RuntimeLocalRewritePreparedRequest {
-            state: request.state,
-            captured: request.captured,
-            constraints,
-        }
-        .reject(response));
-    }
+    };
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_request_inspection",
+            [
+                runtime_proxy_log_field("request", request.state.request_id.to_string()),
+                runtime_proxy_log_field("coverage", inspection.result.coverage().as_str()),
+                runtime_proxy_log_field(
+                    "classification",
+                    inspection.result.classification().as_str(),
+                ),
+                runtime_proxy_log_field(
+                    "finding_count",
+                    inspection.result.findings().len().to_string(),
+                ),
+            ],
+        ),
+    );
     Ok(RuntimeLocalRewritePreparedRequest {
         state: request.state,
         captured: request.captured,
         constraints,
+        inspection,
     })
 }
 
@@ -105,10 +122,12 @@ pub(super) fn runtime_local_rewrite_pre_reservation_governance<'target, 'shared>
         );
         return Err(request.reject(response));
     }
-    if let Some(body) = runtime_proxy_crate::runtime_gateway_redact_request_body(
-        &request.captured.body,
-        &shared.gateway_guardrails,
-    ) {
+    if request.inspection.result.coverage() == prodex_domain::InspectionCoverage::Unsupported
+        && let Some(body) = runtime_proxy_crate::runtime_gateway_redact_request_body(
+            &request.captured.body,
+            &shared.gateway_guardrails,
+        )
+    {
         runtime_proxy_log(
             &shared.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -169,6 +188,7 @@ pub(super) fn runtime_local_rewrite_reserve_virtual_key<'target, 'shared>(
         &request.captured,
         shared,
         application,
+        &request.inspection,
     ) {
         Ok(admission) => admission,
         Err(rejection) => {

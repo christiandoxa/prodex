@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::fs;
 use std::io::Read;
+use std::net::IpAddr;
 use std::path::Path;
 use std::time::Duration;
 
@@ -30,6 +31,8 @@ struct ProdexPresidioRuntimeFileConfig {
     language_mode: PresidioLanguageMode,
     #[serde(default = "default_presidio_fail_mode")]
     fail_mode: String,
+    #[serde(default)]
+    trusted_hosts: Vec<String>,
 }
 
 impl Default for ProdexPresidioRuntimeFileConfig {
@@ -41,6 +44,7 @@ impl Default for ProdexPresidioRuntimeFileConfig {
             languages: None,
             language_mode: PresidioLanguageMode::default(),
             fail_mode: default_presidio_fail_mode(),
+            trusted_hosts: Vec::new(),
         }
     }
 }
@@ -52,6 +56,7 @@ pub struct RuntimePresidioRedactionConfig {
     pub languages: Vec<String>,
     pub language_mode: PresidioLanguageMode,
     pub fail_closed: bool,
+    pub trusted_hosts: Vec<String>,
 }
 
 impl fmt::Debug for RuntimePresidioRedactionConfig {
@@ -63,6 +68,7 @@ impl fmt::Debug for RuntimePresidioRedactionConfig {
             .field("languages", &self.languages)
             .field("language_mode", &self.language_mode)
             .field("fail_closed", &self.fail_closed)
+            .field("trusted_host_count", &self.trusted_hosts.len())
             .finish()
     }
 }
@@ -139,6 +145,13 @@ pub fn runtime_presidio_redaction_config(
     };
     validate_presidio_url(&file_config.analyzer_url, "analyzer_url")?;
     validate_presidio_url(&file_config.anonymizer_url, "anonymizer_url")?;
+    if file_config
+        .trusted_hosts
+        .iter()
+        .any(|host| !presidio_trusted_host_is_valid(host))
+    {
+        anyhow::bail!("invalid trusted_hosts: expected bounded exact host names or IP addresses");
+    }
 
     let languages = file_config.languages.unwrap_or_else(|| {
         file_config
@@ -162,6 +175,11 @@ pub fn runtime_presidio_redaction_config(
         languages,
         language_mode,
         fail_closed: file_config.fail_mode.eq_ignore_ascii_case("closed"),
+        trusted_hosts: file_config
+            .trusted_hosts
+            .into_iter()
+            .map(|host| host.to_ascii_lowercase())
+            .collect(),
     })
 }
 
@@ -292,6 +310,64 @@ pub fn validate_presidio_url(url: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_enterprise_presidio_endpoints(
+    config: &RuntimePresidioRedactionConfig,
+) -> Result<()> {
+    for (url, field) in [
+        (&config.analyzer_url, "analyzer_url"),
+        (&config.anonymizer_url, "anonymizer_url"),
+    ] {
+        let parsed = reqwest::Url::parse(url).with_context(|| format!("invalid {field}"))?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| anyhow::anyhow!("untrusted {field}: endpoint host is required"))?;
+        if !presidio_host_is_private(host)
+            && !config
+                .trusted_hosts
+                .iter()
+                .any(|trusted| trusted.eq_ignore_ascii_case(host))
+        {
+            anyhow::bail!(
+                "untrusted {field}: enterprise governance requires a private/on-prem endpoint or an exact trusted_hosts entry"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn presidio_host_is_private(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    let Ok(address) = host.parse::<IpAddr>() else {
+        return false;
+    };
+    match address {
+        IpAddr::V4(address) => {
+            address.is_private()
+                || address.is_loopback()
+                || address.is_link_local()
+                || address.is_unspecified()
+        }
+        IpAddr::V6(address) => {
+            address.is_loopback()
+                || address.is_unique_local()
+                || address.is_unicast_link_local()
+                || address.is_unspecified()
+        }
+    }
+}
+
+fn presidio_trusted_host_is_valid(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && host.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':' | b'[' | b']')
+        })
+}
+
 pub fn presidio_endpoint(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
 }
@@ -347,6 +423,7 @@ mod tests {
             languages: vec!["en".to_string()],
             language_mode: PresidioLanguageMode::Fixed,
             fail_closed: true,
+            trusted_hosts: Vec::new(),
         };
 
         let rendered = format!("{config:?}");
@@ -356,6 +433,30 @@ mod tests {
             !rendered.contains("anonymizer-debug-sentinel"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn enterprise_endpoints_require_private_or_explicitly_trusted_hosts() {
+        let mut config = RuntimePresidioRedactionConfig {
+            analyzer_url: "https://presidio.example.com".to_string(),
+            anonymizer_url: "http://10.20.30.40:5001".to_string(),
+            languages: vec!["en".to_string()],
+            language_mode: PresidioLanguageMode::Fixed,
+            fail_closed: true,
+            trusted_hosts: Vec::new(),
+        };
+        assert!(validate_enterprise_presidio_endpoints(&config).is_err());
+
+        config
+            .trusted_hosts
+            .push("presidio.example.com".to_string());
+        validate_enterprise_presidio_endpoints(&config)
+            .expect("exact trusted host and private address should be accepted");
+
+        config.analyzer_url = "http://localhost:5002".to_string();
+        config.trusted_hosts.clear();
+        validate_enterprise_presidio_endpoints(&config)
+            .expect("loopback endpoints should remain accepted");
     }
 
     #[test]

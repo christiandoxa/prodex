@@ -148,31 +148,29 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
         gemini_context,
         copilot_context,
     } = response;
-    if let RuntimeLocalRewriteUpstreamResponse::Streaming(streaming_response) = response {
-        let mut headers = streaming_response.headers;
-        runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-        let body = runtime_gateway_spend_stream_body(
-            runtime_gateway_guardrail_stream_body(streaming_response.body, request_id, shared),
-            request_id,
-            streaming_response.status,
-            captured,
-            shared,
-        );
-        let streaming = RuntimeStreamingResponse {
-            status: streaming_response.status,
-            headers,
-            body,
-            request_id,
-            profile_name: streaming_response.profile_name,
-            log_path: shared.runtime_shared.log_path.clone(),
-            shared: shared.runtime_shared.clone(),
-            _inflight_guard: None,
-        };
-        let _ = request.stream(streaming, None);
-        return;
-    }
-    let live_response = match response {
-        RuntimeLocalRewriteUpstreamResponse::Live(live_response) => live_response,
+    match response {
+        RuntimeLocalRewriteUpstreamResponse::Streaming(streaming_response) => {
+            let mut headers = streaming_response.headers;
+            runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
+            let body = runtime_gateway_spend_stream_body(
+                runtime_gateway_guardrail_stream_body(streaming_response.body, request_id, shared),
+                request_id,
+                streaming_response.status,
+                captured,
+                shared,
+            );
+            let streaming = RuntimeStreamingResponse {
+                status: streaming_response.status,
+                headers,
+                body,
+                request_id,
+                profile_name: streaming_response.profile_name,
+                log_path: shared.runtime_shared.log_path.clone(),
+                shared: shared.runtime_shared.clone(),
+                _inflight_guard: None,
+            };
+            let _ = request.stream(streaming, None);
+        }
         RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => {
             emit_runtime_gateway_response_spend_event_for_body(
                 request_id,
@@ -185,19 +183,19 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
             let _ = request.respond(runtime_local_rewrite_response_with_call_id(
                 parts, request_id, shared,
             ));
-            return;
         }
-        RuntimeLocalRewriteUpstreamResponse::Streaming(_) => unreachable!(),
-    };
-    respond_runtime_local_rewrite_live_response(
-        request_id,
-        request,
-        live_response,
-        gemini_context,
-        copilot_context,
-        captured,
-        shared,
-    );
+        RuntimeLocalRewriteUpstreamResponse::Live(live_response) => {
+            respond_runtime_local_rewrite_live_response(
+                request_id,
+                request,
+                live_response,
+                gemini_context,
+                copilot_context,
+                captured,
+                shared,
+            );
+        }
+    }
 }
 
 fn runtime_local_rewrite_call_id(

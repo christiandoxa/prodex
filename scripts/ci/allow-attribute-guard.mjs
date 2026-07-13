@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 8,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 17,
+  "clippy::too_many_arguments": 19,
   "clippy::type_complexity": 3,
 });
 
@@ -45,6 +45,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/response.rs|pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_stream_notification(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_stream_tool_call(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_streaming_reader(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_streaming_worker(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/events.rs|fn runtime_kiro_stream_tool_call(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/events.rs|pub(super) fn runtime_kiro_stream_notification(",
@@ -55,6 +56,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_spend_event(",
+  "clippy::too_many_arguments|crates/prodex-domain/src/governance/approval.rs|pub fn pending(",
   "clippy::too_many_arguments|crates/prodex-provider-core/src/gemini_bridge/request.rs|pub fn gemini_provider_core_generate_content_request(",
   "clippy::too_many_arguments|crates/prodex-provider-core/src/translators/gemini/response/build.rs|pub(super) fn gemini_build_response_value(",
   "clippy::too_many_arguments|crates/prodex-provider-core/src/translators/kiro/acp.rs|pub fn kiro_provider_core_acp_metadata(",

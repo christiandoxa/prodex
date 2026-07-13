@@ -404,12 +404,9 @@ spec:
         - protocol: TCP
           port: 6379
     - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
+        - namespaceSelector:
+            matchLabels:
+              prodex.dev/network-tier: ai-egress
       ports:
         - protocol: TCP
           port: 443

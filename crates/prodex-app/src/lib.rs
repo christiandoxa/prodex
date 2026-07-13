@@ -77,6 +77,7 @@ mod runtime_gemini_auth;
 mod runtime_gemini_cli;
 mod runtime_gemini_cli_compat;
 mod runtime_gemini_config;
+mod runtime_governance;
 #[allow(dead_code)]
 mod runtime_kiro_acp;
 mod runtime_launch;
