@@ -159,7 +159,7 @@ pub(super) fn render_log_stream_tui(
     frame.render_widget(body, chunks[1]);
 
     let footer = Paragraph::new(Line::styled(
-        state.footer_text("live transcript + token usage | q quit"),
+        state.footer_text("live transcript + upstream payload + token usage | q quit"),
         tui_title_style(),
     ))
     .block(
@@ -187,7 +187,7 @@ fn log_stream_tui_text_for_view(
 ) -> Text<'static> {
     if items.is_empty() {
         return Text::from(Line::styled(
-            "Waiting for transcript or token usage events...",
+            "Waiting for transcript, upstream payload, or token usage events...",
             tui_muted_style(),
         ));
     }
