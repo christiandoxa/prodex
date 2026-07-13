@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.284.0 - 2026-07-13
+
+### CLI
+
+- Trust hooks on launch (`b7c1f04`)
+
+### Misc
+
+- Add live monitoring dashboard (`82ca042`)
+
 ## 0.283.0 - 2026-07-13
 
 ### Misc
@@ -189,13 +199,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Skip workspace trust prompt (`0c2e464`)
-
-## 0.272.0 - 2026-07-10
-
-### Runtime
-
-- Harden gateway and proxy boundaries (`1fc05d4`)
-
-### CLI
-
-- Simplify optimizer candidate lookup (`11ebc21`)
