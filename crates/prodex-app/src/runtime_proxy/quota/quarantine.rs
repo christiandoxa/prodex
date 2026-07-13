@@ -143,18 +143,10 @@ fn runtime_text_mentions_spark_quota_target(value: Option<&str>) -> bool {
 }
 
 fn runtime_usage_main_quota_has_remaining(usage: &UsageResponse) -> bool {
-    let summary = prodex_quota::quota_summary(usage);
-    runtime_main_quota_window_has_remaining(summary.five_hour.status)
-        && runtime_main_quota_window_has_remaining(summary.weekly.status)
-}
-
-fn runtime_main_quota_window_has_remaining(status: RuntimeQuotaWindowStatus) -> bool {
-    matches!(
-        status,
-        RuntimeQuotaWindowStatus::Ready
-            | RuntimeQuotaWindowStatus::Thin
-            | RuntimeQuotaWindowStatus::Critical
-    )
+    usage
+        .rate_limit
+        .as_ref()
+        .is_some_and(prodex_quota::window_pair_has_ready_limit)
 }
 
 #[cfg(test)]
@@ -243,5 +235,15 @@ mod tests {
         usage.additional_rate_limits.push(spark_limit(90, 90, now));
 
         assert!(!runtime_usage_main_quota_has_remaining(&usage));
+    }
+
+    #[test]
+    fn weekly_only_main_quota_survives_spark_scoped_exhaustion() {
+        let now = Local::now().timestamp();
+        let mut usage = usage_response(0, 65, now);
+        usage.rate_limit.as_mut().unwrap().primary_window = None;
+        usage.additional_rate_limits.push(spark_limit(0, 0, now));
+
+        assert!(runtime_usage_main_quota_has_remaining(&usage));
     }
 }

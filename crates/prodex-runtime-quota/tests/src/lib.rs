@@ -97,6 +97,26 @@ fn quota_summary_uses_spark_windows_when_main_is_exhausted() {
 }
 
 #[test]
+fn quota_summary_uses_weekly_only_spark_window_when_main_is_exhausted() {
+    let now = Local::now().timestamp();
+    let mut usage = usage_response(100, 100, now);
+    let mut spark = spark_limit(89, 97, now);
+    spark.rate_limit.primary_window = None;
+    usage.additional_rate_limits.push(spark);
+
+    let summary = runtime_quota_summary_for_route(&usage, RuntimeRouteKind::Responses);
+    let snapshot = runtime_profile_usage_snapshot_from_usage(&usage);
+
+    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(summary.five_hour.remaining_percent, 100);
+    assert_eq!(summary.weekly.status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(summary.weekly.remaining_percent, 97);
+    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Healthy);
+    assert_eq!(snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(snapshot.weekly_remaining_percent, 97);
+}
+
+#[test]
 fn quota_summary_ignores_exhausted_spark_when_main_is_ready() {
     let now = Local::now().timestamp();
     let mut usage = usage_response(0, 65, now);
