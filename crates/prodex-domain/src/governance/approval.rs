@@ -55,6 +55,7 @@ fn approval_token_is_valid(value: &str) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ApprovalKind {
     PolicyRevision,
+    ClassificationRuleRevision,
     ProviderRegistryRevision,
     RoutingScoreRevision,
     HighImpactConfiguration,

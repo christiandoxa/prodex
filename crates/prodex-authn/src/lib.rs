@@ -5,8 +5,14 @@
 //! JWKS-cache, role-mapping, and tenant requirements. It intentionally performs
 //! no discovery, JWKS fetch, HTTP, filesystem, database, or async-runtime work.
 
+mod browser_flow;
 mod compatibility;
 mod evidence;
+
+pub use browser_flow::{
+    OidcBrowserFlowCapability, OidcBrowserFlowCapabilityError, OidcBrowserFlowRequirement,
+    OidcPkceMethod, require_oidc_browser_flow_capability,
+};
 
 pub use compatibility::{
     CompatibilityAuthenticationError, CompatibilityAuthenticationRequest,
@@ -14,8 +20,8 @@ pub use compatibility::{
 };
 pub use evidence::{
     VerifiedCredentialAuthenticationError, VerifiedCredentialAuthenticationRequest,
-    VerifiedCredentialEvidence, VerifiedOidcCredentialEvidence, VerifiedOidcRoleEvidence,
-    authenticate_verified_credential,
+    VerifiedCredentialEvidence, VerifiedMtlsPeerEvidence, VerifiedOidcCredentialEvidence,
+    VerifiedOidcRoleEvidence, VerifiedWorkloadCredentialEvidence, authenticate_verified_credential,
 };
 
 use std::error::Error;

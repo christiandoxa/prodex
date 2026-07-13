@@ -16,6 +16,7 @@ mod local_rewrite;
 mod local_rewrite_application_boundary;
 mod local_rewrite_application_data_plane;
 mod local_rewrite_application_runtime;
+mod local_rewrite_classification_rules;
 mod local_rewrite_constraints;
 mod local_rewrite_copilot;
 mod local_rewrite_copilot_bindings;
@@ -29,10 +30,12 @@ mod local_rewrite_gateway_admin_identity;
 mod local_rewrite_gateway_admin_keys;
 mod local_rewrite_gateway_admin_ledger;
 mod local_rewrite_gateway_admin_payloads;
+mod local_rewrite_gateway_admin_policies;
 mod local_rewrite_gateway_admin_response;
 mod local_rewrite_gateway_admin_route_explain;
 mod local_rewrite_gateway_admin_router;
 mod local_rewrite_gateway_admin_scim;
+mod local_rewrite_gateway_admin_sessions;
 mod local_rewrite_gateway_admin_store_mutation;
 mod local_rewrite_gateway_backend_connection;
 mod local_rewrite_gateway_billing_csv;
@@ -77,10 +80,13 @@ mod local_rewrite_gemini_live;
 mod local_rewrite_gemini_models;
 mod local_rewrite_gemini_quota;
 mod local_rewrite_gemini_thought_signatures;
+mod local_rewrite_governance_audit;
+mod local_rewrite_governance_session;
 mod local_rewrite_kiro;
 mod local_rewrite_model_memory;
 mod local_rewrite_options;
 mod local_rewrite_pipeline;
+mod local_rewrite_provider_registry;
 mod local_rewrite_rate_limits;
 mod local_rewrite_request;
 mod local_rewrite_response;
@@ -433,7 +439,6 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),
     );
-    validate_runtime_governance_inspection_enabled(&runtime_config, presidio_redaction_enabled)?;
     register_runtime_presidio_redaction_proxy_state(
         &log_path,
         if presidio_redaction_enabled {
@@ -444,7 +449,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         } else {
             None
         },
-    );
+    )?;
     runtime_proxy_log_to_path(
         &log_path,
         &format!(

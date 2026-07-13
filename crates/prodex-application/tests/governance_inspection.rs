@@ -24,12 +24,14 @@ fn application_inspection_combines_sources_monotonically() {
             ApplicationInspectionSource {
                 coverage: InspectionCoverage::Full,
                 findings: vec![finding(FindingKind::EmailAddress, "$.input[0].content")],
+                masked_findings: vec![FindingKind::EmailAddress],
                 tags: vec![InspectionTag::new("pii").unwrap()],
                 reason_codes: vec![InspectionReasonCode::new("presidio.finding").unwrap()],
             },
             ApplicationInspectionSource {
                 coverage: InspectionCoverage::Unsupported,
                 findings: vec![finding(FindingKind::ApiKey, "$.tools[0].arguments")],
+                masked_findings: Vec::new(),
                 tags: vec![InspectionTag::new("secret").unwrap()],
                 reason_codes: vec![InspectionReasonCode::new("local.secret").unwrap()],
             },
@@ -45,6 +47,7 @@ fn application_inspection_combines_sources_monotonically() {
     assert_eq!(plan.result.coverage(), InspectionCoverage::Partial);
     assert_eq!(plan.result.classification(), DataClassification::Restricted);
     assert_eq!(plan.result.findings().len(), 2);
+    assert_eq!(plan.masked_findings, vec![FindingKind::EmailAddress]);
 }
 
 #[test]
@@ -71,6 +74,7 @@ fn application_inspection_rejects_unbounded_detector_sources() {
     let source = ApplicationInspectionSource {
         coverage: InspectionCoverage::Full,
         findings: Vec::new(),
+        masked_findings: Vec::new(),
         tags: Vec::new(),
         reason_codes: Vec::new(),
     };
@@ -86,4 +90,46 @@ fn application_inspection_rejects_unbounded_detector_sources() {
     .unwrap_err();
 
     assert_eq!(error, ApplicationInspectionError::TooManyDetectors);
+}
+
+#[test]
+fn application_inspection_rejects_unproven_masking_evidence() {
+    let plan = plan_application_request_inspection(ApplicationInspectionRequest {
+        sources: vec![ApplicationInspectionSource {
+            coverage: InspectionCoverage::Full,
+            findings: vec![finding(FindingKind::EmailAddress, "$.input")],
+            masked_findings: vec![FindingKind::ApiKey],
+            tags: Vec::new(),
+            reason_codes: Vec::new(),
+        }],
+        default_classification: DataClassification::Internal,
+        trusted_label: None,
+        prior_classification: None,
+        detector_revision: DetectorRevisionId::new("combined-v1").unwrap(),
+        limits: InspectionLimits::default(),
+    })
+    .unwrap();
+
+    assert!(plan.masked_findings.is_empty());
+}
+
+#[test]
+fn application_inspection_rejects_unbounded_masking_evidence() {
+    let error = plan_application_request_inspection(ApplicationInspectionRequest {
+        sources: vec![ApplicationInspectionSource {
+            coverage: InspectionCoverage::Full,
+            findings: Vec::new(),
+            masked_findings: vec![FindingKind::ApiKey; FindingKind::ALL.len() + 1],
+            tags: Vec::new(),
+            reason_codes: Vec::new(),
+        }],
+        default_classification: DataClassification::Internal,
+        trusted_label: None,
+        prior_classification: None,
+        detector_revision: DetectorRevisionId::new("combined-v1").unwrap(),
+        limits: InspectionLimits::default(),
+    })
+    .unwrap_err();
+
+    assert_eq!(error, ApplicationInspectionError::TooManyMaskedFindingKinds);
 }

@@ -142,6 +142,7 @@ serving; secret files are not read on the request hot path.
 | `gateway.guardrails.prompt_injection_detection` | none | `false` | Enable built-in prompt-injection heuristic checks before upstream send. |
 | `gateway.guardrails.pii_redaction` | none | `false` | Enable local best-effort request-body redaction for emails, secret-like bearer/API-key values, and long digit groups before upstream send. |
 | `gateway.guardrails.webhook_url` | none | empty | Optional external guardrail HTTP endpoint. Prodex sends base64 request/response bodies and expects JSON such as `{"allow": false, "reason": "...", "message": "..."}` to block. |
+| `gateway.guardrails.webhook_host_allowlist` | none | empty | Exact bounded DNS host allowlist for the guardrail endpoint. Required with HTTPS in `bank_enforce`; redirects are not followed. |
 | `gateway.guardrails.webhook_phases` | none | both phases | External guardrail phases: `pre` for requests before upstream send, `post` for buffered responses before returning to caller. |
 | `gateway.guardrails.webhook_bearer_token_env` | none | empty | Exact whitespace-free environment variable name containing a non-empty, whitespace-free bearer token for `gateway.guardrails.webhook_url`. |
 | `gateway.guardrails.webhook_bearer_token_ref` | none | empty | Projected webhook bearer-token reference. Mutually exclusive with `webhook_bearer_token_env`. |
@@ -266,10 +267,104 @@ presidio_redaction = true
 prompt_injection_detection = true
 pii_redaction = true
 webhook_url = "https://guardrails.example/check"
+webhook_host_allowlist = ["guardrails.example"]
 webhook_phases = ["pre", "post"]
 webhook_bearer_token_env = "PRODEX_GATEWAY_GUARDRAIL_TOKEN"
 webhook_fail_closed = true
 ```
+
+## Governance authority schemas
+
+`governance.authority_tenants` is the bounded, typed tenant discovery source for
+SQLite/PostgreSQL governance refresh. It is merged with tenant IDs on static admin
+tokens, is limited to 64 unique UUIDs, and supports OIDC/SCIM deployments that have
+no static tenant-bound admin token. `enterprise_enforce` and `bank_enforce` require
+an authoritative SQLite or PostgreSQL store and at least one configured authority
+tenant.
+
+The stored `Policy` artifact is strict JSON using the same schema as
+`RuntimePolicyGovernanceSettings`. Local `policy.toml` can configure the equivalent
+fields directly. An empty `policy_rules` list keeps the mode baseline. Non-empty
+custom rules are added to that baseline; they never replace it. IDs beginning with
+`builtin.` are reserved. In particular, the immutable `bank_enforce` baseline keeps
+its provider-trust, retention, training, response-inspection, audit, and fallback
+obligations even when custom allow rules are present. Custom deny rules can tighten
+the result.
+
+```toml
+[governance]
+mode = "enterprise_observe"
+authority_tenants = ["00000000-0000-7000-8000-000000000001"]
+
+[[governance.policy_rules]]
+id = "deny-revoked-tool-session"
+effect = "deny"
+obligations = []
+reason_code = "policy.session_revoked"
+
+[governance.policy_rules.condition]
+channel = "api"
+credential_scope = "data_plane"
+session_revoked = true
+requested_capability = "tools"
+```
+
+Each rule requires `id`, `condition`, `effect`, `obligations`, and `reason_code`.
+The strict condition schema supports channel, principal kind, minimum role,
+credential scope, action, canonical route, minimum data classification, inspection
+coverage, minimum request risk, network zone, maximum session age/idle time,
+session revoked/MFA state, minimum retained classification, minimum authentication
+strength, environment MFA state, one requested capability, and quota
+headroom/reservation flags. Tenant is implicit in the tenant-bound snapshot.
+Group and department attributes are not currently supported. Provider eligibility
+is expressed through typed obligations and the separately activated provider
+registry/routing artifacts, not free-form policy attributes.
+
+Effects are `allow`, `require_approval`, and `deny`. A deny rule cannot carry
+obligations. Typed obligation kinds are `mask_finding`,
+`minimum_provider_trust`, `allow_provider`, `deny_provider`,
+`require_local_execution`, `prohibit_retention`, `prohibit_training_use`,
+`require_region`, `disable_tools`, `allow_tool`, `allow_model`, `allow_modality`,
+`max_input_tokens`, `max_output_tokens`, `max_context_tokens`,
+`require_response_inspection`, `session_idle_timeout_seconds`,
+`session_absolute_timeout_seconds`, `require_reauthentication`, `require_mfa`,
+`audit_detail`, `require_human_approval`, `retention_seconds`, and
+`deny_fallback_outside_eligibility`. Rules are limited to 256 and obligations to
+64 per rule. Unknown fields, missing required rule fields, invalid tokens/selectors,
+zero positive bounds, and over-limit artifacts are rejected before activation.
+
+`ClassificationRules` is a separate strict artifact activated through the
+`/v1/prodex/gateway/classification-rules` lifecycle. It owns both tenant detector
+patterns/revision and the classification rule set used by the PDP; the `Policy`
+artifact does not override its classification decision. Example:
+
+```json
+{
+  "schema_version": 1,
+  "detector_revision": "detectors-v1",
+  "patterns": [
+    {"id": "customer-secret", "pattern": "customer-*secret"}
+  ],
+  "classification_revision": "classification-v1",
+  "classification_checksum": "867cd7a4ceb2c1f0beb5f0662d71c059ce65ff0e2056be7aa7d650e5772cf3d7",
+  "unsupported_coverage_floor": "restricted",
+  "classification_rules": [
+    {"finding_kind": "tenant_sensitive", "classification": "confidential"}
+  ]
+}
+```
+
+The checksum is lowercase SHA-256 over canonical JSON containing
+`unsupported_coverage_floor` and the classification rules sorted by finding kind
+and classification. A mismatch is rejected. Detector patterns are limited to 16
+per tenant, use bounded interior `*` globs, and retain Unicode-safe byte offsets.
+
+The data plane reads immutable per-tenant snapshots only. SQLite/PostgreSQL reads
+run at startup and in the bounded background refresher; invalid refreshes retain
+the last-known-good snapshot. Enforcing modes have no cross-tenant/default fallback.
+Artifact validation, activation, startup load, refresh, and committed swap also
+enforce the process deployment-mode floor: `bank_enforce` accepts only bank policy
+artifacts, and `enterprise_enforce` cannot be downgraded to observe or personal.
 
 ## Runtime Proxy Keys
 

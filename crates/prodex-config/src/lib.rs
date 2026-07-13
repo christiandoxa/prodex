@@ -7,7 +7,7 @@
 use std::error::Error;
 use std::fmt;
 
-use prodex_domain::{PolicyRevisionId, SecretPurpose, SecretRef, TenantId};
+use prodex_domain::{DataClassification, PolicyRevisionId, SecretPurpose, SecretRef, TenantId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GovernanceMode {
@@ -40,7 +40,27 @@ pub enum GovernanceRolloutMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceUnknownClassificationBehavior {
+    UseDefault,
+    Deny,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernancePolicyFailureMode {
+    Open,
+    Closed,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GovernanceSessionConfig {
+    pub absolute_timeout_seconds: Option<u32>,
+    pub idle_timeout_seconds: Option<u32>,
+    pub max_concurrent: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GovernanceConfig {
+    pub config_version: u32,
     pub mode: GovernanceMode,
     pub inspection: GovernanceRolloutMode,
     pub classification: GovernanceRolloutMode,
@@ -49,11 +69,17 @@ pub struct GovernanceConfig {
     pub mandatory_audit: bool,
     pub anonymous_data_plane: bool,
     pub raw_secret_sources: bool,
+    pub classification_default: DataClassification,
+    pub classification_unknown: GovernanceUnknownClassificationBehavior,
+    pub policy_failure_mode: GovernancePolicyFailureMode,
+    pub active_policy_revision: Option<PolicyRevisionId>,
+    pub session: GovernanceSessionConfig,
 }
 
 impl GovernanceConfig {
     pub const fn personal_compatible() -> Self {
         Self {
+            config_version: 1,
             mode: GovernanceMode::Personal,
             inspection: GovernanceRolloutMode::Off,
             classification: GovernanceRolloutMode::Off,
@@ -62,16 +88,32 @@ impl GovernanceConfig {
             mandatory_audit: false,
             anonymous_data_plane: true,
             raw_secret_sources: true,
+            classification_default: DataClassification::Internal,
+            classification_unknown: GovernanceUnknownClassificationBehavior::UseDefault,
+            policy_failure_mode: GovernancePolicyFailureMode::Open,
+            active_policy_revision: None,
+            session: GovernanceSessionConfig {
+                absolute_timeout_seconds: None,
+                idle_timeout_seconds: None,
+                max_concurrent: None,
+            },
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GovernanceConfigError {
+    UnsupportedVersion,
     EnforceModeRequiresEnforcement,
-    BankAuditRequired,
+    EnforceAuditRequired,
     BankIdentityRequired,
     BankSecretReferenceRequired,
+    EnforceUnknownClassificationMustDeny,
+    EnforcePolicyMustFailClosed,
+    EnforceActiveRevisionRequired,
+    EnforceSessionBoundsRequired,
+    InvalidSessionBounds,
+    BankRestrictedDefaultRequired,
 }
 
 impl fmt::Display for GovernanceConfigError {
@@ -85,6 +127,9 @@ impl Error for GovernanceConfigError {}
 pub fn validate_governance_config(
     config: GovernanceConfig,
 ) -> Result<GovernanceConfig, GovernanceConfigError> {
+    if config.config_version != 1 {
+        return Err(GovernanceConfigError::UnsupportedVersion);
+    }
     if config.mode.is_enforcing()
         && [
             config.inspection,
@@ -97,16 +142,53 @@ pub fn validate_governance_config(
     {
         return Err(GovernanceConfigError::EnforceModeRequiresEnforcement);
     }
+    if config.mode.is_enforcing() && !config.mandatory_audit {
+        return Err(GovernanceConfigError::EnforceAuditRequired);
+    }
     if config.mode == GovernanceMode::BankEnforce {
-        if !config.mandatory_audit {
-            return Err(GovernanceConfigError::BankAuditRequired);
-        }
         if config.anonymous_data_plane {
             return Err(GovernanceConfigError::BankIdentityRequired);
         }
         if config.raw_secret_sources {
             return Err(GovernanceConfigError::BankSecretReferenceRequired);
         }
+        if config.classification_default != DataClassification::Restricted {
+            return Err(GovernanceConfigError::BankRestrictedDefaultRequired);
+        }
+    }
+    if config.mode.is_enforcing() {
+        if config.classification_unknown != GovernanceUnknownClassificationBehavior::Deny {
+            return Err(GovernanceConfigError::EnforceUnknownClassificationMustDeny);
+        }
+        if config.policy_failure_mode != GovernancePolicyFailureMode::Closed {
+            return Err(GovernanceConfigError::EnforcePolicyMustFailClosed);
+        }
+        if config.active_policy_revision.is_none() {
+            return Err(GovernanceConfigError::EnforceActiveRevisionRequired);
+        }
+        if config.session.absolute_timeout_seconds.is_none()
+            || config.session.idle_timeout_seconds.is_none()
+            || config.session.max_concurrent.is_none()
+        {
+            return Err(GovernanceConfigError::EnforceSessionBoundsRequired);
+        }
+    }
+    let session = config.session;
+    if session
+        .absolute_timeout_seconds
+        .is_some_and(|value| !(300..=86_400).contains(&value))
+        || session
+            .idle_timeout_seconds
+            .is_some_and(|value| !(60..=3_600).contains(&value))
+        || session
+            .max_concurrent
+            .is_some_and(|value| value == 0 || value > 10_000)
+        || matches!(
+            (session.idle_timeout_seconds, session.absolute_timeout_seconds),
+            (Some(idle), Some(absolute)) if idle > absolute
+        )
+    {
+        return Err(GovernanceConfigError::InvalidSessionBounds);
     }
     Ok(config)
 }

@@ -4,14 +4,16 @@ use super::super::local_rewrite_copilot::{
     runtime_copilot_remember_bindings_from_responses_body,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_guardrails::runtime_gateway_guardrail_stream_body;
 use super::super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
+use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
 use super::runtime_local_rewrite_buffered_response_parts;
-use super::runtime_local_rewrite_response_with_call_id;
-use crate::{RuntimeStreamingResponse, build_runtime_proxy_text_response};
+use super::runtime_local_rewrite_governed_response_with_call_id;
+use super::runtime_local_rewrite_invalid_response;
+use crate::RuntimeStreamingResponse;
+use prodex_application::ApplicationResponseObligationPlan;
 use std::io::Read;
 use std::time::Instant;
 
@@ -27,6 +29,7 @@ pub(super) fn respond_runtime_copilot_rewrite(
     shared: &RuntimeLocalRewriteProxyShared,
     captured: &crate::RuntimeProxyRequest,
     copilot_context: Option<RuntimeCopilotRequestContext>,
+    response_obligations: Option<ApplicationResponseObligationPlan>,
 ) {
     let profile_name = copilot_context
         .as_ref()
@@ -42,13 +45,7 @@ pub(super) fn respond_runtime_copilot_rewrite(
             response,
             binding_recorder,
         ));
-        let body = runtime_gateway_spend_stream_body(
-            runtime_gateway_guardrail_stream_body(body, request_id, shared),
-            request_id,
-            status,
-            captured,
-            shared,
-        );
+        let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
@@ -59,7 +56,7 @@ pub(super) fn respond_runtime_copilot_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        let _ = request.stream(streaming, None);
+        respond_runtime_local_rewrite_stream(request, streaming, shared, response_obligations);
         return;
     }
 
@@ -78,8 +75,13 @@ pub(super) fn respond_runtime_copilot_rewrite(
                 response_started_at.elapsed().as_millis(),
                 parts.body.as_slice(),
             );
-            runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
+            runtime_local_rewrite_governed_response_with_call_id(
+                parts,
+                request_id,
+                shared,
+                response_obligations,
+            )
         })
-        .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+        .unwrap_or_else(|err| runtime_local_rewrite_invalid_response(request_id, shared, &err));
     let _ = request.respond(response);
 }

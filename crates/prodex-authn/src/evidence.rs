@@ -2,7 +2,8 @@ use std::error::Error;
 use std::fmt;
 
 use prodex_domain::{
-    CredentialScope, ExplicitRoleMapper, JwksCacheSnapshot, OidcValidationPolicy, Principal, Role,
+    Audience, CredentialScope, ExplicitRoleMapper, Issuer, JwksCacheSnapshot, OidcValidationPolicy,
+    Principal, PrincipalId, PrincipalKind, Role,
 };
 
 use crate::{AuthenticationError, TokenClaims, validate_oidc_token_claims};
@@ -52,6 +53,48 @@ impl fmt::Debug for VerifiedOidcCredentialEvidence {
 pub enum VerifiedCredentialEvidence {
     Principal(Principal),
     Oidc(Box<VerifiedOidcCredentialEvidence>),
+    Workload(VerifiedWorkloadCredentialEvidence),
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct VerifiedMtlsPeerEvidence {
+    pub certificate_chain_verified: bool,
+    pub bound_principal_id: PrincipalId,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct VerifiedWorkloadCredentialEvidence {
+    pub issuer: Issuer,
+    pub audience: Audience,
+    pub expected_issuer: Issuer,
+    pub expected_audience: Audience,
+    pub resolved_principal: Principal,
+    pub mtls_required: bool,
+    pub mtls_peer: Option<VerifiedMtlsPeerEvidence>,
+}
+
+impl fmt::Debug for VerifiedMtlsPeerEvidence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedMtlsPeerEvidence")
+            .field(
+                "certificate_chain_verified",
+                &self.certificate_chain_verified,
+            )
+            .field("bound_principal_id", &"<redacted>")
+            .finish()
+    }
+}
+
+impl fmt::Debug for VerifiedWorkloadCredentialEvidence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VerifiedWorkloadCredentialEvidence")
+            .field("issuer", &"<redacted>")
+            .field("audience", &"<redacted>")
+            .field("resolved_principal", &"<redacted>")
+            .field("mtls_required", &self.mtls_required)
+            .field("mtls_peer", &self.mtls_peer)
+            .finish()
+    }
 }
 
 impl fmt::Debug for VerifiedCredentialEvidence {
@@ -59,6 +102,7 @@ impl fmt::Debug for VerifiedCredentialEvidence {
         match self {
             Self::Principal(_) => f.debug_tuple("Principal").field(&"<redacted>").finish(),
             Self::Oidc(_) => f.debug_tuple("Oidc").field(&"<redacted>").finish(),
+            Self::Workload(_) => f.debug_tuple("Workload").field(&"<redacted>").finish(),
         }
     }
 }
@@ -89,6 +133,8 @@ pub enum VerifiedCredentialAuthenticationError {
     },
     Oidc(AuthenticationError),
     OidcPrincipalMismatch,
+    WorkloadIdentityMismatch,
+    WorkloadMtlsRequired,
 }
 
 impl fmt::Display for VerifiedCredentialAuthenticationError {
@@ -101,6 +147,10 @@ impl fmt::Display for VerifiedCredentialAuthenticationError {
             Self::Oidc(error) => error.fmt(f),
             Self::OidcPrincipalMismatch => {
                 f.write_str("OIDC principal evidence does not match verified claims")
+            }
+            Self::WorkloadIdentityMismatch => f.write_str("workload identity evidence is invalid"),
+            Self::WorkloadMtlsRequired => {
+                f.write_str("verified workload mTLS evidence is required")
             }
         }
     }
@@ -123,6 +173,9 @@ pub fn authenticate_verified_credential(
         Some(VerifiedCredentialEvidence::Oidc(evidence)) => {
             authenticate_verified_oidc_evidence(*evidence)?
         }
+        Some(VerifiedCredentialEvidence::Workload(evidence)) => {
+            authenticate_verified_workload_evidence(evidence)?
+        }
         None if request.anonymous_allowed => return Ok(None),
         None => return Err(VerifiedCredentialAuthenticationError::CredentialRequired),
     };
@@ -137,6 +190,28 @@ pub fn authenticate_verified_credential(
         );
     }
     Ok(Some(principal))
+}
+
+fn authenticate_verified_workload_evidence(
+    evidence: VerifiedWorkloadCredentialEvidence,
+) -> Result<Principal, VerifiedCredentialAuthenticationError> {
+    let principal = evidence.resolved_principal;
+    if evidence.issuer != evidence.expected_issuer
+        || evidence.audience != evidence.expected_audience
+        || principal.kind != PrincipalKind::ServiceAccount
+        || principal.tenant_id.is_none()
+    {
+        return Err(VerifiedCredentialAuthenticationError::WorkloadIdentityMismatch);
+    }
+    if evidence.mtls_required {
+        let peer = evidence
+            .mtls_peer
+            .ok_or(VerifiedCredentialAuthenticationError::WorkloadMtlsRequired)?;
+        if !peer.certificate_chain_verified || peer.bound_principal_id != principal.id {
+            return Err(VerifiedCredentialAuthenticationError::WorkloadIdentityMismatch);
+        }
+    }
+    Ok(principal)
 }
 
 fn authenticate_verified_oidc_evidence(
@@ -325,6 +400,52 @@ mod tests {
                 anonymous_allowed: false,
             }),
             Err(VerifiedCredentialAuthenticationError::OidcPrincipalMismatch),
+        );
+    }
+
+    #[test]
+    fn workload_evidence_requires_exact_identity_and_bound_mtls_when_configured() {
+        let tenant_id = Some(id::<TenantId>("00000000-0000-7000-8000-000000000002"));
+        let workload = Principal::new(
+            id::<PrincipalId>("00000000-0000-7000-8000-000000000005"),
+            tenant_id,
+            PrincipalKind::ServiceAccount,
+            Role::Operator,
+            CredentialScope::DataPlane,
+        );
+        let issuer = Issuer::new("https://workload.example.com").unwrap();
+        let audience = Audience::new("prodex-data-plane").unwrap();
+        let evidence = VerifiedWorkloadCredentialEvidence {
+            issuer: issuer.clone(),
+            audience: audience.clone(),
+            expected_issuer: issuer,
+            expected_audience: audience,
+            resolved_principal: workload.clone(),
+            mtls_required: true,
+            mtls_peer: Some(VerifiedMtlsPeerEvidence {
+                certificate_chain_verified: true,
+                bound_principal_id: workload.id,
+            }),
+        };
+        assert_eq!(
+            authenticate_verified_credential(VerifiedCredentialAuthenticationRequest {
+                evidence: Some(VerifiedCredentialEvidence::Workload(evidence.clone())),
+                required_scope: Some(CredentialScope::DataPlane),
+                anonymous_allowed: false,
+            })
+            .unwrap(),
+            Some(workload)
+        );
+
+        let mut unbound = evidence;
+        unbound.mtls_peer = None;
+        assert_eq!(
+            authenticate_verified_credential(VerifiedCredentialAuthenticationRequest {
+                evidence: Some(VerifiedCredentialEvidence::Workload(unbound)),
+                required_scope: Some(CredentialScope::DataPlane),
+                anonymous_allowed: false,
+            }),
+            Err(VerifiedCredentialAuthenticationError::WorkloadMtlsRequired)
         );
     }
 

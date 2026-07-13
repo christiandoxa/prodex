@@ -28,6 +28,7 @@ pub(super) fn runtime_gateway_openapi_spec_for_mount(mount_path: &str) -> Value 
         .and_then(Value::as_object_mut)
         .expect("checked gateway OpenAPI document must contain paths");
     *paths = remount_paths(std::mem::take(paths), mount_path);
+    remount_local_path_refs(&mut document, mount_path);
     document
 }
 
@@ -44,6 +45,33 @@ fn remount_paths(paths: Map<String, Value>, mount_path: &str) -> Map<String, Val
         .collect()
 }
 
+fn remount_local_path_refs(value: &mut Value, mount_path: &str) {
+    match value {
+        Value::Object(object) => {
+            if let Some(reference) = object
+                .get("$ref")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            {
+                const CANONICAL_PREFIX: &str = "#/paths/~1v1~1";
+                if let Some(suffix) = reference.strip_prefix(CANONICAL_PREFIX) {
+                    let encoded_mount = mount_path.replace('~', "~0").replace('/', "~1");
+                    object["$ref"] = Value::String(format!("#/paths/{encoded_mount}~1{suffix}"));
+                }
+            }
+            for nested in object.values_mut() {
+                remount_local_path_refs(nested, mount_path);
+            }
+        }
+        Value::Array(array) => {
+            for nested in array {
+                remount_local_path_refs(nested, mount_path);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,7 +80,7 @@ mod tests {
     const COMPONENTS_DIGEST: &str =
         "0793d38857e524a3a14fa77974ebaf7cc56d5a4b8afc9243de5faddbbbdbc3c0";
     const DOCUMENT_DIGEST: &str =
-        "d94a158fb8e18fe421e88c05505e584bf787a2dcfb23a4cbf75986958527764f";
+        "11f3647119871fa3e1172f901f43dcbe0255b98c8afd52ddbfc595ba636418da";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -124,7 +152,9 @@ mod tests {
                 .strip_prefix(CANONICAL_MOUNT_PATH)
                 .filter(|suffix| suffix.starts_with('/'))
                 .map_or(path.clone(), |suffix| format!("/gateway{suffix}"));
-            assert_eq!(&remounted["paths"][remounted_path], operation);
+            let mut expected = operation.clone();
+            remount_local_path_refs(&mut expected, "/gateway");
+            assert_eq!(&remounted["paths"][remounted_path], &expected);
         }
         assert!(
             remounted["paths"]
@@ -133,6 +163,7 @@ mod tests {
                 .keys()
                 .all(|path| !path.starts_with("/v1/"))
         );
+        assert_local_refs_resolve(&remounted, &remounted);
 
         let root = runtime_gateway_openapi_spec_for_mount("/");
         assert_eq!(root["servers"][0]["url"], "");
@@ -226,6 +257,69 @@ mod tests {
             schemas["GatewayRouteExplainResponse"]["properties"]["policy_adjustments"]["items"]["$ref"],
             "#/components/schemas/GatewayRouteOutputAdjustment"
         );
+    }
+
+    #[test]
+    fn openapi_documents_policy_lifecycle_preconditions() {
+        let spec = runtime_gateway_openapi_spec_for_mount("/v1/");
+        let paths = &spec["paths"];
+        for path in [
+            "/v1/prodex/gateway/policies",
+            "/v1/prodex/gateway/policies/validate",
+            "/v1/prodex/gateway/policies/status",
+            "/v1/prodex/gateway/policies/{revision_id}",
+            "/v1/prodex/gateway/policies/{revision_id}/submit",
+            "/v1/prodex/gateway/policies/{revision_id}/approvals/{approval_id}/votes",
+            "/v1/prodex/gateway/policies/{revision_id}/activate",
+            "/v1/prodex/gateway/policies/{revision_id}/rollback",
+            "/v1/prodex/gateway/governance/outbox",
+            "/v1/prodex/gateway/governance/outbox/claim",
+            "/v1/prodex/gateway/governance/audit/integrity",
+        ] {
+            assert!(
+                paths[path].is_object(),
+                "missing policy lifecycle path {path}"
+            );
+        }
+        for action in ["activate", "rollback"] {
+            let post =
+                &paths[format!("/v1/prodex/gateway/policies/{{revision_id}}/{action}")]["post"];
+            let names = post["parameters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|parameter| parameter["name"].as_str())
+                .collect::<Vec<_>>();
+            assert!(names.contains(&"Idempotency-Key"));
+            assert!(names.contains(&"If-Match"));
+            assert!(post["responses"]["412"].is_object());
+            assert!(post["responses"]["428"].is_object());
+        }
+    }
+
+    #[test]
+    fn openapi_documents_every_governance_artifact_lifecycle() {
+        let spec = runtime_gateway_openapi_spec_for_mount("/v1/");
+        let paths = &spec["paths"];
+        for resource in [
+            "classification-rules",
+            "provider-registries",
+            "routing-scores",
+        ] {
+            for suffix in [
+                "",
+                "/validate",
+                "/status",
+                "/{revision_id}",
+                "/{revision_id}/submit",
+                "/{revision_id}/approvals/{approval_id}/votes",
+                "/{revision_id}/activate",
+                "/{revision_id}/rollback",
+            ] {
+                let path = format!("/v1/prodex/gateway/{resource}{suffix}");
+                assert!(paths[&path].is_object(), "missing governance path {path}");
+            }
+        }
     }
 
     #[test]

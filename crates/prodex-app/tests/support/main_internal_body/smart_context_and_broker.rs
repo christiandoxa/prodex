@@ -395,13 +395,20 @@ fn runtime_proxy_presidio_redaction_failure_uses_generic_response_and_logs_no_en
             language_mode: PresidioLanguageMode::Fixed,
             fail_closed: true,
             trusted_hosts: Vec::new(),
+            timeout_ms: 10_000,
+            max_response_bytes: 4 * 1024 * 1024,
+            max_concurrency: 8,
         }),
-    );
+    )
+    .expect("Presidio state should register");
 
     let gateway_token = "standard-presidio-gateway-token";
     let sensitive_input = "standard-user@example.com";
     let response = reqwest::blocking::Client::new()
-        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .post(format!(
+            "http://{}/v1/responses?token=standard-query-secret",
+            proxy.listen_addr
+        ))
         .bearer_auth(gateway_token)
         .json(&serde_json::json!({"model":"gpt-5","input":sensitive_input}))
         .send()
@@ -419,6 +426,7 @@ fn runtime_proxy_presidio_redaction_failure_uses_generic_response_and_logs_no_en
     assert!(!runtime_log.contains(gateway_token));
     assert!(!runtime_log.contains(sensitive_input));
     assert!(!runtime_log.contains("standard-presidio-secret"));
+    assert!(!runtime_log.contains("standard-query-secret"));
     assert!(!runtime_log.contains("127.0.0.1:9"));
 }
 

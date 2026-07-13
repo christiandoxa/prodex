@@ -1,6 +1,6 @@
 # ADR 0008: Sessions and Trusted Proxies
 
-- Status: Proposed
+- Status: Accepted
 - Scope: remote human and service gateway access
 
 ## Context
@@ -29,6 +29,10 @@ requires private/internal exposure and forbids anonymous compatibility bypass.
 
 ## Implementation status
 
-Virtual-key auth/scopes, tenant boundaries and session primitives exist.
-Unified OIDC/workload/mTLS authentication, trusted-proxy enforcement and durable
-multi-replica revocation remain gaps.
+The candidate implements typed OIDC/workload evidence, optional bound mTLS,
+explicit role/tenant resolution, PKCE S256 capability validation, edge-header
+canonicalization, and governed session binding/expiry/concurrency/revocation.
+Evidence includes `edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch`,
+`workload_evidence_requires_exact_identity_and_bound_mtls_when_configured`, and
+`session_reuse_with_another_principal_is_revoked`. Durable multi-replica
+revocation validation remains pending with PostgreSQL.

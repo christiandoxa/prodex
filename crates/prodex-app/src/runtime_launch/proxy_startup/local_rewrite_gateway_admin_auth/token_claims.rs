@@ -147,6 +147,10 @@ fn runtime_gateway_verified_oidc_token(
         .ok_or_else(|| anyhow::anyhow!("gateway OIDC token is missing issuer"))?;
     let issuer = runtime_gateway_oidc_domain_issuer(issuer)?;
     runtime_gateway_require_oidc_audience(&claims, &config.audience)?;
+    runtime_gateway_require_oidc_authentication_strength(
+        &claims,
+        config.authentication_strength.as_deref(),
+    )?;
     let audience =
         Audience::new(config.audience.clone()).context("gateway OIDC token audience is invalid")?;
     let expires_at_unix_ms = runtime_gateway_oidc_numeric_date_ms(&claims, "exp")?
@@ -213,6 +217,19 @@ fn runtime_gateway_require_oidc_audience(
     });
     if !audience_matches {
         bail!("gateway OIDC token audience is missing or invalid");
+    }
+    Ok(())
+}
+
+fn runtime_gateway_require_oidc_authentication_strength(
+    claims: &BTreeMap<String, serde_json::Value>,
+    expected: Option<&str>,
+) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    if claims.get("acr").and_then(serde_json::Value::as_str) != Some(expected) {
+        bail!("gateway OIDC token authentication strength is missing or invalid");
     }
     Ok(())
 }
@@ -348,4 +365,32 @@ pub(super) fn runtime_gateway_parse_sso_prefixes(value: &str) -> Option<Vec<Stri
 
 pub(super) fn runtime_gateway_exact_scope_string(value: &str) -> Option<String> {
     (!value.is_empty() && !value.chars().any(char::is_whitespace)).then(|| value.to_string())
+}
+
+#[cfg(test)]
+mod authentication_strength_tests {
+    use super::*;
+
+    #[test]
+    fn configured_authentication_strength_requires_exact_acr_claim() {
+        let mut claims = BTreeMap::new();
+        assert!(
+            runtime_gateway_require_oidc_authentication_strength(
+                &claims,
+                Some("phishing_resistant")
+            )
+            .is_err()
+        );
+        claims.insert("acr".to_string(), serde_json::json!("mfa"));
+        assert!(
+            runtime_gateway_require_oidc_authentication_strength(
+                &claims,
+                Some("phishing_resistant")
+            )
+            .is_err()
+        );
+        claims.insert("acr".to_string(), serde_json::json!("phishing_resistant"));
+        runtime_gateway_require_oidc_authentication_strength(&claims, Some("phishing_resistant"))
+            .unwrap();
+    }
 }

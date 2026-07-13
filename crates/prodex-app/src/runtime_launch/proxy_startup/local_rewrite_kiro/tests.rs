@@ -333,3 +333,17 @@ fn kiro_semantic_compact_summary_uses_acp_turn() {
     assert_eq!(summary, "FAKE NATIVE KIRO COMPACT SUMMARY");
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn kiro_stderr_error_context_is_bounded_and_content_free() {
+    let secret = b"Bearer secret-sentinel\nuser@example.com\nmore";
+    let mut stderr = std::io::Cursor::new(secret.as_slice());
+
+    let marker = runtime_kiro_read_stderr(&mut stderr);
+    let suffix = runtime_kiro_stderr_suffix(&marker);
+
+    assert_eq!(stderr.position(), 1);
+    assert_eq!(suffix, "; subprocess reported an error");
+    assert!(!suffix.contains("secret-sentinel"));
+    assert!(!suffix.contains("example.com"));
+}

@@ -54,6 +54,163 @@ fn governance_defaults_preserve_personal_mode() {
 }
 
 #[test]
+fn governance_authority_tenants_are_typed_unique_and_bounded() {
+    let duplicate = parse_policy(
+        r#"
+version = 1
+
+[governance]
+authority_tenants = [
+  "00000000-0000-7000-8000-000000000001",
+  "00000000-0000-7000-8000-000000000001",
+]
+"#,
+    );
+    let error = validate_runtime_policy_file(&duplicate, Path::new("policy.toml"))
+        .expect_err("duplicate authority tenants must be rejected");
+    assert!(error.to_string().contains("duplicates"), "{error:#}");
+
+    let tenants = (0..=crate::MAX_GOVERNANCE_AUTHORITY_TENANTS)
+        .map(|index| format!("\"00000000-0000-7000-8000-{index:012x}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let error = validate_runtime_policy_file(
+        &parse_policy(&format!(
+            "version = 1\n[governance]\nauthority_tenants = [{tenants}]"
+        )),
+        Path::new("policy.toml"),
+    )
+    .expect_err("authority tenant count must be bounded");
+    assert!(error.to_string().contains("tenant count"), "{error:#}");
+}
+
+#[test]
+fn governance_policy_rules_are_strict_typed_and_bounded() {
+    let valid = parse_policy(
+        r#"
+version = 1
+
+[[governance.policy_rules]]
+id = "deny.revoked.api"
+effect = "deny"
+obligations = []
+reason_code = "policy.session_revoked"
+
+[governance.policy_rules.condition]
+channel = "api"
+credential_scope = "data_plane"
+session_revoked = true
+minimum_authentication_strength = 2
+requested_capability = "tools"
+quota_has_headroom = false
+"#,
+    );
+    validate_runtime_policy_file(&valid, Path::new("policy.toml"))
+        .expect("strict typed policy conditions should validate");
+
+    let missing_effect = r#"
+version = 1
+[[governance.policy_rules]]
+id = "missing.effect"
+obligations = []
+reason_code = "policy.invalid"
+[governance.policy_rules.condition]
+"#;
+    assert!(toml::from_str::<RuntimePolicyFile>(missing_effect).is_err());
+
+    let deny_with_obligation = parse_policy(
+        r#"
+version = 1
+[[governance.policy_rules]]
+id = "deny.with.obligation"
+effect = "deny"
+obligations = [{ kind = "require_mfa" }]
+reason_code = "policy.invalid"
+[governance.policy_rules.condition]
+"#,
+    );
+    assert!(validate_runtime_policy_file(&deny_with_obligation, Path::new("policy.toml")).is_err());
+
+    let reserved = parse_policy(
+        r#"
+version = 1
+[[governance.policy_rules]]
+id = "builtin.confidential-controls"
+effect = "allow"
+obligations = []
+reason_code = "policy.invalid"
+[governance.policy_rules.condition]
+"#,
+    );
+    assert!(validate_runtime_policy_file(&reserved, Path::new("policy.toml")).is_err());
+
+    let mut too_many = parse_policy("version = 1");
+    too_many.governance.policy_rules = (0..=prodex_domain::MAX_GOVERNANCE_POLICY_RULES)
+        .map(|index| crate::RuntimeGovernancePolicyRule {
+            id: format!("rule-{index}"),
+            condition: crate::RuntimeGovernancePolicyRuleCondition {
+                channel: None,
+                principal_kind: None,
+                minimum_role: None,
+                credential_scope: None,
+                action: None,
+                route: None,
+                minimum_classification: None,
+                inspection_coverage: None,
+                minimum_request_risk: None,
+                network_zone: None,
+                maximum_session_age_seconds: None,
+                maximum_session_idle_seconds: None,
+                session_revoked: None,
+                session_mfa_satisfied: None,
+                minimum_session_retained_classification: None,
+                minimum_authentication_strength: None,
+                environment_mfa_satisfied: None,
+                requested_capability: None,
+                quota_has_headroom: None,
+                quota_reservation_required: None,
+            },
+            effect: crate::RuntimeGovernancePolicyEffect::Allow,
+            obligations: Vec::new(),
+            reason_code: format!("policy.rule-{index}"),
+        })
+        .collect();
+    assert!(validate_runtime_policy_file(&too_many, Path::new("policy.toml")).is_err());
+}
+
+#[test]
+fn governance_inspection_patterns_enforce_bounded_tenant_scoped_globs() {
+    let valid = parse_policy(
+        r#"
+version = 1
+
+[[governance.inspection_patterns]]
+tenant_id = "00000000-0000-7000-8000-000000000001"
+id = "customer-code"
+pattern = "customer-*secret"
+"#,
+    );
+    validate_runtime_policy_file(&valid, Path::new("policy.toml"))
+        .expect("bounded interior-star tenant patterns should validate");
+
+    for pattern in ["*secret", "secret*", "secret**value", "secret\nvalue"] {
+        let input = format!(
+            r#"
+version = 1
+
+[[governance.inspection_patterns]]
+tenant_id = "00000000-0000-7000-8000-000000000001"
+id = "customer-code"
+pattern = {pattern:?}
+"#
+        );
+        let error = validate_runtime_policy_file(&parse_policy(&input), Path::new("policy.toml"))
+            .expect_err("unbounded or malformed tenant patterns must fail closed");
+        assert!(error.to_string().contains("bounded literal"), "{error:#}");
+    }
+}
+
+#[test]
 fn enforcing_governance_requires_all_stages() {
     let policy = parse_policy(
         r#"
@@ -65,6 +222,7 @@ inspection = "enforce"
 classification = "observe"
 policy = "enforce"
 routing = "enforce"
+mandatory_audit = true
 "#,
     );
     let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
@@ -92,11 +250,20 @@ mandatory_audit = true
 anonymous_data_plane = false
 raw_secret_sources = false
 policy_revision = "00000000-0000-7000-8000-000000000001"
+active_policy_revision = "00000000-0000-7000-8000-000000000001"
 policy_valid_until_unix_ms = 4102444800000
+classification_default = "confidential"
+classification_unknown = "deny"
+policy_failure_mode = "closed"
 classification_revision = "classification-v1"
 classification_checksum = "sha256-test-v1"
 provider_registry_revision = 1
 routing_score_revision = 1
+
+[governance.session]
+absolute_timeout_seconds = 3600
+idle_timeout_seconds = 900
+max_concurrent = 10
 
 [governance.provider]
 descriptor_revision = 1
@@ -124,6 +291,7 @@ inspection = "enforce"
 classification = "enforce"
 policy = "enforce"
 routing = "enforce"
+mandatory_audit = true
 "#,
     );
     let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
@@ -156,6 +324,182 @@ raw_secret_sources = {raw_secret_sources}
         let error = validate_runtime_policy_file(&parse_policy(&input), Path::new("policy.toml"))
             .expect_err("bank governance guardrail must fail closed");
         assert!(error.to_string().contains(field), "{error:#}");
+    }
+}
+
+fn complete_bank_policy() -> String {
+    r#"
+version = 1
+
+[secrets]
+production = true
+projected_root = "/run/secrets/prodex"
+projected_provider = "kubernetes"
+
+[gateway]
+listen_addr = "10.0.0.10:4317"
+restricted_egress = true
+replica_count = 2
+require_multi_replica_accounting_checks = true
+provider = "gemini"
+require_auth = true
+provider_api_key_ref = { provider = "kubernetes", name = "PROVIDER_KEY" }
+auth_token_ref = { provider = "kubernetes", name = "GATEWAY_TOKEN" }
+trusted_proxies = ["10.0.0.2"]
+
+[gateway.state]
+backend = "postgres"
+postgres_url_ref = { provider = "kubernetes", name = "POSTGRES_URL" }
+redis_url_ref = { provider = "kubernetes", name = "REDIS_URL" }
+postgres_tls_mode = "verify-full"
+
+[gateway.sso]
+remote_human = true
+oidc_issuer = "https://idp.example.com"
+oidc_audience = "prodex-bank"
+required_scope = "control_plane"
+authentication_strength = "phishing_resistant"
+
+[gateway.workload_identity]
+enabled = true
+issuer = "https://workload.example.com"
+audience = "prodex-data-plane"
+required_scope = "data_plane"
+mtls_required = true
+mtls_ca_ref = { provider = "kubernetes", name = "WORKLOAD_CA" }
+
+[gateway.observability]
+sinks = ["siem"]
+siem_endpoint = "https://siem.example.com/events"
+siem_bearer_token_ref = { provider = "kubernetes", name = "SIEM_TOKEN" }
+siem_mtls_identity_ref = { provider = "kubernetes", name = "SIEM_MTLS" }
+siem_signing_key_ref = { provider = "kubernetes", name = "SIEM_SIGNING" }
+siem_max_batch_events = 64
+siem_max_batch_bytes = 262144
+siem_max_attempts = 5
+siem_retry_base_ms = 1000
+siem_retry_max_ms = 30000
+siem_max_lag_ms = 60000
+
+[governance]
+config_version = 1
+mode = "bank_enforce"
+inspection = "enforce"
+classification = "enforce"
+policy = "enforce"
+routing = "enforce"
+mandatory_audit = true
+anonymous_data_plane = false
+raw_secret_sources = false
+classification_default = "restricted"
+classification_unknown = "deny"
+policy_failure_mode = "closed"
+policy_revision = "00000000-0000-7000-8000-000000000001"
+active_policy_revision = "00000000-0000-7000-8000-000000000001"
+policy_valid_until_unix_ms = 4102444800000
+classification_revision = "classification-v1"
+classification_checksum = "sha256-test-v1"
+provider_registry_revision = 1
+routing_score_revision = 1
+
+[governance.session]
+absolute_timeout_seconds = 3600
+idle_timeout_seconds = 900
+max_concurrent = 10
+
+[governance.provider]
+descriptor_revision = 1
+trust_tier = "restricted_approved"
+local_execution = true
+maximum_classification = "restricted"
+regions = ["us-east"]
+retention_seconds = 0
+training_use = false
+"#
+    .to_string()
+}
+
+#[test]
+fn bank_governance_deployment_matrix_fails_closed() {
+    let valid = complete_bank_policy();
+    validate_runtime_policy_file(&parse_policy(&valid), Path::new("policy.toml"))
+        .expect("complete bank deployment should validate");
+
+    for (from, to, expected) in [
+        (
+            "listen_addr = \"10.0.0.10:4317\"",
+            "listen_addr = \"0.0.0.0:4317\"",
+            "private gateway listen address",
+        ),
+        (
+            "restricted_egress = true",
+            "restricted_egress = false",
+            "restricted egress",
+        ),
+        (
+            "replica_count = 2",
+            "replica_count = 1",
+            "highly available gateway",
+        ),
+        (
+            "backend = \"postgres\"",
+            "backend = \"sqlite\"",
+            "shared PostgreSQL state",
+        ),
+        (
+            "remote_human = true",
+            "remote_human = false",
+            "remote human OIDC",
+        ),
+        (
+            "required_scope = \"control_plane\"",
+            "required_scope = \"data_plane\"",
+            "control_plane scope",
+        ),
+        (
+            "authentication_strength = \"phishing_resistant\"",
+            "authentication_strength = \"mfa\"",
+            "phishing_resistant",
+        ),
+        (
+            "classification_default = \"restricted\"",
+            "classification_default = \"confidential\"",
+            "restricted default classification",
+        ),
+        (
+            "mtls_required = true",
+            "mtls_required = false",
+            "mTLS-bound workload identity",
+        ),
+        (
+            "idle_timeout_seconds = 900",
+            "idle_timeout_seconds = 7200",
+            "idle_timeout_seconds",
+        ),
+    ] {
+        let candidate = valid.replacen(from, to, 1);
+        let error =
+            validate_runtime_policy_file(&parse_policy(&candidate), Path::new("policy.toml"))
+                .expect_err("insecure bank deployment combination must fail closed");
+        assert!(error.to_string().contains(expected), "{error:#}");
+    }
+}
+
+#[test]
+fn identity_edge_config_rejects_untrusted_proxy_and_unsupported_browser_flow() {
+    for (input, expected) in [
+        (
+            "version = 1\n[gateway]\ntrusted_proxies = [\"proxy.example.com\"]\n",
+            "exact IP addresses",
+        ),
+        (
+            "version = 1\n[gateway.sso]\nbrowser_flow = true\npkce_method = \"S256\"\n",
+            "unsupported",
+        ),
+    ] {
+        let error = validate_runtime_policy_file(&parse_policy(input), Path::new("policy.toml"))
+            .expect_err("unsafe identity edge configuration must fail closed");
+        assert!(error.to_string().contains(expected), "{error:#}");
     }
 }
 
@@ -564,6 +908,44 @@ webhook_phases = ["middle"]
         err.to_string()
             .contains("gateway.guardrails.webhook_phases[0]")
     );
+}
+
+#[test]
+fn bank_governance_requires_allowlisted_https_guardrail_webhook() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[governance]
+mode = "bank_enforce"
+
+[gateway.guardrails]
+webhook_url = "http://guardrails.example/check"
+webhook_phases = ["pre"]
+webhook_fail_closed = true
+"#,
+    );
+
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("bank webhook without HTTPS/allowlist must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("requires HTTPS and a host allowlist")
+    );
+
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[gateway.guardrails]
+webhook_url = "https://guardrails.example/check"
+webhook_host_allowlist = ["https://guardrails.example"]
+"#,
+    );
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("allowlist entries must be exact hosts");
+    assert!(error.to_string().contains("must be an exact DNS host"));
 }
 
 #[test]

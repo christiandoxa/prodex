@@ -280,7 +280,11 @@ pub fn plan_control_plane_route(
     }
     Ok(GatewayControlPlaneRoutePlan {
         operation,
-        requires_idempotency: operation.requires_idempotency(),
+        requires_idempotency: operation.requires_idempotency()
+            && !matches!(
+                request.method,
+                GatewayHttpMethod::Get | GatewayHttpMethod::Options
+            ),
         requires_audit: operation.requires_audit(),
     })
 }
@@ -371,7 +375,13 @@ fn control_plane_operation_for_path(
             Some(GatewayControlPlaneOperation::ProviderCredentialRotate)
         }
         ["budgets", ..] => Some(GatewayControlPlaneOperation::BudgetUpdate),
-        ["policies", ..] => Some(GatewayControlPlaneOperation::PolicyPublish),
+        [
+            "policies" | "classification-rules" | "provider-registries" | "routing-scores",
+            ..,
+        ] => Some(GatewayControlPlaneOperation::PolicyPublish),
+        ["sessions", _, "revoke"] => Some(GatewayControlPlaneOperation::PolicyPublish),
+        ["governance", "outbox", ..] => Some(GatewayControlPlaneOperation::PolicyPublish),
+        ["governance", "audit", "integrity"] => Some(GatewayControlPlaneOperation::PolicyPublish),
         ["configuration", ..] | ["config", ..] => {
             Some(GatewayControlPlaneOperation::ConfigurationPublish)
         }
@@ -450,9 +460,11 @@ fn control_plane_operation_allows_method(
         | GatewayControlPlaneOperation::VirtualKeyCreate
         | GatewayControlPlaneOperation::VirtualKeyRotateSecret
         | GatewayControlPlaneOperation::ProviderCredentialRotate
-        | GatewayControlPlaneOperation::PolicyPublish
         | GatewayControlPlaneOperation::ConfigurationPublish
         | GatewayControlPlaneOperation::AuditExport => method == GatewayHttpMethod::Post,
+        GatewayControlPlaneOperation::PolicyPublish => {
+            matches!(method, GatewayHttpMethod::Get | GatewayHttpMethod::Post)
+        }
         GatewayControlPlaneOperation::TenantUpdate
         | GatewayControlPlaneOperation::VirtualKeyUpdate
         | GatewayControlPlaneOperation::BudgetUpdate => method == GatewayHttpMethod::Patch,

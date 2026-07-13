@@ -286,13 +286,13 @@ fn structured_log_round_trips_quoted_values() {
             runtime_proxy_log_field("request", "7"),
             runtime_proxy_log_field("bad key", "skip"),
             runtime_proxy_log_field("profile", "alpha beta"),
-            runtime_proxy_log_field("error", "line\rbreak"),
+            runtime_proxy_log_field("note", "line\rbreak"),
         ],
     );
 
     assert_eq!(
         message,
-        "event name request=7 profile=\"alpha beta\" error=\"line break\""
+        "event name request=7 profile=\"alpha beta\" note=\"line break\""
     );
 
     let fields = runtime_proxy_log_fields(&message);
@@ -301,7 +301,7 @@ fn structured_log_round_trips_quoted_values() {
         fields.get("profile").map(String::as_str),
         Some("alpha beta")
     );
-    assert_eq!(fields.get("error").map(String::as_str), Some("line break"));
+    assert_eq!(fields.get("note").map(String::as_str), Some("line break"));
     assert!(!fields.contains_key("bad key"));
     assert_eq!(runtime_proxy_log_event(&message), Some("event"));
 }
@@ -313,13 +313,13 @@ fn typed_log_event_preserves_order_and_quoted_fields() {
         [
             runtime_proxy_log_field("profile", "alpha beta"),
             runtime_proxy_log_field("empty", ""),
-            runtime_proxy_log_field("error", r#"bad "quote" \ slash"#),
+            runtime_proxy_log_field("note", r#"bad "quote" \ slash"#),
         ],
     );
 
     assert_eq!(
         message,
-        r#"stream_read_error profile="alpha beta" empty="" error="bad \"quote\" \\ slash""#
+        r#"stream_read_error profile="alpha beta" empty="" note="bad \"quote\" \\ slash""#
     );
 
     let parsed = runtime_proxy_parse_log_event(&message).unwrap();
@@ -333,8 +333,40 @@ fn typed_log_event_preserves_order_and_quoted_fields() {
         vec![
             ("profile", "alpha beta"),
             ("empty", ""),
-            ("error", r#"bad "quote" \ slash"#),
+            ("note", r#"bad "quote" \ slash"#),
         ]
     );
     assert_eq!(parsed.render_message(), message);
+}
+
+#[test]
+fn structured_log_redacts_sensitive_fields_and_location_secrets() {
+    let message = runtime_proxy_structured_log_message(
+        "request_captured",
+        [
+            runtime_proxy_log_field(
+                "path",
+                "/v1/responses?token=query-secret-sentinel#fragment-secret-sentinel",
+            ),
+            runtime_proxy_log_field(
+                "upstream_url",
+                "https://user:password-secret-sentinel@example.com/v1?key=query-secret-sentinel",
+            ),
+            runtime_proxy_log_field("access_token", "token-secret-sentinel"),
+            runtime_proxy_log_field("error", "Authorization: Bearer bearer-secret-sentinel"),
+            runtime_proxy_log_field("message", "user@example.com failed"),
+            runtime_proxy_log_field("detail", "upstream_timeout"),
+        ],
+    );
+
+    assert!(message.contains("path=/v1/responses"), "{message}");
+    assert!(
+        message.contains("upstream_url=https://<redacted>@example.com/v1"),
+        "{message}"
+    );
+    assert!(message.contains("access_token=<redacted>"), "{message}");
+    assert!(message.contains("error=<redacted>"), "{message}");
+    assert!(message.contains("message=<redacted>"), "{message}");
+    assert!(message.contains("detail=upstream_timeout"), "{message}");
+    assert!(!message.contains("secret-sentinel"), "{message}");
 }

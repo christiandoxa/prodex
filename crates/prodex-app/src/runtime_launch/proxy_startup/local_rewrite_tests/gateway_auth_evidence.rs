@@ -43,6 +43,7 @@ fn gateway_oidc_missing_scope_claims_preserves_scim_role_and_tenant_fallback() {
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
                 key_prefixes_claim: "prodex_key_prefixes".to_string(),
+                authentication_strength: None,
             }),
         },
         gateway_state_store: RuntimeGatewayStateStore::file(&paths),

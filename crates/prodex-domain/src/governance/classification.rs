@@ -102,6 +102,20 @@ impl fmt::Debug for CompiledClassificationRuleSet {
     }
 }
 
+impl CompiledClassificationRuleSet {
+    pub fn revision(&self) -> &ClassificationRuleSetRevisionId {
+        &self.revision
+    }
+
+    pub fn checksum(&self) -> &ClassificationRuleSetChecksum {
+        &self.checksum
+    }
+
+    pub fn unsupported_coverage_floor(&self) -> DataClassification {
+        self.unsupported_coverage_floor
+    }
+}
+
 pub fn compile_classification_rule_set(
     mut rule_set: ClassificationRuleSet,
 ) -> Result<CompiledClassificationRuleSet, ClassificationError> {

@@ -23,15 +23,3 @@ pub(crate) fn runtime_governed_presidio_redaction_config(
     }
     Ok(config)
 }
-
-pub(crate) fn validate_runtime_governance_inspection_enabled(
-    runtime_config: &crate::RuntimeConfig,
-    presidio_enabled: bool,
-) -> Result<()> {
-    if runtime_config.governance.inspection == prodex_config::GovernanceRolloutMode::Enforce
-        && !presidio_enabled
-    {
-        anyhow::bail!("governance inspection enforcement requires Presidio to be enabled");
-    }
-    Ok(())
-}

@@ -393,3 +393,56 @@ pub struct TenantLifecycleMetricPlan {
     pub operation_label: TelemetryAttribute,
     pub result_label: TelemetryAttribute,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectionStage {
+    Local,
+    External,
+    Merge,
+    RequestEnforcement,
+    ResponseEnforcement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectionCoverageClass {
+    Full,
+    Partial,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectionFindingCategory {
+    None,
+    PersonalData,
+    Credential,
+    Financial,
+    Multiple,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectionMaskingAction {
+    None,
+    Masked,
+    Denied,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectionOutcome {
+    Allowed,
+    Denied,
+    Timeout,
+    Error,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InspectionMetricPlan {
+    pub event_metric_name: &'static str,
+    pub duration_metric_name: &'static str,
+    pub increment: u64,
+    pub duration_micros: u64,
+    pub stage_label: TelemetryAttribute,
+    pub coverage_label: TelemetryAttribute,
+    pub finding_category_label: TelemetryAttribute,
+    pub masking_action_label: TelemetryAttribute,
+    pub outcome_label: TelemetryAttribute,
+}

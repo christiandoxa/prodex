@@ -24,7 +24,9 @@ use prodex_storage::{
     UserLifecycleKind, VirtualKeySecretReferenceCommand, VirtualKeySecretReferenceKind,
 };
 
+mod governance_sql;
 mod migration_catalog;
+pub use governance_sql::*;
 pub use migration_catalog::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

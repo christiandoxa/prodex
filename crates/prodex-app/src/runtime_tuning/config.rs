@@ -101,14 +101,22 @@ impl RuntimeConfig {
             .as_ref()
             .map(|policy| policy.governance.clone())
             .unwrap_or_default();
+        match crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns::compile(
+            &config.governance_policy.inspection_patterns,
+        ) {
+            Ok(patterns) => config.tenant_detector_patterns = patterns,
+            Err(_) => parser.errors.push(ConfigError {
+                key: "runtime.policy.governance.inspection_patterns",
+                message: "contains an invalid bounded tenant detector pattern".to_string(),
+            }),
+        }
         config.governance = loaded_policy
             .as_ref()
             .map(|policy| crate::runtime_governance::runtime_governance_config(&policy.governance))
             .unwrap_or_else(prodex_config::GovernanceConfig::personal_compatible);
-        config.governance_snapshot =
-            crate::runtime_governance::build_runtime_governance_snapshot(&config.governance_policy)
-                .ok();
-        if config.governance_snapshot.is_none() {
+        if crate::runtime_governance::compile_runtime_governance_settings(&config.governance_policy)
+            .is_err()
+        {
             parser.errors.push(ConfigError {
                 key: "runtime.policy.governance",
                 message: "contains an invalid immutable governance snapshot".to_string(),
@@ -733,7 +741,8 @@ impl RuntimeConfig {
             gateway,
             governance: prodex_config::GovernanceConfig::personal_compatible(),
             governance_policy: prodex_runtime_policy::RuntimePolicyGovernanceSettings::default(),
-            governance_snapshot: None,
+            tenant_detector_patterns:
+                crate::runtime_proxy::presidio::local::RuntimeTenantDetectorPatterns::default(),
             gemini,
             compatibility_defaults: Vec::new(),
         }

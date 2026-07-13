@@ -596,6 +596,7 @@ fn oidc_discovery_policy_rejects_issuer_and_jwks_origin_changes() {
         role_claim: "prodex_role".to_string(),
         tenant_claim: "prodex_tenant".to_string(),
         key_prefixes_claim: "prodex_key_prefixes".to_string(),
+        authentication_strength: None,
     };
     let policy = RuntimeGatewayOidcEndpointPolicy::from_config(&config).unwrap();
     assert!(

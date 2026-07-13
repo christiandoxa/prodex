@@ -1242,9 +1242,9 @@ dependencies = [
 
 [[package]]
 name = "http-body"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
+checksum = "ca2a8f2913ee65f60facd6a5905613afaa448497a0230cc41ce022d93290bc2c"
 dependencies = [
  "bytes",
  "http",
@@ -1252,9 +1252,9 @@ dependencies = [
 
 [[package]]
 name = "http-body-util"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
+checksum = "e9f41fd6a08e4d4ec69df65976da761afd5ad5e58a9d4acb46bd1c953a9e3ff2"
 dependencies = [
  "bytes",
  "futures-core",
@@ -1767,9 +1767,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mio"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
+checksum = "30d65c71f1ce40ab09135ce117d742b9f8a19ff91a41a8b57ed50bc2de59c427"
 dependencies = [
  "libc",
  "log",
@@ -2313,6 +2313,8 @@ dependencies = [
  "bytes",
  "fallible-iterator 0.2.0",
  "postgres-protocol",
+ "serde_core",
+ "serde_json",
  "uuid",
 ]
 
@@ -2344,6 +2346,7 @@ dependencies = [
 name = "prodex"
 version = "0.284.0"
 dependencies = [
+ "arc-swap",
  "base64",
  "criterion",
  "libc",
@@ -2354,6 +2357,8 @@ dependencies = [
  "prodex-domain",
  "prodex-gateway-http",
  "prodex-gateway-server",
+ "prodex-provider-core",
+ "prodex-provider-spi",
  "prodex-secret-store",
  "prodex-storage",
  "prodex-storage-postgres",
@@ -2372,6 +2377,7 @@ version = "0.284.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "aws-lc-rs",
  "base64",
  "bytes",
  "chrono",
@@ -2441,6 +2447,7 @@ dependencies = [
  "prodex-storage-redis",
  "prodex-storage-redis-runtime",
  "prodex-storage-sqlite",
+ "prodex-storage-sqlite-runtime",
  "prodex-terminal-ui",
  "prodex-update-notice",
  "ratatui",
@@ -3002,6 +3009,8 @@ dependencies = [
  "prodex-storage-postgres",
  "rustls",
  "rustls-native-certs",
+ "serde_json",
+ "sha2",
  "tokio",
  "tokio-postgres",
  "tokio-postgres-rustls",
@@ -3033,6 +3042,18 @@ dependencies = [
  "prodex-domain",
  "prodex-storage",
  "rusqlite",
+]
+
+[[package]]
+name = "prodex-storage-sqlite-runtime"
+version = "0.284.0"
+dependencies = [
+ "prodex-domain",
+ "prodex-storage",
+ "prodex-storage-sqlite",
+ "rusqlite",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -3458,9 +3479,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.41"
+version = "0.23.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b92b125634d9b795e7beca796cc790df15a7fb38323bf3196fda83292d06b1f"
+checksum = "3c54fcab019b409d04215d3a17cb438fd7fbf192ee61461f20f4fe18704bc138"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -3791,9 +3812,9 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "socket2"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -4769,9 +4790,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
+checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "winreg"
@@ -4931,6 +4952,6 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.22"
+version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd2f034a4bebf216c9e4b7083603e024cf930873fd67830cfb083c9fa33129d9"
+checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"

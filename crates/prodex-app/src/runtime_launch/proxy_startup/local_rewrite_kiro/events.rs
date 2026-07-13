@@ -304,9 +304,13 @@ pub(super) fn runtime_kiro_created_at() -> u64 {
 }
 
 pub(super) fn runtime_kiro_read_stderr(stderr: &mut impl Read) -> String {
-    let mut stderr_text = String::new();
-    let _ = stderr.read_to_string(&mut stderr_text);
-    stderr_text
+    let mut marker = [0_u8; 1];
+    stderr
+        .read(&mut marker)
+        .ok()
+        .filter(|read| *read != 0)
+        .map(|_| "present".to_string())
+        .unwrap_or_default()
 }
 
 pub(super) fn runtime_kiro_stderr_suffix(stderr: &str) -> String {
@@ -314,6 +318,6 @@ pub(super) fn runtime_kiro_stderr_suffix(stderr: &str) -> String {
     if stderr.is_empty() {
         String::new()
     } else {
-        format!("; stderr: {stderr}")
+        "; subprocess reported an error".to_string()
     }
 }

@@ -59,7 +59,7 @@ pub(super) use super::local_rewrite_upstream::{
 use super::provider_bridge::runtime_provider_openai_contract;
 use super::*;
 use anyhow::Context;
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
@@ -89,6 +89,22 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,
     pub(super) copilot_oauth_pool: Option<RuntimeCopilotOAuthPool>,
     pub(super) model_memory: RuntimeLocalRewriteModelMemory,
+    pub(super) governance_sessions:
+        super::local_rewrite_governance_session::RuntimeGatewayGovernanceSessionStore,
+    pub(super) governance_audit_writer:
+        super::local_rewrite_governance_audit::RuntimeGovernanceAuditWriter,
+    pub(super) governed_provider_registry: Arc<
+        ArcSwap<super::local_rewrite_provider_registry::RuntimeGatewayProviderRegistrySnapshotSet>,
+    >,
+    pub(super) governed_routing_scores: Arc<
+        ArcSwap<super::local_rewrite_provider_registry::RuntimeGatewayRoutingScoresSnapshotSet>,
+    >,
+    pub(super) classification_rules: Arc<
+        ArcSwap<super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet>,
+    >,
+    pub(super) governance_snapshot:
+        Arc<ArcSwap<crate::runtime_governance::RuntimeGovernanceAuthoritySnapshotSet>>,
+    pub(super) governance_authority: Option<RuntimeGovernanceAuthority>,
     pub(super) api_key_cursor: Arc<AtomicUsize>,
     pub(super) client: reqwest::blocking::Client,
     pub(super) gateway_oidc_http_cache:
@@ -120,8 +136,87 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) gateway_draining: Arc<AtomicBool>,
 }
 
+#[derive(Clone)]
+pub(super) enum RuntimeGovernanceAuthority {
+    Sqlite {
+        path: PathBuf,
+        tenant_ids: Vec<prodex_domain::TenantId>,
+    },
+    Postgres {
+        repository: prodex_storage_postgres_runtime::PostgresRepository,
+        runtime: Arc<tokio::runtime::Runtime>,
+        tenant_ids: Vec<prodex_domain::TenantId>,
+    },
+}
+
 #[allow(dead_code)]
 impl RuntimeLocalRewriteProxyShared {
+    pub(super) fn swap_committed_governance_artifact(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+        artifact: &[u8],
+    ) -> Result<()> {
+        self.swap_committed_governance_artifact_kind(
+            tenant_id,
+            prodex_storage::GovernanceArtifactKind::Policy,
+            artifact,
+        )
+    }
+
+    pub(super) fn swap_committed_governance_artifact_kind(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+        kind: prodex_storage::GovernanceArtifactKind,
+        artifact: &[u8],
+    ) -> Result<()> {
+        match kind {
+            prodex_storage::GovernanceArtifactKind::Policy => {
+                let snapshot =
+                    crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
+                        artifact,
+                        self.runtime_shared.runtime_config.governance.mode,
+                    )?;
+                let next = self
+                    .governance_snapshot
+                    .load_full()
+                    .with_tenant_snapshot(tenant_id, snapshot)?;
+                self.governance_snapshot.store(Arc::new(next));
+            }
+            prodex_storage::GovernanceArtifactKind::ClassificationRules => {
+                let snapshot = super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
+                    tenant_id,
+                    artifact,
+                )?;
+                let next = self
+                    .classification_rules
+                    .load_full()
+                    .with_tenant_snapshot(tenant_id, snapshot)?;
+                self.classification_rules.store(Arc::new(next));
+            }
+            prodex_storage::GovernanceArtifactKind::ProviderRegistry => {
+                let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                    artifact,
+                    &self.provider,
+                    self.provider_credential.as_ref(),
+                )?;
+                let next = self
+                    .governed_provider_registry
+                    .load_full()
+                    .with_tenant_snapshot(tenant_id, snapshot)?;
+                self.governed_provider_registry.store(Arc::new(next));
+            }
+            prodex_storage::GovernanceArtifactKind::RoutingScores => {
+                let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(artifact)?;
+                let next = self
+                    .governed_routing_scores
+                    .load_full()
+                    .with_tenant_snapshot(tenant_id, snapshot)?;
+                self.governed_routing_scores.store(Arc::new(next));
+            }
+        }
+        Ok(())
+    }
+
     fn conversation_store_for_request(
         &self,
         request: &RuntimeProxyRequest,
@@ -379,6 +474,21 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         runtime_gateway_postgres_repository(&gateway_state_store, worker_count)?;
     let gateway_redis_rate_limit_executor =
         runtime_gateway_redis_rate_limit_executor(&gateway_state_store, &runtime_shared)?;
+    let (
+        governance_snapshot,
+        classification_rules,
+        governed_provider_registry,
+        governed_routing_scores,
+        governance_authority,
+    ) = runtime_gateway_governance_authority(
+        &runtime_config,
+        &gateway_state_store,
+        &gateway_admin_tokens,
+        gateway_postgres_repository.as_ref(),
+        &runtime_shared.async_runtime,
+        &provider,
+        provider_credential.as_ref(),
+    )?;
     register_runtime_proxy_persistence_mode(&log_path, true);
     register_runtime_smart_context_proxy_state(
         &log_path,
@@ -386,7 +496,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),
     );
-    validate_runtime_governance_inspection_enabled(&runtime_config, presidio_redaction_enabled)?;
     register_runtime_presidio_redaction_proxy_state(
         &log_path,
         if presidio_redaction_enabled {
@@ -397,7 +506,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         } else {
             None
         },
-    );
+    )?;
     let bridge_kind = provider.bridge_kind();
     let openai_contract = runtime_provider_openai_contract(bridge_kind);
     let gateway_virtual_key_store_path = gateway_state_store.key_store_path().to_path_buf();
@@ -477,6 +586,13 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         gemini_oauth_pool,
         copilot_oauth_pool,
         model_memory: Arc::new(Mutex::new(RuntimeLocalRewriteModelMemoryState::default())),
+        governance_sessions: Default::default(),
+        governance_audit_writer: Default::default(),
+        governed_provider_registry,
+        governed_routing_scores,
+        classification_rules,
+        governance_snapshot,
+        governance_authority,
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client(&runtime_config)?,
         gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
@@ -520,6 +636,286 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         secret_refresh,
         log_path,
     })
+}
+
+type RuntimeGatewayGovernanceAuthorityState = (
+    Arc<ArcSwap<crate::runtime_governance::RuntimeGovernanceAuthoritySnapshotSet>>,
+    Arc<ArcSwap<super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet>>,
+    Arc<ArcSwap<super::local_rewrite_provider_registry::RuntimeGatewayProviderRegistrySnapshotSet>>,
+    Arc<ArcSwap<super::local_rewrite_provider_registry::RuntimeGatewayRoutingScoresSnapshotSet>>,
+    Option<RuntimeGovernanceAuthority>,
+);
+
+fn runtime_gateway_governance_authority(
+    runtime_config: &RuntimeConfig,
+    state_store: &RuntimeGatewayStateStore,
+    admin_tokens: &[RuntimeGatewayAdminToken],
+    postgres_repository: Option<&prodex_storage_postgres_runtime::PostgresRepository>,
+    async_runtime: &Arc<tokio::runtime::Runtime>,
+    provider: &RuntimeLocalRewriteProviderOptions,
+    provider_credential: Option<&RuntimeProjectedProviderCredential>,
+) -> Result<RuntimeGatewayGovernanceAuthorityState> {
+    let enforcing = runtime_config.governance.mode.is_enforcing();
+    let deployment_mode = runtime_config.governance.mode;
+    let policy_bootstrap = crate::runtime_governance::compile_runtime_governance_settings(
+        &runtime_config.governance_policy,
+    )?;
+    let mut policy_snapshots =
+        crate::runtime_governance::RuntimeGovernanceAuthoritySnapshotSet::bootstrap(
+            policy_bootstrap,
+            !enforcing,
+        );
+    let mut classification_snapshots =
+        super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet::bootstrap(
+            &runtime_config.governance_policy,
+            !enforcing,
+        )?;
+    let provider_bootstrap = super::local_rewrite_provider_registry::runtime_gateway_bootstrap_provider_registry_snapshot(
+        &runtime_config.governance_policy,
+        provider,
+        provider_credential,
+    )?;
+    let mut provider_snapshots =
+        super::local_rewrite_provider_registry::RuntimeGatewayProviderRegistrySnapshotSet::bootstrap(
+            provider_bootstrap,
+            !enforcing,
+        );
+    let routing_bootstrap =
+        super::local_rewrite_provider_registry::runtime_gateway_bootstrap_routing_scores_snapshot(
+            &runtime_config.governance_policy,
+        );
+    let mut routing_snapshots =
+        super::local_rewrite_provider_registry::RuntimeGatewayRoutingScoresSnapshotSet::bootstrap(
+            routing_bootstrap,
+            !enforcing,
+        );
+
+    let wrap = |policy_snapshots,
+                classification_snapshots,
+                provider_snapshots,
+                routing_snapshots,
+                authority| {
+        (
+            Arc::new(ArcSwap::from_pointee(policy_snapshots)),
+            Arc::new(ArcSwap::from_pointee(classification_snapshots)),
+            Arc::new(ArcSwap::from_pointee(provider_snapshots)),
+            Arc::new(ArcSwap::from_pointee(routing_snapshots)),
+            authority,
+        )
+    };
+    if !matches!(
+        state_store,
+        RuntimeGatewayStateStore::Sqlite { .. } | RuntimeGatewayStateStore::Postgres { .. }
+    ) {
+        if enforcing {
+            anyhow::bail!("enforcing governance requires SQLite or PostgreSQL authority");
+        }
+        return Ok(wrap(
+            policy_snapshots,
+            classification_snapshots,
+            provider_snapshots,
+            routing_snapshots,
+            None,
+        ));
+    }
+    let mut tenants = runtime_config.governance_policy.authority_tenants.clone();
+    for value in admin_tokens
+        .iter()
+        .filter_map(|token| token.tenant_id.as_deref())
+    {
+        let tenant = value
+            .parse::<prodex_domain::TenantId>()
+            .context("gateway admin tenant is invalid for governance authority")?;
+        if !tenants.contains(&tenant) {
+            tenants.push(tenant);
+        }
+    }
+    if tenants.len() > crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS {
+        anyhow::bail!("governance authority tenant limit exceeded");
+    }
+    if tenants.is_empty() && enforcing {
+        anyhow::bail!("enforcing governance requires configured authority tenants");
+    }
+    let authority = match state_store {
+        RuntimeGatewayStateStore::Sqlite { path } => RuntimeGovernanceAuthority::Sqlite {
+            path: path.clone(),
+            tenant_ids: tenants.clone(),
+        },
+        RuntimeGatewayStateStore::Postgres { .. } => RuntimeGovernanceAuthority::Postgres {
+            repository: postgres_repository
+                .context("authoritative PostgreSQL governance repository is unavailable")?
+                .clone(),
+            runtime: Arc::clone(async_runtime),
+            tenant_ids: tenants.clone(),
+        },
+        _ => unreachable!(),
+    };
+    let sqlite_repository = match &authority {
+        RuntimeGovernanceAuthority::Sqlite { path, .. } => Some(
+            prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path)
+                .map_err(|_| anyhow::anyhow!("failed to open authoritative governance store"))?,
+        ),
+        RuntimeGovernanceAuthority::Postgres { .. } => None,
+    };
+    for tenant_id in &tenants {
+        let policy = runtime_gateway_load_governance_snapshot(
+            &authority,
+            sqlite_repository.as_ref(),
+            *tenant_id,
+            prodex_storage::GovernanceArtifactKind::Policy,
+            |artifact| {
+                crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
+                    artifact,
+                    deployment_mode,
+                )
+                .is_ok()
+            },
+        )
+        .and_then(|stored| {
+            let snapshot =
+                crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
+                    &stored.compiled_artifact,
+                    deployment_mode,
+                )?;
+            anyhow::ensure!(
+                snapshot.application.policy.revision().to_string() == stored.revision_id,
+                "policy artifact revision does not match stored revision"
+            );
+            Ok(snapshot)
+        });
+        let classification = runtime_gateway_load_governance_snapshot(
+            &authority,
+            sqlite_repository.as_ref(),
+            *tenant_id,
+            prodex_storage::GovernanceArtifactKind::ClassificationRules,
+            |artifact| {
+                super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
+                    *tenant_id,
+                    artifact,
+                )
+                .is_ok()
+            },
+        )
+        .and_then(|stored| {
+            let snapshot = super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
+                *tenant_id,
+                &stored.compiled_artifact,
+            )?;
+            anyhow::ensure!(
+                snapshot.classification_rules().revision().as_str() == stored.revision_id,
+                "classification artifact revision does not match stored revision"
+            );
+            Ok(snapshot)
+        });
+        let registry = runtime_gateway_load_governance_snapshot(
+            &authority,
+            sqlite_repository.as_ref(),
+            *tenant_id,
+            prodex_storage::GovernanceArtifactKind::ProviderRegistry,
+            |artifact| {
+                super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                    artifact,
+                    provider,
+                    provider_credential,
+                )
+                .is_ok()
+            },
+        )
+        .and_then(|stored| {
+            let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                &stored.compiled_artifact,
+                provider,
+                provider_credential,
+            )?;
+            anyhow::ensure!(
+                snapshot.revision().to_string() == stored.revision_id,
+                "provider registry artifact revision does not match stored revision"
+            );
+            Ok(snapshot)
+        });
+        let routing = runtime_gateway_load_governance_snapshot(
+            &authority,
+            sqlite_repository.as_ref(),
+            *tenant_id,
+            prodex_storage::GovernanceArtifactKind::RoutingScores,
+            |artifact| {
+                super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(
+                    artifact,
+                )
+                .is_ok()
+            },
+        )
+        .and_then(|stored| {
+            let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(
+                &stored.compiled_artifact,
+            )?;
+            anyhow::ensure!(
+                snapshot.revision.to_string() == stored.revision_id,
+                "routing scores artifact revision does not match stored revision"
+            );
+            Ok(snapshot)
+        });
+
+        if enforcing {
+            let unavailable = || {
+                anyhow::anyhow!(
+                    "authoritative governance store has no valid active or last-known-good snapshot"
+                )
+            };
+            policy_snapshots = policy_snapshots
+                .with_tenant_snapshot(*tenant_id, policy.map_err(|_| unavailable())?)?;
+            classification_snapshots = classification_snapshots
+                .with_tenant_snapshot(*tenant_id, classification.map_err(|_| unavailable())?)?;
+            provider_snapshots = provider_snapshots
+                .with_tenant_snapshot(*tenant_id, registry.map_err(|_| unavailable())?)?;
+            routing_snapshots = routing_snapshots
+                .with_tenant_snapshot(*tenant_id, routing.map_err(|_| unavailable())?)?;
+        } else {
+            if let Ok(policy) = policy {
+                policy_snapshots = policy_snapshots.with_tenant_snapshot(*tenant_id, policy)?;
+            }
+            if let Ok(classification) = classification {
+                classification_snapshots =
+                    classification_snapshots.with_tenant_snapshot(*tenant_id, classification)?;
+            }
+            if let Ok(registry) = registry {
+                provider_snapshots =
+                    provider_snapshots.with_tenant_snapshot(*tenant_id, registry)?;
+            }
+            if let Ok(routing) = routing {
+                routing_snapshots = routing_snapshots.with_tenant_snapshot(*tenant_id, routing)?;
+            }
+        }
+    }
+    Ok(wrap(
+        policy_snapshots,
+        classification_snapshots,
+        provider_snapshots,
+        routing_snapshots,
+        Some(authority),
+    ))
+}
+
+fn runtime_gateway_load_governance_snapshot(
+    authority: &RuntimeGovernanceAuthority,
+    sqlite_repository: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+    tenant_id: prodex_domain::TenantId,
+    kind: prodex_storage::GovernanceArtifactKind,
+    validate_artifact: impl FnMut(&[u8]) -> bool,
+) -> Result<prodex_storage::GovernanceSnapshot> {
+    match authority {
+        RuntimeGovernanceAuthority::Sqlite { .. } => sqlite_repository
+            .context("authoritative SQLite governance repository is unavailable")?
+            .load_snapshot(tenant_id, kind, validate_artifact)
+            .map_err(anyhow::Error::from),
+        RuntimeGovernanceAuthority::Postgres {
+            repository,
+            runtime,
+            ..
+        } => runtime
+            .block_on(repository.governance_load_snapshot(tenant_id, kind, validate_artifact))
+            .map_err(anyhow::Error::from),
+    }
 }
 
 pub(super) struct RuntimeLocalRewriteWorkers {
@@ -582,6 +978,291 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
     spawn_gemini_sidecar_listener: bool,
 ) -> Result<RuntimeLocalRewriteWorkers> {
     let mut worker_threads = Vec::new();
+    if let Some(authority) = shared.governance_authority.clone() {
+        worker_threads.push(
+            shared
+                .governance_sessions
+                .spawn_durable_bank(authority.clone(), Arc::clone(shutdown))
+                .map_err(|_| anyhow::anyhow!("failed to start governance session bank"))?,
+        );
+        worker_threads.push(
+            shared
+                .governance_audit_writer
+                .spawn(authority, Arc::clone(shutdown))
+                .map_err(|_| anyhow::anyhow!("failed to start governance audit writer"))?,
+        );
+    }
+    if let Some(authority) = shared.governance_authority.clone() {
+        let policy_snapshots = Arc::clone(&shared.governance_snapshot);
+        let classification_snapshots = Arc::clone(&shared.classification_rules);
+        let provider_snapshots = Arc::clone(&shared.governed_provider_registry);
+        let routing_snapshots = Arc::clone(&shared.governed_routing_scores);
+        let provider = shared.provider.clone();
+        let provider_credential = shared.provider_credential.clone();
+        let shutdown = Arc::clone(shutdown);
+        let log_path = shared.runtime_shared.log_path.clone();
+        let deployment_mode = shared.runtime_shared.runtime_config.governance.mode;
+        worker_threads.push(thread::spawn(move || {
+            let sqlite_repository = match &authority {
+                RuntimeGovernanceAuthority::Sqlite { path, .. } => {
+                    prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path).ok()
+                }
+                RuntimeGovernanceAuthority::Postgres { .. } => None,
+            };
+            while !shutdown.load(Ordering::SeqCst) {
+                let tenant_ids = match &authority {
+                    RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. }
+                    | RuntimeGovernanceAuthority::Postgres { tenant_ids, .. } => tenant_ids,
+                };
+                let mut next_policy = (*policy_snapshots.load_full()).clone();
+                let mut next_classification = (*classification_snapshots.load_full()).clone();
+                let mut next_provider = (*provider_snapshots.load_full()).clone();
+                let mut next_routing = (*routing_snapshots.load_full()).clone();
+                let mut policy_refreshed = 0usize;
+                let mut classification_refreshed = 0usize;
+                let mut provider_refreshed = 0usize;
+                let mut routing_refreshed = 0usize;
+                for tenant_id in tenant_ids {
+                    if let Ok(stored) = runtime_gateway_load_governance_snapshot(
+                        &authority,
+                        sqlite_repository.as_ref(),
+                        *tenant_id,
+                        prodex_storage::GovernanceArtifactKind::Policy,
+                        |artifact| {
+                            crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
+                                artifact,
+                                deployment_mode,
+                            )
+                            .is_ok()
+                        },
+                    ) && let Ok(snapshot) =
+                        crate::runtime_governance::compile_runtime_governance_artifact_for_deployment(
+                            &stored.compiled_artifact,
+                            deployment_mode,
+                        )
+                        && snapshot.application.policy.revision().to_string()
+                            == stored.revision_id
+                        && let Ok(updated) =
+                            next_policy.with_tenant_snapshot(*tenant_id, snapshot)
+                    {
+                        next_policy = updated;
+                        policy_refreshed += 1;
+                    }
+                    if let Ok(stored) = runtime_gateway_load_governance_snapshot(
+                        &authority,
+                        sqlite_repository.as_ref(),
+                        *tenant_id,
+                        prodex_storage::GovernanceArtifactKind::ClassificationRules,
+                        |artifact| {
+                            super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
+                                *tenant_id,
+                                artifact,
+                            )
+                            .is_ok()
+                        },
+                    ) && let Ok(snapshot) = super::local_rewrite_classification_rules::compile_runtime_classification_rules_artifact(
+                        *tenant_id,
+                        &stored.compiled_artifact,
+                    ) && snapshot.classification_rules().revision().as_str() == stored.revision_id
+                        && let Ok(updated) = next_classification.with_tenant_snapshot(*tenant_id, snapshot)
+                    {
+                        next_classification = updated;
+                        classification_refreshed += 1;
+                    }
+                    if let Ok(stored) = runtime_gateway_load_governance_snapshot(
+                        &authority,
+                        sqlite_repository.as_ref(),
+                        *tenant_id,
+                        prodex_storage::GovernanceArtifactKind::ProviderRegistry,
+                        |artifact| {
+                            super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                                artifact,
+                                &provider,
+                                provider_credential.as_ref(),
+                            )
+                            .is_ok()
+                        },
+                    ) && let Ok(snapshot) = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                        &stored.compiled_artifact,
+                        &provider,
+                        provider_credential.as_ref(),
+                    ) && snapshot.revision().to_string() == stored.revision_id
+                        && let Ok(updated) = next_provider.with_tenant_snapshot(*tenant_id, snapshot)
+                    {
+                        next_provider = updated;
+                        provider_refreshed += 1;
+                    }
+                    if let Ok(stored) = runtime_gateway_load_governance_snapshot(
+                        &authority,
+                        sqlite_repository.as_ref(),
+                        *tenant_id,
+                        prodex_storage::GovernanceArtifactKind::RoutingScores,
+                        |artifact| {
+                            super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(artifact)
+                                .is_ok()
+                        },
+                    ) && let Ok(snapshot) = super::local_rewrite_provider_registry::compile_runtime_gateway_routing_scores_artifact(
+                        &stored.compiled_artifact,
+                    ) && snapshot.revision.to_string() == stored.revision_id
+                        && let Ok(updated) = next_routing.with_tenant_snapshot(*tenant_id, snapshot)
+                    {
+                        next_routing = updated;
+                        routing_refreshed += 1;
+                    }
+                }
+                if policy_refreshed > 0 {
+                    policy_snapshots.store(Arc::new(next_policy));
+                }
+                if classification_refreshed > 0 {
+                    classification_snapshots.store(Arc::new(next_classification));
+                }
+                if provider_refreshed > 0 {
+                    provider_snapshots.store(Arc::new(next_provider));
+                }
+                if routing_refreshed > 0 {
+                    routing_snapshots.store(Arc::new(next_routing));
+                }
+                if policy_refreshed + classification_refreshed + provider_refreshed + routing_refreshed > 0 {
+                    runtime_proxy_log_to_path(
+                        &log_path,
+                        &format!(
+                            "governance_snapshot_refresh status=success policy={policy_refreshed} classification_rules={classification_refreshed} provider_registry={provider_refreshed} routing_scores={routing_refreshed} configured={}",
+                            tenant_ids.len()
+                        ),
+                    );
+                } else {
+                    runtime_proxy_log_to_path(
+                        &log_path,
+                        "governance_snapshot_refresh status=error action=retain_lkg",
+                    );
+                }
+                for _ in 0..50 {
+                    if shutdown.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }));
+    }
+    if let Some(siem_worker) = shared.gateway_observability.siem_worker.clone() {
+        match &shared.gateway_state_store {
+            RuntimeGatewayStateStore::Postgres { .. } => {
+                let repository = shared
+                    .gateway_postgres_repository
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("failed to open the SIEM governance outbox"))?;
+                let tenant_ids = match shared.governance_authority.as_ref() {
+                    Some(RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. })
+                    | Some(RuntimeGovernanceAuthority::Postgres { tenant_ids, .. }) => {
+                        tenant_ids.clone()
+                    }
+                    None => Vec::new(),
+                };
+                let runtime = shared.runtime_shared.async_runtime.handle().clone();
+                let shutdown = Arc::clone(shutdown);
+                let log_path = shared.runtime_shared.log_path.clone();
+                worker_threads.push(thread::spawn(move || {
+                    while !shutdown.load(Ordering::SeqCst) {
+                        let now_unix_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                            .try_into()
+                            .unwrap_or(u64::MAX);
+                        let status = if siem_worker
+                            .run_once_postgres(&repository, &runtime, &tenant_ids, now_unix_ms)
+                            .is_ok()
+                        {
+                            "success"
+                        } else {
+                            "error"
+                        };
+                        runtime_proxy_log_to_path(
+                            &log_path,
+                            &format!("governance_siem_worker status={status} backend=postgres"),
+                        );
+                        for _ in 0..50 {
+                            if shutdown.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                    }
+                }));
+            }
+            RuntimeGatewayStateStore::Sqlite { path } => {
+                let repository = prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(
+                    path,
+                )
+                .map_err(|_| anyhow::anyhow!("failed to open the SIEM governance outbox"))?;
+                let shutdown = Arc::clone(shutdown);
+                let log_path = shared.runtime_shared.log_path.clone();
+                worker_threads.push(thread::spawn(move || {
+                    while !shutdown.load(Ordering::SeqCst) {
+                        let now_unix_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis()
+                            .try_into()
+                            .unwrap_or(u64::MAX);
+                        match siem_worker.run_once(&repository, now_unix_ms) {
+                    Ok(report) => match repository
+                        .aggregate_outbox_health()
+                        .and_then(|health| {
+                            siem_worker
+                                .plan_health(health, now_unix_ms)
+                                .map_err(|_| {
+                                    prodex_storage_sqlite_runtime::GovernanceRepositoryError::Database
+                                })
+                        }) {
+                        Ok(metric) => {
+                            let status = metric
+                                .status_label
+                                .as_metric_label()
+                                .map(|(_, value)| value)
+                                .unwrap_or("error");
+                            runtime_proxy_log_to_path(
+                                &log_path,
+                                &format!(
+                                    "governance_siem_worker status=success selected={} delivered={} retried={} dead_lettered={} {}={} {}={} {}={} health={status}",
+                                    report.selected,
+                                    report.delivered,
+                                    report.retried,
+                                    report.dead_lettered,
+                                    metric.pending_metric_name,
+                                    metric.pending,
+                                    metric.dead_letter_metric_name,
+                                    metric.dead_lettered,
+                                    metric.lag_metric_name,
+                                    metric.lag_milliseconds,
+                                ),
+                            );
+                        }
+                        Err(_) => runtime_proxy_log_to_path(
+                            &log_path,
+                            "governance_siem_worker status=error code=health_unavailable",
+                        ),
+                    },
+                    Err(_) => runtime_proxy_log_to_path(
+                        &log_path,
+                        "governance_siem_worker status=error code=outbox_unavailable",
+                    ),
+                }
+                        for _ in 0..50 {
+                            if shutdown.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                    }
+                }));
+            }
+            RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
+                anyhow::bail!("configured SIEM worker requires a durable governance outbox");
+            }
+        }
+    }
     if let Some(pool) = shared.gemini_oauth_pool.as_ref()
         && let Some(worker) = pool.spawn_quota_refresh(shared.runtime_shared.log_path.clone())
     {
@@ -675,6 +1356,7 @@ fn build_runtime_local_rewrite_http_client(
         .connect_timeout(Duration::from_millis(
             runtime_config.tuning.http_connect_timeout_ms,
         ))
+        .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
         .build()
         .context("failed to build runtime local rewrite HTTP client")

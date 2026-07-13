@@ -188,7 +188,7 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("path", request.url()),
+                    runtime_proxy_log_field("path", runtime_proxy_log_url(request.url())),
                 ],
             ),
         );
@@ -219,7 +219,7 @@ fn dispatch_runtime_http_proxy_request(
         },
     };
     if let Err(_err) =
-        apply_runtime_presidio_redaction_to_request(request_id, &mut captured, shared)
+        apply_runtime_presidio_redaction_to_request(request_id, &mut captured, shared, false, None)
     {
         runtime_proxy_log_dispatch_error(
             shared,
@@ -241,14 +241,22 @@ fn dispatch_runtime_http_proxy_request(
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("path", captured.path_and_query.as_str()),
+                runtime_proxy_log_field("path", runtime_proxy_log_url(&captured.path_and_query)),
                 runtime_proxy_log_field(
                     "previous_response_id",
-                    format!("{:?}", runtime_request_previous_response_id(&captured)),
+                    if runtime_request_previous_response_id(&captured).is_some() {
+                        "present"
+                    } else {
+                        "none"
+                    },
                 ),
                 runtime_proxy_log_field(
                     "turn_state",
-                    format!("{:?}", runtime_request_turn_state(&captured)),
+                    if runtime_request_turn_state(&captured).is_some() {
+                        "present"
+                    } else {
+                        "none"
+                    },
                 ),
                 runtime_proxy_log_field("body_bytes", captured.body.len().to_string()),
             ],

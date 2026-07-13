@@ -1,4 +1,7 @@
-use prodex_domain::{PolicyRevisionId, SecretRef};
+use prodex_domain::{
+    CredentialScope, FindingKind, InspectionCoverage, ModelCapability, PolicyRevisionId,
+    PrincipalKind, Role, SecretRef, TenantId,
+};
 use secret_store::SecretBackendKind;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use std::path::PathBuf;
@@ -7,7 +10,7 @@ pub const PRODEX_POLICY_FILE_NAME: &str = "policy.toml";
 pub const PRODEX_POLICY_VERSION: u32 = 1;
 pub const PRODEX_RUNTIME_PROXY_PRESET_ENV: &str = "PRODEX_RUNTIME_PROXY_PRESET";
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimePolicyServiceMode {
     #[default]
@@ -31,7 +34,7 @@ pub enum RuntimeLogFormat {
     Json,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGovernanceMode {
     #[default]
@@ -41,7 +44,7 @@ pub enum RuntimeGovernanceMode {
     BankEnforce,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGovernanceRolloutMode {
     #[default]
@@ -50,7 +53,7 @@ pub enum RuntimeGovernanceRolloutMode {
     Enforce,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGovernanceDataClassification {
     Public,
@@ -60,7 +63,7 @@ pub enum RuntimeGovernanceDataClassification {
     Restricted,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeGovernanceProviderTrustTier {
     #[default]
@@ -69,12 +72,38 @@ pub enum RuntimeGovernanceProviderTrustTier {
     RestrictedApproved,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernanceUnknownClassificationBehavior {
+    #[default]
+    UseDefault,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyFailureMode {
+    #[default]
+    Open,
+    Closed,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGovernanceSessionSettings {
+    pub absolute_timeout_seconds: Option<u32>,
+    pub idle_timeout_seconds: Option<u32>,
+    pub max_concurrent: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGovernanceProviderSettings {
     pub descriptor_revision: u64,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub revoked: bool,
     pub trust_tier: RuntimeGovernanceProviderTrustTier,
     #[serde(default)]
     pub local_execution: bool,
@@ -87,9 +116,180 @@ pub struct RuntimePolicyGovernanceProviderSettings {
     pub training_use: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyInspectionPattern {
+    pub tenant_id: TenantId,
+    pub id: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyChannel {
+    Cli,
+    Ide,
+    Api,
+    Mcp,
+    InternalService,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyAction {
+    InvokeModel,
+    UseTool,
+    UploadContent,
+    CompactContext,
+    MutateControlPlane,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyRequestRisk {
+    Low,
+    Elevated,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyNetworkZone {
+    Local,
+    TrustedInternal,
+    Partner,
+    Public,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyEffect {
+    Allow,
+    RequireApproval,
+    Deny,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyDataModality {
+    Text,
+    Image,
+    Audio,
+    Video,
+    File,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeGovernancePolicyAuditDetailLevel {
+    Minimal,
+    Standard,
+    Elevated,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeGovernancePolicyRuleCondition {
+    pub channel: Option<RuntimeGovernancePolicyChannel>,
+    pub principal_kind: Option<PrincipalKind>,
+    pub minimum_role: Option<Role>,
+    pub credential_scope: Option<CredentialScope>,
+    pub action: Option<RuntimeGovernancePolicyAction>,
+    pub route: Option<String>,
+    pub minimum_classification: Option<RuntimeGovernanceDataClassification>,
+    pub inspection_coverage: Option<InspectionCoverage>,
+    pub minimum_request_risk: Option<RuntimeGovernancePolicyRequestRisk>,
+    pub network_zone: Option<RuntimeGovernancePolicyNetworkZone>,
+    pub maximum_session_age_seconds: Option<u64>,
+    pub maximum_session_idle_seconds: Option<u64>,
+    pub session_revoked: Option<bool>,
+    pub session_mfa_satisfied: Option<bool>,
+    pub minimum_session_retained_classification: Option<RuntimeGovernanceDataClassification>,
+    pub minimum_authentication_strength: Option<u8>,
+    pub environment_mfa_satisfied: Option<bool>,
+    pub requested_capability: Option<ModelCapability>,
+    pub quota_has_headroom: Option<bool>,
+    pub quota_reservation_required: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RuntimeGovernancePolicyObligation {
+    MaskFinding {
+        finding_kind: FindingKind,
+    },
+    MinimumProviderTrust {
+        trust_tier: RuntimeGovernanceProviderTrustTier,
+    },
+    AllowProvider {
+        selector: String,
+    },
+    DenyProvider {
+        selector: String,
+    },
+    RequireLocalExecution,
+    ProhibitRetention,
+    ProhibitTrainingUse,
+    RequireRegion {
+        selector: String,
+    },
+    DisableTools,
+    AllowTool {
+        selector: String,
+    },
+    AllowModel {
+        selector: String,
+    },
+    AllowModality {
+        modality: RuntimeGovernancePolicyDataModality,
+    },
+    MaxInputTokens {
+        value: u32,
+    },
+    MaxOutputTokens {
+        value: u32,
+    },
+    MaxContextTokens {
+        value: u32,
+    },
+    RequireResponseInspection,
+    SessionIdleTimeoutSeconds {
+        value: u32,
+    },
+    SessionAbsoluteTimeoutSeconds {
+        value: u32,
+    },
+    RequireReauthentication,
+    RequireMfa,
+    AuditDetail {
+        level: RuntimeGovernancePolicyAuditDetailLevel,
+    },
+    RequireHumanApproval,
+    RetentionSeconds {
+        value: u32,
+    },
+    DenyFallbackOutsideEligibility,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeGovernancePolicyRule {
+    pub id: String,
+    pub condition: RuntimeGovernancePolicyRuleCondition,
+    pub effect: RuntimeGovernancePolicyEffect,
+    pub obligations: Vec<RuntimeGovernancePolicyObligation>,
+    pub reason_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGovernanceSettings {
+    #[serde(default = "default_governance_config_version")]
+    pub config_version: u32,
+    #[serde(default)]
+    pub authority_tenants: Vec<TenantId>,
     #[serde(default)]
     pub mode: RuntimeGovernanceMode,
     #[serde(default)]
@@ -120,11 +320,27 @@ pub struct RuntimePolicyGovernanceSettings {
     pub routing_score_revision: Option<u64>,
     #[serde(default)]
     pub provider: Option<RuntimePolicyGovernanceProviderSettings>,
+    #[serde(default)]
+    pub inspection_patterns: Vec<RuntimePolicyInspectionPattern>,
+    #[serde(default)]
+    pub classification_default: RuntimeGovernanceDataClassification,
+    #[serde(default)]
+    pub classification_unknown: RuntimeGovernanceUnknownClassificationBehavior,
+    #[serde(default)]
+    pub policy_failure_mode: RuntimeGovernancePolicyFailureMode,
+    #[serde(default)]
+    pub active_policy_revision: Option<PolicyRevisionId>,
+    #[serde(default)]
+    pub policy_rules: Vec<RuntimeGovernancePolicyRule>,
+    #[serde(default)]
+    pub session: RuntimePolicyGovernanceSessionSettings,
 }
 
 impl Default for RuntimePolicyGovernanceSettings {
     fn default() -> Self {
         Self {
+            config_version: 1,
+            authority_tenants: Vec::new(),
             mode: RuntimeGovernanceMode::Personal,
             inspection: RuntimeGovernanceRolloutMode::Off,
             classification: RuntimeGovernanceRolloutMode::Off,
@@ -140,8 +356,19 @@ impl Default for RuntimePolicyGovernanceSettings {
             provider_registry_revision: None,
             routing_score_revision: None,
             provider: None,
+            inspection_patterns: Vec::new(),
+            classification_default: RuntimeGovernanceDataClassification::Internal,
+            classification_unknown: RuntimeGovernanceUnknownClassificationBehavior::UseDefault,
+            policy_failure_mode: RuntimeGovernancePolicyFailureMode::Open,
+            active_policy_revision: None,
+            policy_rules: Vec::new(),
+            session: RuntimePolicyGovernanceSessionSettings::default(),
         }
     }
+}
+
+const fn default_governance_config_version() -> u32 {
+    1
 }
 
 const fn default_true() -> bool {
@@ -202,6 +429,9 @@ pub struct RuntimePolicySecretsSettings {
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewaySettings {
     pub listen_addr: Option<String>,
+    pub restricted_egress: Option<bool>,
+    pub replica_count: Option<u16>,
+    pub require_multi_replica_accounting_checks: Option<bool>,
     pub provider: Option<String>,
     pub base_url: Option<String>,
     pub require_auth: Option<bool>,
@@ -225,6 +455,10 @@ pub struct RuntimePolicyGatewaySettings {
     pub observability: RuntimePolicyGatewayObservabilitySettings,
     #[serde(default)]
     pub guardrails: RuntimePolicyGatewayGuardrailsSettings,
+    #[serde(default)]
+    pub trusted_proxies: Vec<String>,
+    #[serde(default)]
+    pub workload_identity: RuntimePolicyGatewayWorkloadIdentitySettings,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -297,6 +531,22 @@ pub struct RuntimePolicyGatewaySsoSettings {
     pub oidc_tenant_claim: Option<String>,
     pub oidc_key_prefixes_claim: Option<String>,
     pub default_role: Option<String>,
+    pub remote_human: Option<bool>,
+    pub required_scope: Option<String>,
+    pub authentication_strength: Option<String>,
+    pub browser_flow: Option<bool>,
+    pub pkce_method: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePolicyGatewayWorkloadIdentitySettings {
+    pub enabled: Option<bool>,
+    pub issuer: Option<String>,
+    pub audience: Option<String>,
+    pub required_scope: Option<String>,
+    pub mtls_required: Option<bool>,
+    pub mtls_ca_ref: Option<SecretRef>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -352,6 +602,16 @@ pub struct RuntimePolicyGatewayObservabilitySettings {
     pub http_schema: Option<String>,
     pub http_bearer_token_env: Option<String>,
     pub http_bearer_token_ref: Option<SecretRef>,
+    pub siem_endpoint: Option<String>,
+    pub siem_bearer_token_ref: Option<SecretRef>,
+    pub siem_mtls_identity_ref: Option<SecretRef>,
+    pub siem_signing_key_ref: Option<SecretRef>,
+    pub siem_max_batch_events: Option<u16>,
+    pub siem_max_batch_bytes: Option<u32>,
+    pub siem_max_attempts: Option<u8>,
+    pub siem_retry_base_ms: Option<u64>,
+    pub siem_retry_max_ms: Option<u64>,
+    pub siem_max_lag_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -367,6 +627,8 @@ pub struct RuntimePolicyGatewayGuardrailsSettings {
     pub prompt_injection_detection: Option<bool>,
     pub pii_redaction: Option<bool>,
     pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub webhook_host_allowlist: Vec<String>,
     #[serde(default)]
     pub webhook_phases: Vec<String>,
     pub webhook_bearer_token_env: Option<String>,

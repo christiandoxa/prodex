@@ -64,6 +64,66 @@ INSERT INTO prodex_audit_log VALUES
 INSERT INTO prodex_idempotency_records VALUES
   ('${tenantA}', 'request-a', 'fingerprint-a', 'completed', 1000, 1500, decode('01', 'hex')),
   ('${tenantB}', 'request-b', 'fingerprint-b', 'completed', 1000, 1500, decode('02', 'hex'));
+INSERT INTO prodex_policy_revisions VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000901', 'policy-checksum-a', '{}', 'active', '00000000-0000-7000-8000-000000000201', 1000),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000902', 'policy-checksum-b', '{}', 'active', '00000000-0000-7000-8000-000000000202', 1000);
+INSERT INTO prodex_policy_pointers VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000901', '00000000-0000-7000-8000-000000000901', 'policy-etag-a', 1000),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000902', '00000000-0000-7000-8000-000000000902', 'policy-etag-b', 1000);
+INSERT INTO prodex_policy_activation_history VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000911', '00000000-0000-7000-8000-000000000901', NULL, 'activate', '00000000-0000-7000-8000-000000000201', 1000),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000912', '00000000-0000-7000-8000-000000000902', NULL, 'activate', '00000000-0000-7000-8000-000000000202', 1000);
+INSERT INTO prodex_approvals VALUES
+  ('${tenantA}', 'approval-a', 'policy_revision', 'policy', 'approval-fingerprint-a', '00000000-0000-7000-8000-000000000201', 'active', 1, 10000, 1000, 1),
+  ('${tenantB}', 'approval-b', 'policy_revision', 'policy', 'approval-fingerprint-b', '00000000-0000-7000-8000-000000000202', 'active', 1, 10000, 1000, 1);
+INSERT INTO prodex_approval_votes VALUES
+  ('${tenantA}', 'approval-a', '00000000-0000-7000-8000-000000000201', 1000),
+  ('${tenantB}', 'approval-b', '00000000-0000-7000-8000-000000000202', 1000);
+INSERT INTO prodex_classification_rule_revisions VALUES
+  ('${tenantA}', 'classification-1', 'classification-checksum-a', '{}', 'active', 1000),
+  ('${tenantB}', 'classification-1', 'classification-checksum-b', '{}', 'active', 1000);
+INSERT INTO prodex_provider_registry_revisions VALUES
+  ('${tenantA}', 'registry-1', 'registry-checksum-a', 'active', 1000),
+  ('${tenantB}', 'registry-1', 'registry-checksum-b', 'active', 1000);
+INSERT INTO prodex_pricing_revisions VALUES
+  ('${tenantA}', 'pricing-1', 'pricing-checksum-a', '{}', 'active', 1000),
+  ('${tenantB}', 'pricing-1', 'pricing-checksum-b', '{}', 'active', 1000);
+INSERT INTO prodex_provider_descriptors VALUES
+  ('${tenantA}', 'registry-1', 'provider-a', 'openai', 'active', 'trusted', 'hosted', ARRAY['region-a'], '{}', '{}', 0, 'pricing-1', 'projected', 'credential-a', '1'),
+  ('${tenantB}', 'registry-1', 'provider-b', 'openai', 'active', 'trusted', 'hosted', ARRAY['region-b'], '{}', '{}', 0, 'pricing-1', 'projected', 'credential-b', '1');
+INSERT INTO prodex_routing_score_revisions VALUES
+  ('${tenantA}', 'routing-1', 'routing-checksum-a', '{}', 'active', 1000),
+  ('${tenantB}', 'routing-1', 'routing-checksum-b', '{}', 'active', 1000);
+INSERT INTO prodex_governance_sessions VALUES
+  ('${tenantA}', 'session-hash-a', '00000000-0000-7000-8000-000000000201', 'api', 'inference', 'internal', '00000000-0000-7000-8000-000000000901', 'registry-1', 'provider-a', 1000, 1500, 10000, 5000),
+  ('${tenantB}', 'session-hash-b', '00000000-0000-7000-8000-000000000202', 'api', 'inference', 'internal', '00000000-0000-7000-8000-000000000902', 'registry-1', 'provider-b', 1000, 1500, 10000, 5000);
+INSERT INTO prodex_session_revocations VALUES
+  ('${tenantA}', 'session-hash-a', 1600, 'logout'),
+  ('${tenantB}', 'session-hash-b', 1600, 'logout');
+INSERT INTO prodex_siem_outbox VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000921', '00000000-0000-7000-8000-000000000801', '{}', 0, 2000, 1600, NULL),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000922', '00000000-0000-7000-8000-000000000802', '{}', 0, 2000, 1600, NULL);
+INSERT INTO prodex_siem_dead_letters VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000931', '00000000-0000-7000-8000-000000000801', '{}', 1, 'delivery_failed', 2000),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000932', '00000000-0000-7000-8000-000000000802', '{}', 1, 'delivery_failed', 2000);
+INSERT INTO prodex_governance_revision_artifacts VALUES
+  ('${tenantA}', 'policy', '00000000-0000-7000-8000-000000000901', 'policy-checksum-a', decode('01', 'hex'), '00000000-0000-7000-8000-000000000201', 1000),
+  ('${tenantB}', 'policy', '00000000-0000-7000-8000-000000000902', 'policy-checksum-b', decode('02', 'hex'), '00000000-0000-7000-8000-000000000202', 1000);
+INSERT INTO prodex_classification_rule_pointers VALUES
+  ('${tenantA}', 'classification-1', 'classification-1', 'classification-etag-a', 1000),
+  ('${tenantB}', 'classification-1', 'classification-1', 'classification-etag-b', 1000);
+INSERT INTO prodex_provider_registry_pointers VALUES
+  ('${tenantA}', 'registry-1', 'registry-1', 'registry-etag-a', 1000),
+  ('${tenantB}', 'registry-1', 'registry-1', 'registry-etag-b', 1000);
+INSERT INTO prodex_routing_score_pointers VALUES
+  ('${tenantA}', 'routing-1', 'routing-1', 'routing-etag-a', 1000),
+  ('${tenantB}', 'routing-1', 'routing-1', 'routing-etag-b', 1000);
+INSERT INTO prodex_governance_activation_history VALUES
+  ('${tenantA}', '00000000-0000-7000-8000-000000000941', 'classification_rules', 'classification-1', NULL, 'activate', '00000000-0000-7000-8000-000000000201', 'classification-activate-a', 1000),
+  ('${tenantB}', '00000000-0000-7000-8000-000000000942', 'classification_rules', 'classification-1', NULL, 'activate', '00000000-0000-7000-8000-000000000202', 'classification-activate-b', 1000);
+INSERT INTO prodex_governance_mutation_idempotency VALUES
+  ('${tenantA}', 'policy', 'policy-activate-a', 'request-a', 'activate', '00000000-0000-7000-8000-000000000901', 'policy-etag-a', 1000),
+  ('${tenantB}', 'policy', 'policy-activate-b', 'request-b', 'activate', '00000000-0000-7000-8000-000000000902', 'policy-etag-b', 1000);
 `;
 
 const fingerprintSql = String.raw`
@@ -80,9 +140,94 @@ SELECT json_build_object(
   'ledger_rows', (SELECT COUNT(*) FROM prodex_usage_ledger),
   'audit_rows', (SELECT COUNT(*) FROM prodex_audit_log),
   'idempotency_rows', (SELECT COUNT(*) FROM prodex_idempotency_records),
+  'policy_revisions', (SELECT COUNT(*) FROM prodex_policy_revisions),
+  'policy_pointers', (SELECT COUNT(*) FROM prodex_policy_pointers),
+  'policy_activations', (SELECT COUNT(*) FROM prodex_policy_activation_history),
+  'approvals', (SELECT COUNT(*) FROM prodex_approvals),
+  'approval_votes', (SELECT COUNT(*) FROM prodex_approval_votes),
+  'classification_revisions', (SELECT COUNT(*) FROM prodex_classification_rule_revisions),
+  'provider_registry_revisions', (SELECT COUNT(*) FROM prodex_provider_registry_revisions),
+  'pricing_revisions', (SELECT COUNT(*) FROM prodex_pricing_revisions),
+  'provider_descriptors', (SELECT COUNT(*) FROM prodex_provider_descriptors),
+  'routing_score_revisions', (SELECT COUNT(*) FROM prodex_routing_score_revisions),
+  'governance_sessions', (SELECT COUNT(*) FROM prodex_governance_sessions),
+  'session_revocations', (SELECT COUNT(*) FROM prodex_session_revocations),
+  'siem_outbox_rows', (SELECT COUNT(*) FROM prodex_siem_outbox),
+  'siem_dead_letter_rows', (SELECT COUNT(*) FROM prodex_siem_dead_letters),
+  'governance_artifacts', (SELECT COUNT(*) FROM prodex_governance_revision_artifacts),
+  'classification_pointers', (SELECT COUNT(*) FROM prodex_classification_rule_pointers),
+  'provider_registry_pointers', (SELECT COUNT(*) FROM prodex_provider_registry_pointers),
+  'routing_score_pointers', (SELECT COUNT(*) FROM prodex_routing_score_pointers),
+  'governance_activations', (SELECT COUNT(*) FROM prodex_governance_activation_history),
+  'governance_idempotency_rows', (SELECT COUNT(*) FROM prodex_governance_mutation_idempotency),
   'committed_tokens', (SELECT SUM(committed_tokens) FROM prodex_budget_counters),
   'ledger_tokens', (SELECT SUM(tokens) FROM prodex_usage_ledger),
-  'unique_ledger_rows', (SELECT COUNT(DISTINCT (tenant_id, reservation_id, event_kind)) FROM prodex_usage_ledger)
+  'unique_ledger_rows', (SELECT COUNT(DISTINCT (tenant_id, reservation_id, event_kind)) FROM prodex_usage_ledger),
+  'policy_pointer_links', (
+    SELECT COUNT(*) FROM prodex_policy_pointers pointer
+    JOIN prodex_policy_revisions revision
+      ON revision.tenant_id = pointer.tenant_id
+     AND revision.revision_id = pointer.active_revision_id
+  ),
+  'provider_pricing_links', (
+    SELECT COUNT(*) FROM prodex_provider_descriptors provider
+    JOIN prodex_pricing_revisions pricing
+      ON pricing.tenant_id = provider.tenant_id
+     AND pricing.revision_id = provider.pricing_revision
+  ),
+  'session_revision_links', (
+    SELECT COUNT(*) FROM prodex_governance_sessions session
+    JOIN prodex_policy_revisions policy
+      ON policy.tenant_id = session.tenant_id
+     AND policy.revision_id = session.policy_revision_id
+    JOIN prodex_provider_registry_revisions registry
+      ON registry.tenant_id = session.tenant_id
+     AND registry.revision_id = session.registry_revision_id
+  ),
+  'session_revocation_links', (
+    SELECT COUNT(*) FROM prodex_session_revocations revocation
+    JOIN prodex_governance_sessions session
+      USING (tenant_id, session_id_hash)
+  ),
+  'siem_audit_links', (
+    (SELECT COUNT(*) FROM prodex_siem_outbox outbox
+      JOIN prodex_audit_log audit USING (tenant_id, audit_event_id))
+    +
+    (SELECT COUNT(*) FROM prodex_siem_dead_letters dead_letter
+      JOIN prodex_audit_log audit USING (tenant_id, audit_event_id))
+  ),
+  'audit_chain_valid_rows', (
+    SELECT COUNT(*) FROM prodex_audit_log audit
+    WHERE audit.previous_digest IS NULL OR EXISTS (
+      SELECT 1 FROM prodex_audit_log predecessor
+      WHERE predecessor.tenant_id = audit.tenant_id
+        AND predecessor.event_digest = audit.previous_digest
+    )
+  ),
+  'governance_artifact_links', (
+    SELECT COUNT(*) FROM prodex_governance_revision_artifacts artifact
+    JOIN prodex_policy_revisions policy
+      ON policy.tenant_id = artifact.tenant_id
+     AND policy.revision_id::text = artifact.revision_id
+     AND policy.artifact_checksum = artifact.artifact_checksum
+    WHERE artifact.artifact_kind = 'policy'
+  ),
+  'governance_pointer_links', (
+    (SELECT COUNT(*) FROM prodex_classification_rule_pointers pointer
+      JOIN prodex_classification_rule_revisions revision
+        ON revision.tenant_id = pointer.tenant_id
+       AND revision.revision_id = pointer.active_revision_id)
+    +
+    (SELECT COUNT(*) FROM prodex_provider_registry_pointers pointer
+      JOIN prodex_provider_registry_revisions revision
+        ON revision.tenant_id = pointer.tenant_id
+       AND revision.revision_id = pointer.active_revision_id)
+    +
+    (SELECT COUNT(*) FROM prodex_routing_score_pointers pointer
+      JOIN prodex_routing_score_revisions revision
+        ON revision.tenant_id = pointer.tenant_id
+       AND revision.revision_id = pointer.active_revision_id)
+  )
 )::text;
 `;
 
@@ -116,7 +261,16 @@ BEGIN
     'prodex_tenants', 'prodex_virtual_keys', 'prodex_service_identities',
     'prodex_users', 'prodex_role_bindings', 'prodex_provider_credentials',
     'prodex_budget_counters', 'prodex_budget_policies', 'prodex_reservations',
-    'prodex_usage_ledger', 'prodex_audit_log', 'prodex_idempotency_records'
+    'prodex_usage_ledger', 'prodex_audit_log', 'prodex_idempotency_records',
+    'prodex_policy_revisions', 'prodex_policy_pointers',
+    'prodex_policy_activation_history', 'prodex_approvals', 'prodex_approval_votes',
+    'prodex_classification_rule_revisions', 'prodex_provider_registry_revisions',
+    'prodex_pricing_revisions', 'prodex_provider_descriptors',
+    'prodex_routing_score_revisions', 'prodex_governance_sessions',
+    'prodex_session_revocations', 'prodex_siem_outbox', 'prodex_siem_dead_letters',
+    'prodex_governance_revision_artifacts', 'prodex_classification_rule_pointers',
+    'prodex_provider_registry_pointers', 'prodex_routing_score_pointers',
+    'prodex_governance_activation_history', 'prodex_governance_mutation_idempotency'
   ] LOOP
     EXECUTE format('SELECT COUNT(*) FROM %I', tenant_table) INTO visible_rows;
     IF visible_rows <> 1 THEN
@@ -146,9 +300,25 @@ BEGIN
   END;
 END $check$;
 SELECT json_build_object(
-  'tenant_tables_checked', 12,
+  'tenant_tables_checked', 32,
   'cross_tenant_reads_blocked', true,
-  'cross_tenant_writes_blocked', true
+  'cross_tenant_writes_blocked', true,
+  'forced_governance_tables', (
+    SELECT COUNT(*) FROM pg_class
+    WHERE relnamespace = current_schema()::regnamespace
+      AND relname = ANY(ARRAY[
+        'prodex_policy_revisions', 'prodex_policy_pointers',
+        'prodex_policy_activation_history', 'prodex_approvals', 'prodex_approval_votes',
+        'prodex_classification_rule_revisions', 'prodex_provider_registry_revisions',
+        'prodex_pricing_revisions', 'prodex_provider_descriptors',
+        'prodex_routing_score_revisions', 'prodex_governance_sessions',
+        'prodex_session_revocations', 'prodex_siem_outbox', 'prodex_siem_dead_letters',
+        'prodex_governance_revision_artifacts', 'prodex_classification_rule_pointers',
+        'prodex_provider_registry_pointers', 'prodex_routing_score_pointers',
+        'prodex_governance_activation_history', 'prodex_governance_mutation_idempotency'
+      ])
+      AND relforcerowsecurity
+  )
 )::text;
 `;
 
@@ -212,6 +382,7 @@ export function assessDrill({
   postBackupMarkerAbsent,
   accountingMatches,
   tenantDataComplete,
+  governanceReferencesValid,
   rlsIsolated,
 }) {
   const failures = [];
@@ -221,6 +392,7 @@ export function assessDrill({
   if (!postBackupMarkerAbsent) failures.push("post_backup_marker_restored");
   if (!accountingMatches) failures.push("accounting_mismatch");
   if (!tenantDataComplete) failures.push("tenant_data_incomplete");
+  if (!governanceReferencesValid) failures.push("governance_reference_invalid");
   if (!rlsIsolated) failures.push("tenant_isolation_failed");
   return { passed: failures.length === 0, failures };
 }
@@ -383,10 +555,26 @@ async function runManagedDrill() {
     const tenantDataComplete = [
       "tenants", "virtual_keys", "service_identities", "users", "role_bindings",
       "provider_credentials", "budget_counters", "budget_policies", "reservations",
-      "ledger_rows", "audit_rows", "idempotency_rows",
+      "ledger_rows", "audit_rows", "idempotency_rows", "policy_revisions",
+      "policy_pointers", "policy_activations", "approvals", "approval_votes",
+      "classification_revisions", "provider_registry_revisions", "pricing_revisions",
+      "provider_descriptors", "routing_score_revisions", "governance_sessions",
+      "session_revocations", "siem_outbox_rows", "siem_dead_letter_rows",
+      "governance_artifacts", "classification_pointers", "provider_registry_pointers",
+      "routing_score_pointers", "governance_activations", "governance_idempotency_rows",
     ].every((field) => restoredFingerprint[field] === 2);
+    const governanceReferencesValid =
+      restoredFingerprint.policy_pointer_links === 2 &&
+      restoredFingerprint.provider_pricing_links === 2 &&
+      restoredFingerprint.session_revision_links === 2 &&
+      restoredFingerprint.session_revocation_links === 2 &&
+      restoredFingerprint.siem_audit_links === 4 &&
+      restoredFingerprint.audit_chain_valid_rows === restoredFingerprint.audit_rows &&
+      restoredFingerprint.governance_artifact_links === 2 &&
+      restoredFingerprint.governance_pointer_links === 6;
     const rlsIsolated =
-      rls.tenant_tables_checked === 12 &&
+      rls.tenant_tables_checked === 32 &&
+      rls.forced_governance_tables === 20 &&
       rls.cross_tenant_reads_blocked === true &&
       rls.cross_tenant_writes_blocked === true;
     const assessment = assessDrill({
@@ -398,6 +586,7 @@ async function runManagedDrill() {
       postBackupMarkerAbsent: markerCount === 0,
       accountingMatches,
       tenantDataComplete,
+      governanceReferencesValid,
       rlsIsolated,
     });
 
@@ -415,8 +604,10 @@ async function runManagedDrill() {
         post_backup_marker_absent: markerCount === 0,
         accounting_matches: accountingMatches,
         tenant_data_complete: tenantDataComplete,
+        governance_references_valid: governanceReferencesValid,
         tenant_isolation_enforced: rlsIsolated,
         tenant_tables_checked: rls.tenant_tables_checked,
+        forced_governance_tables: rls.forced_governance_tables,
         tenant_rows: restoredFingerprint.tenants,
         ledger_rows: restoredFingerprint.ledger_rows,
         audit_rows: restoredFingerprint.audit_rows,
@@ -452,6 +643,7 @@ async function runSelfTest() {
     postBackupMarkerAbsent: true,
     accountingMatches: true,
     tenantDataComplete: true,
+    governanceReferencesValid: true,
     rlsIsolated: true,
   });
   if (!assessment.passed) throw new Error("passing drill assessment was rejected");

@@ -179,7 +179,9 @@ fn gateway_postgres_tls_config(
 pub(crate) fn gateway_validate_runtime_topology(
     state_store: &RuntimeGatewayStateStore,
     config: &RuntimeGatewayConfig,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<()> {
+    gateway_validate_runtime_deployment_policy(config, policy)?;
     let gateway_replica_count = config.replica_count;
     let require_multi_replica_accounting_checks = config.require_multi_replica_accounting_checks;
     if require_multi_replica_accounting_checks {
@@ -201,6 +203,27 @@ pub(crate) fn gateway_validate_runtime_topology(
         let response = prodex_application::plan_application_runtime_error_response(&error);
         anyhow::anyhow!("{}: {}: {}", response.code, response.message, error)
     })?;
+    Ok(())
+}
+
+fn gateway_validate_runtime_deployment_policy(
+    config: &RuntimeGatewayConfig,
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<()> {
+    if policy
+        .replica_count
+        .is_some_and(|expected| expected != config.replica_count)
+    {
+        bail!("gateway.replica_count does not match PRODEX_GATEWAY_REPLICA_COUNT runtime topology");
+    }
+    if policy
+        .require_multi_replica_accounting_checks
+        .is_some_and(|expected| expected != config.require_multi_replica_accounting_checks)
+    {
+        bail!(
+            "gateway.require_multi_replica_accounting_checks does not match PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS runtime topology"
+        );
+    }
     Ok(())
 }
 
@@ -276,4 +299,35 @@ fn gateway_coordination_redis_url(
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_whitespace)
+}
+
+#[cfg(test)]
+mod deployment_policy_tests {
+    use super::*;
+
+    fn runtime_config(replicas: u16, checks: bool) -> RuntimeGatewayConfig {
+        RuntimeGatewayConfig {
+            replica_count: replicas,
+            require_multi_replica_accounting_checks: checks,
+            launch: RuntimeGatewayLaunchEnvironment::default(),
+        }
+    }
+
+    #[test]
+    fn runtime_topology_must_match_deployment_policy() {
+        let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings {
+            replica_count: Some(2),
+            require_multi_replica_accounting_checks: Some(true),
+            ..Default::default()
+        };
+        assert!(
+            gateway_validate_runtime_deployment_policy(&runtime_config(2, true), &policy).is_ok()
+        );
+        assert!(
+            gateway_validate_runtime_deployment_policy(&runtime_config(1, true), &policy).is_err()
+        );
+        assert!(
+            gateway_validate_runtime_deployment_policy(&runtime_config(2, false), &policy).is_err()
+        );
+    }
 }

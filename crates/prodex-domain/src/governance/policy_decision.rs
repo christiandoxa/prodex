@@ -6,7 +6,8 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::{
-    CapabilitySet, CredentialScope, PolicyRevisionId, Principal, PrincipalKind, Role, TenantContext,
+    CapabilitySet, CredentialScope, ModelCapability, PolicyRevisionId, Principal, PrincipalKind,
+    Role, TenantContext,
 };
 
 use super::{DataClassification, FindingKind, InspectionCoverage};
@@ -277,17 +278,28 @@ fn policy_obligation_safe_debug(obligation: &GovernanceObligation) -> &'static s
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct PolicyRuleCondition {
     pub channel: Option<Channel>,
     pub principal_kind: Option<PrincipalKind>,
     pub minimum_role: Option<Role>,
+    pub credential_scope: Option<CredentialScope>,
     pub action: Option<GovernedAction>,
     pub route: Option<CanonicalRoute>,
     pub minimum_classification: Option<DataClassification>,
     pub inspection_coverage: Option<InspectionCoverage>,
     pub minimum_request_risk: Option<RequestRisk>,
     pub network_zone: Option<NetworkZone>,
+    pub maximum_session_age_seconds: Option<u64>,
+    pub maximum_session_idle_seconds: Option<u64>,
+    pub session_revoked: Option<bool>,
+    pub session_mfa_satisfied: Option<bool>,
+    pub minimum_session_retained_classification: Option<DataClassification>,
+    pub minimum_authentication_strength: Option<u8>,
+    pub environment_mfa_satisfied: Option<bool>,
+    pub requested_capability: Option<ModelCapability>,
+    pub quota_has_headroom: Option<bool>,
+    pub quota_reservation_required: Option<bool>,
 }
 
 impl PolicyRuleCondition {
@@ -299,6 +311,9 @@ impl PolicyRuleCondition {
             && self
                 .minimum_role
                 .is_none_or(|value| input.principal.role >= value)
+            && self
+                .credential_scope
+                .is_none_or(|value| value == input.credential_scope)
             && self.action.is_none_or(|value| value == input.action)
             && self.route.as_ref().is_none_or(|value| value == input.route)
             && self
@@ -313,6 +328,36 @@ impl PolicyRuleCondition {
             && self
                 .network_zone
                 .is_none_or(|value| value == input.environment.network_zone)
+            && self
+                .maximum_session_age_seconds
+                .is_none_or(|value| input.session.age_seconds <= value)
+            && self
+                .maximum_session_idle_seconds
+                .is_none_or(|value| input.session.idle_seconds <= value)
+            && self
+                .session_revoked
+                .is_none_or(|value| value == input.session.revoked)
+            && self
+                .session_mfa_satisfied
+                .is_none_or(|value| value == input.session.mfa_satisfied)
+            && self
+                .minimum_session_retained_classification
+                .is_none_or(|value| input.session.retained_classification >= value)
+            && self
+                .minimum_authentication_strength
+                .is_none_or(|value| input.environment.authentication_strength >= value)
+            && self
+                .environment_mfa_satisfied
+                .is_none_or(|value| value == input.environment.mfa_satisfied)
+            && self
+                .requested_capability
+                .is_none_or(|value| input.requested_capabilities.contains(value))
+            && self
+                .quota_has_headroom
+                .is_none_or(|value| value == input.quota.has_headroom)
+            && self
+                .quota_reservation_required
+                .is_none_or(|value| value == input.quota.reservation_required)
     }
 }
 
@@ -322,12 +367,38 @@ impl fmt::Debug for PolicyRuleCondition {
             .field("channel", &self.channel)
             .field("principal_kind", &self.principal_kind)
             .field("minimum_role", &self.minimum_role)
+            .field("credential_scope", &self.credential_scope)
             .field("action", &self.action)
             .field("route", &self.route.as_ref().map(|_| "<redacted>"))
             .field("minimum_classification", &self.minimum_classification)
             .field("inspection_coverage", &self.inspection_coverage)
             .field("minimum_request_risk", &self.minimum_request_risk)
             .field("network_zone", &self.network_zone)
+            .field(
+                "maximum_session_age_seconds",
+                &self.maximum_session_age_seconds,
+            )
+            .field(
+                "maximum_session_idle_seconds",
+                &self.maximum_session_idle_seconds,
+            )
+            .field("session_revoked", &self.session_revoked)
+            .field("session_mfa_satisfied", &self.session_mfa_satisfied)
+            .field(
+                "minimum_session_retained_classification",
+                &self.minimum_session_retained_classification,
+            )
+            .field(
+                "minimum_authentication_strength",
+                &self.minimum_authentication_strength,
+            )
+            .field("environment_mfa_satisfied", &self.environment_mfa_satisfied)
+            .field("requested_capability", &self.requested_capability)
+            .field("quota_has_headroom", &self.quota_has_headroom)
+            .field(
+                "quota_reservation_required",
+                &self.quota_reservation_required,
+            )
             .finish()
     }
 }
@@ -355,6 +426,12 @@ pub struct CompiledGovernancePolicy {
     valid_until_unix_ms: u64,
     default_effect: PolicyEffect,
     rules: Vec<GovernancePolicyRule>,
+}
+
+impl CompiledGovernancePolicy {
+    pub fn revision(&self) -> PolicyRevisionId {
+        self.revision
+    }
 }
 
 impl fmt::Debug for CompiledGovernancePolicy {

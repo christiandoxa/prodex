@@ -17,6 +17,48 @@ while moving legacy adapter code behind enterprise boundaries.
 - Documentation: ADRs, threat model, migration guide, deployment notes, and CI
   guards that keep the enterprise boundaries visible.
 
+## Tenant Governance Authority Checkpoint
+
+- **Implemented:** policy, classification rules, provider registries, and
+  routing scores load as independent tenant-keyed immutable snapshot sets.
+  Personal and observe modes retain validated bootstrap compatibility.
+  Enforcing modes require configured authority tenants and valid SQLite or
+  PostgreSQL active/last-known-good artifacts for every required kind.
+- **Runtime behavior:** a bounded background worker validates each artifact kind
+  independently and atomically replaces only successful tenant snapshots.
+  Invalid or unavailable refreshes retain the existing in-memory
+  last-known-good value. Request routing reads snapshots only from `ArcSwap`;
+  it performs no governance-store I/O on the hot path. Dispatch revalidates the
+  tenant registry, descriptor, pricing, credential, and routing-score revisions
+  before invoking the attached provider adapter.
+- **Lifecycle:** `/policies`, `/classification-rules`,
+  `/provider-registries`, and `/routing-scores` share maker-checker approval,
+  activation/rollback, ETag/idempotency, audit-outbox, and active/LKG storage
+  semantics. Typed validation runs before persistence and activation, and the
+  storage revision ID must exactly match the artifact-internal revision. A
+  successful activation immediately compile-swaps the corresponding tenant
+  snapshot; the background refresher remains recovery, not the commit path.
+- **Provider boundary:** the registry accepts bounded descriptors and explicit
+  pricing revisions plus normalized cost, latency, risk, and priority signals.
+  Only the process-attached adapter can be executable. Health, quota, circuit,
+  and load stay with live runtime authority; aliases/context constraints and
+  deployment transport limits remain with their existing route/adapter
+  authorities. No heterogeneous provider fallback is claimed.
+- **Evidence:**
+  `local_rewrite_provider_registry.rs`,
+  `local_rewrite_gateway_admin_policies.rs`, provider-SPI governed routing
+  tests, SQLite generic lifecycle tests, checked OpenAPI paths, and
+  `benches/governance_hot_paths.rs` cover bounded compilation, hard eligibility,
+  lower-cost soft scoring, cross-tenant isolation, LKG retention, unsupported
+  adapters, revocation/repricing revalidation, representative routing,
+  obligation merging, and snapshot read/swap cost.
+- **Residual:** the mounted lifecycle handler still performs compatibility
+  orchestration and direct repository calls after shared HTTP/application
+  authorization planning. Moving that orchestration into one generic
+  application use case remains boundary cleanup. SQLite remains a local and
+  compatibility backend; PostgreSQL plus its tenant/RLS controls remains the
+  production durability target.
+
 ## Audit Matrix
 
 ### 1. SSO Role Fallback Must Not Become Admin
