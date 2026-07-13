@@ -72,10 +72,8 @@ pub(super) struct LogTuiHeaderDetail {
 
 #[derive(Debug, Clone)]
 struct LogTuiQuotaDetail {
-    five_hour_left: String,
-    five_hour_reset: String,
-    weekly_left: String,
-    weekly_reset: String,
+    five_hour: String,
+    weekly: String,
 }
 
 impl LogTuiHeaderDetail {
@@ -95,13 +93,17 @@ impl LogTuiHeaderDetail {
         Self {
             profile,
             quota: Some(LogTuiQuotaDetail {
-                five_hour_left: format_percent(snapshot.five_hour_remaining_percent),
-                five_hour_reset: format_snapshot_reset(
+                five_hour: format_quota_window(
+                    "5h",
+                    snapshot.five_hour_status,
+                    snapshot.five_hour_remaining_percent,
                     snapshot.five_hour_reset_at,
                     LOG_TUI_SHORT_RESET_TIME_FORMAT,
                 ),
-                weekly_left: format_percent(snapshot.weekly_remaining_percent),
-                weekly_reset: format_snapshot_reset(
+                weekly: format_quota_window(
+                    "weekly",
+                    snapshot.weekly_status,
+                    snapshot.weekly_remaining_percent,
                     snapshot.weekly_reset_at,
                     LOG_TUI_RESET_TIME_FORMAT,
                 ),
@@ -118,12 +120,10 @@ impl LogTuiHeaderDetail {
         if width == 0 {
             return String::new();
         }
-        let suffix = self.quota.as_ref().map(|quota| {
-            format!(
-                "  5h {} reset {}  weekly {} reset {}",
-                quota.five_hour_left, quota.five_hour_reset, quota.weekly_left, quota.weekly_reset
-            )
-        });
+        let suffix = self
+            .quota
+            .as_ref()
+            .map(|quota| format!("  {}  {}", quota.five_hour, quota.weekly));
         let suffix_text = suffix.as_deref().unwrap_or("");
         let reserved = terminal_ui::text_width(suffix_text);
         if reserved >= width {
@@ -355,6 +355,23 @@ fn format_percent(value: i64) -> String {
     format!("{}%", value.clamp(0, 100))
 }
 
+fn format_quota_window(
+    label: &str,
+    status: RuntimeQuotaWindowStatus,
+    remaining_percent: i64,
+    reset_at: i64,
+    reset_pattern: &str,
+) -> String {
+    if status == RuntimeQuotaWindowStatus::Unknown {
+        return format!("{label} unavailable");
+    }
+    format!(
+        "{label} {} reset {}",
+        format_percent(remaining_percent),
+        format_snapshot_reset(reset_at, reset_pattern)
+    )
+}
+
 fn format_snapshot_reset(reset_at: i64, pattern: &str) -> String {
     if reset_at == i64::MAX {
         return "-".to_string();
@@ -469,6 +486,26 @@ mod tests {
         let detail =
             LogTuiHeaderDetail::quota("main".to_string(), &snapshot, Duration::from_secs(1));
         assert_eq!(detail.render(80), "main  5h 42% reset -  weekly 7% reset -");
+    }
+
+    #[test]
+    fn header_detail_does_not_render_unknown_window_as_exhausted() {
+        let snapshot = RuntimeProfileUsageSnapshot {
+            checked_at: 0,
+            five_hour_status: RuntimeQuotaWindowStatus::Unknown,
+            five_hour_remaining_percent: 0,
+            five_hour_reset_at: i64::MAX,
+            weekly_status: RuntimeQuotaWindowStatus::Ready,
+            weekly_remaining_percent: 65,
+            weekly_reset_at: i64::MAX,
+        };
+
+        let detail =
+            LogTuiHeaderDetail::quota("main".to_string(), &snapshot, Duration::from_secs(1));
+        assert_eq!(
+            detail.render(80),
+            "main  5h unavailable  weekly 65% reset -"
+        );
     }
 
     #[test]
