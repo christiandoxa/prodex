@@ -42,6 +42,7 @@ mod runtime_launch;
 mod selection;
 mod session;
 mod shared;
+mod status;
 
 pub(crate) use self::app_server_broker::*;
 pub(crate) use self::audit::*;
@@ -64,6 +65,7 @@ pub(crate) use self::redeem::*;
 pub(crate) use self::selection::*;
 pub(crate) use self::session::*;
 pub(crate) use self::shared::*;
+pub(crate) use self::status::*;
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
     runtime_launch::handle_run(args)

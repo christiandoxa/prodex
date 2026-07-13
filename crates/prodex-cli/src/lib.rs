@@ -61,6 +61,11 @@ pub enum Commands {
     )]
     Info(InfoArgs),
     #[command(
+        name = "status",
+        about = "Monitor profiles, quota resets, token efficiency, and Prodex resource usage."
+    )]
+    Status(StatusArgs),
+    #[command(
         name = "log",
         about = "Show the latest transcript text and token counts or stream them live."
     )]
@@ -302,6 +307,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "use"
             | "current"
             | "info"
+            | "status"
             | "log"
             | "session"
             | "doctor"

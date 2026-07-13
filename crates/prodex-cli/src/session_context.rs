@@ -86,6 +86,25 @@ pub struct InfoArgs {
     pub tokens: bool,
 }
 
+#[derive(Args, Debug)]
+pub struct StatusArgs {
+    /// Render one snapshot instead of the live dashboard.
+    #[arg(long)]
+    pub once: bool,
+    /// Resource sampling interval in seconds.
+    #[arg(long, default_value_t = 1, value_name = "SECONDS", value_parser = clap::value_parser!(u64).range(1..=60))]
+    pub interval: u64,
+}
+
+impl Default for StatusArgs {
+    fn default() -> Self {
+        Self {
+            once: false,
+            interval: 1,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
 pub enum LogMode {
     /// Show the most recent transcript text and token usage event and exit.

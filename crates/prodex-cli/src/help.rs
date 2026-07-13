@@ -2,6 +2,7 @@ pub const RUNTIME_PROXY_DOCTOR_TAIL_BYTES: usize = 128 * 1024;
 pub const CLI_TOP_LEVEL_AFTER_HELP: &str = "\
 Tips:
   Bare `prodex` invocation defaults to `prodex run`.
+  Use `prodex status` for the live quota, token, and resource dashboard.
   Use `prodex quota --all --detail` for the clearest quota view across profiles.
   Use `prodex <command> -h` to see every parameter for that command.
 
@@ -9,6 +10,7 @@ Examples:
   prodex
   prodex exec \"review this repo\"
   prodex profile list
+  prodex status
   prodex quota --all --detail
   prodex redeem main
   prodex run --profile main";
