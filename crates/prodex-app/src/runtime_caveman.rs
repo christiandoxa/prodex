@@ -298,7 +298,7 @@ mod tests {
             "--dangerously-bypass-approvals-and-sandbox"
         )));
         assert!(
-            strategy
+            !strategy
                 .codex_args
                 .contains(&OsString::from("--dangerously-bypass-hook-trust"))
         );
@@ -324,7 +324,6 @@ mod tests {
             strategy.codex_args,
             vec![
                 OsString::from("--dangerously-bypass-approvals-and-sandbox"),
-                OsString::from("--dangerously-bypass-hook-trust"),
                 OsString::from("exec"),
                 OsString::from("hi")
             ]

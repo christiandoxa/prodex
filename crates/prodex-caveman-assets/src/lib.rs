@@ -2,7 +2,6 @@ mod asset_verification;
 mod embedded_files;
 mod embedded_tree;
 mod fs_ops;
-mod hook_trust;
 mod launch_home;
 mod localization;
 mod marketplace;
@@ -35,13 +34,10 @@ pub const PRODEX_CAVEMAN_FULL_ASSETS_ENV: &str = "PRODEX_CAVEMAN_FULL_ASSETS";
 pub const PRODEX_CLAUDE_CAVEMAN_PLUGIN_NAME: &str = "caveman";
 pub const PRODEX_RTK_SOURCE_REPO: &str = "https://github.com/rtk-ai/rtk.git";
 
-pub(crate) const PRODEX_CAVEMAN_HOOK_TIMEOUT_SEC: u64 = 600;
-pub(crate) const PRODEX_CAVEMAN_HOOK_COMMAND: &str = "prodex-caveman-sessionstart";
-pub(crate) const PRODEX_CAVEMAN_HOOK_SCRIPT: &str = "prodex-caveman-sessionstart";
-pub(crate) const PRODEX_CAVEMAN_HOOK_MARKER: &str = ".prodex-hooks/caveman-sessionstart";
 pub(crate) const RTK_MD: &str = "RTK.md";
 pub(crate) const SUPER_OPTIMIZERS_MD: &str = "SUPER_OPTIMIZERS.md";
 pub(crate) const AGENTS_MD: &str = "AGENTS.md";
+pub(crate) const PRODEX_CAVEMAN_DEVELOPER_INSTRUCTIONS: &str = "CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.\nPRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE. Ponytail applies smallest-correct-implementation pressure. Use visible rtk <cmd> for noisy shell output and codebase-memory-mcp for structural code navigation. Presidio is opt-in only.";
 pub(crate) const PRODEX_RTK_CODEX_AWARENESS: &str = r#"# RTK - Rust Token Killer (Codex CLI)
 
 RTK is a token-optimized CLI proxy for shell commands.

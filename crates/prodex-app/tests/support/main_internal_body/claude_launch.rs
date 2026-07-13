@@ -152,41 +152,23 @@ fn prepare_prodex_overlay_home_localizes_config_and_installs_plugin() {
     assert!(rendered_config.contains("remote_plugin = false"));
     assert!(!rendered_config.contains("codex_hooks"));
     assert!(!rendered_config.contains("suppress_unstable_features_warning"));
-    assert!(rendered_config.contains("[[hooks.SessionStart]]"));
-    assert!(rendered_config.contains("[[hooks.SessionStart.hooks]]"));
-    assert!(rendered_config.contains("type = \"command\""));
-    assert!(rendered_config.contains("command = \"prodex-caveman-sessionstart\""));
+    assert!(rendered_config.contains("developer_instructions"));
+    assert!(rendered_config.contains("CAVEMAN MODE ACTIVE"));
+    assert!(!rendered_config.contains("hooks.SessionStart"));
     assert!(rendered_config.contains("[marketplaces.prodex-caveman]"));
     assert!(rendered_config.contains("[plugins.\"caveman@prodex-caveman\"]"));
     assert!(rendered_config.contains("enabled = true"));
     let parsed_config: toml::Value =
         toml::from_str(&rendered_config).expect("temp config should parse");
-    assert_eq!(
-        parsed_config["hooks"]["SessionStart"][0]["hooks"][0]["type"].as_str(),
-        Some("command")
-    );
-    assert!(
-        parsed_config["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-            .as_str()
-            .is_some_and(|command| command == "prodex-caveman-sessionstart")
-    );
-    let hook_script = fs::read_to_string(overlay_home.join("bin/prodex-caveman-sessionstart"))
-        .expect("Caveman SessionStart script should exist");
-    assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
-    assert!(hook_script.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
-    assert!(hook_script.contains("Ponytail applies smallest-correct-implementation pressure"));
-    assert!(hook_script.contains("rtk <cmd>"));
-    assert!(hook_script.contains("codebase-memory-mcp"));
-    assert!(hook_script.contains("Presidio is opt-in only"));
-    assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
-    let hook_key = format!("{}:session_start:0:0", temp_config.display());
-    let trusted_hash = parsed_config["hooks"]["state"][&hook_key]["trusted_hash"]
+    let developer_instructions = parsed_config["developer_instructions"]
         .as_str()
-        .expect("Caveman hook should be auto-trusted for the temporary config source");
-    assert!(
-        trusted_hash.starts_with("sha256:") && trusted_hash.len() == "sha256:".len() + 64,
-        "trusted hook hash should use Codex canonical sha256 format"
-    );
+        .expect("Caveman developer instructions should be configured");
+    assert!(developer_instructions.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
+    assert!(developer_instructions.contains("Ponytail applies smallest-correct-implementation pressure"));
+    assert!(developer_instructions.contains("rtk <cmd>"));
+    assert!(developer_instructions.contains("codebase-memory-mcp"));
+    assert!(developer_instructions.contains("Presidio is opt-in only"));
+    assert!(parsed_config.get("hooks").is_none());
 
     let shared_rendered = fs::read_to_string(&shared_config).expect("shared config should read");
     assert!(

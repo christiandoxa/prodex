@@ -2530,9 +2530,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "prodex-shared-codex-fs",
- "serde",
  "serde_json",
- "sha2",
  "toml",
 ]
 
