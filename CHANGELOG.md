@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.279.0 - 2026-07-13
+
+### CLI
+
+- Allow missing rate limit windows (`686b462`)
+
+### Docs
+
+- Allow configured commit identity (`9da7f01`)
+
 ## 0.278.0 - 2026-07-12
 
 ### Deps
@@ -179,9 +189,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden auth and gateway enforcement (`c457bfe`)
-
-## 0.266.0 - 2026-07-09
-
-### Misc
-
-- Connect stacked panel borders (`7e0c16f`)
