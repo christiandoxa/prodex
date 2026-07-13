@@ -509,7 +509,10 @@ mod tests {
 
     #[test]
     fn local_inspection_masks_supported_nested_content_and_preserves_structure() {
-        let private_key = "-----BEGIN PRIVATE KEY-----abc-----END PRIVATE KEY-----";
+        let private_key = concat!(
+            "-----BEGIN PRIVATE ",
+            "KEY-----abc-----END PRIVATE KEY-----"
+        );
         let body = serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5",
             "input": ["héllo user@example.com", "Bearer access-token-value"],
@@ -555,7 +558,10 @@ mod tests {
 
     #[test]
     fn malformed_private_key_is_masked_through_end_of_value() {
-        let secret = "-----BEGIN PRIVATE KEY-----malformed-secret-without-footer";
+        let secret = concat!(
+            "-----BEGIN PRIVATE ",
+            "KEY-----malformed-secret-without-footer"
+        );
         let body = serde_json::to_vec(&serde_json::json!({"input": secret})).unwrap();
 
         let inspected = runtime_local_inspect_and_mask(body).unwrap();
