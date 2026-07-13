@@ -403,7 +403,10 @@ prodex quota --all --provider deepseek --once
 prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
 prodex redeem main
 prodex dashboard
+prodex status
 ```
+
+`prodex status` opens a btop-inspired live terminal dashboard combining the active/runtime profile, 5-hour and weekly quota/reset/runway, historical token usage and cache efficiency, and aggregate Prodex process CPU, resident memory, disk I/O, and network socket queues. Press `r` to refresh immediately and `q` or `Esc` to exit. `prodex status --once` emits one snapshot for scripts. Resource counters use Linux `/proc`; non-Linux systems show those fields as unavailable while quota and token panels continue working.
 
 The live `prodex quota --all --detail` view accepts `s` to cycle sort modes and `f` to cycle the provider filter through `all`, `openai`, `gemini`, `anthropic`, `copilot`, `kiro`, `deepseek`, and `local`. Add `--provider openai`, `--provider gemini`, `--provider anthropic`, `--provider copilot`, `--provider kiro`, `--provider deepseek`, or `--provider local` to start locked to a single provider.
 
@@ -811,6 +814,8 @@ See [LOCAL.md](./LOCAL.md) for self-hosted model setup and testing.
 <summary>Utility commands</summary>
 
 ```bash
+prodex status
+prodex status --once
 prodex info
 prodex log
 prodex log stream

@@ -130,7 +130,10 @@ prodex redeem main
 prodex dashboard
 prodex session list
 prodex info
+prodex status
 ```
+
+`prodex status` opens a btop-inspired live terminal dashboard for the active/runtime profile, 5-hour and weekly quota/reset/runway, historical token usage and cache efficiency, plus aggregate Prodex CPU, memory, disk I/O, and network socket queues. Press `r` to refresh immediately and `q` or `Esc` to exit. Use `prodex status --once` for scripts or a single snapshot. Resource counters use Linux `/proc` and degrade to unavailable on other platforms.
 
 `prodex quota --all` refreshes live by default. Use `--once` when you want a single snapshot:
 
