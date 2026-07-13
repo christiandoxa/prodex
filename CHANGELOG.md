@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.283.0 - 2026-07-13
+
+### Misc
+
+- Stabilize startup hooks and TUI borders (`e67a15d`)
+
 ## 0.282.0 - 2026-07-13
 
 ### Misc
@@ -193,9 +199,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Simplify optimizer candidate lookup (`11ebc21`)
-
-## 0.270.0 - 2026-07-10
-
-### CLI
-
-- Trust launch directory in yolo mode (`436bce1`)
