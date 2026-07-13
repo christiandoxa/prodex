@@ -29,6 +29,46 @@ fn route_pressure_uses_route_specific_reserve_thresholds() {
 }
 
 #[test]
+fn weekly_only_quota_is_ready_and_exhaustion_still_wins() {
+    let weekly = window(80);
+    assert_eq!(
+        runtime_proxy_quota_pressure_band_for_route(
+            None,
+            Some(weekly),
+            RuntimeRouteKind::Responses,
+        ),
+        RuntimeSelectionQuotaPressureBand::Healthy
+    );
+
+    let summary =
+        runtime_proxy_quota_summary_for_route(None, Some(weekly), RuntimeRouteKind::Responses);
+    assert_eq!(
+        summary.five_hour.status,
+        RuntimeSelectionQuotaWindowStatus::Ready
+    );
+    assert_eq!(summary.five_hour.remaining_percent, 100);
+    assert_eq!(
+        summary.route_band,
+        RuntimeSelectionQuotaPressureBand::Healthy
+    );
+
+    let snapshot = runtime_proxy_usage_snapshot_from_observations_at(None, Some(weekly), 100);
+    assert_eq!(
+        snapshot.five_hour_status,
+        RuntimeSelectionQuotaWindowStatus::Ready
+    );
+    assert_eq!(snapshot.five_hour_remaining_percent, 100);
+    assert_eq!(
+        runtime_proxy_quota_pressure_band_for_route(
+            None,
+            Some(window(0)),
+            RuntimeRouteKind::Responses,
+        ),
+        RuntimeSelectionQuotaPressureBand::Exhausted
+    );
+}
+
+#[test]
 fn snapshot_hold_preserves_active_exhaustion_until_reset() {
     let snapshot = RuntimeProxyUsageSnapshot {
         checked_at: 100,
