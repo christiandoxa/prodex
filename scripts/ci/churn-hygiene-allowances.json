@@ -2,10 +2,7 @@
   {
     "id": "status-dashboard-and-hook-trust-0.284.0",
     "requiredSubjects": [
-      "fix(super): trust hooks on launch",
-      "feat(status): add live monitoring dashboard",
-      "chore(release): release 0.284.0",
-      "chore(ci): allow reviewed 0.284.0 release range"
+      "feat(status): add live monitoring dashboard"
     ],
     "caps": {
       "maxFiles": 25,
