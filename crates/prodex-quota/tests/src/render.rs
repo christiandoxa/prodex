@@ -103,6 +103,9 @@ fn sorted_names_by(reports: &[QuotaReport], sort: QuotaReportSort) -> Vec<String
         .collect()
 }
 
+#[path = "render/spark.rs"]
+mod spark;
+
 #[test]
 fn labels_standard_windows() {
     assert_eq!(window_label(Some(18_000)), "5h");
@@ -369,73 +372,6 @@ fn profile_quota_render_shows_monthly_workspace_limits() {
 
     assert!(rendered.contains("Workspace credits monthly"));
     assert!(rendered.contains("73% left"));
-}
-
-#[test]
-fn quota_reports_detail_shows_spark_additional_limit() {
-    let mut usage = main_windows(65, 1_783_413_134, 48, 1_783_999_934);
-    usage
-        .additional_rate_limits
-        .push(spark_limit(89, 1_783_413_134, 97, 1_783_999_934));
-
-    let output = render_quota_reports_with_layout(&[openai_report("main", usage)], true, None, 160);
-
-    assert!(output.contains("GPT-5.3-Codex-Spark: 5h 89% | weekly 97%; resets:"));
-    assert!(output.contains("Spark remaining pool:"));
-    assert!(output.contains("5h 89% | weekly 97% across 1 profile(s)"));
-}
-
-#[test]
-fn quota_reports_status_is_ready_when_spark_remains() {
-    let mut usage = main_windows(0, 1_700_001_800, 0, 1_700_259_200);
-    usage
-        .additional_rate_limits
-        .push(spark_limit(89, 1_783_413_134, 97, 1_783_999_934));
-
-    let output = render_quota_reports_with_layout(
-        &[openai_report("spark-only", usage.clone())],
-        true,
-        None,
-        160,
-    );
-
-    assert_eq!(format_openai_quota_status(&usage), "Ready");
-    assert!(collect_blocked_limits(&usage, false).is_empty());
-    assert!(output.contains("Available:"));
-    assert!(output.contains("1/1 profile"));
-    assert!(
-        output
-            .lines()
-            .any(|line| line.contains("spark-only") && line.contains("Ready"))
-    );
-}
-
-#[test]
-fn quota_reports_status_stays_ready_when_main_remains_but_spark_is_blocked() {
-    let mut usage = main_windows(50, 1_783_413_134, 37, 1_783_999_934);
-    usage
-        .additional_rate_limits
-        .push(spark_limit(0, 1_783_413_134, 69, 1_783_999_934));
-
-    let output = render_quota_reports_with_layout(
-        &[openai_report("spark-blocked", usage.clone())],
-        true,
-        None,
-        160,
-    );
-
-    assert_eq!(format_openai_quota_status(&usage), "Ready");
-    assert!(collect_blocked_limits(&usage, false).is_empty());
-    assert!(output.contains("Available:"));
-    assert!(output.contains("1/1 profile"));
-    assert!(output.contains("Usable now:"));
-    assert!(output.contains("5h 50% | weekly 37% across 1 ready profile(s)"));
-    assert!(output.contains("GPT-5.3-Codex-Spark: 5h 0% | weekly 69%"));
-    assert!(
-        output
-            .lines()
-            .any(|line| line.contains("spark-blocked") && line.contains("Ready"))
-    );
 }
 
 #[test]

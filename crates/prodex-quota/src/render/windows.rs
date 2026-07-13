@@ -77,6 +77,15 @@ pub fn spark_window_snapshots_at(
     ))
 }
 
+pub fn spark_window_snapshot(usage: &UsageResponse, label: &str) -> Option<MainWindowSnapshot> {
+    let pair = &usage
+        .additional_rate_limits
+        .iter()
+        .find(|additional| additional_rate_limit_is_spark(additional))?
+        .rate_limit;
+    required_window_snapshot_at(pair, label, Local::now().timestamp())
+}
+
 fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
     [
         additional.limit_name.as_deref(),
@@ -90,7 +99,7 @@ fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
     })
 }
 
-fn window_pair_has_ready_windows(pair: &WindowPair) -> bool {
+pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
     let now = Local::now().timestamp();
     let windows = ["5h", "weekly"]
         .into_iter()
@@ -107,7 +116,7 @@ pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&Window
     if usage
         .rate_limit
         .as_ref()
-        .is_some_and(window_pair_has_ready_windows)
+        .is_some_and(window_pair_has_ready_limit)
     {
         return usage.rate_limit.as_ref();
     }
@@ -117,7 +126,7 @@ pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&Window
         .iter()
         .find(|additional| additional_rate_limit_is_spark(additional))
         .map(|additional| &additional.rate_limit);
-    if spark.is_some_and(window_pair_has_ready_windows) {
+    if spark.is_some_and(window_pair_has_ready_limit) {
         return spark;
     }
 
@@ -125,7 +134,7 @@ pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&Window
 }
 
 pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
-    openai_quota_runtime_window_pair(usage).is_some_and(window_pair_has_ready_windows)
+    openai_quota_runtime_window_pair(usage).is_some_and(window_pair_has_ready_limit)
 }
 
 pub fn quota_window_summary(usage: &UsageResponse, label: &str) -> RuntimeQuotaWindowSummary {

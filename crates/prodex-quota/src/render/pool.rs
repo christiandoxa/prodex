@@ -17,6 +17,8 @@ pub(super) struct QuotaPoolAggregate {
     ready_weekly_pool_remaining: i64,
     main_pool_remaining: i64,
     spark_profiles_with_data: usize,
+    spark_five_hour_profiles_with_data: usize,
+    spark_weekly_profiles_with_data: usize,
     spark_five_hour_pool_remaining: i64,
     spark_weekly_pool_remaining: i64,
     earliest_five_hour_reset_at: Option<i64>,
@@ -88,11 +90,23 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
                         aggregate.ready_weekly_pool_remaining += weekly.remaining_percent;
                     }
                 }
-                if let Some((spark_five_hour, spark_weekly)) = spark_window_snapshots(usage) {
+                let spark_five_hour = spark_window_snapshot(usage, "5h");
+                let spark_weekly = spark_window_snapshot(usage, "weekly");
+                if spark_five_hour.is_some() || spark_weekly.is_some() {
                     aggregate.spark_profiles_with_data += 1;
-                    aggregate.spark_five_hour_pool_remaining += spark_five_hour.remaining_percent;
-                    aggregate.spark_weekly_pool_remaining += spark_weekly.remaining_percent;
-                    for reset_at in [spark_five_hour.reset_at, spark_weekly.reset_at] {
+                    if let Some(window) = spark_five_hour {
+                        aggregate.spark_five_hour_profiles_with_data += 1;
+                        aggregate.spark_five_hour_pool_remaining += window.remaining_percent;
+                    }
+                    if let Some(window) = spark_weekly {
+                        aggregate.spark_weekly_profiles_with_data += 1;
+                        aggregate.spark_weekly_pool_remaining += window.remaining_percent;
+                    }
+                    for reset_at in [spark_five_hour, spark_weekly]
+                        .into_iter()
+                        .flatten()
+                        .map(|window| window.reset_at)
+                    {
                         if reset_at != i64::MAX {
                             aggregate.earliest_spark_reset_at = Some(
                                 aggregate
@@ -282,6 +296,8 @@ fn quota_pool_summary_fields_for_aggregate(
                 aggregate.spark_five_hour_pool_remaining,
                 aggregate.spark_weekly_pool_remaining,
                 aggregate.spark_profiles_with_data,
+                aggregate.spark_five_hour_profiles_with_data,
+                aggregate.spark_weekly_profiles_with_data,
                 aggregate.earliest_spark_reset_at,
             ),
         ));
@@ -317,15 +333,34 @@ fn format_dual_pool_remaining(
     five_hour_remaining: i64,
     weekly_remaining: i64,
     profiles_with_data: usize,
+    five_hour_profiles: usize,
+    weekly_profiles: usize,
     earliest_reset_at: Option<i64>,
 ) -> String {
     if profiles_with_data == 0 {
         return "Unavailable".to_string();
     }
 
-    let mut value = format!(
-        "5h {five_hour_remaining}% | weekly {weekly_remaining}% across {profiles_with_data} profile(s)"
-    );
+    let mut value = if five_hour_profiles == profiles_with_data
+        && weekly_profiles == profiles_with_data
+    {
+        format!(
+            "5h {five_hour_remaining}% | weekly {weekly_remaining}% across {profiles_with_data} profile(s)"
+        )
+    } else {
+        let mut windows = Vec::new();
+        if five_hour_profiles > 0 {
+            windows.push(format!(
+                "5h {five_hour_remaining}% across {five_hour_profiles} profile(s)"
+            ));
+        }
+        if weekly_profiles > 0 {
+            windows.push(format!(
+                "weekly {weekly_remaining}% across {weekly_profiles} profile(s)"
+            ));
+        }
+        windows.join(" | ")
+    };
     if let Some(reset_at) = earliest_reset_at {
         value.push_str(&format!(
             "; earliest reset {}",
