@@ -19,6 +19,8 @@ behind the new boundary crates.
 - Budget reservations, usage counters, and append-only billing ledger events.
 - Policy and configuration revisions, signatures, digests, and last-known-good
   cache state.
+- Tenant-scoped classification-rule, provider-registry, pricing, and routing-score
+  revisions and their active/last-known-good pointers.
 - Audit events and audit hash-chain digests.
 - Provider traffic, streaming responses, continuation identifiers, and trace
   context.
@@ -92,6 +94,10 @@ paths.
 | Mid-stream rotation | Broken transport semantics and affinity | Rotation only pre-commit; continuation bindings preserved |
 | High-cardinality telemetry labels | Metrics cardinality explosion | Telemetry attribute validation and bounded labels |
 | Failed runtime-policy reload evicts usable policy | Availability loss or hidden partial configuration | Validate before atomic cache replacement, propagate failure, withhold publication acknowledgement, and retry delivery |
+| Governance artifact is loaded for the wrong tenant | Cross-tenant policy or provider selection | Explicit configured authority tenant set; tenant-keyed immutable snapshots; no fallback snapshot in enforcing modes; cross-tenant negative tests |
+| Stored revision ID differs from the compiled artifact revision | Approval provenance bypass or misleading audit evidence | Create, activation, startup, and refresh require the stored and artifact-internal revisions to match exactly |
+| Invalid active provider registry or routing scores replace usable state | Routing outage or attacker-controlled weights | Strict bounded typed compilers; SQLite/PostgreSQL active-to-LKG validation; compile before atomic `ArcSwap`; retain the prior in-memory snapshot on refresh failure |
+| Provider is revoked or repriced after route planning | Dispatch through stale authority | Re-read the tenant registry and routing-score snapshots at dispatch; require registry, descriptor, pricing, credential, and score revisions to remain current |
 | Backup exists but cannot restore tenant/accounting state | Extended outage, billing loss, or isolation regression | Automated PostgreSQL dump/restore drill, checksum, RPO/RTO gates, full tenant-table fingerprint, ledger uniqueness, and `NOBYPASSRLS` negative checks |
 
 ## Required Negative Tests
@@ -112,6 +118,11 @@ is considered enterprise-ready:
 - Redis plans avoid whole-map JSON or whole-list rewrite patterns.
 - Malformed runtime-policy reload preserves cached policy or cached absence, returns an error, remains unacknowledged, and installs the corrected replacement on retry.
 - Restored PostgreSQL state preserves all tenant/accounting rows, excludes post-backup writes, and denies cross-tenant reads and writes under a non-owner role.
+- Provider-registry and routing-score artifacts reject malformed bounds,
+  cross-tenant lookup, unsupported executable adapters, revision tampering, and
+  invalid refresh without evicting last-known-good state.
+- Revocation and pricing revision changes between planning and dispatch deny the
+  stale route before provider invocation.
 
 ## Audit Requirements
 
@@ -136,3 +147,16 @@ adapter replaces the shared-filesystem composition-root path.
 Last-known-good runtime policy can delay an intended policy update until retry
 succeeds. Reload failures must remain observable, and urgent revocation must use
 an explicit fail-closed invalidation path.
+
+The governed registry deliberately exposes only the adapter attached to the
+current process as executable. Other provider descriptors may be retained as
+non-executable metadata, but this runtime does not claim heterogeneous
+cross-adapter fallback. Model aliases and context limits remain route-policy
+authority; deployment timeouts and concurrency remain adapter/runtime authority;
+live health, quota, circuit, and load remain runtime-state authority. Registry
+snapshots carry bounded compliance metadata plus explicit pricing, cost,
+latency, risk, and priority revisions without duplicating those live signals.
+The mounted lifecycle HTTP adapter still contains compatibility orchestration
+around the application/control-plane boundary; replacing its remaining direct
+repository calls is residual architecture work, not a prerequisite for the
+typed storage and runtime enforcement described above.

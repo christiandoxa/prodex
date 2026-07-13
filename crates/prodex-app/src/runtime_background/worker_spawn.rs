@@ -148,7 +148,7 @@ mod tests {
         let log = fs::read_to_string(&log_path).expect("panic log should be written");
         assert!(log.contains("runtime_background_worker_panic"));
         assert!(log.contains("worker=prodex-panic-worker"));
-        assert!(log.contains("error=\"simulated background panic\""));
+        assert!(log.contains("error=<redacted>"));
         let _ = fs::remove_file(log_path);
     }
 

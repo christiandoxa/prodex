@@ -299,7 +299,7 @@ fn runtime_proxy_broker_health_endpoint_reports_registered_metadata() {
                 .executable_path
                 .as_ref()
                 .map(|path| path.display().to_string()),
-            executable_sha256: current_identity.executable_sha256.clone(),
+            executable_sha256: Some("a".repeat(64)),
         },
     );
 

@@ -4,17 +4,23 @@
 
 This document defines a reversible path from the current compatibility runtime
 to one governed production pipeline. It does not authorize a rollout or claim
-that the named governance modes are fully implemented.
+release readiness.
 
 Existing repository foundations include immutable/LKG-style runtime policy
 snapshots, API version/deprecation domain decisions, compatibility and
 deprecation metric plans, strict gateway routes, bounded drain plans, a
 three-replica Kubernetes gateway scaffold, external migration modes, provider
 affinity and pre-commit rotation invariants, and historical compatibility/load
-tests. Material gaps remain: the typed governance modes, complete policy and
-registry lifecycle, tenant cohort controller, unified access sessions,
-bank-mode startup gates, current governance benchmarks, and removal of all
-anonymous or early-dispatch bypasses.
+tests. The candidate based on `e308fdf6` adds typed governance modes,
+inspection/classification/PDP/obligation/session stages, policy lifecycle,
+governed routing, bank startup gates, focused security evidence and governance
+microbenchmarks.
+
+The release-candidate gates cover supported capabilities. The open residuals are one attached
+executable provider adapter per process, synchronous mandatory precommit audit,
+policy-selected request-path Presidio/webhook calls, a five-second cross-replica
+session revocation refresh bound, and deployment-specific managed failover,
+external SIEM and multi-replica soak evidence.
 
 Rollout is therefore a controlled migration of authority, not a collection of
 independent feature toggles.

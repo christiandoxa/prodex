@@ -296,6 +296,9 @@ pub(crate) fn runtime_profile_auth_failure_active_from_map(
     profile_name: &str,
     now: i64,
 ) -> bool {
+    if profile_health.is_empty() {
+        return false;
+    }
     runtime_profile_effective_score_from_map(
         profile_health,
         &runtime_profile_auth_failure_key(profile_name),

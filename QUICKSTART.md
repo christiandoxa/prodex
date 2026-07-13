@@ -466,6 +466,7 @@ blocked_keywords = ["secret project"]
 blocked_output_keywords = ["do not reveal"]
 allowed_models = ["prodex-fast"]
 webhook_url = "https://guardrails.example/check"
+webhook_host_allowlist = ["guardrails.example"]
 webhook_phases = ["pre", "post"]
 ```
 
@@ -534,6 +535,9 @@ anonymizer_url = "http://localhost:5001"
 language_mode = "auto"
 languages = ["en", "id"]
 fail_mode = "open"
+timeout_ms = 10000
+max_response_bytes = 4194304
+max_concurrency = 8
 ```
 
 The default Presidio Docker images typically support English (`en`). For Indonesian (`id`), use a custom Presidio Analyzer with Indonesian NLP config plus recognizers; Prodex can route `en,id`, but detection quality comes from the Analyzer container.

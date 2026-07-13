@@ -2,7 +2,7 @@ use super::{
     RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE, RuntimeLocalRewriteDispatchReadyRequest,
     RuntimeLocalRewritePipelineExit, RuntimeLocalRewritePipelineResult,
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared, RuntimeProxyRequest,
-    build_runtime_proxy_text_response, path_without_query, redaction_redact_secret_like_text,
+    build_runtime_proxy_json_error_response, build_runtime_proxy_text_response, path_without_query,
     respond_runtime_gemini_compact_request, respond_runtime_local_rewrite_proxy_request,
     runtime_copilot_model_catalog_from_provider, runtime_gateway_application_provider_dispatch,
     runtime_kiro_compact_response_parts, runtime_kiro_model_catalog_from_provider,
@@ -23,6 +23,17 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteDispatchReadyRequest<'target>> {
     if !path_without_query(&request.captured.path_and_query).ends_with("/responses/compact") {
         return Ok(request);
+    }
+    if runtime_gateway_application_provider_dispatch(&request.application_admission, shared)
+        .is_err()
+    {
+        return Err(request
+            .state
+            .reject(build_runtime_proxy_json_error_response(
+                503,
+                "governed_provider_unavailable",
+                "governed provider dispatch is unavailable",
+            )));
     }
     if let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider {
         respond_runtime_gemini_compact_request(
@@ -128,7 +139,20 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
 ) -> RuntimeLocalRewritePipelineResult<()> {
     runtime_local_rewrite_log_governance_decision(&request, shared);
     let provider_dispatch =
-        runtime_gateway_application_provider_dispatch(&request.application_admission);
+        match runtime_gateway_application_provider_dispatch(&request.application_admission, shared)
+        {
+            Ok(dispatch) => dispatch,
+            Err(_) => {
+                return Err(request
+                    .state
+                    .reject(build_runtime_proxy_json_error_response(
+                        503,
+                        "governed_provider_unavailable",
+                        "governed provider dispatch is unavailable",
+                    )));
+            }
+        };
+    let response_obligations = request.application_admission.response_obligations();
     let response = match send_runtime_local_rewrite_upstream_request(
         request.state.request_id,
         &request.captured,
@@ -162,6 +186,7 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         response,
         &request.captured,
         shared,
+        response_obligations,
     );
     Ok(())
 }
@@ -226,8 +251,24 @@ fn runtime_local_rewrite_upstream_request_failed_response() -> tiny_http::Respon
     build_runtime_proxy_text_response(502, RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE)
 }
 
-fn runtime_local_rewrite_error_log_value(err: &anyhow::Error) -> String {
-    redaction_redact_secret_like_text(&format!("{err:#}")).replace('\n', " ")
+fn runtime_local_rewrite_error_log_value(_err: &anyhow::Error) -> String {
+    "upstream_request_failed".to_string()
+}
+
+#[cfg(test)]
+mod error_log_tests {
+    use super::*;
+
+    #[test]
+    fn upstream_error_log_value_is_content_free() {
+        let error =
+            anyhow::anyhow!("Bearer secret-sentinel for user@example.com in raw provider response");
+
+        assert_eq!(
+            runtime_local_rewrite_error_log_value(&error),
+            "upstream_request_failed"
+        );
+    }
 }
 
 pub(in super::super) fn runtime_local_rewrite_remote_compact_unsupported_message(
@@ -327,11 +368,6 @@ mod tests {
         .context("local rewrite upstream failed");
         let message = runtime_local_rewrite_error_log_value(&err);
 
-        assert!(!message.contains('\n'));
-        assert!(message.contains("local rewrite upstream failed"));
-        assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(message.contains("api_key=<redacted>"));
-        assert!(!message.contains("local-rewrite-token"));
-        assert!(!message.contains("local-rewrite-key"));
+        assert_eq!(message, "upstream_request_failed");
     }
 }

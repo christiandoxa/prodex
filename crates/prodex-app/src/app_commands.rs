@@ -38,7 +38,7 @@ mod ping;
 mod presidio;
 mod quota;
 mod redeem;
-mod runtime_launch;
+pub(crate) mod runtime_launch;
 mod selection;
 mod session;
 mod shared;

@@ -1,7 +1,11 @@
 //! Durable governance revision, activation, and SIEM outbox plans.
 
 use super::*;
-use prodex_domain::{ApprovalFingerprint, ApprovalRecord, ApprovalState, AuditEventId};
+use prodex_domain::{
+    ApprovalFingerprint, ApprovalId, ApprovalRecord, ApprovalState, AuditEventId, Channel,
+    CredentialScope, DataClassification, IdempotencyKey, PolicyRevisionId, Principal, PrincipalId,
+    TenantId,
+};
 
 pub const MAX_COMPILED_GOVERNANCE_ARTIFACT_BYTES: usize = 1024 * 1024;
 
@@ -12,6 +16,325 @@ pub enum GovernanceArtifactKind {
     ProviderRegistry,
     RoutingScores,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceWriteOutcome {
+    Applied,
+    Replayed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceActivationAction {
+    Activate,
+    Rollback,
+}
+
+impl GovernanceActivationAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Activate => "activate",
+            Self::Rollback => "rollback",
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernanceActivationRequest {
+    pub tenant_id: TenantId,
+    pub kind: GovernanceArtifactKind,
+    pub revision_id: String,
+    pub approval_id: ApprovalId,
+    pub actor: Principal,
+    pub action: GovernanceActivationAction,
+    pub expected_etag: Option<String>,
+    pub idempotency_key: IdempotencyKey,
+    pub request_fingerprint: String,
+    pub audit_outbox: AuditOutboxWriteCommand,
+    pub activated_at_unix_ms: u64,
+}
+
+impl fmt::Debug for GovernanceActivationRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceActivationRequest")
+            .field("tenant_id", &"<redacted>")
+            .field("kind", &self.kind)
+            .field("revision_id", &"<redacted>")
+            .field("approval_id", &"<redacted>")
+            .field("actor", &"<redacted>")
+            .field("action", &self.action)
+            .field(
+                "expected_etag",
+                &self.expected_etag.as_ref().map(|_| "<redacted>"),
+            )
+            .field("idempotency_key", &"<redacted>")
+            .field("request_fingerprint", &"<redacted>")
+            .field("audit_outbox", &"<redacted>")
+            .field("activated_at_unix_ms", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GovernanceActivationResult {
+    pub outcome: GovernanceWriteOutcome,
+    pub kind: GovernanceArtifactKind,
+    pub revision_id: String,
+    pub etag: String,
+    pub last_known_good_revision_id: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApprovalVoteRequest {
+    pub tenant_id: TenantId,
+    pub approval_id: ApprovalId,
+    pub actor: Principal,
+    pub expected_version: u64,
+    pub now_unix_ms: u64,
+    pub audit_outbox: AuditOutboxWriteCommand,
+}
+
+impl fmt::Debug for ApprovalVoteRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApprovalVoteRequest")
+            .field("tenant_id", &"<redacted>")
+            .field("approval_id", &"<redacted>")
+            .field("actor", &"<redacted>")
+            .field("expected_version", &"<redacted>")
+            .field("now_unix_ms", &"<redacted>")
+            .field("audit_outbox", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GovernanceRevisionSummary {
+    pub revision_id: String,
+    pub fingerprint: String,
+    pub lifecycle_state: String,
+    pub created_at_unix_ms: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GovernanceStatus {
+    pub active_revision_id: Option<String>,
+    pub last_known_good_revision_id: Option<String>,
+    pub etag: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceSnapshotSource {
+    Active,
+    LastKnownGood,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernanceSnapshot {
+    pub tenant_id: TenantId,
+    pub kind: GovernanceArtifactKind,
+    pub revision_id: String,
+    pub compiled_artifact: Vec<u8>,
+    pub source: GovernanceSnapshotSource,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernanceSessionUpsertCommand {
+    pub tenant_id: TenantId,
+    pub session_id_hash: String,
+    pub principal_id: PrincipalId,
+    pub channel: Channel,
+    pub credential_scope: CredentialScope,
+    pub classification: DataClassification,
+    pub policy_revision_id: PolicyRevisionId,
+    pub registry_revision_id: String,
+    pub provider_affinity: Option<String>,
+    pub created_at_unix_ms: u64,
+    pub last_seen_at_unix_ms: u64,
+    pub absolute_expires_at_unix_ms: u64,
+    pub idle_expires_at_unix_ms: u64,
+    pub max_concurrent: Option<u32>,
+}
+
+impl fmt::Debug for GovernanceSessionUpsertCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceSessionUpsertCommand")
+            .field("tenant_id", &"<redacted>")
+            .field("session_id_hash", &"<redacted>")
+            .field("principal_id", &"<redacted>")
+            .field("channel", &self.channel)
+            .field("credential_scope", &self.credential_scope)
+            .field("classification", &self.classification)
+            .field("policy_revision_id", &"<redacted>")
+            .field("registry_revision_id", &"<redacted>")
+            .field(
+                "provider_affinity",
+                &self.provider_affinity.as_ref().map(|_| "<redacted>"),
+            )
+            .field("created_at_unix_ms", &"<redacted>")
+            .field("last_seen_at_unix_ms", &"<redacted>")
+            .field("absolute_expires_at_unix_ms", &"<redacted>")
+            .field("idle_expires_at_unix_ms", &"<redacted>")
+            .field("max_concurrent", &self.max_concurrent)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernanceSessionRecord {
+    pub tenant_id: TenantId,
+    pub session_id_hash: String,
+    pub principal_id: PrincipalId,
+    pub channel: Channel,
+    pub credential_scope: CredentialScope,
+    pub classification: DataClassification,
+    pub policy_revision_id: PolicyRevisionId,
+    pub registry_revision_id: String,
+    pub provider_affinity: Option<String>,
+    pub created_at_unix_ms: u64,
+    pub last_seen_at_unix_ms: u64,
+    pub absolute_expires_at_unix_ms: u64,
+    pub idle_expires_at_unix_ms: u64,
+    pub revoked_at_unix_ms: Option<u64>,
+    pub revocation_reason_code: Option<String>,
+}
+
+impl fmt::Debug for GovernanceSessionRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceSessionRecord")
+            .field("tenant_id", &"<redacted>")
+            .field("session_id_hash", &"<redacted>")
+            .field("principal_id", &"<redacted>")
+            .field("channel", &self.channel)
+            .field("credential_scope", &self.credential_scope)
+            .field("classification", &self.classification)
+            .field("policy_revision_id", &"<redacted>")
+            .field("registry_revision_id", &"<redacted>")
+            .field(
+                "provider_affinity",
+                &self.provider_affinity.as_ref().map(|_| "<redacted>"),
+            )
+            .field("created_at_unix_ms", &"<redacted>")
+            .field("last_seen_at_unix_ms", &"<redacted>")
+            .field("absolute_expires_at_unix_ms", &"<redacted>")
+            .field("idle_expires_at_unix_ms", &"<redacted>")
+            .field("revoked", &self.revoked_at_unix_ms.is_some())
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GovernanceSessionUpsertOutcome {
+    Stored(GovernanceSessionRecord),
+    ConcurrentLimitReached,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernanceSessionRevokeCommand {
+    pub tenant_id: TenantId,
+    pub session_id_hash: String,
+    pub revoked_at_unix_ms: u64,
+    pub reason_code: String,
+    pub audit_outbox: AuditOutboxWriteCommand,
+}
+
+impl fmt::Debug for GovernanceSessionRevokeCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceSessionRevokeCommand")
+            .field("tenant_id", &"<redacted>")
+            .field("session_id_hash", &"<redacted>")
+            .field("revoked_at_unix_ms", &"<redacted>")
+            .field("reason_code", &self.reason_code)
+            .field("audit_outbox", &"<redacted>")
+            .finish()
+    }
+}
+
+impl fmt::Debug for GovernanceSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceSnapshot")
+            .field("tenant_id", &"<redacted>")
+            .field("kind", &self.kind)
+            .field("revision_id", &"<redacted>")
+            .field("compiled_artifact_bytes", &self.compiled_artifact.len())
+            .field("source", &self.source)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GovernanceOutboxHealth {
+    pub pending: u64,
+    pub dead_lettered: u64,
+    pub oldest_pending_at_unix_ms: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GovernanceAuditIntegrityHealth {
+    pub event_count: u64,
+    pub chain_head_count: u64,
+    pub chain_valid: bool,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernanceAuditExportRecord {
+    pub audit_event_id: String,
+    pub occurred_at_unix_ms: u64,
+    pub principal_id: String,
+    pub action: String,
+    pub resource_kind: String,
+    pub resource_id: Option<String>,
+    pub outcome: String,
+    pub reason_code: Option<String>,
+    pub previous_digest: Option<String>,
+    pub event_digest: String,
+}
+
+impl fmt::Debug for GovernanceAuditExportRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernanceAuditExportRecord")
+            .field("audit_event_id", &"<redacted>")
+            .field("occurred_at_unix_ms", &"<redacted>")
+            .field("principal_id", &"<redacted>")
+            .field("action", &self.action)
+            .field("resource_kind", &self.resource_kind)
+            .field(
+                "resource_id",
+                &self.resource_id.as_ref().map(|_| "<redacted>"),
+            )
+            .field("outcome", &self.outcome)
+            .field("reason_code", &self.reason_code)
+            .field(
+                "previous_digest",
+                &self.previous_digest.as_ref().map(|_| "<redacted>"),
+            )
+            .field("event_digest", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceRepositoryError {
+    Database,
+    InvalidInput,
+    TenantMismatch,
+    NotFound,
+    Conflict,
+    EtagMismatch,
+    ApprovalRequired,
+    SnapshotUnavailable,
+    AuditChainConflict,
+    ApprovalSelfAction,
+    StaleVersion,
+    InvalidTransition,
+    Unsupported,
+}
+
+impl fmt::Display for GovernanceRepositoryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "governance repository operation failed")
+    }
+}
+
+impl Error for GovernanceRepositoryError {}
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct GovernanceRevisionWriteCommand {

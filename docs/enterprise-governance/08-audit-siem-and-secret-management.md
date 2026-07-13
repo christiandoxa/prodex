@@ -3,10 +3,10 @@
 The target couples mandatory durable audit to governed mutations and selected
 high-risk dispatches, then exports sanitized evidence asynchronously through a
 transactional outbox. Secrets are references resolved from an approved secret
-manager, never policy values. The repository already has append-only audit,
-redaction, secret-store and hash-chain primitives; transactional governance
-audit/outbox, SIEM delivery and external Vault integration remain gaps. Detailed
-design is in [`08-audit-siem-and-evidence.md`](08-audit-siem-and-evidence.md).
+manager, never policy values. The implementation includes append-only hash-chain
+audit, transactional governance audit/outbox storage, bounded SIEM delivery and
+an external-secret provider boundary. Detailed design is in
+[`08-audit-siem-and-evidence.md`](08-audit-siem-and-evidence.md).
 
 ## Audit event
 
@@ -48,7 +48,12 @@ never drops unexpired evidence.
   per-chunk streaming path.
 - Values are held for the minimum lifetime, excluded from Debug/log/audit/error
   output, and rotated without embedding a new value in policy.
-- Cache expiry, revocation and Vault outage behavior is explicit per mode.
+- The production projected-secret adapter supports Vault Agent, Secrets Store
+  CSI and equivalent external injectors. The injector owns authentication and
+  lease renewal; Prodex re-resolves bounded files near adapter use and fails
+  closed when a required projection is missing or invalid.
+- Cache expiry, revocation and external secret-manager outage behavior is
+  explicit per mode.
 - `bank_enforce` rejects raw secret configuration and missing external secret
   prerequisites at startup.
 

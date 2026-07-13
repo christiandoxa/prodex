@@ -1,6 +1,6 @@
 //! Bounded schema-aware JSON content walking for Presidio inspection.
 
-use prodex_domain::InspectionCoverage;
+use prodex_domain::{FindingKind, InspectionCoverage};
 use std::error::Error;
 use std::fmt;
 
@@ -12,6 +12,7 @@ pub(super) const MAX_PRESIDIO_JSON_TEXT_BYTES: usize = 1024 * 1024;
 pub(super) struct PresidioJsonString {
     pub path: String,
     pub text: String,
+    pub sensitive_kind: Option<FindingKind>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,7 +40,7 @@ pub(super) fn collect_json_content(
     value: &serde_json::Value,
 ) -> Result<PresidioJsonContent, PresidioJsonContentError> {
     let mut state = PresidioJsonWalkState::default();
-    collect_json_content_at(value, false, "$", 0, &mut state)?;
+    collect_json_content_at(value, false, None, "$", 0, &mut state)?;
     let coverage = if state.values.is_empty() {
         InspectionCoverage::Unsupported
     } else if state.unsupported_modality {
@@ -63,6 +64,7 @@ struct PresidioJsonWalkState {
 fn collect_json_content_at(
     value: &serde_json::Value,
     inspect_strings: bool,
+    sensitive_kind: Option<FindingKind>,
     path: &str,
     depth: usize,
     state: &mut PresidioJsonWalkState,
@@ -85,6 +87,7 @@ fn collect_json_content_at(
             state.values.push(PresidioJsonString {
                 path: path.to_string(),
                 text: text.clone(),
+                sensitive_kind,
             });
         }
         serde_json::Value::Array(items) => {
@@ -92,6 +95,7 @@ fn collect_json_content_at(
                 collect_json_content_at(
                     item,
                     inspect_strings,
+                    sensitive_kind,
                     &format!("{path}[{index}]"),
                     depth + 1,
                     state,
@@ -105,6 +109,7 @@ fn collect_json_content_at(
                 }
                 let schema_field = inspectable_json_string_field(key);
                 let inspect_child = inspect_strings || schema_field;
+                let child_sensitive_kind = sensitive_json_key_kind(key).or(sensitive_kind);
                 let child_path = if schema_field {
                     format!("{path}.{key}")
                 } else if inspect_strings {
@@ -112,12 +117,40 @@ fn collect_json_content_at(
                 } else {
                     path.to_string()
                 };
-                collect_json_content_at(value, inspect_child, &child_path, depth + 1, state)?;
+                collect_json_content_at(
+                    value,
+                    inspect_child,
+                    child_sensitive_kind,
+                    &child_path,
+                    depth + 1,
+                    state,
+                )?;
             }
         }
         _ => {}
     }
     Ok(())
+}
+
+fn sensitive_json_key_kind(key: &str) -> Option<FindingKind> {
+    if !redaction::redaction_key_looks_sensitive(key) {
+        return None;
+    }
+    let normalized = key
+        .bytes()
+        .filter(u8::is_ascii_alphanumeric)
+        .map(|byte| byte.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let normalized = std::str::from_utf8(&normalized).ok()?;
+    Some(if normalized.contains("privatekey") {
+        FindingKind::PrivateKey
+    } else if normalized.contains("apikey") {
+        FindingKind::ApiKey
+    } else if normalized.contains("token") || normalized == "authorization" {
+        FindingKind::AccessToken
+    } else {
+        FindingKind::Password
+    })
 }
 
 fn inspectable_json_string_field(key: &str) -> bool {

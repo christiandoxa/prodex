@@ -811,6 +811,9 @@ jobs:
           PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE: scripts/ci/runtime-proxy-bench-thresholds.json
         run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
+      - name: Measure bounded governance hot paths
+        run: cargo bench --locked --bench governance_hot_paths
+
   runtime-load-smoke:
     needs: changes
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.heavy == 'true'

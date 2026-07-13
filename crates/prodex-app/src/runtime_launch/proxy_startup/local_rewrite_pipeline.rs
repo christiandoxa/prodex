@@ -84,7 +84,6 @@ use prodex_application::{
     ApplicationInspectionPlan, ApplicationRequestContextError, ApplicationRequestDeadline,
 };
 use prodex_domain::RequestId;
-use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{
     RuntimeProxyRequest, is_runtime_realtime_websocket_path, path_without_query,
     runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -656,7 +655,7 @@ fn runtime_local_rewrite_capture_rejection(
                 runtime_proxy_log_field("request", state.request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("reason", reason),
-                runtime_proxy_log_field("path", state.path.as_str()),
+                runtime_proxy_log_field("path", path_without_query(&state.path)),
             ],
         ),
     );

@@ -8,10 +8,13 @@
 mod governed_routing;
 
 pub use governed_routing::{
-    GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute, GovernedRoutingError,
-    GovernedRoutingPlan, GovernedRoutingRequest, GovernedRoutingSignals, GovernedRoutingWeights,
-    MAX_GOVERNED_PROVIDER_REGIONS, MAX_GOVERNED_ROUTING_CANDIDATES, MAX_GOVERNED_ROUTING_FALLBACKS,
-    ROUTING_SCORE_SCALE, plan_governed_provider_route,
+    GOVERNED_SCORE_COMPONENT_COUNT, GovernedCandidateEvaluation, GovernedCandidateOutcome,
+    GovernedHardFilterReason, GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute,
+    GovernedRoutingError, GovernedRoutingPlan, GovernedRoutingRequest, GovernedRoutingSignals,
+    GovernedRoutingWeights, GovernedScoreBreakdown, GovernedScoreComponent,
+    GovernedScoreComponentKind, MAX_GOVERNED_HARD_FILTER_REASONS, MAX_GOVERNED_PROVIDER_REGIONS,
+    MAX_GOVERNED_ROUTING_CANDIDATES, MAX_GOVERNED_ROUTING_FALLBACKS, ROUTING_SCORE_SCALE,
+    plan_governed_provider_route,
 };
 
 use std::error::Error;

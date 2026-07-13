@@ -16,6 +16,7 @@ mod gateway_admin_auth;
 mod gateway_admin_crud;
 mod gateway_admin_governance_headers;
 mod gateway_admin_ledger_query;
+mod gateway_admin_policy_lifecycle;
 mod gateway_admin_scope;
 mod gateway_admin_tenant_scope;
 mod gateway_admin_toctou;
@@ -3489,8 +3490,9 @@ fn gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_
         }))
         .send()
         .expect("streaming request should be sent");
-    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.status().as_u16(), 403);
     let body = response.text().expect("stream body should be readable");
+    assert!(body.contains(r#""code":"blocked_output_keyword""#));
     assert!(!body.contains("do-not-stream-sensitive-marker"));
 
     let audit_log = std::fs::read_to_string(audit_dir.join("prodex-audit.log"))
@@ -3498,6 +3500,7 @@ fn gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"response_guardrail_blocked""#));
     assert!(audit_log.contains(r#""reason":"blocked_output_keyword""#));
+    assert!(audit_log.contains(r#""commit_state":"precommit""#));
     assert!(!audit_log.contains(gateway_token));
     assert!(!audit_log.contains("do-not-stream-sensitive-marker"));
 
@@ -3570,7 +3573,8 @@ fn gateway_pre_guardrail_webhook_denial_is_audited_without_secret_leakage() {
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"guardrail_webhook_blocked""#));
     assert!(audit_log.contains(r#""phase":"pre""#));
-    assert!(audit_log.contains(r#""reason":"tenant_policy_denied""#));
+    assert!(audit_log.contains(r#""reason":"webhook_denied""#));
+    assert!(!audit_log.contains("tenant_policy_denied"));
     assert!(audit_log.contains(r#""path":"/v1/responses""#));
     assert!(!audit_log.contains(gateway_token));
     assert!(!audit_log.contains(webhook_token));
@@ -3646,7 +3650,8 @@ fn gateway_post_guardrail_webhook_denial_is_audited_without_secret_leakage() {
     assert!(audit_log.contains(r#""component":"gateway_data_plane""#));
     assert!(audit_log.contains(r#""action":"response_guardrail_webhook_blocked""#));
     assert!(audit_log.contains(r#""phase":"post""#));
-    assert!(audit_log.contains(r#""reason":"output_policy_denied""#));
+    assert!(audit_log.contains(r#""reason":"webhook_denied""#));
+    assert!(!audit_log.contains("output_policy_denied"));
     assert!(!audit_log.contains(gateway_token));
     assert!(!audit_log.contains(webhook_token));
     assert!(!audit_log.contains("do-not-log-webhook-message"));

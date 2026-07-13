@@ -1,6 +1,6 @@
 # ADR 0005: Provider Registry and Governed Routing
 
-- Status: Proposed
+- Status: Accepted
 - Scope: target provider selection
 
 ## Context
@@ -28,6 +28,23 @@ revision. Revocation overrides continuation pinning.
 
 ## Implementation status
 
-Provider adapters, affinity, circuit, quota and bounded precommit retry
-foundations exist. Revisioned compliance registry, hard-filter and auditable
-fixed-point choice remain gaps.
+The local rewrite runtime publishes a revisioned tenant-bound snapshot for the
+single provider adapter attached to that process. It advertises only endpoints
+and capabilities implemented by that adapter, hard-filters disabled or revoked
+entries, preserves eligible continuation affinity, and requires a successful
+audited governed decision before enforcing-mode dispatch. Existing adapter-local
+health, quota, circuit and bounded precommit retry machinery remains authoritative.
+
+The current process architecture owns one `RuntimeLocalRewriteProviderOptions`
+adapter, one upstream configuration, and one credential family. Simultaneous
+heterogeneous provider dispatch is therefore not executable in one process.
+Configured or stale routes naming another provider must fail unavailable; they
+must never be sent through the attached adapter. Multi-provider fallback requires
+a broker/process boundary that owns one executable adapter per candidate. Until
+that exists, precommit retries remain within the original one-provider eligible
+snapshot and no cross-provider fallback is advertised.
+
+Evidence includes `governed_routing_enforces_every_hard_eligibility_gate`,
+`governed_routing_scores_in_fixed_point_and_breaks_ties_by_provider`,
+`governed_routing_does_not_preserve_affinity_after_revocation`, and the
+provider-SPI/production boundary guards.

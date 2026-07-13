@@ -77,6 +77,7 @@ pub(crate) struct RuntimeGatewayOidcConfig {
     pub(crate) role_claim: String,
     pub(crate) tenant_claim: String,
     pub(crate) key_prefixes_claim: String,
+    pub(crate) authentication_strength: Option<String>,
 }
 
 impl fmt::Debug for RuntimeGatewayOidcConfig {
@@ -93,6 +94,10 @@ impl fmt::Debug for RuntimeGatewayOidcConfig {
             .field("role_claim", &"<redacted>")
             .field("tenant_claim", &"<redacted>")
             .field("key_prefixes_claim", &"<redacted>")
+            .field(
+                "authentication_strength",
+                &self.authentication_strength.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }
@@ -319,6 +324,11 @@ pub(crate) struct RuntimeGatewayObservabilityConfig {
     pub(crate) http_endpoint: Option<String>,
     pub(crate) http_schema: String,
     pub(crate) http_bearer_token: Option<RuntimeGatewaySecret>,
+    pub(crate) siem_worker: Option<
+        Arc<
+            crate::app_commands::runtime_launch::gateway_config::gateway_siem_export::RuntimeSiemWorkerConfig,
+        >,
+    >,
 }
 
 impl fmt::Debug for RuntimeGatewayObservabilityConfig {
@@ -337,6 +347,10 @@ impl fmt::Debug for RuntimeGatewayObservabilityConfig {
             .field(
                 "http_bearer_token",
                 &self.http_bearer_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "siem_worker",
+                &self.siem_worker.as_ref().map(|_| "<redacted>"),
             )
             .finish()
     }
@@ -478,6 +492,7 @@ mod tests {
                 role_claim: "prodex_role".to_string(),
                 tenant_claim: "prodex_tenant".to_string(),
                 key_prefixes_claim: "prodex_key_prefixes".to_string(),
+                authentication_strength: None,
             }),
         };
         assert_redacted(
@@ -517,6 +532,7 @@ mod tests {
                     None::<String>,
                 ),
             )),
+            siem_worker: None,
         };
         assert_redacted(
             &format!("{observability:?}"),

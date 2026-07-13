@@ -3,13 +3,7 @@ pub(super) fn bin(name: &str) -> String {
 }
 
 pub(super) fn closed_otlp_endpoint() -> String {
-    let listener =
-        std::net::TcpListener::bind("127.0.0.1:0").expect("bind OTLP closed-port listener");
-    let addr = listener
-        .local_addr()
-        .expect("resolve OTLP closed-port listener addr");
-    drop(listener);
-    format!("http://{addr}/v1/logs")
+    "http://127.0.0.1:0/v1/logs".to_string()
 }
 
 macro_rules! assert_scoped_idempotency_key {

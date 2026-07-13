@@ -67,6 +67,14 @@ fn control_plane_data_plane_field(policy: &RuntimePolicyFile) -> Option<&'static
         ("gateway.virtual_keys", !gateway.virtual_keys.is_empty()),
         ("gateway.sso", gateway.sso != Default::default()),
         (
+            "gateway.trusted_proxies",
+            !gateway.trusted_proxies.is_empty(),
+        ),
+        (
+            "gateway.workload_identity",
+            gateway.workload_identity != Default::default(),
+        ),
+        (
             "gateway.observability",
             gateway.observability != Default::default(),
         ),

@@ -270,7 +270,11 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                                     ),
                                     runtime_proxy_log_field(
                                         "turn_state",
-                                        format!("{turn_state:?}"),
+                                        if turn_state.is_some() {
+                                            "present"
+                                        } else {
+                                            "none"
+                                        },
                                     ),
                                 ],
                             ),

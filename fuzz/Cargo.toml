@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 prodex-authn = { path = "../crates/prodex-authn" }
+prodex-domain = { path = "../crates/prodex-domain" }
 prodex-gateway-http = { path = "../crates/prodex-gateway-http" }
 prodex-profile-export = { path = "../crates/prodex-profile-export" }
 prodex-runtime-policy = { path = "../crates/prodex-runtime-policy" }
@@ -40,6 +41,13 @@ bench = false
 [[bin]]
 name = "runtime_policy_parse"
 path = "fuzz_targets/runtime_policy_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "governance_policy"
+path = "fuzz_targets/governance_policy.rs"
 test = false
 doc = false
 bench = false

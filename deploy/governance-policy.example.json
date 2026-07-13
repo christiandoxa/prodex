@@ -1,0 +1,19 @@
+{
+  "config_version": 1,
+  "authority_tenants": ["00000000-0000-7000-8000-000000000001"],
+  "mode": "enterprise_observe",
+  "policy_rules": [
+    {
+      "id": "deny-revoked-tool-session",
+      "condition": {
+        "channel": "api",
+        "credential_scope": "data_plane",
+        "session_revoked": true,
+        "requested_capability": "tools"
+      },
+      "effect": "deny",
+      "obligations": [],
+      "reason_code": "policy.session_revoked"
+    }
+  ]
+}

@@ -21,6 +21,52 @@ pub fn plan_security_decision_metric(
     })
 }
 
+pub fn plan_inspection_metric(
+    stage: InspectionStage,
+    coverage: InspectionCoverageClass,
+    finding_category: InspectionFindingCategory,
+    masking_action: InspectionMaskingAction,
+    outcome: InspectionOutcome,
+    duration_micros: u64,
+) -> Result<InspectionMetricPlan, TelemetryAttributeError> {
+    let stage_label =
+        TelemetryAttribute::metric_label("inspection_stage", inspection_stage_label(stage));
+    let coverage_label = TelemetryAttribute::metric_label(
+        "inspection_coverage",
+        inspection_coverage_label(coverage),
+    );
+    let finding_category_label = TelemetryAttribute::metric_label(
+        "inspection_finding_category",
+        inspection_finding_category_label(finding_category),
+    );
+    let masking_action_label = TelemetryAttribute::metric_label(
+        "inspection_masking_action",
+        inspection_masking_action_label(masking_action),
+    );
+    let outcome_label =
+        TelemetryAttribute::metric_label("inspection_outcome", inspection_outcome_label(outcome));
+    for label in [
+        &stage_label,
+        &coverage_label,
+        &finding_category_label,
+        &masking_action_label,
+        &outcome_label,
+    ] {
+        label.as_metric_label()?;
+    }
+    Ok(InspectionMetricPlan {
+        event_metric_name: "prodex_inspection_events_total",
+        duration_metric_name: "prodex_inspection_duration_microseconds",
+        increment: 1,
+        duration_micros: duration_micros.min(120_000_000),
+        stage_label,
+        coverage_label,
+        finding_category_label,
+        masking_action_label,
+        outcome_label,
+    })
+}
+
 pub fn plan_authn_token_validation_metric(
     stage: AuthnTokenValidationStage,
     result: AuthnTokenValidationResult,
@@ -353,6 +399,51 @@ fn security_decision_kind_label(decision: SecurityDecisionKind) -> &'static str 
         SecurityDecisionKind::TenantResolution => "tenant_resolution",
         SecurityDecisionKind::Authorization => "authorization",
         SecurityDecisionKind::CredentialScope => "credential_scope",
+    }
+}
+
+fn inspection_stage_label(stage: InspectionStage) -> &'static str {
+    match stage {
+        InspectionStage::Local => "local",
+        InspectionStage::External => "external",
+        InspectionStage::Merge => "merge",
+        InspectionStage::RequestEnforcement => "request_enforcement",
+        InspectionStage::ResponseEnforcement => "response_enforcement",
+    }
+}
+
+fn inspection_coverage_label(coverage: InspectionCoverageClass) -> &'static str {
+    match coverage {
+        InspectionCoverageClass::Full => "full",
+        InspectionCoverageClass::Partial => "partial",
+        InspectionCoverageClass::Unsupported => "unsupported",
+    }
+}
+
+fn inspection_finding_category_label(category: InspectionFindingCategory) -> &'static str {
+    match category {
+        InspectionFindingCategory::None => "none",
+        InspectionFindingCategory::PersonalData => "personal_data",
+        InspectionFindingCategory::Credential => "credential",
+        InspectionFindingCategory::Financial => "financial",
+        InspectionFindingCategory::Multiple => "multiple",
+    }
+}
+
+fn inspection_masking_action_label(action: InspectionMaskingAction) -> &'static str {
+    match action {
+        InspectionMaskingAction::None => "none",
+        InspectionMaskingAction::Masked => "masked",
+        InspectionMaskingAction::Denied => "denied",
+    }
+}
+
+fn inspection_outcome_label(outcome: InspectionOutcome) -> &'static str {
+    match outcome {
+        InspectionOutcome::Allowed => "allowed",
+        InspectionOutcome::Denied => "denied",
+        InspectionOutcome::Timeout => "timeout",
+        InspectionOutcome::Error => "error",
     }
 }
 

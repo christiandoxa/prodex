@@ -1,6 +1,5 @@
 use super::super::*;
 use prodex_quota::{RuntimeQuotaPressureBand, RuntimeQuotaSummary};
-use prodex_shared_types::RuntimeQuotaSource;
 use prodex_state::ProfileEntry;
 use std::path::PathBuf;
 
@@ -10,14 +9,11 @@ struct RuntimePreviousResponseDiskFallbackEntry {
     order_index: usize,
 }
 
-enum RuntimePreviousResponseRejection<'a> {
-    NegativeCache {
-        response_id: &'a str,
-    },
+enum RuntimePreviousResponseRejection {
+    NegativeCache,
     AuthFailure,
     Quota {
         summary: RuntimeQuotaSummary,
-        source: Option<RuntimeQuotaSource>,
         reason: &'static str,
     },
 }
@@ -33,21 +29,12 @@ struct RuntimePreviousResponseDiscovery {
 
 #[derive(Clone, Copy)]
 struct RuntimePreviousResponseDiscoveryContext<'a> {
-    shared: &'a RuntimeRotationProxyShared,
     runtime: &'a RuntimeRotationState,
     excluded_profiles: &'a BTreeSet<String>,
     previous_response_id: Option<&'a str>,
     route_kind: RuntimeRouteKind,
     allow_disk_auth_fallback: bool,
     now: i64,
-}
-
-#[derive(Clone, Copy)]
-struct RuntimePreviousResponseCandidateLogContext<'a> {
-    shared: &'a RuntimeRotationProxyShared,
-    route_kind: RuntimeRouteKind,
-    name: &'a str,
-    order_index: usize,
 }
 
 pub(super) fn discover_runtime_previous_response_candidate(
@@ -77,7 +64,6 @@ pub(super) fn discover_runtime_previous_response_candidate(
         }
         let discovered = discover_cached_previous_response_candidate(
             RuntimePreviousResponseDiscoveryContext {
-                shared,
                 runtime: &runtime,
                 excluded_profiles,
                 previous_response_id,
@@ -126,7 +112,6 @@ fn discover_cached_previous_response_candidate(
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> RuntimePreviousResponseDiscovery {
     let RuntimePreviousResponseDiscoveryContext {
-        shared,
         runtime,
         excluded_profiles,
         previous_response_id,
@@ -135,7 +120,7 @@ fn discover_cached_previous_response_candidate(
         now,
     } = context;
     let mut disk_fallback_entries = Vec::new();
-    for (order_index, (name, profile)) in runtime_previous_response_ordered_profiles(runtime)
+    for (order_index, (_, name, profile)) in runtime_previous_response_ordered_profiles(runtime)
         .into_iter()
         .enumerate()
     {
@@ -151,14 +136,7 @@ fn discover_cached_previous_response_candidate(
         ) {
             Ok(eligible) => eligible,
             Err(rejection) => {
-                record_runtime_previous_response_rejection(
-                    shared,
-                    trace,
-                    route_kind,
-                    name,
-                    order_index,
-                    rejection,
-                );
+                record_runtime_previous_response_rejection(trace, name, order_index, rejection);
                 continue;
             }
         };
@@ -202,16 +180,14 @@ fn discover_cached_previous_response_candidate(
     }
 }
 
-fn runtime_previous_response_candidate_eligibility<'a>(
+fn runtime_previous_response_candidate_eligibility(
     runtime: &RuntimeRotationState,
     name: &str,
-    previous_response_id: Option<&'a str>,
+    previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
     now: i64,
-) -> std::result::Result<
-    RuntimePreviousResponseEligibleCandidate,
-    RuntimePreviousResponseRejection<'a>,
-> {
+) -> std::result::Result<RuntimePreviousResponseEligibleCandidate, RuntimePreviousResponseRejection>
+{
     if let Some(response_id) = previous_response_id
         && runtime_previous_response_negative_cache_active(
             &runtime.profile_health,
@@ -221,7 +197,7 @@ fn runtime_previous_response_candidate_eligibility<'a>(
             now,
         )
     {
-        return Err(RuntimePreviousResponseRejection::NegativeCache { response_id });
+        return Err(RuntimePreviousResponseRejection::NegativeCache);
     }
     if runtime_profile_auth_failure_active_with_auth_cache(
         &runtime.profile_health,
@@ -231,7 +207,7 @@ fn runtime_previous_response_candidate_eligibility<'a>(
     ) {
         return Err(RuntimePreviousResponseRejection::AuthFailure);
     }
-    let (quota_summary, quota_source) =
+    let (quota_summary, _) =
         runtime_profile_quota_summary_for_route_from_state(runtime, name, route_kind, now);
     if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
         || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
@@ -240,7 +216,6 @@ fn runtime_previous_response_candidate_eligibility<'a>(
             .unwrap_or_else(|| runtime_quota_pressure_band_reason(quota_summary.route_band));
         return Err(RuntimePreviousResponseRejection::Quota {
             summary: quota_summary,
-            source: quota_source,
             reason,
         });
     }
@@ -248,34 +223,19 @@ fn runtime_previous_response_candidate_eligibility<'a>(
 }
 
 fn record_runtime_previous_response_rejection(
-    shared: &RuntimeRotationProxyShared,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
-    route_kind: RuntimeRouteKind,
     name: &str,
     order_index: usize,
-    rejection: RuntimePreviousResponseRejection<'_>,
+    rejection: RuntimePreviousResponseRejection,
 ) {
     match rejection {
-        RuntimePreviousResponseRejection::NegativeCache { response_id } => {
+        RuntimePreviousResponseRejection::NegativeCache => {
             record_runtime_previous_response_simple_rejection(
                 trace,
                 name,
                 order_index,
                 "negative_cache",
                 Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Affinity),
-            );
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "selection_skip_affinity",
-                    [
-                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                        runtime_proxy_log_field("affinity", "previous_response_discovery"),
-                        runtime_proxy_log_field("profile", name),
-                        runtime_proxy_log_field("reason", "negative_cache"),
-                        runtime_proxy_log_field("response_id", response_id),
-                    ],
-                ),
             );
         }
         RuntimePreviousResponseRejection::AuthFailure => {
@@ -288,35 +248,16 @@ fn record_runtime_previous_response_rejection(
                 reason,
                 None,
             );
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "selection_skip_affinity",
-                    [
-                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                        runtime_proxy_log_field("affinity", "previous_response_discovery"),
-                        runtime_proxy_log_field("profile", name),
-                        runtime_proxy_log_field("reason", "auth_failure_backoff"),
-                    ],
-                ),
-            );
         }
-        RuntimePreviousResponseRejection::Quota {
-            summary,
-            source,
-            reason,
-        } => record_runtime_previous_response_quota_rejection(
-            RuntimePreviousResponseCandidateLogContext {
-                shared,
-                route_kind,
+        RuntimePreviousResponseRejection::Quota { summary, reason } => {
+            record_runtime_previous_response_quota_rejection(
+                trace,
                 name,
                 order_index,
-            },
-            trace,
-            summary,
-            source,
-            reason,
-        ),
+                summary,
+                reason,
+            )
+        }
     }
 }
 
@@ -340,18 +281,12 @@ fn record_runtime_previous_response_simple_rejection(
 }
 
 fn record_runtime_previous_response_quota_rejection(
-    context: RuntimePreviousResponseCandidateLogContext<'_>,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
+    name: &str,
+    order_index: usize,
     summary: RuntimeQuotaSummary,
-    source: Option<RuntimeQuotaSource>,
     reason: &'static str,
 ) {
-    let RuntimePreviousResponseCandidateLogContext {
-        shared,
-        route_kind,
-        name,
-        order_index,
-    } = context;
     let mut candidate = runtime_selection_trace_candidate(
         order_index,
         runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity,
@@ -366,25 +301,6 @@ fn record_runtime_previous_response_quota_rejection(
         Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Quota),
     );
     trace.record_candidate(name, candidate);
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "selection_skip_affinity",
-            runtime_selection_log_fields_with_quota(
-                [
-                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                    runtime_proxy_log_field("affinity", "previous_response_discovery"),
-                    runtime_proxy_log_field("profile", name),
-                    runtime_proxy_log_field("reason", reason),
-                    runtime_proxy_log_field(
-                        "quota_source",
-                        runtime_selection_quota_source_label(source),
-                    ),
-                ],
-                summary,
-            ),
-        ),
-    );
 }
 
 fn record_runtime_previous_response_auth_incompatible(
@@ -456,7 +372,7 @@ fn select_runtime_previous_response_disk_fallback(
 
 fn runtime_previous_response_ordered_profiles(
     runtime: &RuntimeRotationState,
-) -> Vec<(&str, &ProfileEntry)> {
+) -> Vec<(usize, &str, &ProfileEntry)> {
     let mut ordered = runtime
         .state
         .profiles
@@ -479,7 +395,4 @@ fn runtime_previous_response_ordered_profiles(
         (profile.provider.runtime_pool_priority(), rotation_index)
     });
     ordered
-        .into_iter()
-        .map(|(_, name, profile)| (name, profile))
-        .collect()
 }

@@ -1,5 +1,5 @@
 use super::*;
-mod gateway_config;
+pub(crate) mod gateway_config;
 #[path = "runtime_launch/gateway_shutdown.rs"]
 mod gateway_shutdown;
 #[path = "runtime_launch/gateway_startup.rs"]

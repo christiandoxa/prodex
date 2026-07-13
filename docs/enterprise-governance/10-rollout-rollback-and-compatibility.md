@@ -18,6 +18,18 @@ Capabilities also use `off`, `observe`, and `enforce` states. Configuration
 validation rejects combinations that could label a control enforced when its
 PEP or dependency is absent.
 
+## Current candidate checkpoint
+
+The candidate based on `e308fdf6` has implemented the typed governance stages,
+focused security tests, architecture/deployment guards, live PostgreSQL/RLS and
+SIEM-outbox validation, restore evidence, fuzz/load/stress checks and bounded
+benchmarks. Managed failover, external SIEM delivery and multi-replica soak are
+deployment acceptance evidence rather than hidden fallback behavior.
+
+Canary scope must also respect the current single-attached-adapter boundary.
+No rollout may configure a heterogeneous provider fallback set in one process
+or claim that such fallback has been tested.
+
 ## Promotion sequence
 
 1. Build immutable snapshots and content-free telemetry.
@@ -56,6 +68,11 @@ Immediate rollback triggers include policy bypass, cross-tenant access,
 unredacted sensitive output, mandatory audit loss, routing outside the approved
 eligible set, post-commit retry/rotation, bank fail-open behavior, or a sustained
 SLO/budget breach.
+
+Until the residuals are removed, rollback planning must account for synchronous
+mandatory-audit latency and request-path Presidio/webhook dependency failure.
+Disabling a mandatory enforcement stage is not a rollback; move the affected
+cohort to a previously approved compatible mode/snapshot or stop admission.
 
 ## Exit evidence
 

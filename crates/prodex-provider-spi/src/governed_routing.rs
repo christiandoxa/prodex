@@ -13,6 +13,157 @@ pub const ROUTING_SCORE_SCALE: u16 = 10_000;
 pub const MAX_GOVERNED_ROUTING_CANDIDATES: usize = 64;
 pub const MAX_GOVERNED_ROUTING_FALLBACKS: usize = 8;
 pub const MAX_GOVERNED_PROVIDER_REGIONS: usize = 16;
+pub const MAX_GOVERNED_HARD_FILTER_REASONS: usize = 16;
+pub const GOVERNED_SCORE_COMPONENT_COUNT: usize = 7;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum GovernedHardFilterReason {
+    TenantMismatch,
+    ProviderDisabled,
+    ProviderRevoked,
+    CircuitOpen,
+    QuotaUnavailable,
+    CredentialUnavailable,
+    ClassificationUnsupported,
+    CapabilityMissing,
+    ProviderNotAllowed,
+    ProviderDenied,
+    TrustTierInsufficient,
+    RegionUnavailable,
+    LocalExecutionRequired,
+    RetentionProhibited,
+    RetentionLimitExceeded,
+    TrainingUseProhibited,
+}
+
+impl GovernedHardFilterReason {
+    pub const fn reason_code(self) -> &'static str {
+        match self {
+            Self::TenantMismatch => "routing.hard.tenant_mismatch",
+            Self::ProviderDisabled => "routing.hard.provider_disabled",
+            Self::ProviderRevoked => "routing.hard.provider_revoked",
+            Self::CircuitOpen => "routing.hard.circuit_open",
+            Self::QuotaUnavailable => "routing.hard.quota_unavailable",
+            Self::CredentialUnavailable => "routing.hard.credential_unavailable",
+            Self::ClassificationUnsupported => "routing.hard.classification_unsupported",
+            Self::CapabilityMissing => "routing.hard.capability_missing",
+            Self::ProviderNotAllowed => "routing.hard.provider_not_allowed",
+            Self::ProviderDenied => "routing.hard.provider_denied",
+            Self::TrustTierInsufficient => "routing.hard.trust_tier_insufficient",
+            Self::RegionUnavailable => "routing.hard.region_unavailable",
+            Self::LocalExecutionRequired => "routing.hard.local_execution_required",
+            Self::RetentionProhibited => "routing.hard.retention_prohibited",
+            Self::RetentionLimitExceeded => "routing.hard.retention_limit_exceeded",
+            Self::TrainingUseProhibited => "routing.hard.training_use_prohibited",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernedCandidateOutcome {
+    Eligible,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernedScoreComponentKind {
+    Health,
+    AvailableCapacity,
+    CostEfficiency,
+    LatencyEfficiency,
+    RiskReduction,
+    OperatorPriority,
+    Affinity,
+}
+
+impl GovernedScoreComponentKind {
+    pub const fn reason_code(self) -> &'static str {
+        match self {
+            Self::Health => "routing.score.health",
+            Self::AvailableCapacity => "routing.score.available_capacity",
+            Self::CostEfficiency => "routing.score.cost_efficiency",
+            Self::LatencyEfficiency => "routing.score.latency_efficiency",
+            Self::RiskReduction => "routing.score.risk_reduction",
+            Self::OperatorPriority => "routing.score.operator_priority",
+            Self::Affinity => "routing.score.affinity",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct GovernedScoreComponent {
+    pub kind: GovernedScoreComponentKind,
+    pub normalized_value: u16,
+    pub weight: u16,
+    pub weighted_value: u64,
+}
+
+impl fmt::Debug for GovernedScoreComponent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernedScoreComponent")
+            .field("reason_code", &self.kind.reason_code())
+            .field("normalized_value", &"<bounded>")
+            .field("weight", &"<bounded>")
+            .field("weighted_value", &"<bounded>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernedScoreBreakdown {
+    pub score_revision: u64,
+    pub components: [GovernedScoreComponent; GOVERNED_SCORE_COMPONENT_COUNT],
+    pub weighted_total: u64,
+    pub weight_total: u16,
+    pub score: u16,
+}
+
+impl fmt::Debug for GovernedScoreBreakdown {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernedScoreBreakdown")
+            .field("score_revision", &"<redacted>")
+            .field("components", &self.components)
+            .field("weighted_total", &"<bounded>")
+            .field("weight_total", &"<bounded>")
+            .field("score", &self.score)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GovernedCandidateEvaluation {
+    pub provider: ProviderId,
+    pub descriptor_revision: u64,
+    outcome: GovernedCandidateOutcome,
+    rejection_reasons: Vec<GovernedHardFilterReason>,
+    score_breakdown: Option<GovernedScoreBreakdown>,
+}
+
+impl GovernedCandidateEvaluation {
+    pub const fn outcome(&self) -> GovernedCandidateOutcome {
+        self.outcome
+    }
+
+    pub fn rejection_reasons(&self) -> &[GovernedHardFilterReason] {
+        &self.rejection_reasons
+    }
+
+    pub const fn score_breakdown(&self) -> Option<&GovernedScoreBreakdown> {
+        self.score_breakdown.as_ref()
+    }
+}
+
+impl fmt::Debug for GovernedCandidateEvaluation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GovernedCandidateEvaluation")
+            .field("provider", &self.provider)
+            .field("descriptor_revision", &"<redacted>")
+            .field("outcome", &self.outcome)
+            .field("rejection_reasons", &self.rejection_reasons)
+            .field("score_breakdown", &self.score_breakdown)
+            .finish()
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct GovernedRoutingSignals {
@@ -98,6 +249,7 @@ impl GovernedRoutingWeights {
 #[derive(Clone, PartialEq, Eq)]
 pub struct GovernedProviderDescriptor {
     pub revision: u64,
+    pub pricing_revision: u64,
     pub tenant: TenantContext,
     pub provider: ProviderId,
     pub credential_ref: SecretRef,
@@ -120,6 +272,7 @@ impl fmt::Debug for GovernedProviderDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GovernedProviderDescriptor")
             .field("revision", &"<redacted>")
+            .field("pricing_revision", &"<redacted>")
             .field("tenant", &"<redacted>")
             .field("provider", &self.provider)
             .field("credential_ref", &"<redacted>")
@@ -176,8 +329,10 @@ impl fmt::Debug for GovernedRoutingRequest<'_> {
 pub struct GovernedRoute {
     pub provider: ProviderId,
     pub descriptor_revision: u64,
+    pub pricing_revision: u64,
     pub credential_ref: SecretRef,
     pub score: u16,
+    pub score_breakdown: GovernedScoreBreakdown,
 }
 
 impl fmt::Debug for GovernedRoute {
@@ -185,8 +340,10 @@ impl fmt::Debug for GovernedRoute {
         f.debug_struct("GovernedRoute")
             .field("provider", &self.provider)
             .field("descriptor_revision", &"<redacted>")
+            .field("pricing_revision", &"<redacted>")
             .field("credential_ref", &"<redacted>")
             .field("score", &self.score)
+            .field("score_breakdown", &self.score_breakdown)
             .finish()
     }
 }
@@ -199,6 +356,7 @@ pub struct GovernedRoutingPlan {
     pub policy_revision: PolicyRevisionId,
     pub primary: GovernedRoute,
     pub fallbacks: Vec<GovernedRoute>,
+    pub candidate_evaluations: Vec<GovernedCandidateEvaluation>,
 }
 
 impl fmt::Debug for GovernedRoutingPlan {
@@ -210,6 +368,7 @@ impl fmt::Debug for GovernedRoutingPlan {
             .field("policy_revision", &"<redacted>")
             .field("primary", &self.primary)
             .field("fallback_count", &self.fallbacks.len())
+            .field("candidate_count", &self.candidate_evaluations.len())
             .finish()
     }
 }
@@ -271,24 +430,46 @@ pub fn plan_governed_provider_route(
 ) -> Result<GovernedRoutingPlan, GovernedRoutingError> {
     validate_request(request)?;
 
-    let mut routes = request
-        .registry
-        .providers
-        .iter()
-        .filter(|provider| provider.tenant == request.tenant)
-        .filter(|provider| provider_is_eligible(provider, request))
-        .map(|provider| GovernedRoute {
-            provider: provider.provider,
-            descriptor_revision: provider.revision,
-            credential_ref: provider.credential_ref.clone(),
-            score: score_provider(provider, request),
-        })
-        .collect::<Vec<_>>();
+    let mut routes = Vec::new();
+    let mut candidate_evaluations = Vec::with_capacity(request.registry.providers.len());
+    for provider in &request.registry.providers {
+        let rejection_reasons = provider_rejection_reasons(provider, request);
+        if rejection_reasons.is_empty() {
+            let score_breakdown = score_provider(provider, request);
+            routes.push(GovernedRoute {
+                provider: provider.provider,
+                descriptor_revision: provider.revision,
+                pricing_revision: provider.pricing_revision,
+                credential_ref: provider.credential_ref.clone(),
+                score: score_breakdown.score,
+                score_breakdown: score_breakdown.clone(),
+            });
+            candidate_evaluations.push(GovernedCandidateEvaluation {
+                provider: provider.provider,
+                descriptor_revision: provider.revision,
+                outcome: GovernedCandidateOutcome::Eligible,
+                rejection_reasons,
+                score_breakdown: Some(score_breakdown),
+            });
+        } else {
+            candidate_evaluations.push(GovernedCandidateEvaluation {
+                provider: provider.provider,
+                descriptor_revision: provider.revision,
+                outcome: GovernedCandidateOutcome::Rejected,
+                rejection_reasons,
+                score_breakdown: None,
+            });
+        }
+    }
     routes.sort_by(|left, right| {
-        right
-            .score
-            .cmp(&left.score)
-            .then_with(|| left.provider.cmp(&right.provider))
+        let left_has_affinity = request.affinity_provider == Some(left.provider);
+        let right_has_affinity = request.affinity_provider == Some(right.provider);
+        right_has_affinity.cmp(&left_has_affinity).then_with(|| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| left.provider.cmp(&right.provider))
+        })
     });
 
     let primary = routes
@@ -307,6 +488,7 @@ pub fn plan_governed_provider_route(
         policy_revision: request.policy.policy_revision,
         primary,
         fallbacks,
+        candidate_evaluations,
     })
 }
 
@@ -344,7 +526,7 @@ fn validate_request(request: &GovernedRoutingRequest<'_>) -> Result<(), Governed
     }
 
     for (index, provider) in request.registry.providers.iter().enumerate() {
-        if provider.revision == 0 {
+        if provider.revision == 0 || provider.pricing_revision == 0 {
             return Err(GovernedRoutingError::InvalidDescriptorRevision {
                 provider: provider.provider,
             });
@@ -377,27 +559,41 @@ fn validate_request(request: &GovernedRoutingRequest<'_>) -> Result<(), Governed
     Ok(())
 }
 
-fn provider_is_eligible(
+fn provider_rejection_reasons(
     provider: &GovernedProviderDescriptor,
     request: &GovernedRoutingRequest<'_>,
-) -> bool {
-    provider.enabled
-        && !provider.revoked
-        && !provider.circuit_open
-        && provider.quota_available
-        && provider.credential_available
-        && request.classification <= provider.maximum_classification
-        && request
-            .required_capabilities
-            .missing_from(&provider.capabilities)
-            .is_empty()
-        && obligations_allow(provider, &request.policy.obligations)
-}
+) -> Vec<GovernedHardFilterReason> {
+    let obligations = &request.policy.obligations;
+    let mut reasons = Vec::with_capacity(MAX_GOVERNED_HARD_FILTER_REASONS);
+    if provider.tenant != request.tenant {
+        reasons.push(GovernedHardFilterReason::TenantMismatch);
+    }
+    if !provider.enabled {
+        reasons.push(GovernedHardFilterReason::ProviderDisabled);
+    }
+    if provider.revoked {
+        reasons.push(GovernedHardFilterReason::ProviderRevoked);
+    }
+    if provider.circuit_open {
+        reasons.push(GovernedHardFilterReason::CircuitOpen);
+    }
+    if !provider.quota_available {
+        reasons.push(GovernedHardFilterReason::QuotaUnavailable);
+    }
+    if !provider.credential_available {
+        reasons.push(GovernedHardFilterReason::CredentialUnavailable);
+    }
+    if request.classification > provider.maximum_classification {
+        reasons.push(GovernedHardFilterReason::ClassificationUnsupported);
+    }
+    if !request
+        .required_capabilities
+        .missing_from(&provider.capabilities)
+        .is_empty()
+    {
+        reasons.push(GovernedHardFilterReason::CapabilityMissing);
+    }
 
-fn obligations_allow(
-    provider: &GovernedProviderDescriptor,
-    obligations: &[GovernanceObligation],
-) -> bool {
     let has_allow_list = obligations
         .iter()
         .any(|item| matches!(item, GovernanceObligation::AllowProvider(_)));
@@ -423,21 +619,42 @@ fn obligations_allow(
         _ => None,
     });
 
-    (!has_allow_list || allow_list_match)
-        && !denied
-        && minimum_trust
-            .max()
-            .is_none_or(|required| provider.trust_tier >= required)
-        && regions_match
-        && (!obligations.contains(&GovernanceObligation::RequireLocalExecution)
-            || provider.local_execution)
-        && (!obligations.contains(&GovernanceObligation::ProhibitRetention)
-            || provider.retention_seconds == 0)
-        && maximum_retention
-            .min()
-            .is_none_or(|limit| provider.retention_seconds <= limit)
-        && (!obligations.contains(&GovernanceObligation::ProhibitTrainingUse)
-            || !provider.training_use)
+    if has_allow_list && !allow_list_match {
+        reasons.push(GovernedHardFilterReason::ProviderNotAllowed);
+    }
+    if denied {
+        reasons.push(GovernedHardFilterReason::ProviderDenied);
+    }
+    if minimum_trust
+        .max()
+        .is_some_and(|required| provider.trust_tier < required)
+    {
+        reasons.push(GovernedHardFilterReason::TrustTierInsufficient);
+    }
+    if !regions_match {
+        reasons.push(GovernedHardFilterReason::RegionUnavailable);
+    }
+    if obligations.contains(&GovernanceObligation::RequireLocalExecution)
+        && !provider.local_execution
+    {
+        reasons.push(GovernedHardFilterReason::LocalExecutionRequired);
+    }
+    if obligations.contains(&GovernanceObligation::ProhibitRetention)
+        && provider.retention_seconds != 0
+    {
+        reasons.push(GovernedHardFilterReason::RetentionProhibited);
+    }
+    if maximum_retention
+        .min()
+        .is_some_and(|limit| provider.retention_seconds > limit)
+    {
+        reasons.push(GovernedHardFilterReason::RetentionLimitExceeded);
+    }
+    if obligations.contains(&GovernanceObligation::ProhibitTrainingUse) && provider.training_use {
+        reasons.push(GovernedHardFilterReason::TrainingUseProhibited);
+    }
+    assert!(reasons.len() <= MAX_GOVERNED_HARD_FILTER_REASONS);
+    reasons
 }
 
 fn selector_matches_provider(selector: &PolicySelector, provider: ProviderId) -> bool {
@@ -451,7 +668,7 @@ fn selectors_overlap(left: &PolicySelector, right: &PolicySelector) -> bool {
 fn score_provider(
     provider: &GovernedProviderDescriptor,
     request: &GovernedRoutingRequest<'_>,
-) -> u16 {
+) -> GovernedScoreBreakdown {
     let weights = request.weights;
     let inverse = |value: u16| ROUTING_SCORE_SCALE - value;
     let affinity = if request.affinity_provider == Some(provider.provider) {
@@ -459,17 +676,66 @@ fn score_provider(
     } else {
         0
     };
-    let numerator = [
-        (provider.signals.health, weights.health),
-        (inverse(provider.signals.load), weights.load),
-        (inverse(provider.signals.cost), weights.cost),
-        (inverse(provider.signals.latency), weights.latency),
-        (inverse(provider.signals.risk), weights.risk),
-        (provider.signals.priority, weights.priority),
-        (affinity, weights.affinity),
-    ]
-    .into_iter()
-    .map(|(value, weight)| u64::from(value) * u64::from(weight))
-    .sum::<u64>();
-    (numerator / request.weights.total().unwrap_or(1)) as u16
+    let components = [
+        score_component(
+            GovernedScoreComponentKind::Health,
+            provider.signals.health,
+            weights.health,
+        ),
+        score_component(
+            GovernedScoreComponentKind::AvailableCapacity,
+            inverse(provider.signals.load),
+            weights.load,
+        ),
+        score_component(
+            GovernedScoreComponentKind::CostEfficiency,
+            inverse(provider.signals.cost),
+            weights.cost,
+        ),
+        score_component(
+            GovernedScoreComponentKind::LatencyEfficiency,
+            inverse(provider.signals.latency),
+            weights.latency,
+        ),
+        score_component(
+            GovernedScoreComponentKind::RiskReduction,
+            inverse(provider.signals.risk),
+            weights.risk,
+        ),
+        score_component(
+            GovernedScoreComponentKind::OperatorPriority,
+            provider.signals.priority,
+            weights.priority,
+        ),
+        score_component(
+            GovernedScoreComponentKind::Affinity,
+            affinity,
+            weights.affinity,
+        ),
+    ];
+    let weighted_total = components
+        .iter()
+        .map(|component| component.weighted_value)
+        .sum::<u64>();
+    let weight_total = request.weights.total().unwrap_or(1) as u16;
+    GovernedScoreBreakdown {
+        score_revision: request.score_revision,
+        components,
+        weighted_total,
+        weight_total,
+        score: (weighted_total / u64::from(weight_total)) as u16,
+    }
+}
+
+fn score_component(
+    kind: GovernedScoreComponentKind,
+    normalized_value: u16,
+    weight: u16,
+) -> GovernedScoreComponent {
+    GovernedScoreComponent {
+        kind,
+        normalized_value,
+        weight,
+        weighted_value: u64::from(normalized_value) * u64::from(weight),
+    }
 }

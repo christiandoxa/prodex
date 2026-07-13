@@ -9,6 +9,9 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const MANIFEST = "crates/prodex-storage-sqlite/Cargo.toml";
 const SRC_DIR = "crates/prodex-storage-sqlite/src";
 const LIB = "crates/prodex-storage-sqlite/src/lib.rs";
+const RUNTIME_MANIFEST = "crates/prodex-storage-sqlite-runtime/Cargo.toml";
+const RUNTIME_SRC_DIR = "crates/prodex-storage-sqlite-runtime/src";
+const RUNTIME_LIB = "crates/prodex-storage-sqlite-runtime/src/lib.rs";
 const ALLOWED_DEPENDENCIES = new Set(["prodex_domain", "prodex_storage"]);
 const ALLOWED_DEV_DEPENDENCIES = new Set(["rusqlite"]);
 const FORBIDDEN_DEPENDENCIES = new Set([
@@ -37,6 +40,22 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
   { name: "database driver", pattern: /\b(postgres|rusqlite|sqlx|redis)\s*::/u },
   { name: "json persistence", pattern: /\bserde_json\b/u },
   { name: "transport", pattern: /\btungstenite\s*::/u },
+]);
+const ALLOWED_RUNTIME_DEPENDENCIES = new Set([
+  "prodex_domain",
+  "prodex_storage",
+  "rusqlite",
+  "serde_json",
+  "sha2",
+]);
+const ALLOWED_RUNTIME_DEV_DEPENDENCIES = new Set(["prodex_storage_sqlite"]);
+const FORBIDDEN_RUNTIME_SOURCE_PATTERNS = Object.freeze([
+  { name: "environment", pattern: /\bstd\s*::\s*env\b/u },
+  { name: "network", pattern: /\bstd\s*::\s*net\b/u },
+  { name: "process", pattern: /\bstd\s*::\s*process\b/u },
+  { name: "async runtime", pattern: /\btokio\s*::/u },
+  { name: "HTTP framework", pattern: /\b(axum|hyper|tower)\s*::/u },
+  { name: "HTTP client", pattern: /\breqwest\s*::/u },
 ]);
 
 function stripComment(line) {
@@ -126,6 +145,42 @@ export function validateSource(sourceText, sourcePath = "source.rs") {
   return errors;
 }
 
+export function validateRuntimeManifest(tomlText, manifestPath = RUNTIME_MANIFEST) {
+  const sections = parseDependencySections(tomlText);
+  const errors = [];
+  for (const dep of sections.get("dependencies") ?? []) {
+    if (!ALLOWED_RUNTIME_DEPENDENCIES.has(dep)) {
+      errors.push(`${manifestPath}: unexpected runtime adapter dependency '${dep}'`);
+    }
+  }
+  for (const dep of sections.get("dev-dependencies") ?? []) {
+    if (!ALLOWED_RUNTIME_DEV_DEPENDENCIES.has(dep)) {
+      errors.push(`${manifestPath}: unexpected runtime adapter dev-dependency '${dep}'`);
+    }
+  }
+  for (const sectionName of sorted(sections.keys())) {
+    if (sectionName.startsWith("target.")) {
+      errors.push(`${manifestPath}: target-specific dependencies are not allowed in the SQLite runtime adapter`);
+    }
+  }
+  return errors;
+}
+
+export function validateRuntimeSource(sourceText, sourcePath = "source.rs") {
+  const errors = [];
+  sourceText.split(/\r?\n/u).forEach((line, index) => {
+    for (const { name, pattern } of FORBIDDEN_RUNTIME_SOURCE_PATTERNS) {
+      if (pattern.test(line)) {
+        errors.push(`${sourcePath}:${index + 1}: SQLite runtime adapter cannot use ${name} '${line.trim()}'`);
+      }
+    }
+  });
+  if (sourcePath === RUNTIME_LIB && !sourceText.includes("#![forbid(unsafe_code)]")) {
+    errors.push(`${sourcePath}: SQLite runtime adapter crate root must forbid unsafe code`);
+  }
+  return errors;
+}
+
 async function rustFilesUnder(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const files = [];
@@ -143,6 +198,11 @@ async function validateSources() {
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
     errors.push(...validateSource(source, path.relative(repoRoot, file)));
+  }
+  const runtimeFiles = await rustFilesUnder(path.join(repoRoot, RUNTIME_SRC_DIR));
+  for (const file of runtimeFiles) {
+    const source = await fs.readFile(file, "utf8");
+    errors.push(...validateRuntimeSource(source, path.relative(repoRoot, file)));
   }
   return errors;
 }
@@ -189,6 +249,32 @@ prodex_storage = { workspace = true }
     validateSource("pub const SQL: &str = \"SELECT 1\";", LIB).some((error) => error.includes("forbid unsafe code")),
     "crate root without unsafe forbid accepted",
   );
+  const validRuntime = `
+[package]
+name = "prodex-storage-sqlite-runtime"
+
+[dependencies]
+prodex_domain = { workspace = true }
+prodex_storage = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+prodex_storage_sqlite = { workspace = true }
+`;
+  assertSelfTest(
+    validateRuntimeManifest(validRuntime, "valid-runtime/Cargo.toml").length === 0,
+    "valid runtime manifest rejected",
+  );
+  assertSelfTest(
+    validateRuntimeManifest(`${validRuntime}\nreqwest = "0.13"\n`, "invalid-runtime/Cargo.toml").some((error) => error.includes("reqwest")),
+    "runtime HTTP dependency accepted",
+  );
+  assertSelfTest(
+    validateRuntimeSource("#![forbid(unsafe_code)]\nuse rusqlite::Connection;", RUNTIME_LIB).length === 0,
+    "valid runtime source rejected",
+  );
 }
 
 async function main() {
@@ -197,7 +283,12 @@ async function main() {
     return;
   }
   const manifest = await fs.readFile(path.join(repoRoot, MANIFEST), "utf8");
-  const errors = [...validateManifest(manifest), ...(await validateSources())];
+  const runtimeManifest = await fs.readFile(path.join(repoRoot, RUNTIME_MANIFEST), "utf8");
+  const errors = [
+    ...validateManifest(manifest),
+    ...validateRuntimeManifest(runtimeManifest),
+    ...(await validateSources()),
+  ];
   if (errors.length > 0) {
     for (const error of errors) process.stderr.write(`${error}\n`);
     process.exitCode = 1;

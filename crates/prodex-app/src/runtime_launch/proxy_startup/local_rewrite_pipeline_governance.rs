@@ -10,10 +10,17 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
         Ok(plan) => plan,
         Err(response) => return Err(request.state.reject(response)),
     };
-    let inspection = match apply_runtime_presidio_redaction_to_request(
+    let inspection = match crate::runtime_launch::proxy_startup::local_rewrite_classification_rules::apply_runtime_gateway_classification_to_request(
         request.state.request_id,
         &mut request.captured,
-        &shared.runtime_shared,
+        shared,
+        shared.gateway_guardrails.pii_redaction,
+        request
+            .state
+            .application
+            .as_ref()
+            .and_then(|authorized| authorized.tenant_context())
+            .map(|tenant| tenant.tenant_id),
     ) {
         Ok(inspection) => inspection,
         Err(_) => {
@@ -32,7 +39,10 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
                         runtime_proxy_log_field("request", request.state.request_id.to_string()),
                         runtime_proxy_log_field("transport", "http"),
                         runtime_proxy_log_field("reason", "presidio_redaction_failed"),
-                        runtime_proxy_log_field("path", &request.captured.path_and_query),
+                        runtime_proxy_log_field(
+                            "path",
+                            path_without_query(&request.captured.path_and_query),
+                        ),
                     ],
                 ),
             );
@@ -121,28 +131,6 @@ pub(super) fn runtime_local_rewrite_pre_reservation_governance<'target, 'shared>
             "gateway guardrail blocked this request",
         );
         return Err(request.reject(response));
-    }
-    if request.inspection.result.coverage() == prodex_domain::InspectionCoverage::Unsupported
-        && let Some(body) = runtime_proxy_crate::runtime_gateway_redact_request_body(
-            &request.captured.body,
-            &shared.gateway_guardrails,
-        )
-    {
-        runtime_proxy_log(
-            &shared.runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_guardrail_pii_redacted",
-                [
-                    runtime_proxy_log_field("request", request.state.request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field(
-                        "path",
-                        path_without_query(&request.captured.path_and_query),
-                    ),
-                ],
-            ),
-        );
-        request.captured.body = body;
     }
     Ok(RuntimeLocalRewriteGovernedRequest(request))
 }
@@ -370,4 +358,3 @@ use super::{
     runtime_gateway_prepare_constraint_plan, runtime_gateway_virtual_key_admission,
     runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
-use crate::runtime_proxy::apply_runtime_presidio_redaction_to_request;

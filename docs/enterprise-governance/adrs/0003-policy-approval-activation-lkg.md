@@ -1,6 +1,6 @@
 # ADR 0003: Policy Approval, Activation, and LKG
 
-- Status: Proposed
+- Status: Accepted
 - Scope: target control plane
 
 ## Context
@@ -28,6 +28,10 @@ Every race, rejection, activation, rollback and failed attempt is audited.
 
 ## Implementation status
 
-Snapshot and LKG foundations exist. Durable draft/revision/approval/activation
-tables, quorum enforcement and transactional audit/outbox integration are
-planned.
+The candidate implements immutable governance revisions, approval transitions,
+maker-checker/quorum enforcement, optimistic activation, active/LKG pointers,
+rollback, audit and outbox contracts. Evidence includes
+`maker_checker_quorum_and_activation_are_enforced`,
+`gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg`, the
+SQLite governance repository lifecycle suite, and the live PostgreSQL all-kind
+lifecycle proof.

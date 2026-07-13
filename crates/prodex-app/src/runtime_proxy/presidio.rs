@@ -6,6 +6,7 @@ use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
 use crate::{RuntimePresidioRedactionConfig, read_async_response_body_with_limit};
 use anyhow::{Context, Result, anyhow};
+use arc_swap::ArcSwap;
 use prodex_application::{
     ApplicationInspectionPlan, ApplicationInspectionRequest, ApplicationInspectionSource,
     plan_application_request_inspection,
@@ -13,29 +14,69 @@ use prodex_application::{
 use prodex_domain::{
     ContentLocation, DataClassification, DetectorId, DetectorRevisionId, FindingKind,
     InspectionCoverage, InspectionFinding, InspectionLimits, InspectionReasonCode, InspectionTag,
-    MAX_INSPECTION_FINDINGS,
+    MAX_INSPECTION_FINDINGS, TenantId,
+};
+use prodex_observability::{
+    InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction,
+    InspectionMetricPlan, InspectionOutcome, InspectionStage, plan_inspection_metric,
 };
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 mod analyzer;
 mod json_body;
+pub(crate) mod local;
 
 use analyzer::{detect_presidio_language, merge_presidio_analyzer_results};
 use json_body::{
     PresidioJsonString, collect_json_content, presidio_json_value_separator,
     replace_json_string_values,
 };
+use local::runtime_local_inspect_and_mask_for_tenant;
 
-const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
-const PRESIDIO_RESPONSE_MAX_BYTES: usize = 64 * 1024 * 1024;
+static RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH: OnceLock<RuntimePresidioRedactionRegistry> =
+    OnceLock::new();
+const MAX_RUNTIME_PRESIDIO_REGISTRY_ENTRIES: usize = 128;
+const RUNTIME_DEFAULT_DETECTOR_REVISION: &str = "runtime-inspection-v1";
 
-static RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH: OnceLock<
-    Mutex<BTreeMap<PathBuf, RuntimePresidioRedactionConfig>>,
-> = OnceLock::new();
+struct RuntimePresidioRedactionRegistry {
+    current: ArcSwap<BTreeMap<PathBuf, Arc<RuntimePresidioRedactionState>>>,
+    update: Mutex<()>,
+}
+
+impl Default for RuntimePresidioRedactionRegistry {
+    fn default() -> Self {
+        Self {
+            current: ArcSwap::from_pointee(BTreeMap::new()),
+            update: Mutex::new(()),
+        }
+    }
+}
+
+struct RuntimePresidioRedactionState {
+    config: RuntimePresidioRedactionConfig,
+    client: reqwest::Client,
+    slots: Arc<tokio::sync::Semaphore>,
+}
+
+impl RuntimePresidioRedactionState {
+    fn new(config: RuntimePresidioRedactionConfig) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(config.timeout_ms))
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .context("failed to build Presidio runtime HTTP client")?;
+        Ok(Self {
+            slots: Arc::new(tokio::sync::Semaphore::new(config.max_concurrency)),
+            config,
+            client,
+        })
+    }
+}
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct PresidioAnalyzerResult {
@@ -62,6 +103,17 @@ struct RuntimePresidioRedaction {
     source: ApplicationInspectionSource,
 }
 
+#[derive(Debug)]
+struct RuntimePresidioRedactionFailure {
+    body: Vec<u8>,
+    error: anyhow::Error,
+}
+
+enum RuntimePresidioRedactionAttempt {
+    Success(RuntimePresidioRedaction),
+    Failure(RuntimePresidioRedactionFailure),
+}
+
 pub(crate) struct RuntimePresidioWebSocketInspection<'a> {
     pub(crate) text: Cow<'a, str>,
     pub(crate) inspection: ApplicationInspectionPlan,
@@ -70,50 +122,174 @@ pub(crate) struct RuntimePresidioWebSocketInspection<'a> {
 pub(crate) fn register_runtime_presidio_redaction_proxy_state(
     log_path: &Path,
     config: Option<RuntimePresidioRedactionConfig>,
-) {
-    let registry =
-        RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let Ok(mut registry) = registry.lock() else {
-        return;
-    };
-    if let Some(config) = config {
-        registry.insert(log_path.to_path_buf(), config);
+) -> Result<()> {
+    let state = config
+        .map(RuntimePresidioRedactionState::new)
+        .transpose()?
+        .map(Arc::new);
+    let registry = RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH.get_or_init(Default::default);
+    let _update = registry
+        .update
+        .lock()
+        .map_err(|_| anyhow!("Presidio registry update lock was poisoned"))?;
+    let mut snapshot = (**registry.current.load()).clone();
+    if let Some(state) = state {
+        validate_runtime_presidio_registry_insert(snapshot.len(), snapshot.contains_key(log_path))?;
+        snapshot.insert(log_path.to_path_buf(), state);
     } else {
-        registry.remove(log_path);
+        snapshot.remove(log_path);
     }
+    registry.current.store(Arc::new(snapshot));
+    Ok(())
+}
+
+fn validate_runtime_presidio_registry_insert(entry_count: usize, replacing: bool) -> Result<()> {
+    if !replacing && entry_count >= MAX_RUNTIME_PRESIDIO_REGISTRY_ENTRIES {
+        anyhow::bail!("Presidio registry entry limit reached");
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_runtime_presidio_redaction_to_request(
     request_id: u64,
     request: &mut RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
+    legacy_local_enabled: bool,
+    tenant_id: Option<TenantId>,
 ) -> Result<ApplicationInspectionPlan> {
-    let Some(config) = runtime_presidio_redaction_for_log_path(&shared.log_path) else {
-        return runtime_presidio_inspection_plan(Vec::new());
-    };
-    if request.body.is_empty() {
-        return runtime_presidio_inspection_plan(vec![runtime_presidio_inspection_source(
-            InspectionCoverage::Full,
+    let detector_revision = DetectorRevisionId::new(RUNTIME_DEFAULT_DETECTOR_REVISION)
+        .context("invalid detector revision")?;
+    apply_runtime_presidio_redaction_to_request_with_rules(
+        request_id,
+        request,
+        shared,
+        legacy_local_enabled,
+        tenant_id,
+        &shared.runtime_config.governance,
+        &shared.runtime_config.tenant_detector_patterns,
+        &detector_revision,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
+    request_id: u64,
+    request: &mut RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    legacy_local_enabled: bool,
+    tenant_id: Option<TenantId>,
+    governance: &prodex_config::GovernanceConfig,
+    tenant_detector_patterns: &local::RuntimeTenantDetectorPatterns,
+    detector_revision: &DetectorRevisionId,
+) -> Result<ApplicationInspectionPlan> {
+    let state = runtime_presidio_redaction_for_log_path(&shared.log_path);
+    if !runtime_local_inspection_required(
+        governance.inspection,
+        legacy_local_enabled,
+        state.is_some() || tenant_detector_patterns.has_for_tenant(tenant_id),
+    ) {
+        return runtime_presidio_inspection_plan(
             Vec::new(),
-        )?]);
-    }
-    if std::str::from_utf8(&request.body).is_err() {
-        if config.fail_closed {
-            return Err(anyhow!("presidio_unsupported_encoding"));
-        }
-        return runtime_presidio_inspection_plan(vec![runtime_presidio_unavailable_source(
-            "inspection.unsupported_encoding",
-        )?]);
+            governance.classification_default,
+            detector_revision,
+        );
     }
 
+    let original_bytes = request.body.len();
+    let local_started = Instant::now();
+    let local = match runtime_local_inspect_and_mask_for_tenant(
+        std::mem::take(&mut request.body),
+        tenant_detector_patterns,
+        tenant_id,
+    ) {
+        Ok(local) => local,
+        Err(error) => {
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::Local,
+                InspectionCoverage::Unsupported,
+                &[],
+                InspectionMaskingAction::Denied,
+                runtime_inspection_error_outcome(&error),
+                runtime_inspection_duration_micros(local_started),
+            );
+            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+            return Err(error);
+        }
+    };
+    runtime_emit_inspection_metric(
+        shared,
+        InspectionStage::Local,
+        local.coverage,
+        &local.findings,
+        if local.changed {
+            InspectionMaskingAction::Masked
+        } else {
+            InspectionMaskingAction::None
+        },
+        InspectionOutcome::Allowed,
+        runtime_inspection_duration_micros(local_started),
+    );
+    request.body = local.body;
+    if local.changed {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "local_inspection_masking_applied",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("original_bytes", original_bytes.to_string()),
+                    runtime_proxy_log_field("masked_bytes", request.body.len().to_string()),
+                ],
+            ),
+        );
+    }
+    let mut sources = vec![runtime_local_inspection_source(
+        local.coverage,
+        local.findings,
+        local.changed,
+    )?];
+    let Some(state) = state else {
+        return runtime_presidio_inspection_plan(
+            sources,
+            governance.classification_default,
+            detector_revision,
+        );
+    };
+    if request.body.is_empty() {
+        return runtime_presidio_inspection_plan(
+            sources,
+            governance.classification_default,
+            detector_revision,
+        );
+    }
+
+    let presidio_input_bytes = request.body.len();
+    let external_started = Instant::now();
     let redaction = await_runtime_proxy_async_task(
         shared,
         "presidio_redact_request_body",
-        runtime_presidio_redact_body(request.body.clone(), config.clone()),
+        runtime_presidio_redact_body(std::mem::take(&mut request.body), state.clone()),
     );
     match redaction {
-        Ok(redaction) => {
-            if redaction.body != request.body {
+        Ok(RuntimePresidioRedactionAttempt::Success(redaction)) => {
+            let presidio_masked = !redaction.source.findings.is_empty();
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::External,
+                redaction.source.coverage,
+                &redaction.source.findings,
+                if presidio_masked {
+                    InspectionMaskingAction::Masked
+                } else {
+                    InspectionMaskingAction::None
+                },
+                InspectionOutcome::Allowed,
+                runtime_inspection_duration_micros(external_started),
+            );
+            request.body = redaction.body;
+            if presidio_masked {
                 runtime_proxy_log(
                     shared,
                     runtime_proxy_structured_log_message(
@@ -123,21 +299,40 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
                             runtime_proxy_log_field("transport", "http"),
                             runtime_proxy_log_field(
                                 "original_bytes",
-                                request.body.len().to_string(),
+                                presidio_input_bytes.to_string(),
                             ),
                             runtime_proxy_log_field(
                                 "redacted_bytes",
-                                redaction.body.len().to_string(),
+                                request.body.len().to_string(),
                             ),
                         ],
                     ),
                 );
-                request.body = redaction.body;
             }
-            runtime_presidio_inspection_plan(vec![redaction.source])
+            sources.push(redaction.source);
+            runtime_presidio_inspection_plan(
+                sources,
+                governance.classification_default,
+                detector_revision,
+            )
         }
-        Err(_err) => {
-            let fail_closed = config.fail_closed;
+        Ok(RuntimePresidioRedactionAttempt::Failure(failure)) => {
+            request.body = failure.body;
+            let fail_closed = state.config.fail_closed;
+            let failure_outcome = runtime_inspection_error_outcome(&failure.error);
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::External,
+                InspectionCoverage::Unsupported,
+                &[],
+                if fail_closed {
+                    InspectionMaskingAction::Denied
+                } else {
+                    InspectionMaskingAction::None
+                },
+                failure_outcome,
+                runtime_inspection_duration_micros(external_started),
+            );
             runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -154,12 +349,29 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
                 ),
             );
             if fail_closed {
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 Err(anyhow!("presidio_redaction_failed"))
             } else {
-                runtime_presidio_inspection_plan(vec![runtime_presidio_unavailable_source(
-                    "presidio.unavailable",
-                )?])
+                sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
+                runtime_presidio_inspection_plan(
+                    sources,
+                    governance.classification_default,
+                    detector_revision,
+                )
             }
+        }
+        Err(_) => {
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::External,
+                InspectionCoverage::Unsupported,
+                &[],
+                InspectionMaskingAction::Denied,
+                InspectionOutcome::Error,
+                runtime_inspection_duration_micros(external_started),
+            );
+            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+            Err(anyhow!("presidio_redaction_failed"))
         }
     }
 }
@@ -168,25 +380,125 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
     request_id: u64,
     text: &'a str,
     shared: &RuntimeRotationProxyShared,
+    legacy_local_enabled: bool,
+    tenant_id: Option<TenantId>,
 ) -> Result<RuntimePresidioWebSocketInspection<'a>> {
-    let Some(config) = runtime_presidio_redaction_for_log_path(&shared.log_path) else {
+    let detector_revision = DetectorRevisionId::new(RUNTIME_DEFAULT_DETECTOR_REVISION)
+        .context("invalid detector revision")?;
+    apply_runtime_presidio_redaction_to_websocket_text_with_rules(
+        request_id,
+        text,
+        shared,
+        legacy_local_enabled,
+        tenant_id,
+        &shared.runtime_config.governance,
+        &shared.runtime_config.tenant_detector_patterns,
+        &detector_revision,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
+    request_id: u64,
+    text: &'a str,
+    shared: &RuntimeRotationProxyShared,
+    legacy_local_enabled: bool,
+    tenant_id: Option<TenantId>,
+    governance: &prodex_config::GovernanceConfig,
+    tenant_detector_patterns: &local::RuntimeTenantDetectorPatterns,
+    detector_revision: &DetectorRevisionId,
+) -> Result<RuntimePresidioWebSocketInspection<'a>> {
+    let state = runtime_presidio_redaction_for_log_path(&shared.log_path);
+    if !runtime_local_inspection_required(
+        governance.inspection,
+        legacy_local_enabled,
+        state.is_some() || tenant_detector_patterns.has_for_tenant(tenant_id),
+    ) {
         let result = RuntimePresidioWebSocketInspection {
             text: Cow::Borrowed(text),
-            inspection: runtime_presidio_inspection_plan(Vec::new())?,
+            inspection: runtime_presidio_inspection_plan(
+                Vec::new(),
+                governance.classification_default,
+                detector_revision,
+            )?,
         };
         runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
         return Ok(result);
+    }
+
+    let local_started = Instant::now();
+    let local = match runtime_local_inspect_and_mask_for_tenant(
+        text.as_bytes().to_vec(),
+        tenant_detector_patterns,
+        tenant_id,
+    ) {
+        Ok(local) => local,
+        Err(error) => {
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::Local,
+                InspectionCoverage::Unsupported,
+                &[],
+                InspectionMaskingAction::Denied,
+                runtime_inspection_error_outcome(&error),
+                runtime_inspection_duration_micros(local_started),
+            );
+            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+            return Err(error);
+        }
     };
+    runtime_emit_inspection_metric(
+        shared,
+        InspectionStage::Local,
+        local.coverage,
+        &local.findings,
+        if local.changed {
+            InspectionMaskingAction::Masked
+        } else {
+            InspectionMaskingAction::None
+        },
+        InspectionOutcome::Allowed,
+        runtime_inspection_duration_micros(local_started),
+    );
+    let mut body = local.body;
+    let mut sources = vec![runtime_local_inspection_source(
+        local.coverage,
+        local.findings,
+        local.changed,
+    )?];
+    let Some(state) = state else {
+        return runtime_local_websocket_inspection(
+            request_id,
+            text,
+            body,
+            sources,
+            shared,
+            governance.classification_default,
+            detector_revision,
+        );
+    };
+    let external_started = Instant::now();
     let redaction = await_runtime_proxy_async_task(
         shared,
         "presidio_redact_websocket_text",
-        runtime_presidio_redact_body(text.as_bytes().to_vec(), config.clone()),
+        runtime_presidio_redact_body(body, state.clone()),
     );
     match redaction {
-        Ok(redaction) => {
-            let redacted = String::from_utf8(redaction.body)
-                .context("Presidio returned non-UTF-8 websocket text")?;
-            if redacted != text {
+        Ok(RuntimePresidioRedactionAttempt::Success(redaction)) => {
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::External,
+                redaction.source.coverage,
+                &redaction.source.findings,
+                if redaction.source.findings.is_empty() {
+                    InspectionMaskingAction::None
+                } else {
+                    InspectionMaskingAction::Masked
+                },
+                InspectionOutcome::Allowed,
+                runtime_inspection_duration_micros(external_started),
+            );
+            if !redaction.source.findings.is_empty() {
                 runtime_proxy_log(
                     shared,
                     runtime_proxy_structured_log_message(
@@ -195,26 +507,42 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
                             runtime_proxy_log_field("request", request_id.to_string()),
                             runtime_proxy_log_field("transport", "websocket"),
                             runtime_proxy_log_field("original_bytes", text.len().to_string()),
-                            runtime_proxy_log_field("redacted_bytes", redacted.len().to_string()),
+                            runtime_proxy_log_field(
+                                "redacted_bytes",
+                                redaction.body.len().to_string(),
+                            ),
                         ],
                     ),
                 );
-                let result = RuntimePresidioWebSocketInspection {
-                    text: Cow::Owned(redacted),
-                    inspection: runtime_presidio_inspection_plan(vec![redaction.source])?,
-                };
-                runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
-                Ok(result)
-            } else {
-                let result = RuntimePresidioWebSocketInspection {
-                    text: Cow::Borrowed(text),
-                    inspection: runtime_presidio_inspection_plan(vec![redaction.source])?,
-                };
-                runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
-                Ok(result)
             }
+            body = redaction.body;
+            sources.push(redaction.source);
+            runtime_local_websocket_inspection(
+                request_id,
+                text,
+                body,
+                sources,
+                shared,
+                governance.classification_default,
+                detector_revision,
+            )
         }
-        Err(_err) => {
+        Ok(RuntimePresidioRedactionAttempt::Failure(failure)) => {
+            body = failure.body;
+            let fail_closed = state.config.fail_closed;
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::External,
+                InspectionCoverage::Unsupported,
+                &[],
+                if fail_closed {
+                    InspectionMaskingAction::Denied
+                } else {
+                    InspectionMaskingAction::None
+                },
+                runtime_inspection_error_outcome(&failure.error),
+                runtime_inspection_duration_micros(external_started),
+            );
             runtime_proxy_log(
                 shared,
                 runtime_proxy_structured_log_message(
@@ -224,26 +552,204 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
                         runtime_proxy_log_field("transport", "websocket"),
                         runtime_proxy_log_field(
                             "fail_mode",
-                            if config.fail_closed { "closed" } else { "open" },
+                            if state.config.fail_closed {
+                                "closed"
+                            } else {
+                                "open"
+                            },
                         ),
                         runtime_proxy_log_field("reason", "presidio_redaction_failed"),
                     ],
                 ),
             );
-            if config.fail_closed {
+            if fail_closed {
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
                 Err(anyhow!("presidio_redaction_failed"))
             } else {
-                let result = RuntimePresidioWebSocketInspection {
-                    text: Cow::Borrowed(text),
-                    inspection: runtime_presidio_inspection_plan(vec![
-                        runtime_presidio_unavailable_source("presidio.unavailable")?,
-                    ])?,
-                };
-                runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
-                Ok(result)
+                sources.push(runtime_presidio_unavailable_source("presidio.unavailable")?);
+                runtime_local_websocket_inspection(
+                    request_id,
+                    text,
+                    body,
+                    sources,
+                    shared,
+                    governance.classification_default,
+                    detector_revision,
+                )
             }
         }
+        Err(_) => {
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::External,
+                InspectionCoverage::Unsupported,
+                &[],
+                InspectionMaskingAction::Denied,
+                InspectionOutcome::Error,
+                runtime_inspection_duration_micros(external_started),
+            );
+            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+            Err(anyhow!("presidio_redaction_failed"))
+        }
     }
+}
+
+fn runtime_local_websocket_inspection<'a>(
+    request_id: u64,
+    original: &'a str,
+    body: Vec<u8>,
+    sources: Vec<ApplicationInspectionSource>,
+    shared: &RuntimeRotationProxyShared,
+    default_classification: DataClassification,
+    detector_revision: &DetectorRevisionId,
+) -> Result<RuntimePresidioWebSocketInspection<'a>> {
+    let masked = String::from_utf8(body).context("inspection returned non-UTF-8 websocket text")?;
+    let result = RuntimePresidioWebSocketInspection {
+        text: if masked == original {
+            Cow::Borrowed(original)
+        } else {
+            Cow::Owned(masked)
+        },
+        inspection: runtime_presidio_inspection_plan(
+            sources,
+            default_classification,
+            detector_revision,
+        )?,
+    };
+    runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
+    Ok(result)
+}
+
+const fn runtime_local_inspection_required(
+    rollout: prodex_config::GovernanceRolloutMode,
+    legacy_local_enabled: bool,
+    configured_detector_enabled: bool,
+) -> bool {
+    !matches!(rollout, prodex_config::GovernanceRolloutMode::Off)
+        || legacy_local_enabled
+        || configured_detector_enabled
+}
+
+fn runtime_inspection_coverage_class(coverage: InspectionCoverage) -> InspectionCoverageClass {
+    match coverage {
+        InspectionCoverage::Full => InspectionCoverageClass::Full,
+        InspectionCoverage::Partial => InspectionCoverageClass::Partial,
+        InspectionCoverage::Unsupported => InspectionCoverageClass::Unsupported,
+    }
+}
+
+fn runtime_inspection_finding_category(
+    findings: &[InspectionFinding],
+) -> InspectionFindingCategory {
+    let mut personal = false;
+    let mut credential = false;
+    let mut financial = false;
+    for finding in findings {
+        match finding.kind() {
+            FindingKind::EmailAddress
+            | FindingKind::PhoneNumber
+            | FindingKind::PersonName
+            | FindingKind::PhysicalAddress
+            | FindingKind::GovernmentId
+            | FindingKind::TenantSensitive => personal = true,
+            FindingKind::AccessToken
+            | FindingKind::ApiKey
+            | FindingKind::PrivateKey
+            | FindingKind::Password => credential = true,
+            FindingKind::FinancialAccount | FindingKind::PaymentCard => financial = true,
+        }
+    }
+    match (personal, credential, financial) {
+        (false, false, false) => InspectionFindingCategory::None,
+        (true, false, false) => InspectionFindingCategory::PersonalData,
+        (false, true, false) => InspectionFindingCategory::Credential,
+        (false, false, true) => InspectionFindingCategory::Financial,
+        _ => InspectionFindingCategory::Multiple,
+    }
+}
+
+fn runtime_inspection_duration_micros(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
+}
+
+fn runtime_inspection_error_outcome(error: &anyhow::Error) -> InspectionOutcome {
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_timeout)
+    }) || error.to_string().to_ascii_lowercase().contains("timeout")
+    {
+        InspectionOutcome::Timeout
+    } else {
+        InspectionOutcome::Error
+    }
+}
+
+fn runtime_inspection_metric_message(metric: &InspectionMetricPlan) -> Result<String> {
+    let labels = [
+        &metric.stage_label,
+        &metric.coverage_label,
+        &metric.finding_category_label,
+        &metric.masking_action_label,
+        &metric.outcome_label,
+    ]
+    .map(|label| label.as_metric_label())
+    .into_iter()
+    .collect::<std::result::Result<Vec<_>, _>>()
+    .map_err(|_| anyhow!("invalid inspection metric label"))?;
+    Ok(runtime_proxy_structured_log_message(
+        "runtime_inspection_metric",
+        [
+            runtime_proxy_log_field("event_metric_name", metric.event_metric_name),
+            runtime_proxy_log_field("duration_metric_name", metric.duration_metric_name),
+            runtime_proxy_log_field("increment", metric.increment.to_string()),
+            runtime_proxy_log_field("duration_micros", metric.duration_micros.to_string()),
+            runtime_proxy_log_field(labels[0].0, labels[0].1),
+            runtime_proxy_log_field(labels[1].0, labels[1].1),
+            runtime_proxy_log_field(labels[2].0, labels[2].1),
+            runtime_proxy_log_field(labels[3].0, labels[3].1),
+            runtime_proxy_log_field(labels[4].0, labels[4].1),
+        ],
+    ))
+}
+
+fn runtime_emit_inspection_metric(
+    shared: &RuntimeRotationProxyShared,
+    stage: InspectionStage,
+    coverage: InspectionCoverage,
+    findings: &[InspectionFinding],
+    masking_action: InspectionMaskingAction,
+    outcome: InspectionOutcome,
+    duration_micros: u64,
+) {
+    let Ok(metric) = plan_inspection_metric(
+        stage,
+        runtime_inspection_coverage_class(coverage),
+        runtime_inspection_finding_category(findings),
+        masking_action,
+        outcome,
+        duration_micros,
+    ) else {
+        return;
+    };
+    if let Ok(message) = runtime_inspection_metric_message(&metric) {
+        runtime_proxy_log(shared, message);
+    }
+}
+
+fn runtime_emit_inspection_denied_metric(
+    shared: &RuntimeRotationProxyShared,
+    stage: InspectionStage,
+) {
+    runtime_emit_inspection_metric(
+        shared,
+        stage,
+        InspectionCoverage::Unsupported,
+        &[],
+        InspectionMaskingAction::Denied,
+        InspectionOutcome::Denied,
+        0,
+    );
 }
 
 fn runtime_presidio_log_websocket_inspection(
@@ -274,28 +780,64 @@ fn runtime_presidio_log_websocket_inspection(
 
 fn runtime_presidio_redaction_for_log_path(
     log_path: &Path,
-) -> Option<RuntimePresidioRedactionConfig> {
+) -> Option<Arc<RuntimePresidioRedactionState>> {
     RUNTIME_PRESIDIO_REDACTION_BY_LOG_PATH
         .get()
-        .and_then(|registry| registry.lock().ok()?.get(log_path).cloned())
+        .and_then(|registry| registry.current.load().get(log_path).cloned())
 }
 
 async fn runtime_presidio_redact_body(
     body: Vec<u8>,
-    config: RuntimePresidioRedactionConfig,
-) -> Result<RuntimePresidioRedaction> {
-    let text = String::from_utf8(body).context("request body is not UTF-8")?;
-    let client = reqwest::Client::builder()
-        .timeout(PRESIDIO_HTTP_TIMEOUT)
-        .build()
-        .context("failed to build Presidio runtime HTTP client")?;
+    state: Arc<RuntimePresidioRedactionState>,
+) -> Result<RuntimePresidioRedactionAttempt> {
+    let _permit = match state.slots.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return Ok(RuntimePresidioRedactionAttempt::Failure(
+                RuntimePresidioRedactionFailure {
+                    body,
+                    error: anyhow!("presidio_concurrency_limit_reached"),
+                },
+            ));
+        }
+    };
+    let text = match String::from_utf8(body) {
+        Ok(text) => text,
+        Err(error) => {
+            return Ok(RuntimePresidioRedactionAttempt::Failure(
+                RuntimePresidioRedactionFailure {
+                    body: error.into_bytes(),
+                    error: anyhow!("request body is not UTF-8"),
+                },
+            ));
+        }
+    };
+    Ok(
+        match runtime_presidio_redact_text_body(&text, &state).await {
+            Ok(redaction) => RuntimePresidioRedactionAttempt::Success(redaction),
+            Err(error) => {
+                RuntimePresidioRedactionAttempt::Failure(RuntimePresidioRedactionFailure {
+                    body: text.into_bytes(),
+                    error,
+                })
+            }
+        },
+    )
+}
 
-    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&text) {
+async fn runtime_presidio_redact_text_body(
+    text: &str,
+    state: &RuntimePresidioRedactionState,
+) -> Result<RuntimePresidioRedaction> {
+    let config = &state.config;
+    let client = &state.client;
+
+    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(text) {
         let content = collect_json_content(&json)?;
         if content.values.is_empty() {
             return Ok(RuntimePresidioRedaction {
-                body: text.into_bytes(),
-                source: runtime_presidio_inspection_source(content.coverage, Vec::new())?,
+                body: text.as_bytes().to_vec(),
+                source: runtime_presidio_inspection_source(content.coverage, Vec::new(), false)?,
             });
         }
 
@@ -306,12 +848,12 @@ async fn runtime_presidio_redact_body(
             .map(|value| value.text.as_str())
             .collect::<Vec<_>>()
             .join(&separator);
-        let redacted = runtime_presidio_redact_text(&client, &combined, &config).await?;
+        let redacted = runtime_presidio_redact_text(client, &combined, config).await?;
         let findings = runtime_presidio_findings(&content.values, &separator, &redacted.findings)?;
         if redacted.text == combined {
             return Ok(RuntimePresidioRedaction {
-                body: text.into_bytes(),
-                source: runtime_presidio_inspection_source(content.coverage, findings)?,
+                body: text.as_bytes().to_vec(),
+                source: runtime_presidio_inspection_source(content.coverage, findings, false)?,
             });
         }
 
@@ -328,22 +870,24 @@ async fn runtime_presidio_redact_body(
         return Ok(RuntimePresidioRedaction {
             body: serde_json::to_vec(&json)
                 .context("failed to serialize redacted JSON request body")?,
-            source: runtime_presidio_inspection_source(content.coverage, findings)?,
+            source: runtime_presidio_inspection_source(content.coverage, findings, true)?,
         });
     }
 
-    let redacted = runtime_presidio_redact_text(&client, &text, &config).await?;
+    let redacted = runtime_presidio_redact_text(client, text, config).await?;
     let findings = runtime_presidio_findings(
         &[PresidioJsonString {
             path: "$".to_string(),
-            text,
+            text: text.to_string(),
+            sensitive_kind: None,
         }],
         "",
         &redacted.findings,
     )?;
+    let changed = redacted.text != text;
     Ok(RuntimePresidioRedaction {
         body: redacted.text.into_bytes(),
-        source: runtime_presidio_inspection_source(InspectionCoverage::Full, findings)?,
+        source: runtime_presidio_inspection_source(InspectionCoverage::Full, findings, changed)?,
     })
 }
 
@@ -359,21 +903,39 @@ async fn runtime_presidio_redact_text(
 
     match language_mode {
         PresidioLanguageMode::Fixed => {
-            let results =
-                presidio_analyze_async(client, &config.analyzer_url, text, &languages[0]).await?;
+            let results = presidio_analyze_async(
+                client,
+                &config.analyzer_url,
+                text,
+                &languages[0],
+                config.max_response_bytes,
+            )
+            .await?;
             all_analyzer_results = results;
         }
         PresidioLanguageMode::Auto => {
             let detected_lang =
                 detect_presidio_language(text, languages).unwrap_or_else(|| languages[0].clone());
-            let results =
-                presidio_analyze_async(client, &config.analyzer_url, text, &detected_lang).await?;
+            let results = presidio_analyze_async(
+                client,
+                &config.analyzer_url,
+                text,
+                &detected_lang,
+                config.max_response_bytes,
+            )
+            .await?;
             all_analyzer_results = results;
         }
         PresidioLanguageMode::Multi => {
             for lang in languages {
-                let results =
-                    presidio_analyze_async(client, &config.analyzer_url, text, lang).await?;
+                let results = presidio_analyze_async(
+                    client,
+                    &config.analyzer_url,
+                    text,
+                    lang,
+                    config.max_response_bytes,
+                )
+                .await?;
                 all_analyzer_results.extend(results.into_iter().map(|mut r| {
                     r.language = lang.clone();
                     r
@@ -406,7 +968,7 @@ async fn runtime_presidio_redact_text(
         .context("Presidio Anonymizer returned an error")?;
     let anonymized_body = read_async_response_body_with_limit(
         anonymized_response,
-        PRESIDIO_RESPONSE_MAX_BYTES,
+        config.max_response_bytes,
         "failed to read Presidio Anonymizer response",
     )
     .await?;
@@ -421,18 +983,48 @@ async fn runtime_presidio_redact_text(
 fn runtime_presidio_inspection_source(
     coverage: InspectionCoverage,
     findings: Vec<InspectionFinding>,
+    masked: bool,
+) -> Result<ApplicationInspectionSource> {
+    runtime_inspection_source(coverage, findings, masked, "presidio.finding")
+}
+
+fn runtime_local_inspection_source(
+    coverage: InspectionCoverage,
+    findings: Vec<InspectionFinding>,
+    masked: bool,
+) -> Result<ApplicationInspectionSource> {
+    runtime_inspection_source(coverage, findings, masked, "local.finding")
+}
+
+fn runtime_inspection_source(
+    coverage: InspectionCoverage,
+    findings: Vec<InspectionFinding>,
+    masked: bool,
+    finding_reason: &'static str,
 ) -> Result<ApplicationInspectionSource> {
     let has_findings = !findings.is_empty();
+    let masked_findings = if masked {
+        let mut kinds = findings
+            .iter()
+            .map(|finding| finding.kind())
+            .collect::<Vec<_>>();
+        kinds.sort();
+        kinds.dedup();
+        kinds
+    } else {
+        Vec::new()
+    };
     Ok(ApplicationInspectionSource {
         coverage,
         findings,
+        masked_findings,
         tags: has_findings
             .then(|| InspectionTag::new("sensitive-data"))
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
             .context("invalid inspection tag")?,
         reason_codes: has_findings
-            .then(|| InspectionReasonCode::new("presidio.finding"))
+            .then(|| InspectionReasonCode::new(finding_reason))
             .into_iter()
             .collect::<Result<Vec<_>, _>>()
             .context("invalid inspection reason code")?,
@@ -445,6 +1037,7 @@ fn runtime_presidio_unavailable_source(
     Ok(ApplicationInspectionSource {
         coverage: InspectionCoverage::Unsupported,
         findings: Vec::new(),
+        masked_findings: Vec::new(),
         tags: Vec::new(),
         reason_codes: vec![
             InspectionReasonCode::new(reason).context("invalid inspection reason code")?,
@@ -454,14 +1047,15 @@ fn runtime_presidio_unavailable_source(
 
 fn runtime_presidio_inspection_plan(
     sources: Vec<ApplicationInspectionSource>,
+    default_classification: DataClassification,
+    detector_revision: &DetectorRevisionId,
 ) -> Result<ApplicationInspectionPlan> {
     plan_application_request_inspection(ApplicationInspectionRequest {
         sources,
-        default_classification: DataClassification::Internal,
+        default_classification,
         trusted_label: None,
         prior_classification: None,
-        detector_revision: DetectorRevisionId::new("runtime-inspection-v1")
-            .context("invalid detector revision")?,
+        detector_revision: detector_revision.clone(),
         limits: InspectionLimits::default(),
     })
     .context("failed to build inspection plan")
@@ -549,6 +1143,7 @@ async fn presidio_analyze_async(
     analyzer_url: &str,
     text: &str,
     language: &str,
+    max_response_bytes: usize,
 ) -> Result<Vec<PresidioAnalyzerResult>> {
     let response = client
         .post(presidio_endpoint(analyzer_url, "analyze"))
@@ -563,7 +1158,7 @@ async fn presidio_analyze_async(
         .context("Presidio Analyzer returned an error")?;
     let body = read_async_response_body_with_limit(
         response,
-        PRESIDIO_RESPONSE_MAX_BYTES,
+        max_response_bytes,
         "failed to read Presidio Analyzer response",
     )
     .await?;
@@ -580,8 +1175,17 @@ fn presidio_endpoint(base_url: &str, path: &str) -> String {
 mod tests {
     use super::{
         PresidioAnalyzerResult, PresidioJsonString, PresidioLanguageMode,
-        RuntimePresidioRedactionConfig, runtime_presidio_findings, runtime_presidio_redact_body,
+        RuntimePresidioRedactionAttempt, RuntimePresidioRedactionConfig,
+        RuntimePresidioRedactionState, runtime_inspection_metric_message,
+        runtime_local_inspection_required, runtime_presidio_findings,
+        runtime_presidio_inspection_plan, runtime_presidio_redact_body,
+        validate_runtime_presidio_registry_insert,
     };
+    use prodex_observability::{
+        InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction,
+        InspectionOutcome, InspectionStage, plan_inspection_metric,
+    };
+    use std::sync::Arc;
     use std::thread;
     use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
     use tokio::runtime::Builder as TokioRuntimeBuilder;
@@ -625,18 +1229,29 @@ mod tests {
             language_mode: PresidioLanguageMode::Fixed,
             fail_closed: true,
             trusted_hosts: Vec::new(),
+            timeout_ms: 10_000,
+            max_response_bytes: 4 * 1024 * 1024,
+            max_concurrency: 8,
         };
+        let state = Arc::new(RuntimePresidioRedactionState::new(config).unwrap());
         let runtime = TokioRuntimeBuilder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
-        let redacted = runtime
+        let attempt = runtime
             .block_on(runtime_presidio_redact_body(
                 br#"{"type":"response.create","input":"contact user@example.com"}"#.to_vec(),
-                config,
+                state,
             ))
             .unwrap();
+        let RuntimePresidioRedactionAttempt::Success(redacted) = attempt else {
+            panic!("Presidio fixture should succeed");
+        };
         assert_eq!(redacted.source.findings.len(), 1);
+        assert_eq!(
+            redacted.source.masked_findings,
+            vec![prodex_domain::FindingKind::EmailAddress]
+        );
         let text = String::from_utf8(redacted.body).unwrap();
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert!(!text.contains("user@example.com"));
@@ -652,6 +1267,7 @@ mod tests {
             &[PresidioJsonString {
                 path: "$.tools[0].arguments.*".to_string(),
                 text: "é user@example.com".to_string(),
+                sensitive_kind: None,
             }],
             "",
             &[PresidioAnalyzerResult {
@@ -670,6 +1286,13 @@ mod tests {
             findings[0].location().field_path(),
             "$.tools[0].arguments.*"
         );
+        let detected_only = super::runtime_presidio_inspection_source(
+            prodex_domain::InspectionCoverage::Full,
+            findings,
+            false,
+        )
+        .unwrap();
+        assert!(detected_only.masked_findings.is_empty());
     }
 
     #[test]
@@ -678,6 +1301,7 @@ mod tests {
             &[PresidioJsonString {
                 path: "$.input".to_string(),
                 text: "safe".to_string(),
+                sensitive_kind: None,
             }],
             "",
             &[PresidioAnalyzerResult {
@@ -691,5 +1315,85 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("invalid confidence score"));
+    }
+
+    #[test]
+    fn disabled_personal_inspection_preserves_compatibility() {
+        assert!(!runtime_local_inspection_required(
+            prodex_config::GovernanceRolloutMode::Off,
+            false,
+            false,
+        ));
+        assert!(runtime_local_inspection_required(
+            prodex_config::GovernanceRolloutMode::Off,
+            true,
+            false,
+        ));
+        assert!(runtime_local_inspection_required(
+            prodex_config::GovernanceRolloutMode::Observe,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn inspection_plan_pins_selected_detector_revision() {
+        let revision = prodex_domain::DetectorRevisionId::new("tenant-rules-42").unwrap();
+
+        let plan = runtime_presidio_inspection_plan(
+            Vec::new(),
+            prodex_domain::DataClassification::Internal,
+            &revision,
+        )
+        .unwrap();
+
+        assert_eq!(plan.result.detector_revision().as_str(), "tenant-rules-42");
+    }
+
+    #[test]
+    fn presidio_registry_rejects_unbounded_unique_paths_but_allows_replacement() {
+        assert!(
+            validate_runtime_presidio_registry_insert(
+                super::MAX_RUNTIME_PRESIDIO_REGISTRY_ENTRIES,
+                false
+            )
+            .is_err()
+        );
+        validate_runtime_presidio_registry_insert(
+            super::MAX_RUNTIME_PRESIDIO_REGISTRY_ENTRIES,
+            true,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn inspection_metric_log_has_only_bounded_content_free_dimensions() {
+        let metric = plan_inspection_metric(
+            InspectionStage::External,
+            InspectionCoverageClass::Partial,
+            InspectionFindingCategory::Multiple,
+            InspectionMaskingAction::Masked,
+            InspectionOutcome::Timeout,
+            u64::MAX,
+        )
+        .unwrap();
+        let message = runtime_inspection_metric_message(&metric).unwrap();
+
+        assert!(message.contains("event_metric_name=prodex_inspection_events_total"));
+        assert!(message.contains("inspection_stage=external"));
+        assert!(message.contains("inspection_coverage=partial"));
+        assert!(message.contains("inspection_finding_category=multiple"));
+        assert!(message.contains("inspection_masking_action=masked"));
+        assert!(message.contains("inspection_outcome=timeout"));
+        assert!(message.contains("duration_micros=120000000"));
+        for forbidden in [
+            "payload-secret-sentinel",
+            "tenant_id",
+            "request_id",
+            "field_path",
+            "detector_id",
+        ] {
+            assert!(!message.contains(forbidden), "{message}");
+        }
     }
 }

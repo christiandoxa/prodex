@@ -253,7 +253,7 @@ fn runtime_proxy_log_to_path_marks_async_queue_drops_after_recovery() {
 #[test]
 fn runtime_proxy_log_to_path_preserves_valid_json_format() {
     let _runtime_lock = acquire_test_runtime_lock();
-    let _format = TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_FORMAT", "json");
+    set_runtime_proxy_log_format(RuntimeLogFormat::Json);
     let dir = RuntimeProxyLogTestDir::new();
     let log_path = dir.log_path("json.log");
 
@@ -313,6 +313,7 @@ fn runtime_proxy_log_to_path_preserves_valid_json_format() {
         value.get("pid").and_then(|value| value.as_u64()),
         Some(std::process::id().into())
     );
+    set_runtime_proxy_log_format(RuntimeLogFormat::Text);
 }
 
 #[test]
@@ -330,21 +331,15 @@ fn runtime_proxy_structured_log_message_quotes_spaced_field_values() {
 
     assert_eq!(
         message,
-        "dispatch_error request=42 transport=http error=\"failed with \\\"quoted\\\" value\" detail=\"line1 line2\" empty=\"\""
+        "dispatch_error request=42 transport=http error=<redacted> detail=<redacted> empty=\"\""
     );
     assert_eq!(runtime_proxy_log_event(&message), Some("dispatch_error"));
 
     let fields = runtime_proxy_log_fields(&message);
     assert_eq!(fields.get("request").map(String::as_str), Some("42"));
     assert_eq!(fields.get("transport").map(String::as_str), Some("http"));
-    assert_eq!(
-        fields.get("error").map(String::as_str),
-        Some("failed with \"quoted\" value")
-    );
-    assert_eq!(
-        fields.get("detail").map(String::as_str),
-        Some("line1 line2")
-    );
+    assert_eq!(fields.get("error").map(String::as_str), Some("<redacted>"));
+    assert_eq!(fields.get("detail").map(String::as_str), Some("<redacted>"));
     assert_eq!(fields.get("empty").map(String::as_str), Some(""));
 }
 

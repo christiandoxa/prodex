@@ -38,6 +38,10 @@ pub(crate) fn runtime_route_selection_catalog(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> RuntimeRouteSelectionCatalog {
+    let has_auth_failure_health = runtime
+        .profile_health
+        .keys()
+        .any(|key| key.starts_with("__auth_failure__:"));
     RuntimeRouteSelectionCatalog {
         current_profile: runtime.current_profile.clone(),
         include_code_review: runtime.include_code_review,
@@ -53,12 +57,13 @@ pub(crate) fn runtime_route_selection_catalog(
                 ),
                 cached_probe_entry: runtime.profile_probe_cache.get(&profile.name).cloned(),
                 cached_usage_snapshot: runtime.profile_usage_snapshots.get(&profile.name).cloned(),
-                auth_failure_active: runtime_profile_auth_failure_active_with_auth_cache(
-                    &runtime.profile_health,
-                    &runtime.profile_usage_auth,
-                    &profile.name,
-                    now,
-                ),
+                auth_failure_active: has_auth_failure_health
+                    && runtime_profile_auth_failure_active_with_auth_cache(
+                        &runtime.profile_health,
+                        &runtime.profile_usage_auth,
+                        &profile.name,
+                        now,
+                    ),
                 in_selection_backoff: runtime_profile_name_in_selection_backoff(
                     &profile.name,
                     &runtime.profile_retry_backoff_until,

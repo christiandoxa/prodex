@@ -406,6 +406,42 @@ fn control_plane_route_planner_maps_admin_paths_to_explicit_operations() {
             true,
         ),
         (
+            GatewayHttpMethod::Get,
+            "/admin/policies/status",
+            GatewayControlPlaneOperation::PolicyPublish,
+            false,
+        ),
+        (
+            GatewayHttpMethod::Get,
+            "/prodex/gateway/governance/outbox",
+            GatewayControlPlaneOperation::PolicyPublish,
+            false,
+        ),
+        (
+            GatewayHttpMethod::Get,
+            "/prodex/gateway/governance/audit/integrity",
+            GatewayControlPlaneOperation::PolicyPublish,
+            false,
+        ),
+        (
+            GatewayHttpMethod::Post,
+            "/prodex/gateway/governance/outbox/claim",
+            GatewayControlPlaneOperation::PolicyPublish,
+            true,
+        ),
+        (
+            GatewayHttpMethod::Post,
+            "/prodex/gateway/sessions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/revoke",
+            GatewayControlPlaneOperation::PolicyPublish,
+            true,
+        ),
+        (
+            GatewayHttpMethod::Post,
+            "/prodex/gateway/sessions/current/revoke",
+            GatewayControlPlaneOperation::PolicyPublish,
+            true,
+        ),
+        (
             GatewayHttpMethod::Post,
             "/admin/configuration/revisions",
             GatewayControlPlaneOperation::ConfigurationPublish,

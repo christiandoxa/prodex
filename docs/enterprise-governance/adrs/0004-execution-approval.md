@@ -1,6 +1,6 @@
 # ADR 0004: High-Risk Execution Approval
 
-- Status: Proposed
+- Status: Accepted
 - Scope: enabled only for policy effects requiring approval
 
 ## Context
@@ -28,5 +28,8 @@ is not stored in approval records.
 
 ## Implementation status
 
-This workflow is not yet authoritative in production. It remains optional until
-its store, PEP, API/CLI and security tests are complete.
+Typed approval effects, bounded content-free approval records and policy
+approval lifecycle primitives exist. Request-bound execution-token atomic
+consumption is not yet an authoritative production path. The feature remains
+optional and must not be advertised as complete until its store, PEP, API/CLI
+and replay/race matrix pass.

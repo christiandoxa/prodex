@@ -18,20 +18,30 @@ pub use self::load::{
 pub use self::paths::{resolve_runtime_policy_path, runtime_policy_path};
 pub use self::types::{
     PRODEX_POLICY_FILE_NAME, PRODEX_POLICY_VERSION, PRODEX_RUNTIME_PROXY_PRESET_ENV,
-    RuntimeGovernanceDataClassification, RuntimeGovernanceMode, RuntimeGovernanceProviderTrustTier,
-    RuntimeGovernanceRolloutMode, RuntimeLogFormat, RuntimePolicyConfig, RuntimePolicyFile,
-    RuntimePolicyGatewayAdminToken, RuntimePolicyGatewayGuardrailsSettings,
+    RuntimeGovernanceDataClassification, RuntimeGovernanceMode, RuntimeGovernancePolicyAction,
+    RuntimeGovernancePolicyAuditDetailLevel, RuntimeGovernancePolicyChannel,
+    RuntimeGovernancePolicyDataModality, RuntimeGovernancePolicyEffect,
+    RuntimeGovernancePolicyFailureMode, RuntimeGovernancePolicyNetworkZone,
+    RuntimeGovernancePolicyObligation, RuntimeGovernancePolicyRequestRisk,
+    RuntimeGovernancePolicyRule, RuntimeGovernancePolicyRuleCondition,
+    RuntimeGovernanceProviderTrustTier, RuntimeGovernanceRolloutMode,
+    RuntimeGovernanceUnknownClassificationBehavior, RuntimeLogFormat, RuntimePolicyConfig,
+    RuntimePolicyFile, RuntimePolicyGatewayAdminToken, RuntimePolicyGatewayGuardrailsSettings,
     RuntimePolicyGatewayObservabilitySettings, RuntimePolicyGatewayRequestConstraintSettings,
     RuntimePolicyGatewayRouteAlias, RuntimePolicyGatewayRouteModelMetrics,
     RuntimePolicyGatewaySettings, RuntimePolicyGatewayVirtualKey,
-    RuntimePolicyGovernanceProviderSettings, RuntimePolicyGovernanceSettings,
-    RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection, RuntimePolicyProxySettings,
-    RuntimePolicyRuntimeFile, RuntimePolicyRuntimeSettings, RuntimePolicySecretsFile,
-    RuntimePolicySecretsSettings, RuntimePolicyServiceMode, RuntimePolicySummary,
+    RuntimePolicyGatewayWorkloadIdentitySettings, RuntimePolicyGovernanceProviderSettings,
+    RuntimePolicyGovernanceSessionSettings, RuntimePolicyGovernanceSettings,
+    RuntimePolicyInspectionPattern, RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection,
+    RuntimePolicyProxySettings, RuntimePolicyRuntimeFile, RuntimePolicyRuntimeSettings,
+    RuntimePolicySecretsFile, RuntimePolicySecretsSettings, RuntimePolicyServiceMode,
+    RuntimePolicySummary,
 };
 pub use self::validate::{
-    RuntimePolicyValidationErrors, RuntimePolicyValidationIssue, RuntimePolicyValidationSection,
-    parse_secret_backend_kind, validate_runtime_policy_file, validate_runtime_proxy_policy,
+    MAX_GOVERNANCE_AUTHORITY_TENANTS, RuntimePolicyValidationErrors, RuntimePolicyValidationIssue,
+    RuntimePolicyValidationSection, parse_secret_backend_kind,
+    validate_runtime_governance_settings, validate_runtime_policy_file,
+    validate_runtime_proxy_policy,
 };
 
 use anyhow::{Result, bail};

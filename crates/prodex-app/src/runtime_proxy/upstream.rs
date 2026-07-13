@@ -150,10 +150,21 @@ async fn send_runtime_proxy_upstream_request_with_events(
                 runtime_proxy_log_field("profile", profile_name),
                 runtime_proxy_log_field("method", request.method.as_str()),
                 runtime_proxy_log_field("url", log_url.as_str()),
-                runtime_proxy_log_field("turn_state_override", format!("{turn_state_override:?}")),
+                runtime_proxy_log_field(
+                    "turn_state_override",
+                    if turn_state_override.is_some() {
+                        "present"
+                    } else {
+                        "none"
+                    },
+                ),
                 runtime_proxy_log_field(
                     "previous_response_id",
-                    format!("{:?}", runtime_request_previous_response_id(request)),
+                    if runtime_request_previous_response_id(request).is_some() {
+                        "present"
+                    } else {
+                        "none"
+                    },
                 ),
             ],
         ),
@@ -203,10 +214,13 @@ async fn send_runtime_proxy_upstream_request_with_events(
                 ),
                 runtime_proxy_log_field(
                     "turn_state",
-                    format!(
-                        "{:?}",
-                        runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
-                    ),
+                    if runtime_proxy_header_value(response.headers(), "x-codex-turn-state")
+                        .is_some()
+                    {
+                        "present"
+                    } else {
+                        "none"
+                    },
                 ),
             ],
         ),

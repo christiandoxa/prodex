@@ -761,9 +761,9 @@ fn control_plane_operation_allows_http_method(
         | ControlPlaneOperation::VirtualKeyCreate
         | ControlPlaneOperation::VirtualKeyRotateSecret
         | ControlPlaneOperation::ProviderCredentialRotate
-        | ControlPlaneOperation::PolicyPublish
         | ControlPlaneOperation::ConfigurationPublish
         | ControlPlaneOperation::AuditExport => method == Post,
+        ControlPlaneOperation::PolicyPublish => matches!(method, Get | Post),
         ControlPlaneOperation::TenantUpdate
         | ControlPlaneOperation::VirtualKeyUpdate
         | ControlPlaneOperation::BudgetUpdate => method == Patch,

@@ -1,6 +1,6 @@
 # ADR 0009: External Secrets and Vault
 
-- Status: Proposed
+- Status: Accepted
 - Scope: production provider and service credentials
 
 ## Context
@@ -29,5 +29,7 @@ backends remain clearly labelled and cannot satisfy bank mode.
 
 ## Implementation status
 
-Secret-store abstractions and redaction exist. External Vault integration,
-namespace authorization, lease refresh and bank startup validation are planned.
+Secret references, projected-secret resolution, redacted wrappers, purpose
+binding and bank raw-secret rejection are implemented. A production
+Vault-compatible lease/renewal adapter and its namespace, rotation, revocation
+and outage evidence remain pending. No request-path Vault call is permitted.

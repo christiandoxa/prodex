@@ -1,4 +1,5 @@
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
+use super::local_rewrite_application_data_plane::runtime_gateway_application_websocket_governance;
 use super::local_rewrite_gateway_credentials::runtime_gateway_pin_request_credentials;
 use super::local_rewrite_gemini::runtime_gemini_live_auth_attempts;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
@@ -10,7 +11,6 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use prodex_provider_core::gemini_provider_core_live_provider_stream_error;
-use redaction::redaction_redact_secret_like_text;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -156,6 +156,30 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
         ));
         return;
     };
+    let preflight = super::local_rewrite_classification_rules::apply_runtime_gateway_classification_to_websocket_text(
+        request_id,
+        "{}",
+        shared,
+        shared.gateway_guardrails.pii_redaction,
+        authorized
+            .and_then(|authorized| authorized.tenant_context())
+            .map(|tenant| tenant.tenant_id),
+    );
+    if preflight.as_ref().ok().is_none_or(|preflight| {
+        runtime_gateway_application_websocket_governance(
+            authorized,
+            preflight.text.as_ref(),
+            shared,
+            &preflight.inspection,
+        )
+        .is_err()
+    }) {
+        let _ = request.respond(build_runtime_proxy_text_response(
+            403,
+            "Gemini Live request was denied by governance policy.",
+        ));
+        return;
+    }
     let attempts = match runtime_gemini_live_auth_attempts(auth, shared) {
         Ok(attempts) => attempts,
         Err(_err) => {
@@ -189,10 +213,26 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
         }
     }
     let Some((profile_name, mut upstream_socket)) = selected else {
-        let message = last_error
-            .map(|err| format!("failed to connect Gemini Live upstream: {err:#}"))
-            .unwrap_or_else(|| "no Gemini Live auth attempts were available".to_string());
-        let _ = request.respond(build_runtime_proxy_text_response(502, &message));
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "local_rewrite_gemini_live_connect_failed",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field(
+                        "error",
+                        last_error
+                            .as_ref()
+                            .map(runtime_gemini_live_redacted_log_error)
+                            .unwrap_or_else(|| "auth_attempt_unavailable".to_string()),
+                    ),
+                ],
+            ),
+        );
+        let _ = request.respond(build_runtime_proxy_text_response(
+            502,
+            RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE,
+        ));
         return;
     };
     let Some(websocket_key) = runtime_gemini_live_websocket_key(&request) else {
@@ -257,11 +297,12 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
 }
 
 fn runtime_gemini_live_redacted_log_error(error: &anyhow::Error) -> String {
-    runtime_gemini_live_redacted_log_text(&format!("{error:#}"))
+    let _ = error;
+    runtime_gemini_live_redacted_log_text("")
 }
 
-fn runtime_gemini_live_redacted_log_text(value: &str) -> String {
-    redaction_redact_secret_like_text(value)
+fn runtime_gemini_live_redacted_log_text(_value: &str) -> String {
+    "gemini_live_stream_failed".to_string()
 }
 
 fn handle_runtime_gemini_live_tcp_stream(
@@ -314,13 +355,28 @@ fn handle_runtime_gemini_live_tcp_stream(
         }
     }
     let Some((profile_name, mut upstream_socket)) = selected else {
-        let message = last_error
-            .map(|err| format!("failed to connect Gemini Live upstream: {err:#}"))
-            .unwrap_or_else(|| "no Gemini Live auth attempts were available".to_string());
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "local_rewrite_gemini_live_sidecar_connect_failed",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field(
+                        "error",
+                        last_error
+                            .as_ref()
+                            .map(runtime_gemini_live_redacted_log_error)
+                            .unwrap_or_else(|| "auth_attempt_unavailable".to_string()),
+                    ),
+                ],
+            ),
+        );
         let _ = local_socket.send(WsMessage::Text(
-            gemini_provider_core_live_provider_stream_error(message)
-                .to_string()
-                .into(),
+            gemini_provider_core_live_provider_stream_error(
+                RUNTIME_GEMINI_LIVE_PROVIDER_STREAM_FAILED_MESSAGE,
+            )
+            .to_string()
+            .into(),
         ));
         let _ = local_socket.close(None);
         return Ok(());
@@ -404,13 +460,12 @@ mod tests {
     }
 
     #[test]
-    fn gemini_live_runtime_error_logs_redact_secret_like_material() {
+    fn gemini_live_runtime_error_logs_are_content_free() {
         let raw = "failed to connect Gemini Live upstream: Authorization: Bearer fixture_live_notreal_12345 url=wss://example.test?api_key=sk-live-fixture-notreal-123456";
 
         let redacted = runtime_gemini_live_redacted_log_text(raw);
 
-        assert!(redacted.contains("Authorization: Bearer <redacted>"));
-        assert!(redacted.contains("api_key=<redacted>"));
+        assert_eq!(redacted, "gemini_live_stream_failed");
         assert!(!redacted.contains("fixture_live_notreal_12345"));
         assert!(!redacted.contains("sk-live-fixture-notreal-123456"));
     }

@@ -17,8 +17,10 @@ use super::*;
 use crate::runtime_launch::proxy_startup::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderRouteKind, runtime_provider_route_kind,
 };
+use prodex_application::ApplicationResponseObligationPlan;
 use runtime_proxy_crate::path_without_query;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn respond_runtime_local_rewrite_live_response(
     request_id: u64,
     request: RuntimeLocalRewriteRequest,
@@ -27,6 +29,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
     copilot_context: Option<RuntimeCopilotRequestContext>,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
+    response_obligations: Option<ApplicationResponseObligationPlan>,
 ) {
     let RuntimeLocalRewriteLiveResponse { prefix, response } = live_response;
     let status = response.status().as_u16();
@@ -67,6 +70,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 provider_kind: RuntimeProviderBridgeKind::DeepSeek,
                 profile_name: None,
                 binding_recorder: None,
+                response_obligations,
             },
         );
         return;
@@ -90,6 +94,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 provider_kind: RuntimeProviderBridgeKind::Anthropic,
                 profile_name: None,
                 binding_recorder: None,
+                response_obligations,
             },
         );
         return;
@@ -114,6 +119,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     provider_kind: RuntimeProviderBridgeKind::Gemini,
                     profile_name: None,
                     binding_recorder: None,
+                    response_obligations,
                 },
             );
         } else {
@@ -128,6 +134,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     shared,
                     captured,
                     gemini_context,
+                    response_obligations,
                 },
             );
         }
@@ -151,6 +158,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
             shared,
             captured,
             copilot_context,
+            response_obligations,
         );
         return;
     }
@@ -175,6 +183,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
             })
             .unwrap_or_else(|| "local".to_string()),
         is_sse,
+        response_obligations,
     );
 }
 

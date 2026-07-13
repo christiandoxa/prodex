@@ -93,10 +93,18 @@ pub(crate) fn runtime_profile_cached_auth_summary_from_maps_for_selection(
     profile_usage_auth: &BTreeMap<String, RuntimeProfileUsageAuthCacheEntry>,
     profile_probe_cache: &BTreeMap<String, RuntimeProfileProbeCacheEntry>,
 ) -> Option<AuthSummary> {
-    runtime_profile_cached_auth_summary_for_selection(
-        profile_usage_auth.get(profile_name).cloned(),
-        profile_probe_cache.get(profile_name).cloned(),
-    )
+    if profile_usage_auth.get(profile_name).is_some_and(|entry| {
+        runtime_profile_usage_auth_cache_entry_freshness(entry)
+            == RuntimeProfileUsageAuthCacheFreshness::Fresh
+    }) {
+        return Some(AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        });
+    }
+    profile_probe_cache
+        .get(profile_name)
+        .map(|entry| entry.auth.clone())
 }
 
 pub(crate) fn runtime_snapshot_blocks_same_request_cold_start_probe(

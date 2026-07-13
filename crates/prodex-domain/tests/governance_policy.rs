@@ -8,17 +8,7 @@ use prodex_domain::{
 };
 
 fn condition() -> PolicyRuleCondition {
-    PolicyRuleCondition {
-        channel: None,
-        principal_kind: None,
-        minimum_role: None,
-        action: None,
-        route: None,
-        minimum_classification: None,
-        inspection_coverage: None,
-        minimum_request_risk: None,
-        network_zone: None,
-    }
+    PolicyRuleCondition::default()
 }
 
 fn input<'a>(
@@ -113,6 +103,56 @@ fn explicit_deny_wins_and_drops_obligations() {
     assert_eq!(decision.effect, PolicyEffect::Deny);
     assert!(decision.obligations.is_empty());
     assert_eq!(decision.reason_codes.len(), 2);
+}
+
+#[test]
+fn extended_abac_conditions_are_bounded_and_exact() {
+    let tenant_id = TenantId::new();
+    let tenant = TenantContext { tenant_id };
+    let principal = Principal::new(
+        PrincipalId::new(),
+        Some(tenant_id),
+        PrincipalKind::User,
+        Role::Operator,
+        CredentialScope::DataPlane,
+    );
+    let policy = compile_governance_policy(GovernancePolicyArtifact {
+        revision: PolicyRevisionId::new(),
+        valid_until_unix_ms: 10_000,
+        default_effect: PolicyEffect::Allow,
+        rules: vec![GovernancePolicyRule {
+            id: GovernancePolicyRuleId::new("deny.exact.abac").unwrap(),
+            condition: PolicyRuleCondition {
+                credential_scope: Some(CredentialScope::DataPlane),
+                maximum_session_age_seconds: Some(10),
+                maximum_session_idle_seconds: Some(1),
+                session_revoked: Some(false),
+                session_mfa_satisfied: Some(true),
+                minimum_session_retained_classification: Some(DataClassification::Confidential),
+                minimum_authentication_strength: Some(3),
+                environment_mfa_satisfied: Some(true),
+                requested_capability: Some(prodex_domain::ModelCapability::Tools),
+                quota_has_headroom: Some(true),
+                quota_reservation_required: Some(true),
+                ..condition()
+            },
+            effect: PolicyEffect::Deny,
+            obligations: Vec::new(),
+            reason_code: PolicyReasonCode::new("policy.exact_abac").unwrap(),
+        }],
+    })
+    .unwrap();
+    let route = CanonicalRoute::new("/v1/responses").unwrap();
+    let tools = prodex_domain::CapabilitySet::new(vec![prodex_domain::ModelCapability::Tools]);
+    let none = prodex_domain::CapabilitySet::new(Vec::new());
+
+    let denied =
+        evaluate_governance_policy(&policy, &input(tenant, &principal, &route, &tools)).unwrap();
+    let allowed =
+        evaluate_governance_policy(&policy, &input(tenant, &principal, &route, &none)).unwrap();
+
+    assert_eq!(denied.effect, PolicyEffect::Deny);
+    assert_eq!(allowed.effect, PolicyEffect::Allow);
 }
 
 #[test]

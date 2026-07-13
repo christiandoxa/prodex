@@ -123,6 +123,11 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
             "gateway.sso.oidc_key_prefixes_claim",
             sso.oidc_key_prefixes_claim.as_deref(),
         ),
+        ("gateway.sso.required_scope", sso.required_scope.as_deref()),
+        (
+            "gateway.sso.authentication_strength",
+            sso.authentication_strength.as_deref(),
+        ),
     ] {
         if let Some(value) = value {
             validate_gateway_exact_identifier(value, path, field)?;
@@ -140,7 +145,55 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
         || sso.oidc_audience.is_some()
         || sso.oidc_jwks_url.is_some()
         || !sso.oidc_jwks_origin_allowlist.is_empty();
+    if sso.remote_human == Some(true) && !oidc_enabled {
+        bail!(
+            "gateway.sso.remote_human in {} requires exact OIDC issuer and audience",
+            path.display()
+        );
+    }
+    if sso
+        .required_scope
+        .as_deref()
+        .is_some_and(|scope| !matches!(scope, "control_plane" | "data_plane"))
+    {
+        bail!(
+            "gateway.sso.required_scope in {} must be control_plane or data_plane",
+            path.display()
+        );
+    }
+    if sso
+        .authentication_strength
+        .as_deref()
+        .is_some_and(|strength| !matches!(strength, "mfa" | "phishing_resistant"))
+    {
+        bail!(
+            "gateway.sso.authentication_strength in {} must be mfa or phishing_resistant",
+            path.display()
+        );
+    }
+    if sso.browser_flow == Some(true) {
+        bail!(
+            "gateway.sso.browser_flow in {} is unsupported; use the existing OIDC bearer-token broker",
+            path.display()
+        );
+    }
+    if sso.pkce_method.is_some() && sso.browser_flow != Some(true) {
+        bail!(
+            "gateway.sso.pkce_method in {} requires a supported browser flow",
+            path.display()
+        );
+    }
     if oidc_enabled {
+        if sso
+            .required_scope
+            .as_deref()
+            .is_some_and(|scope| scope != "control_plane")
+        {
+            bail!(
+                "gateway.sso.required_scope in {} must be control_plane for human OIDC",
+                path.display()
+            );
+        }
         if sso.oidc_issuer.is_none() || sso.oidc_audience.is_none() {
             bail!(
                 "gateway.sso OIDC in {} requires oidc_issuer and oidc_audience",
@@ -193,6 +246,63 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
         validate_gateway_admin_role(role).with_context(|| {
             format!("gateway.sso.default_role in {} is invalid", path.display())
         })?;
+    }
+    validate_gateway_workload_identity(policy, path)?;
+    Ok(())
+}
+
+fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
+    let workload = &policy.gateway.workload_identity;
+    crate::validate_secrets::validate_gateway_secret_ref(
+        policy,
+        path,
+        "gateway.workload_identity.mtls_ca_ref",
+        workload.mtls_ca_ref.as_ref(),
+    )?;
+    let configured = workload.enabled.is_some()
+        || workload.issuer.is_some()
+        || workload.audience.is_some()
+        || workload.required_scope.is_some()
+        || workload.mtls_required.is_some()
+        || workload.mtls_ca_ref.is_some();
+    if !configured {
+        return Ok(());
+    }
+    if workload.enabled != Some(true)
+        || workload.issuer.is_none()
+        || workload.audience.is_none()
+        || workload.required_scope.as_deref() != Some("data_plane")
+    {
+        bail!(
+            "gateway.workload_identity in {} requires enabled=true, exact issuer/audience, and data_plane scope",
+            path.display()
+        );
+    }
+    ValidatedOidcIssuer::parse(
+        workload
+            .issuer
+            .as_deref()
+            .expect("workload issuer presence checked"),
+    )
+    .with_context(|| {
+        format!(
+            "gateway.workload_identity.issuer in {} must be an exact HTTPS issuer",
+            path.display()
+        )
+    })?;
+    validate_gateway_exact_identifier(
+        workload
+            .audience
+            .as_deref()
+            .expect("workload audience presence checked"),
+        path,
+        "gateway.workload_identity.audience",
+    )?;
+    if workload.mtls_required == Some(true) && workload.mtls_ca_ref.is_none() {
+        bail!(
+            "gateway.workload_identity.mtls_ca_ref in {} is required when mTLS is required",
+            path.display()
+        );
     }
     Ok(())
 }

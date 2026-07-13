@@ -91,6 +91,45 @@ fn trace_context_parses_and_renders_w3c_traceparent() {
 }
 
 #[test]
+fn inspection_metrics_are_bounded_and_low_cardinality() {
+    use prodex_observability::{
+        InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction,
+        InspectionOutcome, InspectionStage, plan_inspection_metric,
+    };
+
+    let plan = plan_inspection_metric(
+        InspectionStage::External,
+        InspectionCoverageClass::Partial,
+        InspectionFindingCategory::Multiple,
+        InspectionMaskingAction::Denied,
+        InspectionOutcome::Timeout,
+        u64::MAX,
+    )
+    .unwrap();
+
+    assert_eq!(plan.event_metric_name, "prodex_inspection_events_total");
+    assert_eq!(
+        plan.duration_metric_name,
+        "prodex_inspection_duration_microseconds"
+    );
+    assert_eq!(plan.duration_micros, 120_000_000);
+    let labels = [
+        plan.stage_label,
+        plan.coverage_label,
+        plan.finding_category_label,
+        plan.masking_action_label,
+        plan.outcome_label,
+    ];
+    for label in labels {
+        let (key, value) = label.as_metric_label().unwrap();
+        assert!(!key.contains("tenant"));
+        assert!(!key.contains("principal"));
+        assert!(!key.contains("match"));
+        assert!(value.len() <= 20);
+    }
+}
+
+#[test]
 fn trace_context_rejects_malformed_or_invalid_context() {
     assert_eq!(
         TraceContext::parse_traceparent("01-abc"),

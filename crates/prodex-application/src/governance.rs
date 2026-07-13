@@ -17,6 +17,7 @@ use prodex_domain::{
 pub struct ApplicationInspectionSource {
     pub coverage: InspectionCoverage,
     pub findings: Vec<InspectionFinding>,
+    pub masked_findings: Vec<prodex_domain::FindingKind>,
     pub tags: Vec<InspectionTag>,
     pub reason_codes: Vec<InspectionReasonCode>,
 }
@@ -26,6 +27,7 @@ impl fmt::Debug for ApplicationInspectionSource {
         f.debug_struct("ApplicationInspectionSource")
             .field("coverage", &self.coverage)
             .field("finding_count", &self.findings.len())
+            .field("masked_finding_count", &self.masked_findings.len())
             .field("tag_count", &self.tags.len())
             .field("reason_code_count", &self.reason_codes.len())
             .finish()
@@ -58,12 +60,14 @@ impl fmt::Debug for ApplicationInspectionRequest {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ApplicationInspectionPlan {
     pub result: InspectionResult,
+    pub masked_findings: Vec<prodex_domain::FindingKind>,
 }
 
 impl fmt::Debug for ApplicationInspectionPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ApplicationInspectionPlan")
             .field("result", &self.result)
+            .field("masked_finding_count", &self.masked_findings.len())
             .finish()
     }
 }
@@ -71,6 +75,7 @@ impl fmt::Debug for ApplicationInspectionPlan {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ApplicationInspectionError {
     TooManyDetectors,
+    TooManyMaskedFindingKinds,
     InvalidResult(InspectionModelError),
 }
 
@@ -99,13 +104,22 @@ pub fn plan_application_request_inspection(
     }
 
     let mut findings = Vec::new();
+    let mut masked_findings = Vec::new();
     let mut tags = Vec::new();
     let mut reason_codes = Vec::new();
     for source in request.sources {
+        if source.masked_findings.len() > prodex_domain::FindingKind::ALL.len() {
+            return Err(ApplicationInspectionError::TooManyMaskedFindingKinds);
+        }
         coverage = Some(match coverage {
             Some(current) => current.combine(source.coverage),
             None => source.coverage,
         });
+        for kind in source.masked_findings {
+            if source.findings.iter().any(|finding| finding.kind() == kind) {
+                masked_findings.push(kind);
+            }
+        }
         for finding in source.findings {
             classification = classification.raised_to(finding.kind().minimum_classification());
             findings.push(finding);
@@ -113,6 +127,8 @@ pub fn plan_application_request_inspection(
         tags.extend(source.tags);
         reason_codes.extend(source.reason_codes);
     }
+    masked_findings.sort();
+    masked_findings.dedup();
 
     let result = InspectionResult::new(
         coverage.unwrap_or(InspectionCoverage::Unsupported),
@@ -124,7 +140,10 @@ pub fn plan_application_request_inspection(
         request.limits,
     )
     .map_err(ApplicationInspectionError::InvalidResult)?;
-    Ok(ApplicationInspectionPlan { result })
+    Ok(ApplicationInspectionPlan {
+        result,
+        masked_findings,
+    })
 }
 
 #[derive(Clone)]

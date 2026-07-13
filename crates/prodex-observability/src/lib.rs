@@ -17,6 +17,7 @@ mod operations;
 mod provider;
 mod runtime;
 mod security;
+mod siem;
 mod trace;
 
 pub use accounting::*;
@@ -27,4 +28,5 @@ pub use operations::*;
 pub use provider::*;
 pub use runtime::*;
 pub use security::*;
+pub use siem::*;
 pub use trace::*;

@@ -1,6 +1,6 @@
 # ADR 0010: Bank Profile Fail-Closed Semantics
 
-- Status: Proposed
+- Status: Accepted
 - Scope: `bank_enforce`
 
 ## Context
@@ -29,7 +29,11 @@ controls and evidence, not automatic legal or regulatory certification.
 
 ## Implementation status
 
-Many component primitives exist, but the typed profile, startup validator,
-fully governed channels, durable dependencies and end-to-end fail-closed
-scenario remain incomplete. Bank mode must not be advertised as ready until all
-matrix rows and exit evidence pass.
+The typed profile, startup validator, mandatory stage checks, private-listener
+guard, identity/audit/secret-reference requirements and runtime fail-closed
+inspection/obligation behavior are implemented. Evidence includes
+`bank_governance_deployment_matrix_fails_closed`,
+`bank_runtime_listener_guard_rejects_public_or_wildcard_addresses`,
+`bank_snapshot_denies_unsupported_inspection`, and the deployment-security
+guard. Bank mode must not be advertised as release-ready until PostgreSQL/SIEM,
+full-channel, chaos and release gates pass.

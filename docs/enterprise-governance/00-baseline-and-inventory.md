@@ -6,6 +6,11 @@ This document records the repository state observed on 2026-07-13 before the
 enterprise-governance phases begin. It is an implementation baseline, not a
 claim of certification, regulatory approval, or legal compliance.
 
+Baseline revision: `e308fdf6`. Candidate implementation evidence is recorded
+separately in `implementation-ledger.md` and
+`14-final-implementation-report.md`; the pipeline inventory below intentionally
+describes the pre-change baseline.
+
 Evidence sources were the current worktree, the existing architecture, threat,
 deployment, policy, provider, and refactor documents, and direct inspection of
 the production composition path and its boundary crates.
@@ -22,9 +27,11 @@ the production composition path and its boundary crates.
 | Node.js | `v24.18.0` |
 | npm | `12.0.1` |
 
-No governance latency, throughput, CPU, RSS, allocation, or lock-wait baseline
-was captured in this audit. Those measurements remain required before a
-production governance stage is enabled.
+The later candidate run captured pure-stage inspection, PDP and governed-routing
+microbenchmarks plus the compatible proxy baseline in
+`12-performance-baseline-and-results.md`. Allocation, queue/lock wait,
+end-to-end governed overhead and the disabled compatibility delta remain
+pending.
 
 ## Current Data-Plane Pipeline
 

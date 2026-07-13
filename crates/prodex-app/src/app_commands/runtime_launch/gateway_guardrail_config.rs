@@ -120,7 +120,6 @@ fn gateway_guardrail_webhook_config_with_resolver(
                 },
             )?;
             if !matches!(parsed.scheme(), "http" | "https")
-                || parsed.host_str().is_none()
                 || !parsed.username().is_empty()
                 || parsed.password().is_some()
                 || parsed.query().is_some()
@@ -129,6 +128,20 @@ fn gateway_guardrail_webhook_config_with_resolver(
                 bail!(
                     "gateway.guardrails.webhook_url must be an http(s) URL with host and no credentials, query, or fragment"
                 );
+            }
+            let Some(host) = parsed.host_str() else {
+                bail!(
+                    "gateway.guardrails.webhook_url must be an http(s) URL with host and no credentials, query, or fragment"
+                );
+            };
+            if !policy.guardrails.webhook_host_allowlist.is_empty()
+                && !policy
+                    .guardrails
+                    .webhook_host_allowlist
+                    .iter()
+                    .any(|allowed| allowed.eq_ignore_ascii_case(host))
+            {
+                bail!("gateway.guardrails.webhook_url host is not allowlisted");
             }
             Ok(value.to_string())
         })

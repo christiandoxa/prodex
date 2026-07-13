@@ -73,6 +73,25 @@ pub(crate) fn gateway_sso_secret_with_resolver(
 fn gateway_sso_oidc_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<Option<RuntimeGatewayOidcConfig>> {
+    if policy.sso.browser_flow == Some(true) {
+        bail!("gateway.sso.browser_flow is unsupported; use the OIDC bearer-token broker");
+    }
+    if policy
+        .sso
+        .required_scope
+        .as_deref()
+        .is_some_and(|scope| scope != "control_plane")
+    {
+        bail!("gateway.sso.required_scope must be control_plane for human OIDC");
+    }
+    if policy
+        .sso
+        .authentication_strength
+        .as_deref()
+        .is_some_and(|strength| !matches!(strength, "mfa" | "phishing_resistant"))
+    {
+        bail!("gateway.sso.authentication_strength is invalid");
+    }
     let Some(issuer) = policy.sso.oidc_issuer.as_deref() else {
         if policy.sso.oidc_audience.is_some()
             || policy.sso.oidc_jwks_url.is_some()
@@ -132,6 +151,7 @@ fn gateway_sso_oidc_config(
             &policy.sso.oidc_key_prefixes_claim,
             "prodex_key_prefixes",
         )?,
+        authentication_strength: policy.sso.authentication_strength.clone(),
     }))
 }
 

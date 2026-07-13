@@ -14,6 +14,8 @@ mod gateway_provider_config;
 mod gateway_route_alias_config;
 #[path = "gateway_secret_config.rs"]
 mod gateway_secret_config;
+#[path = "gateway_siem_export.rs"]
+pub(crate) mod gateway_siem_export;
 #[path = "gateway_sso_config.rs"]
 mod gateway_sso_config;
 #[path = "gateway_state_store_config.rs"]
@@ -309,6 +311,11 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         None => "127.0.0.1:4000".to_string(),
     };
     gateway_validate_listen_auth(&listen_addr, auth.auth_required)?;
+    if runtime_config.governance.mode == prodex_config::GovernanceMode::BankEnforce
+        && !gateway_private_listen_address(&listen_addr)
+    {
+        bail!("bank governance mode requires a private runtime gateway listen address");
+    }
 
     let guardrail = resolve_gateway_guardrail_config_with_resolver(args, policy, &secret_resolver)?;
     let call_id_header = gateway_call_id_header_config(policy)?;
@@ -318,7 +325,7 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         &secret_resolver,
         &runtime_config.gateway.launch,
     )?;
-    gateway_validate_runtime_topology(&state_store, &runtime_config.gateway)?;
+    gateway_validate_runtime_topology(&state_store, &runtime_config.gateway, policy)?;
 
     let sso = gateway_sso_config_with_resolver(policy, &secret_resolver)?;
     let observability =
@@ -345,6 +352,16 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         presidio_redaction_enabled: guardrail.presidio_redaction_enabled,
         credential_fingerprint,
     })
+}
+
+fn gateway_private_listen_address(value: &str) -> bool {
+    let Ok(address) = value.parse::<std::net::SocketAddr>() else {
+        return false;
+    };
+    match address.ip() {
+        std::net::IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        std::net::IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local(),
+    }
 }
 
 pub(super) fn gateway_call_id_header_config(
@@ -377,6 +394,14 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn bank_runtime_listener_guard_rejects_public_or_wildcard_addresses() {
+        assert!(gateway_private_listen_address("127.0.0.1:4317"));
+        assert!(gateway_private_listen_address("10.0.0.10:4317"));
+        assert!(!gateway_private_listen_address("0.0.0.0:4317"));
+        assert!(!gateway_private_listen_address("203.0.113.10:4317"));
+    }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let stamp = SystemTime::now()

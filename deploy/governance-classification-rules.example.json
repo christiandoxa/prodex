@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "detector_revision": "detectors-v1",
+  "patterns": [
+    {
+      "id": "customer-secret",
+      "pattern": "customer-*secret"
+    }
+  ],
+  "classification_revision": "classification-v1",
+  "classification_checksum": "867cd7a4ceb2c1f0beb5f0662d71c059ce65ff0e2056be7aa7d650e5772cf3d7",
+  "unsupported_coverage_floor": "restricted",
+  "classification_rules": [
+    {
+      "finding_kind": "tenant_sensitive",
+      "classification": "confidential"
+    }
+  ]
+}

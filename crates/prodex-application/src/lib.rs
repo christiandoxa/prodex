@@ -15,6 +15,7 @@ mod config;
 mod control_plane;
 mod data_plane;
 mod governance;
+mod obligations;
 mod provider;
 mod request_context;
 mod virtual_key;
@@ -25,6 +26,7 @@ pub use config::*;
 pub use control_plane::*;
 pub use data_plane::*;
 pub use governance::*;
+pub use obligations::*;
 pub use provider::*;
 pub use request_context::{
     APPLICATION_REQUEST_METADATA_HEADER_LIMIT, ApplicationAuthenticatedRequestContext,

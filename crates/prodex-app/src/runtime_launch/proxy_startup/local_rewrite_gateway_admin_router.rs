@@ -20,6 +20,7 @@ use super::local_rewrite_gateway_admin_payloads::{
     runtime_gateway_admin_guardrails_payload, runtime_gateway_admin_observability_payload,
     runtime_gateway_admin_providers_payload, runtime_gateway_openapi_spec,
 };
+use super::local_rewrite_gateway_admin_policies::runtime_gateway_admin_policy_response;
 use super::local_rewrite_gateway_admin_response::runtime_gateway_admin_json_response;
 use super::local_rewrite_gateway_admin_route_explain::runtime_gateway_admin_route_explain_response;
 use super::local_rewrite_gateway_admin_scim::{
@@ -28,6 +29,7 @@ use super::local_rewrite_gateway_admin_scim::{
     runtime_gateway_admin_scim_list_users_response,
     runtime_gateway_admin_scim_update_user_response,
 };
+use super::local_rewrite_gateway_admin_sessions::runtime_gateway_admin_session_response;
 use super::local_rewrite_gateway_dashboard::runtime_gateway_admin_dashboard_response;
 use super::local_rewrite_gateway_key_payloads::runtime_gateway_admin_keys_payload;
 use super::local_rewrite_gateway_metrics::runtime_gateway_prometheus_response;
@@ -52,6 +54,19 @@ pub(super) fn runtime_gateway_request_path_is_admin(
         || path == format!("{admin_prefix}/providers")
         || path == format!("{admin_prefix}/observability")
         || path == format!("{admin_prefix}/guardrails")
+        || path == format!("{admin_prefix}/policies")
+        || path.starts_with(&format!("{admin_prefix}/policies/"))
+        || path == format!("{admin_prefix}/classification-rules")
+        || path.starts_with(&format!("{admin_prefix}/classification-rules/"))
+        || path == format!("{admin_prefix}/provider-registries")
+        || path.starts_with(&format!("{admin_prefix}/provider-registries/"))
+        || path == format!("{admin_prefix}/routing-scores")
+        || path.starts_with(&format!("{admin_prefix}/routing-scores/"))
+        || path.starts_with(&format!("{admin_prefix}/sessions/"))
+        || path == format!("{admin_prefix}/governance/outbox")
+        || path == format!("{admin_prefix}/governance/outbox/claim")
+        || path == format!("{admin_prefix}/governance/audit/integrity")
+        || path == format!("{admin_prefix}/audit/exports")
         || path == format!("{admin_prefix}/routes/explain")
         || path == format!("{admin_prefix}/usage")
         || path == format!("{admin_prefix}/keys")
@@ -136,6 +151,19 @@ pub(super) fn runtime_gateway_admin_response(
     let openapi_path = format!("{admin_prefix}/openapi.json");
     let admin_path = format!("{admin_prefix}/admin");
     let scim_users_path = format!("{admin_prefix}/scim/v2/Users");
+    let policy_path = path == format!("{admin_prefix}/policies")
+        || path.starts_with(&format!("{admin_prefix}/policies/"))
+        || path == format!("{admin_prefix}/classification-rules")
+        || path.starts_with(&format!("{admin_prefix}/classification-rules/"))
+        || path == format!("{admin_prefix}/provider-registries")
+        || path.starts_with(&format!("{admin_prefix}/provider-registries/"))
+        || path == format!("{admin_prefix}/routing-scores")
+        || path.starts_with(&format!("{admin_prefix}/routing-scores/"))
+        || path == format!("{admin_prefix}/governance/outbox")
+        || path == format!("{admin_prefix}/governance/outbox/claim")
+        || path == format!("{admin_prefix}/governance/audit/integrity")
+        || path == format!("{admin_prefix}/audit/exports");
+    let session_path = path.starts_with(&format!("{admin_prefix}/sessions/"));
     let key_resource = path
         .strip_prefix(&(keys_path.clone() + "/"))
         .map(str::trim)
@@ -166,6 +194,8 @@ pub(super) fn runtime_gateway_admin_response(
         && path != keys_path
         && path != openapi_path
         && path != scim_users_path
+        && !policy_path
+        && !session_path
         && key_name.is_none()
         && key_secret_name.is_none()
         && scim_user_id.is_none()
@@ -265,6 +295,48 @@ pub(super) fn runtime_gateway_admin_response(
         return Some(runtime_gateway_admin_route_explain_response(
             captured, shared, admin_auth,
         ));
+    }
+
+    if policy_path {
+        return Some(match authorized_action {
+            Some(base_action) => runtime_gateway_admin_policy_response(
+                captured,
+                path,
+                &admin_prefix,
+                shared,
+                admin_auth,
+                base_action,
+            )
+            .unwrap_or_else(|| {
+                build_runtime_proxy_json_error_response(
+                    404,
+                    "governance_policy_not_found",
+                    "policy governance resource was not found",
+                )
+            }),
+            None => runtime_gateway_admin_missing_action_response(),
+        });
+    }
+
+    if session_path {
+        return Some(match authorized_action {
+            Some(base_action) => runtime_gateway_admin_session_response(
+                captured,
+                path,
+                &admin_prefix,
+                shared,
+                admin_auth,
+                base_action,
+            )
+            .unwrap_or_else(|| {
+                build_runtime_proxy_json_error_response(
+                    404,
+                    "governance_session_not_found",
+                    "session governance resource was not found",
+                )
+            }),
+            None => runtime_gateway_admin_missing_action_response(),
+        });
     }
 
     if path == usage_path {

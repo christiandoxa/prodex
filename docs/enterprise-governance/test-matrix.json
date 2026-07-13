@@ -1,7 +1,10 @@
 {
   "schema_version": 1,
-  "artifact_status": "target-control-matrix",
+  "artifact_status": "candidate-evidence-matrix",
   "status_definitions": {
+    "tested": "The named implementation evidence passed the focused control asserted by this row.",
+    "implemented": "Production behavior exists and named focused evidence is present, but a broader backend, integration, or release gate remains.",
+    "pending_validation": "Implementation is present, but the required backend or integration validation is still running or blocked from final evidence.",
     "partial": "Relevant production or test foundations exist, but the complete target invariant is not proven.",
     "planned": "The target control or its required evidence is not complete. This is not a passing result."
   },
@@ -14,8 +17,13 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
       "expected": "Untrusted forwarding headers are ignored or rejected; no privilege or tenant change occurs.",
-      "implementation_status": "planned",
-      "evidence_required": "Gateway tests through trusted and untrusted proxy hops with duplicate and conflicting headers."
+      "implementation_status": "tested",
+      "evidence_required": "Gateway tests through trusted and untrusted proxy hops with duplicate and conflicting headers.",
+      "evidence": [
+        "edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch",
+        "principal_evidence_enforces_required_scope_and_anonymous_policy",
+        "auth-boundary-guard.mjs"
+      ]
     },
     {
       "id": "SEC-ID-002",
@@ -25,8 +33,12 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "postgresql_integration_security",
       "expected": "Cross-tenant reads and writes fail through every API and direct repository operation.",
-      "implementation_status": "planned",
-      "evidence_required": "Multi-tenant API and PostgreSQL RLS suite using synthetic tenants."
+      "implementation_status": "tested",
+      "evidence_required": "Multi-tenant API and PostgreSQL RLS suite using synthetic tenants.",
+      "evidence": [
+        "npm run ci:storage-postgres-proof",
+        "live PostgreSQL/RLS cross-tenant and four-kind governance lifecycle proof"
+      ]
     },
     {
       "id": "SEC-ID-003",
@@ -36,8 +48,16 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
       "expected": "Fixed, expired, revoked, replayed, or privilege-stale sessions are rejected on every replica.",
-      "implementation_status": "planned",
-      "evidence_required": "Clock-controlled fixation/expiry/revocation tests across at least two gateway replicas."
+      "implementation_status": "partial",
+      "evidence_required": "Clock-controlled fixation/expiry/revocation tests across at least two gateway replicas.",
+      "evidence": [
+        "session_context_propagates_age_idle_classification_and_affinity",
+        "session_reuse_with_another_principal_is_revoked",
+        "configured_timeouts_and_concurrency_fail_closed",
+        "governance_sessions_are_monotonic_bounded_and_revocable",
+        "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg hash/current-session revoke assertions",
+        "cross-replica invalidation window and multi-replica validation pending"
+      ]
     },
     {
       "id": "SEC-INS-001",
@@ -47,8 +67,13 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "unit_property",
       "expected": "Finding locations and masking remain correct for multibyte prefixes and nested tool arguments.",
-      "implementation_status": "partial",
-      "evidence_required": "Focused Presidio adapter Unicode and nested-argument regression tests."
+      "implementation_status": "tested",
+      "evidence_required": "Focused Presidio adapter Unicode and nested-argument regression tests.",
+      "evidence": [
+        "walker_inspects_supported_nested_fields_without_retaining_argument_keys",
+        "tenant_patterns_are_isolated_and_support_unicode_interior_globs",
+        "incremental_inspector_handles_unicode_split_inside_codepoint"
+      ]
     },
     {
       "id": "SEC-INS-002",
@@ -58,8 +83,14 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "unit_fuzz",
       "expected": "Work remains bounded and truncated/opaque inputs never report full coverage.",
-      "implementation_status": "partial",
-      "evidence_required": "Limit boundary tests plus retained parser/walker fuzz corpus."
+      "implementation_status": "tested",
+      "evidence_required": "Limit boundary tests plus retained parser/walker fuzz corpus.",
+      "evidence": [
+        "walker_reports_unsupported_modalities_and_depth_limits",
+        "walker_bounds_value_count_and_total_text",
+        "local_inspection_rejects_deep_and_match_flood_inputs",
+        "application_inspection_rejects_unbounded_detector_sources"
+      ]
     },
     {
       "id": "SEC-INS-003",
@@ -69,8 +100,13 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
       "expected": "Observe records would-deny; enforce constrains/denies; bank denies required unresolved inspection.",
-      "implementation_status": "planned",
-      "evidence_required": "Text, image, audio, file, non-UTF8, timeout and detector-outage matrix."
+      "implementation_status": "partial",
+      "evidence_required": "Text, image, audio, file, non-UTF8, timeout and detector-outage matrix.",
+      "evidence": [
+        "application_inspection_is_unsupported_without_detector_evidence",
+        "bank_response_inspection_requires_full_coverage",
+        "gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage"
+      ]
     },
     {
       "id": "SEC-INS-004",
@@ -80,8 +116,13 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "stream_integration_fuzz",
       "expected": "Boundary-spanning findings are enforced before local commit without unbounded buffering.",
-      "implementation_status": "planned",
-      "evidence_required": "Random chunk-boundary corpus for SSE and WebSocket response streams."
+      "implementation_status": "partial",
+      "evidence_required": "Random chunk-boundary corpus for SSE and WebSocket response streams.",
+      "evidence": [
+        "incremental_inspector_finds_every_chunk_boundary",
+        "incremental_inspector_finds_unicode_across_three_chunks",
+        "full SSE/WebSocket randomized corpus pending"
+      ]
     },
     {
       "id": "SEC-POL-001",
@@ -91,8 +132,13 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "golden_property",
       "expected": "Equivalent inputs produce identical effect, obligations and reason codes; mandatory unknowns fail safely.",
-      "implementation_status": "planned",
-      "evidence_required": "Golden vectors and randomized rule/input permutation properties."
+      "implementation_status": "tested",
+      "evidence_required": "Golden vectors and randomized rule/input permutation properties.",
+      "evidence": [
+        "explicit_deny_wins_and_drops_obligations",
+        "missing_or_cross_tenant_attributes_fail_closed",
+        "policy_compilation_is_bounded_and_rejects_duplicate_ids"
+      ]
     },
     {
       "id": "SEC-POL-002",
@@ -102,8 +148,13 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "unit_property",
       "expected": "Deny is absorbing and unresolved mandatory conflicts deny rather than choose a weaker value.",
-      "implementation_status": "planned",
-      "evidence_required": "Pairwise and generated obligation merge properties."
+      "implementation_status": "tested",
+      "evidence_required": "Pairwise and generated obligation merge properties.",
+      "evidence": [
+        "allow_tool_obligations_form_one_allow_set",
+        "obligation_matrix_preserves_classification_and_observe_enforce_semantics",
+        "request_and_session_obligations_return_stable_typed_violations"
+      ]
     },
     {
       "id": "SEC-POL-003",
@@ -113,8 +164,14 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_chaos",
       "expected": "Invalid snapshots never activate; revocation beats cache/LKG; bank denies without valid mandatory state.",
-      "implementation_status": "planned",
-      "evidence_required": "Corruption, refresh race, activation acknowledgement, invalidation and LKG outage suite."
+      "implementation_status": "tested",
+      "evidence_required": "Corruption, refresh race, activation acknowledgement, invalidation and LKG outage suite.",
+      "evidence": [
+        "malformed_active_snapshot_keeps_lkg_and_rollback_is_atomic",
+        "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg",
+        "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
+        "postgres_governance_lifecycle_supports_all_artifact_kinds passed against live PostgreSQL"
+      ]
     },
     {
       "id": "SEC-APR-001",
@@ -124,8 +181,14 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "state_machine_concurrency",
       "expected": "Self, stale, replayed, expired and conflicting approvals fail; one valid activation is audited.",
-      "implementation_status": "planned",
-      "evidence_required": "Model/state-machine and real-database concurrency tests."
+      "implementation_status": "implemented",
+      "evidence_required": "Model/state-machine and real-database concurrency tests.",
+      "evidence": [
+        "maker_checker_quorum_and_activation_are_enforced",
+        "approval_replay_is_idempotent_and_stale_versions_fail",
+        "concurrent_activation_uses_etag_compare_and_swap",
+        "PostgreSQL validation pending"
+      ]
     },
     {
       "id": "SEC-APR-002",
@@ -136,7 +199,11 @@
       "test_type": "integration_security",
       "expected": "Mismatched, revoked, expired or exhausted approval denies and cannot expand policy eligibility.",
       "implementation_status": "planned",
-      "evidence_required": "Mutation/replay/race matrix matching sample 05."
+      "evidence_required": "Mutation/replay/race matrix matching sample 05.",
+      "evidence": [
+        "Typed request-bound approval model exists",
+        "authoritative atomic execution-token consumption pending"
+      ]
     },
     {
       "id": "SEC-APR-003",
@@ -147,7 +214,11 @@
       "test_type": "state_machine_security",
       "expected": "Over-scope/expired/exhausted grants deny and non-bypassable invariants remain enforced.",
       "implementation_status": "planned",
-      "evidence_required": "Grant lifecycle and every forbidden-override test."
+      "evidence_required": "Grant lifecycle and every forbidden-override test.",
+      "evidence": [
+        "Generic bounded break-glass primitives exist",
+        "governance-specific forbidden-override matrix pending"
+      ]
     },
     {
       "id": "SEC-RTE-001",
@@ -157,8 +228,12 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "unit_property",
       "expected": "Ineligible providers are never scored or selected under any soft input.",
-      "implementation_status": "planned",
-      "evidence_required": "Generated provider/constraint sets and seven synthetic scenario assertions."
+      "implementation_status": "tested",
+      "evidence_required": "Generated provider/constraint sets and seven synthetic scenario assertions.",
+      "evidence": [
+        "governed_routing_enforces_every_hard_eligibility_gate",
+        "governed_routing_never_places_ineligible_or_cross_tenant_routes_in_fallback"
+      ]
     },
     {
       "id": "SEC-RTE-002",
@@ -168,8 +243,12 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "golden_property",
       "expected": "The same eligible snapshot/input produces byte-stable score components and selection across replicas.",
-      "implementation_status": "planned",
-      "evidence_required": "Cross-process golden vectors and permutation properties."
+      "implementation_status": "tested",
+      "evidence_required": "Cross-process golden vectors and permutation properties.",
+      "evidence": [
+        "governed_routing_scores_in_fixed_point_and_breaks_ties_by_provider",
+        "governance_hot_paths governed-routing maximum-bound benchmark"
+      ]
     },
     {
       "id": "SEC-RTE-003",
@@ -179,8 +258,13 @@
       "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "runtime_regression",
       "expected": "Existing owner remains selected under local heuristics; tenant mismatch/revocation fails safely.",
-      "implementation_status": "partial",
-      "evidence_required": "Existing runtime affinity regressions extended with tenant and governance epochs."
+      "implementation_status": "tested",
+      "evidence_required": "Existing runtime affinity regressions extended with tenant and governance epochs.",
+      "evidence": [
+        "governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score",
+        "governed_routing_does_not_preserve_affinity_after_revocation",
+        "explicit_provider_revocation_overrides_continuation_affinity"
+      ]
     },
     {
       "id": "SEC-RTE-004",
@@ -190,8 +274,13 @@
       "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "stream_runtime_regression",
       "expected": "Postcommit failure is surfaced naturally; no second upstream target receives the continuation.",
-      "implementation_status": "partial",
-      "evidence_required": "HTTP/SSE/WebSocket fault injection before and after first committed chunk."
+      "implementation_status": "tested",
+      "evidence_required": "HTTP/SSE/WebSocket fault injection before and after first committed chunk.",
+      "evidence": [
+        "explicit_quota_codes_rotate_only_before_commit",
+        "transient_5xx_retries_only_before_commit",
+        "provider_retry_boundary_marks_irreversible_stages_committed"
+      ]
     },
     {
       "id": "SEC-AUD-001",
@@ -201,8 +290,13 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "database_fault_injection",
       "expected": "Failure at every statement/commit boundary rolls back all state and returns no success.",
-      "implementation_status": "planned",
-      "evidence_required": "SQLite and PostgreSQL transactional fault matrix."
+      "implementation_status": "tested",
+      "evidence_required": "SQLite and PostgreSQL transactional fault matrix.",
+      "evidence": [
+        "audit_failure_rolls_back_activation_fail_closed",
+        "atomic session revoke plus audit/outbox SQLite and live PostgreSQL coverage",
+        "npm run ci:storage-postgres-proof"
+      ]
     },
     {
       "id": "SEC-AUD-002",
@@ -212,8 +306,15 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "unit_integration_security",
       "expected": "Tamper/fork is detected at the first affected event and synthetic content canaries never appear.",
-      "implementation_status": "partial",
-      "evidence_required": "Existing audit-log tests extended to governance schemas, concurrent heads and canary scan."
+      "implementation_status": "tested",
+      "evidence_required": "Existing audit-log tests extended to governance schemas, concurrent heads and canary scan.",
+      "evidence": [
+        "audit_chain_digest_matches_canonical_vector",
+        "audit_integrity_health_detects_missing_same_tenant_parent",
+        "decision_context_is_bounded_explainable_and_content_free",
+        "bounded tenant audit export storage and HTTP assertions",
+        "gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage"
+      ]
     },
     {
       "id": "SEC-AUD-003",
@@ -223,8 +324,14 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_chaos",
       "expected": "Every committed event is retained and eventually delivered or visibly dead-lettered without hot-path SIEM calls.",
-      "implementation_status": "planned",
-      "evidence_required": "Sink outage, duplicate ack, worker crash, lease expiry, poison and backlog-capacity suite."
+      "implementation_status": "tested",
+      "evidence_required": "Sink outage, duplicate ack, worker crash, lease expiry, poison and backlog-capacity suite.",
+      "evidence": [
+        "outbox_retries_with_stable_id_then_dead_letters",
+        "outbox_worker_delivers_through_the_bounded_exporter_port",
+        "PostgreSQL claim-token lease and separate finalize transactions passed live",
+        "SQLite exporter outage, retry and dead-letter tests"
+      ]
     },
     {
       "id": "SEC-SEC-001",
@@ -235,7 +342,12 @@
       "test_type": "static_dynamic_security",
       "expected": "Raw canary values are rejected at boundaries and absent from every captured artifact.",
       "implementation_status": "partial",
-      "evidence_required": "Existing redaction/secret-store tests plus end-to-end canary scan."
+      "evidence_required": "Existing redaction/secret-store tests plus end-to-end canary scan.",
+      "evidence": [
+        "governed_routing_debug_output_contains_no_tenant_region_revision_or_secret_reference",
+        "guardrail_webhook_policy_reason_is_stable_and_content_free",
+        "end-to-end release canary scan pending"
+      ]
     },
     {
       "id": "SEC-SEC-002",
@@ -246,7 +358,11 @@
       "test_type": "integration_chaos",
       "expected": "Cross-namespace access and expired/revoked leases deny; bank never falls back to raw local secrets.",
       "implementation_status": "planned",
-      "evidence_required": "External secret manager namespace, rotation, revocation and outage tests."
+      "evidence_required": "External secret manager namespace, rotation, revocation and outage tests.",
+      "evidence": [
+        "SecretRef/projected-secret boundary exists",
+        "production Vault-compatible lease adapter validation pending"
+      ]
     },
     {
       "id": "SEC-STO-001",
@@ -256,8 +372,13 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "migration_restore_integration",
       "expected": "Old/new supported images interoperate and restored durable state preserves isolation, hashes and pointers.",
-      "implementation_status": "planned",
-      "evidence_required": "SQLite/PostgreSQL forward/back compatibility, export/import and point-in-time restore drill."
+      "implementation_status": "tested",
+      "evidence_required": "SQLite/PostgreSQL forward/back compatibility, export/import and point-in-time restore drill.",
+      "evidence": [
+        "all_governance_artifact_kinds_use_revisioned_authority",
+        "governance migration catalog tests",
+        "npm run ci:backup-restore-drill governance fingerprint and audit-link verification"
+      ]
     },
     {
       "id": "SEC-STO-002",
@@ -267,8 +388,13 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "multi_replica_chaos",
       "expected": "One authoritative mutation wins; Redis loss degrades boundedly and rebuilds without losing durable state.",
-      "implementation_status": "planned",
-      "evidence_required": "At least two replicas with concurrent activation/use, Redis restart and DB failover."
+      "implementation_status": "partial",
+      "evidence_required": "At least two replicas with concurrent activation/use, Redis restart and DB failover.",
+      "evidence": [
+        "concurrent_activation_uses_etag_compare_and_swap",
+        "two live PostgreSQL repositories enforce atomic reservation/accounting",
+        "Redis-backed boundary proof passed; Redis restart and database failover remain deployment tests"
+      ]
     },
     {
       "id": "SEC-GWY-001",
@@ -278,8 +404,14 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "architecture_integration",
       "expected": "Every supported channel records the same required stage/revision evidence before provider dispatch.",
-      "implementation_status": "partial",
-      "evidence_required": "Channel parity tests and CI guard forbidding direct provider dispatch from adapters."
+      "implementation_status": "tested",
+      "evidence_required": "Channel parity tests and CI guard forbidding direct provider dispatch from adapters.",
+      "evidence": [
+        "provider_route_mapping_covers_forwarded_data_plane_routes",
+        "anonymous_compatibility_owns_typed_provider_dispatch",
+        "production-boundary-guard.mjs",
+        "application-boundary-guard.mjs"
+      ]
     },
     {
       "id": "SEC-GWY-002",
@@ -289,8 +421,13 @@
       "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "runtime_regression",
       "expected": "Generic upstream 429/status/body/stream is preserved; local precommit exhaustion is a local service-unavailable result.",
-      "implementation_status": "partial",
-      "evidence_required": "Existing runtime quota/transport transparency regressions plus governed precommit failures."
+      "implementation_status": "tested",
+      "evidence_required": "Existing runtime quota/transport transparency regressions plus governed precommit failures.",
+      "evidence": [
+        "generic_429_passes_through_without_explicit_quota_code",
+        "codex_content_policy_errors_pass_through_without_quota_rotation",
+        "transient_5xx_retries_only_before_commit"
+      ]
     },
     {
       "id": "SEC-BNK-001",
@@ -300,8 +437,13 @@
       "modes": ["bank_enforce"],
       "test_type": "configuration_deployment_security",
       "expected": "Every insecure combination rejects startup with a stable content-free reason.",
-      "implementation_status": "planned",
-      "evidence_required": "Generated configuration matrix plus Compose/Kubernetes/container policy tests."
+      "implementation_status": "tested",
+      "evidence_required": "Generated configuration matrix plus Compose/Kubernetes/container policy tests.",
+      "evidence": [
+        "bank_governance_deployment_matrix_fails_closed",
+        "bank_runtime_listener_guard_rejects_public_or_wildcard_addresses",
+        "deployment-security-guard.mjs"
+      ]
     },
     {
       "id": "SEC-BNK-002",
@@ -311,8 +453,13 @@
       "modes": ["bank_enforce"],
       "test_type": "end_to_end_chaos_security",
       "expected": "Each missing mandatory dependency denies before upstream commit and emits bounded durable evidence when possible.",
-      "implementation_status": "planned",
-      "evidence_required": "Complete sample 07 scenario under dependency fault injection."
+      "implementation_status": "partial",
+      "evidence_required": "Complete sample 07 scenario under dependency fault injection.",
+      "evidence": [
+        "bank_snapshot_denies_unsupported_inspection",
+        "bank_response_inspection_requires_full_coverage",
+        "complete end-to-end dependency fault matrix pending"
+      ]
     },
     {
       "id": "SEC-DEP-001",
@@ -322,8 +469,13 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "deployment_static_integration",
       "expected": "CI rejects insecure manifests and a deployed pod cannot reach unapproved endpoints.",
-      "implementation_status": "planned",
-      "evidence_required": "Manifest policy, image/provenance/vulnerability scan and network-policy connectivity tests."
+      "implementation_status": "partial",
+      "evidence_required": "Manifest policy, image/provenance/vulnerability scan and network-policy connectivity tests.",
+      "evidence": [
+        "hardened_container_and_complete_artifacts_are_compliant",
+        "deployment-security-guard.mjs",
+        "deployed connectivity/image scan release evidence pending"
+      ]
     },
     {
       "id": "SEC-PERF-001",
@@ -333,8 +485,13 @@
       "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "benchmark_load_soak",
       "expected": "Disabled regression is at most 5%; governed local overhead at most 5 ms p99; PDP at most 1 ms; routing at most 2 ms.",
-      "implementation_status": "planned",
-      "evidence_required": "Five comparable samples with machine metadata, raw output, load/soak errors and variance."
+      "implementation_status": "partial",
+      "evidence_required": "Five comparable samples with machine metadata, raw output, load/soak errors and variance.",
+      "evidence": [
+        "12-performance-baseline-and-results.md maximum-bound and disabled-path Criterion tables",
+        "32/32 local load smoke at 68.56 ms p95 TTFT",
+        "session-bank, audit/outbox pressure and external multi-replica soak remain deployment evidence"
+      ]
     }
   ]
 }

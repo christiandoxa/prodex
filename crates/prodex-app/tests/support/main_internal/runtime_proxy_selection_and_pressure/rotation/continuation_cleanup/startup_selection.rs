@@ -3,9 +3,12 @@ use super::*;
 #[test]
 fn runtime_rotation_proxy_can_start_even_if_selected_profile_auth_is_not_quota_compatible() {
     let temp_dir = TestDir::isolated();
-    let main_home = temp_dir.path.join("homes/main");
-    let second_home = temp_dir.path.join("homes/second");
+    let homes = temp_dir.path.join("homes");
+    let main_home = homes.join("main");
+    let second_home = homes.join("second");
+    create_codex_home_if_missing(&homes).expect("homes root should be created");
     create_codex_home_if_missing(&main_home).expect("main home should be created");
+    create_codex_home_if_missing(&second_home).expect("second home should be created");
     write_auth_json(&second_home.join("auth.json"), "second-account");
 
     let state = AppState {
