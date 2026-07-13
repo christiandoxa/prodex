@@ -85,7 +85,7 @@ When changing `prodex`, keep these invariants intact:
 8. Tracked content must not contain real personal or operational identifiers.
    - Use reserved domains such as `example.com`, generic paths such as `/home/test-user`, generic profile names, and synthetic UUIDs or tokens in docs, tests, fixtures, and examples.
    - Never copy real email-derived profile names, home or `CODEX_HOME` paths, overlay IDs, attachment IDs, session IDs, logs, auth data, or credentials into the repository.
-   - Preserve intentional public project ownership metadata, but use a non-personal Git author address for new commits and scan the tracked diff for secrets and PII before release.
+   - Preserve intentional public project ownership metadata. Git commit authors may use the maintainer identity configured locally, including a real name and verified email address; continue to scan the tracked diff for secrets and PII before release.
 
 ## Runtime Proxy Rules
 
