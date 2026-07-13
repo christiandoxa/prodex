@@ -320,7 +320,7 @@ fn log_snapshot_tui_text_handles_empty_state() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(rendered.contains("Waiting for transcript"));
+    assert!(rendered.contains("Waiting for transcript, upstream payload, or token usage"));
 }
 
 #[test]
