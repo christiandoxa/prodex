@@ -111,7 +111,7 @@ fn labels_standard_windows() {
 }
 
 #[test]
-fn blocks_missing_required_main_window() {
+fn missing_main_window_does_not_block_available_window() {
     let usage = UsageResponse {
         email: None,
         plan_type: None,
@@ -128,10 +128,39 @@ fn blocks_missing_required_main_window() {
         additional_rate_limits: Vec::new(),
     };
 
-    let blocked = collect_blocked_limits(&usage, false);
-    assert_eq!(blocked.len(), 1);
-    assert_eq!(blocked[0].message, "weekly quota unavailable");
-    assert_eq!(format_openai_quota_status(&usage), "Blocked weekly");
+    assert!(collect_blocked_limits(&usage, false).is_empty());
+    assert_eq!(format_openai_quota_status(&usage), "Ready");
+}
+
+#[test]
+fn missing_five_hour_window_does_not_block_available_weekly_window() {
+    let usage = UsageResponse {
+        email: None,
+        plan_type: None,
+        rate_limit: Some(WindowPair {
+            primary_window: None,
+            secondary_window: Some(UsageWindow {
+                used_percent: Some(0),
+                reset_at: Some(1_700_259_200),
+                limit_window_seconds: Some(604_800),
+            }),
+        }),
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: Vec::new(),
+    };
+
+    assert!(collect_blocked_limits(&usage, false).is_empty());
+    let fields = quota_pool_summary_fields(&[openai_report("weekly-only", usage)]);
+    assert!(fields.contains(&("Available".to_string(), "1/1 profile".to_string())));
+    assert!(fields.contains(&(
+        "Usable now".to_string(),
+        "weekly 100% across 1 ready profile(s)".to_string(),
+    )));
+    assert!(fields.contains(&("5h remaining pool".to_string(), "Unavailable".to_string(),)));
+    assert!(fields.iter().any(|(label, value)| {
+        label == "Weekly remaining pool" && value.starts_with("100% across 1 profile(s)")
+    }));
 }
 
 #[test]

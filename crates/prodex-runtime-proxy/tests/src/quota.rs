@@ -219,4 +219,17 @@ fn precommit_quota_gate_final_blocks_unknown_quota_only_when_pool_fallback_exist
         ),
         RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
     );
+
+    assert_eq!(
+        runtime_proxy_precommit_quota_gate_final_decision(
+            RuntimeProxyPrecommitQuotaGateFinalInput {
+                summary,
+                source: Some(RuntimeSelectionQuotaSource::LiveProbe),
+                route_kind: RuntimeRouteKind::Responses,
+                has_alternative_quota_profile: true,
+                responses_critical_floor_percent: 2,
+            },
+        ),
+        RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
+    );
 }

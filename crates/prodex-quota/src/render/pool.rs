@@ -6,6 +6,10 @@ pub(super) struct QuotaPoolAggregate {
     available_profiles: usize,
     profiles_with_data: usize,
     ready_profiles_with_data: usize,
+    five_hour_profiles_with_data: usize,
+    weekly_profiles_with_data: usize,
+    ready_five_hour_profiles_with_data: usize,
+    ready_weekly_profiles_with_data: usize,
     main_profiles_with_data: usize,
     five_hour_pool_remaining: i64,
     weekly_pool_remaining: i64,
@@ -42,33 +46,47 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         }
         match snapshot {
             ProviderQuotaSnapshot::OpenAi(usage) => {
-                let Some((five_hour, weekly)) = main_window_snapshots(usage) else {
+                let five_hour = required_main_window_snapshot(usage, "5h");
+                let weekly = required_main_window_snapshot(usage, "weekly");
+                if five_hour.is_none() && weekly.is_none() {
                     continue;
-                };
+                }
 
                 aggregate.profiles_with_data += 1;
-                aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
-                aggregate.weekly_pool_remaining += weekly.remaining_percent;
-                if five_hour.remaining_percent > 0 && weekly.remaining_percent > 0 {
+                if let Some(five_hour) = five_hour {
+                    aggregate.five_hour_profiles_with_data += 1;
+                    aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
+                    if five_hour.reset_at != i64::MAX {
+                        aggregate.earliest_five_hour_reset_at = Some(
+                            aggregate
+                                .earliest_five_hour_reset_at
+                                .map_or(five_hour.reset_at, |current| {
+                                    current.min(five_hour.reset_at)
+                                }),
+                        );
+                    }
+                }
+                if let Some(weekly) = weekly {
+                    aggregate.weekly_profiles_with_data += 1;
+                    aggregate.weekly_pool_remaining += weekly.remaining_percent;
+                    if weekly.reset_at != i64::MAX {
+                        aggregate.earliest_weekly_reset_at = Some(
+                            aggregate
+                                .earliest_weekly_reset_at
+                                .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
+                        );
+                    }
+                }
+                if openai_quota_has_ready_limit(usage) {
                     aggregate.ready_profiles_with_data += 1;
-                    aggregate.ready_five_hour_pool_remaining += five_hour.remaining_percent;
-                    aggregate.ready_weekly_pool_remaining += weekly.remaining_percent;
-                }
-                if five_hour.reset_at != i64::MAX {
-                    aggregate.earliest_five_hour_reset_at = Some(
-                        aggregate
-                            .earliest_five_hour_reset_at
-                            .map_or(five_hour.reset_at, |current| {
-                                current.min(five_hour.reset_at)
-                            }),
-                    );
-                }
-                if weekly.reset_at != i64::MAX {
-                    aggregate.earliest_weekly_reset_at = Some(
-                        aggregate
-                            .earliest_weekly_reset_at
-                            .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
-                    );
+                    if let Some(five_hour) = five_hour {
+                        aggregate.ready_five_hour_profiles_with_data += 1;
+                        aggregate.ready_five_hour_pool_remaining += five_hour.remaining_percent;
+                    }
+                    if let Some(weekly) = weekly {
+                        aggregate.ready_weekly_profiles_with_data += 1;
+                        aggregate.ready_weekly_pool_remaining += weekly.remaining_percent;
+                    }
                 }
                 if let Some((spark_five_hour, spark_weekly)) = spark_window_snapshots(usage) {
                     aggregate.spark_profiles_with_data += 1;
@@ -206,6 +224,8 @@ fn quota_pool_summary_fields_for_aggregate(
                 aggregate.ready_five_hour_pool_remaining,
                 aggregate.ready_weekly_pool_remaining,
                 aggregate.ready_profiles_with_data,
+                aggregate.ready_five_hour_profiles_with_data,
+                aggregate.ready_weekly_profiles_with_data,
             ),
         ));
         fields.extend([
@@ -213,7 +233,7 @@ fn quota_pool_summary_fields_for_aggregate(
                 "5h remaining pool".to_string(),
                 format_info_pool_remaining(
                     aggregate.five_hour_pool_remaining,
-                    aggregate.profiles_with_data,
+                    aggregate.five_hour_profiles_with_data,
                     aggregate.earliest_five_hour_reset_at,
                 ),
             ),
@@ -221,7 +241,7 @@ fn quota_pool_summary_fields_for_aggregate(
                 "Weekly remaining pool".to_string(),
                 format_info_pool_remaining(
                     aggregate.weekly_pool_remaining,
-                    aggregate.profiles_with_data,
+                    aggregate.weekly_profiles_with_data,
                     aggregate.earliest_weekly_reset_at,
                 ),
             ),
@@ -273,12 +293,23 @@ fn format_ready_pool_remaining(
     five_hour_remaining: i64,
     weekly_remaining: i64,
     ready_profiles: usize,
+    five_hour_profiles: usize,
+    weekly_profiles: usize,
 ) -> String {
     if ready_profiles == 0 {
         return "Unavailable".to_string();
     }
+
+    let mut windows = Vec::new();
+    if five_hour_profiles > 0 {
+        windows.push(format!("5h {five_hour_remaining}%"));
+    }
+    if weekly_profiles > 0 {
+        windows.push(format!("weekly {weekly_remaining}%"));
+    }
     format!(
-        "5h {five_hour_remaining}% | weekly {weekly_remaining}% across {ready_profiles} ready profile(s)"
+        "{} across {ready_profiles} ready profile(s)",
+        windows.join(" | ")
     )
 }
 
