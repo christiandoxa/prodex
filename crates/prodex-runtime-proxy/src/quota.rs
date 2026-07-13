@@ -180,10 +180,34 @@ pub fn runtime_proxy_quota_summary_for_route(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeProxyQuotaSummary {
+    let (five_hour_summary, weekly_summary) =
+        runtime_proxy_quota_window_summaries(five_hour, weekly);
     RuntimeProxyQuotaSummary {
-        five_hour: runtime_proxy_quota_window_summary(five_hour),
-        weekly: runtime_proxy_quota_window_summary(weekly),
+        five_hour: five_hour_summary,
+        weekly: weekly_summary,
         route_band: runtime_proxy_quota_pressure_band_for_route(five_hour, weekly, route_kind),
+    }
+}
+
+fn runtime_proxy_quota_window_summaries(
+    five_hour: Option<RuntimeProxyQuotaWindowObservation>,
+    weekly: Option<RuntimeProxyQuotaWindowObservation>,
+) -> (
+    RuntimeProxyQuotaWindowSummary,
+    RuntimeProxyQuotaWindowSummary,
+) {
+    let neutral = RuntimeProxyQuotaWindowSummary {
+        status: RuntimeSelectionQuotaWindowStatus::Ready,
+        remaining_percent: 100,
+        reset_at: i64::MAX,
+    };
+    match (five_hour, weekly) {
+        (None, Some(weekly)) => (neutral, runtime_proxy_quota_window_summary(Some(weekly))),
+        (Some(five_hour), None) => (runtime_proxy_quota_window_summary(Some(five_hour)), neutral),
+        _ => (
+            runtime_proxy_quota_window_summary(five_hour),
+            runtime_proxy_quota_window_summary(weekly),
+        ),
     }
 }
 
@@ -209,8 +233,7 @@ pub fn runtime_proxy_usage_snapshot_from_observations_at(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     checked_at: i64,
 ) -> RuntimeProxyUsageSnapshot {
-    let five_hour = runtime_proxy_quota_window_summary(five_hour);
-    let weekly = runtime_proxy_quota_window_summary(weekly);
+    let (five_hour, weekly) = runtime_proxy_quota_window_summaries(five_hour, weekly);
     RuntimeProxyUsageSnapshot {
         checked_at,
         five_hour_status: five_hour.status,
@@ -406,16 +429,13 @@ pub fn runtime_proxy_quota_pressure_band_for_route(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeSelectionQuotaPressureBand {
-    let Some(weekly) = weekly else {
+    if weekly.is_none() && five_hour.is_none() {
         return RuntimeSelectionQuotaPressureBand::Unknown;
-    };
-    let Some(five_hour) = five_hour else {
-        return RuntimeSelectionQuotaPressureBand::Unknown;
-    };
+    }
 
-    let weekly_remaining = weekly.remaining_percent;
-    let five_hour_remaining = five_hour.remaining_percent;
-    if weekly_remaining == 0 || five_hour_remaining == 0 {
+    if weekly.is_some_and(|window| window.remaining_percent == 0)
+        || five_hour.is_some_and(|window| window.remaining_percent == 0)
+    {
         return RuntimeSelectionQuotaPressureBand::Exhausted;
     }
 
@@ -424,9 +444,13 @@ pub fn runtime_proxy_quota_pressure_band_for_route(
         RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => (10, 5, 5, 3),
     };
 
-    if weekly_remaining <= critical_weekly || five_hour_remaining <= critical_five_hour {
+    if weekly.is_some_and(|window| window.remaining_percent <= critical_weekly)
+        || five_hour.is_some_and(|window| window.remaining_percent <= critical_five_hour)
+    {
         RuntimeSelectionQuotaPressureBand::Critical
-    } else if weekly_remaining <= thin_weekly || five_hour_remaining <= thin_five_hour {
+    } else if weekly.is_some_and(|window| window.remaining_percent <= thin_weekly)
+        || five_hour.is_some_and(|window| window.remaining_percent <= thin_five_hour)
+    {
         RuntimeSelectionQuotaPressureBand::Thin
     } else {
         RuntimeSelectionQuotaPressureBand::Healthy
