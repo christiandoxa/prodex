@@ -104,6 +104,22 @@ fn runtime_launch_preflight_error_message_redacts_secret_like_chain() {
 }
 
 #[test]
+fn persisted_weekly_only_snapshot_does_not_block_launch_preflight() {
+    let usage = runtime_launch_usage_from_snapshot(&RuntimeProfileUsageSnapshot {
+        checked_at: Local::now().timestamp(),
+        five_hour_status: RuntimeQuotaWindowStatus::Unknown,
+        five_hour_remaining_percent: 0,
+        five_hour_reset_at: i64::MAX,
+        weekly_status: RuntimeQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 100,
+        weekly_reset_at: Local::now().timestamp() + 604_800,
+    });
+
+    assert!(usage.rate_limit.as_ref().unwrap().primary_window.is_none());
+    assert!(collect_blocked_limits(&usage, false).is_empty());
+}
+
+#[test]
 fn prepare_runtime_launch_uses_persisted_exhausted_quota_snapshot_before_network_preflight() {
     let root = temp_dir("launch-preflight-persisted-exhausted-snapshot");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
