@@ -182,12 +182,15 @@ fn runtime_gateway_guardrail_webhook_decision(
             }
         });
     };
+    // Webhook response text is untrusted content. Keep audit, trace, and log dimensions stable.
+    runtime_gateway_guardrail_webhook_policy_block(allow)
+}
+
+fn runtime_gateway_guardrail_webhook_policy_block(
+    allow: bool,
+) -> Option<RuntimeGatewayGuardrailWebhookBlock> {
     (!allow).then(|| RuntimeGatewayGuardrailWebhookBlock {
-        reason: value
-            .get("reason")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("webhook_denied")
-            .to_string(),
+        reason: "webhook_denied".to_string(),
     })
 }
 
@@ -250,6 +253,17 @@ mod tests {
                 .unwrap()
                 .reason,
             "webhook_error"
+        );
+    }
+
+    #[test]
+    fn guardrail_webhook_policy_reason_is_stable_and_content_free() {
+        assert!(runtime_gateway_guardrail_webhook_policy_block(true).is_none());
+        assert_eq!(
+            runtime_gateway_guardrail_webhook_policy_block(false)
+                .unwrap()
+                .reason,
+            "webhook_denied"
         );
     }
 }

@@ -5,6 +5,36 @@ The authoritative machine-readable inventory is
 mode, phase, test type, expected result and implementation status. `planned`
 means required evidence is not yet present; it is not a passing result.
 
+The matrix also uses `tested` only when it names the focused test or guard,
+`implemented` when production behavior exists but a broader gate remains, and
+`pending_validation` only when the required backend execution evidence is not
+available.
+
+## Candidate evidence register
+
+| Control | Status | Named evidence |
+| --- | --- | --- |
+| Identity/header trust | tested | `edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch`; `principal_evidence_enforces_required_scope_and_anonymous_policy`; auth boundary guard |
+| Bounded inspection/classification | tested | `inspection_result_is_bounded_deterministic_and_content_free`; schema walker/local detector bounds; application inspection tests |
+| PDP and obligations | tested | `explicit_deny_wins_and_drops_obligations`; `policy_compilation_is_bounded_and_rejects_duplicate_ids`; governance obligation matrix |
+| Provider routing | tested | governed-routing hard-filter, fixed-point score, affinity, revocation, fallback and debug suites |
+| Channel boundary | tested | `provider_route_mapping_covers_forwarded_data_plane_routes`; production/application boundary guards |
+| Upstream transparency/no postcommit retry | tested | generic 429/content-policy pass-through and precommit-only error-policy regressions |
+| Bank startup configuration | tested | `bank_governance_deployment_matrix_fails_closed`; listener guard; deployment-security guard |
+| PostgreSQL/RLS and SIEM | tested | live disposable PostgreSQL/TLS/RLS lifecycle and outbox proof passed |
+| Performance | implemented | maximum-bound and disabled-path Criterion budgets, fuzz, load and stress passed; external multi-replica soak remains deployment evidence |
+
+## Declared residuals
+
+- One process has one attached executable provider adapter. Heterogeneous
+  in-process selection/fallback is unsupported and must fail unavailable.
+- Mandatory governed data-plane audit is synchronous precommit I/O.
+- Policy-selected Presidio and guardrail-webhook calls are bounded request-path
+  network dependencies.
+- Cross-replica revocation has a documented five-second refresh bound; Redis
+  restart, managed-database failover and external SIEM outage exercises remain
+  deployment acceptance work.
+
 ## Required suites
 
 | Area | Minimum evidence |

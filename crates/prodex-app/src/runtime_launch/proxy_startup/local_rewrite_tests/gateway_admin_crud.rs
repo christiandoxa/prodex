@@ -48,6 +48,7 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
             http_endpoint: Some("https://telemetry.example.test/ingest".to_string()),
             http_schema: "prodex.gateway.event.v1".to_string(),
             http_bearer_token: Some(runtime_gateway_test_secret("telemetry-secret")),
+            siem_worker: None,
         },
     })
     .expect("gateway proxy should start");

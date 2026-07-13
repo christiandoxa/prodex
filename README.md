@@ -700,7 +700,14 @@ anonymizer_url = "http://localhost:5001"
 language_mode = "auto"
 languages = ["en", "id"]
 fail_mode = "open"
+timeout_ms = 10000
+max_response_bytes = 4194304
+max_concurrency = 8
 ```
+
+Enterprise modes additionally require private/on-prem endpoints or exact
+`trusted_hosts` entries. Redirects and environment proxy settings are ignored
+so inspected content cannot leave the approved endpoint boundary.
 
 The standard Microsoft Analyzer image is English-only. Indonesian detection requires an Analyzer with Indonesian models and recognizers. Presidio quality depends on that service configuration.
 

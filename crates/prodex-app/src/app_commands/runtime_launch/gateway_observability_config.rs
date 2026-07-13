@@ -1,4 +1,5 @@
 use super::gateway_secret_config::GatewaySecretResolver;
+use super::gateway_siem_export::RuntimeSiemWorkerConfig;
 use super::*;
 use prodex_domain::SecretPurpose;
 use std::path::PathBuf;
@@ -82,12 +83,14 @@ pub(crate) fn gateway_observability_config_with_resolver(
         .transpose()?
         .unwrap_or_else(|| "generic".to_string());
     let http_bearer_token = gateway_observability_secret_with_resolver(policy, resolver)?;
+    let siem_worker = RuntimeSiemWorkerConfig::from_policy(&policy.observability, resolver)?;
     Ok(RuntimeGatewayObservabilityConfig {
         sinks,
         jsonl_path,
         http_endpoint,
         http_schema,
         http_bearer_token,
+        siem_worker: siem_worker.map(std::sync::Arc::new),
     })
 }
 

@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use redaction::{redaction_key_looks_sensitive, redaction_redact_secret_like_text};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeProxyLogField<'a> {
     key: Cow<'a, str>,
@@ -47,7 +49,14 @@ impl<'a> RuntimeProxyLogEvent<'a> {
     }
 
     pub fn render_message(&self) -> String {
-        let mut message = runtime_proxy_sanitize_log_fragment(&self.event).into_owned();
+        let capacity = self.event.len()
+            + self
+                .fields
+                .iter()
+                .map(|field| field.key().len() + field.value().len() + 2)
+                .sum::<usize>();
+        let mut message = String::with_capacity(capacity);
+        message.push_str(&runtime_proxy_sanitize_log_fragment(&self.event));
         for field in &self.fields {
             if field.key().is_empty() || runtime_proxy_log_key_needs_skip(field.key()) {
                 continue;
@@ -57,7 +66,10 @@ impl<'a> RuntimeProxyLogEvent<'a> {
             }
             message.push_str(field.key());
             message.push('=');
-            message.push_str(&runtime_proxy_format_log_field_value(field.value()));
+            message.push_str(&runtime_proxy_format_log_field_value(
+                field.key(),
+                field.value(),
+            ));
         }
         message
     }
@@ -202,13 +214,146 @@ fn runtime_proxy_log_key_needs_skip(key: &str) -> bool {
         .any(|byte| byte == b'=' || byte.is_ascii_whitespace())
 }
 
-fn runtime_proxy_format_log_field_value(value: &str) -> String {
+fn runtime_proxy_format_log_field_value(key: &str, value: &str) -> String {
+    if runtime_proxy_log_key_is_internal_code(key)
+        || key == "trace"
+        || (runtime_proxy_log_key_is_known_safe(key)
+            && runtime_proxy_log_value_is_stable_code(value))
+    {
+        return runtime_proxy_quote_log_field_value(value);
+    }
+    let value = if (!runtime_proxy_log_key_is_known_safe(key) && redaction_key_looks_sensitive(key))
+        || (runtime_proxy_log_key_is_free_form(key)
+            && !runtime_proxy_log_value_is_stable_code(value))
+    {
+        Cow::Borrowed("<redacted>")
+    } else {
+        if runtime_proxy_log_key_is_location(key) {
+            Cow::Owned(redaction_redact_secret_like_text(
+                &runtime_proxy_strip_log_location_secrets(value),
+            ))
+        } else if runtime_proxy_log_value_is_stable_code(value) {
+            Cow::Borrowed(value)
+        } else {
+            Cow::Owned(redaction_redact_secret_like_text(value))
+        }
+    };
+    runtime_proxy_quote_log_field_value(&value)
+}
+
+fn runtime_proxy_log_key_is_internal_code(key: &str) -> bool {
+    matches!(
+        key,
+        "affinity"
+            | "balance"
+            | "cold_start_jobs"
+            | "excluded_count"
+            | "fallback"
+            | "health"
+            | "inflight"
+            | "mode"
+            | "order"
+            | "outcome"
+            | "performance"
+            | "pressure_mode"
+            | "prompt_cache_bound"
+            | "ready"
+            | "reason"
+            | "reports"
+            | "route"
+            | "schema_version"
+            | "signaled"
+            | "soft_limit"
+            | "sync_probe_jobs"
+            | "transport"
+            | "useful"
+            | "wait_ms"
+            | "waited_ms"
+    )
+}
+
+fn runtime_proxy_quote_log_field_value(value: &str) -> String {
     let sanitized = runtime_proxy_sanitize_log_fragment(value);
     if runtime_proxy_log_field_value_needs_quotes(&sanitized) {
         serde_json::to_string(sanitized.as_ref()).unwrap_or_else(|_| "\"\"".to_string())
     } else {
         sanitized.into_owned()
     }
+}
+
+fn runtime_proxy_log_key_is_known_safe(key: &str) -> bool {
+    matches!(
+        key,
+        "affinity"
+            | "balance"
+            | "cold_start_jobs"
+            | "excluded_count"
+            | "fallback"
+            | "health"
+            | "inflight"
+            | "mode"
+            | "order"
+            | "outcome"
+            | "performance"
+            | "pressure_mode"
+            | "profile"
+            | "prompt_cache_bound"
+            | "ready"
+            | "reason"
+            | "reports"
+            | "request"
+            | "response_id"
+            | "route"
+            | "schema_version"
+            | "signaled"
+            | "soft_limit"
+            | "sync_probe_jobs"
+            | "trace"
+            | "transport"
+            | "useful"
+            | "wait_ms"
+            | "waited_ms"
+    )
+}
+
+fn runtime_proxy_log_key_is_free_form(key: &str) -> bool {
+    [
+        "error", "message", "detail", "body", "response", "stderr", "panic",
+    ]
+    .iter()
+    .any(|candidate| key.eq_ignore_ascii_case(candidate))
+}
+
+fn runtime_proxy_log_value_is_stable_code(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.contains("sk-")
+        && !value.contains("sk_")
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'_' | b'-' | b'.' | b':')
+        })
+}
+
+fn runtime_proxy_log_key_is_location(key: &str) -> bool {
+    key.eq_ignore_ascii_case("path")
+        || key.ends_with("_path")
+        || key.eq_ignore_ascii_case("url")
+        || key.ends_with("_url")
+        || key.eq_ignore_ascii_case("endpoint")
+        || key.ends_with("_endpoint")
+}
+
+fn runtime_proxy_strip_log_location_secrets(value: &str) -> String {
+    let value = value.split(['?', '#']).next().unwrap_or(value);
+    let Some((scheme, remainder)) = value.split_once("://") else {
+        return value.to_string();
+    };
+    let Some((_, location)) = remainder.rsplit_once('@') else {
+        return value.to_string();
+    };
+    format!("{scheme}://<redacted>@{location}")
 }
 
 fn runtime_proxy_sanitize_log_fragment(value: &str) -> Cow<'_, str> {

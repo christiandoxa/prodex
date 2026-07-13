@@ -1,6 +1,6 @@
 # ADR 0002: PDP, PAP, PIP, PEP, and Snapshots
 
-- Status: Proposed
+- Status: Accepted
 - Scope: target enterprise governance architecture
 
 ## Context
@@ -33,6 +33,10 @@ overrides cache and LKG.
 
 ## Implementation status
 
-Policy caching, ArcSwap/LKG and application boundary primitives exist. The
-unified governance PAP/PIP/PDP/PEP contract and full snapshot lifecycle remain
-to be implemented.
+The candidate implements immutable compiled classification/policy snapshots, a
+pure application PDP, typed PIP input, request/response/session/routing PEPs and
+CI dependency guards. Evidence includes
+`application_pipeline_classifies_before_policy_evaluation`,
+`explicit_deny_wins_and_drops_obligations`, and the production/application
+boundary guards. Durable multi-replica publication and PostgreSQL validation
+remain pending.

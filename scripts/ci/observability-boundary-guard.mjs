@@ -421,6 +421,25 @@ const REQUIRED_SOURCE_SNIPPETS = Object.freeze([
   "\"security_result\"",
   "security_decision_kind_label(decision)",
   "security_decision_result_label(result)",
+  "pub enum InspectionStage",
+  "pub enum InspectionCoverageClass",
+  "pub enum InspectionFindingCategory",
+  "pub enum InspectionMaskingAction",
+  "pub enum InspectionOutcome",
+  "pub struct InspectionMetricPlan",
+  "pub fn plan_inspection_metric(",
+  "event_metric_name: \"prodex_inspection_events_total\"",
+  "duration_metric_name: \"prodex_inspection_duration_microseconds\"",
+  "\"inspection_stage\"",
+  "\"inspection_coverage\"",
+  "\"inspection_finding_category\"",
+  "\"inspection_masking_action\"",
+  "\"inspection_outcome\"",
+  "inspection_stage_label(stage)",
+  "inspection_coverage_label(coverage)",
+  "inspection_finding_category_label(finding_category)",
+  "inspection_masking_action_label(masking_action)",
+  "inspection_outcome_label(outcome)",
   "pub enum AuthnTokenValidationStage",
   "pub enum AuthnTokenValidationResult",
   "pub struct AuthnTokenValidationMetricPlan",
@@ -1003,6 +1022,12 @@ pub struct AuditRetentionPurgeMetricPlan;
 pub enum SecurityDecisionKind {}
 pub enum SecurityDecisionResult {}
 pub struct SecurityDecisionMetricPlan;
+pub enum InspectionStage {}
+pub enum InspectionCoverageClass {}
+pub enum InspectionFindingCategory {}
+pub enum InspectionMaskingAction {}
+pub enum InspectionOutcome {}
+pub struct InspectionMetricPlan;
 pub enum AuthnTokenValidationStage {}
 pub enum AuthnTokenValidationResult {}
 pub struct AuthnTokenValidationMetricPlan;
@@ -1423,6 +1448,20 @@ pub fn plan_security_decision_metric() {
 }
 fn security_decision_kind_label(decision: SecurityDecisionKind) {}
 fn security_decision_result_label(result: SecurityDecisionResult) {}
+pub fn plan_inspection_metric() {
+    let stage = TelemetryAttribute::metric_label("inspection_stage", inspection_stage_label(stage));
+    let coverage = TelemetryAttribute::metric_label("inspection_coverage", inspection_coverage_label(coverage));
+    let finding = TelemetryAttribute::metric_label("inspection_finding_category", inspection_finding_category_label(finding_category));
+    let masking = TelemetryAttribute::metric_label("inspection_masking_action", inspection_masking_action_label(masking_action));
+    let outcome = TelemetryAttribute::metric_label("inspection_outcome", inspection_outcome_label(outcome));
+    event_metric_name: "prodex_inspection_events_total";
+    duration_metric_name: "prodex_inspection_duration_microseconds";
+}
+fn inspection_stage_label(stage: InspectionStage) {}
+fn inspection_coverage_label(coverage: InspectionCoverageClass) {}
+fn inspection_finding_category_label(finding_category: InspectionFindingCategory) {}
+fn inspection_masking_action_label(masking_action: InspectionMaskingAction) {}
+fn inspection_outcome_label(outcome: InspectionOutcome) {}
 pub fn plan_authn_token_validation_metric() {
     let stage = TelemetryAttribute::metric_label("authn_validation_stage", authn_token_validation_stage_label(stage));
     let result = TelemetryAttribute::metric_label("authn_validation_result", authn_token_validation_result_label(result));

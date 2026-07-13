@@ -233,12 +233,366 @@ END $migration$;
 "#,
 };
 
+pub const ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(4),
+    phase: PostgresMigrationPhase::Expand,
+    name: "004_enterprise_governance_hardening",
+    sql: r#"
+CREATE TABLE IF NOT EXISTS prodex_pricing_revisions (
+    tenant_id UUID NOT NULL REFERENCES prodex_tenants(tenant_id),
+    revision_id TEXT NOT NULL,
+    artifact_checksum TEXT NOT NULL,
+    pricing_metadata JSONB NOT NULL,
+    lifecycle_state TEXT NOT NULL,
+    created_at_unix_ms BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, revision_id),
+    UNIQUE (tenant_id, artifact_checksum),
+    CHECK (char_length(revision_id) BETWEEN 1 AND 128),
+    CHECK (char_length(artifact_checksum) BETWEEN 1 AND 128),
+    CHECK (char_length(lifecycle_state) BETWEEN 1 AND 32),
+    CHECK (octet_length(pricing_metadata::text) <= 1048576),
+    CHECK (created_at_unix_ms >= 0)
+);
+
+DO $migration$
+DECLARE
+    target_table REGCLASS;
+    constraint_name TEXT;
+    constraint_sql TEXT;
+BEGIN
+    FOR target_table, constraint_name, constraint_sql IN
+        SELECT table_name::regclass, name, expression
+        FROM (VALUES
+            ('prodex_policy_pointers', 'prodex_policy_pointers_active_revision_fk',
+             'FOREIGN KEY (tenant_id, active_revision_id) REFERENCES prodex_policy_revisions(tenant_id, revision_id) NOT VALID'),
+            ('prodex_policy_pointers', 'prodex_policy_pointers_lkg_revision_fk',
+             'FOREIGN KEY (tenant_id, last_known_good_revision_id) REFERENCES prodex_policy_revisions(tenant_id, revision_id) NOT VALID'),
+            ('prodex_policy_activation_history', 'prodex_policy_activation_revision_fk',
+             'FOREIGN KEY (tenant_id, revision_id) REFERENCES prodex_policy_revisions(tenant_id, revision_id) NOT VALID'),
+            ('prodex_policy_activation_history', 'prodex_policy_activation_previous_revision_fk',
+             'FOREIGN KEY (tenant_id, previous_revision_id) REFERENCES prodex_policy_revisions(tenant_id, revision_id) NOT VALID'),
+            ('prodex_provider_descriptors', 'prodex_provider_descriptors_pricing_revision_fk',
+             'FOREIGN KEY (tenant_id, pricing_revision) REFERENCES prodex_pricing_revisions(tenant_id, revision_id) NOT VALID'),
+            ('prodex_governance_sessions', 'prodex_governance_sessions_policy_revision_fk',
+             'FOREIGN KEY (tenant_id, policy_revision_id) REFERENCES prodex_policy_revisions(tenant_id, revision_id) NOT VALID'),
+            ('prodex_governance_sessions', 'prodex_governance_sessions_registry_revision_fk',
+             'FOREIGN KEY (tenant_id, registry_revision_id) REFERENCES prodex_provider_registry_revisions(tenant_id, revision_id) NOT VALID'),
+            ('prodex_session_revocations', 'prodex_session_revocations_session_fk',
+             'FOREIGN KEY (tenant_id, session_id_hash) REFERENCES prodex_governance_sessions(tenant_id, session_id_hash) NOT VALID'),
+            ('prodex_siem_outbox', 'prodex_siem_outbox_audit_event_fk',
+             'FOREIGN KEY (tenant_id, audit_event_id) REFERENCES prodex_audit_log(tenant_id, audit_event_id) NOT VALID'),
+            ('prodex_siem_dead_letters', 'prodex_siem_dead_letters_audit_event_fk',
+             'FOREIGN KEY (tenant_id, audit_event_id) REFERENCES prodex_audit_log(tenant_id, audit_event_id) NOT VALID')
+        ) AS constraints(table_name, name, expression)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = target_table AND conname = constraint_name
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE %s ADD CONSTRAINT %I %s',
+                target_table,
+                constraint_name,
+                constraint_sql
+            );
+        END IF;
+    END LOOP;
+
+    FOR target_table, constraint_name, constraint_sql IN
+        SELECT table_name::regclass, name, expression
+        FROM (VALUES
+            ('prodex_policy_revisions', 'prodex_policy_revisions_bounded',
+             'char_length(artifact_checksum) BETWEEN 1 AND 128 AND char_length(lifecycle_state) BETWEEN 1 AND 32 AND octet_length(compiled_metadata::text) <= 1048576 AND created_at_unix_ms >= 0'),
+            ('prodex_policy_pointers', 'prodex_policy_pointers_bounded',
+             'char_length(etag) BETWEEN 1 AND 256 AND updated_at_unix_ms >= 0'),
+            ('prodex_policy_activation_history', 'prodex_policy_activation_history_bounded',
+             'occurred_at_unix_ms >= 0'),
+            ('prodex_approvals', 'prodex_approvals_bounded',
+             'char_length(approval_id) BETWEEN 1 AND 128 AND char_length(approval_kind) BETWEEN 1 AND 64 AND char_length(approval_scope) BETWEEN 1 AND 256 AND char_length(fingerprint) BETWEEN 1 AND 128 AND char_length(lifecycle_state) BETWEEN 1 AND 32 AND expires_at_unix_ms >= 0 AND (activated_at_unix_ms IS NULL OR activated_at_unix_ms >= 0)'),
+            ('prodex_classification_rule_revisions', 'prodex_classification_rule_revisions_bounded',
+             'char_length(revision_id) BETWEEN 1 AND 128 AND char_length(artifact_checksum) BETWEEN 1 AND 128 AND char_length(lifecycle_state) BETWEEN 1 AND 32 AND octet_length(compiled_metadata::text) <= 1048576 AND created_at_unix_ms >= 0'),
+            ('prodex_provider_registry_revisions', 'prodex_provider_registry_revisions_bounded',
+             'char_length(revision_id) BETWEEN 1 AND 128 AND char_length(artifact_checksum) BETWEEN 1 AND 128 AND char_length(lifecycle_state) BETWEEN 1 AND 32 AND created_at_unix_ms >= 0'),
+            ('prodex_provider_descriptors', 'prodex_provider_descriptors_bounded',
+             'char_length(registry_revision_id) BETWEEN 1 AND 128 AND char_length(provider_id) BETWEEN 1 AND 128 AND char_length(adapter_kind) BETWEEN 1 AND 64 AND char_length(lifecycle_state) BETWEEN 1 AND 32 AND char_length(trust_tier) BETWEEN 1 AND 32 AND char_length(deployment_type) BETWEEN 1 AND 32 AND cardinality(approved_regions) <= 32 AND octet_length(capability_metadata::text) <= 1048576 AND octet_length(data_handling_metadata::text) <= 1048576 AND char_length(pricing_revision) BETWEEN 1 AND 128 AND char_length(secret_provider) BETWEEN 1 AND 128 AND char_length(secret_name) BETWEEN 1 AND 256 AND (secret_version IS NULL OR char_length(secret_version) BETWEEN 1 AND 128)'),
+            ('prodex_routing_score_revisions', 'prodex_routing_score_revisions_bounded',
+             'char_length(revision_id) BETWEEN 1 AND 128 AND char_length(artifact_checksum) BETWEEN 1 AND 128 AND char_length(lifecycle_state) BETWEEN 1 AND 32 AND octet_length(fixed_point_weights::text) <= 1048576 AND created_at_unix_ms >= 0'),
+            ('prodex_governance_sessions', 'prodex_governance_sessions_bounded',
+             'char_length(session_id_hash) BETWEEN 1 AND 128 AND char_length(channel) BETWEEN 1 AND 64 AND char_length(credential_scope) BETWEEN 1 AND 256 AND (provider_affinity IS NULL OR char_length(provider_affinity) BETWEEN 1 AND 128) AND created_at_unix_ms >= 0 AND last_seen_at_unix_ms >= created_at_unix_ms AND idle_expires_at_unix_ms >= last_seen_at_unix_ms AND absolute_expires_at_unix_ms >= created_at_unix_ms'),
+            ('prodex_session_revocations', 'prodex_session_revocations_bounded',
+             'char_length(reason_code) BETWEEN 1 AND 64 AND revoked_at_unix_ms >= 0'),
+            ('prodex_siem_outbox', 'prodex_siem_outbox_bounded',
+             'octet_length(event_envelope::text) <= 1048576 AND next_attempt_at_unix_ms >= 0 AND created_at_unix_ms >= 0 AND (delivered_at_unix_ms IS NULL OR delivered_at_unix_ms >= created_at_unix_ms)'),
+            ('prodex_siem_dead_letters', 'prodex_siem_dead_letters_bounded',
+             'octet_length(event_envelope::text) <= 1048576 AND char_length(stable_reason_code) BETWEEN 1 AND 64 AND failed_at_unix_ms >= 0')
+        ) AS constraints(table_name, name, expression)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conrelid = target_table AND conname = constraint_name
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE %s ADD CONSTRAINT %I CHECK (%s) NOT VALID',
+                target_table,
+                constraint_name,
+                constraint_sql
+            );
+        END IF;
+    END LOOP;
+END $migration$;
+
+DO $migration$
+DECLARE tenant_table TEXT;
+BEGIN
+    FOREACH tenant_table IN ARRAY ARRAY[
+        'prodex_policy_revisions',
+        'prodex_policy_pointers',
+        'prodex_policy_activation_history',
+        'prodex_approvals',
+        'prodex_approval_votes',
+        'prodex_classification_rule_revisions',
+        'prodex_provider_registry_revisions',
+        'prodex_pricing_revisions',
+        'prodex_provider_descriptors',
+        'prodex_routing_score_revisions',
+        'prodex_governance_sessions',
+        'prodex_session_revocations',
+        'prodex_siem_outbox',
+        'prodex_siem_dead_letters'
+    ] LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tenant_table);
+        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tenant_table);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = current_schema()
+              AND tablename = tenant_table
+              AND policyname = tenant_table || '_tenant_isolation'
+        ) THEN
+            EXECUTE format(
+                'CREATE POLICY %I ON %I USING (tenant_id = current_setting(''prodex.tenant_id'', true)::uuid) WITH CHECK (tenant_id = current_setting(''prodex.tenant_id'', true)::uuid)',
+                tenant_table || '_tenant_isolation',
+                tenant_table
+            );
+        END IF;
+    END LOOP;
+END $migration$;
+"#,
+};
+
+pub const GOVERNANCE_LIFECYCLE_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(5),
+    phase: PostgresMigrationPhase::Expand,
+    name: "005_governance_lifecycle",
+    sql: r#"
+CREATE TABLE IF NOT EXISTS prodex_governance_revision_artifacts (
+    tenant_id UUID NOT NULL REFERENCES prodex_tenants(tenant_id),
+    artifact_kind TEXT NOT NULL,
+    revision_id TEXT NOT NULL,
+    artifact_checksum TEXT NOT NULL,
+    compiled_artifact BYTEA NOT NULL,
+    created_by UUID NOT NULL,
+    created_at_unix_ms BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, artifact_kind, revision_id),
+    UNIQUE (tenant_id, artifact_kind, artifact_checksum),
+    CHECK (artifact_kind IN ('policy', 'classification_rules', 'provider_registry', 'routing_scores')),
+    CHECK (char_length(revision_id) BETWEEN 1 AND 128),
+    CHECK (char_length(artifact_checksum) BETWEEN 1 AND 128),
+    CHECK (octet_length(compiled_artifact) BETWEEN 1 AND 1048576),
+    CHECK (created_at_unix_ms >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS prodex_classification_rule_pointers (
+    tenant_id UUID PRIMARY KEY REFERENCES prodex_tenants(tenant_id),
+    active_revision_id TEXT,
+    last_known_good_revision_id TEXT,
+    etag TEXT NOT NULL,
+    updated_at_unix_ms BIGINT NOT NULL,
+    CHECK (char_length(etag) BETWEEN 1 AND 128),
+    CHECK (updated_at_unix_ms >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS prodex_provider_registry_pointers (
+    tenant_id UUID PRIMARY KEY REFERENCES prodex_tenants(tenant_id),
+    active_revision_id TEXT,
+    last_known_good_revision_id TEXT,
+    etag TEXT NOT NULL,
+    updated_at_unix_ms BIGINT NOT NULL,
+    CHECK (char_length(etag) BETWEEN 1 AND 128),
+    CHECK (updated_at_unix_ms >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS prodex_routing_score_pointers (
+    tenant_id UUID PRIMARY KEY REFERENCES prodex_tenants(tenant_id),
+    active_revision_id TEXT,
+    last_known_good_revision_id TEXT,
+    etag TEXT NOT NULL,
+    updated_at_unix_ms BIGINT NOT NULL,
+    CHECK (char_length(etag) BETWEEN 1 AND 128),
+    CHECK (updated_at_unix_ms >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS prodex_governance_activation_history (
+    tenant_id UUID NOT NULL REFERENCES prodex_tenants(tenant_id),
+    activation_id UUID NOT NULL,
+    artifact_kind TEXT NOT NULL,
+    revision_id TEXT NOT NULL,
+    previous_revision_id TEXT,
+    action TEXT NOT NULL,
+    actor_id UUID NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    occurred_at_unix_ms BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, activation_id),
+    UNIQUE (tenant_id, artifact_kind, idempotency_key),
+    CHECK (artifact_kind IN ('classification_rules', 'provider_registry', 'routing_scores')),
+    CHECK (action IN ('activate', 'rollback')),
+    CHECK (char_length(revision_id) BETWEEN 1 AND 128),
+    CHECK (char_length(idempotency_key) BETWEEN 1 AND 256),
+    CHECK (occurred_at_unix_ms >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS prodex_governance_mutation_idempotency (
+    tenant_id UUID NOT NULL REFERENCES prodex_tenants(tenant_id),
+    artifact_kind TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    action TEXT NOT NULL,
+    revision_id TEXT NOT NULL,
+    resulting_etag TEXT NOT NULL,
+    created_at_unix_ms BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, artifact_kind, idempotency_key),
+    CHECK (artifact_kind IN ('policy', 'classification_rules', 'provider_registry', 'routing_scores')),
+    CHECK (action IN ('activate', 'rollback')),
+    CHECK (char_length(idempotency_key) BETWEEN 1 AND 256),
+    CHECK (char_length(request_fingerprint) BETWEEN 1 AND 256),
+    CHECK (char_length(revision_id) BETWEEN 1 AND 128),
+    CHECK (char_length(resulting_etag) BETWEEN 1 AND 128),
+    CHECK (created_at_unix_ms >= 0)
+);
+
+CREATE OR REPLACE FUNCTION prodex_reject_governance_revision_mutation()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+BEGIN
+    RAISE EXCEPTION 'governance revision content is immutable';
+END $function$;
+
+DO $migration$
+DECLARE trigger_spec RECORD;
+BEGIN
+    FOR trigger_spec IN
+        SELECT * FROM (VALUES
+            ('prodex_governance_revision_artifacts', 'prodex_governance_revision_artifacts_immutable', 'UPDATE OR DELETE', NULL),
+            ('prodex_policy_revisions', 'prodex_policy_revision_content_immutable', 'UPDATE', 'artifact_checksum, compiled_metadata, created_by, created_at_unix_ms'),
+            ('prodex_classification_rule_revisions', 'prodex_classification_revision_content_immutable', 'UPDATE', 'artifact_checksum, compiled_metadata, created_at_unix_ms'),
+            ('prodex_provider_registry_revisions', 'prodex_provider_registry_revision_content_immutable', 'UPDATE', 'artifact_checksum, created_at_unix_ms'),
+            ('prodex_routing_score_revisions', 'prodex_routing_score_revision_content_immutable', 'UPDATE', 'artifact_checksum, fixed_point_weights, created_at_unix_ms')
+        ) AS specs(table_name, trigger_name, event_kind, columns)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+            WHERE tgrelid = trigger_spec.table_name::regclass
+              AND tgname = trigger_spec.trigger_name
+              AND NOT tgisinternal
+        ) THEN
+            IF trigger_spec.columns IS NULL THEN
+                EXECUTE format(
+                    'CREATE TRIGGER %I BEFORE %s ON %I FOR EACH ROW EXECUTE FUNCTION prodex_reject_governance_revision_mutation()',
+                    trigger_spec.trigger_name,
+                    trigger_spec.event_kind,
+                    trigger_spec.table_name
+                );
+            ELSE
+                EXECUTE format(
+                    'CREATE TRIGGER %I BEFORE %s OF %s ON %I FOR EACH ROW EXECUTE FUNCTION prodex_reject_governance_revision_mutation()',
+                    trigger_spec.trigger_name,
+                    trigger_spec.event_kind,
+                    trigger_spec.columns,
+                    trigger_spec.table_name
+                );
+            END IF;
+        END IF;
+    END LOOP;
+END $migration$;
+
+DO $migration$
+DECLARE tenant_table TEXT;
+BEGIN
+    FOREACH tenant_table IN ARRAY ARRAY[
+        'prodex_governance_revision_artifacts',
+        'prodex_classification_rule_pointers',
+        'prodex_provider_registry_pointers',
+        'prodex_routing_score_pointers',
+        'prodex_governance_activation_history',
+        'prodex_governance_mutation_idempotency'
+    ] LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tenant_table);
+        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tenant_table);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = current_schema()
+              AND tablename = tenant_table
+              AND policyname = tenant_table || '_tenant_isolation'
+        ) THEN
+            EXECUTE format(
+                'CREATE POLICY %I ON %I USING (tenant_id = current_setting(''prodex.tenant_id'', true)::uuid) WITH CHECK (tenant_id = current_setting(''prodex.tenant_id'', true)::uuid)',
+                tenant_table || '_tenant_isolation',
+                tenant_table
+            );
+        END IF;
+    END LOOP;
+END $migration$;
+"#,
+};
+
+pub const SIEM_OUTBOX_LEASING_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(6),
+    phase: PostgresMigrationPhase::Expand,
+    name: "006_siem_outbox_leasing",
+    sql: r#"
+ALTER TABLE prodex_siem_outbox
+    ADD COLUMN IF NOT EXISTS claim_token UUID,
+    ADD COLUMN IF NOT EXISTS claim_expires_at_unix_ms BIGINT;
+
+ALTER TABLE prodex_siem_outbox
+    DROP CONSTRAINT IF EXISTS prodex_siem_outbox_claim_pair;
+ALTER TABLE prodex_siem_outbox
+    ADD CONSTRAINT prodex_siem_outbox_claim_pair CHECK (
+        (claim_token IS NULL AND claim_expires_at_unix_ms IS NULL)
+        OR (claim_token IS NOT NULL AND claim_expires_at_unix_ms IS NOT NULL)
+    ) NOT VALID;
+
+CREATE INDEX IF NOT EXISTS prodex_siem_outbox_due_claim_idx
+    ON prodex_siem_outbox (
+        tenant_id, delivered_at_unix_ms, next_attempt_at_unix_ms,
+        claim_expires_at_unix_ms, event_id
+    );
+"#,
+};
+
+pub const GOVERNANCE_SESSION_INDEX_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(7),
+    phase: PostgresMigrationPhase::Expand,
+    name: "007_governance_session_indexes",
+    sql: r#"
+CREATE INDEX IF NOT EXISTS prodex_governance_sessions_principal_active_idx
+    ON prodex_governance_sessions (
+        tenant_id, principal_id, absolute_expires_at_unix_ms,
+        idle_expires_at_unix_ms, session_id_hash
+    );
+CREATE INDEX IF NOT EXISTS prodex_governance_sessions_refresh_idx
+    ON prodex_governance_sessions (tenant_id, last_seen_at_unix_ms DESC, session_id_hash);
+"#,
+};
+
 pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     INITIAL_TENANT_ACCOUNTING_MIGRATION,
     GROUPED_REQUEST_BUDGET_MIGRATION,
     ENTERPRISE_GOVERNANCE_MIGRATION,
+    ENTERPRISE_GOVERNANCE_HARDENING_MIGRATION,
+    GOVERNANCE_LIFECYCLE_MIGRATION,
+    SIEM_OUTBOX_LEASING_MIGRATION,
+    GOVERNANCE_SESSION_INDEX_MIGRATION,
 ];
-pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(3);
+pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(7);
 
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,

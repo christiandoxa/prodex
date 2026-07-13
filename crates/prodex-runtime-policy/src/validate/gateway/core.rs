@@ -41,6 +41,27 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
     if let Some(listen_addr) = policy.gateway.listen_addr.as_deref() {
         validate_gateway_exact_identifier(listen_addr, path, "gateway.listen_addr")?;
     }
+    if policy
+        .gateway
+        .replica_count
+        .is_some_and(|replicas| !(1..=64).contains(&replicas))
+    {
+        bail!(
+            "gateway.replica_count in {} must be between 1 and 64",
+            path.display()
+        );
+    }
+    if policy.gateway.require_multi_replica_accounting_checks == Some(true)
+        && policy
+            .gateway
+            .replica_count
+            .is_none_or(|replicas| replicas < 2)
+    {
+        bail!(
+            "gateway.require_multi_replica_accounting_checks in {} requires replica_count >= 2",
+            path.display()
+        );
+    }
     if let Some(provider) = policy.gateway.provider.as_deref() {
         validate_gateway_exact_identifier(provider, path, "gateway.provider")?;
         match provider.to_ascii_lowercase().as_str() {
@@ -59,6 +80,27 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
         if base_url.chars().any(char::is_whitespace) {
             bail!(
                 "gateway.base_url in {} must not contain whitespace",
+                path.display()
+            );
+        }
+    }
+    if policy.gateway.trusted_proxies.len() > 16 {
+        bail!(
+            "gateway.trusted_proxies in {} must contain at most 16 exact IP addresses",
+            path.display()
+        );
+    }
+    let mut trusted = std::collections::BTreeSet::new();
+    for proxy in &policy.gateway.trusted_proxies {
+        let address = proxy.parse::<std::net::IpAddr>().with_context(|| {
+            format!(
+                "gateway.trusted_proxies in {} must contain exact IP addresses",
+                path.display()
+            )
+        })?;
+        if !trusted.insert(address) {
+            bail!(
+                "gateway.trusted_proxies in {} must not contain duplicates",
                 path.display()
             );
         }

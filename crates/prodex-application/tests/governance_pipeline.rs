@@ -33,6 +33,7 @@ fn application_pipeline_classifies_before_policy_evaluation() {
             InspectionLimits::default(),
         )
         .unwrap(),
+        masked_findings: Vec::new(),
     };
     let snapshot = ApplicationGovernanceSnapshot {
         classification_rules: compile_classification_rule_set(ClassificationRuleSet {

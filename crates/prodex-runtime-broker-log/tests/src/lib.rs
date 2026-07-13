@@ -1,6 +1,15 @@
 use super::*;
 use std::io::Write;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static CONTINUITY_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_continuity_cache() -> MutexGuard<'static, ()> {
+    CONTINUITY_CACHE_TEST_LOCK
+        .lock()
+        .expect("continuity cache test lock should be available")
+}
 
 fn temp_log_path(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -15,6 +24,7 @@ fn temp_log_path(name: &str) -> PathBuf {
 
 #[test]
 fn continuity_failure_reason_metrics_follow_runtime_log_summary() {
+    let _guard = lock_continuity_cache();
     clear_runtime_broker_continuity_failure_reason_cache_for_test();
     let log_path = temp_log_path("reasons");
     fs::write(
@@ -51,6 +61,7 @@ fn continuity_failure_reason_metrics_follow_runtime_log_summary() {
 
 #[test]
 fn continuity_failure_reason_metrics_reuse_cached_summary_for_unchanged_log() {
+    let _guard = lock_continuity_cache();
     clear_runtime_broker_continuity_failure_reason_cache_for_test();
     let log_path = temp_log_path("cache-hit");
     fs::write(
@@ -89,6 +100,7 @@ fn continuity_failure_reason_metrics_reuse_cached_summary_for_unchanged_log() {
 
 #[test]
 fn continuity_failure_reason_metrics_incrementally_update_when_log_appends() {
+    let _guard = lock_continuity_cache();
     clear_runtime_broker_continuity_failure_reason_cache_for_test();
     let log_path = temp_log_path("cache-invalidate");
     fs::write(

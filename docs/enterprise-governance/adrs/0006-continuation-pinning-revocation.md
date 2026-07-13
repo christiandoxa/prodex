@@ -1,6 +1,6 @@
 # ADR 0006: Continuation Pinning and Revocation
 
-- Status: Proposed
+- Status: Accepted
 - Scope: response chains, turn state and session-scoped routes
 
 ## Context
@@ -28,6 +28,11 @@ expiry, restart and concurrent persistence.
 
 ## Implementation status
 
-Runtime response/session affinity and no-midstream-rotate behavior exist.
-Tenant-bound governance epochs and explicit provider-registry revocation
-semantics remain planned.
+Runtime response/session affinity, tenant-bound governance session state,
+provider revocation precedence and no-midstream-rotate behavior are wired into
+the candidate. Evidence includes
+`governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score`,
+`explicit_provider_revocation_overrides_continuation_affinity`,
+`session_reuse_with_another_principal_is_revoked`, and
+`explicit_quota_codes_rotate_only_before_commit`. Durable multi-replica session
+and revocation validation remains pending with PostgreSQL.

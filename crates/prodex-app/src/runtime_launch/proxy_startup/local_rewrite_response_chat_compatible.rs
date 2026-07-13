@@ -12,7 +12,6 @@ use super::super::local_rewrite_rate_limits::{
     runtime_deepseek_codex_rate_limit_headers, runtime_provider_codex_rate_limit_headers,
 };
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
-use super::super::local_rewrite_response_guardrails::runtime_gateway_guardrail_stream_body;
 use super::super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
@@ -20,9 +19,12 @@ use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_stream_conformance,
     runtime_provider_stream_event_conformance_result,
 };
+use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
-use super::runtime_local_rewrite_response_with_call_id;
-use crate::{RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_text_response};
+use super::runtime_local_rewrite_governed_response_with_call_id;
+use super::runtime_local_rewrite_invalid_response;
+use crate::{RuntimeProxyRequest, RuntimeStreamingResponse};
+use prodex_application::ApplicationResponseObligationPlan;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Instant;
@@ -35,6 +37,7 @@ pub(super) struct RuntimeChatCompatibleRewriteContext<'a> {
     pub(super) provider_kind: RuntimeProviderBridgeKind,
     pub(super) profile_name: Option<String>,
     pub(super) binding_recorder: Option<RuntimeCopilotBindingRecorder>,
+    pub(super) response_obligations: Option<ApplicationResponseObligationPlan>,
 }
 
 pub(super) fn respond_runtime_chat_compatible_rewrite(
@@ -51,6 +54,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         provider_kind,
         profile_name,
         binding_recorder,
+        response_obligations,
     } = context;
     let profile_name = profile_name.unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
     let rate_limit_headers = if provider_kind == RuntimeProviderBridgeKind::DeepSeek {
@@ -99,13 +103,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         } else {
             Box::new(reader)
         };
-        let body = runtime_gateway_spend_stream_body(
-            runtime_gateway_guardrail_stream_body(body, request_id, shared),
-            request_id,
-            status,
-            captured,
-            shared,
-        );
+        let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
         let streaming = RuntimeStreamingResponse {
             status,
             headers,
@@ -116,7 +114,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        let _ = request.stream(streaming, None);
+        respond_runtime_local_rewrite_stream(request, streaming, shared, response_obligations);
         return;
     }
 
@@ -145,8 +143,13 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
             response_started_at.elapsed().as_millis(),
             parts.body.as_slice(),
         );
-        runtime_local_rewrite_response_with_call_id(parts, request_id, shared)
+        runtime_local_rewrite_governed_response_with_call_id(
+            parts,
+            request_id,
+            shared,
+            response_obligations,
+        )
     })
-    .unwrap_or_else(|err| build_runtime_proxy_text_response(502, &err.to_string()));
+    .unwrap_or_else(|err| runtime_local_rewrite_invalid_response(request_id, shared, &err));
     let _ = request.respond(response);
 }

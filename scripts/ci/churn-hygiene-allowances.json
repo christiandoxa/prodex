@@ -1,5 +1,18 @@
 [
   {
+    "id": "enterprise-governance-platform-0.285.0",
+    "requiredSubjects": [
+      "feat(governance): add enterprise governance platform"
+    ],
+    "caps": {
+      "maxFiles": 196,
+      "maxBehaviorFiles": 149,
+      "maxLines": 26030,
+      "maxFileLines": 2268
+    },
+    "reason": "Reviewed the unified enterprise governance boundary, policy and artifact lifecycle, fixed-point provider routing, durable session and audit stores, hardened integrations, storage proofs, OpenAPI and operator evidence with multi-agent implementation, the full locked all-features suite, strict Clippy, fuzz/load/stress, backup/restore, performance compatibility, dependency audit, release hygiene, and tracked-diff credential scanning before the 0.285.0 release."
+  },
+  {
     "id": "status-dashboard-and-hook-trust-0.284.0",
     "requiredSubjects": [
       "feat(status): add live monitoring dashboard"

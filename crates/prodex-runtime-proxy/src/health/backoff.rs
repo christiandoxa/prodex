@@ -94,6 +94,12 @@ pub fn runtime_profile_name_in_selection_backoff(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
+    if retry_backoff_until.is_empty()
+        && transport_backoff_until.is_empty()
+        && route_circuit_open_until.is_empty()
+    {
+        return false;
+    }
     runtime_profile_name_in_retry_or_transport_backoff(
         profile_name,
         retry_backoff_until,

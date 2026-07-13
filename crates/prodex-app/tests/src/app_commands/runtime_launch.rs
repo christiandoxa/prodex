@@ -686,6 +686,19 @@ fn gateway_guardrail_webhook_config_preserves_valid_url_value() {
 }
 
 #[test]
+fn gateway_guardrail_webhook_config_enforces_exact_host_allowlist() {
+    let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+    policy.guardrails.webhook_url = Some("https://guardrails.example/check".to_string());
+    policy.guardrails.webhook_host_allowlist = vec!["siem.example".to_string()];
+
+    let error = gateway_guardrail_webhook_config(&policy).unwrap_err();
+    assert!(error.to_string().contains("host is not allowlisted"));
+
+    policy.guardrails.webhook_host_allowlist = vec!["GUARDRAILS.EXAMPLE".to_string()];
+    assert!(gateway_guardrail_webhook_config(&policy).is_ok());
+}
+
+#[test]
 fn gateway_guardrail_config_preserves_keyword_values() {
     let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
     policy.guardrails.blocked_keywords = vec![" secret project ".to_string()];

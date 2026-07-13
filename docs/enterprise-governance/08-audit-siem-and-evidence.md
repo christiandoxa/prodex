@@ -16,17 +16,17 @@ SIEM is never the system of record.
 The terms **must**, **must not**, **required**, **should**, and **may** are
 normative in this document.
 
-## Current Repository Evidence and Gaps
+## Candidate Repository Evidence and Residuals
 
 | Area | Existing repository primitive | Gap against the target |
 | --- | --- | --- |
 | Local audit log | `prodex-audit-log` appends structured JSONL and supports bounded recent queries. `prodex audit` filters component, action, and outcome, with a 512-KiB read window. | Records contain arbitrary `details`, local process/time fields, and no tenant hash chain. This path is file-backed, not a durable multi-replica authority, and is not a complete query/export/verification interface. |
-| Live call sites | Profile, broker, admin, and gateway paths emit local audit events. Several helpers intentionally discard append errors as best effort. | A discarded failure cannot satisfy mandatory audit. The data plane and control plane do not yet converge on one durable contract. |
-| Typed audit domain | `prodex-domain` has bounded action/resource/reason types, tenant/principal identity, event IDs, outcomes, query/export/retention models, digest types, envelopes, and a canonical SHA-256 chain-link function. Debug output redacts sensitive fields. | The current event shape lacks all requested policy/classification/registry/provider/request/trace fields. Envelope link checking alone is not an end-to-end persisted-range verification or completeness proof. |
-| Control-plane planning | Every current `ControlPlaneOperation` declares append-only hash-chain audit for success and denial; authorization plans carry typed events. | The plan is not proof that the live mutation and audit append commit atomically. Current policy routes do not yet implement the full governance lifecycle. |
-| Storage plans | PostgreSQL and SQLite migrations include `prodex_audit_log`; plans enforce tenant matching, predecessor/event digests, unique tenant digests, query, export, and retention operations. PostgreSQL applies RLS. | The driver-free plans are not a unified production audit service. The schema has no chain sequence/checkpoint, governed revision fields, SIEM outbox/dead letter, legal-hold tables, or transactional mutation-plus-outbox proof. |
+| Live call sites | Governed data-plane decisions and four-kind control-plane mutations submit bounded content-free audit events and await durable transaction acknowledgement before success. | Legacy personal-mode operational JSONL remains separate and best effort. |
+| Typed audit domain | `prodex-domain` has bounded action/resource/reason and governance revision context, tenant/principal identity, event IDs, outcomes, query/export/retention models, canonical digests and redacted debug output. | Independent external chain-anchor signing remains a deployment control. |
+| Control-plane planning | Every governance artifact lifecycle and session revocation writes mutation, hash-chain audit and SIEM outbox atomically. | Optional execution approval and break-glass activation are disabled. |
+| Storage plans | PostgreSQL and SQLite runtime repositories implement tenant-scoped append, bounded query/export, integrity verification, SIEM claim/finalize and dead-letter operations. PostgreSQL applies RLS. | Legal-hold workflow remains unsupported. |
 | Observability | `prodex-observability` has low-cardinality audit emit/persist/export, chain, query, and retention metric plans. | There are no SIEM delivery/backlog/dead-letter metrics or operational exporter wired to a durable outbox. |
-| SIEM | None found in the production path. | A durable transactional outbox, exporter, sink contract, retry, deduplication, dead-letter operations, and lag alarms are required. |
+| SIEM | A bounded exporter port consumes durable SQLite/PostgreSQL outbox claims with retry, stable IDs, leases, finalize and visible dead-letter state. | External sink credentials, delivery SLO and outage exercise belong to the deployment. |
 
 The existing JSONL file remains useful as a personal-mode operational record
 during migration. It must not be relabeled as the enterprise audit authority.

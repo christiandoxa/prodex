@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -164,7 +163,9 @@ async function runWithManagedPostgres() {
     opensslAvailable: await commandExists("openssl", ["version"]),
   });
 
-  const tlsDir = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-pg-tls-"));
+  const tlsParent = path.join(repoRoot, "target", "ci");
+  await fs.mkdir(tlsParent, { recursive: true });
+  const tlsDir = await fs.mkdtemp(path.join(tlsParent, "prodex-pg-tls-"));
   await createTlsMaterial(tlsDir);
 
   const containerName = `prodex-pg-proof-${process.pid}-${Date.now()}`;
@@ -233,6 +234,19 @@ async function runWithManagedPostgres() {
         PRODEX_TEST_REDIS_URL: `redis://127.0.0.1:${redisPort}/0`,
       },
     });
+    await run(
+      "cargo",
+      [
+        "test", "-q", "-p", "prodex-storage-postgres-runtime",
+        "--test", "postgres_runtime", "--", "--test-threads=1",
+      ],
+      {
+        env: {
+          PRODEX_TEST_POSTGRES_URL: `postgres://postgres:postgres@127.0.0.1:${port}/prodex_test`,
+          PRODEX_TEST_REDIS_URL: `redis://127.0.0.1:${redisPort}/0`,
+        },
+      },
+    );
     await run(
       "cargo",
       [

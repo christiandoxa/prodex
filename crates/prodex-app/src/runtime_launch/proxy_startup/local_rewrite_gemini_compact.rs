@@ -19,14 +19,13 @@ use prodex_provider_core::{
     gemini_provider_core_semantic_compact_summary,
 };
 use prodex_provider_spi::ProviderStreamMode;
-use redaction::redaction_redact_secret_like_text;
 use std::io::Read;
 
 #[cfg(test)]
 const GEMINI_LOCAL_COMPACT_MAX_SUMMARY_BYTES: usize = 24 * 1024;
 
-fn runtime_gemini_compact_error_log_value(err: &anyhow::Error) -> String {
-    redaction_redact_secret_like_text(&format!("{err:#}")).replace('\n', " ")
+fn runtime_gemini_compact_error_log_value(_err: &anyhow::Error) -> String {
+    "semantic_compact_failed".to_string()
 }
 
 pub(super) fn respond_runtime_gemini_compact_request(
@@ -383,17 +382,14 @@ mod tests {
     }
 
     #[test]
-    fn gemini_compact_error_log_value_redacts_secret_like_chain() {
+    fn gemini_compact_error_log_value_is_content_free() {
         let err = anyhow::anyhow!(
             "compact failed\nAuthorization: Bearer gemini-compact-token\napi_key=gemini-compact-key"
         )
         .context("Gemini semantic compact fallback");
         let message = runtime_gemini_compact_error_log_value(&err);
 
-        assert!(!message.contains('\n'));
-        assert!(message.contains("Gemini semantic compact fallback"));
-        assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(message.contains("api_key=<redacted>"));
+        assert_eq!(message, "semantic_compact_failed");
         assert!(!message.contains("gemini-compact-token"));
         assert!(!message.contains("gemini-compact-key"));
     }

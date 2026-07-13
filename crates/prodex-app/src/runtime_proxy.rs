@@ -14,7 +14,7 @@ mod lifecycle;
 mod lineage;
 mod payload_detection;
 mod prefetch;
-mod presidio;
+pub(crate) mod presidio;
 mod previous_response_log;
 mod previous_response_orchestration;
 mod profile_state;

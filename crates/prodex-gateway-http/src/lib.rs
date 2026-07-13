@@ -29,6 +29,7 @@ pub use request_target::{
     CanonicalRequestTarget, CanonicalRequestTargetError, MAX_REQUEST_TARGET_BYTES,
 };
 mod api_version;
+mod edge_security;
 mod planning;
 mod preconditions;
 mod request;
@@ -36,6 +37,7 @@ mod route;
 mod upstream_headers;
 
 pub use api_version::*;
+pub use edge_security::*;
 pub use planning::*;
 pub use preconditions::*;
 pub use request::*;

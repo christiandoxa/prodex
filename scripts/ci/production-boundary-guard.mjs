@@ -315,14 +315,10 @@ export function validateProductionBoundary(sources) {
   );
   const providerDispatch =
     functionBody(sources.dispatch, "runtime_local_rewrite_dispatch_provider") ?? "";
-  requireOrdered(
+  requirePattern(
     errors,
     providerDispatch,
-    [
-      "runtime_gateway_application_provider_dispatch(&request.application_admission)",
-      "send_runtime_local_rewrite_upstream_request(",
-      "&provider_dispatch",
-    ],
+    /runtime_gateway_application_provider_dispatch\(\s*&request\.application_admission,\s*shared,?\s*\)[\s\S]*?send_runtime_local_rewrite_upstream_request\([\s\S]*?&provider_dispatch/,
     `${FILES.dispatch}: the concrete sender must consume the application provider dispatch plan`,
   );
   const providerPlan =
@@ -330,7 +326,7 @@ export function validateProductionBoundary(sources) {
   requirePattern(
     errors,
     providerPlan,
-    /RuntimeGatewayApplicationAdmissionKind::TenantBound\s*\{\s*plan,\s*\.\.\s*\}[\s\S]*?&plan\.admission\.provider_invocation/,
+    /RuntimeGatewayApplicationAdmissionKind::TenantBound\s*\{\s*plan,\s*routing,\s*\.\.\s*\}[\s\S]*?&plan\.admission\.provider_invocation/,
     `${FILES.dataPlaneAdapter}: tenant-bound provider dispatch must borrow the admitted application invocation`,
   );
   requirePattern(
@@ -947,6 +943,18 @@ export function validateProductionBoundary(sources) {
     "credential.reference()",
     `${FILES.dataPlaneAdapter}: application provider invocation must preserve the configured SecretRef`,
   );
+  requireText(
+    errors,
+    providerInvocation,
+    "routing.primary.provider",
+    `${FILES.dataPlaneAdapter}: governed routing must own the provider selected for dispatch`,
+  );
+  requireText(
+    errors,
+    providerInvocation,
+    "routing.primary.credential_ref.clone()",
+    `${FILES.dataPlaneAdapter}: governed routing must own the credential reference selected for dispatch`,
+  );
 
   const providerConfig =
     functionBody(sources.providerConfig, "resolve_gateway_provider_credentials_with_resolver") ?? "";
@@ -1456,7 +1464,7 @@ function runSelfTest() {
       runtime_gateway_virtual_key_admission();
     }`,
     dispatch: `fn runtime_local_rewrite_dispatch_provider() {
-      let provider_dispatch = runtime_gateway_application_provider_dispatch(&request.application_admission);
+      let provider_dispatch = runtime_gateway_application_provider_dispatch(&request.application_admission, shared);
       send_runtime_local_rewrite_upstream_request(request, &provider_dispatch);
     }`,
     providerSender: `fn send_runtime_local_rewrite_upstream_request() {
@@ -1670,12 +1678,14 @@ function runSelfTest() {
       let request_id = authorized.request().request_id();
       authorized.request().trace_context();
       fn runtime_gateway_application_provider_dispatch() {
-        match admission { RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, .. } => &plan.admission.provider_invocation }
+        match admission { RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, routing, .. } => &plan.admission.provider_invocation }
       }
       fn runtime_gateway_application_provider_retry_precommit() {
         plan_application_provider_retry(ApplicationProviderRetryRequest {});
       }
       fn runtime_gateway_provider_invocation() {
+        routing.primary.provider;
+        routing.primary.credential_ref.clone();
         shared.provider_credential.as_ref().map(|credential| credential.reference());
       }`,
     providerConfig: `fn resolve_gateway_provider_credentials_with_resolver() {
@@ -2033,7 +2043,7 @@ function runSelfTest() {
     validateProductionBoundary({
       ...valid,
       dispatch: valid.dispatch.replace(
-        "runtime_gateway_application_provider_dispatch(&request.application_admission)",
+        "runtime_gateway_application_provider_dispatch(&request.application_admission, shared)",
         "provider_bypass",
       ),
     }).some((error) => error.includes("concrete sender")),

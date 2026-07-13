@@ -23,6 +23,40 @@ pub(super) fn build_runtime_local_rewrite_proxy_shared(
     gateway_observability: RuntimeGatewayObservabilityConfig,
 ) -> Result<RuntimeLocalRewriteProxyShared> {
     let (provider, provider_credential) = provider.into_runtime_parts();
+    let allow_governance_fallback = !runtime_shared.runtime_config.governance.mode.is_enforcing();
+    let governed_provider_registry = Arc::new(ArcSwap::from_pointee(
+        super::local_rewrite_provider_registry::RuntimeGatewayProviderRegistrySnapshotSet::bootstrap(
+            super::local_rewrite_provider_registry::runtime_gateway_bootstrap_provider_registry_snapshot(
+        &runtime_shared.runtime_config.governance_policy,
+        &provider,
+        provider_credential.as_ref(),
+            )?,
+            allow_governance_fallback,
+        ),
+    ));
+    let governed_routing_scores = Arc::new(ArcSwap::from_pointee(
+        super::local_rewrite_provider_registry::RuntimeGatewayRoutingScoresSnapshotSet::bootstrap(
+            super::local_rewrite_provider_registry::runtime_gateway_bootstrap_routing_scores_snapshot(
+                &runtime_shared.runtime_config.governance_policy,
+            ),
+            allow_governance_fallback,
+        ),
+    ));
+    let classification_rules = Arc::new(ArcSwap::from_pointee(
+        super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet::bootstrap(
+            &runtime_shared.runtime_config.governance_policy,
+            allow_governance_fallback,
+        )?,
+    ));
+    let bootstrap = crate::runtime_governance::compile_runtime_governance_settings(
+        &runtime_shared.runtime_config.governance_policy,
+    )?;
+    let governance_snapshot = Arc::new(ArcSwap::from_pointee(
+        crate::runtime_governance::RuntimeGovernanceAuthoritySnapshotSet::bootstrap(
+            bootstrap,
+            !runtime_shared.runtime_config.governance.mode.is_enforcing(),
+        ),
+    ));
     Ok(RuntimeLocalRewriteProxyShared {
         runtime_shared,
         upstream_base_url,
@@ -35,6 +69,12 @@ pub(super) fn build_runtime_local_rewrite_proxy_shared(
         gemini_oauth_pool,
         copilot_oauth_pool,
         model_memory: Arc::new(Mutex::new(RuntimeLocalRewriteModelMemoryState::default())),
+        governance_sessions: Default::default(),
+        governed_provider_registry,
+        governed_routing_scores,
+        classification_rules,
+        governance_snapshot,
+        governance_authority: None,
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client()?,
         gateway_auth_token_hash,

@@ -1,6 +1,6 @@
 # ADR 0001: Classification and Inspection
 
-- Status: Proposed
+- Status: Accepted
 - Scope: target enterprise governance architecture
 
 ## Context
@@ -31,6 +31,12 @@ validation.
 
 ## Implementation status
 
-Typed request inspection and bounded Presidio mapping are being integrated.
-Compiled revisioned classification rules and complete request/response channel
-coverage remain gaps.
+The candidate implements the typed bounded inspection model, monotonic compiled
+classification rules, schema-aware JSON walking, local detectors, bounded
+Presidio mapping, explicit coverage and response-stream overlap inspection.
+Evidence includes `inspection_result_is_bounded_deterministic_and_content_free`,
+`application_inspection_combines_sources_monotonically`,
+`local_inspection_rejects_deep_and_match_flood_inputs`, and
+`incremental_inspector_finds_every_chunk_boundary`. Supported unary, SSE,
+WebSocket and Gemini paths pass the common boundary. Presidio remains a bounded
+request-path network dependency when policy selects it.

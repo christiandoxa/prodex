@@ -34,7 +34,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("unsupported_path", request.url()),
+                    runtime_proxy_log_field(
+                        "unsupported_path",
+                        runtime_proxy_log_url(request.url()),
+                    ),
                 ],
             ),
         );
@@ -54,7 +57,10 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
                     runtime_proxy_log_field("transport", "websocket"),
-                    runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
+                    runtime_proxy_log_field(
+                        "path",
+                        runtime_proxy_log_url(&handshake_request.path_and_query),
+                    ),
                 ],
             ),
         );
@@ -95,17 +101,25 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
             [
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "websocket"),
-                runtime_proxy_log_field("path", handshake_request.path_and_query.as_str()),
+                runtime_proxy_log_field(
+                    "path",
+                    runtime_proxy_log_url(&handshake_request.path_and_query),
+                ),
                 runtime_proxy_log_field(
                     "previous_response_id",
-                    format!(
-                        "{:?}",
-                        runtime_request_previous_response_id(&handshake_request)
-                    ),
+                    if runtime_request_previous_response_id(&handshake_request).is_some() {
+                        "present"
+                    } else {
+                        "none"
+                    },
                 ),
                 runtime_proxy_log_field(
                     "turn_state",
-                    format!("{:?}", runtime_request_turn_state(&handshake_request)),
+                    if runtime_request_turn_state(&handshake_request).is_some() {
+                        "present"
+                    } else {
+                        "none"
+                    },
                 ),
             ],
         ),

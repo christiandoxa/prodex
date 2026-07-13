@@ -1,0 +1,24 @@
+[package]
+name = "prodex-storage-sqlite-runtime"
+version.workspace = true
+edition.workspace = true
+description = "Executing SQLite adapter for Prodex governance storage plans"
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "prodex_storage_sqlite_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+prodex_domain = { workspace = true }
+prodex_storage = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+prodex_storage_sqlite = { workspace = true }
+
+[lints]
+workspace = true

@@ -70,9 +70,25 @@ const ALLOWLIST = Object.freeze([
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
     id: "blocking-thread-spawn",
     pattern: /\bworker_threads\.push\(thread::spawn\s*\(/,
-    maxHits: 2,
+    maxHits: 5,
     reason:
-      "bounded local rewrite worker pool created during launch, outside request commit path",
+      "bounded local rewrite, governance refresh and SIEM workers created during launch, outside request commit paths",
+  },
+  {
+    name: "governance-audit-launch-worker",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_audit.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 1,
+    reason: "single bounded durable audit writer created during launch",
+  },
+  {
+    name: "governance-session-launch-worker",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 1,
+    reason: "single bounded durable session worker created during launch",
   },
   {
     name: "gateway-secret-refresh-worker",

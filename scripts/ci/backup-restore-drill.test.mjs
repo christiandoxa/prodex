@@ -20,6 +20,7 @@ test("assessDrill reports every recovery invariant failure", () => {
       postBackupMarkerAbsent: false,
       accountingMatches: false,
       tenantDataComplete: false,
+      governanceReferencesValid: false,
       rlsIsolated: false,
     }),
     {
@@ -31,6 +32,7 @@ test("assessDrill reports every recovery invariant failure", () => {
         "post_backup_marker_restored",
         "accounting_mismatch",
         "tenant_data_incomplete",
+        "governance_reference_invalid",
         "tenant_isolation_failed",
       ],
     },
@@ -48,6 +50,7 @@ test("assessDrill accepts an intact restore within thresholds", () => {
       postBackupMarkerAbsent: true,
       accountingMatches: true,
       tenantDataComplete: true,
+      governanceReferencesValid: true,
       rlsIsolated: true,
     }),
     { passed: true, failures: [] },

@@ -47,6 +47,8 @@ const ALLOWED_RUNTIME_DEPENDENCIES = new Set([
   "prodex_storage_postgres",
   "rustls",
   "rustls-native-certs",
+  "serde_json",
+  "sha2",
   "tokio",
   "tokio-postgres",
   "tokio-postgres-rustls",

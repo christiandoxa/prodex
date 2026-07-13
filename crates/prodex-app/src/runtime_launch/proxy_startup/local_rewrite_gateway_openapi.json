@@ -2605,6 +2605,309 @@
         "summary": "Get the Prodex gateway OpenAPI document"
       }
     },
+    "/v1/prodex/gateway/audit/exports": {
+      "post": {
+        "operationId": "exportGovernanceAudit",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 1000}}, "additionalProperties": false}}}},
+        "responses": {
+          "200": {"description": "Bounded tenant-scoped content-free audit export", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Export bounded tenant audit records and append an immutable export audit event"
+      }
+    },
+    "/v1/prodex/gateway/governance/outbox": {
+      "get": {
+        "operationId": "getGovernanceOutboxHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Tenant SIEM outbox health"
+          },
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Get tenant governance SIEM outbox health"
+      }
+    },
+    "/v1/prodex/gateway/governance/audit/integrity": {
+      "get": {
+        "operationId": "getGovernanceAuditIntegrity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["event_count", "chain_head_count", "chain_valid"],
+                  "properties": {
+                    "event_count": {"type": "integer", "minimum": 0},
+                    "chain_head_count": {"type": "integer", "minimum": 0},
+                    "chain_valid": {"type": "boolean"}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "description": "Content-free tenant audit-chain integrity health"
+          },
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Get tenant audit-chain integrity health without event content"
+      }
+    },
+    "/v1/prodex/gateway/governance/outbox/claim": {
+      "post": {
+        "operationId": "claimGovernanceOutbox",
+        "parameters": [{"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "501": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Claim tenant SIEM outbox work when lease-capable storage is available"
+      }
+    },
+    "/v1/prodex/gateway/sessions/{session_id_hash}/revoke": {
+      "post": {
+        "operationId": "revokeGovernanceSession",
+        "parameters": [
+          {"in": "path", "name": "session_id_hash", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"reason_code": {"type": "string", "maxLength": 64}}, "additionalProperties": false}}}},
+        "responses": {
+          "204": {"description": "Session revoked; repeated revocation is idempotent"},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Revoke a tenant session by server-issued SHA-256 session hash"
+      }
+    },
+    "/v1/prodex/gateway/sessions/current/revoke": {
+      "post": {
+        "operationId": "revokeCurrentGovernanceSession",
+        "parameters": [
+          {"in": "header", "name": "session_id", "required": true, "schema": {"type": "string"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"reason_code": {"type": "string", "maxLength": 64}}, "additionalProperties": false}}}},
+        "responses": {
+          "204": {"description": "Current session revoked after server-side session identifier hashing"},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Revoke the authenticated current session without accepting a raw session identifier in the body"
+      }
+    },
+    "/v1/prodex/gateway/policies": {
+      "get": {
+        "operationId": "listPolicyRevisions",
+        "responses": {
+          "200": {"description": "Tenant policy revision metadata", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "List tenant policy revisions without artifact content"
+      },
+      "post": {
+        "operationId": "createPolicyRevision",
+        "parameters": [{"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["revision_id", "artifact"], "properties": {"revision_id": {"type": "string", "format": "uuid"}, "artifact": {}}}}}},
+        "responses": {
+          "201": {"description": "Immutable policy revision created", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Create immutable tenant policy revision"
+      }
+    },
+    "/v1/prodex/gateway/policies/validate": {
+      "post": {
+        "operationId": "validatePolicyRevision",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["artifact"], "properties": {"artifact": {}}}}}},
+        "responses": {
+          "200": {"description": "Policy validation result", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Validate policy candidate without persistence"
+      }
+    },
+    "/v1/prodex/gateway/policies/status": {
+      "get": {
+        "operationId": "getPolicyStatus",
+        "responses": {
+          "200": {"description": "Active and last-known-good policy pointers", "headers": {"ETag": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Get tenant active and last-known-good policy status"
+      }
+    },
+    "/v1/prodex/gateway/policies/{revision_id}": {
+      "get": {
+        "operationId": "getPolicyRevision",
+        "parameters": [{"in": "path", "name": "revision_id", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {
+          "200": {"description": "Policy revision metadata without artifact content", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Get tenant policy revision metadata"
+      }
+    },
+    "/v1/prodex/gateway/policies/{revision_id}/submit": {
+      "post": {
+        "operationId": "submitPolicyRevision",
+        "parameters": [
+          {"in": "path", "name": "revision_id", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"approval_id": {"type": "string"}, "required_quorum": {"type": "integer", "minimum": 1, "maximum": 16}, "expires_at_unix_ms": {"type": "integer"}}}}}},
+        "responses": {
+          "201": {"description": "Maker-checker approval created", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Submit immutable policy revision for approval"
+      }
+    },
+    "/v1/prodex/gateway/policies/{revision_id}/approvals/{approval_id}/votes": {
+      "post": {
+        "operationId": "votePolicyApproval",
+        "parameters": [
+          {"in": "path", "name": "revision_id", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"in": "path", "name": "approval_id", "required": true, "schema": {"type": "string"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["decision", "expected_version"], "properties": {"decision": {"type": "string", "enum": ["approve", "reject"]}, "expected_version": {"type": "integer", "minimum": 1}}}}}},
+        "responses": {
+          "200": {"description": "Approval state transition", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Approve or reject policy revision with optimistic version"
+      }
+    },
+    "/v1/prodex/gateway/policies/{revision_id}/activate": {
+      "post": {
+        "operationId": "activatePolicyRevision",
+        "parameters": [
+          {"in": "path", "name": "revision_id", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}},
+          {"in": "header", "name": "If-Match", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["approval_id"], "properties": {"approval_id": {"type": "string"}}}}}},
+        "responses": {
+          "200": {"description": "Policy activation result", "headers": {"ETag": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "412": {"$ref": "#/components/responses/GatewayError"},
+          "428": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Activate approved policy revision using ETag compare-and-swap"
+      }
+    },
+    "/v1/prodex/gateway/policies/{revision_id}/rollback": {
+      "post": {
+        "operationId": "rollbackPolicyRevision",
+        "parameters": [
+          {"in": "path", "name": "revision_id", "required": true, "schema": {"type": "string", "format": "uuid"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}},
+          {"in": "header", "name": "If-Match", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["approval_id"], "properties": {"approval_id": {"type": "string"}}}}}},
+        "responses": {
+          "200": {"description": "Policy rollback result", "headers": {"ETag": {"schema": {"type": "string"}}}, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "412": {"$ref": "#/components/responses/GatewayError"},
+          "428": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Rollback to approved last-known-good policy using ETag compare-and-swap"
+      }
+    },
+    "/v1/prodex/gateway/classification-rules": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies"},
+    "/v1/prodex/gateway/classification-rules/validate": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1validate"},
+    "/v1/prodex/gateway/classification-rules/status": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1status"},
+    "/v1/prodex/gateway/classification-rules/{revision_id}": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}"},
+    "/v1/prodex/gateway/classification-rules/{revision_id}/submit": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1submit"},
+    "/v1/prodex/gateway/classification-rules/{revision_id}/approvals/{approval_id}/votes": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1approvals~1{approval_id}~1votes"},
+    "/v1/prodex/gateway/classification-rules/{revision_id}/activate": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1activate"},
+    "/v1/prodex/gateway/classification-rules/{revision_id}/rollback": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1rollback"},
+    "/v1/prodex/gateway/provider-registries": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies"},
+    "/v1/prodex/gateway/provider-registries/validate": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1validate"},
+    "/v1/prodex/gateway/provider-registries/status": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1status"},
+    "/v1/prodex/gateway/provider-registries/{revision_id}": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}"},
+    "/v1/prodex/gateway/provider-registries/{revision_id}/submit": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1submit"},
+    "/v1/prodex/gateway/provider-registries/{revision_id}/approvals/{approval_id}/votes": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1approvals~1{approval_id}~1votes"},
+    "/v1/prodex/gateway/provider-registries/{revision_id}/activate": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1activate"},
+    "/v1/prodex/gateway/provider-registries/{revision_id}/rollback": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1rollback"},
+    "/v1/prodex/gateway/routing-scores": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies"},
+    "/v1/prodex/gateway/routing-scores/validate": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1validate"},
+    "/v1/prodex/gateway/routing-scores/status": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1status"},
+    "/v1/prodex/gateway/routing-scores/{revision_id}": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}"},
+    "/v1/prodex/gateway/routing-scores/{revision_id}/submit": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1submit"},
+    "/v1/prodex/gateway/routing-scores/{revision_id}/approvals/{approval_id}/votes": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1approvals~1{approval_id}~1votes"},
+    "/v1/prodex/gateway/routing-scores/{revision_id}/activate": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1activate"},
+    "/v1/prodex/gateway/routing-scores/{revision_id}/rollback": {"$ref": "#/paths/~1v1~1prodex~1gateway~1policies~1{revision_id}~1rollback"},
     "/v1/prodex/gateway/providers": {
       "get": {
         "operationId": "getGatewayProviders",

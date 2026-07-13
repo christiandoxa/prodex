@@ -1,4 +1,5 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use runtime_proxy_crate::path_without_query;
 use serde_json::Value;
 use std::path::Path;
 
@@ -13,7 +14,7 @@ pub(super) fn runtime_gateway_audit_data_plane_auth_failed(
             "state_backend": shared.gateway_state_store.label(),
             "details": {
                 "reason": "missing_or_invalid_gateway_bearer_token",
-                "path": path,
+                "path": path_without_query(path),
             },
         }),
     );
@@ -28,7 +29,7 @@ pub(super) fn runtime_gateway_audit_data_plane_request_capture_failed(
         "request_capture_failed",
         serde_json::json!({
             "state_backend": shared.gateway_state_store.label(),
-            "details": { "path": path, "reason": "request_capture_failed" },
+            "details": { "path": path_without_query(path), "reason": "request_capture_failed" },
         }),
     );
 }
@@ -42,7 +43,7 @@ pub(super) fn runtime_gateway_audit_data_plane_presidio_redaction_failed(
         "presidio_redaction_failed",
         serde_json::json!({
             "state_backend": shared.gateway_state_store.label(),
-            "details": { "path": path, "reason": "presidio_redaction_failed" },
+            "details": { "path": path_without_query(path), "reason": "presidio_redaction_failed" },
         }),
     );
 }
@@ -56,7 +57,7 @@ pub(super) fn runtime_gateway_audit_data_plane_request_body_too_large(
         "request_body_too_large",
         serde_json::json!({
             "state_backend": shared.gateway_state_store.label(),
-            "details": { "path": path, "reason": "request_body_too_large" },
+            "details": { "path": path_without_query(path), "reason": "request_body_too_large" },
         }),
     );
 }
@@ -75,7 +76,7 @@ pub(super) fn runtime_gateway_audit_data_plane_virtual_key_rejected(
         },
         serde_json::json!({
             "state_backend": shared.gateway_state_store.label(),
-            "details": { "reason": reason, "path": path },
+            "details": { "reason": reason, "path": path_without_query(path) },
         }),
     );
 }
@@ -90,7 +91,7 @@ pub(super) fn runtime_gateway_audit_data_plane_guardrail_blocked(
         "guardrail_blocked",
         serde_json::json!({
             "state_backend": shared.gateway_state_store.label(),
-            "details": { "reason": reason, "path": path },
+            "details": { "reason": reason, "path": path_without_query(path) },
         }),
     );
 }
@@ -106,7 +107,7 @@ pub(super) fn runtime_gateway_audit_data_plane_guardrail_webhook_blocked(
         "guardrail_webhook_blocked",
         serde_json::json!({
             "state_backend": shared.gateway_state_store.label(),
-            "details": { "path": path, "phase": phase, "reason": reason },
+            "details": { "path": path_without_query(path), "phase": phase, "reason": reason },
         }),
     );
 }

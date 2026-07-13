@@ -1,5 +1,6 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
+use runtime_proxy_crate::path_without_query;
 use std::path::Path;
 
 pub(super) fn runtime_gateway_audit_admin_auth_event(
@@ -36,7 +37,7 @@ pub(super) fn runtime_gateway_audit_admin_request_denied_event(
             "actor": actor,
             "role": role,
             "method": method,
-            "path": path_value,
+            "path": path_without_query(path_value),
         },
     });
     let default_log_dir = shared
@@ -68,7 +69,7 @@ pub(super) fn runtime_gateway_audit_admin_role_denied_event(
             "actor": actor,
             "role": role,
             "method": method,
-            "path": path_value,
+            "path": path_without_query(path_value),
         },
     });
     let default_log_dir = shared

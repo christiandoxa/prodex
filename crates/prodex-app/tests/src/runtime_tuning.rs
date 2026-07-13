@@ -92,17 +92,28 @@ mandatory_audit = true
 anonymous_data_plane = false
 raw_secret_sources = false
 policy_revision = "00000000-0000-7000-8000-000000000001"
+active_policy_revision = "00000000-0000-7000-8000-000000000001"
 policy_valid_until_unix_ms = 4102444800000
+classification_default = "confidential"
+classification_unknown = "deny"
+policy_failure_mode = "closed"
 classification_revision = "classification-v1"
 classification_checksum = "sha256-test-v1"
 provider_registry_revision = 1
 routing_score_revision = 1
+
+[governance.session]
+absolute_timeout_seconds = 3600
+idle_timeout_seconds = 900
+max_concurrent = 10
 
 [governance.provider]
 descriptor_revision = 1
 trust_tier = "enterprise"
 maximum_classification = "confidential"
 regions = ["us-east"]
+retention_seconds = 0
+training_use = false
 "#,
     );
     let paths = test_app_paths(policy_dir.root.clone());
