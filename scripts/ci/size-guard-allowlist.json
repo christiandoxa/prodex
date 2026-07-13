@@ -106,7 +106,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1202,
+    "maxLines": 1201,
     "reason": "Provider-aware runtime and gateway argument parsing now explicitly rejects normalized triple-slash URLs; the tightly coupled CLI surface remains capped."
   },
   {
