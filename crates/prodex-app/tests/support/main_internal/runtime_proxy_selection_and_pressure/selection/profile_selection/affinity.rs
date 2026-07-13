@@ -1,5 +1,20 @@
 use super::*;
 
+fn selection_trace(
+    shared: &RuntimeRotationProxyShared,
+) -> runtime_proxy_crate::RuntimeRouteDecisionTrace {
+    runtime_proxy_flush_logs_for_path(&shared.log_path);
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+    let trace_line = log
+        .lines()
+        .find(|line| line.contains(" route_decision "))
+        .expect("selection should emit a route decision trace");
+    let trace_json = runtime_proxy_crate::runtime_proxy_log_fields(trace_line)
+        .remove("trace")
+        .expect("route decision trace should contain typed JSON");
+    serde_json::from_str(&trace_json).expect("route decision trace should be valid")
+}
+
 #[test]
 fn response_selection_preserves_bound_previous_response_affinity_despite_quota() {
     let temp_dir = TestDir::isolated();
@@ -49,11 +64,13 @@ fn previous_response_discovery_skips_blocked_profiles_before_cached_candidate() 
     )
     .expect("quota-aware discovery should succeed");
     assert_eq!(selected.as_deref(), Some("second"));
-    runtime_proxy_flush_logs_for_path(&quota_shared.log_path);
-    let log = fs::read_to_string(&quota_shared.log_path).expect("runtime log should be readable");
-    assert!(log.contains(
-        "selection_skip_affinity route=responses affinity=previous_response_discovery profile=main"
-    ));
+    let trace = selection_trace(&quota_shared);
+    assert!(trace.candidates.iter().any(|candidate| {
+        candidate.eligibility
+            == runtime_proxy_crate::RuntimeRouteCandidateEligibility::Rejected
+            && candidate.rejection_stage
+                == Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Quota)
+    }));
 
     let negative_dir = TestDir::isolated();
     let negative_shared = runtime_shared_for_affinity_selection(&negative_dir, BTreeMap::new());
@@ -93,12 +110,15 @@ fn previous_response_discovery_skips_blocked_profiles_before_cached_candidate() 
     )
     .expect("negative-cache-aware discovery should succeed");
     assert_eq!(selected.as_deref(), Some("second"));
-    runtime_proxy_flush_logs_for_path(&negative_shared.log_path);
-    let log =
-        fs::read_to_string(&negative_shared.log_path).expect("runtime log should be readable");
-    assert!(log.contains(
-        "selection_skip_affinity route=responses affinity=previous_response_discovery profile=main reason=negative_cache"
-    ));
+    let trace = selection_trace(&negative_shared);
+    assert!(trace.candidates.iter().any(|candidate| {
+        candidate
+            .reason
+            .as_ref()
+            .is_some_and(|reason| reason.as_str() == "negative_cache")
+            && candidate.rejection_stage
+                == Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Affinity)
+    }));
 }
 
 #[test]
