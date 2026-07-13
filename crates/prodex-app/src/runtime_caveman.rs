@@ -130,11 +130,12 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
 fn trusted_workspace_codex_args(workspace: &Path, codex_args: &[OsString]) -> Vec<OsString> {
     let workspace = serde_json::to_string(&workspace.to_string_lossy())
         .expect("workspace path should serialize as a TOML-compatible string");
-    let mut args = Vec::with_capacity(codex_args.len() + 2);
+    let mut args = Vec::with_capacity(codex_args.len() + 3);
     args.push(OsString::from("-c"));
     args.push(OsString::from(format!(
         "projects={{{workspace}={{trust_level=\"trusted\"}}}}"
     )));
+    args.push(OsString::from("--dangerously-bypass-hook-trust"));
     args.extend(codex_args.iter().cloned());
     args
 }
@@ -341,6 +342,7 @@ mod tests {
             vec![
                 OsString::from("-c"),
                 OsString::from("projects={\"/tmp/project\"={trust_level=\"trusted\"}}"),
+                OsString::from("--dangerously-bypass-hook-trust"),
                 OsString::from("--dangerously-bypass-approvals-and-sandbox"),
             ]
         );
