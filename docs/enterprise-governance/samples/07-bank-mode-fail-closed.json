@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "artifact_status": "target-example-not-runtime-config",
+  "scenario": "bank-mode fail-closed behavior",
+  "governance_mode": "bank_enforce",
+  "deployment": {
+    "listener": "private_internal",
+    "anonymous_compatibility": false,
+    "trusted_proxy_only": true,
+    "durable_store": "postgresql_with_rls",
+    "external_secret_manager": true,
+    "provider_egress_allow_list": true
+  },
+  "mandatory_dependencies": [
+    "authenticated_tenant_identity",
+    "valid_policy_snapshot",
+    "valid_provider_registry_snapshot",
+    "required_full_inspection",
+    "durable_audit_and_outbox",
+    "authorized_secret_reference"
+  ],
+  "failure_cases": [
+    {"missing": "authenticated_tenant_identity", "expected": "deny"},
+    {"missing": "valid_policy_snapshot", "expected": "deny"},
+    {"missing": "valid_provider_registry_snapshot", "expected": "deny"},
+    {"missing": "required_full_inspection", "expected": "deny"},
+    {"missing": "durable_audit_and_outbox", "expected": "deny"},
+    {"missing": "authorized_secret_reference", "expected": "deny"}
+  ],
+  "expected": {
+    "insecure_startup_configuration": "reject_startup",
+    "runtime_mandatory_dependency_failure": "deny_before_upstream_commit",
+    "break_glass_can_override_invariants": false,
+    "legal_certification_claimed": false
+  }
+}

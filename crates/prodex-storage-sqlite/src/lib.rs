@@ -24,6 +24,9 @@ use prodex_storage::{
     UserLifecycleKind, VirtualKeySecretReferenceCommand, VirtualKeySecretReferenceKind,
 };
 
+mod enterprise_governance_migration;
+pub use enterprise_governance_migration::LOCAL_ENTERPRISE_GOVERNANCE_MIGRATION;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SqliteMigrationVersion(pub u32);
 
@@ -247,8 +250,11 @@ CREATE INDEX IF NOT EXISTS prodex_idempotency_records_tenant_status_idx
 "#,
 };
 
-pub const SQLITE_MIGRATIONS: &[SqliteMigration] = &[INITIAL_LOCAL_ACCOUNTING_MIGRATION];
-pub const REQUIRED_SQLITE_SCHEMA_VERSION: SqliteMigrationVersion = SqliteMigrationVersion(1);
+pub const SQLITE_MIGRATIONS: &[SqliteMigration] = &[
+    INITIAL_LOCAL_ACCOUNTING_MIGRATION,
+    LOCAL_ENTERPRISE_GOVERNANCE_MIGRATION,
+];
+pub const REQUIRED_SQLITE_SCHEMA_VERSION: SqliteMigrationVersion = SqliteMigrationVersion(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SqliteRuntimeMode {

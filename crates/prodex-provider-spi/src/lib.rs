@@ -5,6 +5,15 @@
 //! and provider adapters without depending on HTTP frameworks, provider SDKs,
 //! filesystem access, database drivers, or async runtimes.
 
+mod governed_routing;
+
+pub use governed_routing::{
+    GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute, GovernedRoutingError,
+    GovernedRoutingPlan, GovernedRoutingRequest, GovernedRoutingSignals, GovernedRoutingWeights,
+    MAX_GOVERNED_PROVIDER_REGIONS, MAX_GOVERNED_ROUTING_CANDIDATES, MAX_GOVERNED_ROUTING_FALLBACKS,
+    ROUTING_SCORE_SCALE, plan_governed_provider_route,
+};
+
 use std::error::Error;
 use std::fmt;
 

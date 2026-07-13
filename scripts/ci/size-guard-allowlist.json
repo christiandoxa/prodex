@@ -26,8 +26,13 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 1069,
-    "reason": "Kiro profile import now includes stricter private temp-home handling for copied credentials; capped at current size until provider import helpers are split from command orchestration."
+    "maxLines": 1137,
+    "reason": "Kiro profile import now discovers the native CLI model catalog with an ACP fallback while preserving private credential staging; capped until catalog discovery splits from command orchestration."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
+    "maxLines": 1338,
+    "reason": "The typed gateway data-plane boundary now carries inspection, classification, PDP obligations, deterministic governed routing, provider dispatch, and reconciliation in one auditable pipeline; capped until governance planning moves to a sibling module."
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
@@ -36,8 +41,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1934,
-    "reason": "Kiro local rewrite request/response translation remains capped after its inline tests moved behind a focused module boundary; includes bounded streaming delivery and tenant-scoped conversation persistence."
+    "maxLines": 1988,
+    "reason": "Kiro local rewrite request/response translation remains capped while model and effort forwarding, single-invocation streaming, and tenant-scoped conversation persistence share the provider boundary."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
@@ -141,8 +146,8 @@
   },
   {
     "file": "crates/prodex-application/tests/application_boundary.rs",
-    "maxLines": 6353,
-    "reason": "Application boundary characterization matrix is capped while security, accounting, and policy cases move to focused modules."
+    "maxLines": 6378,
+    "reason": "Application boundary characterization now verifies that governed inspection and policy plans cross data-plane admission; capped while security, accounting, and policy cases move to focused modules."
   },
   {
     "file": "crates/prodex-authz/tests/boundary.rs",
@@ -196,8 +201,8 @@
   },
   {
     "file": "crates/prodex-storage-sqlite/src/lib.rs",
-    "maxLines": 1723,
-    "reason": "SQLite compatibility SQL-plan contracts are capped until migrations, local accounting, idempotency, and readiness plans are split."
+    "maxLines": 1729,
+    "reason": "SQLite compatibility SQL-plan contracts now export the focused enterprise-governance migration module; capped until local accounting, idempotency, and readiness plans are split."
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
@@ -211,8 +216,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_external_provider_config.rs",
-    "maxLines": 905,
-    "reason": "External provider parsing and exact secret/config validation are capped after the reviewed enterprise gateway integration."
+    "maxLines": 1003,
+    "reason": "External provider catalog generation now imports Kiro model metadata alongside Copilot while preserving exact secret/config validation; capped until provider-specific catalog loading splits out."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",

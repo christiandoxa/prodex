@@ -80,7 +80,9 @@ use crate::runtime_proxy::{
 };
 use crate::runtime_proxy_shared::RuntimeProxyActiveRequestGuard;
 use crate::{runtime_proxy_log, runtime_proxy_next_request_id};
-use prodex_application::{ApplicationRequestContextError, ApplicationRequestDeadline};
+use prodex_application::{
+    ApplicationInspectionPlan, ApplicationRequestContextError, ApplicationRequestDeadline,
+};
 use prodex_domain::RequestId;
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{
@@ -121,6 +123,7 @@ struct RuntimeLocalRewritePreparedRequest<'target, 'shared> {
     state: RuntimeLocalRewriteRequestState<'target>,
     captured: RuntimeProxyRequest,
     constraints: Option<RuntimeGatewayPendingConstraintPlan<'shared>>,
+    inspection: ApplicationInspectionPlan,
 }
 
 impl RuntimeLocalRewritePreparedRequest<'_, '_> {
@@ -437,11 +440,16 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
     if state.context.plane() != prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
         return Ok(None);
     }
-    let credential = runtime_gateway_data_plane_credential(
+    let mut credential = runtime_gateway_data_plane_credential(
         virtual_key.as_ref(),
         legacy_authorized,
         shared.gateway_auth_token_hash.is_some() || admin_configured,
     );
+    credential.anonymous_allowed &= shared
+        .runtime_shared
+        .runtime_config
+        .governance
+        .anonymous_data_plane;
     runtime_gateway_application_data_plane_authorization(&state.context, credential)
         .map(Some)
         .map_err(|_| runtime_local_rewrite_data_auth_rejection(state, shared))
@@ -579,7 +587,12 @@ fn runtime_local_rewrite_dispatch_websocket<'target>(
         RuntimeLocalRewriteProviderOptions::Gemini { .. }
     ) && is_runtime_realtime_websocket_path(&state.path)
     {
-        handle_runtime_gemini_live_websocket_request(state.request_id, state.request, shared);
+        handle_runtime_gemini_live_websocket_request(
+            state.request_id,
+            state.request,
+            shared,
+            state.application.as_ref(),
+        );
         return Err(RuntimeLocalRewritePipelineExit::Handled);
     }
     runtime_proxy_log(

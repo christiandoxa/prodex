@@ -107,10 +107,7 @@ const REQUIRED_GATEWAY_KUBERNETES_MARKERS = Object.freeze([
   ["prodex.dev/network-tier: data-store", "data-store egress namespace selector"],
   ["port: 5432", "PostgreSQL egress port"],
   ["port: 6379", "Redis egress port"],
-  ["except:", "private network exceptions on broad HTTPS egress"],
-  ["10.0.0.0/8", "RFC1918 10/8 excluded from broad HTTPS egress"],
-  ["172.16.0.0/12", "RFC1918 172.16/12 excluded from broad HTTPS egress"],
-  ["192.168.0.0/16", "RFC1918 192.168/16 excluded from broad HTTPS egress"],
+  ["prodex.dev/network-tier: ai-egress", "approved AI egress namespace selector"],
 ]);
 
 const REQUIRED_CONTROL_PLANE_MARKERS = Object.freeze([
@@ -277,6 +274,16 @@ export function validateDeploymentSecurity(inputs) {
   requireIncludes(
     checks,
     compose,
+    "127.0.0.1:4000:4000",
+    composePath,
+    "loopback-only default published gateway port",
+  );
+  if (/^\s*-\s*["']?4000:4000["']?\s*$/mu.test(compose)) {
+    checks.push(`${composePath}: default gateway port must not bind every host interface`);
+  }
+  requireIncludes(
+    checks,
+    compose,
     "./deploy/compose-gateway-policy.toml:/var/lib/prodex/policy.toml:ro",
     composePath,
     "tracked gateway policy mount",
@@ -321,6 +328,7 @@ export function validateDeploymentSecurity(inputs) {
     "Postgres password secret file path",
   );
   for (const [needle, description] of [
+    ["version = 1", "runtime policy version"],
     ['projected_root = "/run/secrets"', "Compose projected secret root"],
     ['projected_provider = "compose"', "Compose projected secret provider"],
     ["require_auth = true", "gateway authentication requirement"],
@@ -384,6 +392,9 @@ export function validateDeploymentSecurity(inputs) {
     checks.push(`${kubernetesPath}: missing gateway NetworkPolicy`);
   } else if (!/prodex\.dev\/network-tier:\s*monitoring[\s\S]*?port:\s*4000\b/u.test(gatewayPolicy)) {
     checks.push(`${kubernetesPath}: gateway NetworkPolicy must allow monitoring metrics ingress on port 4000`);
+  }
+  if (gatewayPolicy && /cidr:\s*(?:0\.0\.0\.0\/0|::\/0)\b/u.test(gatewayPolicy)) {
+    checks.push(`${kubernetesPath}: gateway NetworkPolicy must route provider traffic through approved AI egress`);
   }
   const gatewaySecrets = kubernetesDocumentByKindAndName(kubernetes, "ExternalSecret", "prodex-gateway-secrets");
   if (!gatewaySecrets) {
@@ -776,6 +787,8 @@ function validFixture() {
     compose: `
 entrypoint: ["/usr/local/bin/prodex-gateway"]
 command: ["serve", "--listen", "0.0.0.0:4000"]
+ports:
+  - "127.0.0.1:4000:4000"
 read_only: true
 cap_drop:
   - ALL
@@ -813,6 +826,8 @@ prodex_postgres_password:
   file: \${PRODEX_POSTGRES_PASSWORD_FILE:?set PRODEX_POSTGRES_PASSWORD_FILE}
 `,
     composePolicy: `
+version = 1
+
 [secrets]
 projected_root = "/run/secrets"
 projected_provider = "compose"
@@ -1171,10 +1186,7 @@ k8s-app: kube-dns
 prodex.dev/network-tier: data-store
 port: 5432
 port: 6379
-except:
-10.0.0.0/8
-172.16.0.0/12
-192.168.0.0/16
+prodex.dev/network-tier: ai-egress
 app.kubernetes.io/component: control-plane
 port: 4100
 `,

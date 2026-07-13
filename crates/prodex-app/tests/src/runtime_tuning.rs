@@ -77,6 +77,51 @@ fn runtime_config_reads_each_environment_key_once() {
 }
 
 #[test]
+fn runtime_config_carries_validated_governance_mode() {
+    let policy_dir = with_test_policy_dir(
+        r#"
+version = 1
+
+[governance]
+mode = "enterprise_enforce"
+inspection = "enforce"
+classification = "enforce"
+policy = "enforce"
+routing = "enforce"
+mandatory_audit = true
+anonymous_data_plane = false
+raw_secret_sources = false
+policy_revision = "00000000-0000-7000-8000-000000000001"
+policy_valid_until_unix_ms = 4102444800000
+classification_revision = "classification-v1"
+classification_checksum = "sha256-test-v1"
+provider_registry_revision = 1
+routing_score_revision = 1
+
+[governance.provider]
+descriptor_revision = 1
+trust_tier = "enterprise"
+maximum_classification = "confidential"
+regions = ["us-east"]
+"#,
+    );
+    let paths = test_app_paths(policy_dir.root.clone());
+    let environment = RuntimeConfigEnvironment::read_with(|_| None);
+
+    let config = RuntimeConfig::from_environment(&paths, environment)
+        .expect("validated governance settings should load");
+
+    assert_eq!(
+        config.governance.mode,
+        prodex_config::GovernanceMode::EnterpriseEnforce
+    );
+    assert_eq!(
+        config.governance.routing,
+        prodex_config::GovernanceRolloutMode::Enforce
+    );
+}
+
+#[test]
 fn runtime_config_aggregates_errors_without_values() {
     let policy_dir = with_test_policy_dir("version = 1\n");
     let paths = test_app_paths(policy_dir.root.clone());

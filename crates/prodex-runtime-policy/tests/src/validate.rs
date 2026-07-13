@@ -43,6 +43,123 @@ fn service_mode_defaults_to_gateway_and_accepts_explicit_control_plane() {
 }
 
 #[test]
+fn governance_defaults_preserve_personal_mode() {
+    let policy = parse_policy("version = 1");
+    assert_eq!(
+        policy.governance.mode,
+        crate::RuntimeGovernanceMode::Personal
+    );
+    validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect("personal governance defaults should remain compatible");
+}
+
+#[test]
+fn enforcing_governance_requires_all_stages() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[governance]
+mode = "enterprise_enforce"
+inspection = "enforce"
+classification = "observe"
+policy = "enforce"
+routing = "enforce"
+"#,
+    );
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("partial governance enforcement must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("requires inspection, classification, policy, and routing enforcement")
+    );
+}
+
+#[test]
+fn enforcing_governance_accepts_complete_immutable_snapshots() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[governance]
+mode = "enterprise_enforce"
+inspection = "enforce"
+classification = "enforce"
+policy = "enforce"
+routing = "enforce"
+mandatory_audit = true
+anonymous_data_plane = false
+raw_secret_sources = false
+policy_revision = "00000000-0000-7000-8000-000000000001"
+policy_valid_until_unix_ms = 4102444800000
+classification_revision = "classification-v1"
+classification_checksum = "sha256-test-v1"
+provider_registry_revision = 1
+routing_score_revision = 1
+
+[governance.provider]
+descriptor_revision = 1
+trust_tier = "enterprise"
+maximum_classification = "confidential"
+regions = ["us-east"]
+retention_seconds = 0
+training_use = false
+"#,
+    );
+
+    validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect("complete immutable governance snapshots should validate");
+}
+
+#[test]
+fn enforcing_governance_rejects_missing_snapshot_or_provider_revision() {
+    let policy = parse_policy(
+        r#"
+version = 1
+
+[governance]
+mode = "enterprise_enforce"
+inspection = "enforce"
+classification = "enforce"
+policy = "enforce"
+routing = "enforce"
+"#,
+    );
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("missing immutable revisions must fail closed");
+    assert!(error.to_string().contains("immutable snapshot revisions"));
+}
+
+#[test]
+fn bank_governance_requires_audit_identity_and_secret_references() {
+    for (field, mandatory_audit, anonymous_data_plane, raw_secret_sources) in [
+        ("mandatory audit", false, false, false),
+        ("anonymous data-plane", true, true, false),
+        ("secret references", true, false, true),
+    ] {
+        let input = format!(
+            r#"
+version = 1
+
+[governance]
+mode = "bank_enforce"
+inspection = "enforce"
+classification = "enforce"
+policy = "enforce"
+routing = "enforce"
+mandatory_audit = {mandatory_audit}
+anonymous_data_plane = {anonymous_data_plane}
+raw_secret_sources = {raw_secret_sources}
+"#
+        );
+        let error = validate_runtime_policy_file(&parse_policy(&input), Path::new("policy.toml"))
+            .expect_err("bank governance guardrail must fail closed");
+        assert!(error.to_string().contains(field), "{error:#}");
+    }
+}
+
+#[test]
 fn control_plane_mode_rejects_data_plane_capabilities() {
     for (field, configure) in [
         ("gateway.provider", "provider = \"anthropic\""),

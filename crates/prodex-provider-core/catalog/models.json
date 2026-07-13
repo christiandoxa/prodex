@@ -1744,7 +1744,7 @@
     "id": "auto",
     "display_name": "Kiro Auto",
     "description": "Kiro alias routed through the imported runtime model selection.",
-    "context_window_tokens": 200000,
+    "context_window_tokens": 1000000,
     "input_cost_per_million_microusd": null,
     "output_cost_per_million_microusd": null,
     "supported_endpoints": [
@@ -1755,35 +1755,6 @@
     ],
     "aliases": [
       "default"
-    ],
-    "feature_flags": {
-      "tools": true,
-      "json_schema": false,
-      "vision": false,
-      "audio": false,
-      "web_search": false,
-      "reasoning": false
-    },
-    "pricing_known": false
-  },
-  {
-    "provider": "kiro",
-    "owned_by": "kiro-cli",
-    "id": "claude-sonnet-4",
-    "display_name": "Claude Sonnet 4",
-    "description": "Kiro imported runtime compatibility model exposed through Prodex.",
-    "context_window_tokens": 200000,
-    "input_cost_per_million_microusd": null,
-    "output_cost_per_million_microusd": null,
-    "supported_endpoints": [
-      "responses",
-      "responses/compact",
-      "chat-completions",
-      "models"
-    ],
-    "aliases": [
-      "sonnet",
-      "claude"
     ],
     "feature_flags": {
       "tools": true,

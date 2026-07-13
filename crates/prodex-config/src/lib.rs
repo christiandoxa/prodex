@@ -9,6 +9,108 @@ use std::fmt;
 
 use prodex_domain::{PolicyRevisionId, SecretPurpose, SecretRef, TenantId};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceMode {
+    Personal,
+    EnterpriseObserve,
+    EnterpriseEnforce,
+    BankEnforce,
+}
+
+impl GovernanceMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Personal => "personal",
+            Self::EnterpriseObserve => "enterprise_observe",
+            Self::EnterpriseEnforce => "enterprise_enforce",
+            Self::BankEnforce => "bank_enforce",
+        }
+    }
+
+    pub const fn is_enforcing(self) -> bool {
+        matches!(self, Self::EnterpriseEnforce | Self::BankEnforce)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceRolloutMode {
+    Off,
+    Observe,
+    Enforce,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GovernanceConfig {
+    pub mode: GovernanceMode,
+    pub inspection: GovernanceRolloutMode,
+    pub classification: GovernanceRolloutMode,
+    pub policy: GovernanceRolloutMode,
+    pub routing: GovernanceRolloutMode,
+    pub mandatory_audit: bool,
+    pub anonymous_data_plane: bool,
+    pub raw_secret_sources: bool,
+}
+
+impl GovernanceConfig {
+    pub const fn personal_compatible() -> Self {
+        Self {
+            mode: GovernanceMode::Personal,
+            inspection: GovernanceRolloutMode::Off,
+            classification: GovernanceRolloutMode::Off,
+            policy: GovernanceRolloutMode::Off,
+            routing: GovernanceRolloutMode::Off,
+            mandatory_audit: false,
+            anonymous_data_plane: true,
+            raw_secret_sources: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GovernanceConfigError {
+    EnforceModeRequiresEnforcement,
+    BankAuditRequired,
+    BankIdentityRequired,
+    BankSecretReferenceRequired,
+}
+
+impl fmt::Display for GovernanceConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "governance configuration is invalid")
+    }
+}
+
+impl Error for GovernanceConfigError {}
+
+pub fn validate_governance_config(
+    config: GovernanceConfig,
+) -> Result<GovernanceConfig, GovernanceConfigError> {
+    if config.mode.is_enforcing()
+        && [
+            config.inspection,
+            config.classification,
+            config.policy,
+            config.routing,
+        ]
+        .into_iter()
+        .any(|mode| mode != GovernanceRolloutMode::Enforce)
+    {
+        return Err(GovernanceConfigError::EnforceModeRequiresEnforcement);
+    }
+    if config.mode == GovernanceMode::BankEnforce {
+        if !config.mandatory_audit {
+            return Err(GovernanceConfigError::BankAuditRequired);
+        }
+        if config.anonymous_data_plane {
+            return Err(GovernanceConfigError::BankIdentityRequired);
+        }
+        if config.raw_secret_sources {
+            return Err(GovernanceConfigError::BankSecretReferenceRequired);
+        }
+    }
+    Ok(config)
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConfigRevision<T> {
     pub tenant_id: TenantId,

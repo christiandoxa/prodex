@@ -667,10 +667,10 @@ pub const SUPER_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
 const SUPER_COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";
 pub const SUPER_KIRO_PROVIDER_ID: &str = "prodex-kiro";
 const SUPER_KIRO_PROVIDER_NAME: &str = "Kiro";
-pub const SUPER_KIRO_DEFAULT_MODEL: &str = "claude-sonnet-4";
+pub const SUPER_KIRO_DEFAULT_MODEL: &str = "auto";
 const SUPER_KIRO_DEFAULT_BASE_URL: &str = "https://kiro.dev";
-pub const SUPER_KIRO_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
-pub const SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
+pub const SUPER_KIRO_DEFAULT_CONTEXT_WINDOW: usize = 1_000_000;
+pub const SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT: usize = 950_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExternalProvider {
@@ -716,8 +716,8 @@ impl SuperExternalProvider {
         match self {
             // Codex currently exposes no configurable remote-compaction capability flag.
             // It enables /responses/compact only for provider names OpenAI or Azure.
-            Self::Gemini => "Azure",
-            Self::Copilot | Self::Kiro => "OpenAI",
+            Self::Gemini | Self::Kiro => "Azure",
+            Self::Copilot => "OpenAI",
             _ => self.display_name(),
         }
     }
@@ -1067,7 +1067,7 @@ mod tests {
         )));
         assert!(rendered.contains(&format!(
             "model_providers.{SUPER_KIRO_PROVIDER_ID}.name={}",
-            toml_string_literal("OpenAI")
+            toml_string_literal("Azure")
         )));
         assert!(rendered.contains(&format!(
             "model_providers.{SUPER_KIRO_PROVIDER_ID}.base_url={}",

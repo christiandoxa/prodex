@@ -1,4 +1,5 @@
 use super::*;
+use std::ffi::OsString;
 
 #[test]
 fn kiro_acp_builds_initialize_and_session_requests() {
@@ -156,6 +157,22 @@ fn kiro_acp_prompt_turn_sends_prompt_after_session_bootstrap() {
         result.notifications[0].method.as_deref(),
         Some("_kiro.dev/metadata")
     );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn kiro_acp_prompt_turn_passes_selected_model_to_agent() {
+    let root = temp_dir("prompt-turn-model");
+    let fake_agent = write_fake_kiro_prompt_agent(&root);
+    runtime_kiro_acp_prompt_turn_with_command_and_options(
+        fake_agent.as_os_str(),
+        &root,
+        &[(OsString::from("EXPECT_MODEL"), OsString::from("1"))],
+        Some("claude-sonnet-4.5"),
+        Some("medium"),
+        "hello from prodex",
+    )
+    .expect("selected model should be passed to Kiro ACP");
     let _ = fs::remove_dir_all(root);
 }
 

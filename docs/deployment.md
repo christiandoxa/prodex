@@ -276,12 +276,13 @@ in-cluster ingress and egress rules. They accept application ingress only from
 namespaces labeled `prodex.dev/network-tier=ingress`, gateway metrics scraping
 only from namespaces labeled `prodex.dev/network-tier=monitoring`, allow DNS to
 `kube-dns`, and allow PostgreSQL (`5432`) and Redis (`6379`) only in namespaces
-labeled `prodex.dev/network-tier=data-store`. Gateway pods additionally allow
-outbound HTTPS (`443`) to public provider endpoints while excluding RFC1918
-private ranges from that broad HTTPS egress; the control plane does
-not allow public provider egress. Label your ingress controller, monitoring,
-and database/Redis namespaces, or replace the selectors with your private
-endpoint policy before applying the manifest.
+labeled `prodex.dev/network-tier=data-store`. Gateway pods send provider HTTPS
+traffic only through namespaces labeled `prodex.dev/network-tier=ai-egress`;
+the control plane has no provider egress. Run an approved egress proxy or
+gateway in that namespace and enforce its destination allowlist there. Label
+your ingress controller, monitoring, data-store, and AI-egress namespaces, or
+replace the selectors with your private endpoint policy before applying the
+manifest.
 
 The `ServiceMonitor` authenticates with `PRODEX_GATEWAY_METRICS_TOKEN` from
 `prodex-gateway-secrets`, not the gateway root token. The Secret is projected

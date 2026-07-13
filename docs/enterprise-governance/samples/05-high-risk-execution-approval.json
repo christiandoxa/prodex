@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "artifact_status": "target-example-not-runtime-config",
+  "scenario": "high-risk execution requiring approval",
+  "governance_mode": "enterprise_enforce",
+  "input": {
+    "tenant": "tenant-example",
+    "principal": "user-example",
+    "classification": "confidential",
+    "operation": "tool_execution",
+    "risk_tier": "high",
+    "tool": "database_write"
+  },
+  "policy": {
+    "effect": "require_approval",
+    "approval_quorum": 2,
+    "maker_may_approve": false,
+    "approval_ttl_seconds": 900,
+    "maximum_uses": 1,
+    "allowed_tool": "database_write",
+    "mandatory_audit": true
+  },
+  "approval": {
+    "decision_binding": "required",
+    "input_fingerprint_binding": "required",
+    "policy_revision_binding": "required",
+    "status": "absent"
+  },
+  "expected": {
+    "without_valid_approval": "require_approval",
+    "with_matching_unexpired_quorum": "allow_with_obligations",
+    "after_first_use": "deny",
+    "mutated_request": "require_new_approval"
+  }
+}

@@ -89,6 +89,26 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
     let provider = dispatch.provider();
     let endpoint = dispatch.endpoint();
     let stream_mode = dispatch.stream_mode();
+    let inspection = dispatch.inspection();
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_provider_dispatch",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", provider.label()),
+                runtime_proxy_log_field(
+                    "classification",
+                    inspection.result.classification().as_str(),
+                ),
+                runtime_proxy_log_field("coverage", inspection.result.coverage().as_str()),
+                runtime_proxy_log_field(
+                    "finding_count",
+                    inspection.result.findings().len().to_string(),
+                ),
+            ],
+        ),
+    );
     let route_kind = runtime_local_rewrite_route_kind(endpoint);
     let body = prepare_runtime_smart_context_http_body(
         request_id,

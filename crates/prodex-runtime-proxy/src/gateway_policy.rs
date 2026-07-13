@@ -146,6 +146,9 @@ pub enum RuntimeGatewayVirtualKeyRejection {
     BudgetExceeded,
     RpmLimitExceeded,
     TpmLimitExceeded,
+    GovernanceDenied,
+    GovernanceApprovalRequired,
+    NoEligibleProvider,
     PolicyStateUnavailable,
 }
 
@@ -153,7 +156,12 @@ impl RuntimeGatewayVirtualKeyRejection {
     pub fn status(self) -> u16 {
         match self {
             Self::MissingOrInvalidToken => 401,
-            Self::ModelNotAllowed | Self::RequestBudgetExceeded | Self::BudgetExceeded => 403,
+            Self::ModelNotAllowed
+            | Self::RequestBudgetExceeded
+            | Self::BudgetExceeded
+            | Self::GovernanceDenied
+            | Self::GovernanceApprovalRequired
+            | Self::NoEligibleProvider => 403,
             Self::RpmLimitExceeded | Self::TpmLimitExceeded => 429,
             Self::PolicyStateUnavailable => 503,
         }
@@ -167,6 +175,9 @@ impl RuntimeGatewayVirtualKeyRejection {
             Self::BudgetExceeded => "budget_exceeded",
             Self::RpmLimitExceeded => "rpm_limit_exceeded",
             Self::TpmLimitExceeded => "tpm_limit_exceeded",
+            Self::GovernanceDenied => "governance_policy_denied",
+            Self::GovernanceApprovalRequired => "governance_approval_required",
+            Self::NoEligibleProvider => "no_compliant_provider",
             Self::PolicyStateUnavailable => "gateway_policy_unavailable",
         }
     }

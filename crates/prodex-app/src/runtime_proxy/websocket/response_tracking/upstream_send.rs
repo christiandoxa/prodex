@@ -37,11 +37,11 @@ pub(super) fn send_runtime_websocket_upstream_request(
         upstream_socket,
     } = request;
 
-    let redacted_request_text =
+    let inspected =
         apply_runtime_presidio_redaction_to_websocket_text(request_id, request_text, shared)?;
     let upstream_request_text = prepare_runtime_smart_context_websocket_text(
         request_id,
-        redacted_request_text.as_ref(),
+        inspected.text.as_ref(),
         handshake_request,
         shared,
         profile_name,

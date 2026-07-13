@@ -97,6 +97,23 @@ impl RuntimeConfig {
         });
         proxy_policy = proxy_policy.with_effective_preset(preset);
         let mut config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
+        config.governance_policy = loaded_policy
+            .as_ref()
+            .map(|policy| policy.governance.clone())
+            .unwrap_or_default();
+        config.governance = loaded_policy
+            .as_ref()
+            .map(|policy| crate::runtime_governance::runtime_governance_config(&policy.governance))
+            .unwrap_or_else(prodex_config::GovernanceConfig::personal_compatible);
+        config.governance_snapshot =
+            crate::runtime_governance::build_runtime_governance_snapshot(&config.governance_policy)
+                .ok();
+        if config.governance_snapshot.is_none() {
+            parser.errors.push(ConfigError {
+                key: "runtime.policy.governance",
+                message: "contains an invalid immutable governance snapshot".to_string(),
+            });
+        }
         if let Some(input) = gateway_input {
             config.gateway.launch = Self::parse_gateway_launch(
                 &mut parser,
@@ -714,6 +731,9 @@ impl RuntimeConfig {
                 )),
             },
             gateway,
+            governance: prodex_config::GovernanceConfig::personal_compatible(),
+            governance_policy: prodex_runtime_policy::RuntimePolicyGovernanceSettings::default(),
+            governance_snapshot: None,
             gemini,
             compatibility_defaults: Vec::new(),
         }

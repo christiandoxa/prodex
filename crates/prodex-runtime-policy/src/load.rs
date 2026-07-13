@@ -89,5 +89,6 @@ pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicy
         runtime_proxy: parsed.runtime_proxy,
         gateway: parsed.gateway,
         secrets,
+        governance: parsed.governance,
     }))
 }

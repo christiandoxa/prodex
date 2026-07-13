@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "artifact_status": "target-example-not-runtime-config",
+  "scenario": "tools disabled for high-risk requests",
+  "governance_mode": "enterprise_enforce",
+  "input": {
+    "tenant": "tenant-example",
+    "classification": "confidential",
+    "inspection_finding_kinds": ["credential", "financial"],
+    "risk_tier": "high",
+    "operation": "model_inference",
+    "tools_requested": ["shell", "network_fetch"]
+  },
+  "policy": {
+    "effect": "allow_with_obligations",
+    "tools": "disabled",
+    "response_inspection": "required",
+    "mandatory_audit": true
+  },
+  "expected": {
+    "effect": "allow_with_obligations",
+    "forwarded_tools": [],
+    "tool_invocation_result": "deny",
+    "reason_codes": ["high_risk_tools_disabled"]
+  }
+}

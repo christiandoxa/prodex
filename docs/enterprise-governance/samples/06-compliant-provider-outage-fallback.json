@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "artifact_status": "target-example-not-runtime-config",
+  "scenario": "provider outage with compliant fallback",
+  "governance_mode": "enterprise_enforce",
+  "input": {
+    "tenant": "tenant-example",
+    "classification": "confidential",
+    "operation": "model_inference",
+    "continuation": false,
+    "response_committed": false
+  },
+  "policy": {
+    "provider_allow_set": ["cloud-primary", "cloud-secondary"],
+    "required_regions": ["id"],
+    "maximum_retention_days": 0,
+    "maximum_precommit_attempts": 2,
+    "mandatory_audit": true
+  },
+  "runtime": {
+    "cloud-primary": {"eligible": true, "health": "unavailable"},
+    "cloud-secondary": {"eligible": true, "health": "ready"},
+    "cloud-noncompliant": {"eligible": false, "health": "ready"}
+  },
+  "expected": {
+    "first_candidate": "cloud-primary",
+    "precommit_fallback": "cloud-secondary",
+    "never_selected": ["cloud-noncompliant"],
+    "after_commit_failure": "surface_transport_failure_without_rotation"
+  }
+}

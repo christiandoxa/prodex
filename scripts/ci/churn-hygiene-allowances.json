@@ -1,5 +1,18 @@
 [
   {
+    "id": "enterprise-governance-kiro-parity-0.282.0",
+    "requiredSubjects": [
+      "feat(governance): add enterprise controls and Kiro parity"
+    ],
+    "caps": {
+      "maxFiles": 130,
+      "maxBehaviorFiles": 85,
+      "maxLines": 14200,
+      "maxFileLines": 660
+    },
+    "reason": "Reviewed the enterprise governance domain, policy and storage integration, governed provider routing, Kiro native model parity, deployment contracts, and documentation with the full all-features suite, complete local preflight, focused credentialed Kiro smoke tests, formatting, and credential scan before the 0.282.0 release."
+  },
+  {
     "id": "enterprise-refactor-release-0.277.0",
     "requiredSubjects": [
       "chore(docs): remove architecture decision records",

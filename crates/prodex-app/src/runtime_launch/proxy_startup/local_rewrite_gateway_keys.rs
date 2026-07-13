@@ -4,7 +4,8 @@ use super::local_rewrite::{
     schedule_runtime_gateway_virtual_key_usage_save,
 };
 use super::local_rewrite_application_data_plane::{
-    RuntimeGatewayApplicationAdmission, runtime_gateway_application_data_plane_admission,
+    RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError,
+    runtime_gateway_application_data_plane_admission,
 };
 use super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
@@ -27,8 +28,8 @@ use super::provider_bridge::runtime_provider_gateway_cost_for_request;
 use super::*;
 use anyhow::Result;
 use prodex_application::{
-    ApplicationVirtualKeyAdmissionError, ApplicationVirtualKeyAdmissionPlan,
-    plan_application_virtual_key_admission,
+    ApplicationInspectionPlan, ApplicationVirtualKeyAdmissionError,
+    ApplicationVirtualKeyAdmissionPlan, plan_application_virtual_key_admission,
 };
 use prodex_domain::{
     BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey, RequestId, ReservationRecord,
@@ -302,6 +303,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     authorized: &prodex_application::ApplicationAuthorizedRequestContext<'_>,
+    inspection: &ApplicationInspectionPlan,
 ) -> Result<
     RuntimeGatewayVirtualKeyAdmissionOutcome,
     runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
@@ -334,7 +336,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         Ok(Some(key)) => key,
         Ok(None) => {
             return runtime_gateway_application_admission_without_virtual_key(
-                request_id, captured, shared, authorized,
+                request_id, captured, shared, authorized, inspection,
             );
         }
         Err(rejection) => return Err(rejection),
@@ -437,8 +439,9 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         captured,
         shared,
         command.clone(),
+        inspection.clone(),
     )
-    .map_err(|_| runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
+    .map_err(runtime_gateway_application_admission_rejection)?;
     if let Some(rate_limit) = virtual_key_plan.distributed_rate_limit.as_ref() {
         drop(usage.take());
         runtime_gateway_distributed_rate_limit_admission(shared, rate_limit)?;
@@ -566,6 +569,7 @@ fn runtime_gateway_application_admission_without_virtual_key(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     authorized: &prodex_application::ApplicationAuthorizedRequestContext<'_>,
+    inspection: &ApplicationInspectionPlan,
 ) -> Result<
     RuntimeGatewayVirtualKeyAdmissionOutcome,
     runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
@@ -577,6 +581,7 @@ fn runtime_gateway_application_admission_without_virtual_key(
                 authorized.request().route(),
                 captured,
                 shared,
+                inspection.clone(),
             )
             .map_err(|_| {
                 runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
@@ -603,22 +608,56 @@ fn runtime_gateway_application_admission_without_virtual_key(
         created_at_unix_ms: runtime_gateway_unix_epoch_millis(),
         ttl_ms: RUNTIME_GATEWAY_RESERVATION_TTL_MS,
     };
-    let application =
-        runtime_gateway_application_data_plane_admission(authorized, captured, shared, command)
-            .map_err(|_| {
-                runtime_proxy_log(
-                    &shared.runtime_shared,
-                    runtime_proxy_structured_log_message(
-                        "gateway_application_admission_failed",
-                        [runtime_proxy_log_field("request", request_id.to_string())],
-                    ),
-                );
-                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
-            })?;
+    let application = runtime_gateway_application_data_plane_admission(
+        authorized,
+        captured,
+        shared,
+        command,
+        inspection.clone(),
+    )
+    .map_err(|error| {
+        let rejection = runtime_gateway_application_admission_rejection(error);
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_application_admission_failed",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("reason", rejection.code()),
+                ],
+            ),
+        );
+        rejection
+    })?;
     Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
         namespace: None,
         application,
     })
+}
+
+fn runtime_gateway_application_admission_rejection(
+    error: RuntimeGatewayApplicationDataPlaneError,
+) -> runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection {
+    match error {
+        RuntimeGatewayApplicationDataPlaneError::GovernanceDenied => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceDenied
+        }
+        RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceApprovalRequired
+        }
+        RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::NoEligibleProvider
+        }
+        RuntimeGatewayApplicationDataPlaneError::Execution(_)
+        | RuntimeGatewayApplicationDataPlaneError::MissingPrincipal
+        | RuntimeGatewayApplicationDataPlaneError::RouteUnavailable
+        | RuntimeGatewayApplicationDataPlaneError::ProviderRoute(_)
+        | RuntimeGatewayApplicationDataPlaneError::TraceContext(_)
+        | RuntimeGatewayApplicationDataPlaneError::Admission(_)
+        | RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+        }
+    }
 }
 
 fn runtime_gateway_try_durable_reservation(

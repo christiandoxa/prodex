@@ -1,3 +1,4 @@
+use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
 use crate::{
     codex_cli_config_override_exact_value, codex_cli_config_override_value,
     codex_config_exact_value, codex_config_value,
@@ -7,7 +8,8 @@ use prodex_cli::{
     SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
     SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_ANTHROPIC_PROVIDER_ID,
     SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
-    SUPER_COPILOT_DEFAULT_MODEL, SUPER_COPILOT_PROVIDER_ID,
+    SUPER_COPILOT_DEFAULT_MODEL, SUPER_COPILOT_PROVIDER_ID, SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
+    SUPER_KIRO_DEFAULT_CONTEXT_WINDOW, SUPER_KIRO_DEFAULT_MODEL, SUPER_KIRO_PROVIDER_ID,
     super_copilot_prompt_token_limit_for_model,
 };
 use serde_json::json;
@@ -24,6 +26,7 @@ pub(crate) const COPILOT_RUNTIME_MODEL_CATALOG_FILE: &str =
 enum ExternalCatalogProvider {
     Anthropic,
     Copilot,
+    Kiro,
 }
 
 pub(crate) fn write_copilot_runtime_model_catalog(
@@ -114,6 +117,8 @@ fn external_catalog_provider(
         Some(ExternalCatalogProvider::Anthropic)
     } else if provider.eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID) {
         Some(ExternalCatalogProvider::Copilot)
+    } else if provider.eq_ignore_ascii_case(SUPER_KIRO_PROVIDER_ID) {
+        Some(ExternalCatalogProvider::Kiro)
     } else {
         None
     }
@@ -227,7 +232,16 @@ fn external_catalog_models(
             continue;
         }
         let priority = models.len() + 1;
-        let (display_name, description) = provider.model_metadata(slug);
+        let dynamic_model = dynamic_models
+            .iter()
+            .find(|model| model.slug.eq_ignore_ascii_case(slug));
+        let (fallback_display_name, fallback_description) = provider.model_metadata(slug);
+        let display_name = dynamic_model
+            .and_then(|model| model.display_name.as_deref())
+            .unwrap_or(fallback_display_name);
+        let description = dynamic_model
+            .and_then(|model| model.description.as_deref())
+            .unwrap_or(fallback_description);
         let model_context_window = per_model_context_window.unwrap_or(context_window);
         let model_compact_limit = per_model_context_window
             .map(|cw| cw.saturating_mul(95).saturating_div(100))
@@ -249,6 +263,8 @@ fn external_catalog_models(
 #[derive(Clone, Debug)]
 struct ExternalDynamicCatalogModel {
     slug: String,
+    display_name: Option<String>,
+    description: Option<String>,
     context_window: Option<u64>,
 }
 
@@ -256,10 +272,12 @@ fn external_dynamic_catalog_models(
     codex_home: &Path,
     provider: ExternalCatalogProvider,
 ) -> Vec<ExternalDynamicCatalogModel> {
-    if !matches!(provider, ExternalCatalogProvider::Copilot) {
-        return Vec::new();
-    }
-    let catalog_path = codex_home.join(COPILOT_RUNTIME_MODEL_CATALOG_FILE);
+    let catalog_file = match provider {
+        ExternalCatalogProvider::Copilot => COPILOT_RUNTIME_MODEL_CATALOG_FILE,
+        ExternalCatalogProvider::Kiro => KIRO_MODEL_CATALOG_FILE,
+        ExternalCatalogProvider::Anthropic => return Vec::new(),
+    };
+    let catalog_path = codex_home.join(catalog_file);
     let Ok(contents) = fs::read_to_string(catalog_path) else {
         return Vec::new();
     };
@@ -282,6 +300,11 @@ fn external_dynamic_catalog_models(
             let context_window = copilot_catalog_entry_prompt_token_limit(model)
                 .or_else(|| {
                     model
+                        .get("context_window_tokens")
+                        .and_then(serde_json::Value::as_u64)
+                })
+                .or_else(|| {
+                    model
                         .get("context_window")
                         .and_then(serde_json::Value::as_u64)
                 })
@@ -296,6 +319,15 @@ fn external_dynamic_catalog_models(
             }
             Some(ExternalDynamicCatalogModel {
                 slug: slug.to_string(),
+                display_name: model
+                    .get("name")
+                    .or_else(|| model.get("model_name"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                description: model
+                    .get("description")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
                 context_window,
             })
         })
@@ -341,7 +373,9 @@ fn external_catalog_model(
     auto_compact_token_limit: u64,
 ) -> serde_json::Value {
     let input_modalities = match provider {
-        ExternalCatalogProvider::Anthropic | ExternalCatalogProvider::Copilot => {
+        ExternalCatalogProvider::Anthropic
+        | ExternalCatalogProvider::Copilot
+        | ExternalCatalogProvider::Kiro => {
             json!(["text", "image"])
         }
     };
@@ -405,6 +439,7 @@ impl ExternalCatalogProvider {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_MODEL,
             Self::Copilot => SUPER_COPILOT_DEFAULT_MODEL,
+            Self::Kiro => SUPER_KIRO_DEFAULT_MODEL,
         }
     }
 
@@ -412,6 +447,7 @@ impl ExternalCatalogProvider {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
             Self::Copilot => SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
+            Self::Kiro => SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
         }
     }
 
@@ -419,6 +455,7 @@ impl ExternalCatalogProvider {
         match self {
             Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT,
             Self::Copilot => SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
+            Self::Kiro => SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
         }
     }
 
@@ -426,6 +463,7 @@ impl ExternalCatalogProvider {
         match self {
             Self::Anthropic => None,
             Self::Copilot => super_copilot_prompt_token_limit_for_model(model).map(|v| v as u64),
+            Self::Kiro => None,
         }
     }
 
@@ -600,6 +638,11 @@ impl ExternalCatalogProvider {
                     "Legacy GPT-5.1 Codex entry kept for GitHub Copilot compatibility.",
                 ),
             ],
+            Self::Kiro => &[(
+                "auto",
+                "Kiro Auto",
+                "Kiro selects the model for the task using the imported account catalog.",
+            )],
         }
     }
 
@@ -678,6 +721,61 @@ mod tests {
         assert_eq!(catalog["models"][0]["auto_compact_token_limit"], 258400);
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         assert_eq!(catalog["models"][0]["web_search_tool_type"], "text");
+    }
+
+    #[test]
+    fn external_provider_catalog_args_use_imported_kiro_models() {
+        let codex_home = temp_codex_home("kiro");
+        fs::create_dir_all(&codex_home).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&codex_home, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        fs::write(
+            codex_home.join(KIRO_MODEL_CATALOG_FILE),
+            serde_json::to_vec(&json!({
+                "models": [
+                    {
+                        "id": "auto",
+                        "name": "auto",
+                        "description": "Models chosen by task",
+                        "context_window_tokens": 1_000_000
+                    },
+                    {
+                        "id": "deepseek-3.2",
+                        "name": "deepseek-3.2",
+                        "description": "Experimental preview of DeepSeek V3.2",
+                        "context_window_tokens": 164_000
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let user_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\"prodex-kiro\""),
+            OsString::from("-c"),
+            OsString::from("model=\"auto\""),
+        ];
+
+        let args = prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
+            .expect("Kiro catalog should prepare");
+        assert!(args[1].to_string_lossy().starts_with("model_catalog_json="));
+
+        let catalog: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(codex_home.join(EXTERNAL_MODEL_CATALOG_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(catalog["models"][0]["slug"], "auto");
+        assert_eq!(catalog["models"][0]["context_window"], 1_000_000);
+        assert_eq!(catalog["models"][1]["slug"], "deepseek-3.2");
+        assert_eq!(catalog["models"][1]["context_window"], 164_000);
+        assert_eq!(
+            catalog["models"][1]["description"],
+            "Experimental preview of DeepSeek V3.2"
+        );
     }
 
     #[test]

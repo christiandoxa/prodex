@@ -126,6 +126,7 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
     request: RuntimeLocalRewriteDispatchReadyRequest<'_>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<()> {
+    runtime_local_rewrite_log_governance_decision(&request, shared);
     let provider_dispatch =
         runtime_gateway_application_provider_dispatch(&request.application_admission);
     let response = match send_runtime_local_rewrite_upstream_request(
@@ -163,6 +164,62 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         shared,
     );
     Ok(())
+}
+
+fn runtime_local_rewrite_log_governance_decision(
+    request: &RuntimeLocalRewriteDispatchReadyRequest<'_>,
+    shared: &RuntimeLocalRewriteProxyShared,
+) {
+    let Some(governance) = request.application_admission.governance() else {
+        return;
+    };
+    let routing = request.application_admission.routing();
+    let effect = match governance.policy.effect {
+        prodex_domain::PolicyEffect::Allow => "allow",
+        prodex_domain::PolicyEffect::Deny => "deny",
+        prodex_domain::PolicyEffect::RequireApproval => "require_approval",
+    };
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_governance_decision",
+            [
+                runtime_proxy_log_field("request", request.state.request_id.to_string()),
+                runtime_proxy_log_field(
+                    "classification",
+                    governance.classification.classification().as_str(),
+                ),
+                runtime_proxy_log_field("coverage", governance.classification.coverage().as_str()),
+                runtime_proxy_log_field("effect", effect),
+                runtime_proxy_log_field(
+                    "policy_revision",
+                    governance.policy.policy_revision.to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "obligation_count",
+                    governance.policy.obligations.len().to_string(),
+                ),
+                runtime_proxy_log_field(
+                    "provider",
+                    routing
+                        .map(|routing| routing.primary.provider.label())
+                        .unwrap_or("legacy-observe"),
+                ),
+                runtime_proxy_log_field(
+                    "registry_revision",
+                    routing
+                        .map(|routing| routing.registry_revision.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                ),
+                runtime_proxy_log_field(
+                    "score_revision",
+                    routing
+                        .map(|routing| routing.score_revision.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                ),
+            ],
+        ),
+    );
 }
 
 fn runtime_local_rewrite_upstream_request_failed_response() -> tiny_http::ResponseBox {

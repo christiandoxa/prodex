@@ -31,6 +31,9 @@ pub(crate) struct RuntimeConfig {
     pub(crate) websocket_environment: RuntimeWebsocketEnvironment,
     pub(crate) oidc: RuntimeOidcTimingConfig,
     pub(crate) gateway: RuntimeGatewayConfig,
+    pub(crate) governance: prodex_config::GovernanceConfig,
+    pub(crate) governance_policy: prodex_runtime_policy::RuntimePolicyGovernanceSettings,
+    pub(crate) governance_snapshot: Option<prodex_application::ApplicationGovernanceSnapshot>,
     pub(crate) gemini: RuntimeGeminiConfig,
     pub(super) compatibility_defaults: Vec<&'static str>,
 }
@@ -208,6 +211,11 @@ impl fmt::Debug for RuntimeConfig {
             )
             .field("log_format", &self.log_format)
             .field("gateway", &self.gateway)
+            .field("governance_mode", &self.governance.mode.as_str())
+            .field(
+                "governance_snapshot_loaded",
+                &self.governance_snapshot.is_some(),
+            )
             .field("gemini_home_configured", &self.gemini.home_dir.is_some())
             .field(
                 "websocket_proxy_configured",
