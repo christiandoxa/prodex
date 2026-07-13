@@ -386,10 +386,14 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         model_context_window_tokens,
         Some(paths.root.join("runtime-smart-context-artifacts.json")),
     );
+    validate_runtime_governance_inspection_enabled(&runtime_config, presidio_redaction_enabled)?;
     register_runtime_presidio_redaction_proxy_state(
         &log_path,
         if presidio_redaction_enabled {
-            Some(runtime_presidio_redaction_config(paths)?)
+            Some(runtime_governed_presidio_redaction_config(
+                paths,
+                &runtime_config,
+            )?)
         } else {
             None
         },
@@ -598,6 +602,12 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
         ));
     }
     let gemini_live_sidecar_addr = if spawn_gemini_sidecar_listener
+        && !shared
+            .runtime_shared
+            .runtime_config
+            .governance
+            .mode
+            .is_enforcing()
         && matches!(
             &shared.provider,
             RuntimeLocalRewriteProviderOptions::Gemini { .. }

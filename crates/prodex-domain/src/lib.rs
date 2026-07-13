@@ -13,6 +13,7 @@ mod capabilities;
 mod correlation;
 mod deployment;
 mod errors;
+mod governance;
 mod health;
 mod idempotency;
 mod identity;
@@ -125,6 +126,28 @@ pub use api::{
 pub use health::{
     HealthCheck, HealthProbeKind, HealthProbeResponsePlan, HealthSnapshot, HealthState,
     plan_health_probe_response,
+};
+
+pub use governance::{
+    ApprovalAction, ApprovalError, ApprovalFingerprint, ApprovalId, ApprovalKind,
+    ApprovalReasonCode, ApprovalRecord, ApprovalScope, ApprovalState, ApprovalTransition,
+    ApprovalTransitionRequest, ApprovalVote, AuditDetailLevel, CanonicalRoute, Channel,
+    ClassificationDecision, ClassificationError, ClassificationReasonCode, ClassificationRequest,
+    ClassificationRule, ClassificationRuleSet, ClassificationRuleSetChecksum,
+    ClassificationRuleSetRevisionId, CompiledClassificationRuleSet, CompiledGovernancePolicy,
+    ContentLocation, DataClassification, DataModality, DataPolicyContext, DetectorId,
+    DetectorRevisionId, EnvironmentContext, FindingKind, GovernanceObligation,
+    GovernancePolicyArtifact, GovernancePolicyError, GovernancePolicyRule, GovernancePolicyRuleId,
+    GovernedAction, InspectionCoverage, InspectionFinding, InspectionLimits, InspectionModelError,
+    InspectionReasonCode, InspectionResult, InspectionTag, MAX_APPROVAL_QUORUM,
+    MAX_CLASSIFICATION_REASON_CODES, MAX_CLASSIFICATION_RULES, MAX_CONTENT_LOCATION_PATH_BYTES,
+    MAX_GOVERNANCE_POLICY_RULES, MAX_INSPECTION_DETECTORS, MAX_INSPECTION_FINDINGS,
+    MAX_INSPECTION_REASON_CODES, MAX_INSPECTION_TAGS, MAX_INSPECTION_TOKEN_BYTES,
+    MAX_POLICY_OBLIGATIONS, MAX_POLICY_REASON_CODES, NetworkZone, PolicyDecision, PolicyEffect,
+    PolicyInput, PolicyReasonCode, PolicyRuleCondition, PolicySelector, ProviderTrustTier,
+    QuotaContext, RequestRisk, SessionPolicyContext, classify_inspection,
+    compile_classification_rule_set, compile_governance_policy, evaluate_governance_policy,
+    transition_approval,
 };
 
 pub use rate_limit::{

@@ -1,21 +1,26 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_admin_router::runtime_gateway_http_request_meta;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
+use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use super::provider_bridge::{RuntimeProviderGatewaySpendEvent, runtime_provider_model_from_body};
-use crate::RuntimeProxyRequest;
+use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use prodex_application::{
     ApplicationAuthorizedRequestContext, ApplicationDataPlaneError, ApplicationDataPlanePlan,
-    ApplicationDataPlaneRequest, ApplicationProviderRetryRequest,
+    ApplicationDataPlaneRequest, ApplicationGovernancePlan, ApplicationGovernanceRequest,
+    ApplicationInspectionPlan, ApplicationProviderRetryRequest,
     ApplicationUsageReconciliationBackend, ApplicationUsageReconciliationError,
     ApplicationUsageReconciliationExecutionPlan, ApplicationUsageReconciliationExecutionRequest,
     ApplicationUsageReconciliationPlan, ApplicationUsageReconciliationRequest,
     plan_application_data_plane, plan_application_data_plane_execution,
-    plan_application_provider_retry, plan_application_usage_reconciliation,
-    plan_application_usage_reconciliation_execution,
+    plan_application_governance, plan_application_provider_retry,
+    plan_application_usage_reconciliation, plan_application_usage_reconciliation_execution,
 };
 use prodex_domain::{
-    Principal, RequestId, ReservationReconciliationReason, ReservationRecord, SecretRef,
-    TenantContext, TenantId, TenantScopedResource, UsageAmount,
+    CanonicalRoute, CapabilitySet, Channel, CredentialScope, DataClassification,
+    EnvironmentContext, GovernanceObligation, GovernedAction, ModelCapability, NetworkZone,
+    PolicyEffect, PolicySelector, Principal, ProviderTrustTier, QuotaContext, RequestId,
+    RequestRisk, ReservationReconciliationReason, ReservationRecord, SecretRef,
+    SessionPolicyContext, TenantContext, TenantId, TenantScopedResource, UsageAmount,
 };
 use prodex_gateway_core::{GatewayAdmissionRequest, GatewayUsageReconciliationRequest};
 use prodex_gateway_http::{GatewayHttpExecutionPlan, GatewayHttpPolicy, GatewayHttpRouteKind};
@@ -24,14 +29,19 @@ use prodex_provider_core::{
     ProviderAdapterContract, ProviderEndpoint, ProviderErrorClass, ProviderId, provider_adapter,
 };
 use prodex_provider_spi::{
+    GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoutingError,
+    GovernedRoutingPlan, GovernedRoutingRequest, GovernedRoutingSignals, GovernedRoutingWeights,
     ProviderInvocation, ProviderRetryCause, ProviderRetryDecision, ProviderRetryPolicy,
     ProviderRetryStage, ProviderRoute, ProviderRouteError, ProviderStreamMode,
+    plan_governed_provider_route,
 };
 use prodex_storage::{
     AtomicReservationCommand, DurableStoreKind, TenantStorageKey, UsageReconciliationCommand,
 };
+use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::error::Error;
 use std::fmt;
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RuntimeGatewayTenantResource {
@@ -49,8 +59,14 @@ pub(super) struct RuntimeGatewayApplicationAdmission(RuntimeGatewayApplicationAd
 
 #[derive(Clone)]
 enum RuntimeGatewayApplicationAdmissionKind {
-    TenantBound(Box<ApplicationDataPlanePlan>),
-    CompatibilityAnonymous(RuntimeGatewayCompatibilityProviderInvocation),
+    TenantBound {
+        plan: Box<ApplicationDataPlanePlan>,
+        routing: Option<GovernedRoutingPlan>,
+    },
+    CompatibilityAnonymous {
+        invocation: RuntimeGatewayCompatibilityProviderInvocation,
+        inspection: ApplicationInspectionPlan,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -63,8 +79,28 @@ struct RuntimeGatewayCompatibilityProviderInvocation {
 impl RuntimeGatewayApplicationAdmission {
     pub(super) fn tenant_bound(&self) -> Option<&ApplicationDataPlanePlan> {
         match &self.0 {
-            RuntimeGatewayApplicationAdmissionKind::TenantBound(plan) => Some(plan),
-            RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous(_) => None,
+            RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, .. } => Some(plan),
+            RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { .. } => None,
+        }
+    }
+
+    pub(super) fn inspection(&self) -> &ApplicationInspectionPlan {
+        match &self.0 {
+            RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, .. } => &plan.inspection,
+            RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous {
+                inspection, ..
+            } => inspection,
+        }
+    }
+
+    pub(super) fn governance(&self) -> Option<&ApplicationGovernancePlan> {
+        self.tenant_bound().map(|plan| &plan.governance)
+    }
+
+    pub(super) fn routing(&self) -> Option<&GovernedRoutingPlan> {
+        match &self.0 {
+            RuntimeGatewayApplicationAdmissionKind::TenantBound { routing, .. } => routing.as_ref(),
+            RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { .. } => None,
         }
     }
 
@@ -74,6 +110,7 @@ impl RuntimeGatewayApplicationAdmission {
         route: GatewayHttpRouteKind,
         captured: &RuntimeProxyRequest,
         shared: &RuntimeLocalRewriteProxyShared,
+        inspection: ApplicationInspectionPlan,
     ) -> Result<Self, RuntimeGatewayApplicationDataPlaneError> {
         runtime_gateway_compatibility_provider_invocation(
             shared.provider.bridge_kind().provider_id(),
@@ -81,7 +118,12 @@ impl RuntimeGatewayApplicationAdmission {
             captured,
         )
         .map(|invocation| {
-            Self(RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous(invocation))
+            Self(
+                RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous {
+                    invocation,
+                    inspection,
+                },
+            )
         })
     }
 }
@@ -94,6 +136,10 @@ pub(super) enum RuntimeGatewayApplicationDataPlaneError {
     ProviderRoute(ProviderRouteError),
     TraceContext(TraceContextError),
     Admission(ApplicationDataPlaneError),
+    GovernanceDenied,
+    GovernanceApprovalRequired,
+    GovernanceUnavailable,
+    NoEligibleProvider,
 }
 
 impl fmt::Display for RuntimeGatewayApplicationDataPlaneError {
@@ -103,7 +149,12 @@ impl fmt::Display for RuntimeGatewayApplicationDataPlaneError {
             Self::Admission(error) => error.fmt(f),
             Self::ProviderRoute(error) => error.fmt(f),
             Self::TraceContext(error) => error.fmt(f),
-            Self::MissingPrincipal | Self::RouteUnavailable => {
+            Self::MissingPrincipal
+            | Self::RouteUnavailable
+            | Self::GovernanceDenied
+            | Self::GovernanceApprovalRequired
+            | Self::GovernanceUnavailable
+            | Self::NoEligibleProvider => {
                 write!(f, "application data-plane request is invalid")
             }
         }
@@ -152,12 +203,14 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
     reservation: AtomicReservationCommand,
+    inspection: ApplicationInspectionPlan,
 ) -> Result<RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError> {
     let Some(tenant) = authorized.tenant_context() else {
         return RuntimeGatewayApplicationAdmission::compatibility_anonymous(
             authorized.request().route(),
             captured,
             shared,
+            inspection,
         );
     };
     let principal = authorized
@@ -170,6 +223,14 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
         None => runtime_gateway_application_trace_context(request_id)
             .map_err(RuntimeGatewayApplicationDataPlaneError::TraceContext)?,
     };
+    let governance = runtime_gateway_governance_decision(
+        tenant,
+        &principal,
+        authorized.request().route(),
+        captured,
+        shared,
+        &inspection,
+    )?;
     let provider_invocation =
         runtime_gateway_provider_invocation(RuntimeGatewayProviderInvocationInput {
             tenant,
@@ -183,6 +244,8 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
     let http = runtime_gateway_http_request_meta(captured, captured.path_and_query.as_str());
     let request = ApplicationDataPlaneRequest {
         http,
+        inspection,
+        governance: governance.plan,
         admission: GatewayAdmissionRequest {
             tenant,
             principal,
@@ -196,11 +259,82 @@ pub(super) fn runtime_gateway_application_data_plane_admission(
     };
     plan_application_data_plane(runtime_gateway_application_http_policy(shared), request)
         .map(|plan| {
-            RuntimeGatewayApplicationAdmission(RuntimeGatewayApplicationAdmissionKind::TenantBound(
-                Box::new(plan),
-            ))
+            RuntimeGatewayApplicationAdmission(
+                RuntimeGatewayApplicationAdmissionKind::TenantBound {
+                    plan: Box::new(plan),
+                    routing: governance.routing,
+                },
+            )
         })
         .map_err(RuntimeGatewayApplicationDataPlaneError::Admission)
+}
+
+pub(super) fn runtime_gateway_application_websocket_governance(
+    authorized: Option<&ApplicationAuthorizedRequestContext<'_>>,
+    text: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    inspection: &ApplicationInspectionPlan,
+) -> Result<(), RuntimeGatewayApplicationDataPlaneError> {
+    let enforcing = shared
+        .runtime_shared
+        .runtime_config
+        .governance
+        .mode
+        .is_enforcing();
+    let Some(authorized) = authorized else {
+        return if enforcing {
+            Err(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal)
+        } else {
+            Ok(())
+        };
+    };
+    let (Some(tenant), Some(principal)) = (authorized.tenant_context(), authorized.principal())
+    else {
+        return if enforcing {
+            Err(RuntimeGatewayApplicationDataPlaneError::MissingPrincipal)
+        } else {
+            Ok(())
+        };
+    };
+    let captured = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/v1/realtime".to_string(),
+        headers: Vec::new(),
+        body: text.as_bytes().to_vec(),
+    };
+    let decision = runtime_gateway_governance_decision(
+        tenant,
+        principal,
+        GatewayHttpRouteKind::DataPlaneWebSocket,
+        &captured,
+        shared,
+        inspection,
+    )?;
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "gateway_websocket_governance_decision",
+            [
+                runtime_proxy_log_field(
+                    "classification",
+                    decision.plan.classification.classification().as_str(),
+                ),
+                runtime_proxy_log_field(
+                    "coverage",
+                    decision.plan.classification.coverage().as_str(),
+                ),
+                runtime_proxy_log_field(
+                    "provider",
+                    decision
+                        .routing
+                        .as_ref()
+                        .map(|routing| routing.primary.provider.label())
+                        .unwrap_or("legacy-observe"),
+                ),
+            ],
+        ),
+    );
+    Ok(())
 }
 
 fn runtime_gateway_compatibility_provider_invocation(
@@ -226,6 +360,459 @@ struct RuntimeGatewayProviderInvocationInput<'a> {
     route: GatewayHttpRouteKind,
     captured: &'a RuntimeProxyRequest,
     shared: &'a RuntimeLocalRewriteProxyShared,
+}
+
+struct RuntimeGatewayGovernanceDecision {
+    plan: ApplicationGovernancePlan,
+    routing: Option<GovernedRoutingPlan>,
+}
+
+fn runtime_gateway_governance_decision(
+    tenant: TenantContext,
+    principal: &Principal,
+    route_kind: GatewayHttpRouteKind,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    inspection: &ApplicationInspectionPlan,
+) -> Result<RuntimeGatewayGovernanceDecision, RuntimeGatewayApplicationDataPlaneError> {
+    let snapshot = shared
+        .runtime_shared
+        .runtime_config
+        .governance_snapshot
+        .as_ref()
+        .ok_or(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?;
+    let route = runtime_gateway_governance_route(route_kind)?;
+    let capabilities = runtime_gateway_requested_capabilities(route_kind, captured);
+    let tools_requested = capabilities.contains(ModelCapability::Tools);
+    let request_risk = if tools_requested {
+        RequestRisk::High
+    } else if inspection.result.coverage() != prodex_domain::InspectionCoverage::Full {
+        RequestRisk::Elevated
+    } else {
+        RequestRisk::Low
+    };
+    let environment = EnvironmentContext {
+        network_zone: NetworkZone::Unknown,
+        authentication_strength: 1,
+        mfa_satisfied: false,
+    };
+    let governance = plan_application_governance(
+        snapshot,
+        ApplicationGovernanceRequest {
+            inspection,
+            trusted_label: None,
+            untrusted_label: None,
+            prior_classification: None,
+            session_floor: DataClassification::Public,
+            route_floor: DataClassification::Public,
+            request_risk_floor: if tools_requested {
+                DataClassification::Internal
+            } else {
+                DataClassification::Public
+            },
+            tenant,
+            principal,
+            channel: Channel::Api,
+            credential_scope: CredentialScope::DataPlane,
+            session: SessionPolicyContext {
+                age_seconds: 0,
+                idle_seconds: 0,
+                revoked: false,
+                mfa_satisfied: false,
+                retained_classification: DataClassification::Public,
+            },
+            action: runtime_gateway_governed_action(route_kind),
+            route: &route,
+            request_risk,
+            requested_capabilities: &capabilities,
+            quota: QuotaContext {
+                has_headroom: true,
+                reservation_required: true,
+            },
+            environment,
+        },
+    )
+    .map_err(|_| RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?;
+    let enforcing = shared
+        .runtime_shared
+        .runtime_config
+        .governance
+        .mode
+        .is_enforcing();
+    if enforcing
+        && let Err(error) =
+            runtime_gateway_enforce_policy_decision(&governance, &capabilities, captured, shared)
+    {
+        runtime_gateway_mandatory_governance_audit(
+            shared,
+            "policy_decision",
+            "denied",
+            &governance,
+            None,
+            runtime_gateway_governance_error_code(&error),
+        )?;
+        return Err(error);
+    }
+    let registry = runtime_gateway_governed_registry(tenant, shared, &capabilities)?;
+    let routing = plan_governed_provider_route(&GovernedRoutingRequest {
+        tenant,
+        classification: governance.classification.classification(),
+        required_capabilities: &capabilities,
+        policy: &governance.policy,
+        registry: &registry,
+        score_revision: shared
+            .runtime_shared
+            .runtime_config
+            .governance_policy
+            .routing_score_revision
+            .unwrap_or(1),
+        weights: GovernedRoutingWeights::default(),
+        affinity_provider: None,
+        max_fallbacks: 0,
+    });
+    let routing = match routing {
+        Ok(plan) => Some(plan),
+        Err(_error) if !enforcing => None,
+        Err(error) => {
+            let error = match error {
+                GovernedRoutingError::PolicyDenied => {
+                    RuntimeGatewayApplicationDataPlaneError::GovernanceDenied
+                }
+                GovernedRoutingError::ApprovalRequired => {
+                    RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired
+                }
+                GovernedRoutingError::NoEligibleProvider => {
+                    RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider
+                }
+                _ => RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable,
+            };
+            runtime_gateway_mandatory_governance_audit(
+                shared,
+                "provider_selection",
+                "denied",
+                &governance,
+                None,
+                runtime_gateway_governance_error_code(&error),
+            )?;
+            return Err(error);
+        }
+    };
+    runtime_gateway_mandatory_governance_audit(
+        shared,
+        "provider_selection",
+        "allowed",
+        &governance,
+        routing.as_ref(),
+        "policy_allow",
+    )?;
+    Ok(RuntimeGatewayGovernanceDecision {
+        plan: governance,
+        routing,
+    })
+}
+
+fn runtime_gateway_mandatory_governance_audit(
+    shared: &RuntimeLocalRewriteProxyShared,
+    action: &str,
+    outcome: &str,
+    governance: &ApplicationGovernancePlan,
+    routing: Option<&GovernedRoutingPlan>,
+    reason: &str,
+) -> Result<(), RuntimeGatewayApplicationDataPlaneError> {
+    if !shared
+        .runtime_shared
+        .runtime_config
+        .governance
+        .mandatory_audit
+    {
+        return Ok(());
+    }
+    let default_log_dir = shared
+        .runtime_shared
+        .log_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let path = prodex_audit_log::audit_log_path(default_log_dir);
+    prodex_audit_log::append_audit_event(
+        &path,
+        "gateway_governance",
+        action,
+        outcome,
+        serde_json::json!({
+            "classification": governance.classification.classification().as_str(),
+            "inspection_coverage": governance.classification.coverage().as_str(),
+            "policy_revision": governance.policy.policy_revision.to_string(),
+            "policy_effect": match governance.policy.effect {
+                PolicyEffect::Allow => "allow",
+                PolicyEffect::Deny => "deny",
+                PolicyEffect::RequireApproval => "require_approval",
+            },
+            "obligation_count": governance.policy.obligations.len(),
+            "provider": routing.map(|routing| routing.primary.provider.label()),
+            "registry_revision": routing.map(|routing| routing.registry_revision),
+            "score_revision": routing.map(|routing| routing.score_revision),
+            "reason": reason,
+        }),
+    )
+    .map_err(|_| RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)
+}
+
+fn runtime_gateway_governance_error_code(
+    error: &RuntimeGatewayApplicationDataPlaneError,
+) -> &'static str {
+    match error {
+        RuntimeGatewayApplicationDataPlaneError::GovernanceDenied => "policy_denied",
+        RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired => "approval_required",
+        RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider => "no_compliant_provider",
+        RuntimeGatewayApplicationDataPlaneError::Execution(_)
+        | RuntimeGatewayApplicationDataPlaneError::MissingPrincipal
+        | RuntimeGatewayApplicationDataPlaneError::RouteUnavailable
+        | RuntimeGatewayApplicationDataPlaneError::ProviderRoute(_)
+        | RuntimeGatewayApplicationDataPlaneError::TraceContext(_)
+        | RuntimeGatewayApplicationDataPlaneError::Admission(_)
+        | RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable => {
+            "governance_unavailable"
+        }
+    }
+}
+
+fn runtime_gateway_enforce_policy_decision(
+    governance: &ApplicationGovernancePlan,
+    capabilities: &CapabilitySet,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<(), RuntimeGatewayApplicationDataPlaneError> {
+    if governance.policy.valid_until_unix_ms <= runtime_gateway_unix_epoch_millis() {
+        return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable);
+    }
+    match governance.policy.effect {
+        PolicyEffect::Deny => {
+            return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceDenied);
+        }
+        PolicyEffect::RequireApproval => {
+            return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired);
+        }
+        PolicyEffect::Allow => {}
+    }
+    if governance
+        .policy
+        .obligations
+        .contains(&GovernanceObligation::RequireHumanApproval)
+    {
+        return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired);
+    }
+    if governance
+        .policy
+        .obligations
+        .contains(&GovernanceObligation::RequireMfa)
+        || governance
+            .policy
+            .obligations
+            .contains(&GovernanceObligation::RequireReauthentication)
+        || (governance
+            .policy
+            .obligations
+            .contains(&GovernanceObligation::DisableTools)
+            && capabilities.contains(ModelCapability::Tools))
+    {
+        return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceDenied);
+    }
+    let estimated_input_tokens =
+        u32::try_from(captured.body.len().saturating_add(3) / 4).unwrap_or(u32::MAX);
+    if governance.policy.obligations.iter().any(
+        |obligation| matches!(obligation, GovernanceObligation::MaxInputTokens(limit) if estimated_input_tokens > *limit),
+    ) {
+        return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceDenied);
+    }
+    if governance
+        .policy
+        .obligations
+        .contains(&GovernanceObligation::RequireResponseInspection)
+    {
+        let streaming =
+            runtime_gateway_provider_stream_mode(captured) == ProviderStreamMode::Streaming;
+        let incremental_inspection = !shared.gateway_guardrails.blocked_output_keywords.is_empty();
+        let buffered_inspection = shared.gateway_guardrail_webhook.enabled_for("post");
+        if (streaming && !incremental_inspection)
+            || (!streaming && !incremental_inspection && !buffered_inspection)
+        {
+            return Err(RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable);
+        }
+    }
+    Ok(())
+}
+
+fn runtime_gateway_governed_registry(
+    tenant: TenantContext,
+    shared: &RuntimeLocalRewriteProxyShared,
+    capabilities: &CapabilitySet,
+) -> Result<GovernedProviderRegistry, RuntimeGatewayApplicationDataPlaneError> {
+    let settings = &shared.runtime_shared.runtime_config.governance_policy;
+    let provider_settings = settings.provider.as_ref();
+    let provider = shared.provider.bridge_kind().provider_id();
+    let regions = provider_settings
+        .map(|settings| settings.regions.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .map(|region| PolicySelector::new(region.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?;
+    let regions = if regions.is_empty() {
+        vec![
+            PolicySelector::new("*")
+                .map_err(|_| RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)?,
+        ]
+    } else {
+        regions
+    };
+    let trust_tier = match provider_settings.map(|settings| settings.trust_tier) {
+        Some(prodex_runtime_policy::RuntimeGovernanceProviderTrustTier::Enterprise) => {
+            ProviderTrustTier::Enterprise
+        }
+        Some(prodex_runtime_policy::RuntimeGovernanceProviderTrustTier::RestrictedApproved) => {
+            ProviderTrustTier::RestrictedApproved
+        }
+        Some(prodex_runtime_policy::RuntimeGovernanceProviderTrustTier::Standard) | None => {
+            ProviderTrustTier::Standard
+        }
+    };
+    let maximum_classification = match provider_settings
+        .map(|settings| settings.maximum_classification)
+        .unwrap_or(prodex_runtime_policy::RuntimeGovernanceDataClassification::Internal)
+    {
+        prodex_runtime_policy::RuntimeGovernanceDataClassification::Public => {
+            DataClassification::Public
+        }
+        prodex_runtime_policy::RuntimeGovernanceDataClassification::Internal => {
+            DataClassification::Internal
+        }
+        prodex_runtime_policy::RuntimeGovernanceDataClassification::Confidential => {
+            DataClassification::Confidential
+        }
+        prodex_runtime_policy::RuntimeGovernanceDataClassification::Restricted => {
+            DataClassification::Restricted
+        }
+    };
+    Ok(GovernedProviderRegistry {
+        revision: settings.provider_registry_revision.unwrap_or(1),
+        providers: vec![GovernedProviderDescriptor {
+            revision: provider_settings
+                .map(|settings| settings.descriptor_revision)
+                .unwrap_or(1),
+            tenant,
+            provider,
+            credential_ref: runtime_gateway_provider_credential_ref(
+                shared
+                    .provider_credential
+                    .as_ref()
+                    .map(|credential| credential.reference()),
+                provider,
+            ),
+            credential_available: true,
+            enabled: provider_settings.is_none_or(|settings| settings.enabled),
+            revoked: false,
+            circuit_open: false,
+            quota_available: true,
+            local_execution: provider_settings.is_some_and(|settings| settings.local_execution),
+            trust_tier,
+            maximum_classification,
+            capabilities: capabilities.clone(),
+            regions,
+            retention_seconds: provider_settings
+                .map(|settings| settings.retention_seconds)
+                .unwrap_or(u32::MAX),
+            training_use: provider_settings.is_none_or(|settings| settings.training_use),
+            signals: GovernedRoutingSignals {
+                health: 10_000,
+                load: 0,
+                cost: 5_000,
+                latency: 5_000,
+                risk: match trust_tier {
+                    ProviderTrustTier::Standard => 8_000,
+                    ProviderTrustTier::Enterprise => 4_000,
+                    ProviderTrustTier::RestrictedApproved => 1_000,
+                },
+                priority: 5_000,
+            },
+        }],
+    })
+}
+
+fn runtime_gateway_governance_route(
+    route: GatewayHttpRouteKind,
+) -> Result<CanonicalRoute, RuntimeGatewayApplicationDataPlaneError> {
+    CanonicalRoute::new(match route {
+        GatewayHttpRouteKind::DataPlaneResponses => "responses",
+        GatewayHttpRouteKind::DataPlaneCompact => "responses/compact",
+        GatewayHttpRouteKind::DataPlaneWebSocket => "responses/websocket",
+        GatewayHttpRouteKind::DataPlaneChatCompletions => "chat/completions",
+        GatewayHttpRouteKind::DataPlaneEmbeddings => "embeddings",
+        GatewayHttpRouteKind::DataPlaneImagesGenerations => "images/generations",
+        GatewayHttpRouteKind::DataPlaneImagesEdits => "images/edits",
+        GatewayHttpRouteKind::DataPlaneImagesVariations => "images/variations",
+        GatewayHttpRouteKind::DataPlaneAudioSpeech => "audio/speech",
+        GatewayHttpRouteKind::DataPlaneAudioTranscriptions => "audio/transcriptions",
+        GatewayHttpRouteKind::DataPlaneAudioTranslations => "audio/translations",
+        GatewayHttpRouteKind::DataPlaneBatches => "batches",
+        GatewayHttpRouteKind::DataPlaneBatch => "batch",
+        GatewayHttpRouteKind::DataPlaneRerank => "rerank",
+        GatewayHttpRouteKind::DataPlaneA2a => "a2a",
+        GatewayHttpRouteKind::DataPlaneMessages => "messages",
+        GatewayHttpRouteKind::DataPlaneModels => "models",
+        GatewayHttpRouteKind::DataPlaneModel => "model",
+        _ => return Err(RuntimeGatewayApplicationDataPlaneError::RouteUnavailable),
+    })
+    .map_err(|_| RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable)
+}
+
+fn runtime_gateway_governed_action(route: GatewayHttpRouteKind) -> GovernedAction {
+    match route {
+        GatewayHttpRouteKind::DataPlaneCompact => GovernedAction::CompactContext,
+        GatewayHttpRouteKind::DataPlaneImagesEdits
+        | GatewayHttpRouteKind::DataPlaneImagesVariations
+        | GatewayHttpRouteKind::DataPlaneAudioTranscriptions
+        | GatewayHttpRouteKind::DataPlaneAudioTranslations => GovernedAction::UploadContent,
+        _ => GovernedAction::InvokeModel,
+    }
+}
+
+fn runtime_gateway_requested_capabilities(
+    route: GatewayHttpRouteKind,
+    captured: &RuntimeProxyRequest,
+) -> CapabilitySet {
+    let body = serde_json::from_slice::<serde_json::Value>(&captured.body).ok();
+    let tools = body.as_ref().is_some_and(|body| {
+        body.get("tools")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tools| !tools.is_empty())
+    });
+    let mut capabilities = Vec::new();
+    if matches!(
+        route,
+        GatewayHttpRouteKind::DataPlaneResponses
+            | GatewayHttpRouteKind::DataPlaneCompact
+            | GatewayHttpRouteKind::DataPlaneWebSocket
+    ) {
+        capabilities.push(ModelCapability::ResponsesApi);
+    }
+    if runtime_gateway_provider_stream_mode(captured) == ProviderStreamMode::Streaming {
+        capabilities.push(ModelCapability::Streaming);
+    }
+    if tools {
+        capabilities.push(ModelCapability::Tools);
+    }
+    if matches!(
+        route,
+        GatewayHttpRouteKind::DataPlaneImagesGenerations
+            | GatewayHttpRouteKind::DataPlaneImagesEdits
+            | GatewayHttpRouteKind::DataPlaneImagesVariations
+    ) {
+        capabilities.push(ModelCapability::Vision);
+    }
+    if route == GatewayHttpRouteKind::DataPlaneWebSocket {
+        capabilities.push(ModelCapability::WebSocket);
+    }
+    CapabilitySet::new(capabilities)
 }
 
 fn runtime_gateway_provider_invocation(
@@ -400,9 +987,10 @@ fn runtime_gateway_application_trace_context(
     TraceContext::new(&trace_id, &trace_id[..16], "01")
 }
 
-pub(super) struct RuntimeGatewayApplicationProviderDispatch<'a>(
-    RuntimeGatewayApplicationProviderDispatchKind<'a>,
-);
+pub(super) struct RuntimeGatewayApplicationProviderDispatch<'a> {
+    kind: RuntimeGatewayApplicationProviderDispatchKind<'a>,
+    inspection: &'a ApplicationInspectionPlan,
+}
 
 enum RuntimeGatewayApplicationProviderDispatchKind<'a> {
     Application(&'a ProviderInvocation),
@@ -411,7 +999,7 @@ enum RuntimeGatewayApplicationProviderDispatchKind<'a> {
 
 impl RuntimeGatewayApplicationProviderDispatch<'_> {
     pub(super) fn provider(&self) -> ProviderId {
-        match &self.0 {
+        match &self.kind {
             RuntimeGatewayApplicationProviderDispatchKind::Application(invocation) => {
                 invocation.route.provider
             }
@@ -422,7 +1010,7 @@ impl RuntimeGatewayApplicationProviderDispatch<'_> {
     }
 
     pub(super) fn endpoint(&self) -> ProviderEndpoint {
-        match &self.0 {
+        match &self.kind {
             RuntimeGatewayApplicationProviderDispatchKind::Application(invocation) => {
                 invocation.route.endpoint
             }
@@ -433,7 +1021,7 @@ impl RuntimeGatewayApplicationProviderDispatch<'_> {
     }
 
     pub(super) fn stream_mode(&self) -> ProviderStreamMode {
-        match &self.0 {
+        match &self.kind {
             RuntimeGatewayApplicationProviderDispatchKind::Application(invocation) => {
                 invocation.stream_mode
             }
@@ -442,23 +1030,31 @@ impl RuntimeGatewayApplicationProviderDispatch<'_> {
             }
         }
     }
+
+    pub(super) fn inspection(&self) -> &ApplicationInspectionPlan {
+        self.inspection
+    }
 }
 
 pub(super) fn runtime_gateway_application_provider_dispatch(
     admission: &RuntimeGatewayApplicationAdmission,
 ) -> RuntimeGatewayApplicationProviderDispatch<'_> {
     match &admission.0 {
-        RuntimeGatewayApplicationAdmissionKind::TenantBound(plan) => {
-            RuntimeGatewayApplicationProviderDispatch(
-                RuntimeGatewayApplicationProviderDispatchKind::Application(
+        RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, .. } => {
+            RuntimeGatewayApplicationProviderDispatch {
+                kind: RuntimeGatewayApplicationProviderDispatchKind::Application(
                     &plan.admission.provider_invocation,
                 ),
-            )
+                inspection: admission.inspection(),
+            }
         }
-        RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous(invocation) => {
-            RuntimeGatewayApplicationProviderDispatch(
-                RuntimeGatewayApplicationProviderDispatchKind::CompatibilityAnonymous(invocation),
-            )
+        RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { invocation, .. } => {
+            RuntimeGatewayApplicationProviderDispatch {
+                kind: RuntimeGatewayApplicationProviderDispatchKind::CompatibilityAnonymous(
+                    invocation,
+                ),
+                inspection: admission.inspection(),
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+version = 1
+
 [secrets]
 projected_root = "/run/secrets"
 projected_provider = "compose"

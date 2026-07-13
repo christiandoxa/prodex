@@ -34,6 +34,8 @@ pub fn plan_application_data_plane_execution(
 #[derive(Clone, PartialEq, Eq)]
 pub struct ApplicationDataPlaneRequest<R> {
     pub http: GatewayHttpRequestMeta,
+    pub inspection: ApplicationInspectionPlan,
+    pub governance: ApplicationGovernancePlan,
     pub admission: GatewayAdmissionRequest<R>,
 }
 
@@ -49,6 +51,8 @@ impl<R> fmt::Debug for ApplicationDataPlaneRequest<R> {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ApplicationDataPlanePlan {
     pub http: GatewayHttpPlan,
+    pub inspection: ApplicationInspectionPlan,
+    pub governance: ApplicationGovernancePlan,
     pub admission: GatewayAdmissionPlan,
 }
 
@@ -133,7 +137,12 @@ where
     }
     let admission = plan_data_plane_admission(request.admission)
         .map_err(ApplicationDataPlaneError::Admission)?;
-    Ok(ApplicationDataPlanePlan { http, admission })
+    Ok(ApplicationDataPlanePlan {
+        http,
+        inspection: request.inspection,
+        governance: request.governance,
+        admission,
+    })
 }
 
 #[derive(Clone, PartialEq, Eq)]

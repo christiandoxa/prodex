@@ -6,6 +6,15 @@ use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use crate::shared_types::RuntimeProxyRequest;
 use crate::{RuntimePresidioRedactionConfig, read_async_response_body_with_limit};
 use anyhow::{Context, Result, anyhow};
+use prodex_application::{
+    ApplicationInspectionPlan, ApplicationInspectionRequest, ApplicationInspectionSource,
+    plan_application_request_inspection,
+};
+use prodex_domain::{
+    ContentLocation, DataClassification, DetectorId, DetectorRevisionId, FindingKind,
+    InspectionCoverage, InspectionFinding, InspectionLimits, InspectionReasonCode, InspectionTag,
+    MAX_INSPECTION_FINDINGS,
+};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -17,7 +26,8 @@ mod json_body;
 
 use analyzer::{detect_presidio_language, merge_presidio_analyzer_results};
 use json_body::{
-    collect_json_string_values, presidio_json_value_separator, replace_json_string_values,
+    PresidioJsonString, collect_json_content, presidio_json_value_separator,
+    replace_json_string_values,
 };
 
 const PRESIDIO_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -42,6 +52,21 @@ struct PresidioAnonymizeResponse {
     text: String,
 }
 
+struct RuntimePresidioTextRedaction {
+    text: String,
+    findings: Vec<PresidioAnalyzerResult>,
+}
+
+struct RuntimePresidioRedaction {
+    body: Vec<u8>,
+    source: ApplicationInspectionSource,
+}
+
+pub(crate) struct RuntimePresidioWebSocketInspection<'a> {
+    pub(crate) text: Cow<'a, str>,
+    pub(crate) inspection: ApplicationInspectionPlan,
+}
+
 pub(crate) fn register_runtime_presidio_redaction_proxy_state(
     log_path: &Path,
     config: Option<RuntimePresidioRedactionConfig>,
@@ -62,12 +87,23 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
     request_id: u64,
     request: &mut RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
-) -> Result<()> {
+) -> Result<ApplicationInspectionPlan> {
     let Some(config) = runtime_presidio_redaction_for_log_path(&shared.log_path) else {
-        return Ok(());
+        return runtime_presidio_inspection_plan(Vec::new());
     };
-    if request.body.is_empty() || std::str::from_utf8(&request.body).is_err() {
-        return Ok(());
+    if request.body.is_empty() {
+        return runtime_presidio_inspection_plan(vec![runtime_presidio_inspection_source(
+            InspectionCoverage::Full,
+            Vec::new(),
+        )?]);
+    }
+    if std::str::from_utf8(&request.body).is_err() {
+        if config.fail_closed {
+            return Err(anyhow!("presidio_unsupported_encoding"));
+        }
+        return runtime_presidio_inspection_plan(vec![runtime_presidio_unavailable_source(
+            "inspection.unsupported_encoding",
+        )?]);
     }
 
     let redaction = await_runtime_proxy_async_task(
@@ -76,8 +112,8 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
         runtime_presidio_redact_body(request.body.clone(), config.clone()),
     );
     match redaction {
-        Ok(redacted) => {
-            if redacted != request.body {
+        Ok(redaction) => {
+            if redaction.body != request.body {
                 runtime_proxy_log(
                     shared,
                     runtime_proxy_structured_log_message(
@@ -89,13 +125,16 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
                                 "original_bytes",
                                 request.body.len().to_string(),
                             ),
-                            runtime_proxy_log_field("redacted_bytes", redacted.len().to_string()),
+                            runtime_proxy_log_field(
+                                "redacted_bytes",
+                                redaction.body.len().to_string(),
+                            ),
                         ],
                     ),
                 );
-                request.body = redacted;
+                request.body = redaction.body;
             }
-            Ok(())
+            runtime_presidio_inspection_plan(vec![redaction.source])
         }
         Err(_err) => {
             let fail_closed = config.fail_closed;
@@ -117,7 +156,9 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request(
             if fail_closed {
                 Err(anyhow!("presidio_redaction_failed"))
             } else {
-                Ok(())
+                runtime_presidio_inspection_plan(vec![runtime_presidio_unavailable_source(
+                    "presidio.unavailable",
+                )?])
             }
         }
     }
@@ -127,9 +168,14 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
     request_id: u64,
     text: &'a str,
     shared: &RuntimeRotationProxyShared,
-) -> Result<Cow<'a, str>> {
+) -> Result<RuntimePresidioWebSocketInspection<'a>> {
     let Some(config) = runtime_presidio_redaction_for_log_path(&shared.log_path) else {
-        return Ok(Cow::Borrowed(text));
+        let result = RuntimePresidioWebSocketInspection {
+            text: Cow::Borrowed(text),
+            inspection: runtime_presidio_inspection_plan(Vec::new())?,
+        };
+        runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
+        return Ok(result);
     };
     let redaction = await_runtime_proxy_async_task(
         shared,
@@ -137,8 +183,8 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
         runtime_presidio_redact_body(text.as_bytes().to_vec(), config.clone()),
     );
     match redaction {
-        Ok(redacted) => {
-            let redacted = String::from_utf8(redacted)
+        Ok(redaction) => {
+            let redacted = String::from_utf8(redaction.body)
                 .context("Presidio returned non-UTF-8 websocket text")?;
             if redacted != text {
                 runtime_proxy_log(
@@ -153,9 +199,19 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
                         ],
                     ),
                 );
-                Ok(Cow::Owned(redacted))
+                let result = RuntimePresidioWebSocketInspection {
+                    text: Cow::Owned(redacted),
+                    inspection: runtime_presidio_inspection_plan(vec![redaction.source])?,
+                };
+                runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
+                Ok(result)
             } else {
-                Ok(Cow::Borrowed(text))
+                let result = RuntimePresidioWebSocketInspection {
+                    text: Cow::Borrowed(text),
+                    inspection: runtime_presidio_inspection_plan(vec![redaction.source])?,
+                };
+                runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
+                Ok(result)
             }
         }
         Err(_err) => {
@@ -177,10 +233,43 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text<'a>(
             if config.fail_closed {
                 Err(anyhow!("presidio_redaction_failed"))
             } else {
-                Ok(Cow::Borrowed(text))
+                let result = RuntimePresidioWebSocketInspection {
+                    text: Cow::Borrowed(text),
+                    inspection: runtime_presidio_inspection_plan(vec![
+                        runtime_presidio_unavailable_source("presidio.unavailable")?,
+                    ])?,
+                };
+                runtime_presidio_log_websocket_inspection(request_id, shared, &result.inspection);
+                Ok(result)
             }
         }
     }
+}
+
+fn runtime_presidio_log_websocket_inspection(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    inspection: &ApplicationInspectionPlan,
+) {
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "gateway_request_inspection",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "websocket"),
+                runtime_proxy_log_field("coverage", inspection.result.coverage().as_str()),
+                runtime_proxy_log_field(
+                    "classification",
+                    inspection.result.classification().as_str(),
+                ),
+                runtime_proxy_log_field(
+                    "finding_count",
+                    inspection.result.findings().len().to_string(),
+                ),
+            ],
+        ),
+    );
 }
 
 fn runtime_presidio_redaction_for_log_path(
@@ -194,7 +283,7 @@ fn runtime_presidio_redaction_for_log_path(
 async fn runtime_presidio_redact_body(
     body: Vec<u8>,
     config: RuntimePresidioRedactionConfig,
-) -> Result<Vec<u8>> {
+) -> Result<RuntimePresidioRedaction> {
     let text = String::from_utf8(body).context("request body is not UTF-8")?;
     let client = reqwest::Client::builder()
         .timeout(PRESIDIO_HTTP_TIMEOUT)
@@ -202,42 +291,67 @@ async fn runtime_presidio_redact_body(
         .context("failed to build Presidio runtime HTTP client")?;
 
     if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&text) {
-        let mut values = Vec::new();
-        collect_json_string_values(&json, false, &mut values);
-        if values.is_empty() {
-            return Ok(text.into_bytes());
+        let content = collect_json_content(&json)?;
+        if content.values.is_empty() {
+            return Ok(RuntimePresidioRedaction {
+                body: text.into_bytes(),
+                source: runtime_presidio_inspection_source(content.coverage, Vec::new())?,
+            });
         }
 
-        let separator = presidio_json_value_separator(&values);
-        let combined = values.join(&separator);
+        let separator = presidio_json_value_separator(&content.values);
+        let combined = content
+            .values
+            .iter()
+            .map(|value| value.text.as_str())
+            .collect::<Vec<_>>()
+            .join(&separator);
         let redacted = runtime_presidio_redact_text(&client, &combined, &config).await?;
-        if redacted == combined {
-            return Ok(text.into_bytes());
+        let findings = runtime_presidio_findings(&content.values, &separator, &redacted.findings)?;
+        if redacted.text == combined {
+            return Ok(RuntimePresidioRedaction {
+                body: text.into_bytes(),
+                source: runtime_presidio_inspection_source(content.coverage, findings)?,
+            });
         }
 
-        let redacted_values = redacted.split(&separator).collect::<Vec<_>>();
-        if redacted_values.len() != values.len() {
+        let redacted_values = redacted.text.split(&separator).collect::<Vec<_>>();
+        if redacted_values.len() != content.values.len() {
             anyhow::bail!(
                 "Presidio changed JSON value separator count: expected {}, got {}",
-                values.len(),
+                content.values.len(),
                 redacted_values.len()
             );
         }
         let mut redacted_values = redacted_values.into_iter();
         replace_json_string_values(&mut json, false, &mut redacted_values);
-        return serde_json::to_vec(&json).context("failed to serialize redacted JSON request body");
+        return Ok(RuntimePresidioRedaction {
+            body: serde_json::to_vec(&json)
+                .context("failed to serialize redacted JSON request body")?,
+            source: runtime_presidio_inspection_source(content.coverage, findings)?,
+        });
     }
 
-    Ok(runtime_presidio_redact_text(&client, &text, &config)
-        .await?
-        .into_bytes())
+    let redacted = runtime_presidio_redact_text(&client, &text, &config).await?;
+    let findings = runtime_presidio_findings(
+        &[PresidioJsonString {
+            path: "$".to_string(),
+            text,
+        }],
+        "",
+        &redacted.findings,
+    )?;
+    Ok(RuntimePresidioRedaction {
+        body: redacted.text.into_bytes(),
+        source: runtime_presidio_inspection_source(InspectionCoverage::Full, findings)?,
+    })
 }
 
 async fn runtime_presidio_redact_text(
     client: &reqwest::Client,
     text: &str,
     config: &RuntimePresidioRedactionConfig,
-) -> Result<String> {
+) -> Result<RuntimePresidioTextRedaction> {
     let languages = &config.languages;
     let language_mode = config.language_mode;
 
@@ -270,7 +384,13 @@ async fn runtime_presidio_redact_text(
     }
 
     if all_analyzer_results.is_empty() {
-        return Ok(text.to_string());
+        return Ok(RuntimePresidioTextRedaction {
+            text: text.to_string(),
+            findings: Vec::new(),
+        });
+    }
+    if all_analyzer_results.len() > MAX_INSPECTION_FINDINGS {
+        anyhow::bail!("Presidio finding count exceeded safe limit");
     }
 
     let anonymized_response = client
@@ -292,7 +412,136 @@ async fn runtime_presidio_redact_text(
     .await?;
     let anonymized = serde_json::from_slice::<PresidioAnonymizeResponse>(&anonymized_body)
         .context("failed to parse Presidio Anonymizer response")?;
-    Ok(anonymized.text)
+    Ok(RuntimePresidioTextRedaction {
+        text: anonymized.text,
+        findings: all_analyzer_results,
+    })
+}
+
+fn runtime_presidio_inspection_source(
+    coverage: InspectionCoverage,
+    findings: Vec<InspectionFinding>,
+) -> Result<ApplicationInspectionSource> {
+    let has_findings = !findings.is_empty();
+    Ok(ApplicationInspectionSource {
+        coverage,
+        findings,
+        tags: has_findings
+            .then(|| InspectionTag::new("sensitive-data"))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .context("invalid inspection tag")?,
+        reason_codes: has_findings
+            .then(|| InspectionReasonCode::new("presidio.finding"))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .context("invalid inspection reason code")?,
+    })
+}
+
+fn runtime_presidio_unavailable_source(
+    reason: &'static str,
+) -> Result<ApplicationInspectionSource> {
+    Ok(ApplicationInspectionSource {
+        coverage: InspectionCoverage::Unsupported,
+        findings: Vec::new(),
+        tags: Vec::new(),
+        reason_codes: vec![
+            InspectionReasonCode::new(reason).context("invalid inspection reason code")?,
+        ],
+    })
+}
+
+fn runtime_presidio_inspection_plan(
+    sources: Vec<ApplicationInspectionSource>,
+) -> Result<ApplicationInspectionPlan> {
+    plan_application_request_inspection(ApplicationInspectionRequest {
+        sources,
+        default_classification: DataClassification::Internal,
+        trusted_label: None,
+        prior_classification: None,
+        detector_revision: DetectorRevisionId::new("runtime-inspection-v1")
+            .context("invalid detector revision")?,
+        limits: InspectionLimits::default(),
+    })
+    .context("failed to build inspection plan")
+}
+
+fn runtime_presidio_findings(
+    values: &[PresidioJsonString],
+    separator: &str,
+    findings: &[PresidioAnalyzerResult],
+) -> Result<Vec<InspectionFinding>> {
+    let separator_chars = separator.chars().count();
+    let mut ranges = Vec::with_capacity(values.len());
+    let mut cursor = 0usize;
+    for value in values {
+        let end = cursor
+            .checked_add(value.text.chars().count())
+            .context("Presidio content offset overflow")?;
+        ranges.push((cursor, end));
+        cursor = end
+            .checked_add(separator_chars)
+            .context("Presidio content offset overflow")?;
+    }
+
+    findings
+        .iter()
+        .map(|finding| {
+            let (value_index, (value_start, _)) = ranges
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|(_, (start, end))| finding.start >= *start && finding.end <= *end)
+                .context("Presidio finding crossed a content-field boundary")?;
+            let value = &values[value_index];
+            let start_char = finding.start - value_start;
+            let end_char = finding.end - value_start;
+            let start_byte = unicode_scalar_offset_to_byte(&value.text, start_char)
+                .context("Presidio finding start offset was invalid")?;
+            let end_byte = unicode_scalar_offset_to_byte(&value.text, end_char)
+                .context("Presidio finding end offset was invalid")?;
+            let confidence = presidio_confidence_basis_points(finding.score)?;
+            InspectionFinding::new(
+                presidio_finding_kind(&finding.entity_type),
+                ContentLocation::new(&value.path, start_byte, end_byte)?,
+                confidence,
+                DetectorId::new("presidio")?,
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .collect()
+}
+
+fn unicode_scalar_offset_to_byte(value: &str, offset: usize) -> Option<usize> {
+    if offset == value.chars().count() {
+        return Some(value.len());
+    }
+    value.char_indices().nth(offset).map(|(index, _)| index)
+}
+
+fn presidio_confidence_basis_points(score: f64) -> Result<u16> {
+    if !score.is_finite() || !(0.0..=1.0).contains(&score) {
+        anyhow::bail!("Presidio returned an invalid confidence score");
+    }
+    Ok((score * 10_000.0).round() as u16)
+}
+
+fn presidio_finding_kind(entity_type: &str) -> FindingKind {
+    match entity_type {
+        "EMAIL_ADDRESS" => FindingKind::EmailAddress,
+        "PHONE_NUMBER" => FindingKind::PhoneNumber,
+        "PERSON" => FindingKind::PersonName,
+        "LOCATION" => FindingKind::PhysicalAddress,
+        "CREDIT_CARD" => FindingKind::PaymentCard,
+        "IBAN_CODE" | "CRYPTO" => FindingKind::FinancialAccount,
+        "API_KEY" => FindingKind::ApiKey,
+        "ACCESS_TOKEN" => FindingKind::AccessToken,
+        "PRIVATE_KEY" => FindingKind::PrivateKey,
+        "PASSWORD" => FindingKind::Password,
+        value if value.ends_with("_ID") || value.ends_with("_SSN") => FindingKind::GovernmentId,
+        _ => FindingKind::TenantSensitive,
+    }
 }
 
 async fn presidio_analyze_async(
@@ -330,7 +579,8 @@ fn presidio_endpoint(base_url: &str, path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        PresidioLanguageMode, RuntimePresidioRedactionConfig, runtime_presidio_redact_body,
+        PresidioAnalyzerResult, PresidioJsonString, PresidioLanguageMode,
+        RuntimePresidioRedactionConfig, runtime_presidio_findings, runtime_presidio_redact_body,
     };
     use std::thread;
     use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
@@ -374,6 +624,7 @@ mod tests {
             languages: vec!["en".to_string()],
             language_mode: PresidioLanguageMode::Fixed,
             fail_closed: true,
+            trusted_hosts: Vec::new(),
         };
         let runtime = TokioRuntimeBuilder::new_current_thread()
             .enable_all()
@@ -385,12 +636,60 @@ mod tests {
                 config,
             ))
             .unwrap();
-        let text = String::from_utf8(redacted).unwrap();
+        assert_eq!(redacted.source.findings.len(), 1);
+        let text = String::from_utf8(redacted.body).unwrap();
         let json: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert!(!text.contains("user@example.com"));
         assert_eq!(json["type"], "response.create");
         assert_eq!(json["input"], "contact <EMAIL_ADDRESS>");
         analyzer_handle.join().unwrap();
         anonymizer_handle.join().unwrap();
+    }
+
+    #[test]
+    fn presidio_unicode_scalar_offsets_become_field_byte_offsets() {
+        let findings = runtime_presidio_findings(
+            &[PresidioJsonString {
+                path: "$.tools[0].arguments.*".to_string(),
+                text: "é user@example.com".to_string(),
+            }],
+            "",
+            &[PresidioAnalyzerResult {
+                start: 2,
+                end: 18,
+                score: 0.99,
+                entity_type: "EMAIL_ADDRESS".to_string(),
+                language: "en".to_string(),
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].location().byte_range(), 3..19);
+        assert_eq!(
+            findings[0].location().field_path(),
+            "$.tools[0].arguments.*"
+        );
+    }
+
+    #[test]
+    fn presidio_rejects_malformed_finding_metadata() {
+        let error = runtime_presidio_findings(
+            &[PresidioJsonString {
+                path: "$.input".to_string(),
+                text: "safe".to_string(),
+            }],
+            "",
+            &[PresidioAnalyzerResult {
+                start: 0,
+                end: 4,
+                score: f64::NAN,
+                entity_type: "PERSON".to_string(),
+                language: "en".to_string(),
+            }],
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("invalid confidence score"));
     }
 }

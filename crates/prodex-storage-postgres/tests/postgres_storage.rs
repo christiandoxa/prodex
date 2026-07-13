@@ -120,7 +120,7 @@ fn postgres_storage_error_response_is_stable_and_redacted() {
 
     let schema = PostgresStoragePlanError::SchemaVersionTooOld {
         observed: PostgresMigrationVersion(1),
-        required: PostgresMigrationVersion(2),
+        required: PostgresMigrationVersion(3),
     };
     assert!(!schema.to_string().contains("1"));
     assert!(!schema.to_string().contains("2"));

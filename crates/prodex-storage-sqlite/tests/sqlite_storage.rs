@@ -469,7 +469,7 @@ fn expired_recovery_command(
 #[test]
 fn sqlite_migrations_are_explicit_and_forbidden_on_request_path() {
     let plan = plan_sqlite_migrations(SqliteRuntimeMode::ExternalMigrator).unwrap();
-    assert_eq!(plan.migrations.len(), 1);
+    assert_eq!(plan.migrations.len(), 2);
     assert!(statement_contains_ddl(plan.migrations[0].sql));
 
     assert_eq!(
@@ -514,7 +514,7 @@ fn sqlite_external_migrator_open_is_the_only_ddl_eligible_mode() {
     assert_eq!(plan.mode, SqliteBackendOpenMode::ExternalMigrator);
     assert_eq!(plan.required_schema_version, REQUIRED_SQLITE_SCHEMA_VERSION);
     assert!(plan.ddl_allowed);
-    assert_eq!(plan.migration_count, 1);
+    assert_eq!(plan.migration_count, 2);
 }
 
 #[test]

@@ -53,7 +53,9 @@ fn write_fake_kiro_prompt_agent(root: &Path) -> std::path::PathBuf {
     fs::write(
         &script,
         r#"#!/usr/bin/env python3
-import json, sys
+import json, os, sys
+if os.environ.get("EXPECT_MODEL"):
+    assert sys.argv[1:] == ["acp", "--model", "claude-sonnet-4.5", "--effort", "medium"]
 first = json.loads(sys.stdin.readline())
 second = json.loads(sys.stdin.readline())
 assert first["method"] == "initialize"

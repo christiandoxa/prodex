@@ -56,22 +56,34 @@ pub(crate) fn runtime_kiro_acp_bootstrap_with_command(
     result
 }
 
-pub(crate) fn runtime_kiro_acp_prompt_turn(
-    cwd: &Path,
-    extra_env: &[(OsString, OsString)],
-    prompt: &str,
-) -> Result<RuntimeKiroAcpPromptTurnResult> {
-    runtime_kiro_acp_prompt_turn_with_command(crate::kiro_bin().as_os_str(), cwd, extra_env, prompt)
-}
-
 pub(crate) fn runtime_kiro_acp_prompt_turn_with_command(
     command: &OsStr,
     cwd: &Path,
     extra_env: &[(OsString, OsString)],
     prompt: &str,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
-    let mut child = Command::new(command)
-        .arg("acp")
+    runtime_kiro_acp_prompt_turn_with_command_and_options(
+        command, cwd, extra_env, None, None, prompt,
+    )
+}
+
+pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options(
+    command: &OsStr,
+    cwd: &Path,
+    extra_env: &[(OsString, OsString)],
+    model: Option<&str>,
+    effort: Option<&str>,
+    prompt: &str,
+) -> Result<RuntimeKiroAcpPromptTurnResult> {
+    let mut command = Command::new(command);
+    command.arg("acp");
+    if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
+        command.arg("--model").arg(model);
+    }
+    if let Some(effort) = effort.map(str::trim).filter(|effort| !effort.is_empty()) {
+        command.arg("--effort").arg(effort);
+    }
+    let mut child = command
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -81,7 +93,7 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command(
         .with_context(|| {
             format!(
                 "failed to start Kiro ACP agent {}",
-                command.to_string_lossy()
+                command.get_program().to_string_lossy()
             )
         })?;
     let result = runtime_kiro_acp_prompt_turn_child(&mut child, cwd, prompt);

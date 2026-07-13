@@ -11,6 +11,26 @@ const defaultFiles = [
   "docs/architecture.md",
 ];
 
+async function defaultMarkdownFiles() {
+  const governanceRoot = path.join(repoRoot, "docs", "enterprise-governance");
+  const governanceFiles = [];
+  async function collect(directory) {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await collect(absolute);
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        governanceFiles.push(path.relative(repoRoot, absolute));
+      }
+    }
+  }
+  await collect(governanceRoot).catch((error) => {
+    if (error?.code !== "ENOENT") throw error;
+  });
+  governanceFiles.sort();
+  return [...defaultFiles, ...governanceFiles];
+}
+
 function parseArgs(argv) {
   const files = [];
   let help = false;
@@ -117,7 +137,7 @@ async function lintFile(relativePath) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  const files = args.files.length > 0 ? args.files : defaultFiles;
+  const files = args.files.length > 0 ? args.files : await defaultMarkdownFiles();
 
   if (args.help) {
     process.stdout.write(

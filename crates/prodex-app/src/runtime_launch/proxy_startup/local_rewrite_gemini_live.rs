@@ -147,6 +147,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     request_id: u64,
     request: RuntimeLocalRewriteRequest,
     shared: &RuntimeLocalRewriteProxyShared,
+    authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) {
     let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider else {
         let _ = request.respond(build_runtime_proxy_text_response(
@@ -225,9 +226,13 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
             ],
         ),
     );
-    if let Err(err) =
-        runtime_gemini_live_session(request_id, &mut local_socket, &mut upstream_socket, shared)
-    {
+    if let Err(err) = runtime_gemini_live_session(
+        request_id,
+        &mut local_socket,
+        &mut upstream_socket,
+        shared,
+        authorized,
+    ) {
         runtime_proxy_log(
             &shared.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -337,6 +342,7 @@ fn handle_runtime_gemini_live_tcp_stream(
         &mut local_socket,
         &mut upstream_socket,
         shared,
+        None,
     ) {
         runtime_proxy_log(
             &shared.runtime_shared,

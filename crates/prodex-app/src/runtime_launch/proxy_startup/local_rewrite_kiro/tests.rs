@@ -127,6 +127,31 @@ fn kiro_messages_translation_preserves_anthropic_user_text() {
 }
 
 #[test]
+fn kiro_translation_accepts_codex_web_search_tool() {
+    let body = serde_json::to_vec(&json!({
+        "model": "auto",
+        "stream": true,
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}]
+        }],
+        "tools": [{"type": "web_search", "search_context_size": "medium"}]
+    }))
+    .unwrap();
+    let translated = runtime_provider_chat_compatible_request_body(
+        &body,
+        &RuntimeDeepSeekConversationStore::default(),
+        RuntimeProviderBridgeKind::Kiro,
+        "",
+        false,
+        runtime_kiro_rewrite_options(),
+    )
+    .expect("Kiro should accept Codex web search metadata");
+    assert_eq!(translated.messages[0]["content"], "hello");
+}
+
+#[test]
 fn kiro_chat_request_tolerates_default_noop_controls() {
     let translated = match runtime_kiro_request_body_for_endpoint(
         ProviderEndpoint::ChatCompletions,

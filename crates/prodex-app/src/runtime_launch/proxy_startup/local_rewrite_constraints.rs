@@ -133,7 +133,10 @@ impl RuntimeGatewayPendingConstraintPlan<'_> {
             runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken => {
                 runtime_proxy_crate::RuntimeRouteDecisionStage::Authentication
             }
-            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::ModelNotAllowed => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::ModelNotAllowed
+            | runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceDenied
+            | runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceApprovalRequired
+            | runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::NoEligibleProvider => {
                 runtime_proxy_crate::RuntimeRouteDecisionStage::Governance
             }
             _ => runtime_proxy_crate::RuntimeRouteDecisionStage::Admission,
