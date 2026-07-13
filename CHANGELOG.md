@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.281.0 - 2026-07-13
+
+- No grouped changes.
+
 ## 0.280.0 - 2026-07-13
 
 ### Runtime
@@ -195,9 +199,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Protect active session transcripts (`f2113d1`)
-
-## 0.268.0 - 2026-07-10
-
-### Runtime
-
-- Harden runtime compatibility and launch handling (`1476ca5`)
