@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.282.0 - 2026-07-13
+
+### Misc
+
+- Add enterprise controls and Kiro parity (`fbc94c0`)
+
 ## 0.281.0 - 2026-07-13
 
 - No grouped changes.
@@ -193,9 +199,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Trust launch directory in yolo mode (`436bce1`)
-
-## 0.269.0 - 2026-07-10
-
-### Misc
-
-- Protect active session transcripts (`f2113d1`)
