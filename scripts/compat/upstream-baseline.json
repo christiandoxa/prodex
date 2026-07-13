@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.144.1 release",
+      "baseline_source": "openai/codex rust-v0.144.2 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -58,15 +58,27 @@
         },
         {
           "path": "codex-rs/core/src/compact_remote.rs",
-          "reason": "Owns remote compaction flow that reaches unary /responses/compact and supplies request metadata/turn-state context.",
+          "reason": "Owns remote compaction lifecycle, analytics, fallback, and delegation to the unary /responses/compact request path.",
           "required_contains": [
             "run_remote_compact_task",
             "run_inline_remote_auto_compact_task",
-            "compact_conversation_history",
+            "run_remote_compact_attempt",
             "CompactionImplementation::ResponsesCompact",
             "ContextCompactionItem",
             "CompactionTurnMetadata",
+            "turn_state"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/compact_remote_request.rs",
+          "reason": "Owns remote compaction request construction, compaction-specific Responses metadata, and the unary /responses/compact client call.",
+          "required_contains": [
+            "run_remote_compact_attempt",
+            "compact_conversation_history",
+            "CompactConversationRequestSettings",
+            "CompactionTurnMetadata",
             "CodexResponsesRequestKind::Compaction",
+            "to_responses_metadata",
             "turn_state",
             "responses_metadata"
           ]
@@ -731,14 +743,14 @@
         {
           "id": "compact.remote-responses-compact",
           "kind": "route",
-          "file": "codex-rs/core/src/compact_remote.rs",
-          "reason": "Remote compaction is tied to the Responses compact implementation and item shape.",
+          "file": "codex-rs/core/src/compact_remote_request.rs",
+          "reason": "Remote compaction must construct compaction-specific Responses metadata before calling the unary compact client.",
           "file_contains_all": [
-            "run_remote_compact_task",
+            "run_remote_compact_attempt",
             "compact_conversation_history",
-            "CompactionImplementation::ResponsesCompact",
-            "ContextCompactionItem",
-            "CodexResponsesRequestKind::Compaction"
+            "CompactConversationRequestSettings",
+            "CodexResponsesRequestKind::Compaction",
+            "to_responses_metadata"
           ],
           "expected_routes_all": [
             "/responses/compact"
@@ -748,7 +760,7 @@
           "id": "compact.remote-turn-metadata-header",
           "kind": "header_group",
           "reason": "Remote compaction must derive and pass compaction-specific turn metadata into the compact request.",
-          "file": "codex-rs/core/src/compact_remote.rs",
+          "file": "codex-rs/core/src/compact_remote_request.rs",
           "file_contains_all": [
             "CompactionTurnMetadata",
             "compact_conversation_history",
@@ -1162,7 +1174,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.144.1",
+      "tested_codex_release": "rust-v0.144.2",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1179,15 +1191,15 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.142.4",
-      "name": "0.142.4",
-      "published_at": "2026-06-29T05:04:25Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.142.4",
+      "tag_name": "rust-v0.144.2",
+      "name": "0.144.2",
+      "published_at": "2026-07-13T04:39:22Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.2",
       "body_head": [
-        "## Chores",
-        "- No user-facing changes were identified for this release.",
+        "## Bug Fixes",
+        "- Restored the previous Guardian auto-review policy, request format, and tool behavior after rolling back a prompting regression. (#32672)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.142.3...rust-v0.142.4"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.144.1...rust-v0.144.2"
       ]
     }
   },
