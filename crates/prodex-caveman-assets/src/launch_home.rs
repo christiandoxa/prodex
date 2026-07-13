@@ -5,15 +5,13 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::fs_ops::{
-    copy_file_streaming, read_text_file_limited, remove_existing_dir_path, write_executable_file,
-    write_text_file,
+    copy_file_streaming, read_text_file_limited, remove_existing_dir_path, write_text_file,
 };
-use crate::hook_trust::{configure_caveman_hook_trust_state, configure_caveman_session_start_hook};
 use crate::localization::localize_text_file;
 use crate::marketplace::{install_caveman_marketplace, install_caveman_plugin_cache};
 use crate::toml_helpers::ensure_child_table;
 use crate::{
-    PRODEX_CAVEMAN_HOOK_MARKER, PRODEX_CAVEMAN_HOOK_SCRIPT, PRODEX_CAVEMAN_MARKETPLACE_NAME,
+    PRODEX_CAVEMAN_DEVELOPER_INSTRUCTIONS, PRODEX_CAVEMAN_MARKETPLACE_NAME,
     PRODEX_CAVEMAN_PLUGIN_ID, PRODEX_CAVEMAN_SOURCE_REPO,
 };
 
@@ -84,7 +82,6 @@ pub fn prepare_caveman_launch_home(
 
 pub fn configure_prodex_overlay_home(codex_home: &Path) -> Result<()> {
     localize_text_file(&codex_home.join("config.toml"))?;
-    configure_caveman_session_start_script(codex_home)?;
     configure_caveman_config(codex_home)?;
     install_caveman_marketplace(codex_home)?;
     install_caveman_plugin_cache(codex_home)?;
@@ -93,24 +90,6 @@ pub fn configure_prodex_overlay_home(codex_home: &Path) -> Result<()> {
 
 pub fn configure_caveman_launch_home(codex_home: &Path) -> Result<()> {
     configure_prodex_overlay_home(codex_home)
-}
-
-fn configure_caveman_session_start_script(codex_home: &Path) -> Result<()> {
-    let script_path = codex_home.join("bin").join(PRODEX_CAVEMAN_HOOK_SCRIPT);
-    let script = format!(
-        r#"#!/usr/bin/env sh
-codex_home="${{CODEX_HOME:-${{HOME:-}}/.codex}}"
-marker="$codex_home/{PRODEX_CAVEMAN_HOOK_MARKER}"
-marker_dir=$(dirname "$marker")
-mkdir -p "$marker_dir" 2>/dev/null || true
-if [ -e "$marker" ]; then
-  exit 0
-fi
-: > "$marker" 2>/dev/null || exit 0
-printf '%s\n' 'CAVEMAN MODE ACTIVE. $caveman full: terse, no filler, exact tech. Code/commits/security normal. Stop: stop caveman/normal mode.' 'PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE. Ponytail applies smallest-correct-implementation pressure. Use visible rtk <cmd> for noisy shell output and codebase-memory-mcp for structural code navigation. Presidio is opt-in only.'
-"#
-    );
-    write_executable_script(&script_path, &script)
 }
 
 fn create_temporary_prodex_overlay_home(managed_profiles_root: &Path) -> Result<PathBuf> {
@@ -388,8 +367,17 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
     features.insert("plugins".to_string(), toml::Value::Boolean(false));
     features.insert("remote_plugin".to_string(), toml::Value::Boolean(false));
 
-    let caveman_hook_group_index = configure_caveman_session_start_hook(&mut table);
-    configure_caveman_hook_trust_state(&mut table, &config_path, caveman_hook_group_index)?;
+    let developer_instructions = table
+        .entry("developer_instructions".to_string())
+        .or_insert_with(|| toml::Value::String(String::new()));
+    let current_instructions = developer_instructions.as_str().unwrap_or_default();
+    if !current_instructions.contains(PRODEX_CAVEMAN_DEVELOPER_INSTRUCTIONS) {
+        *developer_instructions = toml::Value::String(if current_instructions.trim().is_empty() {
+            PRODEX_CAVEMAN_DEVELOPER_INSTRUCTIONS.to_string()
+        } else {
+            format!("{current_instructions}\n\n{PRODEX_CAVEMAN_DEVELOPER_INSTRUCTIONS}")
+        });
+    }
 
     let marketplaces = ensure_child_table(&mut table, "marketplaces");
     let caveman_marketplace = ensure_child_table(marketplaces, PRODEX_CAVEMAN_MARKETPLACE_NAME);
@@ -415,8 +403,4 @@ fn configure_caveman_config(codex_home: &Path) -> Result<()> {
         .context("failed to render Prodex overlay config")?;
     write_text_file(&config_path, &rendered)?;
     Ok(())
-}
-
-fn write_executable_script(path: &Path, script: &str) -> Result<()> {
-    write_executable_file(path, script)
 }

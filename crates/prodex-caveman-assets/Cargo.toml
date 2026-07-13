@@ -14,9 +14,7 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 chrono = { workspace = true }
 prodex_shared_codex_fs = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 toml = { workspace = true }
 
 [lints]

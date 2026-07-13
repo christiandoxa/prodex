@@ -561,7 +561,6 @@ impl SuperArgs {
         if presidio {
             codex_args.push(OsString::from("presidio"));
         }
-        codex_args.push(OsString::from("--dangerously-bypass-hook-trust"));
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
         codex_args.extend(feature_overrides);

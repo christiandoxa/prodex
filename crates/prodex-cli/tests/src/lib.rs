@@ -266,7 +266,6 @@ fn super_default_keeps_minimal_super_prefixes() {
         vec![
             OsString::from("rtk"),
             OsString::from("ponytail"),
-            OsString::from("--dangerously-bypass-hook-trust"),
             OsString::from("exec"),
             OsString::from("review")
         ]
@@ -291,13 +290,7 @@ fn super_omits_presidio_prefix_until_prompt_opt_in() {
     };
     assert_eq!(
         args.into_caveman_args().codex_args,
-        os_args(&[
-            "rtk",
-            "ponytail",
-            "--dangerously-bypass-hook-trust",
-            "exec",
-            "hello",
-        ])
+        os_args(&["rtk", "ponytail", "exec", "hello"])
     );
 }
 #[test]
@@ -309,14 +302,7 @@ fn super_includes_presidio_prefix_when_opted_in() {
     };
     assert_eq!(
         args.into_caveman_args_with_presidio(true).codex_args,
-        os_args(&[
-            "rtk",
-            "ponytail",
-            "presidio",
-            "--dangerously-bypass-hook-trust",
-            "exec",
-            "hello",
-        ])
+        os_args(&["rtk", "ponytail", "presidio", "exec", "hello",])
     );
 }
 #[test]
@@ -330,14 +316,7 @@ fn super_presidio_flag_enables_presidio_without_prompt() {
     ]);
     assert_eq!(
         args.codex_args,
-        os_args(&[
-            "rtk",
-            "ponytail",
-            "presidio",
-            "--dangerously-bypass-hook-trust",
-            "exec",
-            "hello",
-        ])
+        os_args(&["rtk", "ponytail", "presidio", "exec", "hello",])
     );
 }
 #[test]
@@ -369,13 +348,7 @@ fn super_no_presidio_flag_disables_presidio_without_prompt() {
     ]);
     assert_eq!(
         args.codex_args,
-        os_args(&[
-            "rtk",
-            "ponytail",
-            "--dangerously-bypass-hook-trust",
-            "exec",
-            "hello",
-        ])
+        os_args(&["rtk", "ponytail", "exec", "hello"])
     );
 }
 #[test]
@@ -383,14 +356,7 @@ fn super_leading_optional_prefixes_are_consumed_before_passthrough() {
     let args = parse_super_as_caveman(&["prodex", "s", "ponytail", "presidio", "exec", "hello"]);
     assert_eq!(
         args.codex_args,
-        os_args(&[
-            "rtk",
-            "ponytail",
-            "presidio",
-            "--dangerously-bypass-hook-trust",
-            "exec",
-            "hello",
-        ])
+        os_args(&["rtk", "ponytail", "presidio", "exec", "hello",])
     );
 }
 #[test]

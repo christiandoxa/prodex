@@ -298,15 +298,10 @@ fn prepare_caveman_home_handles_broken_config_symlink() {
     assert!(overlay_config.contains("prodex-caveman"));
     assert!(overlay_config.contains("plugins = false"));
     assert!(overlay_config.contains("remote_plugin = false"));
-    let hook_script = fs::read_to_string(overlay.join("bin").join("prodex-caveman-sessionstart"))
-        .expect("Caveman SessionStart script should exist");
-    assert!(hook_script.contains("CAVEMAN MODE ACTIVE"));
-    assert!(hook_script.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
-    assert!(hook_script.contains("Ponytail applies smallest-correct-implementation pressure"));
-    assert!(hook_script.contains("rtk <cmd>"));
-    assert!(hook_script.contains("codebase-memory-mcp"));
-    assert!(hook_script.contains("Presidio is opt-in only"));
-    assert!(hook_script.contains(".prodex-hooks/caveman-sessionstart"));
+    assert!(overlay_config.contains("developer_instructions"));
+    assert!(overlay_config.contains("CAVEMAN MODE ACTIVE"));
+    assert!(overlay_config.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
+    assert!(!overlay_config.contains("hooks.SessionStart"));
 
     let _ = fs::remove_dir_all(base);
     let _ = fs::remove_dir_all(managed_root);
@@ -472,44 +467,35 @@ fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
     let _ = fs::remove_dir_all(shared);
 }
 
-#[cfg(unix)]
 #[test]
-fn caveman_session_start_script_outputs_once_per_launch_home() {
-    let codex_home = temp_dir("caveman-sessionstart-once");
+fn caveman_developer_instructions_preserve_existing_config_and_are_idempotent() {
+    let codex_home = temp_dir("caveman-developer-instructions");
     fs::create_dir_all(&codex_home).expect("codex home should exist");
+    fs::write(
+        codex_home.join("config.toml"),
+        "developer_instructions = \"keep existing guidance\"\n",
+    )
+    .expect("base config should write");
 
     configure_caveman_launch_home(&codex_home).expect("caveman home should configure");
     configure_caveman_launch_home(&codex_home)
         .expect("caveman home configure should be idempotent");
 
     let config = fs::read_to_string(codex_home.join("config.toml")).expect("config should read");
-    assert_eq!(config.matches("prodex-caveman-sessionstart").count(), 1);
+    let parsed: toml::Value = toml::from_str(&config).expect("config should parse");
+    let instructions = parsed["developer_instructions"]
+        .as_str()
+        .expect("developer instructions should be a string");
+    assert!(instructions.starts_with("keep existing guidance"));
+    assert_eq!(instructions.matches("CAVEMAN MODE ACTIVE").count(), 1);
+    assert!(instructions.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
+    assert!(instructions.contains("Ponytail applies smallest-correct-implementation pressure"));
+    assert!(instructions.contains("codebase-memory-mcp"));
+    assert!(instructions.contains("Presidio is opt-in only"));
+    assert!(parsed.get("hooks").is_none());
     assert!(
         !config.contains("zsh_path"),
         "Prodex overlay must not override Codex package-managed zsh discovery"
-    );
-
-    let script = codex_home.join("bin").join("prodex-caveman-sessionstart");
-    let first = std::process::Command::new(&script)
-        .env("CODEX_HOME", &codex_home)
-        .output()
-        .expect("first SessionStart script should run");
-    assert!(first.status.success());
-    let first_stdout = String::from_utf8(first.stdout).expect("first stdout should be utf8");
-    assert!(first_stdout.contains("CAVEMAN MODE ACTIVE"));
-    assert!(first_stdout.contains("PRODEX SUPER TOOLS ACTIVE WHEN AVAILABLE"));
-    assert!(first_stdout.contains("Ponytail applies smallest-correct-implementation pressure"));
-    assert!(first_stdout.contains("codebase-memory-mcp"));
-    assert!(first_stdout.contains("Presidio is opt-in only"));
-
-    let second = std::process::Command::new(&script)
-        .env("CODEX_HOME", &codex_home)
-        .output()
-        .expect("second SessionStart script should run");
-    assert!(second.status.success());
-    assert!(
-        second.stdout.is_empty(),
-        "SessionStart script should not replay after marker"
     );
 
     let _ = fs::remove_dir_all(codex_home);
