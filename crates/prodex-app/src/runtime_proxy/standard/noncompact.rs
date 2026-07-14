@@ -102,7 +102,7 @@ pub(super) fn proxy_runtime_noncompact_request(
         .unwrap_or_else(|| current_profile.clone());
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Standard);
-    let selection_started_at = Instant::now();
+    let mut selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
     let mut excluded_profiles = BTreeSet::new();
     let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
@@ -404,5 +404,6 @@ pub(super) fn proxy_runtime_noncompact_request(
                 excluded_profiles.insert(profile_name);
             }
         }
+        selection_started_at = Instant::now();
     }
 }

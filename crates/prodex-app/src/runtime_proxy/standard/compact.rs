@@ -79,7 +79,7 @@ pub(super) fn proxy_runtime_compact_request(
         .unwrap_or_else(|| current_profile.clone());
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Compact);
-    let selection_started_at = Instant::now();
+    let mut selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
     if runtime_proxy_should_shed_fresh_compact_request(
         pressure_mode,
@@ -406,5 +406,6 @@ pub(super) fn proxy_runtime_compact_request(
                 excluded_profiles.insert(profile_name);
             }
         }
+        selection_started_at = Instant::now();
     }
 }

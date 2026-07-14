@@ -413,7 +413,15 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
                     .then_some(Duration::from_millis(750)),
             ),
             "third-account" => initial_account_response("third-account", mode),
-            "fourth-account" | "fifth-account"
+            "fifth-account"
+                if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitUntilThird) =>
+            {
+                let mut response = usage_limit_sse_response(mode);
+                response.0 = "HTTP/1.1 429 Too Many Requests";
+                response.5 = Some(Duration::from_millis(220));
+                response
+            }
+            "fourth-account"
                 if matches!(mode, RuntimeProxyBackendMode::HttpOnlyUsageLimitUntilThird) =>
             {
                 usage_limit_sse_response(mode)
@@ -464,7 +472,7 @@ fn usage_limit_sse_response(
         "text/event-stream",
         concat!(
             "event: response.failed\r\n",
-            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"You've hit your usage limit. To get more access now, send a request to your admin or try again at Mar 24th, 2026 2:04 AM.\"}}}\r\n",
             "\r\n"
         )
         .to_string(),
