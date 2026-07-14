@@ -26,7 +26,10 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
             input.body,
         );
     }
-    if input.endpoint != ProviderEndpoint::Responses {
+    if !matches!(
+        input.endpoint,
+        ProviderEndpoint::Responses | ProviderEndpoint::ResponsesCompact
+    ) {
         return ProviderTransformResult::unsupported(
             ProviderId::Gemini,
             input.endpoint,

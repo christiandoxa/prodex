@@ -18,7 +18,10 @@ pub(super) fn deepseek_transform_request(
             input.body,
         );
     }
-    if input.endpoint != ProviderEndpoint::Responses {
+    if !matches!(
+        input.endpoint,
+        ProviderEndpoint::Responses | ProviderEndpoint::ResponsesCompact
+    ) {
         return ProviderTransformResult::unsupported(
             provider,
             input.endpoint,
