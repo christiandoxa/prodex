@@ -266,7 +266,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1430,
+    "maxLines": 1429,
     "reason": "Gateway launch now composes four governed snapshot authorities, immutable harness startup diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
