@@ -191,6 +191,38 @@ fn all_quota_watch_tui_status_stays_ready_when_only_spark_is_blocked() {
 }
 
 #[test]
+fn all_quota_watch_tui_marks_weekly_only_profile_ready() {
+    let mut usage = test_openai_usage_with_windows(0, 1, 1_783_999_934);
+    usage.rate_limit.as_mut().expect("rate limit").primary_window = None;
+    let snapshot = AllQuotaWatchSnapshot::Reports {
+        updated: "2026-07-14 10:00:00 UTC".to_string(),
+        profile_count: 1,
+        reports: vec![test_openai_quota_report(usage)],
+    };
+
+    let frame = build_all_quota_watch_tui_frame(
+        &snapshot,
+        AllQuotaWatchLayout {
+            detail: true,
+            scroll_offset: 0,
+            sort: QuotaReportSort::Current,
+            provider_filter: QuotaProviderFilter::All,
+            provider_filter_locked: false,
+            total_width: 100,
+            max_lines: Some(20),
+        },
+    );
+
+    let row = &frame.table.as_ref().expect("table").rows[0];
+    assert_eq!(row.status, vec!["Ready".to_string()]);
+    assert_eq!(row.remaining, vec!["weekly 99%".to_string()]);
+    assert!(row.detail[0].contains("resets: 5h unavailable | weekly "));
+    assert!(frame.overview_fields.iter().any(|(label, value)| {
+        label == "Available" && value.contains("1/1 profile")
+    }));
+}
+
+#[test]
 fn all_quota_watch_tui_error_detail_replaces_resets() {
     let snapshot = AllQuotaWatchSnapshot::Reports {
         updated: "2026-06-26 10:00:00 UTC".to_string(),

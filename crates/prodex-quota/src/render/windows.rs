@@ -100,16 +100,15 @@ fn additional_rate_limit_is_spark(additional: &AdditionalRateLimit) -> bool {
 }
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
-    let now = Local::now().timestamp();
-    let windows = ["5h", "weekly"]
+    let used_percentages = ["5h", "weekly"]
         .into_iter()
-        .filter_map(|label| required_window_snapshot_at(pair, label, now))
+        .filter_map(|label| find_main_window(pair, label)?.used_percent)
         .collect::<Vec<_>>();
 
-    !windows.is_empty()
-        && windows
+    !used_percentages.is_empty()
+        && used_percentages
             .into_iter()
-            .all(|window| window.remaining_percent > 0)
+            .all(|used_percent| used_percent < 100)
 }
 
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
@@ -563,18 +562,23 @@ pub fn format_openai_quota_status(usage: &UsageResponse) -> String {
 }
 
 pub fn format_blocked_quota_status(blocked: &[BlockedLimit]) -> String {
-    if blocked
-        .iter()
-        .any(|limit| limit.message.to_ascii_lowercase().contains("5h"))
-    {
+    if blocked.iter().any(|limit| {
+        let message = limit.message.to_ascii_lowercase();
+        message.contains("exhausted") && message.contains("5h")
+    }) {
         "Blocked 5h".to_string()
+    } else if blocked.iter().any(|limit| {
+        let message = limit.message.to_ascii_lowercase();
+        message.contains("exhausted") && message.contains("weekly")
+    }) {
+        "Blocked weekly".to_string()
     } else if blocked
         .iter()
-        .any(|limit| limit.message.to_ascii_lowercase().contains("weekly"))
+        .any(|limit| limit.message.to_ascii_lowercase().contains("exhausted"))
     {
-        "Blocked weekly".to_string()
-    } else {
         "Blocked".to_string()
+    } else {
+        "Unavailable".to_string()
     }
 }
 
