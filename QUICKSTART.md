@@ -21,13 +21,25 @@ If you install `@christiandoxa/prodex` from npm, Prodex uses its bundled `@opena
 
 ## Install
 
-Install from npm:
+Install the latest standalone macOS or Linux binary:
+
+```bash
+curl -fsSL https://github.com/christiandoxa/prodex/releases/latest/download/install.sh | sh
+```
+
+The repository source URL is also usable directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/christiandoxa/prodex/main/install.sh | sh
+```
+
+Legacy npm installation:
 
 ```bash
 npm install -g @christiandoxa/prodex
 ```
 
-Or install from a source checkout:
+Legacy source installation:
 
 ```bash
 cargo install --path .
@@ -39,6 +51,7 @@ Check your installed version first:
 
 ```bash
 prodex --version
+prodex update
 ```
 
 The current local version in this repo is `0.287.0`:
@@ -52,15 +65,15 @@ Dependency status in this repo:
 - The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest and is used by default; external Codex is opt-in through `PRODEX_CODEX_BIN` or `PRODEX_CODEX_RESOLUTION=external`, and one-shot npm repair is opt-in through `PRODEX_CODEX_AUTO_INSTALL=1`
 - Source installs still use whatever `codex` binary is on your `PATH`
 - Packaged Codex runtime resources, including the Codex 0.136.0 and newer bundled zsh runtime helper, stay owned by the Codex package; Prodex does not override `zsh_path`
-- `prodex update` passes through to `codex update` directly without profile selection, quota preflight, or the local runtime proxy
+- `prodex update` verifies and installs the latest GitHub Release binary; npm and Cargo installations are removed during the first migration
+- Update notices from this release onward direct users to `prodex update`
 - Run `cargo update` whenever dependency metadata changes so the workspace lockfile stays in sync
 - Versioned npm install snippets in this guide and `README.md` are synced from `Cargo.toml`
 
-If you want to switch from a Cargo-installed binary to npm:
+Manual migration is unnecessary; run:
 
 ```bash
-cargo uninstall prodex
-npm install -g @christiandoxa/prodex
+prodex update
 ```
 
 ## 1. Create your first profile

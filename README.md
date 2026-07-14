@@ -128,19 +128,33 @@ Runtime proxy design contract:
 
 ## Installation
 
+Install the standalone macOS or Linux binary from the latest GitHub Release:
+
+```bash
+curl -fsSL https://github.com/christiandoxa/prodex/releases/latest/download/install.sh | sh
+```
+
+The installer downloads the matching release asset, verifies it against `SHA256SUMS`, and installs `prodex` to `~/.local/bin`. Its auditable source is also available directly from the repository:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/christiandoxa/prodex/main/install.sh | sh
+```
+
+Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available.
+
 <details>
-<summary>Install from npm</summary>
+<summary>Legacy npm installation</summary>
 
 ```bash
 npm install -g @christiandoxa/prodex
 ```
 
-The npm package uses its bundled `@openai/codex@latest` dependency by default. If the bundled native Codex optional package is missing or not executable, Prodex falls back to an executable external `codex` on `PATH` and prints a notice before launch. This includes nvm-managed global Codex installs when the active nvm version's `bin` directory is on `PATH`. If neither bundled nor external Codex is usable, set `PRODEX_CODEX_AUTO_INSTALL=1` to let Prodex run `npm install -g @openai/codex@latest` once before retrying PATH resolution. To deliberately pin a separate Codex CLI from your machine, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`.
+The npm package uses its bundled `@openai/codex@latest` dependency by default. Running `prodex update` migrates this installation to the standalone GitHub Release binary and preserves Codex as its own global npm command. If the bundled native Codex optional package is missing or not executable, Prodex falls back to an executable external `codex` on `PATH` and prints a notice before launch. This includes nvm-managed global Codex installs when the active nvm version's `bin` directory is on `PATH`. If neither bundled nor external Codex is usable, set `PRODEX_CODEX_AUTO_INSTALL=1` to let Prodex run `npm install -g @openai/codex@latest` once before retrying PATH resolution. To deliberately pin a separate Codex CLI from your machine, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`.
 
 </details>
 
 <details>
-<summary>Install from source checkout</summary>
+<summary>Legacy source installation</summary>
 
 ```bash
 cargo install --path .
@@ -437,13 +451,14 @@ prodex session current --parent-only
 </details>
 
 <details>
-<summary>Update Codex</summary>
+<summary>Update Prodex</summary>
 
 ```bash
 prodex update --help
+prodex update
 ```
 
-`prodex update` passes through to `codex update` directly. It does not use Prodex profile selection, quota preflight, or the local runtime proxy.
+`prodex update` downloads the latest checksum-verified GitHub Release binary. Existing npm or Cargo installations are removed and replaced with the standalone binary in `~/.local/bin`. Update notices emitted by this version use the same command.
 
 </details>
 

@@ -1,33 +1,13 @@
 use super::*;
 
 #[test]
-fn update_command_accepts_passthrough_args() {
-    let command = parse_cli_command_from([
-        "prodex",
-        "update",
-        "--check",
-        "rust-v0.128.0",
-        "--force",
-    ])
-    .expect("update command should parse");
-    let Commands::Update(args) = command else {
+fn update_command_is_prodex_self_update() {
+    let command = parse_cli_command_from(["prodex", "update"])
+        .expect("update command should parse");
+    let Commands::Update(_) = command else {
         panic!("expected update command");
     };
-    assert_eq!(
-        args.codex_args,
-        vec![
-            OsString::from("--check"),
-            OsString::from("rust-v0.128.0"),
-            OsString::from("--force"),
-        ]
-    );
-
-    let command =
-        parse_cli_command_from(["prodex", "update", "--help"]).expect("update help should pass");
-    let Commands::Update(args) = command else {
-        panic!("expected update command");
-    };
-    assert_eq!(args.codex_args, vec![OsString::from("--help")]);
+    assert!(parse_cli_command_from(["prodex", "update", "--check"]).is_err());
 }
 
 #[test]

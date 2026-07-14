@@ -47,46 +47,6 @@ fn run_auto_rotate_flag_rotates_active_profile_when_current_is_blocked() {
 }
 
 #[test]
-fn update_passthrough_uses_inherited_codex_home_without_quota_or_runtime() {
-    let fixture = setup_fixture();
-    let inherited_codex_home = fixture._temp_dir.path.join("local-codex-home");
-    fs::create_dir_all(&inherited_codex_home).expect("failed to create local codex home");
-    let inherited_codex_home = inherited_codex_home.display().to_string();
-    let args_log = fixture.codex_args_log.display().to_string();
-
-    let output = run_prodex_with_env(
-        &fixture,
-        &["update", "--check", "rust-v0.128.0"],
-        &[
-            ("CODEX_HOME", inherited_codex_home.as_str()),
-            ("TEST_CODEX_ARGS_LOG", args_log.as_str()),
-        ],
-    );
-
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(active_profile(&fixture.prodex_home), "main");
-    assert_eq!(
-        fs::read_to_string(&fixture.codex_log)
-            .expect("failed to read codex log")
-            .trim(),
-        inherited_codex_home
-    );
-    let codex_args =
-        fs::read_to_string(&fixture.codex_args_log).expect("failed to read codex args log");
-    assert_eq!(
-        codex_args.lines().collect::<Vec<_>>(),
-        vec!["update", "--check", "rust-v0.128.0"]
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("Quota preflight"));
-    assert!(runtime_broker_registry_path(&fixture.prodex_home).is_none());
-}
-
-#[test]
 fn explicit_profile_auto_rotates_by_default() {
     let fixture = setup_fixture();
 

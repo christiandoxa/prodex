@@ -6,9 +6,9 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Stdio};
 use terminal_ui::{
     tui_border_style, tui_connected_header_block, tui_primary_style, tui_secondary_style,
     tui_title_style,
@@ -16,7 +16,7 @@ use terminal_ui::{
 
 use super::{collect_super_tool_statuses, render_super_tool_statuses};
 use crate::{
-    CavemanArgs, ChildProcessPlan, CodexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
+    CavemanArgs, ChildProcessPlan, ProdexUpdateArgs, RuntimeLaunchRequest, RuntimeProxyEndpoint,
     SUPER_LOCAL_PROVIDER_ID, codex_bin, codex_cli_config_override_value, codex_cli_profile_v2_name,
     prepare_runtime_launch_dry_run, preview_deepseek_provider_codex_args,
     preview_external_provider_catalog_codex_args, preview_gemini_provider_codex_args,
@@ -27,8 +27,8 @@ use crate::{
     validate_credential_free_http_url,
 };
 pub(crate) use prodex_runtime_launch::{
-    RuntimeLaunchDryRunChild, default_child_removed_env, extract_prodex_dry_run_flag,
-    prepare_codex_launch_args, prodex_dry_run_requested, remove_upstream_proxy_env,
+    RuntimeLaunchDryRunChild, extract_prodex_dry_run_flag, prepare_codex_launch_args,
+    prodex_dry_run_requested, remove_upstream_proxy_env,
 };
 
 pub(crate) const PROVIDER_SECRET_ENV_KEYS: [&str; 12] = [
@@ -195,27 +195,39 @@ fn repair_codex_arg0_permissions_best_effort(path: &Path) {
 #[cfg(not(unix))]
 fn repair_codex_arg0_permissions_best_effort(_path: &Path) {}
 
-pub(crate) fn run_codex_direct_passthrough(args: Vec<OsString>) -> Result<ExitStatus> {
-    let binary = codex_bin();
-    let mut command = Command::new(&binary);
-    command.args(args);
-    for key in default_child_removed_env() {
-        command.env_remove(key);
-    }
-    let mut child = command
+#[cfg(unix)]
+pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
+    let running_exe = std::env::current_exe().context("failed to locate current prodex binary")?;
+    let mut child = Command::new("sh")
+        .arg("-s")
+        .arg("--")
+        .env("PRODEX_RUNNING_EXE", running_exe)
+        .env("PRODEX_MIGRATE", "1")
+        .env("PRODEX_NON_INTERACTIVE", "1")
+        .stdin(Stdio::piped())
         .spawn()
-        .with_context(|| format!("failed to execute {}", binary.to_string_lossy()))?;
+        .context("failed to start the embedded Prodex installer with sh")?;
+    child
+        .stdin
+        .take()
+        .context("failed to open Prodex installer stdin")?
+        .write_all(include_bytes!("../../../../install.sh"))
+        .context("failed to send the embedded Prodex installer to sh")?;
     let status = child
         .wait()
-        .with_context(|| format!("failed to wait for {}", binary.to_string_lossy()))?;
-    Ok(status)
+        .context("failed to wait for Prodex installer")?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Prodex installer exited with {status}")
+    }
 }
 
-pub(crate) fn handle_codex_update(args: CodexUpdateArgs) -> Result<()> {
-    let mut command_args = Vec::with_capacity(args.codex_args.len() + 1);
-    command_args.push(OsString::from("update"));
-    command_args.extend(args.codex_args);
-    exit_with_status(run_codex_direct_passthrough(command_args)?)
+#[cfg(not(unix))]
+pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
+    anyhow::bail!(
+        "prodex update currently supports macOS and Linux; download the Windows binary from https://github.com/christiandoxa/prodex/releases/latest"
+    )
 }
 
 pub(crate) fn exit_with_status(status: ExitStatus) -> Result<()> {

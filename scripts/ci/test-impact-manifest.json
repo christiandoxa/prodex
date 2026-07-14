@@ -161,7 +161,8 @@
     "compat:watch": "node scripts/compat/watch-upstream.mjs",
     "compat:watch-fixtures": "node scripts/compat/watch-upstream-fixture-tests.mjs",
     "compat:watch-ci": "node scripts/compat/watch-upstream-ci.mjs",
-    "changelog:test": "node --test scripts/npm/changelog.test.mjs"
+    "changelog:test": "node --test scripts/npm/changelog.test.mjs",
+    "installer:test": "node --test scripts/install.test.mjs"
   },
   "pathGroups": {
     "ciImpactLight": {
@@ -198,6 +199,8 @@
       "exact": [
         "Cargo.lock",
         "Cargo.toml",
+        "install.sh",
+        "scripts/install.test.mjs",
         "scripts/ci/main-internal-core-shard.mjs",
         "scripts/ci/runtime-env-parallel.mjs",
         "scripts/ci/runtime-hotpath-guard.mjs",

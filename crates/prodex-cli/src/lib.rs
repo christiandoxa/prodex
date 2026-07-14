@@ -121,12 +121,8 @@ pub enum Commands {
     Login(CodexPassthroughArgs),
     #[command(about = "Run codex logout for the selected or active profile.")]
     Logout(LogoutArgs),
-    #[command(
-        trailing_var_arg = true,
-        disable_help_flag = true,
-        about = "Run codex update directly without Prodex profile or runtime routing."
-    )]
-    Update(CodexUpdateArgs),
+    #[command(about = "Update Prodex from the latest verified GitHub release binary.")]
+    Update(ProdexUpdateArgs),
     #[command(
         about = "Inspect live quota for one profile or the whole profile pool.",
         after_help = CLI_QUOTA_AFTER_HELP

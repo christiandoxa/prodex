@@ -544,6 +544,9 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
+      - name: Test standalone installer
+        run: npm run installer:test
+
       - name: Build host release binary
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu
 

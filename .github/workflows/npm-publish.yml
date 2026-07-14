@@ -390,8 +390,9 @@ jobs:
     needs:
       - publish-npm
     permissions:
-      attestations: read
+      attestations: write
       contents: write
+      id-token: write
 
     steps:
       - name: Check out repository
@@ -461,6 +462,13 @@ jobs:
             cp "${file}" "release-assets/${stem}-${parent}${ext}"
           done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
           cp artifacts/release-sbom/release-sbom.spdx.json release-assets/release-sbom.spdx.json
+          cp install.sh release-assets/install.sh
+          chmod 0755 release-assets/install.sh
+
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        with:
+          subject-path: release-assets/install.sh
 
       - name: Generate and verify release checksums
         shell: bash
@@ -468,7 +476,7 @@ jobs:
           set -euo pipefail
           (
             cd release-assets
-            sha256sum prodex-* release-sbom.spdx.json > SHA256SUMS
+            sha256sum install.sh prodex-* release-sbom.spdx.json > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
 
@@ -499,8 +507,10 @@ jobs:
           Install:
 
           \`\`\`bash
-          npm install -g @christiandoxa/prodex@${version}
+          curl -fsSL https://github.com/christiandoxa/prodex/releases/download/${version}/install.sh | sh -s -- --release ${version}
           \`\`\`
+
+          Update future releases with \`prodex update\`.
           EOF
           if gh release view "${tag}" >/dev/null 2>&1; then
             gh release edit "${tag}" \
