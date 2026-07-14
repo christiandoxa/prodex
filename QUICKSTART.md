@@ -54,10 +54,10 @@ prodex --version
 prodex update
 ```
 
-The current local version in this repo is `0.287.0`:
+The current local version in this repo is `0.288.0`:
 
 ```bash
-npm install -g @christiandoxa/prodex@0.287.0
+npm install -g @christiandoxa/prodex@0.288.0
 ```
 
 Dependency status in this repo:
