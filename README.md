@@ -17,6 +17,7 @@ Use multiple Codex accounts and supported provider backends from one command lin
 - [Daily command: `prodex s`](#daily-command-prodex-s)
 - [Commands](#commands)
 - [Modes](#modes)
+- [Harness modes](#harness-modes)
 - [Profiles](#profiles)
 - [Local model support](#local-model-support)
 - [Utilities and diagnostics](#utilities-and-diagnostics)
@@ -734,6 +735,32 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 </details>
 
+## Harness modes
+
+A harness mode is model-facing request policy for a local provider bridge; it is separate from the
+upstream provider and from the account profile used for credentials, quota rotation, and
+continuation affinity. Harness selection never creates a second agent runtime: Codex still owns its
+agent loop, tools, sandbox, approvals, skills, hooks, reconnect behavior, and TUI.
+
+Version 1 supports `auto`, `native`, and `minimal`. The default `auto` resolves conservatively to
+`native`, and Native preserves existing request bytes, headers, responses, and stream behavior.
+Minimal is opt-in and only prepends a versioned Prodex instruction to ordinary canonical
+`/v1/responses` inference requests. It preserves model, input, tools and schemas, tool choice,
+reasoning, metadata, streaming controls, continuation IDs, and unknown fields. It does not apply to
+compact, non-inference, admin, websocket, response, or stream-event paths.
+
+```bash
+prodex s --provider anthropic --harness native
+prodex s deepseek --harness minimal
+prodex super --url http://127.0.0.1:8131 --harness minimal
+prodex gateway --provider gemini --harness native
+```
+
+The harness is fixed for the bridge or gateway lifetime. It does not change account affinity,
+pre-commit rotation, retries, approvals, tools, or streaming semantics. See
+[docs/harness-modes.md](./docs/harness-modes.md) for exact scope, diagnostics, non-goals, and the
+unimplemented phase-2 design note.
+
 ## Profiles
 
 <details>
@@ -955,6 +982,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - [docs/state-model.md](./docs/state-model.md) — state ownership and persistence model
 - [docs/runtime-policy.md](./docs/runtime-policy.md) — runtime policy keys, environment overrides, and runtime log path resolution
 - [docs/deployment.md](./docs/deployment.md) — Docker Compose scaffold for the standalone gateway
+- [docs/harness-modes.md](./docs/harness-modes.md) — Harness Mode semantics, scope, diagnostics, and future design note
 - [docs/testing.md](./docs/testing.md) — contributor testing guidance
 
 ## Support
