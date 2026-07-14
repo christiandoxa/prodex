@@ -6,8 +6,9 @@ use prodex_domain::{
     DataPolicyContext, EnvironmentContext, GovernanceObligation, GovernancePolicyArtifact,
     GovernancePolicyRule, GovernancePolicyRuleId, GovernedAction, InspectionCoverage, NetworkZone,
     PolicyEffect, PolicyInput, PolicyReasonCode, PolicyRevisionId, PolicyRuleCondition, Principal,
-    PrincipalId, PrincipalKind, QuotaContext, RequestRisk, Role, SessionPolicyContext,
-    TenantContext, TenantId, compile_governance_policy, evaluate_governance_policy,
+    PrincipalId, PrincipalKind, PrincipalPolicyAttributes, QuotaContext, RequestPolicyAttributes,
+    RequestRisk, Role, SessionPolicyContext, TenantContext, TenantId, compile_governance_policy,
+    evaluate_governance_policy,
 };
 
 const MAX_FUZZ_BYTES: usize = 4096;
@@ -64,9 +65,12 @@ fuzz_target!(|input: &[u8]| {
     );
     let route = CanonicalRoute::new("responses").unwrap();
     let capabilities = CapabilitySet::new(Vec::new());
+    let principal_attributes = PrincipalPolicyAttributes::new(None, None, None).unwrap();
+    let request_attributes = RequestPolicyAttributes::new(None, &[], Vec::new(), None, 0).unwrap();
     let policy_input = PolicyInput {
         tenant,
         principal: &principal,
+        principal_attributes: &principal_attributes,
         channel: Channel::Api,
         credential_scope: CredentialScope::DataPlane,
         session: SessionPolicyContext {
@@ -84,6 +88,7 @@ fuzz_target!(|input: &[u8]| {
         },
         request_risk: RequestRisk::Low,
         requested_capabilities: &capabilities,
+        request_attributes: &request_attributes,
         quota: QuotaContext {
             has_headroom: true,
             reservation_required: true,

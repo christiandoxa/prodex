@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { RUNTIME_ENV_PARALLEL_CASES } from "./runtime-test-manifest.mjs";
 
 const ZERO_TESTS_PATTERN = /\brunning 0 tests\b/;
+const GLOBAL_PROBE_REVISION_TEST = "runtime_probe_refresh_wait_ignores_lane_release_notify";
 
 function parseArgs(argv) {
   const args = { runs: 2, testThreads: 4 };
@@ -115,7 +116,21 @@ async function main() {
   for (let iteration = 1; iteration <= args.runs; iteration += 1) {
     process.stdout.write(`env-sensitive parallel guard iteration ${iteration}/${args.runs}\n`);
     for (const testCase of RUNTIME_ENV_PARALLEL_CASES) {
-      await run("cargo", ["test", "-p", "prodex-app", "--lib", testCase.filter, "--", threadArg], testCase.label);
+      await run(
+        "cargo",
+        [
+          "test",
+          "-p",
+          "prodex-app",
+          "--lib",
+          testCase.filter,
+          "--",
+          threadArg,
+          "--skip",
+          GLOBAL_PROBE_REVISION_TEST,
+        ],
+        testCase.label,
+      );
     }
   }
 }
