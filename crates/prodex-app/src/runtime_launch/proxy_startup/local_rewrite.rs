@@ -332,8 +332,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         secret_refresh,
         gateway_request_constraints,
         resolved_harness,
-        "loopback",
-        Some(listen_addr),
+        ("loopback", Some(listen_addr)),
     )?;
     let RuntimeLocalRewritePrepared {
         runtime_config,
@@ -398,9 +397,9 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
     resolved_harness: prodex_provider_core::ResolvedHarnessMode,
-    transport: &str,
-    listen_addr: Option<std::net::SocketAddr>,
+    transport: (&str, Option<std::net::SocketAddr>),
 ) -> Result<RuntimeLocalRewritePrepared> {
+    let (transport, listen_addr) = transport;
     let RuntimeLocalRewriteProxyStartOptions {
         paths,
         state,
