@@ -137,12 +137,8 @@ impl fmt::Debug for CodexPassthroughArgs {
     }
 }
 
-#[derive(Args, Debug)]
-pub struct CodexUpdateArgs {
-    /// Extra arguments passed through to `codex update` unchanged.
-    #[arg(value_name = "CODEX_ARG", allow_hyphen_values = true)]
-    pub codex_args: Vec<OsString>,
-}
+#[derive(Args, Debug, Default)]
+pub struct ProdexUpdateArgs {}
 
 #[derive(Args)]
 pub struct QuotaArgs {
