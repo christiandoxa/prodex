@@ -136,13 +136,13 @@
   },
   {
     "file": "crates/prodex-session-store/src/lib.rs",
-    "maxLines": 1050,
-    "reason": "Session metadata-prefix recovery reuses the existing resume-repair machinery; capped until repair helpers split from report resolution."
+    "maxLines": 1024,
+    "reason": "Session file I/O now lives in a focused sibling; remaining report resolution and resume repair stay capped until repair helpers split."
   },
   {
     "file": "crates/prodex-session-store/tests/src/lib.rs",
-    "maxLines": 1060,
-    "reason": "Resume-repair coverage now preserves valid subagent metadata; capped while state-db, unreadable-file, and metadata-synthesis fixtures are split by scenario."
+    "maxLines": 1044,
+    "reason": "Large-file regressions now live in a focused sibling; remaining state-db, unreadable-file, and metadata-synthesis fixtures stay capped by scenario."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
