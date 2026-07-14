@@ -2,11 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.290.0 - 2026-07-14
+
+### Misc
+
+- Harden enterprise gateway controls (`fa0447c`)
+
 ## 0.289.0 - 2026-07-14
 
 ### Runtime
 
 - Translate compact requests for local providers (`968b8d6`)
+
+### Misc
+
+- Harden Windows checksum verification (`8ca79a6`)
 
 ## 0.288.0 - 2026-07-14
 
@@ -101,16 +111,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Docs
 
 - Allow configured commit identity (`9da7f01`)
-
-## 0.278.0 - 2026-07-12
-
-### Deps
-
-- Merge pull request #26 (`5b5c912`)
-- Merge pull request #25 (`107ee85`)
-- Bump serde_json (`3d7c05f`)
-- Bump tungstenite from 0.29.0 to 0.30.0 in the cargo group (`0ab418d`)
-
-### Misc
-
-- Migrate legacy prodex root permissions (`5b03d95`)
