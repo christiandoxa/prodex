@@ -48,6 +48,10 @@ impl CavemanLaunchStrategy {
 }
 
 impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
+    fn harness_mode(&self) -> Option<prodex_provider_core::HarnessMode> {
+        self.args.harness
+    }
+
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),

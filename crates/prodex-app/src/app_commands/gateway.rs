@@ -6,13 +6,17 @@ use crate::{AppPaths, AppState, AppStateIoExt, ProfileProvider};
 use anyhow::{Context, anyhow};
 use prodex_provider_core::{
     ProviderAdapterContract, ProviderAdapterContractSpec, ProviderId, provider_adapter,
-    provider_adapter_contract_matrix, provider_model_catalog_json,
+    provider_adapter_contract_matrix, provider_contract_catalog, provider_model_catalog_json,
+    resolve_harness_mode,
 };
 use std::collections::BTreeSet;
 use std::fs;
 use terminal_ui::print_stdout_line;
 
 pub(crate) fn handle_gateway(args: GatewayArgs) -> Result<()> {
+    if args.harness.is_some() && args.command.is_some() {
+        anyhow::bail!("--harness is only supported when launching the gateway");
+    }
     match &args.command {
         Some(GatewayCommands::Providers(command)) => handle_gateway_providers(command),
         Some(GatewayCommands::Capabilities(command)) => handle_gateway_capabilities(command),
@@ -24,8 +28,9 @@ pub(crate) fn handle_gateway(args: GatewayArgs) -> Result<()> {
 fn handle_gateway_providers(args: &GatewayProvidersArgs) -> Result<()> {
     let providers = provider_adapter_contract_matrix();
     if args.json {
+        let catalog = provider_contract_catalog(resolve_harness_mode(None, None).effective);
         print_stdout_line(
-            &serde_json::to_string_pretty(&providers)
+            &serde_json::to_string_pretty(&catalog)
                 .context("failed to serialize provider contracts")?,
         );
         return Ok(());
@@ -172,6 +177,24 @@ mod tests {
     use std::collections::BTreeMap;
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn harness_is_rejected_for_offline_gateway_catalog_commands() {
+        let crate::Commands::Gateway(args) = crate::parse_cli_command_from([
+            "prodex",
+            "gateway",
+            "--harness",
+            "minimal",
+            "providers",
+        ])
+        .unwrap() else {
+            panic!("expected gateway command");
+        };
+
+        let error = handle_gateway(args).unwrap_err().to_string();
+
+        assert!(error.contains("only supported when launching"), "{error}");
+    }
 
     struct EnvGuard {
         _lock: TestEnvLockGuard,

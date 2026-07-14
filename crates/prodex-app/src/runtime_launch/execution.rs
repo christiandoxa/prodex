@@ -1,6 +1,6 @@
 use super::{
     PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeLaunchRequest, RuntimeProxyEndpoint,
-    cleanup_runtime_launch_plan, exit_with_status, prepare_runtime_launch, run_child_plan,
+    cleanup_runtime_launch_plan, exit_with_status, run_child_plan,
 };
 use crate::print_launch_status;
 use anyhow::Result;
@@ -8,6 +8,9 @@ use std::process::ExitStatus;
 
 pub(crate) trait RuntimeLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_>;
+    fn harness_mode(&self) -> Option<prodex_provider_core::HarnessMode> {
+        None
+    }
     fn build_plan(
         &self,
         prepared: &PreparedRuntimeLaunch,
@@ -51,28 +54,6 @@ struct RuntimeLaunchExecution {
 struct RuntimeLaunchCompleted {
     status: ExitStatus,
     plan: RuntimeLaunchPlan,
-}
-
-struct RuntimeLaunchExecutionFactory<'a, F> {
-    request: RuntimeLaunchRequest<'a>,
-    plan_factory: &'a F,
-}
-
-impl<'a, F> RuntimeLaunchExecutionFactory<'a, F>
-where
-    F: RuntimeLaunchPlanFactory,
-{
-    fn new(request: RuntimeLaunchRequest<'a>, plan_factory: &'a F) -> Self {
-        Self {
-            request,
-            plan_factory,
-        }
-    }
-
-    fn build(self) -> Result<RuntimeLaunchExecution> {
-        let prepared = prepare_runtime_launch(self.request)?;
-        RuntimeLaunchExecutionBuilder::new(prepared, self.plan_factory).build()
-    }
 }
 
 struct RuntimeLaunchExecutionBuilder<'a, F> {
@@ -132,7 +113,10 @@ where
 {
     let request = strategy.runtime_request();
     emit_runtime_launch_progress(&request);
-    RuntimeLaunchExecutionFactory::new(request, strategy).build()
+    let resolved_harness =
+        prodex_provider_core::resolve_harness_mode(strategy.harness_mode(), None);
+    let prepared = super::prepare_runtime_launch_with_harness(request, resolved_harness)?;
+    RuntimeLaunchExecutionBuilder::new(prepared, strategy).build()
 }
 
 fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {

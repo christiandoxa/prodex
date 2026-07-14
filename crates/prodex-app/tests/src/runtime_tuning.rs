@@ -51,6 +51,7 @@ fn gateway_args(provider: Option<SuperExternalProvider>) -> GatewayArgs {
         command: None,
         listen: None,
         provider,
+        harness: None,
         base_url: None,
         api_key: None,
         auth_token: None,

@@ -68,6 +68,7 @@ pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) provider_name: Option<&'static str>,
     pub(super) upstream_base_url: String,
     pub(super) provider_options: RuntimeLocalRewriteProviderOptions,
+    pub(super) resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     pub(super) auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(super) auth_required: bool,
     pub(super) listen_addr: String,
@@ -336,6 +337,7 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         provider_name,
         upstream_base_url,
         provider_options,
+        resolved_harness: prodex_provider_core::resolve_harness_mode(args.harness, policy.harness),
         auth_token_hash: auth.auth_token_hash,
         auth_required: auth.auth_required,
         listen_addr,
@@ -432,6 +434,7 @@ mod tests {
             command: None,
             listen: Some("127.0.0.1:0".to_string()),
             provider: None,
+            harness: None,
             base_url: None,
             api_key: None,
             auth_token: None,
@@ -484,6 +487,7 @@ mod tests {
             command: None,
             listen: Some("127.0.0.1:0".to_string()),
             provider: None,
+            harness: Some(prodex_provider_core::HarnessMode::Native),
             base_url: None,
             api_key: None,
             auth_token: None,
@@ -499,6 +503,7 @@ mod tests {
         .unwrap();
         let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings {
             require_auth: Some(true),
+            harness: Some(prodex_provider_core::HarnessMode::Minimal),
             ..Default::default()
         };
         policy.state.backend = Some("redis".to_string());
@@ -514,7 +519,37 @@ mod tests {
             prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
         )
         .unwrap();
+        let policy_only_args = GatewayArgs {
+            harness: None,
+            ..super::gateway_startup::gateway_refresh_args(&args)
+        };
+        let policy_only = resolve_gateway_launch_config_for_service_mode(
+            &paths,
+            &AppState::default(),
+            &policy_only_args,
+            &policy,
+            &secrets,
+            &runtime_config,
+            prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        )
+        .unwrap();
+        assert_eq!(
+            policy_only.resolved_harness.effective,
+            prodex_provider_core::EffectiveHarnessMode::Minimal
+        );
+        assert_eq!(
+            policy_only.resolved_harness.source,
+            prodex_provider_core::HarnessResolutionSource::Config
+        );
         let template = gateway_credential_refresh_template(&initial);
+        assert_eq!(
+            initial.resolved_harness.effective,
+            prodex_provider_core::EffectiveHarnessMode::Native
+        );
+        assert_eq!(
+            initial.resolved_harness.source,
+            prodex_provider_core::HarnessResolutionSource::Cli
+        );
 
         let _missing_state = TestEnvVarGuard::unset("PRODEX_REFRESH_STATE_URL");
         let _changed_base = TestEnvVarGuard::set("OPENAI_BASE_URL", " invalid-after-start ");
@@ -601,6 +636,7 @@ mod tests {
             command: None,
             listen: None,
             provider: Some(SuperExternalProvider::Kiro),
+            harness: None,
             base_url: None,
             api_key: None,
             auth_token: None,

@@ -245,6 +245,7 @@ mod tests {
             no_presidio: false,
             url: None,
             provider: None,
+            harness: None,
             cli: None,
             api_key: None,
             local_model: None,

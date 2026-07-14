@@ -188,6 +188,16 @@ fn gateway_admin_can_create_rotate_disable_and_delete_virtual_keys() {
     assert_eq!(providers.status().as_u16(), 200);
     let providers: serde_json::Value = providers.json().expect("providers response should be json");
     assert_eq!(providers["object"], "gateway.providers");
+    assert_eq!(
+        providers["supported_harness_modes"],
+        serde_json::json!(["auto", "native", "minimal"])
+    );
+    assert_eq!(providers["default_harness_mode"], "auto");
+    assert_eq!(providers["resolved_harness_mode"], "native");
+    assert_eq!(providers["harness_modes"][2]["id"], "minimal");
+    assert_eq!(providers["harness_modes"][2]["request_shaping"], true);
+    assert_eq!(providers["harness_modes"][2]["response_shaping"], false);
+    assert_eq!(providers["harness_modes"][2]["stream_shaping"], false);
     let provider_entries = providers["providers"].as_array().unwrap();
     assert_eq!(provider_entries.len(), 7);
     assert_eq!(provider_entries[0]["provider"], "openai");

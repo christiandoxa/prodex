@@ -117,6 +117,18 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )
     .into_owned();
+    let body = match runtime_harness_shape_request(
+        request_id, request, shared, provider, endpoint, body,
+    ) {
+        Ok(body) => body,
+        Err(parts) => {
+            return Ok(RuntimeLocalRewriteUpstreamResult {
+                response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
+                gemini_context: None,
+                copilot_context: None,
+            });
+        }
+    };
     match (provider, &shared.provider) {
         (_, RuntimeLocalRewriteProviderOptions::ProjectedCredential { .. }) => {
             unreachable!("projected provider wrapper must be split before dispatch")
@@ -451,6 +463,106 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         }
         _ => anyhow::bail!("application provider dispatch does not match configured adapter"),
     }
+}
+
+fn runtime_harness_shape_request(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    body: Vec<u8>,
+) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
+    if shared.resolved_harness.effective != prodex_provider_core::EffectiveHarnessMode::Minimal
+        || endpoint != ProviderEndpoint::Responses
+    {
+        runtime_harness_log_request_shape(
+            request_id,
+            shared,
+            provider,
+            endpoint,
+            false,
+            "unchanged",
+        );
+        return Ok(body);
+    }
+    match prodex_provider_core::shape_harness_request(
+        shared.resolved_harness.effective,
+        endpoint,
+        &body,
+        &request.headers,
+    ) {
+        Ok(shaped) => {
+            runtime_harness_log_request_shape(
+                request_id,
+                shared,
+                provider,
+                endpoint,
+                shaped.applied,
+                "accepted",
+            );
+            Ok(shaped.body.into_owned())
+        }
+        Err(error) => {
+            runtime_proxy_log(
+                &shared.runtime_shared,
+                runtime_proxy_structured_log_message(
+                    "harness_request_shape",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("provider", provider.label()),
+                        runtime_proxy_log_field("route", endpoint.label()),
+                        runtime_proxy_log_field(
+                            "requested",
+                            shared.resolved_harness.requested.to_string(),
+                        ),
+                        runtime_proxy_log_field(
+                            "resolved",
+                            shared.resolved_harness.effective.to_string(),
+                        ),
+                        runtime_proxy_log_field("applied", "false"),
+                        runtime_proxy_log_field("outcome", "rejected"),
+                        runtime_proxy_log_field("reason", error.code()),
+                    ],
+                ),
+            );
+            Err(runtime_local_rewrite_json_parts(
+                400,
+                json!({
+                    "error": {
+                        "message": "request is incompatible with the selected minimal harness",
+                        "type": "invalid_request_error",
+                        "code": "invalid_request",
+                    }
+                }),
+            ))
+        }
+    }
+}
+
+fn runtime_harness_log_request_shape(
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    applied: bool,
+    outcome: &'static str,
+) {
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "harness_request_shape",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", provider.label()),
+                runtime_proxy_log_field("route", endpoint.label()),
+                runtime_proxy_log_field("requested", shared.resolved_harness.requested.to_string()),
+                runtime_proxy_log_field("resolved", shared.resolved_harness.effective.to_string()),
+                runtime_proxy_log_field("applied", applied.to_string()),
+                runtime_proxy_log_field("outcome", outcome),
+            ],
+        ),
+    );
 }
 
 fn runtime_local_embeddings_response_parts(

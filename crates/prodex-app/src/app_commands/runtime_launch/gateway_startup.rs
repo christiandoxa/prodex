@@ -22,6 +22,7 @@ pub(crate) fn start_policy_gateway_backend(
             command: None,
             listen: preferred_listen_addr,
             provider: None,
+            harness: None,
             base_url: None,
             api_key: None,
             auth_token: None,
@@ -51,6 +52,7 @@ pub(crate) fn start_policy_gateway_application(
             command: None,
             listen: None,
             provider: None,
+            harness: None,
             base_url: None,
             api_key: None,
             auth_token: None,
@@ -88,6 +90,7 @@ fn start_gateway_runtime_for_service_mode<T>(
         Arc<RuntimeConfig>,
         Option<RuntimeGatewayCredentialRefreshPlan>,
         prodex_provider_core::ProviderRequestConstraintPolicy,
+        prodex_provider_core::ResolvedHarnessMode,
     ) -> Result<T>,
 ) -> Result<(T, &'static str, bool)> {
     let paths = AppPaths::discover()?;
@@ -131,6 +134,7 @@ fn start_gateway_runtime_for_service_mode<T>(
         )
     });
     let request_constraints = gateway.request_constraints;
+    let resolved_harness = gateway.resolved_harness;
     let provider_name = gateway.provider_name.unwrap_or("openai-compatible");
     let auth_required = gateway.auth_required;
     let options = RuntimeLocalRewriteProxyStartOptions {
@@ -159,15 +163,17 @@ fn start_gateway_runtime_for_service_mode<T>(
         Arc::clone(&runtime_config),
         secret_refresh,
         request_constraints,
+        resolved_harness,
     )?;
     Ok((runtime, provider_name, auth_required))
 }
 
-fn gateway_refresh_args(args: &GatewayArgs) -> GatewayArgs {
+pub(super) fn gateway_refresh_args(args: &GatewayArgs) -> GatewayArgs {
     GatewayArgs {
         command: None,
         listen: None,
         provider: args.provider,
+        harness: args.harness,
         base_url: None,
         api_key: args.api_key.clone(),
         auth_token: args.auth_token.clone(),
