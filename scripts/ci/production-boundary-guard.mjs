@@ -145,7 +145,7 @@ export function validateProductionBoundary(sources) {
         "runtime_local_rewrite_pre_reservation_governance(prepared, shared)",
         "runtime_local_rewrite_reserve_virtual_key(governed, shared)",
         "runtime_local_rewrite_post_reservation_governance(reserved, shared)",
-        "runtime_local_rewrite_apply_constraints(reserved)",
+        "runtime_local_rewrite_apply_constraints(reserved, shared)",
         "runtime_local_rewrite_dispatch_provider(ready, shared)",
       ],
       `${FILES.pipeline}: canonical/auth/admission/governance/reservation/dispatch stages must remain ordered`,
@@ -1404,7 +1404,7 @@ function runSelfTest() {
       runtime_local_rewrite_pre_reservation_governance(prepared, shared);
       runtime_local_rewrite_reserve_virtual_key(governed, shared);
       runtime_local_rewrite_post_reservation_governance(reserved, shared);
-      runtime_local_rewrite_apply_constraints(reserved);
+      runtime_local_rewrite_apply_constraints(reserved, shared);
       runtime_local_rewrite_dispatch_provider(ready, shared);
     }
     fn runtime_local_rewrite_canonical_context() {
