@@ -5,9 +5,9 @@
       "feat(governance): harden enterprise gateway controls"
     ],
     "caps": {
-      "maxFiles": 122,
-      "maxBehaviorFiles": 90,
-      "maxLines": 10315,
+      "maxFiles": 124,
+      "maxBehaviorFiles": 92,
+      "maxLines": 10341,
       "maxFileLines": 671
     },
     "reason": "Reviewed the five-phase enterprise governance hardening across digest-bound approvals, fail-closed canonical audit, bounded PIP attributes, dynamic eligible-only provider routing, edge trust, cross-replica revocation, PostgreSQL/SQLite authority, encrypted restore evidence, OpenAPI and documentation with multi-agent implementation, the full all-features suite, strict Clippy, live PostgreSQL/RLS proof, dependency audit, load/stress, formatting, size and tracked-diff hygiene before the 0.290.0 release."
