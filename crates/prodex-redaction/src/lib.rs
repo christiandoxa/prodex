@@ -292,20 +292,25 @@ fn redaction_redact_sensitive_key_value_text(value: &str) -> String {
     while index < bytes.len() {
         if let Some((key, after_key)) = redaction_parse_potential_field_name(value, index) {
             let separator = redaction_skip_ascii_whitespace(bytes, after_key);
-            if separator < bytes.len()
-                && matches!(bytes[separator], b':' | b'=')
-                && redaction_key_looks_sensitive(key)
-            {
-                let value_start = redaction_skip_ascii_whitespace(bytes, separator + 1);
-                let (value_end, replacement) = redaction_redacted_field_value(value, value_start);
-                redacted.push_str(&value[index..value_start]);
-                redacted.push_str(&replacement);
-                index = value_end;
+            if separator < bytes.len() && matches!(bytes[separator], b':' | b'=') {
+                if redaction_key_looks_sensitive(key) {
+                    let value_start = redaction_skip_ascii_whitespace(bytes, separator + 1);
+                    let (value_end, replacement) =
+                        redaction_redacted_field_value(value, value_start);
+                    redacted.push_str(&value[index..value_start]);
+                    redacted.push_str(&replacement);
+                    index = value_end;
+                    continue;
+                }
+                redacted.push_str(&value[index..after_key]);
+                index = after_key;
                 continue;
             }
-            redacted.push_str(&value[index..after_key]);
-            index = after_key;
-            continue;
+            if !matches!(bytes[index], b'"' | b'\'') {
+                redacted.push_str(&value[index..after_key]);
+                index = after_key;
+                continue;
+            }
         }
 
         let Some(ch) = value[index..].chars().next() else {
@@ -406,7 +411,10 @@ fn redaction_redacted_field_value(value: &str, value_start: usize) -> (usize, St
     let mut cursor = value_start;
     while cursor < bytes.len()
         && !bytes[cursor].is_ascii_whitespace()
-        && !matches!(bytes[cursor], b',' | b'&' | b';' | b'}' | b']' | b')')
+        && !matches!(
+            bytes[cursor],
+            b'"' | b'\'' | b',' | b'&' | b';' | b'}' | b']' | b')'
+        )
     {
         cursor += 1;
     }

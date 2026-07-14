@@ -352,7 +352,7 @@ mod tests {
         handle.join().expect("quota test server should finish");
         let message = format!("{err:#}");
         assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(message.contains("api_key=<redacted>"));
+        assert!(message.contains("api_key=<redacted>"), "{message}");
         assert!(!message.contains("fixture-token-123"));
         assert!(!message.contains("sk-fixture-123"));
 
