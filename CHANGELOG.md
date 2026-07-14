@@ -4,6 +4,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ## 0.285.0 - 2026-07-14
 
+### Runtime
+
+- Restore retries and large session resumes (`29eb66d`)
+
 ### Misc
 
 - Add enterprise governance platform (`e07e2cc`)
