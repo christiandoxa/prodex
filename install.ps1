@@ -90,6 +90,26 @@ function Get-ExpectedDigest {
     throw "Could not find a valid checksum for $AssetName."
 }
 
+function Get-Sha256Digest {
+    param([string]$Path)
+
+    if ($null -ne (Get-Command Get-FileHash -ErrorAction SilentlyContinue)) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Get-ProdexVersion {
     param([string]$BinaryPath)
 
@@ -243,7 +263,7 @@ try {
     Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf "SHA256SUMS") -Destination $ChecksumsPath
     $ExpectedDigest = Get-ExpectedDigest -ManifestPath $ChecksumsPath -AssetName $Asset
     Copy-Download -Source (Join-DownloadSource -Base $BaseUrl -Leaf $Asset) -Destination $DownloadPath
-    $ActualDigest = (Get-FileHash -LiteralPath $DownloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $ActualDigest = Get-Sha256Digest -Path $DownloadPath
     if ($ActualDigest -ne $ExpectedDigest) {
         throw "Downloaded Prodex checksum did not match. Expected $ExpectedDigest but got $ActualDigest."
     }
@@ -257,7 +277,7 @@ try {
     $ReleaseDir = Join-Path $ReleasesDir "$InstalledVersion-$Target"
     $ReleaseBinary = Join-Path $ReleaseDir "prodex.exe"
     if (Test-Path -LiteralPath $ReleaseBinary) {
-        $ExistingDigest = (Get-FileHash -LiteralPath $ReleaseBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+        $ExistingDigest = Get-Sha256Digest -Path $ReleaseBinary
         if ($ExistingDigest -ne $ExpectedDigest) {
             throw "Existing release $ReleaseDir does not match the published checksum."
         }

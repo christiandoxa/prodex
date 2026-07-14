@@ -243,7 +243,7 @@ fn format_info_prodex_version_reports_up_to_date_from_cache() {
     fs::write(
         update_check_cache_file_path(&paths),
         serde_json::to_string_pretty(&serde_json::json!({
-            "source": "Npm",
+            "source": "GitHub",
             "latest_version": current_prodex_version(),
             "checked_at": Local::now().timestamp(),
         }))
@@ -272,7 +272,7 @@ fn format_info_prodex_version_reports_available_update_from_cache() {
     fs::write(
         update_check_cache_file_path(&paths),
         serde_json::to_string_pretty(&serde_json::json!({
-            "source": "Npm",
+            "source": "GitHub",
             "latest_version": "99.0.0",
             "checked_at": Local::now().timestamp(),
         }))
