@@ -51,8 +51,7 @@ pub(crate) fn start_runtime_gateway_application_with_runtime_config(
         secret_refresh,
         request_constraints,
         resolved_harness,
-        "in_process",
-        None,
+        ("in_process", None),
     )?;
     RuntimeGatewayApplication::new(prepared)
 }
