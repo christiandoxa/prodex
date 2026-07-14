@@ -141,6 +141,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             previous_response_retry_index: 0,
             candidate_turn_state_retry_profile: None,
             candidate_turn_state_retry_value: None,
+            quota_last_chance_profile: None,
             saw_inflight_saturation: false,
             saw_previous_response_not_found: false,
             websocket_reuse_fresh_retry_profiles: BTreeSet::new(),
@@ -189,7 +190,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         )
     }
 
-    pub(super) fn select_candidate(&self) -> Result<Option<String>> {
+    pub(super) fn select_candidate(&mut self) -> Result<Option<String>> {
+        if let Some(profile_name) = self.quota_last_chance_profile.take() {
+            return Ok(Some(profile_name));
+        }
         let requested_model =
             runtime_smart_context_model_name_from_body(self.request_text.as_bytes());
         select_runtime_response_candidate_for_route_with_request(
