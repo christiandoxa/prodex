@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.287.0 - 2026-07-14
+
+- No grouped changes.
+
 ## 0.286.0 - 2026-07-14
 
 ### Runtime
@@ -171,9 +175,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add explainable constraint-aware routing (`b315a0e`)
-
-## 0.275.0 - 2026-07-11
-
-### Runtime
-
-- Preserve quota retry and repair transcripts (`afdb1bd`)
