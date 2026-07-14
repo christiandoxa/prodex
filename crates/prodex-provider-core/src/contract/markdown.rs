@@ -3,11 +3,13 @@
 use std::{collections::BTreeMap, fmt::Write as _};
 
 use crate::{
-    ProviderConformanceOperation, provider_adapter_contract_matrix, provider_conformance_cases,
+    EffectiveHarnessMode, ProviderConformanceOperation, provider_conformance_cases,
+    provider_contract_catalog,
 };
 
 pub fn provider_capabilities_markdown() -> String {
-    let matrix = provider_adapter_contract_matrix();
+    let catalog = provider_contract_catalog(EffectiveHarnessMode::Native);
+    let matrix = &catalog.providers;
     let mut fixture_counts: BTreeMap<&'static str, (usize, usize, usize)> = BTreeMap::new();
     for case in provider_conformance_cases() {
         let entry = fixture_counts.entry(case.provider.label()).or_default();
@@ -20,10 +22,10 @@ pub fn provider_capabilities_markdown() -> String {
 
     let mut markdown = String::new();
     markdown.push_str("# Provider Capabilities\n\n");
-    markdown.push_str("Generated from `prodex_provider_core::provider_adapter_contract_matrix()`, `crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json`, and `crates/prodex-provider-core/catalog/models.json`.\n\n");
+    markdown.push_str("Generated from `prodex_provider_core::provider_contract_catalog()`, `crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json`, and `crates/prodex-provider-core/catalog/models.json`.\n\n");
     markdown.push_str("| Provider | Models | Transform | Streaming | Fallback | Fixtures req/resp/stream | responses | responses/compact | chat-completions | messages | models | embeddings | images | audio | batches | rerank | a2a |\n");
     markdown.push_str("|---|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
-    for contract in &matrix {
+    for contract in matrix {
         let counts = fixture_counts
             .get(contract.provider)
             .copied()
@@ -88,9 +90,39 @@ pub fn provider_capabilities_markdown() -> String {
     }
     markdown.push_str("\nStatus values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `untested`, `unsupported`.\n\n");
     markdown.push_str("Fixture summary counts are `request/response/stream-event` conformance cases per provider.\n\n");
+    markdown.push_str("## Harness modes\n\n");
+    let _ = writeln!(
+        markdown,
+        "Default requested mode: `{}`. V1 default resolution: `{}`.\n",
+        catalog.default_harness_mode, catalog.resolved_harness_mode
+    );
+    markdown.push_str("| Mode | Label | Selectable | Default effective | Canonical request routes | Request shaping | Response shaping | Stream shaping | Description |\n");
+    markdown.push_str("|---|---|---|---|---|---|---|---|---|\n");
+    for mode in catalog.harness_modes {
+        let routes = mode
+            .supported_canonical_request_routes
+            .iter()
+            .map(|route| route.label())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            markdown,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            mode.id,
+            mode.display_label,
+            mode.selectable,
+            mode.default_effective_mode,
+            routes,
+            mode.request_shaping,
+            mode.response_shaping,
+            mode.stream_shaping,
+            mode.description,
+        );
+    }
+    markdown.push('\n');
     markdown.push_str("## Declared Responses parameter limitations\n\n");
     let mut wrote_limit = false;
-    for contract in &matrix {
+    for contract in matrix {
         let Some(responses) = contract
             .endpoint_status
             .iter()

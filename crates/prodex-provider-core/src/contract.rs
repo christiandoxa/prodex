@@ -3,8 +3,9 @@
 use serde::Serialize;
 
 use crate::{
-    ALL_PROVIDER_ENDPOINTS, ProviderAdapterContract, ProviderCapabilityStatus,
-    ProviderConformanceOperation, ProviderEndpoint, ProviderId, provider_adapter,
+    ALL_PROVIDER_ENDPOINTS, EffectiveHarnessMode, HarnessMode, HarnessModeSpec,
+    ProviderAdapterContract, ProviderCapabilityStatus, ProviderConformanceOperation,
+    ProviderEndpoint, ProviderId, harness_mode_catalog, provider_adapter,
     provider_conformance_cases, provider_replay_case_count, provider_translator,
 };
 
@@ -37,6 +38,15 @@ pub struct ProviderEndpointContractSpec {
     pub streaming: bool,
     pub tested: bool,
     pub unsupported_params: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ProviderContractCatalogSpec {
+    pub supported_harness_modes: Vec<&'static str>,
+    pub default_harness_mode: &'static str,
+    pub resolved_harness_mode: &'static str,
+    pub harness_modes: &'static [HarnessModeSpec],
+    pub providers: Vec<ProviderAdapterContractSpec>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -126,6 +136,22 @@ pub fn provider_adapter_contract_matrix() -> Vec<ProviderAdapterContractSpec> {
         .copied()
         .map(provider_adapter_contract_spec)
         .collect()
+}
+
+pub fn provider_contract_catalog(
+    resolved_harness_mode: EffectiveHarnessMode,
+) -> ProviderContractCatalogSpec {
+    ProviderContractCatalogSpec {
+        supported_harness_modes: harness_mode_catalog()
+            .iter()
+            .filter(|spec| spec.selectable)
+            .map(|spec| spec.id)
+            .collect(),
+        default_harness_mode: HarnessMode::default().id(),
+        resolved_harness_mode: resolved_harness_mode.id(),
+        harness_modes: harness_mode_catalog(),
+        providers: provider_adapter_contract_matrix(),
+    }
 }
 
 fn provider_endpoint_conformance_coverage(

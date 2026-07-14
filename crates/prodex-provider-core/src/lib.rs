@@ -10,6 +10,7 @@ mod deepseek_bridge;
 mod errors;
 mod fallback;
 mod gemini_bridge;
+mod harness;
 mod models;
 mod replay_cases;
 mod surface;
@@ -54,9 +55,9 @@ pub use constraints::{
     provider_requested_output_tokens_compat,
 };
 pub use contract::{
-    PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContractSpec, ProviderEndpointContractSpec,
-    provider_adapter_contract_matrix, provider_adapter_contract_spec,
-    provider_capabilities_markdown,
+    PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContractSpec, ProviderContractCatalogSpec,
+    ProviderEndpointContractSpec, provider_adapter_contract_matrix, provider_adapter_contract_spec,
+    provider_capabilities_markdown, provider_contract_catalog,
 };
 pub use deepseek_bridge::{
     deepseek_provider_core_apply_reasoning_from_responses_request,
@@ -228,6 +229,12 @@ pub use gemini_bridge::{
     gemini_provider_core_unsupported_tool_fallback_body,
     gemini_provider_core_unverified_success_claim, gemini_provider_core_visible_text_from_part,
     gemini_provider_core_web_search_call_from_grounding,
+};
+pub use harness::{
+    EffectiveHarnessMode, HARNESS_MODE_CATALOG, HarnessMode, HarnessModeSpec,
+    HarnessRequestShapeError, HarnessResolutionSource, HarnessShapedRequest,
+    MINIMAL_HARNESS_INSTRUCTIONS, ParseHarnessModeError, ResolvedHarnessMode, harness_mode_catalog,
+    resolve_harness_mode, shape_harness_request,
 };
 pub use models::{provider_model_catalog, provider_model_cost, provider_model_spec};
 use replay_cases::provider_replay_case_count;

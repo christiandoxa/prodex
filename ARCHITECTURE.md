@@ -47,6 +47,25 @@ The proxy should preserve upstream behavior as much as possible:
 - websocket reuse should stay close to upstream behavior
 - transport failures should prefer surfacing as transport failures, not synthetic semantic errors
 
+### Harness Boundary
+
+A provider identifies upstream transport, authentication, and capabilities. An account profile
+identifies routing and credential state. A harness identifies model-facing canonical request policy;
+it is neither a provider nor an account profile.
+
+The resolved harness is immutable for the lifetime of a local provider bridge or gateway. It runs
+after existing Prodex-owned canonical request processing and before provider wire-format
+translation:
+
+```text
+canonical processing -> harness request shaping -> provider translation -> upstream transport
+```
+
+Version 1 defaults conservatively to a Native no-op. Its opt-in Minimal mode shapes only ordinary
+canonical Responses inference requests. It does not add an agent loop, scan repository context,
+change tools or approvals, rewrite responses or stream events, affect continuation affinity, or
+move the pre-commit rotation boundary. See [docs/harness-modes.md](docs/harness-modes.md).
+
 ### State Recovery
 
 Cross-process persistence must remain merge-safe for:
