@@ -131,6 +131,16 @@ fn redaction_large_nonsecret_token_remains_unchanged() {
 }
 
 #[test]
+fn redaction_masks_sensitive_url_query_values_in_json_text() {
+    let value = r#"{"error":"Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"}"#;
+
+    assert_eq!(
+        redaction_redact_secret_like_text(value),
+        r#"{"error":"Authorization: Bearer <redacted> url=https://example.test?api_key=<redacted>"}"#
+    );
+}
+
+#[test]
 fn redaction_gateway_body_masks_pii_and_secret_like_content() {
     let bearer_token = fake_named_secret("gateway_bearer");
     let prefixed_key = fake_api_key("sk-proj-", "gateway");
