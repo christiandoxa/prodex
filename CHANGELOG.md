@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.288.0 - 2026-07-14
+
+### Misc
+
+- Add verified standalone installer (`04730d3`)
+
 ## 0.287.0 - 2026-07-14
 
 - No grouped changes.
@@ -169,9 +175,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Harden broker capability files (`d2830fd`)
 - Require control-plane idempotency (`1d4592d`)
 - Project migration database secrets (`546bbae`)
-
-## 0.276.0 - 2026-07-11
-
-### Misc
-
-- Add explainable constraint-aware routing (`b315a0e`)
