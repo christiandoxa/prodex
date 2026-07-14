@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Retry quota-ready websocket profiles (`6e27fa4`)
 - Apply resolved harness modes (`0902e4f`)
 
 ### CLI
