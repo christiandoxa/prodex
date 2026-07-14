@@ -18,9 +18,8 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_conform
 ) -> Option<ProviderTransformResult> {
     let path = path_without_query(&request.path_and_query);
     let endpoint = match runtime_provider_route_kind(path) {
-        Some(RuntimeProviderRouteKind::Responses | RuntimeProviderRouteKind::ResponsesCompact) => {
-            ProviderEndpoint::Responses
-        }
+        Some(RuntimeProviderRouteKind::Responses) => ProviderEndpoint::Responses,
+        Some(RuntimeProviderRouteKind::ResponsesCompact) => ProviderEndpoint::ResponsesCompact,
         _ => return None,
     };
     let mut input = ProviderTransformInput::new(endpoint, body.to_vec());

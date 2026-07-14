@@ -19,8 +19,19 @@ use crate::{
     build_runtime_proxy_json_error_response, runtime_proxy_log, validate_credential_free_http_url,
 };
 
+#[cfg(test)]
 pub(crate) fn start_runtime_local_rewrite_proxy(
     options: RuntimeLocalRewriteProxyStartOptions<'_>,
+) -> anyhow::Result<RuntimeRotationProxy> {
+    start_runtime_local_rewrite_proxy_with_harness(
+        options,
+        prodex_provider_core::resolve_harness_mode(None, None),
+    )
+}
+
+pub(crate) fn start_runtime_local_rewrite_proxy_with_harness(
+    options: RuntimeLocalRewriteProxyStartOptions<'_>,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> anyhow::Result<RuntimeRotationProxy> {
     let runtime_config = runtime_local_rewrite_compatibility_config(&options)?;
     super::local_rewrite::start_runtime_local_rewrite_proxy_with_file_access(
@@ -29,6 +40,7 @@ pub(crate) fn start_runtime_local_rewrite_proxy(
         true,
         None,
         Default::default(),
+        resolved_harness,
     )
 }
 
@@ -44,6 +56,7 @@ pub(crate) fn start_runtime_gateway_rewrite_proxy(
         false,
         None,
         request_constraints,
+        prodex_provider_core::resolve_harness_mode(None, None),
     )
 }
 
@@ -52,6 +65,7 @@ pub(crate) fn start_runtime_gateway_rewrite_proxy_with_runtime_config(
     runtime_config: Arc<RuntimeConfig>,
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> anyhow::Result<RuntimeRotationProxy> {
     super::local_rewrite::start_runtime_local_rewrite_proxy_with_file_access(
         options,
@@ -59,6 +73,7 @@ pub(crate) fn start_runtime_gateway_rewrite_proxy_with_runtime_config(
         false,
         secret_refresh,
         request_constraints,
+        resolved_harness,
     )
 }
 

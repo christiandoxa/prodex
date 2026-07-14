@@ -1,6 +1,6 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_openapi::runtime_gateway_openapi_spec_for_mount;
-use prodex_provider_core::provider_adapter_contract_matrix;
+use prodex_provider_core::provider_contract_catalog;
 
 pub(super) fn runtime_gateway_openapi_spec(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -22,11 +22,16 @@ pub(super) fn runtime_gateway_admin_observability_payload(
     })
 }
 
-pub(super) fn runtime_gateway_admin_providers_payload() -> serde_json::Value {
-    serde_json::json!({
-        "object": "gateway.providers",
-        "providers": provider_adapter_contract_matrix(),
-    })
+pub(super) fn runtime_gateway_admin_providers_payload(
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> serde_json::Value {
+    let catalog = provider_contract_catalog(shared.resolved_harness.effective);
+    let mut payload = serde_json::to_value(catalog).expect("provider contract should serialize");
+    payload
+        .as_object_mut()
+        .expect("provider contract should be an object")
+        .insert("object".into(), "gateway.providers".into());
+    payload
 }
 
 pub(super) fn runtime_gateway_admin_guardrails_payload(

@@ -379,6 +379,7 @@ pub(super) fn handle_run(args: RunArgs) -> Result<()> {
                 codex_args: strategy.codex_args.clone(),
             },
             None,
+            None,
         );
     }
     execute_runtime_launch(strategy)
@@ -454,19 +455,24 @@ fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildPr
 
 struct RuntimeLaunchPreparationBuilder<'a> {
     request: RuntimeLaunchRequest<'a>,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     paths: AppPaths,
     state: AppState,
     selection: RuntimeLaunchSelection,
 }
 
 impl<'a> RuntimeLaunchPreparationBuilder<'a> {
-    fn from_request(request: RuntimeLaunchRequest<'a>) -> Result<Self> {
+    fn from_request(
+        request: RuntimeLaunchRequest<'a>,
+        resolved_harness: prodex_provider_core::ResolvedHarnessMode,
+    ) -> Result<Self> {
         let paths = AppPaths::discover()?;
         let mut state = AppState::load_and_repair(&paths)?;
         let selection = select_runtime_launch_profile(&paths, &mut state, &request)?;
 
         Ok(Self {
             request,
+            resolved_harness,
             paths,
             state,
             selection,
@@ -495,6 +501,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
             &self.state,
             &self.selection,
             &self.request,
+            self.resolved_harness,
         )?;
 
         let RuntimeLaunchPreparationBuilder {
@@ -612,6 +619,7 @@ impl RuntimeProxyStartupFactory {
         state: &AppState,
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
+        resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
         if let Some(local_upstream_base_url) =
             local_rewrite_proxy_upstream_base_url(selection, request)?
@@ -622,6 +630,7 @@ impl RuntimeProxyStartupFactory {
                 selection,
                 request,
                 local_upstream_base_url,
+                resolved_harness,
             )?));
         }
 
@@ -703,10 +712,21 @@ impl RuntimeProxyStartupFactory {
     }
 }
 
+#[cfg(test)]
 pub(super) fn prepare_runtime_launch(
     request: RuntimeLaunchRequest<'_>,
 ) -> Result<PreparedRuntimeLaunch> {
-    RuntimeLaunchPreparationBuilder::from_request(request)?.build()
+    prepare_runtime_launch_with_harness(
+        request,
+        prodex_provider_core::resolve_harness_mode(None, None),
+    )
+}
+
+pub(super) fn prepare_runtime_launch_with_harness(
+    request: RuntimeLaunchRequest<'_>,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
+) -> Result<PreparedRuntimeLaunch> {
+    RuntimeLaunchPreparationBuilder::from_request(request, resolved_harness)?.build()
 }
 
 pub(super) fn prepare_runtime_launch_dry_run(
@@ -847,30 +867,34 @@ fn start_local_rewrite_proxy_endpoint(
     selection: &RuntimeLaunchSelection,
     request: &RuntimeLaunchRequest<'_>,
     upstream_base_url: String,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
         runtime_launch_effective_model_context_window_tokens(request, selection);
-    let proxy = start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths,
-        state,
-        upstream_base_url,
-        provider: runtime_local_rewrite_provider_options(state, selection, request)?,
-        upstream_no_proxy: request.upstream_no_proxy,
-        smart_context_enabled: request.smart_context_enabled,
-        presidio_redaction_enabled: request.presidio_redaction_enabled,
-        model_context_window_tokens,
-        preferred_listen_addr: None,
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-    })?;
+    let proxy = start_runtime_local_rewrite_proxy_with_harness(
+        RuntimeLocalRewriteProxyStartOptions {
+            paths,
+            state,
+            upstream_base_url,
+            provider: runtime_local_rewrite_provider_options(state, selection, request)?,
+            upstream_no_proxy: request.upstream_no_proxy,
+            smart_context_enabled: request.smart_context_enabled,
+            presidio_redaction_enabled: request.presidio_redaction_enabled,
+            model_context_window_tokens,
+            preferred_listen_addr: None,
+            gateway_auth_token_hash: None,
+            gateway_admin_tokens: Vec::new(),
+            gateway_sso: RuntimeGatewaySsoConfig::default(),
+            gateway_state_store: RuntimeGatewayStateStore::file(paths),
+            gateway_virtual_keys: Vec::new(),
+            gateway_route_aliases: Vec::new(),
+            gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+            gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+            gateway_call_id_header: None,
+            gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+        },
+        resolved_harness,
+    )?;
     let local_model_provider_id = runtime_local_rewrite_model_provider_id(selection, request)
         .unwrap_or(SUPER_LOCAL_PROVIDER_ID);
     Ok(RuntimeProxyEndpoint {

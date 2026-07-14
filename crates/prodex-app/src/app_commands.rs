@@ -98,10 +98,11 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     handle_caveman(args.into_caveman_args_with_presidio(use_presidio))
 }
 
-pub(super) fn prepare_runtime_launch(
+pub(super) fn prepare_runtime_launch_with_harness(
     request: RuntimeLaunchRequest<'_>,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> Result<PreparedRuntimeLaunch> {
-    runtime_launch::prepare_runtime_launch(request)
+    runtime_launch::prepare_runtime_launch_with_harness(request, resolved_harness)
 }
 
 pub(super) fn prepare_runtime_launch_dry_run(
