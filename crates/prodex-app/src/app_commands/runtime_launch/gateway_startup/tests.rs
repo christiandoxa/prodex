@@ -20,6 +20,7 @@ fn gateway_args() -> GatewayArgs {
         command: None,
         listen: None,
         provider: None,
+        harness: None,
         base_url: None,
         api_key: None,
         auth_token: None,
@@ -27,6 +28,16 @@ fn gateway_args() -> GatewayArgs {
         presidio: false,
         no_presidio: false,
     }
+}
+
+#[test]
+fn gateway_refresh_args_retain_explicit_harness_selection() {
+    let mut args = gateway_args();
+    args.harness = Some(prodex_provider_core::HarnessMode::Minimal);
+
+    let refreshed = gateway_refresh_args(&args);
+
+    assert_eq!(refreshed.harness, args.harness);
 }
 
 #[test]

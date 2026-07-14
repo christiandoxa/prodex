@@ -237,6 +237,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
     let model_context_window_tokens = runtime_launch_cli_model_context_window_tokens(&codex_args);
     let gemini_thinking_budget_tokens =
         runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
+    let resolved_harness = prodex_provider_core::resolve_harness_mode(args.harness, None);
     let request = RuntimeLaunchRequest {
         profile: args.profile.as_deref(),
         allow_auto_rotate: !args.no_auto_rotate,
@@ -276,6 +277,7 @@ pub(crate) fn handle_caveman_dry_run(args: CavemanArgs) -> Result<()> {
         "caveman",
         request,
         RuntimeLaunchDryRunChild::Caveman { codex_args },
+        Some(resolved_harness),
         Some(&extra_report),
     )
 }
@@ -284,11 +286,17 @@ pub(crate) fn print_runtime_launch_dry_run(
     flow: &str,
     request: RuntimeLaunchRequest<'_>,
     child: RuntimeLaunchDryRunChild,
+    resolved_harness: Option<prodex_provider_core::ResolvedHarnessMode>,
     extra_report: Option<&str>,
 ) -> Result<()> {
     let upstream_no_proxy = request.upstream_no_proxy;
     let presidio_redaction_enabled = request.presidio_redaction_enabled;
     let prepared = prepare_runtime_launch_dry_run(request)?;
+    let local_provider_bridge = prepared
+        .runtime_proxy
+        .as_ref()
+        .and_then(|proxy| proxy.local_model_provider_id.as_deref())
+        .is_some();
     let runtime_proxy = runtime_proxy_codex_endpoint(prepared.runtime_proxy.as_ref());
     let child = profile_openai_compatible_dry_run_child(&prepared.codex_home, child)?;
     let plan = prodex_runtime_launch::runtime_launch_dry_run_plan(
@@ -310,6 +318,9 @@ pub(crate) fn print_runtime_launch_dry_run(
         output.push_str(extra_report);
         output.push('\n');
     }
+    if local_provider_bridge && let Some(harness) = resolved_harness {
+        output.push_str(&runtime_launch_harness_dry_run_line(&harness));
+    }
     output.push_str(&format!(
         "Presidio redaction: {}",
         if presidio_redaction_enabled {
@@ -321,6 +332,18 @@ pub(crate) fn print_runtime_launch_dry_run(
     output.push('\n');
     print_runtime_launch_dry_run_report(flow, &output)?;
     Ok(())
+}
+
+fn runtime_launch_harness_dry_run_line(
+    harness: &prodex_provider_core::ResolvedHarnessMode,
+) -> String {
+    format!(
+        "Harness: requested={} resolved={} source={} reason={}\n",
+        harness.requested,
+        harness.effective,
+        harness.source.id(),
+        harness.reason
+    )
 }
 
 fn print_runtime_launch_dry_run_report(flow: &str, output: &str) -> Result<()> {
@@ -474,6 +497,21 @@ mod tests {
         assert!(rendered.contains("Command: codex"));
         assert!(rendered.contains("Runtime proxy: enabled"));
         assert!(rendered.contains("Presidio redaction: disabled"));
+    }
+
+    #[test]
+    fn harness_dry_run_line_reports_immutable_resolution() {
+        let resolved = prodex_provider_core::resolve_harness_mode(
+            Some(prodex_provider_core::HarnessMode::Minimal),
+            None,
+        );
+
+        let line = runtime_launch_harness_dry_run_line(&resolved);
+
+        assert!(line.contains("requested=minimal"), "{line}");
+        assert!(line.contains("resolved=minimal"), "{line}");
+        assert!(line.contains("source=cli"), "{line}");
+        assert!(line.contains("reason=explicit CLI selection"), "{line}");
     }
 
     #[test]

@@ -3,7 +3,7 @@ use super::local_rewrite::{
     RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySecret,
     RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, start_runtime_gateway_rewrite_proxy,
-    start_runtime_local_rewrite_proxy,
+    start_runtime_local_rewrite_proxy, start_runtime_local_rewrite_proxy_with_harness,
 };
 use super::local_rewrite_copilot::RuntimeCopilotProviderAuth;
 use super::local_rewrite_kiro::RuntimeKiroProfileAuth;
@@ -26,6 +26,7 @@ mod gateway_health;
 mod gateway_state;
 mod gateway_usage;
 mod governance_failure;
+mod harness;
 mod model_memory;
 #[cfg(unix)]
 mod projected_provider;

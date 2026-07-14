@@ -31,6 +31,7 @@ fn gateway_args() -> GatewayArgs {
         command: None,
         listen: None,
         provider: None,
+        harness: None,
         base_url: None,
         api_key: None,
         auth_token: None,
@@ -917,15 +918,8 @@ fn gateway_normalize_upstream_base_url_rejects_padded_url() {
     let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let paths = AppPaths::discover().unwrap();
     let args = GatewayArgs {
-        command: None,
-        listen: None,
-        provider: None,
         base_url: Some(" https://api.example/v1 ".to_string()),
-        api_key: None,
-        auth_token: None,
-        smart_context: false,
-        presidio: false,
-        no_presidio: false,
+        ..gateway_args()
     };
     let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
     let state = AppState::default();
@@ -1443,6 +1437,7 @@ fn resolve_gateway_guardrail_config_normalizes_supported_webhook_phases() {
         command: None,
         listen: None,
         provider: None,
+        harness: None,
         base_url: None,
         api_key: None,
         auth_token: None,
@@ -1480,6 +1475,7 @@ fn resolve_gateway_guardrail_config_presidio_cli_overrides_policy() {
             command: None,
             listen: None,
             provider: None,
+            harness: None,
             base_url: None,
             api_key: None,
             auth_token: None,
@@ -1498,6 +1494,7 @@ fn resolve_gateway_guardrail_config_presidio_cli_overrides_policy() {
             command: None,
             listen: None,
             provider: None,
+            harness: None,
             base_url: None,
             api_key: None,
             auth_token: None,
@@ -1563,15 +1560,8 @@ fn gateway_route_alias_model_metrics_lets_policy_override_inferred_costs() {
 #[test]
 fn gateway_upstream_base_url_adds_v1_for_openai_root_url() {
     let args = GatewayArgs {
-        command: None,
-        listen: None,
-        provider: None,
         base_url: Some("https://example.test/".to_string()),
-        api_key: None,
-        auth_token: None,
-        smart_context: false,
-        presidio: false,
-        no_presidio: false,
+        ..gateway_args()
     };
     let policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
     let url = gateway_upstream_base_url(&args, &policy, None).unwrap();
@@ -1592,6 +1582,7 @@ fn resolve_gateway_auth_config_keeps_root_token_out_of_admin_tokens() {
         command: None,
         listen: None,
         provider: None,
+        harness: None,
         base_url: None,
         api_key: None,
         auth_token: Some("cli-gateway-token".to_string()),
@@ -1614,6 +1605,7 @@ fn resolve_gateway_auth_config_requires_non_empty_virtual_key_env_when_policy_de
         command: None,
         listen: None,
         provider: None,
+        harness: None,
         base_url: None,
         api_key: None,
         auth_token: None,

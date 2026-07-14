@@ -2,8 +2,11 @@ use super::super::copilot_instructions::runtime_copilot_init_current_workspace_c
 use super::deepseek_rewrite::*;
 #[cfg(test)]
 pub(crate) use super::local_rewrite_constraints::start_runtime_gateway_rewrite_proxy;
+#[cfg(test)]
+pub(crate) use super::local_rewrite_constraints::start_runtime_local_rewrite_proxy;
 pub(crate) use super::local_rewrite_constraints::{
-    start_runtime_gateway_rewrite_proxy_with_runtime_config, start_runtime_local_rewrite_proxy,
+    start_runtime_gateway_rewrite_proxy_with_runtime_config,
+    start_runtime_local_rewrite_proxy_with_harness,
 };
 use super::local_rewrite_copilot::{
     RuntimeCopilotOAuthPool, runtime_copilot_oauth_pool_from_provider,
@@ -56,7 +59,7 @@ pub(super) use super::local_rewrite_upstream::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult,
 };
-use super::provider_bridge::runtime_provider_openai_contract;
+use super::provider_bridge::{runtime_provider_label, runtime_provider_openai_contract};
 use super::*;
 use anyhow::Context;
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -83,6 +86,7 @@ pub(super) struct RuntimeLocalRewriteProxyShared {
     pub(super) mount_path: String,
     pub(super) provider: RuntimeLocalRewriteProviderOptions,
     pub(super) provider_credential: Option<RuntimeProjectedProviderCredential>,
+    pub(super) resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     pub(super) deepseek_conversations: RuntimeDeepSeekConversationStore,
     pub(super) deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
     pub(super) gemini_conversations: RuntimeDeepSeekConversationStore,
@@ -317,6 +321,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
     allow_local_file_access: bool,
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> Result<RuntimeRotationProxy> {
     validate_credential_free_http_url(&options.upstream_base_url, "runtime upstream base URL")?;
     let (server, listen_addr) = runtime_local_rewrite_server(options.preferred_listen_addr)?;
@@ -326,6 +331,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         allow_local_file_access,
         secret_refresh,
         gateway_request_constraints,
+        resolved_harness,
         "loopback",
         Some(listen_addr),
     )?;
@@ -391,6 +397,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
     allow_local_file_access: bool,
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     transport: &str,
     listen_addr: Option<std::net::SocketAddr>,
 ) -> Result<RuntimeLocalRewritePrepared> {
@@ -508,6 +515,19 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         },
     )?;
     let bridge_kind = provider.bridge_kind();
+    runtime_proxy_log_to_path(
+        &log_path,
+        &runtime_proxy_structured_log_message(
+            "harness_resolution",
+            [
+                runtime_proxy_log_field("provider", runtime_provider_label(bridge_kind)),
+                runtime_proxy_log_field("requested", resolved_harness.requested.to_string()),
+                runtime_proxy_log_field("resolved", resolved_harness.effective.to_string()),
+                runtime_proxy_log_field("source", resolved_harness.source.id()),
+                runtime_proxy_log_field("reason", resolved_harness.reason_code()),
+            ],
+        ),
+    );
     let openai_contract = runtime_provider_openai_contract(bridge_kind);
     let gateway_virtual_key_store_path = gateway_state_store.key_store_path().to_path_buf();
     let gateway_virtual_key_usage_path = gateway_state_store.usage_path().to_path_buf();
@@ -580,6 +600,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         provider,
         provider_credential,
+        resolved_harness,
         deepseek_conversations: RuntimeDeepSeekConversationStore::default(),
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_conversations: RuntimeDeepSeekConversationStore::default(),

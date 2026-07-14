@@ -42,6 +42,7 @@ pub(crate) fn start_runtime_gateway_application_with_runtime_config(
     runtime_config: Arc<RuntimeConfig>,
     secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
+    resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> anyhow::Result<RuntimeGatewayApplication> {
     let prepared = prepare_runtime_local_rewrite_application(
         options,
@@ -49,6 +50,7 @@ pub(crate) fn start_runtime_gateway_application_with_runtime_config(
         false,
         secret_refresh,
         request_constraints,
+        resolved_harness,
         "in_process",
         None,
     )?;

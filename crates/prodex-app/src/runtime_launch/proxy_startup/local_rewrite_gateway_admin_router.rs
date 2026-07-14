@@ -428,7 +428,7 @@ pub(super) fn runtime_gateway_admin_response(
         }
         return Some(runtime_gateway_admin_json_response(
             200,
-            runtime_gateway_admin_providers_payload(),
+            runtime_gateway_admin_providers_payload(shared),
         ));
     }
 
