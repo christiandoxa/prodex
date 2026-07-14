@@ -9,21 +9,8 @@ fn version_is_newer_compares_semver_like_versions() {
 }
 
 #[test]
-fn prodex_update_command_prefers_npm_for_native_installations() {
-    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
-    assert_eq!(
-        prodex_update_command_for_version("0.2.99"),
-        "npm install -g @christiandoxa/prodex@0.2.99 or npm install -g @christiandoxa/prodex@latest"
-    );
-}
-
-#[test]
-fn prodex_update_command_prefers_npm_for_npm_installations() {
-    let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "@christiandoxa/prodex");
-    assert_eq!(
-        prodex_update_command_for_version("0.2.99"),
-        "npm install -g @christiandoxa/prodex@0.2.99 or npm install -g @christiandoxa/prodex@latest"
-    );
+fn prodex_update_notice_uses_the_self_update_command() {
+    assert_eq!(prodex_update_command_for_version("0.2.99"), "prodex update");
 }
 
 #[test]
@@ -99,9 +86,7 @@ fn update_notice_is_suppressed_for_machine_output_modes() {
         provider: None,
         base_url: None,
     })));
-    assert!(!should_emit_update_notice(&Commands::Update(CodexUpdateArgs {
-        codex_args: Vec::new(),
-    })));
+    assert!(!should_emit_update_notice(&Commands::Update(ProdexUpdateArgs {})));
     assert!(should_emit_update_notice(&Commands::Current));
 }
 

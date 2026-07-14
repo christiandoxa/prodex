@@ -27,7 +27,7 @@ pub(super) use process::{
 pub(super) use pty::run_prodex_with_pty_prompt_answer;
 pub(super) use state::{
     active_profile, add_managed_profile, read_access_token, read_state,
-    runtime_broker_registry_path, wait_for_runtime_broker_registry_path,
+    wait_for_runtime_broker_registry_path,
 };
 pub(super) use temp_dir::TestDir;
 pub(super) use token::chatgpt_id_token;

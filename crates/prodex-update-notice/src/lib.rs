@@ -99,10 +99,8 @@ pub fn current_prodex_release_source() -> ProdexReleaseSource {
     ProdexReleaseSource::Npm
 }
 
-pub fn prodex_update_command_for_version(latest_version: &str) -> String {
-    format!(
-        "npm install -g @christiandoxa/prodex@{latest_version} or npm install -g @christiandoxa/prodex@latest"
-    )
+pub fn prodex_update_command_for_version(_latest_version: &str) -> String {
+    "prodex update".to_string()
 }
 
 pub fn prodex_version_status(paths: &AppPaths) -> Result<ProdexVersionStatus> {

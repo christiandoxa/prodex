@@ -335,9 +335,7 @@ fn runtime_broker_startup_grace_covers_ready_timeout() {
 #[test]
 fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
     let runtime_broker = Commands::RuntimeBroker(RuntimeBrokerArgs {});
-    let update = Commands::Update(CodexUpdateArgs {
-        codex_args: vec![OsString::from("--check")],
-    });
+    let update = Commands::Update(ProdexUpdateArgs {});
     let run = Commands::Run(RunArgs {
         profile: None,
         auto_rotate: false,

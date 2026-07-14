@@ -12,6 +12,7 @@
     "npm:sync-version": "node scripts/npm/sync-version.mjs --root npm && node scripts/npm/sync-docs-version.mjs",
     "npm:sync-docs-version": "node scripts/npm/sync-docs-version.mjs",
     "npm:wrapper:test": "node --test scripts/npm/prodex-wrapper.test.mjs",
+    "installer:test": "node --test scripts/install.test.mjs",
     "npm:stage": "node scripts/npm/stage.mjs",
     "npm:publish": "node scripts/npm/publish.mjs",
     "changelog": "node scripts/npm/changelog.mjs",

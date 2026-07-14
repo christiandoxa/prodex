@@ -116,9 +116,9 @@ impl CommandExecute for CodexPassthroughArgs {
     }
 }
 
-impl CommandExecute for CodexUpdateArgs {
+impl CommandExecute for ProdexUpdateArgs {
     fn execute(self) -> Result<()> {
-        handle_codex_update(self)
+        handle_prodex_update(self)
     }
 }
 
