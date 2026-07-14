@@ -6,8 +6,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 961,
-    "reason": "Runtime launch command routing, provider selection, and session/runtime entry planning remain capped after gateway backend startup moved to its focused module."
+    "maxLines": 985,
+    "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after gateway backend startup moved to its focused module."
   },
   {
     "file": "crates/prodex-app/src/app_server_broker_preview.rs",
@@ -51,8 +51,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3743,
-    "reason": "Local rewrite cross-provider regression coverage remains capped after governance-failure behavior moved to a focused sibling module; provider-specific cases continue to split from the shared harness."
+    "maxLines": 3744,
+    "reason": "Local rewrite cross-provider regression coverage remains capped after harness-mode cases and governance-failure behavior moved to focused sibling modules; provider-specific cases continue to split from the shared harness."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
@@ -71,7 +71,7 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
-    "maxLines": 2258,
+    "maxLines": 2250,
     "reason": "Runtime launch command tests remain capped after secure credential fixtures and post-exit session maintenance moved into focused sibling modules."
   },
   {
@@ -111,8 +111,8 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1201,
-    "reason": "Provider-aware runtime and gateway argument parsing now explicitly rejects normalized triple-slash URLs; the tightly coupled CLI surface remains capped."
+    "maxLines": 1240,
+    "reason": "Provider-aware runtime and gateway argument parsing now includes typed harness selection and explicitly rejects normalized triple-slash URLs; the tightly coupled CLI surface remains capped."
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
@@ -146,8 +146,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
-    "maxLines": 1196,
-    "reason": "Gateway admin CRUD compatibility coverage remains capped while tenant, key, SCIM, and audit fixtures are split by resource."
+    "maxLines": 1206,
+    "reason": "Gateway admin CRUD and typed provider/harness catalog compatibility coverage remain capped while tenant, key, SCIM, and audit fixtures are split by resource."
   },
   {
     "file": "crates/prodex-application/tests/application_boundary.rs",
@@ -186,8 +186,8 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
-    "maxLines": 1917,
-    "reason": "Runtime policy compatibility coverage is capped while versioned policy, cache, and gateway settings tests are split."
+    "maxLines": 1942,
+    "reason": "Runtime policy compatibility coverage includes typed gateway harness validation and remains capped while versioned policy, cache, and gateway settings tests are split."
   },
   {
     "file": "crates/prodex-storage/tests/storage_contract.rs",
@@ -266,8 +266,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1409,
-    "reason": "Gateway launch now composes four governed snapshot authorities plus bounded refresh and SIEM workers; capped until authority bootstrap moves to a focused module."
+    "maxLines": 1430,
+    "reason": "Gateway launch now composes four governed snapshot authorities, immutable harness startup diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
@@ -306,8 +306,8 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 937,
-    "reason": "Runtime policy types now carry bounded governance authority, lifecycle, session, audit, and retention configuration in the existing typed schema."
+    "maxLines": 938,
+    "reason": "Runtime policy types now carry fixed gateway harness selection plus bounded governance authority, lifecycle, session, audit, and retention configuration in the existing typed schema."
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",
