@@ -99,6 +99,7 @@ test("install.ps1 verifies Windows release assets", async () => {
   const source = await fs.readFile(windowsInstallerPath, "utf8");
   assert.match(source, /prodex-\$Target\.exe/);
   assert.match(source, /Get-FileHash[^\n]+SHA256/);
+  assert.match(source, /System\.Security\.Cryptography\.SHA256/);
   assert.match(source, /x86_64-pc-windows-msvc/);
   assert.match(source, /aarch64-pc-windows-msvc/);
   assert.match(source, /New-Item -ItemType Junction/);
