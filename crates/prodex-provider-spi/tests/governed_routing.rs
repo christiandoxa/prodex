@@ -42,6 +42,7 @@ fn descriptor(tenant: TenantContext, provider: ProviderId) -> GovernedProviderDe
         revoked: false,
         circuit_open: false,
         quota_available: true,
+        inflight_cap_reached: false,
         local_execution: true,
         trust_tier: ProviderTrustTier::RestrictedApproved,
         maximum_classification: DataClassification::Restricted,
@@ -53,8 +54,9 @@ fn descriptor(tenant: TenantContext, provider: ProviderId) -> GovernedProviderDe
         retention_seconds: 0,
         training_use: false,
         signals: GovernedRoutingSignals {
-            health: 9_000,
+            health: Some(9_000),
             load: 1_000,
+            quota_headroom: None,
             cost: 2_000,
             latency: 3_000,
             risk: 4_000,
@@ -443,8 +445,9 @@ fn governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score() {
     let preferred = descriptor(tenant, ProviderId::OpenAi);
     let mut affinity = descriptor(tenant, ProviderId::Anthropic);
     affinity.signals = GovernedRoutingSignals {
-        health: 0,
+        health: Some(0),
         load: 10_000,
+        quota_headroom: Some(0),
         cost: 10_000,
         latency: 10_000,
         risk: 10_000,
@@ -471,6 +474,84 @@ fn governed_routing_keeps_eligible_continuation_affinity_ahead_of_soft_score() {
     assert_eq!(plan.primary.provider, ProviderId::Anthropic);
     assert_eq!(plan.fallbacks[0].provider, ProviderId::OpenAi);
     assert!(plan.primary.score < plan.fallbacks[0].score);
+}
+
+#[test]
+fn governed_routing_runtime_signals_change_selection_and_keep_only_eligible_fallbacks() {
+    let tenant = TenantContext {
+        tenant_id: TenantId::new(),
+    };
+    let policy = decision(PolicyEffect::Allow, Vec::new());
+    let capabilities = CapabilitySet::new(vec![ModelCapability::ResponsesApi]);
+    let mut openai = descriptor(tenant, ProviderId::OpenAi);
+    openai.signals.health = Some(1_000);
+    openai.signals.load = 9_000;
+    openai.signals.quota_headroom = Some(500);
+    let mut anthropic = descriptor(tenant, ProviderId::Anthropic);
+    anthropic.signals.health = Some(9_000);
+    anthropic.signals.load = 500;
+    anthropic.signals.quota_headroom = Some(9_500);
+    let mut rejected = descriptor(tenant, ProviderId::Copilot);
+    rejected.quota_available = false;
+    let registry = GovernedProviderRegistry {
+        revision: 26,
+        providers: vec![openai, anthropic, rejected],
+    };
+
+    let plan = plan_governed_provider_route(&GovernedRoutingRequest {
+        tenant,
+        classification: DataClassification::Internal,
+        required_capabilities: &capabilities,
+        policy: &policy,
+        registry: &registry,
+        score_revision: 1,
+        weights: GovernedRoutingWeights::default(),
+        affinity_provider: None,
+        max_fallbacks: 2,
+    })
+    .unwrap();
+
+    assert_eq!(plan.primary.provider, ProviderId::Anthropic);
+    assert_eq!(plan.fallbacks.len(), 1);
+    assert_eq!(plan.fallbacks[0].provider, ProviderId::OpenAi);
+    assert!(
+        plan.fallbacks
+            .iter()
+            .all(|route| route.provider != ProviderId::Copilot)
+    );
+}
+
+#[test]
+fn governed_routing_keeps_hard_affinity_across_temporary_runtime_degradation() {
+    let tenant = TenantContext {
+        tenant_id: TenantId::new(),
+    };
+    let policy = decision(PolicyEffect::Allow, Vec::new());
+    let capabilities = CapabilitySet::new(vec![ModelCapability::ResponsesApi]);
+    let mut affinity = descriptor(tenant, ProviderId::Anthropic);
+    affinity.circuit_open = true;
+    affinity.quota_available = false;
+    affinity.inflight_cap_reached = true;
+    let registry = GovernedProviderRegistry {
+        revision: 25,
+        providers: vec![descriptor(tenant, ProviderId::OpenAi), affinity],
+    };
+
+    let plan = plan_governed_provider_route(&GovernedRoutingRequest {
+        tenant,
+        classification: DataClassification::Internal,
+        required_capabilities: &capabilities,
+        policy: &policy,
+        registry: &registry,
+        score_revision: 1,
+        weights: GovernedRoutingWeights::default(),
+        affinity_provider: Some(ProviderId::Anthropic),
+        max_fallbacks: 1,
+    })
+    .unwrap();
+
+    assert_eq!(plan.primary.provider, ProviderId::Anthropic);
+    assert_eq!(plan.fallbacks[0].provider, ProviderId::OpenAi);
 }
 
 #[test]
@@ -557,6 +638,13 @@ fn governed_routing_explains_every_hard_filter_with_stable_reason_codes() {
         candidate,
         allow.clone(),
         GovernedHardFilterReason::QuotaUnavailable,
+    ));
+    let mut candidate = descriptor(tenant, ProviderId::Anthropic);
+    candidate.inflight_cap_reached = true;
+    cases.push((
+        candidate,
+        allow.clone(),
+        GovernedHardFilterReason::InFlightCapReached,
     ));
     let mut candidate = descriptor(tenant, ProviderId::Anthropic);
     candidate.credential_available = false;
@@ -680,6 +768,7 @@ fn governed_routing_explains_every_hard_filter_with_stable_reason_codes() {
             GovernedHardFilterReason::ProviderRevoked,
             GovernedHardFilterReason::CircuitOpen,
             GovernedHardFilterReason::QuotaUnavailable,
+            GovernedHardFilterReason::InFlightCapReached,
             GovernedHardFilterReason::CredentialUnavailable,
             GovernedHardFilterReason::ClassificationUnsupported,
             GovernedHardFilterReason::CapabilityMissing,
@@ -699,6 +788,7 @@ fn governed_routing_explains_every_hard_filter_with_stable_reason_codes() {
             "routing.hard.provider_revoked",
             "routing.hard.circuit_open",
             "routing.hard.quota_unavailable",
+            "routing.hard.inflight_cap_reached",
             "routing.hard.credential_unavailable",
             "routing.hard.classification_unsupported",
             "routing.hard.capability_missing",
@@ -729,6 +819,7 @@ fn governed_routing_bounds_accumulated_hard_filter_explanations() {
     rejected.revoked = true;
     rejected.circuit_open = true;
     rejected.quota_available = false;
+    rejected.inflight_cap_reached = true;
     rejected.credential_available = false;
     rejected.maximum_classification = DataClassification::Public;
     rejected.capabilities = CapabilitySet::new(Vec::new());
@@ -870,7 +961,7 @@ fn governed_routing_rejects_policy_and_unbounded_or_invalid_inputs() {
         Err(GovernedRoutingError::InvalidCredentialReference { .. })
     ));
     let mut invalid = base.clone();
-    invalid.signals.health = 10_001;
+    invalid.signals.health = Some(10_001);
     assert!(matches!(
         plan_one(tenant, invalid, &policy),
         Err(GovernedRoutingError::InvalidSignal { .. })

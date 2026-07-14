@@ -98,10 +98,18 @@ reason_code = "policy.session_revoked"
 
 [governance.policy_rules.condition]
 channel = "api"
+team_id = "platform"
+project_id = "gateway"
+user_id = "service-account"
 credential_scope = "data_plane"
 session_revoked = true
 minimum_authentication_strength = 2
 requested_capability = "tools"
+requested_model = "model-a"
+requested_tool = "shell"
+requested_modality = "audio"
+break_glass_required = true
+break_glass_scope = "incident-response"
 quota_has_headroom = false
 "#,
     );
@@ -144,32 +152,38 @@ reason_code = "policy.invalid"
     );
     assert!(validate_runtime_policy_file(&reserved, Path::new("policy.toml")).is_err());
 
+    let non_api_channel = parse_policy(
+        r#"
+version = 1
+[[governance.policy_rules]]
+id = "deny.cli"
+effect = "deny"
+obligations = []
+reason_code = "policy.invalid_channel"
+[governance.policy_rules.condition]
+channel = "cli"
+"#,
+    );
+    let error = validate_runtime_policy_file(&non_api_channel, Path::new("policy.toml"))
+        .expect_err("gateway policy publication must reject non-API channel selectors");
+    assert!(error.to_string().contains("must be api"), "{error:#}");
+
+    let mut invalid_selector = valid.clone();
+    invalid_selector.governance.policy_rules[0]
+        .condition
+        .team_id = Some("x".repeat(129));
+    let error = validate_runtime_policy_file(&invalid_selector, Path::new("policy.toml"))
+        .expect_err("attribute selectors must be bounded");
+    assert!(
+        error.to_string().contains("attribute selector"),
+        "{error:#}"
+    );
+
     let mut too_many = parse_policy("version = 1");
     too_many.governance.policy_rules = (0..=prodex_domain::MAX_GOVERNANCE_POLICY_RULES)
         .map(|index| crate::RuntimeGovernancePolicyRule {
             id: format!("rule-{index}"),
-            condition: crate::RuntimeGovernancePolicyRuleCondition {
-                channel: None,
-                principal_kind: None,
-                minimum_role: None,
-                credential_scope: None,
-                action: None,
-                route: None,
-                minimum_classification: None,
-                inspection_coverage: None,
-                minimum_request_risk: None,
-                network_zone: None,
-                maximum_session_age_seconds: None,
-                maximum_session_idle_seconds: None,
-                session_revoked: None,
-                session_mfa_satisfied: None,
-                minimum_session_retained_classification: None,
-                minimum_authentication_strength: None,
-                environment_mfa_satisfied: None,
-                requested_capability: None,
-                quota_has_headroom: None,
-                quota_reservation_required: None,
-            },
+            condition: crate::RuntimeGovernancePolicyRuleCondition::default(),
             effect: crate::RuntimeGovernancePolicyEffect::Allow,
             obligations: Vec::new(),
             reason_code: format!("policy.rule-{index}"),
@@ -338,6 +352,7 @@ projected_provider = "kubernetes"
 
 [gateway]
 listen_addr = "10.0.0.10:4317"
+expected_host = "gateway.example.com"
 restricted_egress = true
 replica_count = 2
 require_multi_replica_accounting_checks = true
@@ -359,14 +374,6 @@ oidc_issuer = "https://idp.example.com"
 oidc_audience = "prodex-bank"
 required_scope = "control_plane"
 authentication_strength = "phishing_resistant"
-
-[gateway.workload_identity]
-enabled = true
-issuer = "https://workload.example.com"
-audience = "prodex-data-plane"
-required_scope = "data_plane"
-mtls_required = true
-mtls_ca_ref = { provider = "kubernetes", name = "WORKLOAD_CA" }
 
 [gateway.observability]
 sinks = ["siem"]
@@ -427,6 +434,11 @@ fn bank_governance_deployment_matrix_fails_closed() {
 
     for (from, to, expected) in [
         (
+            "expected_host = \"gateway.example.com\"",
+            "expected_host = \"gateway.example.com/path\"",
+            "bounded exact HTTP authority",
+        ),
+        (
             "listen_addr = \"10.0.0.10:4317\"",
             "listen_addr = \"0.0.0.0:4317\"",
             "private gateway listen address",
@@ -467,11 +479,6 @@ fn bank_governance_deployment_matrix_fails_closed() {
             "restricted default classification",
         ),
         (
-            "mtls_required = true",
-            "mtls_required = false",
-            "mTLS-bound workload identity",
-        ),
-        (
             "idle_timeout_seconds = 900",
             "idle_timeout_seconds = 7200",
             "idle_timeout_seconds",
@@ -491,6 +498,18 @@ fn identity_edge_config_rejects_untrusted_proxy_and_unsupported_browser_flow() {
         (
             "version = 1\n[gateway]\ntrusted_proxies = [\"proxy.example.com\"]\n",
             "exact IP addresses",
+        ),
+        (
+            "version = 1\n[gateway.workload_identity]\nenabled = true\nissuer = \"https://workload.example.com\"\naudience = \"prodex-data-plane\"\nrequired_scope = \"data_plane\"\nmtls_required = true\nmtls_ca_ref = { provider = \"file\", name = \"WORKLOAD_CA\" }\n",
+            "unsupported until the runtime verifies workload tokens and mTLS peer identity",
+        ),
+        (
+            "version = 1\n[gateway]\nlisten_addr = \"10.0.0.10:4317\"\n",
+            "required for a non-loopback",
+        ),
+        (
+            "version = 1\n[gateway]\nexpected_host = \"https://gateway.example.com\"\n",
+            "bounded exact HTTP authority",
         ),
         (
             "version = 1\n[gateway.sso]\nbrowser_flow = true\npkce_method = \"S256\"\n",

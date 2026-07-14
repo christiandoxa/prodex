@@ -26,6 +26,7 @@ const RUNTIME_GATEWAY_GOVERNANCE_SESSION_LIMIT: usize = 4_096;
 const RUNTIME_GATEWAY_GOVERNANCE_SESSION_BANK_LIMIT: usize = 128;
 const RUNTIME_GATEWAY_GOVERNANCE_SESSION_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const RUNTIME_GATEWAY_GOVERNANCE_SESSION_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const RUNTIME_GATEWAY_GOVERNANCE_REVOCATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RUNTIME_GATEWAY_GOVERNANCE_SESSION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const RUNTIME_GATEWAY_GOVERNANCE_SESSION_NEVER_EXPIRES_UNIX_MS: u64 = i64::MAX as u64;
 
@@ -97,10 +98,17 @@ pub(super) struct RuntimeGatewayGovernanceSessionSnapshot {
     pub(super) pinned_provider_descriptor_revision: Option<u64>,
 }
 
+impl RuntimeGatewayGovernanceSessionSnapshot {
+    pub(super) fn session_id_hash(&self) -> Option<String> {
+        self.key.as_ref().map(session_hash_hex)
+    }
+}
+
 impl RuntimeGatewayGovernanceSessionStore {
     pub(super) fn spawn_durable_bank(
         &self,
         authority: RuntimeGovernanceAuthority,
+        fail_closed_on_revocation_error: bool,
         shutdown: Arc<AtomicBool>,
     ) -> Result<thread::JoinHandle<()>, GovernanceRepositoryError> {
         let sqlite = match &authority {
@@ -121,7 +129,14 @@ impl RuntimeGatewayGovernanceSessionStore {
         }
         let store = self.clone();
         Ok(thread::spawn(move || {
-            runtime_gateway_governance_session_bank(store, authority, sqlite, receiver, shutdown)
+            runtime_gateway_governance_session_bank(
+                store,
+                authority,
+                sqlite,
+                receiver,
+                fail_closed_on_revocation_error,
+                shutdown,
+            )
         }))
     }
 
@@ -262,7 +277,8 @@ impl RuntimeGatewayGovernanceSessionStore {
             credential_scope: principal.credential_scope,
             classification,
             policy_revision_id: policy_revision,
-            registry_revision_id: format!("{registry_revision}:{provider_descriptor_revision}"),
+            provider_registry_revision: registry_revision.to_string(),
+            provider_descriptor_revision,
             provider_affinity: Some(provider.label().to_string()),
             created_at_unix_ms: now_unix_ms,
             last_seen_at_unix_ms: now_unix_ms,
@@ -314,7 +330,7 @@ impl RuntimeGatewayGovernanceSessionStore {
         })?;
         match response.recv_timeout(RUNTIME_GATEWAY_GOVERNANCE_SESSION_ACK_TIMEOUT) {
             Ok(Ok(GovernanceSessionUpsertOutcome::Stored(record))) => {
-                self.remember_memory(stored_record(record)?);
+                self.remember_memory(stored_record(*record)?);
                 Ok(())
             }
             Ok(Ok(GovernanceSessionUpsertOutcome::ConcurrentLimitReached)) => {
@@ -447,10 +463,23 @@ fn runtime_gateway_governance_session_bank(
     authority: RuntimeGovernanceAuthority,
     sqlite: Option<prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
     receiver: Receiver<RuntimeGatewayGovernanceSessionBankCommand>,
+    fail_closed_on_revocation_error: bool,
     shutdown: Arc<AtomicBool>,
 ) {
     runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref());
+    let mut revocation_epochs = BTreeMap::new();
+    if runtime_gateway_governance_session_revocation_changed(
+        &authority,
+        sqlite.as_ref(),
+        &mut revocation_epochs,
+    )
+    .is_err()
+        && fail_closed_on_revocation_error
+    {
+        runtime_gateway_governance_sessions_mark_unavailable(&store);
+    }
     let mut refreshed_at = std::time::Instant::now();
+    let mut revocations_polled_at = std::time::Instant::now();
     while !shutdown.load(Ordering::SeqCst) {
         match receiver.recv_timeout(RUNTIME_GATEWAY_GOVERNANCE_SESSION_POLL_INTERVAL) {
             Ok(RuntimeGatewayGovernanceSessionBankCommand::Admit {
@@ -501,10 +530,71 @@ fn runtime_gateway_governance_session_bank(
                 state.pending_touches.insert(key, command);
             }
         }
+        if revocations_polled_at.elapsed() >= RUNTIME_GATEWAY_GOVERNANCE_REVOCATION_POLL_INTERVAL {
+            match runtime_gateway_governance_session_revocation_changed(
+                &authority,
+                sqlite.as_ref(),
+                &mut revocation_epochs,
+            ) {
+                Ok(true) => {
+                    if fail_closed_on_revocation_error {
+                        runtime_gateway_governance_sessions_mark_unavailable(&store);
+                    }
+                    runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref());
+                    refreshed_at = std::time::Instant::now();
+                }
+                Ok(false) => {}
+                Err(_) if fail_closed_on_revocation_error => {
+                    runtime_gateway_governance_sessions_mark_unavailable(&store);
+                }
+                Err(_) => {}
+            }
+            revocations_polled_at = std::time::Instant::now();
+        }
         if refreshed_at.elapsed() >= RUNTIME_GATEWAY_GOVERNANCE_SESSION_REFRESH_INTERVAL {
+            if fail_closed_on_revocation_error {
+                runtime_gateway_governance_sessions_mark_unavailable(&store);
+            }
             runtime_gateway_governance_session_refresh(&store, &authority, sqlite.as_ref());
             refreshed_at = std::time::Instant::now();
         }
+    }
+}
+
+fn runtime_gateway_governance_session_revocation_changed(
+    authority: &RuntimeGovernanceAuthority,
+    sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
+    epochs: &mut BTreeMap<TenantId, u64>,
+) -> Result<bool, GovernanceRepositoryError> {
+    let tenant_ids = match authority {
+        RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. }
+        | RuntimeGovernanceAuthority::Postgres { tenant_ids, .. } => tenant_ids,
+    };
+    let mut changed = false;
+    for tenant_id in tenant_ids {
+        let epoch = match authority {
+            RuntimeGovernanceAuthority::Sqlite { .. } => sqlite
+                .ok_or(GovernanceRepositoryError::Database)
+                .and_then(|repository| repository.governance_session_revocation_epoch(*tenant_id)),
+            RuntimeGovernanceAuthority::Postgres {
+                repository,
+                runtime,
+                ..
+            } => runtime.block_on(repository.governance_session_revocation_epoch(*tenant_id)),
+        };
+        let epoch = epoch?;
+        changed |= epochs
+            .insert(*tenant_id, epoch)
+            .is_none_or(|prior| prior != epoch);
+    }
+    Ok(changed)
+}
+
+fn runtime_gateway_governance_sessions_mark_unavailable(
+    store: &RuntimeGatewayGovernanceSessionStore,
+) {
+    if let Ok(mut state) = store.0.state.lock() {
+        state.hydrated_tenants.clear();
     }
 }
 
@@ -674,8 +764,10 @@ fn command_record(
     session_id_hash: [u8; 32],
     revoked: bool,
 ) -> RuntimeGatewayGovernanceSessionRecord {
-    let (registry_revision, provider_descriptor_revision) =
-        parse_registry_revisions(&command.registry_revision_id).unwrap_or_default();
+    let registry_revision = command
+        .provider_registry_revision
+        .parse()
+        .unwrap_or_default();
     RuntimeGatewayGovernanceSessionRecord {
         session_id_hash,
         tenant_id: command.tenant_id,
@@ -688,7 +780,7 @@ fn command_record(
         classification: command.classification,
         policy_revision: command.policy_revision_id,
         registry_revision,
-        provider_descriptor_revision,
+        provider_descriptor_revision: command.provider_descriptor_revision,
         provider: command
             .provider_affinity
             .as_deref()
@@ -702,9 +794,13 @@ fn stored_record(
 ) -> Result<RuntimeGatewayGovernanceSessionRecord, RuntimeGatewayGovernanceSessionPersistError> {
     let session_id_hash = parse_session_hash(&record.session_id_hash)
         .ok_or(RuntimeGatewayGovernanceSessionPersistError::Unavailable)?;
-    let (registry_revision, provider_descriptor_revision) =
-        parse_registry_revisions(&record.registry_revision_id)
-            .ok_or(RuntimeGatewayGovernanceSessionPersistError::Unavailable)?;
+    let registry_revision = record
+        .provider_registry_revision
+        .parse()
+        .map_err(|_| RuntimeGatewayGovernanceSessionPersistError::Unavailable)?;
+    if record.provider_descriptor_revision == 0 {
+        return Err(RuntimeGatewayGovernanceSessionPersistError::Unavailable);
+    }
     let provider = record
         .provider_affinity
         .as_deref()
@@ -722,14 +818,9 @@ fn stored_record(
         classification: record.classification,
         policy_revision: record.policy_revision_id,
         registry_revision,
-        provider_descriptor_revision,
+        provider_descriptor_revision: record.provider_descriptor_revision,
         provider,
     })
-}
-
-fn parse_registry_revisions(value: &str) -> Option<(u64, u64)> {
-    let (registry, descriptor) = value.split_once(':')?;
-    Some((registry.parse().ok()?, descriptor.parse().ok()?))
 }
 
 fn session_hash_hex(hash: &[u8; 32]) -> String {
@@ -834,6 +925,38 @@ mod tests {
     }
 
     #[test]
+    fn durable_session_round_trips_separate_provider_revisions() {
+        let tenant_id = TenantId::new();
+        let principal = principal(tenant_id);
+        let policy_revision = PolicyRevisionId::new();
+        let record = GovernanceSessionRecord {
+            tenant_id,
+            session_id_hash: "a".repeat(64),
+            principal_id: principal.id,
+            channel: Channel::Api,
+            credential_scope: CredentialScope::DataPlane,
+            classification: DataClassification::Restricted,
+            policy_revision_id: policy_revision,
+            provider_registry_revision: "7".to_string(),
+            provider_descriptor_revision: 9,
+            provider_affinity: Some("gemini".to_string()),
+            created_at_unix_ms: 100_000,
+            last_seen_at_unix_ms: 112_000,
+            absolute_expires_at_unix_ms: 200_000,
+            idle_expires_at_unix_ms: 150_000,
+            revoked_at_unix_ms: None,
+            revocation_reason_code: None,
+        };
+
+        let stored = stored_record(record).unwrap();
+        assert_eq!(stored.registry_revision, 7);
+        assert_eq!(stored.provider_descriptor_revision, 9);
+        assert_eq!(stored.provider, ProviderId::Gemini);
+        assert_eq!(stored.classification, DataClassification::Restricted);
+        assert_eq!(stored.policy_revision, policy_revision);
+    }
+
+    #[test]
     fn session_reuse_with_another_principal_is_revoked() {
         let store = RuntimeGatewayGovernanceSessionStore::default();
         let tenant = TenantContext {
@@ -920,5 +1043,105 @@ mod tests {
             ),
             Some("session_concurrency_limit")
         );
+    }
+
+    #[test]
+    fn cross_replica_revocation_epoch_invalidates_cached_sessions_promptly() {
+        let tenant_id = TenantId::new();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-session-revocation-epoch-{}",
+            AuditEventId::new()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("state.sqlite");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        for migration in prodex_storage_sqlite::SQLITE_MIGRATIONS {
+            connection.execute_batch(migration.sql).unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO prodex_tenants (
+                    tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms
+                 ) VALUES (?1, 'tenant', 1, 1)",
+                rusqlite::params![tenant_id.to_string()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let authority = RuntimeGovernanceAuthority::Sqlite {
+            path: path.clone(),
+            tenant_ids: vec![tenant_id],
+        };
+        let repository =
+            prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(&path).unwrap();
+        let mut epochs = BTreeMap::new();
+        assert!(
+            runtime_gateway_governance_session_revocation_changed(
+                &authority,
+                Some(&repository),
+                &mut epochs,
+            )
+            .unwrap()
+        );
+        assert!(
+            !runtime_gateway_governance_session_revocation_changed(
+                &authority,
+                Some(&repository),
+                &mut epochs,
+            )
+            .unwrap()
+        );
+
+        let second_replica = rusqlite::Connection::open(&path).unwrap();
+        second_replica
+            .execute(
+                "UPDATE prodex_tenants SET session_revocation_epoch = 1 WHERE tenant_id = ?1",
+                rusqlite::params![tenant_id.to_string()],
+            )
+            .unwrap();
+        drop(second_replica);
+        assert!(
+            runtime_gateway_governance_session_revocation_changed(
+                &authority,
+                Some(&repository),
+                &mut epochs,
+            )
+            .unwrap()
+        );
+        assert_eq!(epochs.get(&tenant_id), Some(&1));
+
+        assert!(
+            runtime_gateway_governance_session_revocation_changed(&authority, None, &mut epochs)
+                .is_err()
+        );
+
+        let store = RuntimeGatewayGovernanceSessionStore::default();
+        {
+            let mut state = store.0.state.lock().unwrap();
+            state.durable = true;
+            state.hydrated_tenants.insert(tenant_id);
+        }
+        runtime_gateway_governance_sessions_mark_unavailable(&store);
+        let principal = principal(tenant_id);
+        let snapshot = store.snapshot(
+            &request(),
+            TenantContext { tenant_id },
+            &principal,
+            Channel::Api,
+            1,
+        );
+        assert_eq!(
+            store.configured_violation(
+                snapshot,
+                TenantContext { tenant_id },
+                &principal,
+                1,
+                prodex_config::GovernanceSessionConfig::default(),
+            ),
+            Some("session_store_unavailable")
+        );
+
+        drop(repository);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

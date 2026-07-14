@@ -319,7 +319,7 @@ fn runtime_gateway_control_plane_tenant_id_from_text(value: &str) -> TenantId {
     })
 }
 
-fn runtime_gateway_admin_principal(admin_auth: &RuntimeGatewayAdminAuth) -> Principal {
+pub(super) fn runtime_gateway_admin_principal(admin_auth: &RuntimeGatewayAdminAuth) -> Principal {
     let tenant_id = runtime_gateway_admin_control_plane_tenant_id(admin_auth);
     let tenant_text = tenant_id.to_string();
     Principal::new(

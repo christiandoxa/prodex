@@ -187,11 +187,12 @@ curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/i
 codebase-memory-mcp --help
 ```
 
-Playwright MCP:
+Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.78`):
 
 ```bash
 node --version
 npx --version
+npx -y @playwright/mcp@0.0.78 --version
 ```
 
 Playwright starts through `npx` in headless, isolated mode, so concurrent Prodex terminals do not share browser login state. It requires a browser usable by Playwright and prompts before tools marked as writes. Playwright MCP is not a security boundary.

@@ -171,6 +171,7 @@ pub struct ApplicationGovernanceRequest<'a> {
     pub request_risk_floor: DataClassification,
     pub tenant: TenantContext,
     pub principal: &'a Principal,
+    pub principal_attributes: &'a prodex_domain::PrincipalPolicyAttributes,
     pub channel: Channel,
     pub credential_scope: CredentialScope,
     pub session: SessionPolicyContext,
@@ -178,6 +179,7 @@ pub struct ApplicationGovernanceRequest<'a> {
     pub route: &'a CanonicalRoute,
     pub request_risk: RequestRisk,
     pub requested_capabilities: &'a CapabilitySet,
+    pub request_attributes: &'a prodex_domain::RequestPolicyAttributes,
     pub quota: QuotaContext,
     pub environment: EnvironmentContext,
 }
@@ -194,6 +196,7 @@ impl fmt::Debug for ApplicationGovernanceRequest<'_> {
             .field("request_risk_floor", &self.request_risk_floor)
             .field("tenant", &self.tenant)
             .field("principal", &self.principal)
+            .field("principal_attributes", &self.principal_attributes)
             .field("channel", &self.channel)
             .field("credential_scope", &self.credential_scope)
             .field("session", &self.session)
@@ -201,6 +204,7 @@ impl fmt::Debug for ApplicationGovernanceRequest<'_> {
             .field("route", &self.route)
             .field("request_risk", &self.request_risk)
             .field("requested_capabilities", &self.requested_capabilities)
+            .field("request_attributes", &self.request_attributes)
             .field("quota", &self.quota)
             .field("environment", &self.environment)
             .finish()
@@ -258,6 +262,7 @@ pub fn plan_application_governance(
         &PolicyInput {
             tenant: request.tenant,
             principal: request.principal,
+            principal_attributes: request.principal_attributes,
             channel: request.channel,
             credential_scope: request.credential_scope,
             session: request.session,
@@ -269,6 +274,7 @@ pub fn plan_application_governance(
             },
             request_risk: request.request_risk,
             requested_capabilities: request.requested_capabilities,
+            request_attributes: request.request_attributes,
             quota: request.quota,
             environment: request.environment,
         },

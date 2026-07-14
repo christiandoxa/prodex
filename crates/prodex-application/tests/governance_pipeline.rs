@@ -7,8 +7,9 @@ use prodex_domain::{
     ClassificationRuleSetRevisionId, CredentialScope, DataClassification, DetectorRevisionId,
     EnvironmentContext, GovernancePolicyArtifact, GovernedAction, InspectionCoverage,
     InspectionLimits, InspectionResult, NetworkZone, PolicyEffect, PolicyRevisionId, Principal,
-    PrincipalId, PrincipalKind, QuotaContext, RequestRisk, Role, SessionPolicyContext,
-    TenantContext, TenantId, compile_classification_rule_set, compile_governance_policy,
+    PrincipalId, PrincipalKind, PrincipalPolicyAttributes, QuotaContext, RequestPolicyAttributes,
+    RequestRisk, Role, SessionPolicyContext, TenantContext, TenantId,
+    compile_classification_rule_set, compile_governance_policy,
 };
 
 #[test]
@@ -53,6 +54,8 @@ fn application_pipeline_classifies_before_policy_evaluation() {
     };
     let route = CanonicalRoute::new("responses").unwrap();
     let capabilities = CapabilitySet::new(Vec::new());
+    let principal_attributes = PrincipalPolicyAttributes::default();
+    let request_attributes = RequestPolicyAttributes::default();
 
     let plan = plan_application_governance(
         &snapshot,
@@ -66,6 +69,7 @@ fn application_pipeline_classifies_before_policy_evaluation() {
             request_risk_floor: DataClassification::Public,
             tenant,
             principal: &principal,
+            principal_attributes: &principal_attributes,
             channel: Channel::Api,
             credential_scope: CredentialScope::DataPlane,
             session: SessionPolicyContext {
@@ -79,6 +83,7 @@ fn application_pipeline_classifies_before_policy_evaluation() {
             route: &route,
             request_risk: RequestRisk::Elevated,
             requested_capabilities: &capabilities,
+            request_attributes: &request_attributes,
             quota: QuotaContext {
                 has_headroom: true,
                 reservation_required: true,

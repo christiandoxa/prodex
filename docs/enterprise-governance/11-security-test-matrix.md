@@ -14,26 +14,33 @@ available.
 
 | Control | Status | Named evidence |
 | --- | --- | --- |
-| Identity/header trust | tested | `edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch`; `principal_evidence_enforces_required_scope_and_anonymous_policy`; auth boundary guard |
+| Identity/header trust | tested | `production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_spoofing`; `validated_peer_metadata_maps_to_low_cardinality_governance_zone`; `principal_evidence_enforces_required_scope_and_anonymous_policy`; auth boundary guard |
 | Bounded inspection/classification | tested | `inspection_result_is_bounded_deterministic_and_content_free`; schema walker/local detector bounds; application inspection tests |
 | PDP and obligations | tested | `explicit_deny_wins_and_drops_obligations`; `policy_compilation_is_bounded_and_rejects_duplicate_ids`; governance obligation matrix |
-| Provider routing | tested | governed-routing hard-filter, fixed-point score, affinity, revocation, fallback and debug suites |
+| Execution approval | tested | `execution_fingerprint_is_stable_and_bound_to_the_request_context`; `execution_approval_is_policy_selected_quorum_gated_and_one_use`; `gateway_execution_approval_http_lists_shows_and_reviews_without_payloads` |
+| Provider routing | tested | `governed_routing_runtime_signals_change_selection_and_keep_only_eligible_fallbacks`; `provider_registry_resolves_selected_heterogeneous_projected_adapter`; precommit-only retry and revocation suites |
 | Channel boundary | tested | `provider_route_mapping_covers_forwarded_data_plane_routes`; production/application boundary guards |
 | Upstream transparency/no postcommit retry | tested | generic 429/content-policy pass-through and precommit-only error-policy regressions |
 | Bank startup configuration | tested | `bank_governance_deployment_matrix_fails_closed`; listener guard; deployment-security guard |
 | PostgreSQL/RLS and SIEM | tested | live disposable PostgreSQL/TLS/RLS lifecycle and outbox proof passed |
+| Session revocation epoch | tested | `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly`; deployed two-gateway chaos remains external evidence |
+| Low-cardinality metrics | tested | `prometheus_text_aggregates_keys_without_high_cardinality_labels`; live alert/pager/SLO acceptance remains external evidence |
+| Encrypted restore | tested | AES-256-GCM backup/isolated restore drill; final synthetic RPO 2.004 s and RTO 1.442 s with governance links intact |
 | Performance | implemented | maximum-bound and disabled-path Criterion budgets, fuzz, load and stress passed; external multi-replica soak remains deployment evidence |
 
 ## Declared residuals
 
-- One process has one attached executable provider adapter. Heterogeneous
-  in-process selection/fallback is unsupported and must fail unavailable.
+- Dynamic governed routing resolves eligible heterogeneous projected adapters
+  and permits bounded eligible-set fallback only before response commitment.
 - Mandatory governed data-plane audit is synchronous precommit I/O.
 - Policy-selected Presidio and guardrail-webhook calls are bounded request-path
   network dependencies.
-- Cross-replica revocation has a documented five-second refresh bound; Redis
-  restart, managed-database failover and external SIEM outage exercises remain
-  deployment acceptance work.
+- Shared-authority revocation epochs trigger a 250-millisecond poll path; a
+  deployed two-gateway chaos run, Redis restart, managed-database failover and
+  external SIEM outage exercises remain deployment acceptance work.
+- Configured `gateway.workload_identity` or `mtls_required` fails startup as
+  unsupported until the runtime verifies the workload token and mTLS peer.
+  Trusted external termination remains an unverified acceptance contract.
 
 ## Required suites
 

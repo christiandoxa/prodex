@@ -16,12 +16,12 @@ use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_stream_conformance,
     runtime_provider_stream_event_conformance_result,
 };
+use super::RuntimeGatewayResponseGovernance;
 use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
 use super::runtime_local_rewrite_governed_response_with_call_id;
 use super::runtime_local_rewrite_invalid_response;
 use crate::{RuntimeProxyRequest, RuntimeStreamingResponse};
-use prodex_application::ApplicationResponseObligationPlan;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Instant;
@@ -33,7 +33,7 @@ pub(super) struct RuntimeGeminiRewriteContext<'a> {
     pub(super) shared: &'a RuntimeLocalRewriteProxyShared,
     pub(super) captured: &'a RuntimeProxyRequest,
     pub(super) gemini_context: Option<RuntimeGeminiRequestContext>,
-    pub(super) response_obligations: Option<ApplicationResponseObligationPlan>,
+    pub(super) response_governance: RuntimeGatewayResponseGovernance,
 }
 
 pub(super) fn respond_runtime_gemini_rewrite(
@@ -49,7 +49,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
         shared,
         captured,
         gemini_context,
-        response_obligations,
+        response_governance,
     } = context;
     let RuntimeGeminiRequestContext {
         profile_name,
@@ -120,7 +120,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        respond_runtime_local_rewrite_stream(request, streaming, shared, response_obligations);
+        respond_runtime_local_rewrite_stream(request, streaming, shared, response_governance);
         return;
     }
 
@@ -151,7 +151,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
             parts,
             request_id,
             shared,
-            response_obligations,
+            response_governance,
         )
     })
     .unwrap_or_else(|err| runtime_local_rewrite_invalid_response(request_id, shared, &err));

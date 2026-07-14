@@ -32,8 +32,9 @@ use prodex_application::{
     ApplicationVirtualKeyAdmissionPlan, plan_application_virtual_key_admission,
 };
 use prodex_domain::{
-    BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey, RequestId, ReservationRecord,
-    ReservationRequest, TenantId, UsageAmount,
+    ApprovalId, ApprovalState, BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey,
+    PrincipalPolicyAttributes, RequestId, ReservationRecord, ReservationRequest, TenantId,
+    UsageAmount,
 };
 use prodex_gateway_core::{
     GatewayVirtualKeyAdmissionRequest, GatewayVirtualKeyReservationContext,
@@ -59,6 +60,22 @@ pub(super) struct RuntimeGatewayDurableReservationState {
 pub(super) struct RuntimeGatewayVirtualKeyAdmissionOutcome {
     pub(super) namespace: Option<String>,
     pub(super) application: RuntimeGatewayApplicationAdmission,
+}
+
+pub(super) struct RuntimeGatewayVirtualKeyAdmissionFailure {
+    pub(super) rejection: runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
+    pub(super) approval: Option<(ApprovalId, ApprovalState)>,
+}
+
+impl From<runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection>
+    for RuntimeGatewayVirtualKeyAdmissionFailure
+{
+    fn from(rejection: runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection) -> Self {
+        Self {
+            rejection,
+            approval: None,
+        }
+    }
 }
 
 pub(super) fn runtime_gateway_virtual_key_entries_is_empty(
@@ -302,15 +319,15 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     request_id: u64,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
+    network_zone: prodex_domain::NetworkZone,
     authorized: &prodex_application::ApplicationAuthorizedRequestContext<'_>,
     inspection: &ApplicationInspectionPlan,
-) -> Result<
-    RuntimeGatewayVirtualKeyAdmissionOutcome,
-    runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
-> {
+) -> Result<RuntimeGatewayVirtualKeyAdmissionOutcome, RuntimeGatewayVirtualKeyAdmissionFailure> {
     if path_without_query(&captured.path_and_query) == runtime_proxy_crate::LOCAL_BRIDGE_HEALTH_PATH
     {
-        return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable);
+        return Err(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into(),
+        );
     }
     let snapshot = match runtime_gateway_virtual_key_snapshot(shared.gateway_virtual_keys.lock()) {
         Ok(snapshot) => snapshot,
@@ -322,12 +339,14 @@ pub(super) fn runtime_gateway_virtual_key_admission(
                     [runtime_proxy_log_field("request", request_id.to_string())],
                 ),
             );
-            return Err(rejection);
+            return Err(rejection.into());
         }
     };
     let active_keys = snapshot.active_keys;
     if active_keys.is_empty() && snapshot.configured_count > 0 {
-        return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken);
+        return Err(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::MissingOrInvalidToken.into(),
+        );
     }
     let key = match runtime_proxy_crate::runtime_gateway_virtual_key_from_headers(
         &captured.headers,
@@ -336,10 +355,15 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         Ok(Some(key)) => key,
         Ok(None) => {
             return runtime_gateway_application_admission_without_virtual_key(
-                request_id, captured, shared, authorized, inspection,
+                request_id,
+                captured,
+                shared,
+                network_zone,
+                authorized,
+                inspection,
             );
         }
-        Err(rejection) => return Err(rejection),
+        Err(rejection) => return Err(rejection.into()),
     };
     let authorized_tenant = authorized.tenant_context().map(|tenant| tenant.tenant_id);
     if let (Some(authorized_tenant), Some(key_tenant)) = (
@@ -349,7 +373,9 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             .and_then(|value| value.parse::<TenantId>().ok()),
     ) && authorized_tenant != key_tenant
     {
-        return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable);
+        return Err(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into(),
+        );
     }
     let request_model = runtime_proxy_crate::runtime_gateway_request_model(&captured.body);
     let model = request_model
@@ -369,7 +395,8 @@ pub(super) fn runtime_gateway_virtual_key_admission(
                 ),
             );
             return Err(
-                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
+                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+                    .into(),
             );
         }
     };
@@ -391,7 +418,8 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             .cloned(),
         Err(_) => {
             return Err(
-                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
+                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+                    .into(),
             );
         }
     };
@@ -403,7 +431,9 @@ pub(super) fn runtime_gateway_virtual_key_admission(
                 [runtime_proxy_log_field("request", request_id.to_string())],
             ),
         );
-        return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable);
+        return Err(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into(),
+        );
     };
     let mut usage = Some(usage);
     let usage_snapshot = usage
@@ -434,10 +464,18 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         virtual_key_plan.gateway.reservation.clone().ok_or(
             runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
         )?;
+    let principal_attributes = PrincipalPolicyAttributes::new(
+        key.team_id.as_deref(),
+        key.project_id.as_deref(),
+        key.user_id.as_deref(),
+    )
+    .map_err(|_| runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
     let application = runtime_gateway_application_data_plane_admission(
         authorized,
         captured,
         shared,
+        network_zone,
+        principal_attributes,
         command.clone(),
         inspection.clone(),
     )
@@ -473,9 +511,10 @@ pub(super) fn runtime_gateway_virtual_key_admission(
                     ),
                 );
                 return Err(match error {
-                    RuntimeGatewayDurableReservationError::Rejected(rejection) => rejection,
+                    RuntimeGatewayDurableReservationError::Rejected(rejection) => rejection.into(),
                     RuntimeGatewayDurableReservationError::Failed => {
                         runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+                            .into()
                     }
                 });
             }
@@ -489,7 +528,9 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         })?);
     }
     let Some(usage_map) = usage.as_deref_mut() else {
-        return Err(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable);
+        return Err(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into(),
+        );
     };
     let usage_entry = usage_map.entry(admission.key_name.clone()).or_default();
     apply_gateway_virtual_key_usage_update(usage_entry, usage_update);
@@ -568,12 +609,10 @@ fn runtime_gateway_application_admission_without_virtual_key(
     request_id: u64,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
+    network_zone: prodex_domain::NetworkZone,
     authorized: &prodex_application::ApplicationAuthorizedRequestContext<'_>,
     inspection: &ApplicationInspectionPlan,
-) -> Result<
-    RuntimeGatewayVirtualKeyAdmissionOutcome,
-    runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
-> {
+) -> Result<RuntimeGatewayVirtualKeyAdmissionOutcome, RuntimeGatewayVirtualKeyAdmissionFailure> {
     let Some(tenant) = authorized.tenant_context() else {
         return Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
             namespace: None,
@@ -584,7 +623,9 @@ fn runtime_gateway_application_admission_without_virtual_key(
                 inspection.clone(),
             )
             .map_err(|_| {
-                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+                RuntimeGatewayVirtualKeyAdmissionFailure::from(
+                    runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
+                )
             })?,
         });
     };
@@ -612,6 +653,8 @@ fn runtime_gateway_application_admission_without_virtual_key(
         authorized,
         captured,
         shared,
+        network_zone,
+        PrincipalPolicyAttributes::default(),
         command,
         inspection.clone(),
     )
@@ -623,7 +666,7 @@ fn runtime_gateway_application_admission_without_virtual_key(
                 "gateway_application_admission_failed",
                 [
                     runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("reason", rejection.code()),
+                    runtime_proxy_log_field("reason", rejection.rejection.code()),
                 ],
             ),
         );
@@ -637,16 +680,24 @@ fn runtime_gateway_application_admission_without_virtual_key(
 
 fn runtime_gateway_application_admission_rejection(
     error: RuntimeGatewayApplicationDataPlaneError,
-) -> runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection {
+) -> RuntimeGatewayVirtualKeyAdmissionFailure {
     match error {
         RuntimeGatewayApplicationDataPlaneError::GovernanceDenied => {
-            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceDenied
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceDenied.into()
         }
-        RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired => {
-            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceApprovalRequired
+        RuntimeGatewayApplicationDataPlaneError::GovernanceApprovalRequired {
+            approval_id,
+            state,
+        } => RuntimeGatewayVirtualKeyAdmissionFailure {
+            rejection:
+                runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceApprovalRequired,
+            approval: Some((approval_id, state)),
+        },
+        RuntimeGatewayApplicationDataPlaneError::GovernanceSessionRequired => {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceSessionRequired.into()
         }
         RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider => {
-            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::NoEligibleProvider
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::NoEligibleProvider.into()
         }
         RuntimeGatewayApplicationDataPlaneError::Execution(_)
         | RuntimeGatewayApplicationDataPlaneError::MissingPrincipal
@@ -655,7 +706,7 @@ fn runtime_gateway_application_admission_rejection(
         | RuntimeGatewayApplicationDataPlaneError::TraceContext(_)
         | RuntimeGatewayApplicationDataPlaneError::Admission(_)
         | RuntimeGatewayApplicationDataPlaneError::GovernanceUnavailable => {
-            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into()
         }
     }
 }

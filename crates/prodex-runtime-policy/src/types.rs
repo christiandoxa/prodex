@@ -194,6 +194,9 @@ pub enum RuntimeGovernancePolicyAuditDetailLevel {
 pub struct RuntimeGovernancePolicyRuleCondition {
     pub channel: Option<RuntimeGovernancePolicyChannel>,
     pub principal_kind: Option<PrincipalKind>,
+    pub team_id: Option<String>,
+    pub project_id: Option<String>,
+    pub user_id: Option<String>,
     pub minimum_role: Option<Role>,
     pub credential_scope: Option<CredentialScope>,
     pub action: Option<RuntimeGovernancePolicyAction>,
@@ -210,6 +213,11 @@ pub struct RuntimeGovernancePolicyRuleCondition {
     pub minimum_authentication_strength: Option<u8>,
     pub environment_mfa_satisfied: Option<bool>,
     pub requested_capability: Option<ModelCapability>,
+    pub requested_model: Option<String>,
+    pub requested_tool: Option<String>,
+    pub requested_modality: Option<RuntimeGovernancePolicyDataModality>,
+    pub break_glass_required: Option<bool>,
+    pub break_glass_scope: Option<String>,
     pub quota_has_headroom: Option<bool>,
     pub quota_reservation_required: Option<bool>,
 }
@@ -429,6 +437,7 @@ pub struct RuntimePolicySecretsSettings {
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyGatewaySettings {
     pub listen_addr: Option<String>,
+    pub expected_host: Option<String>,
     pub restricted_egress: Option<bool>,
     pub replica_count: Option<u16>,
     pub require_multi_replica_accounting_checks: Option<bool>,

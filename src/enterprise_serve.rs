@@ -39,13 +39,23 @@ fn run_enterprise_serve(
             .map_err(|error| format!("failed to start gateway application: {error}"))?,
     );
     let handler_application = Arc::clone(&application);
-    let server_result = serve_with_handler(
-        GatewayServerConfig::production(listen_addr, server_mode),
-        move |request| {
-            let application = Arc::clone(&handler_application);
-            async move { application.handle(request).await }
-        },
-    )
+    let mut server_config = GatewayServerConfig::production(listen_addr, server_mode);
+    let gateway_policy = prodex_app::runtime_policy_gateway().unwrap_or_default();
+    server_config.edge_security.expected_host =
+        gateway_expected_host(listen_addr, gateway_policy.expected_host)?;
+    server_config.edge_security.trusted_proxies = gateway_policy
+        .trusted_proxies
+        .into_iter()
+        .map(|proxy| {
+            proxy
+                .parse()
+                .map_err(|_| "gateway trusted proxy must be an exact IP address".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let server_result = serve_with_handler(server_config, move |request| {
+        let application = Arc::clone(&handler_application);
+        async move { application.handle(request).await }
+    })
     .map_err(|_| "gateway server failed".to_string());
     let drain_timeout = Duration::from_millis(
         prodex_gateway_http::GatewayHttpPolicy::production_default().connection_drain_timeout_ms,
@@ -56,6 +66,17 @@ fn run_enterprise_serve(
         return Err("gateway application drain timed out".to_string());
     }
     Ok(())
+}
+
+fn gateway_expected_host(
+    listen_addr: SocketAddr,
+    configured: Option<String>,
+) -> Result<String, String> {
+    match configured {
+        Some(expected_host) => Ok(expected_host),
+        None if listen_addr.ip().is_loopback() => Ok(listen_addr.to_string()),
+        None => Err("non-loopback gateway serve requires gateway.expected_host".to_string()),
+    }
 }
 
 fn parse_listen_addr(
@@ -110,6 +131,23 @@ mod tests {
                 ["--listen".to_string(), "invalid".to_string()].into_iter(),
             ),
             Err("invalid serve listen address".to_string())
+        );
+    }
+
+    #[test]
+    fn expected_host_defaults_only_for_loopback() {
+        assert_eq!(
+            gateway_expected_host("127.0.0.1:4000".parse().unwrap(), None).unwrap(),
+            "127.0.0.1:4000"
+        );
+        assert!(gateway_expected_host("0.0.0.0:4000".parse().unwrap(), None).is_err());
+        assert_eq!(
+            gateway_expected_host(
+                "0.0.0.0:4000".parse().unwrap(),
+                Some("gateway.example.com".to_string()),
+            )
+            .unwrap(),
+            "gateway.example.com"
         );
     }
 }

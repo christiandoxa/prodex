@@ -33,13 +33,13 @@ skip a stage required by the active governance mode.
 | --- | --- | --- |
 | Identity domain | `prodex-domain` has typed issuer, audience, algorithm allowlists, principal kinds, tenant context, credential scopes, role mapping, and redacted error plans. | It does not define the complete human and workload authentication protocol or the requested access-session policy. |
 | OIDC validation | `prodex-authn` validates exact HTTPS OIDC endpoints, restricts JWKS origins, rejects redirects, and plans bounded JWKS last-known-good behavior without doing network I/O in the pure authentication boundary. Gateway runtime policy accepts issuer, audience, JWKS, and claim selectors. | Authorization Code with PKCE, an IdP-supported CLI/IDE login or device flow, logout propagation, authentication-strength obligations, and complete production token verification parity are not proven. |
-| Service identity | Domain, authorization, application, and PostgreSQL/SQLite storage contracts include service identities and credential scope. | Client-credential or workload-identity issuance and verification, certificate binding, rotation, and end-to-end service-channel tests are incomplete. |
-| mTLS | Deployment artifacts use TLS-oriented secret references and hardened pod settings. | A typed peer-certificate identity, trust-bundle validation, revocation behavior, and mandatory bank-mode service-to-service mTLS are not implemented or proven. |
+| Service identity | Domain, authorization, application, and PostgreSQL/SQLite storage contracts include service identities and credential scope. | Configured `gateway.workload_identity` fails startup as unsupported until runtime token verification, issuance, rotation, peer binding, and end-to-end service-channel tests exist. |
+| mTLS | Deployment artifacts contain TLS-oriented secret references. | Configured `mtls_required` fails startup as unsupported. The plaintext production edge does not terminate or verify mTLS; trusted external termination, authenticated peer evidence, trust-bundle validation, revocation behavior, and bank service-to-service enforcement are not verified runtime contracts. |
 | Gateway HTTP policy | `prodex-gateway-http` has strict request-target parsing, route/method classification, body limits, timeout budgets, stream concurrency, cancellation, backpressure, and drain plans. | Per-route header count/size limits, one derived request deadline for every stage, distributed admission parity, and full OpenAPI compatibility enforcement need completion. |
 | Application admission | `prodex-gateway-core`, `prodex-application`, and the canonical runtime path enforce typed tenant, principal, authorization, reservation, provider invocation, and trace relationships. | Anonymous compatibility admission and early WebSocket/Gemini paths have not all been removed or proven to converge on the governed application use case. |
-| Browser protections | The separate expose/admin surfaces contain Host and Origin checks, CSRF tokens, session rotation/revocation, input limits, and `no-store` behavior. | Those controls are not yet a single reviewed browser-admin contract at the unified internal gateway, and they do not prove OIDC PKCE browser integration. |
-| Trusted proxy | Gateway SSO supports an authenticated proxy-token boundary and exact identity header selectors. | There is no complete bounded trusted-proxy network allowlist and safe client-address derivation contract; ordinary forwarding headers cannot yet be treated as trusted risk input. |
-| Sessions | The expose surface has local in-memory browser sessions with idle expiry and revocation. Codex session metadata and continuation affinity exist separately. | Neither is the requested durable enterprise access-session model with absolute expiry, principal/tenant/channel/credential binding, concurrency limits, MFA obligations, revision pinning, and multi-replica revocation. |
+| Browser protections | The unified async edge enforces canonical control-plane Host and, when browser edge policy is enabled, exact Origin and mutation CSRF checks. Browser-capable administration fails closed by default; expose retains its separate cookie/session controls. | Browser OIDC PKCE and a unified browser-admin cookie contract remain deliberately unsupported. |
+| Trusted proxy | The production async edge preserves the TCP peer, requires explicit `gateway.expected_host` for non-loopback listeners, rejects untrusted forwarding, derives a bounded right-to-left client address from exact trusted proxies, strips forwarding headers before dispatch, and maps validated metadata to a low-cardinality governance zone. | Privacy-preserving persisted network-risk history and deployment-specific multi-proxy/geo evidence remain outside the in-process request contract. |
+| Sessions | Governed sessions enforce tenant/principal binding, timeouts, concurrency, monotonic classification, revision pins and atomic revoke/audit/outbox; a shared authority revocation epoch triggers cache refresh on a 250-millisecond poll path. | A deployed two-gateway chaos proof, identity-provider logout propagation, re-authentication/MFA and ordinary data-plane self-service logout remain incomplete. |
 | Deployment exposure | Kubernetes uses a ClusterIP-style internal service, non-root containers, read-only filesystems, dropped capabilities, resource bounds, probes, and graceful drain scaffolding. | Compose currently publishes a host port broadly, and the checked-in deployment does not prove private ingress, IdP/Vault/SIEM egress restrictions, mTLS, or the full bank profile. |
 
 Existing primitives are foundations, not proof of the Phase 5 exit gate.
@@ -193,6 +193,14 @@ SameSite policy, session rotation after authentication or privilege change,
 `Cache-Control: no-store`, clickjacking/content-type protections, and no token
 material in URLs or browser-readable persistent storage. The existing expose
 controls are useful evidence but must be reviewed as part of this one boundary.
+
+The async edge applies forwarding-header trust and safe client-address
+derivation to every route. Exact Host and browser Origin/CSRF enforcement is
+limited to the control plane because that is the browser/admin surface; data
+plane routing never uses caller Host as identity and replaces transport-local
+Host before upstream dispatch. Non-loopback listeners still require an exact
+`gateway.expected_host` so later control-plane composition cannot inherit a
+wildcard-bind authority.
 
 ## Access-Session Contract
 

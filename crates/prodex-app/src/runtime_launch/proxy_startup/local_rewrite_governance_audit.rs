@@ -19,6 +19,27 @@ const AUDIT_CHAIN_RETRIES: usize = 3;
 const AUDIT_WRITER_QUEUE_LIMIT: usize = 128;
 const AUDIT_WRITER_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Clone)]
+pub(super) struct RuntimeGovernanceAuditContext {
+    pub(super) tenant: TenantContext,
+    pub(super) principal: Principal,
+}
+
+impl RuntimeGovernanceAuditContext {
+    pub(super) fn new(tenant: TenantContext, principal: Principal) -> Self {
+        Self { tenant, principal }
+    }
+
+    pub(super) fn from_authorized(
+        authorized: &prodex_application::ApplicationAuthorizedRequestContext<'_>,
+    ) -> Option<Self> {
+        Some(Self::new(
+            authorized.tenant_context()?,
+            authorized.principal()?.clone(),
+        ))
+    }
+}
+
 #[derive(Clone, Default)]
 pub(super) struct RuntimeGovernanceAuditWriter(
     Arc<Mutex<Option<SyncSender<RuntimeGovernanceAuditWrite>>>>,
@@ -117,6 +138,78 @@ pub(super) fn persist_runtime_governance_decision_audit(
     shared.governance_audit_writer.append(event)
 }
 
+pub(super) fn persist_runtime_material_governance_audit(
+    shared: &RuntimeLocalRewriteProxyShared,
+    context: &RuntimeGovernanceAuditContext,
+    request_id: u64,
+    action: &str,
+    outcome: AuditOutcome,
+    reason_code: &str,
+) -> Result<(), GovernanceRepositoryError> {
+    persist_runtime_material_governance_audit_with_writer(
+        &shared.governance_audit_writer,
+        shared
+            .runtime_shared
+            .runtime_config
+            .governance
+            .mandatory_audit,
+        context,
+        request_id,
+        action,
+        outcome,
+        reason_code,
+    )
+}
+
+pub(super) fn runtime_governance_audit_is_durable(shared: &RuntimeLocalRewriteProxyShared) -> bool {
+    shared.governance_authority.is_some()
+}
+
+fn persist_runtime_material_governance_audit_with_writer(
+    writer: &RuntimeGovernanceAuditWriter,
+    mandatory: bool,
+    context: &RuntimeGovernanceAuditContext,
+    request_id: u64,
+    action: &str,
+    outcome: AuditOutcome,
+    reason_code: &str,
+) -> Result<(), GovernanceRepositoryError> {
+    let action = AuditAction::try_new(format!("gateway.governance.{action}"))
+        .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+    if reason_code.is_empty()
+        || reason_code.len() > 128
+        || !reason_code.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':' | b'/')
+        })
+    {
+        return Err(GovernanceRepositoryError::InvalidInput);
+    }
+    let resource_id = AuditResourceId::new(format!("request:{request_id}"))
+        .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+    let occurred_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+    let event = AuditEvent::new(
+        occurred_at_unix_ms,
+        context.tenant,
+        &context.principal,
+        action,
+        AuditResource::new_with_resource_id(
+            "gateway_material_event",
+            Some(resource_id),
+            Some(context.tenant.tenant_id),
+        )
+        .map_err(|_| GovernanceRepositoryError::InvalidInput)?,
+        outcome,
+        Some(reason_code.to_string()),
+    );
+    let result = writer.append(event);
+    if mandatory { result } else { Ok(()) }
+}
+
 fn runtime_governance_audit_writer(
     authority: RuntimeGovernanceAuthority,
     sqlite: Option<prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
@@ -187,6 +280,21 @@ fn audit_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prodex_domain::{CredentialScope, PrincipalId, PrincipalKind, Role, TenantId};
+
+    fn audit_context() -> RuntimeGovernanceAuditContext {
+        let tenant_id = TenantId::from_uuid(uuid::Uuid::from_u128(1));
+        RuntimeGovernanceAuditContext::new(
+            TenantContext { tenant_id },
+            Principal::new(
+                PrincipalId::from_uuid(uuid::Uuid::from_u128(2)),
+                Some(tenant_id),
+                PrincipalKind::VirtualKey,
+                Role::Operator,
+                CredentialScope::DataPlane,
+            ),
+        )
+    }
 
     #[test]
     fn decision_context_is_bounded_explainable_and_content_free() {
@@ -196,5 +304,51 @@ mod tests {
         assert!(context.contains(":v:openai:"));
         assert!(!context.contains("prompt"));
         assert!(context.len() <= 256);
+    }
+
+    #[test]
+    fn mandatory_transform_audit_writer_failure_is_fail_closed_and_content_free() {
+        let error = persist_runtime_material_governance_audit_with_writer(
+            &RuntimeGovernanceAuditWriter::default(),
+            true,
+            &audit_context(),
+            7,
+            "request_transform",
+            AuditOutcome::Success,
+            "sensitive_fields_masked",
+        )
+        .unwrap_err();
+
+        assert_eq!(error, GovernanceRepositoryError::Unsupported);
+    }
+
+    #[test]
+    fn mandatory_response_precommit_audit_writer_failure_is_fail_closed() {
+        let error = persist_runtime_material_governance_audit_with_writer(
+            &RuntimeGovernanceAuditWriter::default(),
+            true,
+            &audit_context(),
+            8,
+            "response_precommit_block",
+            AuditOutcome::Denied,
+            "blocked_output_keyword",
+        )
+        .unwrap_err();
+
+        assert_eq!(error, GovernanceRepositoryError::Unsupported);
+    }
+
+    #[test]
+    fn observe_mode_attempts_but_does_not_fail_closed_on_writer_failure() {
+        persist_runtime_material_governance_audit_with_writer(
+            &RuntimeGovernanceAuditWriter::default(),
+            false,
+            &audit_context(),
+            9,
+            "request_transform",
+            AuditOutcome::Success,
+            "sensitive_fields_masked",
+        )
+        .unwrap();
     }
 }

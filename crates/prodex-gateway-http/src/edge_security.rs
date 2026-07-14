@@ -37,6 +37,7 @@ pub enum GatewayEdgeSecurityError {
     OriginMismatch,
     CsrfMissingOrDuplicated,
     CsrfMismatch,
+    ForwardedClientAddressInvalid,
 }
 
 impl fmt::Display for GatewayEdgeSecurityError {
@@ -51,12 +52,7 @@ pub fn validate_gateway_edge_security(
     policy: GatewayEdgeSecurityPolicy<'_>,
     headers: &[GatewayHttpHeader],
 ) -> Result<(), GatewayEdgeSecurityError> {
-    let forwarded = headers.iter().any(|header| {
-        matches!(
-            header.normalized_name().as_str(),
-            "forwarded" | "x-forwarded-for" | "x-forwarded-host" | "x-forwarded-proto"
-        )
-    });
+    let forwarded = headers.iter().any(is_forwarded_header);
     if forwarded && !policy.peer_is_trusted_proxy {
         return Err(GatewayEdgeSecurityError::ForwardedHeaderFromUntrustedPeer);
     }
@@ -80,6 +76,13 @@ pub fn validate_gateway_edge_security(
         }
     }
     Ok(())
+}
+
+fn is_forwarded_header(header: &GatewayHttpHeader) -> bool {
+    matches!(
+        header.normalized_name().as_str(),
+        "forwarded" | "x-forwarded-for" | "x-forwarded-host" | "x-forwarded-proto" | "x-real-ip"
+    )
 }
 
 fn unique_header<'a>(headers: &'a [GatewayHttpHeader], name: &str) -> Option<&'a str> {
@@ -114,12 +117,14 @@ mod tests {
 
     #[test]
     fn edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch() {
-        let mut spoofed = headers();
-        spoofed.push(GatewayHttpHeader::new("X-Forwarded-For", "198.51.100.7"));
-        assert_eq!(
-            validate_gateway_edge_security(policy(), &spoofed),
-            Err(GatewayEdgeSecurityError::ForwardedHeaderFromUntrustedPeer)
-        );
+        for name in ["X-Forwarded-For", "X-Real-IP"] {
+            let mut spoofed = headers();
+            spoofed.push(GatewayHttpHeader::new(name, "198.51.100.7"));
+            assert_eq!(
+                validate_gateway_edge_security(policy(), &spoofed),
+                Err(GatewayEdgeSecurityError::ForwardedHeaderFromUntrustedPeer)
+            );
+        }
 
         for (name, value, expected) in [
             (

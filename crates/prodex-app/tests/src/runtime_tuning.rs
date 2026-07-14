@@ -657,6 +657,41 @@ fn runtime_config_failure_precedes_listener_bind() {
 }
 
 #[test]
+fn rotation_proxy_rejects_enterprise_observe_before_listener_bind() {
+    let policy_dir = with_test_policy_dir(
+        r#"
+version = 1
+
+[governance]
+mode = "enterprise_observe"
+"#,
+    );
+    let paths = test_app_paths(policy_dir.root.clone());
+
+    let result = start_runtime_rotation_proxy_with_listen_addr(
+        &paths,
+        &AppState::default(),
+        "main",
+        "http://127.0.0.1:1".to_string(),
+        false,
+        true,
+        Some("not-a-listener-address"),
+    );
+    let error = match result {
+        Ok(_) => panic!("enterprise observe unexpectedly started the anonymous proxy"),
+        Err(error) => error.to_string(),
+    };
+
+    assert!(
+        error.contains("enterprise governance modes require the authenticated unified gateway")
+    );
+    assert!(
+        !error.contains("bind"),
+        "unexpected listener error: {error}"
+    );
+}
+
+#[test]
 fn profile_inflight_limits_read_from_policy_and_env_overrides_policy() {
     let policy_dir = with_test_policy_dir(
         r#"

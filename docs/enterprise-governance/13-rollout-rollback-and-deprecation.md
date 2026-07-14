@@ -11,16 +11,16 @@ snapshots, API version/deprecation domain decisions, compatibility and
 deprecation metric plans, strict gateway routes, bounded drain plans, a
 three-replica Kubernetes gateway scaffold, external migration modes, provider
 affinity and pre-commit rotation invariants, and historical compatibility/load
-tests. The candidate based on `e308fdf6` adds typed governance modes,
+tests. The current tranche based on `8ca79a62` adds typed governance modes,
 inspection/classification/PDP/obligation/session stages, policy lifecycle,
 governed routing, bank startup gates, focused security evidence and governance
 microbenchmarks.
 
-The release-candidate gates cover supported capabilities. The open residuals are one attached
-executable provider adapter per process, synchronous mandatory precommit audit,
-policy-selected request-path Presidio/webhook calls, a five-second cross-replica
-session revocation refresh bound, and deployment-specific managed failover,
-external SIEM and multi-replica soak evidence.
+The release-candidate gates cover supported capabilities. The open residuals
+are synchronous mandatory precommit audit, policy-selected request-path
+Presidio/webhook calls, deployment validation of the 250-millisecond shared
+revocation-epoch poll path, and managed failover, external SIEM, trusted TLS
+termination/mTLS peer verification and multi-replica soak evidence.
 
 Rollout is therefore a controlled migration of authority, not a collection of
 independent feature toggles.

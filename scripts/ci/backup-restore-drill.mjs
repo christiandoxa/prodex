@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -14,6 +14,7 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const postgresImage = "postgres:16-alpine";
 const sourceDatabase = "prodex_drill_source";
 const restoreDatabase = "prodex_drill_restore";
+const backupArtifactMagic = Buffer.from("PRODEX-BACKUP-V1", "ascii");
 const evidencePath = path.resolve(
   repoRoot,
   process.env.PRODEX_BACKUP_DRILL_EVIDENCE_PATH ??
@@ -100,6 +101,7 @@ INSERT INTO prodex_governance_sessions VALUES
 INSERT INTO prodex_session_revocations VALUES
   ('${tenantA}', 'session-hash-a', 1600, 'logout'),
   ('${tenantB}', 'session-hash-b', 1600, 'logout');
+UPDATE prodex_tenants SET session_revocation_epoch = 1;
 INSERT INTO prodex_siem_outbox VALUES
   ('${tenantA}', '00000000-0000-7000-8000-000000000921', '00000000-0000-7000-8000-000000000801', '{}', 0, 2000, 1600, NULL),
   ('${tenantB}', '00000000-0000-7000-8000-000000000922', '00000000-0000-7000-8000-000000000802', '{}', 0, 2000, 1600, NULL);
@@ -152,6 +154,7 @@ SELECT json_build_object(
   'routing_score_revisions', (SELECT COUNT(*) FROM prodex_routing_score_revisions),
   'governance_sessions', (SELECT COUNT(*) FROM prodex_governance_sessions),
   'session_revocations', (SELECT COUNT(*) FROM prodex_session_revocations),
+  'session_revocation_epochs', (SELECT SUM(session_revocation_epoch) FROM prodex_tenants),
   'siem_outbox_rows', (SELECT COUNT(*) FROM prodex_siem_outbox),
   'siem_dead_letter_rows', (SELECT COUNT(*) FROM prodex_siem_dead_letters),
   'governance_artifacts', (SELECT COUNT(*) FROM prodex_governance_revision_artifacts),
@@ -182,7 +185,7 @@ SELECT json_build_object(
      AND policy.revision_id = session.policy_revision_id
     JOIN prodex_provider_registry_revisions registry
       ON registry.tenant_id = session.tenant_id
-     AND registry.revision_id = session.registry_revision_id
+     AND registry.revision_id = session.provider_registry_revision
   ),
   'session_revocation_links', (
     SELECT COUNT(*) FROM prodex_session_revocations revocation
@@ -444,6 +447,61 @@ async function sha256File(filePath) {
   return hash.digest("hex");
 }
 
+export async function encryptBackupArtifact(sourcePath, encryptedPath, key) {
+  if (!Buffer.isBuffer(key) || key.length !== 32) {
+    throw new Error("backup encryption key must contain 32 bytes");
+  }
+  const nonce = randomBytes(12);
+  const plaintext = await fs.readFile(sourcePath);
+  try {
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    cipher.setAAD(backupArtifactMagic);
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    await fs.writeFile(
+      encryptedPath,
+      Buffer.concat([backupArtifactMagic, nonce, tag, ciphertext]),
+      { mode: 0o600 },
+    );
+  } finally {
+    plaintext.fill(0);
+  }
+}
+
+export async function decryptBackupArtifact(encryptedPath, destinationPath, key) {
+  if (!Buffer.isBuffer(key) || key.length !== 32) {
+    throw new Error("backup encryption key must contain 32 bytes");
+  }
+  const artifact = await fs.readFile(encryptedPath);
+  const headerBytes = backupArtifactMagic.length + 12 + 16;
+  if (
+    artifact.length < headerBytes ||
+    !artifact.subarray(0, backupArtifactMagic.length).equals(backupArtifactMagic)
+  ) {
+    throw new Error("backup artifact envelope is invalid");
+  }
+  const nonceStart = backupArtifactMagic.length;
+  const tagStart = nonceStart + 12;
+  const ciphertextStart = tagStart + 16;
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    artifact.subarray(nonceStart, tagStart),
+  );
+  decipher.setAAD(backupArtifactMagic);
+  decipher.setAuthTag(artifact.subarray(tagStart, ciphertextStart));
+  const plaintext = Buffer.concat([
+    decipher.update(artifact.subarray(ciphertextStart)),
+    decipher.final(),
+  ]);
+  try {
+    await fs.writeFile(destinationPath, plaintext, { mode: 0o600 });
+  } finally {
+    plaintext.fill(0);
+    artifact.fill(0);
+  }
+}
+
 async function writeEvidence(evidence) {
   await fs.mkdir(path.dirname(evidencePath), { recursive: true });
   const temporaryPath = `${evidencePath}.${process.pid}.tmp`;
@@ -469,6 +527,9 @@ async function runManagedDrill() {
   );
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-backup-drill-"));
   const dumpPath = path.join(workDir, "prodex.dump");
+  const encryptedDumpPath = path.join(workDir, "prodex.dump.aes256gcm");
+  const restoreDumpPath = path.join(workDir, "prodex.restore.dump");
+  const backupKey = randomBytes(32);
   const containerName = `prodex-backup-drill-${process.pid}-${Date.now()}`;
   const evidence = {
     schema_version: 1,
@@ -521,8 +582,18 @@ async function runManagedDrill() {
       { capture: true },
     );
     await run("docker", ["cp", `${containerId}:/tmp/prodex.dump`, dumpPath], { capture: true });
-    const artifactSha256 = await sha256File(dumpPath);
-    const artifactBytes = (await fs.stat(dumpPath)).size;
+    await encryptBackupArtifact(dumpPath, encryptedDumpPath, backupKey);
+    await fs.rm(dumpPath, { force: true });
+    await run("docker", ["exec", containerId, "rm", "-f", "/tmp/prodex.dump"], { capture: true });
+    const artifactSha256 = await sha256File(encryptedDumpPath);
+    const artifactBytes = (await fs.stat(encryptedDumpPath)).size;
+    await decryptBackupArtifact(encryptedDumpPath, restoreDumpPath, backupKey);
+    await run(
+      "docker",
+      ["cp", restoreDumpPath, `${containerId}:/tmp/prodex.restore.dump`],
+      { capture: true },
+    );
+    await fs.rm(restoreDumpPath, { force: true });
     await dockerPsql(containerId, sourceDatabase, postBackupWriteSql);
     await run(
       "docker",
@@ -533,9 +604,10 @@ async function runManagedDrill() {
     const restoreStarted = performance.now();
     await run(
       "docker",
-      ["exec", containerId, "pg_restore", "--exit-on-error", "--no-owner", "--no-privileges", "-U", "postgres", "-d", restoreDatabase, "/tmp/prodex.dump"],
+      ["exec", containerId, "pg_restore", "--exit-on-error", "--no-owner", "--no-privileges", "-U", "postgres", "-d", restoreDatabase, "/tmp/prodex.restore.dump"],
       { capture: true },
     );
+    await run("docker", ["exec", containerId, "rm", "-f", "/tmp/prodex.restore.dump"], { capture: true });
     const restoredFingerprint = JSON.parse(await dockerPsql(containerId, restoreDatabase, fingerprintSql));
     const markerCount = Number(await dockerPsql(
       containerId,
@@ -568,6 +640,7 @@ async function runManagedDrill() {
       restoredFingerprint.provider_pricing_links === 2 &&
       restoredFingerprint.session_revision_links === 2 &&
       restoredFingerprint.session_revocation_links === 2 &&
+      restoredFingerprint.session_revocation_epochs === 2 &&
       restoredFingerprint.siem_audit_links === 4 &&
       restoredFingerprint.audit_chain_valid_rows === restoredFingerprint.audit_rows &&
       restoredFingerprint.governance_artifact_links === 2 &&
@@ -599,6 +672,7 @@ async function runManagedDrill() {
       rto_seconds: Number(rtoSeconds.toFixed(3)),
       artifact_sha256: artifactSha256,
       artifact_bytes: artifactBytes,
+      artifact_encryption: "aes-256-gcm",
       integrity: {
         fingerprints_match: fingerprintsMatch,
         post_backup_marker_absent: markerCount === 0,
@@ -623,6 +697,7 @@ async function runManagedDrill() {
     await writeEvidence(evidence);
     throw error;
   } finally {
+    backupKey.fill(0);
     if (containerId) {
       try {
         await run("docker", ["rm", "-f", containerId], { capture: true });

@@ -2726,6 +2726,54 @@
         "summary": "Revoke the authenticated current session without accepting a raw session identifier in the body"
       }
     },
+    "/v1/prodex/gateway/execution-approvals": {
+      "get": {
+        "operationId": "listExecutionApprovals",
+        "responses": {
+          "200": {"description": "Content-free tenant execution approvals", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "List content-free execution approvals"
+      }
+    },
+    "/v1/prodex/gateway/execution-approvals/{approval_id}": {
+      "get": {
+        "operationId": "getExecutionApproval",
+        "parameters": [{"in": "path", "name": "approval_id", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Content-free execution approval state", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Inspect one content-free execution approval"
+      }
+    },
+    "/v1/prodex/gateway/execution-approvals/{approval_id}/votes": {
+      "post": {
+        "operationId": "voteExecutionApproval",
+        "parameters": [
+          {"in": "path", "name": "approval_id", "required": true, "schema": {"type": "string"}},
+          {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["decision", "expected_version"], "properties": {"decision": {"type": "string", "enum": ["approve", "reject", "cancel"]}, "expected_version": {"type": "integer", "minimum": 1}}}}}},
+        "responses": {
+          "200": {"description": "Execution approval state transition", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "400": {"$ref": "#/components/responses/GatewayError"},
+          "401": {"$ref": "#/components/responses/GatewayError"},
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "404": {"$ref": "#/components/responses/GatewayError"},
+          "409": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
+        },
+        "security": [{"GatewayBearerAuth": []}],
+        "summary": "Approve, reject, or cancel a request-bound execution approval"
+      }
+    },
     "/v1/prodex/gateway/policies": {
       "get": {
         "operationId": "listPolicyRevisions",

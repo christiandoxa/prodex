@@ -5,20 +5,25 @@ use std::str::FromStr;
 
 use deadpool_postgres::Transaction;
 use prodex_domain::{
-    ApprovalAction, ApprovalError, ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalRecord,
-    ApprovalScope, ApprovalState, ApprovalTransitionRequest, ApprovalVote, AuditDigest,
-    AuditEventId, Channel, CredentialScope, DataClassification, PolicyRevisionId, Principal,
-    PrincipalId, Role, TenantId, transition_approval,
+    ApprovalAction, ApprovalError, ApprovalFingerprint, ApprovalId, ApprovalKind,
+    ApprovalReasonCode, ApprovalRecord, ApprovalScope, ApprovalState, ApprovalTransitionRequest,
+    ApprovalVote, AuditDigest, AuditEventId, Channel, CredentialScope, DataClassification,
+    IdempotencyReplayDecision, PolicyRevisionId, Principal, PrincipalId, Role, TenantId,
+    decide_idempotency_replay, transition_approval,
 };
 use prodex_storage::{
-    ApprovalVoteRequest, AuditOutboxWriteCommand, GovernanceActivationAction,
-    GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactKind,
-    GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth, GovernanceOutboxHealth,
-    GovernanceRepositoryError, GovernanceRevisionSummary, GovernanceRevisionWriteCommand,
-    GovernanceSessionRecord, GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
-    GovernanceSessionUpsertOutcome, GovernanceSnapshot, GovernanceSnapshotSource, GovernanceStatus,
-    GovernanceWriteOutcome, SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy,
+    ApprovalVoteIdempotency, ApprovalVoteMutationOutcome, ApprovalVoteRequest,
+    ApprovalVoteSnapshot, ApprovalVoteStableDenial, ApprovalVoteStableOutcome,
+    AuditOutboxWriteCommand, GovernanceActivationAction, GovernanceActivationRequest,
+    GovernanceActivationResult, GovernanceArtifactKind, GovernanceAuditExportRecord,
+    GovernanceAuditIntegrityHealth, GovernanceOutboxHealth, GovernanceRepositoryError,
+    GovernanceRevisionSummary, GovernanceRevisionWriteCommand, GovernanceSessionRecord,
+    GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome,
+    GovernanceSnapshot, GovernanceSnapshotSource, GovernanceStatus, GovernanceWriteOutcome,
+    IdempotencyRecordLookupRow, IdempotencyRecordLookupRowStatus, SiemOutboxDeliveryDecision,
+    SiemOutboxRetryPolicy, denied_approval_audit_outbox, materialize_idempotency_record_lookup_row,
     plan_audit_outbox_write, plan_governance_revision_write, plan_siem_outbox_delivery,
+    verify_governance_audit_integrity,
 };
 use prodex_storage_postgres::{
     APPEND_AUDIT_OUTBOX_ATOMIC_STATEMENT, INSERT_GOVERNANCE_REVISION_ARTIFACT_STATEMENT,
@@ -174,14 +179,21 @@ impl PostgresRepository {
         set_tenant_context(&transaction, approval.tenant_id)
             .await
             .map_err(database_error)?;
-        let revision_id = revision_id_for_fingerprint(
-            &transaction,
-            approval.tenant_id,
-            artifact_kind_for_approval(approval.kind)?,
-            approval.fingerprint.as_str(),
-        )
-        .await?
-        .ok_or(GovernanceRepositoryError::NotFound)?;
+        let kind = approval_artifact_kind(approval.kind)?;
+        let revision_id = if let Some(kind) = kind {
+            Some(
+                revision_id_for_fingerprint(
+                    &transaction,
+                    approval.tenant_id,
+                    kind,
+                    approval.fingerprint.as_str(),
+                )
+                .await?
+                .ok_or(GovernanceRepositoryError::NotFound)?,
+            )
+        } else {
+            None
+        };
 
         if let Some(existing) =
             load_approval_tx(&transaction, approval.tenant_id, &approval.id).await?
@@ -197,8 +209,8 @@ impl PostgresRepository {
                 "INSERT INTO prodex_approvals (
                     tenant_id, approval_id, approval_kind, approval_scope, fingerprint,
                     maker_id, lifecycle_state, required_quorum, expires_at_unix_ms,
-                    activated_at_unix_ms, resource_version
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10)",
+                    activated_at_unix_ms, termination_reason, resource_version
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL, $10)",
                 &[
                     &approval.tenant_id.as_uuid(),
                     &approval.id.as_str(),
@@ -214,14 +226,16 @@ impl PostgresRepository {
             )
             .await
             .map_err(database_error)?;
-        update_revision_state(
-            &transaction,
-            approval.tenant_id,
-            artifact_kind_for_approval(approval.kind)?,
-            &revision_id,
-            "pending_approval",
-        )
-        .await?;
+        if let (Some(kind), Some(revision_id)) = (kind, revision_id.as_deref()) {
+            update_revision_state(
+                &transaction,
+                approval.tenant_id,
+                kind,
+                revision_id,
+                "pending_approval",
+            )
+            .await?;
+        }
         append_audit_outbox_tx(&transaction, audit_outbox).await?;
         transaction.commit().await.map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
@@ -232,44 +246,136 @@ impl PostgresRepository {
         request: ApprovalVoteRequest,
         action: ApprovalAction,
     ) -> Result<ApprovalRecord, GovernanceRepositoryError> {
-        self.governance_timeout(self.governance_transition_approval_inner(request, action))
-            .await
+        match self
+            .governance_timeout(self.governance_transition_approval_inner(request, action, None))
+            .await?
+        {
+            ApprovalVoteMutationOutcome::Applied(approval) => Ok(approval),
+            ApprovalVoteMutationOutcome::Replayed(_) => {
+                Err(GovernanceRepositoryError::InvalidInput)
+            }
+        }
+    }
+
+    pub async fn governance_transition_approval_idempotent(
+        &self,
+        request: ApprovalVoteRequest,
+        action: ApprovalAction,
+        idempotency: ApprovalVoteIdempotency,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        self.governance_timeout(self.governance_transition_approval_inner(
+            request,
+            action,
+            Some(idempotency),
+        ))
+        .await
     }
 
     async fn governance_transition_approval_inner(
         &self,
         request: ApprovalVoteRequest,
         action: ApprovalAction,
-    ) -> Result<ApprovalRecord, GovernanceRepositoryError> {
-        if !matches!(action, ApprovalAction::Approve | ApprovalAction::Reject) {
+        idempotency: Option<ApprovalVoteIdempotency>,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        if !matches!(
+            action,
+            ApprovalAction::Approve
+                | ApprovalAction::Reject
+                | ApprovalAction::Cancel
+                | ApprovalAction::Activate
+        ) {
             return Err(GovernanceRepositoryError::InvalidInput);
         }
-        require_control_plane_admin(request.tenant_id, &request.actor)?;
+        if action != ApprovalAction::Activate {
+            require_control_plane_admin(request.tenant_id, &request.actor)?;
+        }
         let mut client = self.pool.get().await.map_err(database_error)?;
         let transaction = client.transaction().await.map_err(database_error)?;
         set_tenant_context(&transaction, request.tenant_id)
             .await
             .map_err(database_error)?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            match approval_idempotency_replay_postgres(&transaction, request.tenant_id, idempotency)
+                .await?
+            {
+                IdempotencyReplayDecision::ExecuteAndRecordPending => {
+                    insert_approval_idempotency_pending_postgres(
+                        &transaction,
+                        request.tenant_id,
+                        idempotency,
+                    )
+                    .await?;
+                }
+                IdempotencyReplayDecision::AlreadyInProgress { .. } => {
+                    return Err(GovernanceRepositoryError::Conflict);
+                }
+                IdempotencyReplayDecision::Replay(response) => {
+                    transaction.commit().await.map_err(database_error)?;
+                    return ApprovalVoteStableOutcome::replay(&response);
+                }
+            }
+        }
         let current = load_approval_tx(&transaction, request.tenant_id, &request.approval_id)
             .await?
             .ok_or(GovernanceRepositoryError::NotFound)?;
-        let transition = transition_approval(ApprovalTransitionRequest {
+        if action == ApprovalAction::Activate && current.kind != ApprovalKind::Execution {
+            return Err(GovernanceRepositoryError::InvalidInput);
+        }
+        let transition = match transition_approval(ApprovalTransitionRequest {
             record: &current,
             actor: &request.actor,
             action,
             expected_version: request.expected_version,
             now_unix_ms: request.now_unix_ms,
-        })
-        .map_err(approval_transition_error)?;
+            reason: request.reason.as_ref(),
+        }) {
+            Ok(transition) => transition,
+            Err(error) => {
+                let Some(denial) = ApprovalVoteStableDenial::from_approval_error(error) else {
+                    return Err(approval_transition_error(error));
+                };
+                append_audit_outbox_tx(
+                    &transaction,
+                    denied_approval_audit_outbox(request.audit_outbox, denial),
+                )
+                .await?;
+                if let Some(idempotency) = idempotency.as_ref() {
+                    complete_approval_idempotency_postgres(
+                        &transaction,
+                        request.tenant_id,
+                        idempotency,
+                        ApprovalVoteStableOutcome::Denied(denial),
+                        request.now_unix_ms,
+                    )
+                    .await?;
+                }
+                transaction.commit().await.map_err(database_error)?;
+                return Err(denial.repository_error());
+            }
+        };
         if !transition.changed {
+            if let Some(idempotency) = idempotency.as_ref() {
+                complete_approval_idempotency_postgres(
+                    &transaction,
+                    request.tenant_id,
+                    idempotency,
+                    ApprovalVoteStableOutcome::Success(ApprovalVoteSnapshot::from_record(
+                        &transition.record,
+                    )),
+                    request.now_unix_ms,
+                )
+                .await?;
+            }
             transaction.commit().await.map_err(database_error)?;
-            return Ok(transition.record);
+            return Ok(ApprovalVoteMutationOutcome::Applied(transition.record));
         }
         persist_approval_transition(&transaction, &current, &transition.record).await?;
-        if matches!(
-            transition.record.state,
-            ApprovalState::Approved | ApprovalState::Rejected
-        ) {
+        if transition.record.kind != ApprovalKind::Execution
+            && matches!(
+                transition.record.state,
+                ApprovalState::Approved | ApprovalState::Rejected
+            )
+        {
             let revision_id = revision_id_for_fingerprint(
                 &transaction,
                 transition.record.tenant_id,
@@ -288,8 +394,20 @@ impl PostgresRepository {
             .await?;
         }
         append_audit_outbox_tx(&transaction, request.audit_outbox).await?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            complete_approval_idempotency_postgres(
+                &transaction,
+                request.tenant_id,
+                idempotency,
+                ApprovalVoteStableOutcome::Success(ApprovalVoteSnapshot::from_record(
+                    &transition.record,
+                )),
+                request.now_unix_ms,
+            )
+            .await?;
+        }
         transaction.commit().await.map_err(database_error)?;
-        Ok(transition.record)
+        Ok(ApprovalVoteMutationOutcome::Applied(transition.record))
     }
 
     pub async fn governance_list_revisions(
@@ -415,6 +533,46 @@ impl PostgresRepository {
             .ok_or(GovernanceRepositoryError::NotFound)?;
         transaction.commit().await.map_err(database_error)?;
         Ok(approval)
+    }
+
+    pub async fn governance_list_execution_approvals(
+        &self,
+        tenant_id: TenantId,
+    ) -> Result<Vec<ApprovalRecord>, GovernanceRepositoryError> {
+        self.governance_timeout(self.governance_list_execution_approvals_inner(tenant_id))
+            .await
+    }
+
+    async fn governance_list_execution_approvals_inner(
+        &self,
+        tenant_id: TenantId,
+    ) -> Result<Vec<ApprovalRecord>, GovernanceRepositoryError> {
+        let mut client = self.pool.get().await.map_err(database_error)?;
+        let transaction = client.transaction().await.map_err(database_error)?;
+        set_tenant_context(&transaction, tenant_id)
+            .await
+            .map_err(database_error)?;
+        let rows = transaction
+            .query(
+                "SELECT approval_id FROM prodex_approvals
+                 WHERE tenant_id = $1 AND approval_kind = 'execution'
+                 ORDER BY expires_at_unix_ms DESC, approval_id DESC",
+                &[&tenant_id.as_uuid()],
+            )
+            .await
+            .map_err(database_error)?;
+        let mut approvals = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id = ApprovalId::new(row.get::<_, String>(0))
+                .map_err(|_| GovernanceRepositoryError::Database)?;
+            approvals.push(
+                load_approval_tx(&transaction, tenant_id, &id)
+                    .await?
+                    .ok_or(GovernanceRepositoryError::Database)?,
+            );
+        }
+        transaction.commit().await.map_err(database_error)?;
+        Ok(approvals)
     }
 
     pub async fn governance_status(
@@ -602,39 +760,34 @@ impl PostgresRepository {
         set_tenant_context(&transaction, tenant_id)
             .await
             .map_err(database_error)?;
-        let row = transaction
-            .query_one(
-                "SELECT
-                    COUNT(*),
-                    COUNT(*) FILTER (WHERE NOT EXISTS (
-                        SELECT 1 FROM prodex_audit_log child
-                        WHERE child.tenant_id = audit.tenant_id
-                          AND child.previous_digest = audit.event_digest
-                    )),
-                    COUNT(*) FILTER (WHERE audit.previous_digest IS NOT NULL AND NOT EXISTS (
-                        SELECT 1 FROM prodex_audit_log parent
-                        WHERE parent.tenant_id = audit.tenant_id
-                          AND parent.event_digest = audit.previous_digest
-                    )),
-                    COUNT(*) FILTER (WHERE audit.previous_digest IS NULL)
-                 FROM prodex_audit_log audit WHERE audit.tenant_id = $1",
+        let rows = transaction
+            .query(
+                "SELECT audit_event_id, occurred_at_unix_ms, principal_id, action,
+                        resource_kind, resource_id, outcome, reason_code,
+                        previous_digest, event_digest
+                 FROM prodex_audit_log WHERE tenant_id = $1",
                 &[&tenant_id.as_uuid()],
             )
             .await
             .map_err(database_error)?;
-        let events = row.get::<_, i64>(0);
-        let heads = row.get::<_, i64>(1);
-        let invalid_links = row.get::<_, i64>(2);
-        let roots = row.get::<_, i64>(3);
-        let event_count = from_i64(events)?;
-        let chain_head_count = from_i64(heads)?;
-        let health = GovernanceAuditIntegrityHealth {
-            event_count,
-            chain_head_count,
-            chain_valid: invalid_links == 0
-                && chain_head_count <= 1
-                && ((event_count == 0 && roots == 0) || (event_count > 0 && roots == 1)),
-        };
+        let records = rows
+            .into_iter()
+            .map(|row| {
+                Ok(GovernanceAuditExportRecord {
+                    audit_event_id: row.get::<_, Uuid>(0).to_string(),
+                    occurred_at_unix_ms: from_i64(row.get(1))?,
+                    principal_id: row.get::<_, Uuid>(2).to_string(),
+                    action: row.get(3),
+                    resource_kind: row.get(4),
+                    resource_id: row.get(5),
+                    outcome: row.get(6),
+                    reason_code: row.get(7),
+                    previous_digest: row.get(8),
+                    event_digest: row.get(9),
+                })
+            })
+            .collect::<Result<Vec<_>, GovernanceRepositoryError>>()?;
+        let health = verify_governance_audit_integrity(tenant_id, &records);
         transaction.commit().await.map_err(database_error)?;
         Ok(health)
     }
@@ -783,6 +936,7 @@ impl PostgresRepository {
             action: ApprovalAction::Activate,
             expected_version: approval.version,
             now_unix_ms: request.activated_at_unix_ms,
+            reason: None,
         })
         .map_err(|_| GovernanceRepositoryError::ApprovalRequired)?;
 
@@ -944,14 +1098,16 @@ impl PostgresRepository {
         let last_seen_at = to_i64(command.last_seen_at_unix_ms)?;
         let absolute_expires_at = to_i64(command.absolute_expires_at_unix_ms)?;
         let idle_expires_at = to_i64(command.idle_expires_at_unix_ms)?;
+        let provider_descriptor_revision = to_i64(command.provider_descriptor_revision)?;
         transaction
             .execute(
                 "INSERT INTO prodex_governance_sessions (
                     tenant_id, session_id_hash, principal_id, channel, credential_scope,
-                    classification, policy_revision_id, registry_revision_id, provider_affinity,
+                    classification, policy_revision_id, provider_registry_revision,
+                    provider_descriptor_revision, provider_affinity,
                     created_at_unix_ms, last_seen_at_unix_ms, absolute_expires_at_unix_ms,
                     idle_expires_at_unix_ms
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                  ON CONFLICT (tenant_id, session_id_hash) DO UPDATE SET
                     classification = CASE
                         WHEN prodex_governance_sessions.classification = 'restricted'
@@ -964,9 +1120,14 @@ impl PostgresRepository {
                     policy_revision_id = CASE
                         WHEN EXCLUDED.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
                         THEN EXCLUDED.policy_revision_id ELSE prodex_governance_sessions.policy_revision_id END,
-                    registry_revision_id = CASE
+                    provider_registry_revision = CASE
                         WHEN EXCLUDED.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
-                        THEN EXCLUDED.registry_revision_id ELSE prodex_governance_sessions.registry_revision_id END,
+                        THEN EXCLUDED.provider_registry_revision
+                        ELSE prodex_governance_sessions.provider_registry_revision END,
+                    provider_descriptor_revision = CASE
+                        WHEN EXCLUDED.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
+                        THEN EXCLUDED.provider_descriptor_revision
+                        ELSE prodex_governance_sessions.provider_descriptor_revision END,
                     provider_affinity = CASE
                         WHEN EXCLUDED.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
                         THEN EXCLUDED.provider_affinity ELSE prodex_governance_sessions.provider_affinity END,
@@ -993,7 +1154,8 @@ impl PostgresRepository {
                     &credential_scope_label(command.credential_scope),
                     &command.classification.as_str(),
                     &command.policy_revision_id.as_uuid(),
-                    &command.registry_revision_id,
+                    &command.provider_registry_revision,
+                    &provider_descriptor_revision,
                     &command.provider_affinity,
                     &created_at,
                     &last_seen_at,
@@ -1008,7 +1170,7 @@ impl PostgresRepository {
                 .await?
                 .ok_or(GovernanceRepositoryError::Database)?;
         transaction.commit().await.map_err(database_error)?;
-        Ok(GovernanceSessionUpsertOutcome::Stored(stored))
+        Ok(GovernanceSessionUpsertOutcome::Stored(Box::new(stored)))
     }
 
     pub async fn governance_load_sessions(
@@ -1041,8 +1203,9 @@ impl PostgresRepository {
             .query(
                 "SELECT session.session_id_hash, session.principal_id, session.channel,
                         session.credential_scope, session.classification,
-                        session.policy_revision_id, session.registry_revision_id,
-                        session.provider_affinity, session.created_at_unix_ms,
+                        session.policy_revision_id, session.provider_registry_revision,
+                        session.provider_descriptor_revision, session.provider_affinity,
+                        session.created_at_unix_ms,
                         session.last_seen_at_unix_ms, session.absolute_expires_at_unix_ms,
                         session.idle_expires_at_unix_ms, revocation.revoked_at_unix_ms,
                         revocation.reason_code
@@ -1100,6 +1263,36 @@ impl PostgresRepository {
         Ok(count)
     }
 
+    pub async fn governance_session_revocation_epoch(
+        &self,
+        tenant_id: TenantId,
+    ) -> Result<u64, GovernanceRepositoryError> {
+        self.governance_timeout(self.governance_session_revocation_epoch_inner(tenant_id))
+            .await
+    }
+
+    async fn governance_session_revocation_epoch_inner(
+        &self,
+        tenant_id: TenantId,
+    ) -> Result<u64, GovernanceRepositoryError> {
+        let mut client = self.pool.get().await.map_err(database_error)?;
+        let transaction = client.transaction().await.map_err(database_error)?;
+        set_tenant_context(&transaction, tenant_id)
+            .await
+            .map_err(database_error)?;
+        let row = transaction
+            .query_opt(
+                "SELECT session_revocation_epoch FROM prodex_tenants WHERE tenant_id = $1",
+                &[&tenant_id.as_uuid()],
+            )
+            .await
+            .map_err(database_error)?
+            .ok_or(GovernanceRepositoryError::NotFound)?;
+        let epoch = from_i64(row.get(0))?;
+        transaction.commit().await.map_err(database_error)?;
+        Ok(epoch)
+    }
+
     pub async fn governance_revoke_session(
         &self,
         command: GovernanceSessionRevokeCommand,
@@ -1154,6 +1347,18 @@ impl PostgresRepository {
             )
             .await
             .map_err(database_error)?;
+        let updated = transaction
+            .execute(
+                "UPDATE prodex_tenants
+                 SET session_revocation_epoch = session_revocation_epoch + 1
+                 WHERE tenant_id = $1",
+                &[&command.tenant_id.as_uuid()],
+            )
+            .await
+            .map_err(database_error)?;
+        if updated != 1 {
+            return Err(GovernanceRepositoryError::NotFound);
+        }
         append_audit_outbox_tx(&transaction, command.audit_outbox).await?;
         transaction.commit().await.map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
@@ -1631,6 +1836,18 @@ fn artifact_kind_for_approval(
     }
 }
 
+fn approval_artifact_kind(
+    approval_kind: ApprovalKind,
+) -> Result<Option<GovernanceArtifactKind>, GovernanceRepositoryError> {
+    match approval_kind {
+        ApprovalKind::Execution => Ok(None),
+        ApprovalKind::HighImpactConfiguration | ApprovalKind::BreakGlass => {
+            Err(GovernanceRepositoryError::InvalidInput)
+        }
+        _ => artifact_kind_for_approval(approval_kind).map(Some),
+    }
+}
+
 fn approval_kind_for_artifact(kind: GovernanceArtifactKind) -> ApprovalKind {
     match kind {
         GovernanceArtifactKind::Policy => ApprovalKind::PolicyRevision,
@@ -1651,7 +1868,8 @@ async fn persist_approval_transition(
     let changed = transaction
         .execute(
             "UPDATE prodex_approvals
-             SET lifecycle_state = $4, activated_at_unix_ms = $5, resource_version = $6
+             SET lifecycle_state = $4, activated_at_unix_ms = $5,
+                 termination_reason = $6, resource_version = $7
              WHERE tenant_id = $1 AND approval_id = $2 AND resource_version = $3",
             &[
                 &next.tenant_id.as_uuid(),
@@ -1659,6 +1877,10 @@ async fn persist_approval_transition(
                 &previous_version,
                 &approval_state_label(next.state),
                 &activated_at,
+                &next
+                    .termination_reason
+                    .as_ref()
+                    .map(ApprovalReasonCode::as_str),
                 &next_version,
             ],
         )
@@ -1695,7 +1917,8 @@ async fn load_approval_tx(
     let row = transaction
         .query_opt(
             "SELECT approval_kind, approval_scope, fingerprint, maker_id, lifecycle_state,
-                    required_quorum, expires_at_unix_ms, activated_at_unix_ms, resource_version
+                    required_quorum, expires_at_unix_ms, activated_at_unix_ms,
+                    termination_reason, resource_version
              FROM prodex_approvals WHERE tenant_id = $1 AND approval_id = $2 FOR UPDATE",
             &[&tenant_id.as_uuid(), &approval_id.as_str()],
         )
@@ -1749,7 +1972,12 @@ fn approval_from_row(
         votes,
         expires_at_unix_ms: from_i64(row.get(6))?,
         activated_at_unix_ms: row.get::<_, Option<i64>>(7).map(from_i64).transpose()?,
-        version: from_i64(row.get(8))?,
+        termination_reason: row
+            .get::<_, Option<String>>(8)
+            .map(ApprovalReasonCode::new)
+            .transpose()
+            .map_err(|_| GovernanceRepositoryError::Database)?,
+        version: from_i64(row.get(9))?,
     })
 }
 
@@ -1898,8 +2126,9 @@ async fn load_governance_session_tx(
         .query_opt(
             "SELECT session.session_id_hash, session.principal_id, session.channel,
                     session.credential_scope, session.classification,
-                    session.policy_revision_id, session.registry_revision_id,
-                    session.provider_affinity, session.created_at_unix_ms,
+                    session.policy_revision_id, session.provider_registry_revision,
+                    session.provider_descriptor_revision, session.provider_affinity,
+                    session.created_at_unix_ms,
                     session.last_seen_at_unix_ms, session.absolute_expires_at_unix_ms,
                     session.idle_expires_at_unix_ms, revocation.revoked_at_unix_ms,
                     revocation.reason_code
@@ -1929,14 +2158,15 @@ fn governance_session_from_row(
         credential_scope: credential_scope_from_label(row.get::<_, &str>(3))?,
         classification: classification_from_label(row.get::<_, &str>(4))?,
         policy_revision_id: PolicyRevisionId::from_uuid(row.get::<_, Uuid>(5)),
-        registry_revision_id: row.get(6),
-        provider_affinity: row.get(7),
-        created_at_unix_ms: from_i64(row.get(8))?,
-        last_seen_at_unix_ms: from_i64(row.get(9))?,
-        absolute_expires_at_unix_ms: from_i64(row.get(10))?,
-        idle_expires_at_unix_ms: from_i64(row.get(11))?,
-        revoked_at_unix_ms: row.get::<_, Option<i64>>(12).map(from_i64).transpose()?,
-        revocation_reason_code: row.get(13),
+        provider_registry_revision: row.get(6),
+        provider_descriptor_revision: from_i64(row.get(7))?,
+        provider_affinity: row.get(8),
+        created_at_unix_ms: from_i64(row.get(9))?,
+        last_seen_at_unix_ms: from_i64(row.get(10))?,
+        absolute_expires_at_unix_ms: from_i64(row.get(11))?,
+        idle_expires_at_unix_ms: from_i64(row.get(12))?,
+        revoked_at_unix_ms: row.get::<_, Option<i64>>(13).map(from_i64).transpose()?,
+        revocation_reason_code: row.get(14),
     })
 }
 
@@ -2061,10 +2291,117 @@ fn require_control_plane_admin(
     Ok(())
 }
 
+async fn approval_idempotency_replay_postgres(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    idempotency: &ApprovalVoteIdempotency,
+) -> Result<IdempotencyReplayDecision<Vec<u8>>, GovernanceRepositoryError> {
+    if idempotency.operation.tenant_id != tenant_id || idempotency.started_at_unix_ms == 0 {
+        return Err(GovernanceRepositoryError::InvalidInput);
+    }
+    let tenant_lock = tenant_id.to_string();
+    transaction
+        .query_one(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            &[&tenant_lock],
+        )
+        .await
+        .map_err(database_error)?;
+    let row = transaction
+        .query_opt(
+            "SELECT request_fingerprint, entry_status, started_at_unix_ms,
+                    completed_at_unix_ms, response_body
+             FROM prodex_idempotency_records
+             WHERE tenant_id = $1 AND idempotency_key = $2",
+            &[&tenant_id.as_uuid(), &idempotency.operation.key.as_str()],
+        )
+        .await
+        .map_err(database_error)?
+        .map(|row| {
+            let status = match row.get::<_, String>(1).as_str() {
+                "pending" => Ok(IdempotencyRecordLookupRowStatus::Pending),
+                "completed" => Ok(IdempotencyRecordLookupRowStatus::Completed),
+                _ => Err(GovernanceRepositoryError::InvalidInput),
+            }?;
+            Ok(IdempotencyRecordLookupRow {
+                tenant_id,
+                idempotency_key: idempotency.operation.key.clone(),
+                request_fingerprint: row.get(0),
+                status,
+                started_at_unix_ms: from_i64(row.get(2))?,
+                completed_at_unix_ms: row.get::<_, Option<i64>>(3).map(from_i64).transpose()?,
+                response_body: row.get(4),
+            })
+        })
+        .transpose()?;
+    let entry = row
+        .map(|row| materialize_idempotency_record_lookup_row(&idempotency.operation, row))
+        .transpose()
+        .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+    decide_idempotency_replay(&idempotency.operation, entry.as_ref())
+        .map_err(|_| GovernanceRepositoryError::Conflict)
+}
+
+async fn insert_approval_idempotency_pending_postgres(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    idempotency: &ApprovalVoteIdempotency,
+) -> Result<(), GovernanceRepositoryError> {
+    let inserted = transaction
+        .execute(
+            "INSERT INTO prodex_idempotency_records (
+                tenant_id, idempotency_key, request_fingerprint, entry_status, started_at_unix_ms
+             ) VALUES ($1, $2, $3, 'pending', $4)",
+            &[
+                &tenant_id.as_uuid(),
+                &idempotency.operation.key.as_str(),
+                &idempotency.operation.request_fingerprint,
+                &to_i64(idempotency.started_at_unix_ms)?,
+            ],
+        )
+        .await
+        .map_err(database_error)?;
+    if inserted != 1 {
+        return Err(GovernanceRepositoryError::Conflict);
+    }
+    Ok(())
+}
+
+async fn complete_approval_idempotency_postgres(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    idempotency: &ApprovalVoteIdempotency,
+    outcome: ApprovalVoteStableOutcome,
+    completed_at_unix_ms: u64,
+) -> Result<(), GovernanceRepositoryError> {
+    let response = outcome.encode();
+    let updated = transaction
+        .execute(
+            "UPDATE prodex_idempotency_records
+             SET entry_status = 'completed', completed_at_unix_ms = $4, response_body = $5
+             WHERE tenant_id = $1 AND idempotency_key = $2
+               AND request_fingerprint = $3 AND entry_status = 'pending'",
+            &[
+                &tenant_id.as_uuid(),
+                &idempotency.operation.key.as_str(),
+                &idempotency.operation.request_fingerprint,
+                &to_i64(completed_at_unix_ms)?,
+                &response,
+            ],
+        )
+        .await
+        .map_err(database_error)?;
+    if updated != 1 {
+        return Err(GovernanceRepositoryError::Conflict);
+    }
+    Ok(())
+}
+
 fn approval_transition_error(error: ApprovalError) -> GovernanceRepositoryError {
     match error {
         ApprovalError::SelfApprovalDenied => GovernanceRepositoryError::ApprovalSelfAction,
         ApprovalError::StaleVersion => GovernanceRepositoryError::StaleVersion,
+        ApprovalError::ReplayMismatch => GovernanceRepositoryError::Conflict,
         ApprovalError::InvalidTransition => GovernanceRepositoryError::InvalidTransition,
         ApprovalError::TenantMismatch => GovernanceRepositoryError::TenantMismatch,
         ApprovalError::InvalidToken
@@ -2086,7 +2423,8 @@ fn validate_governance_session_upsert(
     command: &GovernanceSessionUpsertCommand,
 ) -> Result<(), GovernanceRepositoryError> {
     if !session_hash_is_valid(&command.session_id_hash)
-        || !bounded_session_token(&command.registry_revision_id)
+        || !bounded_session_token(&command.provider_registry_revision)
+        || command.provider_descriptor_revision == 0
         || command
             .provider_affinity
             .as_deref()

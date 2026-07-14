@@ -343,6 +343,14 @@ fn runtime_governance_policy_rule(
         RuntimeGovernancePolicyRequestRisk as Risk,
     };
 
+    if rule
+        .condition
+        .channel
+        .is_some_and(|channel| channel != ChannelDto::Api)
+    {
+        anyhow::bail!("gateway governance policy channel selector must be api");
+    }
+
     Ok(GovernancePolicyRule {
         id: GovernancePolicyRuleId::new(&rule.id).context("invalid governance policy rule id")?,
         condition: PolicyRuleCondition {
@@ -354,6 +362,27 @@ fn runtime_governance_policy_rule(
                 ChannelDto::InternalService => Channel::InternalService,
             }),
             principal_kind: rule.condition.principal_kind,
+            team_id: rule
+                .condition
+                .team_id
+                .as_deref()
+                .map(PolicySelector::new)
+                .transpose()
+                .context("invalid governance policy team selector")?,
+            project_id: rule
+                .condition
+                .project_id
+                .as_deref()
+                .map(PolicySelector::new)
+                .transpose()
+                .context("invalid governance policy project selector")?,
+            user_id: rule
+                .condition
+                .user_id
+                .as_deref()
+                .map(PolicySelector::new)
+                .transpose()
+                .context("invalid governance policy user selector")?,
             minimum_role: rule.condition.minimum_role,
             credential_scope: rule.condition.credential_scope,
             action: rule.condition.action.map(|value| match value {
@@ -402,6 +431,45 @@ fn runtime_governance_policy_rule(
             minimum_authentication_strength: rule.condition.minimum_authentication_strength,
             environment_mfa_satisfied: rule.condition.environment_mfa_satisfied,
             requested_capability: rule.condition.requested_capability,
+            requested_model: rule
+                .condition
+                .requested_model
+                .as_deref()
+                .map(PolicySelector::new)
+                .transpose()
+                .context("invalid governance policy model selector")?,
+            requested_tool: rule
+                .condition
+                .requested_tool
+                .as_deref()
+                .map(PolicySelector::new)
+                .transpose()
+                .context("invalid governance policy tool selector")?,
+            requested_modality: rule.condition.requested_modality.map(|value| match value {
+                prodex_runtime_policy::RuntimeGovernancePolicyDataModality::Text => {
+                    DataModality::Text
+                }
+                prodex_runtime_policy::RuntimeGovernancePolicyDataModality::Image => {
+                    DataModality::Image
+                }
+                prodex_runtime_policy::RuntimeGovernancePolicyDataModality::Audio => {
+                    DataModality::Audio
+                }
+                prodex_runtime_policy::RuntimeGovernancePolicyDataModality::Video => {
+                    DataModality::Video
+                }
+                prodex_runtime_policy::RuntimeGovernancePolicyDataModality::File => {
+                    DataModality::File
+                }
+            }),
+            break_glass_required: rule.condition.break_glass_required,
+            break_glass_scope: rule
+                .condition
+                .break_glass_scope
+                .as_deref()
+                .map(PolicySelector::new)
+                .transpose()
+                .context("invalid governance policy break-glass selector")?,
             quota_has_headroom: rule.condition.quota_has_headroom,
             quota_reservation_required: rule.condition.quota_reservation_required,
         },
@@ -527,8 +595,9 @@ mod tests {
     use prodex_domain::{
         CanonicalRoute, CapabilitySet, Channel, CredentialScope, DetectorRevisionId,
         EnvironmentContext, GovernedAction, InspectionCoverage, InspectionLimits, InspectionResult,
-        NetworkZone, PolicyInput, Principal, PrincipalId, PrincipalKind, QuotaContext, RequestRisk,
-        Role, SessionPolicyContext, TenantContext, TenantId, evaluate_governance_policy,
+        NetworkZone, PolicyInput, Principal, PrincipalId, PrincipalKind, PrincipalPolicyAttributes,
+        QuotaContext, RequestPolicyAttributes, RequestRisk, Role, SessionPolicyContext,
+        TenantContext, TenantId, evaluate_governance_policy,
     };
 
     #[test]
@@ -568,11 +637,14 @@ mod tests {
         );
         let route = CanonicalRoute::new("responses").unwrap();
         let capabilities = CapabilitySet::new(Vec::new());
+        let principal_attributes = PrincipalPolicyAttributes::default();
+        let request_attributes = RequestPolicyAttributes::default();
         let decision = evaluate_governance_policy(
             &snapshot.policy,
             &PolicyInput {
                 tenant: TenantContext { tenant_id },
                 principal: &principal,
+                principal_attributes: &principal_attributes,
                 channel: Channel::Api,
                 credential_scope: CredentialScope::DataPlane,
                 session: SessionPolicyContext {
@@ -590,6 +662,7 @@ mod tests {
                 },
                 request_risk: RequestRisk::Low,
                 requested_capabilities: &capabilities,
+                request_attributes: &request_attributes,
                 quota: QuotaContext {
                     has_headroom: true,
                     reservation_required: true,
@@ -646,6 +719,9 @@ mod tests {
             masked_findings: Vec::new(),
         };
         let route = CanonicalRoute::new("responses").unwrap();
+        let capabilities = CapabilitySet::new(Vec::new());
+        let principal_attributes = PrincipalPolicyAttributes::default();
+        let request_attributes = RequestPolicyAttributes::default();
         plan_application_governance(
             &snapshot.application,
             ApplicationGovernanceRequest {
@@ -658,6 +734,7 @@ mod tests {
                 request_risk_floor: DataClassification::Public,
                 tenant: TenantContext { tenant_id },
                 principal: &principal,
+                principal_attributes: &principal_attributes,
                 channel: Channel::Api,
                 credential_scope: CredentialScope::DataPlane,
                 session: SessionPolicyContext {
@@ -670,7 +747,8 @@ mod tests {
                 action: GovernedAction::InvokeModel,
                 route: &route,
                 request_risk: RequestRisk::Low,
-                requested_capabilities: &CapabilitySet::new(Vec::new()),
+                requested_capabilities: &capabilities,
+                request_attributes: &request_attributes,
                 quota: QuotaContext {
                     has_headroom: true,
                     reservation_required: true,
@@ -757,6 +835,35 @@ mod tests {
     }
 
     #[test]
+    fn serialized_policy_artifact_rejects_non_api_channel_selectors() {
+        for channel in [
+            prodex_runtime_policy::RuntimeGovernancePolicyChannel::Cli,
+            prodex_runtime_policy::RuntimeGovernancePolicyChannel::Ide,
+            prodex_runtime_policy::RuntimeGovernancePolicyChannel::Mcp,
+            prodex_runtime_policy::RuntimeGovernancePolicyChannel::InternalService,
+        ] {
+            let settings = RuntimePolicyGovernanceSettings {
+                policy_rules: vec![prodex_runtime_policy::RuntimeGovernancePolicyRule {
+                    id: "deny-non-api".to_string(),
+                    condition: prodex_runtime_policy::RuntimeGovernancePolicyRuleCondition {
+                        channel: Some(channel),
+                        ..Default::default()
+                    },
+                    effect: prodex_runtime_policy::RuntimeGovernancePolicyEffect::Deny,
+                    obligations: Vec::new(),
+                    reason_code: "policy.non_api".to_string(),
+                }],
+                ..Default::default()
+            };
+
+            assert!(
+                compile_runtime_governance_artifact(&serde_json::to_vec(&settings).unwrap())
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn deployment_mode_floor_rejects_policy_downgrade() {
         let artifact = serde_json::to_vec(&RuntimePolicyGovernanceSettings::default()).unwrap();
 
@@ -780,6 +887,36 @@ mod tests {
                 prodex_config::GovernanceMode::Personal,
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn deployment_compiler_rejects_conflicting_policy_obligations() {
+        let settings = RuntimePolicyGovernanceSettings {
+            policy_rules: vec![prodex_runtime_policy::RuntimeGovernancePolicyRule {
+                id: "conflicting-provider-policy".to_string(),
+                condition: prodex_runtime_policy::RuntimeGovernancePolicyRuleCondition::default(),
+                effect: prodex_runtime_policy::RuntimeGovernancePolicyEffect::Allow,
+                obligations: vec![
+                    prodex_runtime_policy::RuntimeGovernancePolicyObligation::AllowProvider {
+                        selector: "openai".to_string(),
+                    },
+                    prodex_runtime_policy::RuntimeGovernancePolicyObligation::DenyProvider {
+                        selector: "openai".to_string(),
+                    },
+                ],
+                reason_code: "policy.conflicting_provider".to_string(),
+            }],
+            ..Default::default()
+        };
+        let artifact = serde_json::to_vec(&settings).unwrap();
+
+        assert!(
+            compile_runtime_governance_artifact_for_deployment(
+                &artifact,
+                prodex_config::GovernanceMode::Personal,
+            )
+            .is_err()
         );
     }
 

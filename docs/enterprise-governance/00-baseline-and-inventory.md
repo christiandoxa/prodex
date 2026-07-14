@@ -2,11 +2,11 @@
 
 ## Scope and Evidence
 
-This document records the repository state observed on 2026-07-13 before the
+This document records the repository state observed on 2026-07-14 before the
 enterprise-governance phases begin. It is an implementation baseline, not a
 claim of certification, regulatory approval, or legal compliance.
 
-Baseline revision: `e308fdf6`. Candidate implementation evidence is recorded
+Current tranche baseline revision: `8ca79a62`. Candidate implementation evidence is recorded
 separately in `implementation-ledger.md` and
 `14-final-implementation-report.md`; the pipeline inventory below intentionally
 describes the pre-change baseline.
