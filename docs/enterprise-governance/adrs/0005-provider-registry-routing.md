@@ -28,23 +28,17 @@ revision. Revocation overrides continuation pinning.
 
 ## Implementation status
 
-The local rewrite runtime publishes a revisioned tenant-bound snapshot for the
-single provider adapter attached to that process. It advertises only endpoints
-and capabilities implemented by that adapter, hard-filters disabled or revoked
-entries, preserves eligible continuation affinity, and requires a successful
-audited governed decision before enforcing-mode dispatch. Existing adapter-local
-health, quota, circuit and bounded precommit retry machinery remains authoritative.
-
-The current process architecture owns one `RuntimeLocalRewriteProviderOptions`
-adapter, one upstream configuration, and one credential family. Simultaneous
-heterogeneous provider dispatch is therefore not executable in one process.
-Configured or stale routes naming another provider must fail unavailable; they
-must never be sent through the attached adapter. Multi-provider fallback requires
-a broker/process boundary that owns one executable adapter per candidate. Until
-that exists, precommit retries remain within the original one-provider eligible
-snapshot and no cross-provider fallback is advertised.
+The local rewrite runtime publishes a revisioned tenant-bound snapshot for
+eligible executable adapters. It advertises only implemented endpoints and
+capabilities, hard-filters disabled or revoked entries, projects bounded runtime
+signals, preserves eligible continuation affinity, and requires a successful
+audited decision before enforcing-mode dispatch. Heterogeneous projected
+credentials resolve to their matching adapter, and fallback remains inside the
+original eligible snapshot before response commitment. Unbound or stale routes
+fail unavailable and are never reinterpreted through another adapter.
 
 Evidence includes `governed_routing_enforces_every_hard_eligibility_gate`,
 `governed_routing_scores_in_fixed_point_and_breaks_ties_by_provider`,
 `governed_routing_does_not_preserve_affinity_after_revocation`, and the
-provider-SPI/production boundary guards.
+`provider_registry_resolves_selected_heterogeneous_projected_adapter` regression
+plus provider-SPI/production boundary guards.

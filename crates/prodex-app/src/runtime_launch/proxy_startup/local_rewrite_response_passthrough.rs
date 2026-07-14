@@ -3,13 +3,13 @@ use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
+use super::RuntimeGatewayResponseGovernance;
 use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
 use super::runtime_local_rewrite_buffered_response_parts;
 use super::runtime_local_rewrite_governed_response_with_call_id;
 use super::runtime_local_rewrite_invalid_response;
 use crate::{RuntimeProxyRequest, RuntimeStreamingResponse};
-use prodex_application::ApplicationResponseObligationPlan;
 use std::time::Instant;
 
 #[allow(clippy::too_many_arguments)]
@@ -24,7 +24,7 @@ pub(super) fn respond_runtime_passthrough_rewrite(
     captured: &RuntimeProxyRequest,
     profile_name: String,
     stream: bool,
-    response_obligations: Option<ApplicationResponseObligationPlan>,
+    response_governance: RuntimeGatewayResponseGovernance,
 ) {
     if stream {
         let mut headers = text_headers;
@@ -46,7 +46,7 @@ pub(super) fn respond_runtime_passthrough_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        respond_runtime_local_rewrite_stream(request, streaming, shared, response_obligations);
+        respond_runtime_local_rewrite_stream(request, streaming, shared, response_governance);
         return;
     }
 
@@ -65,7 +65,7 @@ pub(super) fn respond_runtime_passthrough_rewrite(
                 parts,
                 request_id,
                 shared,
-                response_obligations,
+                response_governance,
             )
         })
         .unwrap_or_else(|err| runtime_local_rewrite_invalid_response(request_id, shared, &err));

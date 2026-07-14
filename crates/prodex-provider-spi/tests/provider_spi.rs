@@ -337,6 +337,16 @@ fn provider_retry_eligibility_is_cause_specific() {
             ProviderErrorClass::NotFound,
             ProviderRetryDecision::DeniedNotRetryable,
         ),
+        (
+            ProviderRetryCause::NextProvider,
+            ProviderErrorClass::Transient,
+            ProviderRetryDecision::Allowed,
+        ),
+        (
+            ProviderRetryCause::NextProvider,
+            ProviderErrorClass::Auth,
+            ProviderRetryDecision::DeniedNotRetryable,
+        ),
     ] {
         assert_eq!(
             plan_provider_retry(
@@ -351,6 +361,18 @@ fn provider_retry_eligibility_is_cause_specific() {
             "cause={cause:?} class={class:?}",
         );
     }
+
+    assert_eq!(
+        plan_provider_retry(
+            ProviderRetryPolicy::single_retry(),
+            ProviderRetryStage::AfterFirstByte,
+            ProviderRetryCause::NextProvider,
+            ProviderErrorClass::Transient,
+            0,
+        )
+        .decision,
+        ProviderRetryDecision::DeniedCommitted,
+    );
 }
 
 #[test]

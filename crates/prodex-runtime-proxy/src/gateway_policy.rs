@@ -148,6 +148,7 @@ pub enum RuntimeGatewayVirtualKeyRejection {
     TpmLimitExceeded,
     GovernanceDenied,
     GovernanceApprovalRequired,
+    GovernanceSessionRequired,
     NoEligibleProvider,
     PolicyStateUnavailable,
 }
@@ -161,6 +162,7 @@ impl RuntimeGatewayVirtualKeyRejection {
             | Self::BudgetExceeded
             | Self::GovernanceDenied
             | Self::GovernanceApprovalRequired
+            | Self::GovernanceSessionRequired
             | Self::NoEligibleProvider => 403,
             Self::RpmLimitExceeded | Self::TpmLimitExceeded => 429,
             Self::PolicyStateUnavailable => 503,
@@ -177,6 +179,7 @@ impl RuntimeGatewayVirtualKeyRejection {
             Self::TpmLimitExceeded => "tpm_limit_exceeded",
             Self::GovernanceDenied => "governance_policy_denied",
             Self::GovernanceApprovalRequired => "governance_approval_required",
+            Self::GovernanceSessionRequired => "governance_session_required",
             Self::NoEligibleProvider => "no_compliant_provider",
             Self::PolicyStateUnavailable => "gateway_policy_unavailable",
         }

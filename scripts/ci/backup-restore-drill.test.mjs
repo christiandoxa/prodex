@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { assessDrill, parseThreshold } from "./backup-restore-drill.mjs";
+import {
+  assessDrill,
+  decryptBackupArtifact,
+  encryptBackupArtifact,
+  parseThreshold,
+} from "./backup-restore-drill.mjs";
 
 test("parseThreshold accepts positive values and rejects invalid limits", () => {
   assert.equal(parseThreshold(undefined, 60, "rpo"), 60);
@@ -55,6 +64,32 @@ test("assessDrill accepts an intact restore within thresholds", () => {
     }),
     { passed: true, failures: [] },
   );
+});
+
+test("backup artifact encryption round-trips and rejects tampering", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-backup-envelope-test-"));
+  const source = path.join(directory, "source.dump");
+  const encrypted = path.join(directory, "backup.dump.aes256gcm");
+  const restored = path.join(directory, "restored.dump");
+  const key = randomBytes(32);
+  try {
+    await fs.writeFile(source, "synthetic pg_dump bytes", { mode: 0o600 });
+    await encryptBackupArtifact(source, encrypted, key);
+    assert.notDeepEqual(await fs.readFile(encrypted), await fs.readFile(source));
+    await decryptBackupArtifact(encrypted, restored, key);
+    assert.equal(await fs.readFile(restored, "utf8"), "synthetic pg_dump bytes");
+
+    const tampered = await fs.readFile(encrypted);
+    tampered[tampered.length - 1] ^= 1;
+    await fs.writeFile(encrypted, tampered, { mode: 0o600 });
+    await assert.rejects(
+      decryptBackupArtifact(encrypted, restored, key),
+      /authenticate data|unable to authenticate/u,
+    );
+  } finally {
+    key.fill(0);
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("script self-test runs with stdin closed", async () => {

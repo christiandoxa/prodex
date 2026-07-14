@@ -24,6 +24,7 @@ pub(super) fn runtime_gemini_live_session<S>(
     local_socket: &mut WsSocket<S>,
     upstream_socket: &mut RuntimeUpstreamWebSocket,
     shared: &RuntimeLocalRewriteProxyShared,
+    network_zone: prodex_domain::NetworkZone,
     authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) -> Result<()>
 where
@@ -57,6 +58,7 @@ where
                     authorized,
                     inspected.text.as_ref(),
                     shared,
+                    network_zone,
                     &inspected.inspection,
                 ) {
                     Ok(obligations) => obligations,
@@ -135,6 +137,7 @@ pub(super) fn runtime_gemini_live_duplex_session<S>(
     local_socket: &mut WsSocket<S>,
     upstream_socket: &mut RuntimeUpstreamWebSocket,
     shared: &RuntimeLocalRewriteProxyShared,
+    network_zone: prodex_domain::NetworkZone,
     authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) -> Result<()>
 where
@@ -171,6 +174,7 @@ where
                     authorized,
                     inspected.text.as_ref(),
                     shared,
+                    network_zone,
                     &inspected.inspection,
                 ) {
                     Ok(obligations) => obligations,

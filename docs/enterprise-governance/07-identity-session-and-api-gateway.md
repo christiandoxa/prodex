@@ -3,9 +3,10 @@
 The target is one governed application boundary for CLI, human API clients,
 services, compatibility routes, HTTP/SSE and WebSocket traffic. Existing
 virtual-key authentication, scopes, tenant-aware application boundaries,
-runtime admission and session/affinity primitives are reusable. Anonymous
-compatibility paths, a unified human/workload identity model, trusted-proxy
-validation and durable session revocation remain gaps. Detailed design is in
+runtime admission and session/affinity primitives are reusable. The production
+edge validates trusted proxies and a shared authority revocation epoch refreshes
+session caches; anonymous compatibility paths, human/workload identity parity,
+mTLS peer verification and deployed multi-replica validation remain gaps.
 [`10-unified-gateway-and-identity.md`](10-unified-gateway-and-identity.md).
 
 ## Entry sequence

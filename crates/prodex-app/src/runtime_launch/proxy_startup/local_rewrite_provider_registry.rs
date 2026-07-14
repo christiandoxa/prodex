@@ -4,6 +4,10 @@ use super::local_rewrite_application_data_plane::{
     runtime_gateway_provider_executable_capabilities,
 };
 use super::local_rewrite_options::RuntimeProjectedProviderCredential;
+use super::{
+    RuntimeAnthropicProviderAuth, RuntimeCopilotProviderAuth, RuntimeDeepSeekWebSearchMode,
+    RuntimeGeminiProviderAuth,
+};
 use anyhow::{Context, Result};
 use prodex_domain::{
     CapabilitySet, DataClassification, PolicySelector, ProviderTrustTier, SecretRef, TenantContext,
@@ -13,7 +17,7 @@ use prodex_provider_core::{
     ProviderAdapterContract, ProviderEndpoint, ProviderId, provider_adapter,
 };
 use prodex_provider_spi::{
-    GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoutingPlan,
+    GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute, GovernedRoutingPlan,
     GovernedRoutingSignals, GovernedRoutingWeights, MAX_GOVERNED_PROVIDER_REGIONS,
     MAX_GOVERNED_ROUTING_CANDIDATES,
 };
@@ -47,6 +51,8 @@ struct RuntimeGatewayProviderRegistryDescriptorArtifact {
     enabled: bool,
     revoked: bool,
     executable: bool,
+    #[serde(default)]
+    upstream_base_url: Option<String>,
     endpoints: Vec<ProviderEndpoint>,
     capabilities: CapabilitySet,
     regions: Vec<String>,
@@ -88,6 +94,7 @@ struct RuntimeGatewayCompiledProviderDescriptor {
     enabled: bool,
     revoked: bool,
     executable: bool,
+    upstream_base_url: Option<String>,
     endpoints: Vec<ProviderEndpoint>,
     capabilities: CapabilitySet,
     regions: Vec<PolicySelector>,
@@ -106,7 +113,57 @@ struct RuntimeGatewayCompiledProviderDescriptor {
 pub(super) struct RuntimeGatewayGovernedProviderRegistrySnapshot {
     revision: u64,
     attached_provider: ProviderId,
+    projected_credential: Option<RuntimeProjectedProviderCredential>,
     descriptors: Vec<RuntimeGatewayCompiledProviderDescriptor>,
+}
+
+#[derive(Clone)]
+pub(super) struct RuntimeGatewayProviderExecution {
+    pub(super) provider: RuntimeLocalRewriteProviderOptions,
+    pub(super) credential: RuntimeProjectedProviderCredential,
+    pub(super) upstream_base_url: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RuntimeGatewayProviderRuntimeSignals {
+    pub(super) health: Option<u16>,
+    pub(super) load: u16,
+    pub(super) quota_headroom: Option<u16>,
+    pub(super) circuit_open: bool,
+    pub(super) quota_available: bool,
+    pub(super) inflight_cap_reached: bool,
+}
+
+impl Default for RuntimeGatewayProviderRuntimeSignals {
+    fn default() -> Self {
+        Self {
+            health: None,
+            load: 0,
+            quota_headroom: None,
+            circuit_open: false,
+            quota_available: true,
+            inflight_cap_reached: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct RuntimeGatewayProviderRuntimeSnapshot {
+    providers: BTreeMap<ProviderId, RuntimeGatewayProviderRuntimeSignals>,
+}
+
+impl RuntimeGatewayProviderRuntimeSnapshot {
+    pub(super) fn insert(
+        &mut self,
+        provider: ProviderId,
+        signals: RuntimeGatewayProviderRuntimeSignals,
+    ) {
+        self.providers.insert(provider, signals);
+    }
+
+    fn signals_for(&self, provider: ProviderId) -> RuntimeGatewayProviderRuntimeSignals {
+        self.providers.get(&provider).copied().unwrap_or_default()
+    }
 }
 
 impl std::fmt::Debug for RuntimeGatewayGovernedProviderRegistrySnapshot {
@@ -125,45 +182,74 @@ impl RuntimeGatewayGovernedProviderRegistrySnapshot {
         self.revision
     }
 
+    pub(super) fn provider_ids(&self) -> impl Iterator<Item = ProviderId> + '_ {
+        self.descriptors
+            .iter()
+            .map(|descriptor| descriptor.provider)
+    }
+
+    pub(super) fn runtime_profile_name(&self, provider: ProviderId) -> &str {
+        if provider == self.attached_provider {
+            super::local_rewrite::RUNTIME_LOCAL_REWRITE_PROFILE
+        } else {
+            provider.label()
+        }
+    }
+
+    fn credential_available(&self, descriptor: &RuntimeGatewayCompiledProviderDescriptor) -> bool {
+        descriptor.provider == self.attached_provider
+            || self
+                .projected_credential
+                .as_ref()
+                .is_some_and(|credential| {
+                    credential.reference().provider() == descriptor.credential_ref.provider()
+                })
+    }
+
     pub(super) fn for_tenant(
         &self,
         tenant: TenantContext,
         endpoint: ProviderEndpoint,
+        runtime: &RuntimeGatewayProviderRuntimeSnapshot,
     ) -> GovernedProviderRegistry {
         GovernedProviderRegistry {
             revision: self.revision,
             providers: self
                 .descriptors
                 .iter()
-                .map(|descriptor| GovernedProviderDescriptor {
-                    revision: descriptor.revision,
-                    pricing_revision: descriptor.pricing_revision,
-                    tenant,
-                    provider: descriptor.provider,
-                    credential_ref: descriptor.credential_ref.clone(),
-                    credential_available: descriptor.provider == self.attached_provider,
-                    enabled: descriptor.enabled
-                        && descriptor.executable
-                        && descriptor.endpoints.contains(&endpoint),
-                    revoked: descriptor.revoked,
-                    // Attached adapter owns live health/quota/circuit state.
-                    circuit_open: false,
-                    quota_available: true,
-                    local_execution: descriptor.local_execution,
-                    trust_tier: descriptor.trust_tier,
-                    maximum_classification: descriptor.maximum_classification,
-                    capabilities: descriptor.capabilities.clone(),
-                    regions: descriptor.regions.clone(),
-                    retention_seconds: descriptor.retention_seconds,
-                    training_use: descriptor.training_use,
-                    signals: GovernedRoutingSignals {
-                        health: 10_000,
-                        load: 0,
-                        cost: descriptor.cost,
-                        latency: descriptor.latency,
-                        risk: descriptor.risk,
-                        priority: descriptor.priority,
-                    },
+                .map(|descriptor| {
+                    let runtime = runtime.signals_for(descriptor.provider);
+                    GovernedProviderDescriptor {
+                        revision: descriptor.revision,
+                        pricing_revision: descriptor.pricing_revision,
+                        tenant,
+                        provider: descriptor.provider,
+                        credential_ref: descriptor.credential_ref.clone(),
+                        credential_available: self.credential_available(descriptor),
+                        enabled: descriptor.enabled
+                            && descriptor.executable
+                            && descriptor.endpoints.contains(&endpoint),
+                        revoked: descriptor.revoked,
+                        circuit_open: runtime.circuit_open,
+                        quota_available: runtime.quota_available,
+                        inflight_cap_reached: runtime.inflight_cap_reached,
+                        local_execution: descriptor.local_execution,
+                        trust_tier: descriptor.trust_tier,
+                        maximum_classification: descriptor.maximum_classification,
+                        capabilities: descriptor.capabilities.clone(),
+                        regions: descriptor.regions.clone(),
+                        retention_seconds: descriptor.retention_seconds,
+                        training_use: descriptor.training_use,
+                        signals: GovernedRoutingSignals {
+                            health: runtime.health,
+                            load: runtime.load,
+                            quota_headroom: runtime.quota_headroom,
+                            cost: descriptor.cost,
+                            latency: descriptor.latency,
+                            risk: descriptor.risk,
+                            priority: descriptor.priority,
+                        },
+                    }
                 })
                 .collect(),
         }
@@ -174,18 +260,89 @@ impl RuntimeGatewayGovernedProviderRegistrySnapshot {
         routing: &GovernedRoutingPlan,
         endpoint: ProviderEndpoint,
     ) -> bool {
-        routing.registry_revision == self.revision
-            && routing.primary.provider == self.attached_provider
-            && self.descriptors.iter().any(|descriptor| {
-                descriptor.provider == routing.primary.provider
-                    && descriptor.revision == routing.primary.descriptor_revision
-                    && descriptor.pricing_revision == routing.primary.pricing_revision
-                    && descriptor.credential_ref == routing.primary.credential_ref
-                    && descriptor.enabled
-                    && descriptor.executable
-                    && !descriptor.revoked
-                    && descriptor.endpoints.contains(&endpoint)
-            })
+        self.matches_governed_route(routing.registry_revision, &routing.primary, endpoint)
+    }
+
+    pub(super) fn matches_governed_route(
+        &self,
+        registry_revision: u64,
+        route: &GovernedRoute,
+        endpoint: ProviderEndpoint,
+    ) -> bool {
+        registry_revision == self.revision && self.route_descriptor(route, endpoint).is_some()
+    }
+
+    fn route_descriptor(
+        &self,
+        route: &GovernedRoute,
+        endpoint: ProviderEndpoint,
+    ) -> Option<&RuntimeGatewayCompiledProviderDescriptor> {
+        self.descriptors.iter().find(|descriptor| {
+            descriptor.provider == route.provider
+                && descriptor.revision == route.descriptor_revision
+                && descriptor.pricing_revision == route.pricing_revision
+                && descriptor.credential_ref == route.credential_ref
+                && descriptor.enabled
+                && descriptor.executable
+                && !descriptor.revoked
+                && descriptor.endpoints.contains(&endpoint)
+                && self.credential_available(descriptor)
+        })
+    }
+
+    pub(super) fn execution_for_route(
+        &self,
+        route: &GovernedRoute,
+        endpoint: ProviderEndpoint,
+    ) -> Option<RuntimeGatewayProviderExecution> {
+        let descriptor = self.route_descriptor(route, endpoint)?;
+        if descriptor.provider == self.attached_provider {
+            return None;
+        }
+        let credential = self
+            .projected_credential
+            .as_ref()?
+            .with_reference(descriptor.credential_ref.clone())?;
+        let upstream_base_url = descriptor.upstream_base_url.clone()?;
+        let provider = runtime_gateway_projected_provider_options(
+            descriptor.provider,
+            upstream_base_url.as_str(),
+        )?;
+        Some(RuntimeGatewayProviderExecution {
+            provider,
+            credential,
+            upstream_base_url,
+        })
+    }
+}
+
+fn runtime_gateway_projected_provider_options(
+    provider: ProviderId,
+    upstream_base_url: &str,
+) -> Option<RuntimeLocalRewriteProviderOptions> {
+    match provider {
+        ProviderId::OpenAi => Some(RuntimeLocalRewriteProviderOptions::OpenAiResponses {
+            api_keys: Vec::new(),
+        }),
+        ProviderId::Anthropic => Some(RuntimeLocalRewriteProviderOptions::Anthropic {
+            auth: RuntimeAnthropicProviderAuth::Projected,
+        }),
+        ProviderId::Copilot => Some(RuntimeLocalRewriteProviderOptions::Copilot {
+            auth: RuntimeCopilotProviderAuth::Projected,
+        }),
+        ProviderId::DeepSeek => Some(RuntimeLocalRewriteProviderOptions::DeepSeek {
+            api_keys: Vec::new(),
+            strict_tools: false,
+            beta_base_url: upstream_base_url.to_string(),
+            web_search_mode: RuntimeDeepSeekWebSearchMode::default(),
+        }),
+        ProviderId::Gemini => Some(RuntimeLocalRewriteProviderOptions::Gemini {
+            auth: RuntimeGeminiProviderAuth::Projected,
+            thinking_budget_tokens: None,
+            model_resolution: crate::RuntimeGeminiModelResolution::default(),
+        }),
+        // Kiro currently requires profile auth; Local has no heterogeneous remote SPI.
+        ProviderId::Kiro | ProviderId::Local => None,
     }
 }
 
@@ -322,6 +479,7 @@ pub(super) fn compile_runtime_gateway_routing_scores_artifact(
 struct RuntimeGatewayAttachedProviderRegistryContext {
     provider: ProviderId,
     credential_ref: SecretRef,
+    projected_credential: Option<RuntimeProjectedProviderCredential>,
     endpoints: Vec<ProviderEndpoint>,
     capabilities: CapabilitySet,
 }
@@ -352,6 +510,7 @@ fn runtime_gateway_attached_provider_registry_context(
             credential.map(RuntimeProjectedProviderCredential::reference),
             provider,
         ),
+        projected_credential: credential.cloned(),
         endpoints,
         capabilities: runtime_gateway_provider_executable_capabilities(provider),
     }
@@ -407,6 +566,7 @@ pub(super) fn runtime_gateway_bootstrap_provider_registry_snapshot(
                 enabled: provider_settings.is_none_or(|settings| settings.enabled),
                 revoked: provider_settings.is_some_and(|settings| settings.revoked),
                 executable: true,
+                upstream_base_url: None,
                 endpoints: context.endpoints.clone(),
                 capabilities: context.capabilities.clone(),
                 regions: provider_settings
@@ -502,7 +662,40 @@ fn compile_runtime_gateway_provider_registry(
                 anyhow::bail!("attached provider registry descriptor is invalid");
             }
         } else if descriptor.executable {
-            anyhow::bail!("unsupported provider adapter cannot be executable");
+            let Some(projected_credential) = context.projected_credential.as_ref() else {
+                anyhow::bail!("heterogeneous provider requires projected credentials");
+            };
+            if projected_credential.reference().provider() != descriptor.credential_ref.provider()
+                || descriptor.upstream_base_url.as_deref().is_none_or(|value| {
+                    crate::validate_credential_free_http_url(
+                        value,
+                        "provider registry upstream base URL",
+                    )
+                    .is_err()
+                })
+                || runtime_gateway_projected_provider_options(
+                    descriptor.provider,
+                    descriptor.upstream_base_url.as_deref().unwrap_or_default(),
+                )
+                .is_none()
+            {
+                anyhow::bail!("unsupported provider adapter cannot be executable");
+            }
+            let adapter = provider_adapter(descriptor.provider);
+            if descriptor.endpoints.iter().any(|endpoint| {
+                !adapter.supported_endpoints().contains(endpoint)
+                    || !runtime_gateway_provider_capability_is_executable(
+                        adapter.capability_status(*endpoint),
+                    )
+            }) || !descriptor
+                .capabilities
+                .missing_from(&runtime_gateway_provider_executable_capabilities(
+                    descriptor.provider,
+                ))
+                .is_empty()
+            {
+                anyhow::bail!("unsupported provider capability cannot be executable");
+            }
         }
         let mut regions = Vec::with_capacity(descriptor.regions.len());
         for region in descriptor.regions {
@@ -521,6 +714,7 @@ fn compile_runtime_gateway_provider_registry(
             enabled: descriptor.enabled,
             revoked: descriptor.revoked,
             executable: descriptor.executable,
+            upstream_base_url: descriptor.upstream_base_url,
             endpoints: descriptor.endpoints,
             capabilities: descriptor.capabilities,
             regions,
@@ -545,6 +739,7 @@ fn compile_runtime_gateway_provider_registry(
     Ok(RuntimeGatewayGovernedProviderRegistrySnapshot {
         revision: artifact.revision,
         attached_provider: context.provider,
+        projected_credential: context.projected_credential.clone(),
         descriptors,
     })
 }
@@ -590,6 +785,7 @@ mod tests {
                 enabled: true,
                 revoked: false,
                 executable: true,
+                upstream_base_url: None,
                 endpoints: context.endpoints,
                 capabilities: context.capabilities,
                 regions: vec!["*".to_string()],
@@ -616,6 +812,23 @@ mod tests {
         )
     }
 
+    fn projected_credential() -> RuntimeProjectedProviderCredential {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-governed-routing-projected-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        RuntimeProjectedProviderCredential::new(
+            SecretRef::new("external", "openai", None::<String>),
+            secret_store::ProjectedSecretProvider::new(root, "external").unwrap(),
+        )
+    }
+
     #[test]
     fn provider_registry_compiler_rejects_invalid_and_unsupported_executable_adapters() {
         let mut invalid = artifact();
@@ -637,6 +850,7 @@ mod tests {
                 enabled: true,
                 revoked: false,
                 executable: true,
+                upstream_base_url: Some("https://api.example.com".to_string()),
                 endpoints: vec![ProviderEndpoint::Messages],
                 capabilities: CapabilitySet::new(vec![]),
                 regions: vec!["*".to_string()],
@@ -651,6 +865,88 @@ mod tests {
                 priority: 5_000,
             });
         assert!(compile(&unsupported).is_err());
+    }
+
+    #[test]
+    fn provider_registry_resolves_selected_heterogeneous_projected_adapter() {
+        let credential = projected_credential();
+        let mut artifact = artifact();
+        artifact.descriptors[0].credential_ref = credential.reference().clone();
+        artifact.descriptors[0].priority = 0;
+        artifact
+            .descriptors
+            .push(RuntimeGatewayProviderRegistryDescriptorArtifact {
+                revision: 10,
+                pricing_revision: 4,
+                provider: ProviderId::Anthropic,
+                credential_ref: SecretRef::new("external", "anthropic", None::<String>),
+                enabled: true,
+                revoked: false,
+                executable: true,
+                upstream_base_url: Some("https://api.example.com".to_string()),
+                endpoints: vec![ProviderEndpoint::Responses],
+                capabilities: runtime_gateway_provider_executable_capabilities(
+                    ProviderId::Anthropic,
+                ),
+                regions: vec!["*".to_string()],
+                local_execution: false,
+                trust_tier: RuntimeGatewayProviderRegistryTrustTier::Enterprise,
+                maximum_classification: DataClassification::Confidential,
+                retention_seconds: 0,
+                training_use: false,
+                cost: 0,
+                latency: 0,
+                risk: 0,
+                priority: 10_000,
+            });
+        let snapshot = compile_runtime_gateway_provider_registry_artifact(
+            &serde_json::to_vec(&artifact).unwrap(),
+            &provider(),
+            Some(&credential),
+        )
+        .unwrap();
+        let tenant = TenantContext {
+            tenant_id: TenantId::new(),
+        };
+        let registry =
+            snapshot.for_tenant(tenant, ProviderEndpoint::Responses, &Default::default());
+        let policy = prodex_domain::PolicyDecision {
+            effect: prodex_domain::PolicyEffect::Allow,
+            obligations: Vec::new(),
+            reason_codes: Vec::new(),
+            policy_revision: prodex_domain::PolicyRevisionId::new(),
+            valid_until_unix_ms: u64::MAX,
+        };
+        let required = CapabilitySet::new(vec![prodex_domain::ModelCapability::ResponsesApi]);
+        let routing = prodex_provider_spi::plan_governed_provider_route(
+            &prodex_provider_spi::GovernedRoutingRequest {
+                tenant,
+                classification: DataClassification::Internal,
+                required_capabilities: &required,
+                policy: &policy,
+                registry: &registry,
+                score_revision: 1,
+                weights: GovernedRoutingWeights::default(),
+                affinity_provider: None,
+                max_fallbacks: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(routing.primary.provider, ProviderId::Anthropic);
+        assert_eq!(routing.fallbacks.len(), 1);
+        let execution = snapshot
+            .execution_for_route(&routing.primary, ProviderEndpoint::Responses)
+            .unwrap();
+        assert_eq!(
+            execution.provider.bridge_kind().provider_id(),
+            ProviderId::Anthropic
+        );
+        assert_eq!(
+            execution.credential.reference(),
+            &routing.primary.credential_ref
+        );
+        assert_eq!(execution.upstream_base_url, "https://api.example.com");
     }
 
     #[test]
@@ -678,7 +974,7 @@ mod tests {
             tenant_id: TenantId::new(),
         };
         let active = compile(&artifact()).unwrap();
-        let registry = active.for_tenant(tenant, ProviderEndpoint::Responses);
+        let registry = active.for_tenant(tenant, ProviderEndpoint::Responses, &Default::default());
         let route = &registry.providers[0];
         let routing = GovernedRoutingPlan {
             tenant,
@@ -727,6 +1023,35 @@ mod tests {
                 .unwrap()
                 .matches_route(&routing, ProviderEndpoint::Responses)
         );
+    }
+
+    #[test]
+    fn provider_registry_projects_bounded_runtime_signals_without_probing() {
+        let tenant = TenantContext {
+            tenant_id: TenantId::new(),
+        };
+        let active = compile(&artifact()).unwrap();
+        let mut runtime = RuntimeGatewayProviderRuntimeSnapshot::default();
+        runtime.insert(
+            ProviderId::OpenAi,
+            RuntimeGatewayProviderRuntimeSignals {
+                health: Some(2_500),
+                load: 7_500,
+                quota_headroom: Some(1_500),
+                circuit_open: true,
+                quota_available: false,
+                inflight_cap_reached: true,
+            },
+        );
+
+        let registry = active.for_tenant(tenant, ProviderEndpoint::Responses, &runtime);
+        let descriptor = &registry.providers[0];
+        assert_eq!(descriptor.signals.health, Some(2_500));
+        assert_eq!(descriptor.signals.load, 7_500);
+        assert_eq!(descriptor.signals.quota_headroom, Some(1_500));
+        assert!(descriptor.circuit_open);
+        assert!(!descriptor.quota_available);
+        assert!(descriptor.inflight_cap_reached);
     }
 
     fn routing_scores_artifact(revision: u64, cost: u16) -> Vec<u8> {

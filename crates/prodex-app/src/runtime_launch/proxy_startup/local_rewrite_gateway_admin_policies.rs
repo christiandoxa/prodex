@@ -1,17 +1,20 @@
-use prodex_application::ApplicationGovernanceRepository;
+use prodex_application::{
+    ApplicationExecutionApprovalService, ApplicationGovernanceLifecycleError,
+    ApplicationGovernanceRepository,
+};
 use prodex_control_plane::{ControlPlaneActionPlan, ControlPlaneOperation};
 use prodex_domain::{
-    ApprovalAction, ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalRecord, ApprovalScope,
-    AuditAction, AuditEventId, AuditResource, CredentialScope, Principal, PrincipalKind, Role,
-    compute_audit_chain_digest,
+    ApprovalAction, ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalReasonCode,
+    ApprovalRecord, ApprovalScope, AuditAction, AuditEventId, AuditResource, CredentialScope,
+    Principal, PrincipalKind, Role, compute_audit_chain_digest,
 };
 use prodex_storage::{
-    AppendOnlyAuditCommand, ApprovalVoteRequest, AuditOutboxWriteCommand,
-    GovernanceActivationAction, GovernanceActivationRequest, GovernanceActivationResult,
-    GovernanceArtifactKind, GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth,
-    GovernanceOutboxHealth, GovernanceRepositoryError, GovernanceRevisionSummary,
-    GovernanceRevisionWriteCommand, GovernanceSnapshot, GovernanceStatus, GovernanceWriteOutcome,
-    TenantStorageKey,
+    AppendOnlyAuditCommand, ApprovalVoteIdempotency, ApprovalVoteMutationOutcome,
+    ApprovalVoteRequest, ApprovalVoteSnapshot, AuditOutboxWriteCommand, GovernanceActivationAction,
+    GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactKind,
+    GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth, GovernanceOutboxHealth,
+    GovernanceRepositoryError, GovernanceRevisionSummary, GovernanceRevisionWriteCommand,
+    GovernanceSnapshot, GovernanceStatus, GovernanceWriteOutcome, TenantStorageKey,
 };
 use prodex_storage_sqlite_runtime::GovernanceSqliteRepository;
 use sha2::{Digest, Sha256};
@@ -107,6 +110,21 @@ pub(super) fn runtime_gateway_admin_policy_response(
             shared,
             admin_auth,
             base_action,
+        ));
+    }
+    let execution_approvals = format!("{admin_prefix}/execution-approvals");
+    if path == execution_approvals || path.starts_with(&(execution_approvals.clone() + "/")) {
+        let repository = match repository(shared) {
+            Ok(repository) => repository,
+            Err(response) => return Some(response),
+        };
+        return Some(execution_approval_response(
+            captured,
+            path,
+            &execution_approvals,
+            admin_auth,
+            base_action,
+            &repository,
         ));
     }
     let (resource, resource_path) =
@@ -209,7 +227,7 @@ pub(super) fn runtime_gateway_admin_policy_response(
     })
 }
 
-enum RuntimeGovernanceRepository<'a> {
+pub(super) enum RuntimeGovernanceRepository<'a> {
     Sqlite(GovernanceSqliteRepository),
     Postgres {
         repository: &'a prodex_storage_postgres_runtime::PostgresRepository,
@@ -232,7 +250,7 @@ impl RuntimeGovernanceRepository<'_> {
         }
     }
 
-    fn create_approval(
+    pub(super) fn create_approval(
         &self,
         approval: ApprovalRecord,
         audit: AuditOutboxWriteCommand,
@@ -246,7 +264,7 @@ impl RuntimeGovernanceRepository<'_> {
         }
     }
 
-    fn transition_approval(
+    pub(super) fn transition_approval(
         &self,
         request: ApprovalVoteRequest,
         action: ApprovalAction,
@@ -257,6 +275,27 @@ impl RuntimeGovernanceRepository<'_> {
                 repository,
                 runtime,
             } => runtime.block_on(repository.governance_transition_approval(request, action)),
+        }
+    }
+
+    fn transition_approval_idempotent(
+        &self,
+        request: ApprovalVoteRequest,
+        action: ApprovalAction,
+        idempotency: ApprovalVoteIdempotency,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        match self {
+            Self::Sqlite(repository) => {
+                repository.transition_approval_idempotent(request, action, idempotency)
+            }
+            Self::Postgres {
+                repository,
+                runtime,
+            } => runtime.block_on(repository.governance_transition_approval_idempotent(
+                request,
+                action,
+                idempotency,
+            )),
         }
     }
 
@@ -289,7 +328,7 @@ impl RuntimeGovernanceRepository<'_> {
         }
     }
 
-    fn get_approval(
+    pub(super) fn get_approval(
         &self,
         tenant_id: prodex_domain::TenantId,
         approval_id: &ApprovalId,
@@ -302,6 +341,19 @@ impl RuntimeGovernanceRepository<'_> {
             } => {
                 runtime.block_on(repository.governance_get_approval(tenant_id, approval_id.clone()))
             }
+        }
+    }
+
+    fn list_execution_approvals(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+    ) -> Result<Vec<ApprovalRecord>, GovernanceRepositoryError> {
+        match self {
+            Self::Sqlite(repository) => repository.list_execution_approvals(tenant_id),
+            Self::Postgres {
+                repository,
+                runtime,
+            } => runtime.block_on(repository.governance_list_execution_approvals(tenant_id)),
         }
     }
 
@@ -340,7 +392,7 @@ impl RuntimeGovernanceRepository<'_> {
         }
     }
 
-    fn latest_audit_digest(
+    pub(super) fn latest_audit_digest(
         &self,
         tenant_id: prodex_domain::TenantId,
     ) -> Result<Option<prodex_domain::AuditDigest>, GovernanceRepositoryError> {
@@ -447,6 +499,28 @@ impl ApplicationGovernanceRepository for RuntimeGovernanceRepository<'_> {
         RuntimeGovernanceRepository::transition_approval(self, request, action)
     }
 
+    fn transition_approval_idempotent(
+        &self,
+        request: ApprovalVoteRequest,
+        action: ApprovalAction,
+        idempotency: ApprovalVoteIdempotency,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        RuntimeGovernanceRepository::transition_approval_idempotent(
+            self,
+            request,
+            action,
+            idempotency,
+        )
+    }
+
+    fn get_approval(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+        approval_id: &ApprovalId,
+    ) -> Result<ApprovalRecord, GovernanceRepositoryError> {
+        RuntimeGovernanceRepository::get_approval(self, tenant_id, approval_id)
+    }
+
     fn activate_revision(
         &self,
         request: GovernanceActivationRequest,
@@ -463,13 +537,19 @@ impl ApplicationGovernanceRepository for RuntimeGovernanceRepository<'_> {
     }
 }
 
-fn repository(
+pub(super) fn repository(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<RuntimeGovernanceRepository<'_>, tiny_http::ResponseBox> {
+    runtime_governance_repository(shared).map_err(|_| storage_unavailable())
+}
+
+pub(super) fn runtime_governance_repository(
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<RuntimeGovernanceRepository<'_>, GovernanceRepositoryError> {
     match &shared.gateway_state_store {
         RuntimeGatewayStateStore::Sqlite { path } => GovernanceSqliteRepository::open(path)
             .map(RuntimeGovernanceRepository::Sqlite)
-            .map_err(|_| storage_unavailable()),
+            .map_err(|_| GovernanceRepositoryError::Database),
         RuntimeGatewayStateStore::Postgres { .. } => shared
             .gateway_postgres_repository
             .as_ref()
@@ -477,9 +557,9 @@ fn repository(
                 repository,
                 runtime: shared.runtime_shared.async_runtime.handle().clone(),
             })
-            .ok_or_else(storage_unavailable),
+            .ok_or(GovernanceRepositoryError::Database),
         RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
-            Err(storage_unavailable())
+            Err(GovernanceRepositoryError::Unsupported)
         }
     }
 }
@@ -740,6 +820,196 @@ fn submit_response(
     }
 }
 
+fn execution_approval_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    base_path: &str,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+    repository: &RuntimeGovernanceRepository<'_>,
+) -> tiny_http::ResponseBox {
+    let method = captured.method.to_ascii_uppercase();
+    let segments = path
+        .strip_prefix(&(base_path.to_string() + "/"))
+        .map(|suffix| {
+            suffix
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let tenant_id = base_action.tenant.tenant_id;
+    match (method.as_str(), segments.as_slice()) {
+        ("GET", []) => match repository.list_execution_approvals(tenant_id) {
+            Ok(approvals) => runtime_gateway_admin_json_response(
+                200,
+                serde_json::json!({
+                    "object": "governance.execution_approval.list",
+                    "data": approvals.into_iter().map(execution_approval_json).collect::<Vec<_>>(),
+                }),
+            ),
+            Err(error) => repository_error(error),
+        },
+        ("GET", [approval_id]) => {
+            let approval_id = match ApprovalId::new((*approval_id).to_string()) {
+                Ok(approval_id) => approval_id,
+                Err(_) => return invalid_request(),
+            };
+            match repository.get_approval(tenant_id, &approval_id) {
+                Ok(approval) if approval.kind == ApprovalKind::Execution => {
+                    runtime_gateway_admin_json_response(200, execution_approval_json(approval))
+                }
+                Ok(_) => repository_error(GovernanceRepositoryError::NotFound),
+                Err(error) => repository_error(error),
+            }
+        }
+        ("POST", [approval_id, "votes"]) => {
+            let body = match runtime_gateway_admin_json_body(captured) {
+                Ok(body) => body,
+                Err(response) => return response,
+            };
+            let Some(expected_version) = body
+                .get("expected_version")
+                .and_then(serde_json::Value::as_u64)
+            else {
+                return invalid_request();
+            };
+            let action = match body.get("decision").and_then(serde_json::Value::as_str) {
+                Some("approve") => ApprovalAction::Approve,
+                Some("reject") => ApprovalAction::Reject,
+                Some("cancel") => ApprovalAction::Cancel,
+                _ => return invalid_request(),
+            };
+            let approval_id = match ApprovalId::new((*approval_id).to_string()) {
+                Ok(approval_id) => approval_id,
+                Err(_) => return invalid_request(),
+            };
+            let execution = match execution(captured, path, admin_auth, base_action) {
+                Ok(execution) => execution,
+                Err(response) => return response,
+            };
+            let audit = match execution_approval_audit_command(
+                repository,
+                &execution.authorized_action,
+                &approval_id,
+                match action {
+                    ApprovalAction::Approve => "governance.execution_approval.approve",
+                    ApprovalAction::Reject => "governance.execution_approval.reject",
+                    ApprovalAction::Cancel => "governance.execution_approval.cancel",
+                    _ => unreachable!(),
+                },
+            ) {
+                Ok(audit) => audit,
+                Err(error) => return repository_error(error),
+            };
+            let reason = match action {
+                ApprovalAction::Reject => {
+                    Some(ApprovalReasonCode::new("approval.rejected").unwrap())
+                }
+                ApprovalAction::Cancel => {
+                    Some(ApprovalReasonCode::new("approval.cancelled").unwrap())
+                }
+                _ => None,
+            };
+            match ApplicationExecutionApprovalService::new(repository).review_idempotent(
+                ApprovalVoteRequest {
+                    tenant_id,
+                    approval_id: approval_id.clone(),
+                    actor: actor(&execution.authorized_action),
+                    expected_version,
+                    now_unix_ms: execution.atomic_write.completed_at_unix_ms,
+                    reason,
+                    audit_outbox: audit,
+                },
+                action,
+                ApprovalVoteIdempotency {
+                    operation: execution.atomic_write.operation.clone(),
+                    started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
+                },
+            ) {
+                Ok(ApprovalVoteMutationOutcome::Applied(approval)) => {
+                    runtime_gateway_admin_json_response(200, execution_approval_json(approval))
+                }
+                Ok(ApprovalVoteMutationOutcome::Replayed(snapshot)) => {
+                    runtime_gateway_admin_json_response(
+                        200,
+                        execution_approval_snapshot_json(&approval_id, snapshot),
+                    )
+                }
+                Err(ApplicationGovernanceLifecycleError::Repository(error)) => {
+                    repository_error(error)
+                }
+                Err(_) => repository_error(GovernanceRepositoryError::InvalidInput),
+            }
+        }
+        ("GET" | "POST", _) => build_runtime_proxy_json_error_response(
+            404,
+            "execution_approval_not_found",
+            "execution approval was not found",
+        ),
+        _ => build_runtime_proxy_json_error_response(
+            405,
+            "control_plane_method_not_allowed",
+            "HTTP method is not allowed for this governance route",
+        ),
+    }
+}
+
+fn execution_approval_json(approval: ApprovalRecord) -> serde_json::Value {
+    serde_json::json!({
+        "object": "governance.execution_approval",
+        "approval_id": approval.id.as_str(),
+        "state": approval_state(approval.state),
+        "version": approval.version,
+        "required_quorum": approval.effective_required_quorum(),
+        "vote_count": approval.votes.len(),
+        "expires_at_unix_ms": approval.expires_at_unix_ms,
+        "activated_at_unix_ms": approval.activated_at_unix_ms,
+    })
+}
+
+fn execution_approval_snapshot_json(
+    approval_id: &ApprovalId,
+    snapshot: ApprovalVoteSnapshot,
+) -> serde_json::Value {
+    serde_json::json!({
+        "object": "governance.execution_approval",
+        "approval_id": approval_id.as_str(),
+        "state": approval_state(snapshot.state),
+        "version": snapshot.version,
+        "required_quorum": snapshot.required_quorum,
+        "vote_count": snapshot.vote_count,
+        "expires_at_unix_ms": snapshot.expires_at_unix_ms,
+        "activated_at_unix_ms": snapshot.activated_at_unix_ms,
+    })
+}
+
+fn execution_approval_audit_command(
+    repository: &RuntimeGovernanceRepository<'_>,
+    action: &ControlPlaneActionPlan,
+    approval_id: &ApprovalId,
+    audit_action: &str,
+) -> Result<AuditOutboxWriteCommand, GovernanceRepositoryError> {
+    let mut event = action.audit_event.clone();
+    event.action = AuditAction::new(audit_action);
+    event.resource = AuditResource::new(
+        "execution_approval",
+        Some(approval_id.as_str().to_string()),
+        Some(event.tenant_id),
+    );
+    let previous_digest = repository.latest_audit_digest(event.tenant_id)?;
+    let event_digest = compute_audit_chain_digest(previous_digest.as_ref(), &event);
+    Ok(AuditOutboxWriteCommand {
+        outbox_event_id: AuditEventId::new(),
+        audit: AppendOnlyAuditCommand {
+            storage_key: TenantStorageKey::tenant(event.tenant_id),
+            event,
+            previous_digest,
+            event_digest,
+        },
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn vote_response(
     captured: &RuntimeProxyRequest,
@@ -812,6 +1082,7 @@ fn vote_response(
             actor,
             expected_version,
             now_unix_ms: execution.atomic_write.completed_at_unix_ms,
+            reason: None,
             audit_outbox: audit,
         },
         decision,

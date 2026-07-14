@@ -19,12 +19,12 @@ use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_log_stream_conformance,
     runtime_provider_stream_event_conformance_result,
 };
+use super::RuntimeGatewayResponseGovernance;
 use super::respond_runtime_local_rewrite_stream;
 use super::runtime_local_rewrite_append_call_id_header;
 use super::runtime_local_rewrite_governed_response_with_call_id;
 use super::runtime_local_rewrite_invalid_response;
 use crate::{RuntimeProxyRequest, RuntimeStreamingResponse};
-use prodex_application::ApplicationResponseObligationPlan;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,7 +37,7 @@ pub(super) struct RuntimeChatCompatibleRewriteContext<'a> {
     pub(super) provider_kind: RuntimeProviderBridgeKind,
     pub(super) profile_name: Option<String>,
     pub(super) binding_recorder: Option<RuntimeCopilotBindingRecorder>,
-    pub(super) response_obligations: Option<ApplicationResponseObligationPlan>,
+    pub(super) response_governance: RuntimeGatewayResponseGovernance,
 }
 
 pub(super) fn respond_runtime_chat_compatible_rewrite(
@@ -54,7 +54,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         provider_kind,
         profile_name,
         binding_recorder,
-        response_obligations,
+        response_governance,
     } = context;
     let profile_name = profile_name.unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
     let rate_limit_headers = if provider_kind == RuntimeProviderBridgeKind::DeepSeek {
@@ -114,7 +114,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
             shared: shared.runtime_shared.clone(),
             _inflight_guard: None,
         };
-        respond_runtime_local_rewrite_stream(request, streaming, shared, response_obligations);
+        respond_runtime_local_rewrite_stream(request, streaming, shared, response_governance);
         return;
     }
 
@@ -147,7 +147,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
             parts,
             request_id,
             shared,
-            response_obligations,
+            response_governance,
         )
     })
     .unwrap_or_else(|err| runtime_local_rewrite_invalid_response(request_id, shared, &err));

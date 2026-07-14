@@ -29,10 +29,15 @@ requires private/internal exposure and forbids anonymous compatibility bypass.
 
 ## Implementation status
 
-The candidate implements typed OIDC/workload evidence, optional bound mTLS,
-explicit role/tenant resolution, PKCE S256 capability validation, edge-header
-canonicalization, and governed session binding/expiry/concurrency/revocation.
-Evidence includes `edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch`,
+The candidate implements typed identity evidence, explicit role/tenant
+resolution, PKCE S256 capability validation, edge-header canonicalization, and
+governed session binding/expiry/concurrency/revocation. Configured
+`gateway.workload_identity` or `mtls_required` fails startup as unsupported
+until runtime verifies both workload token and mTLS peer.
+Evidence includes `production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_spoofing`,
+`validated_peer_metadata_maps_to_low_cardinality_governance_zone`,
 `workload_evidence_requires_exact_identity_and_bound_mtls_when_configured`, and
-`session_reuse_with_another_principal_is_revoked`. Durable multi-replica
-revocation validation remains pending with PostgreSQL.
+`session_reuse_with_another_principal_is_revoked`, and
+`cross_replica_revocation_epoch_invalidates_cached_sessions_promptly`. A
+deployed two-gateway chaos proof and trusted external TLS termination remain
+acceptance gaps.

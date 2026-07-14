@@ -56,6 +56,8 @@ pub(super) fn runtime_gateway_request_path_is_admin(
         || path == format!("{admin_prefix}/guardrails")
         || path == format!("{admin_prefix}/policies")
         || path.starts_with(&format!("{admin_prefix}/policies/"))
+        || path == format!("{admin_prefix}/execution-approvals")
+        || path.starts_with(&format!("{admin_prefix}/execution-approvals/"))
         || path == format!("{admin_prefix}/classification-rules")
         || path.starts_with(&format!("{admin_prefix}/classification-rules/"))
         || path == format!("{admin_prefix}/provider-registries")
@@ -102,13 +104,13 @@ pub(super) fn runtime_gateway_admin_authorization_rejection_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    runtime_gateway_audit_admin_role_denied_event(
-        shared,
-        &admin_auth.name,
-        admin_auth.role.as_str(),
-        method,
-        path,
-    );
+    if !runtime_gateway_audit_admin_role_denied_event(shared, admin_auth, method, path) {
+        return build_runtime_proxy_json_error_response(
+            503,
+            "governance_audit_unavailable",
+            "gateway governance audit is temporarily unavailable",
+        );
+    }
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -153,6 +155,8 @@ pub(super) fn runtime_gateway_admin_response(
     let scim_users_path = format!("{admin_prefix}/scim/v2/Users");
     let policy_path = path == format!("{admin_prefix}/policies")
         || path.starts_with(&format!("{admin_prefix}/policies/"))
+        || path == format!("{admin_prefix}/execution-approvals")
+        || path.starts_with(&format!("{admin_prefix}/execution-approvals/"))
         || path == format!("{admin_prefix}/classification-rules")
         || path.starts_with(&format!("{admin_prefix}/classification-rules/"))
         || path == format!("{admin_prefix}/provider-registries")
@@ -252,15 +256,21 @@ pub(super) fn runtime_gateway_admin_response(
     let admin_auth = &preauthorized.auth;
     let authorized_action = preauthorized.control_plane_action();
 
-    if path == route_explain_path && !captured.method.eq_ignore_ascii_case("POST") {
-        runtime_gateway_audit_admin_request_denied_event(
+    if path == route_explain_path
+        && !captured.method.eq_ignore_ascii_case("POST")
+        && !runtime_gateway_audit_admin_request_denied_event(
             shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
+            admin_auth,
             "control_plane_method_not_allowed",
             &captured.method,
             path,
-        );
+        )
+    {
+        return Some(build_runtime_proxy_json_error_response(
+            503,
+            "governance_audit_unavailable",
+            "gateway governance audit is temporarily unavailable",
+        ));
     }
     if let Some(response) = runtime_gateway_admin_boundary_response(captured, path) {
         return Some(response);

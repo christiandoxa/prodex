@@ -274,6 +274,7 @@ pub enum ProviderRetryStage {
 pub enum ProviderRetryCause {
     NextModel,
     RotateCredential,
+    NextProvider,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -402,6 +403,12 @@ fn provider_retry_cause_is_eligible(
             error_class,
             ProviderErrorClass::Auth
                 | ProviderErrorClass::Quota
+                | ProviderErrorClass::RateLimit
+                | ProviderErrorClass::Transient
+        ),
+        ProviderRetryCause::NextProvider => matches!(
+            error_class,
+            ProviderErrorClass::Quota
                 | ProviderErrorClass::RateLimit
                 | ProviderErrorClass::Transient
         ),

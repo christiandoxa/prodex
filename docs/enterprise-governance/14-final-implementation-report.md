@@ -1,8 +1,8 @@
 # Final Enterprise Governance Implementation Report
 
-Date: 2026-07-13 (Asia/Jakarta)
+Date: 2026-07-14 (Asia/Jakarta)
 
-Baseline revision: `e308fdf6`
+Current tranche baseline revision: `8ca79a62`
 
 ## Report Scope
 
@@ -17,8 +17,8 @@ called tested only when a named test, guard, benchmark or artifact is recorded.
 | --- | --- | --- |
 | 1. Inspection boundary | Typed bounded inspection, schema walking, local/Presidio adapters, trusted endpoint rules and low-cardinality telemetry are implemented | `inspection_result_is_bounded_deterministic_and_content_free`; `application_inspection_combines_sources_monotonically`; Presidio/walker/local detector tests |
 | 2. Classification and bidirectional obligations | Monotonic classification, explicit coverage, typed request/response/session obligations and incremental response overlap inspection are implemented | `classification_is_deterministic_and_monotonic`; `obligation_matrix_preserves_classification_and_observe_enforce_semantics`; incremental inspector tests |
-| 3. PDP, lifecycle, audit and SIEM | Pure PDP, four-kind immutable governance lifecycle, maker-checker approval, mandatory durable decision audit, bounded audit export and durable outbox/exporter ports are implemented | policy/approval domain tests; gateway lifecycle regressions; SQLite lifecycle/export tests; live PostgreSQL governance and SIEM outbox tests |
-| 4. Governed provider routing | Tenant-aware hard eligibility, deterministic fixed-point score, affinity/revocation and audited dispatch are implemented for the attached adapter | `crates/prodex-provider-spi/tests/governed_routing.rs`; production/provider-SPI boundary guards |
+| 3. PDP, lifecycle, audit and SIEM | Pure PDP, four-kind immutable governance lifecycle, maker-checker and request-digest-bound execution approval, mandatory durable decision audit, bounded audit export and durable outbox/exporter ports are implemented | policy/approval domain tests; content-free execution-approval HTTP regression; SQLite lifecycle/export tests; live PostgreSQL governance and SIEM outbox tests |
+| 4. Governed provider routing | Tenant-aware hard eligibility, dynamic signals, deterministic fixed-point score, heterogeneous projected-adapter dispatch, affinity/revocation and eligible-only precommit fallback are implemented | `crates/prodex-provider-spi/tests/governed_routing.rs`; provider-registry/runtime dispatch tests; production/provider-SPI boundary guards |
 | 5. Unified gateway and bank hardening | Typed identity evidence, edge security, durable governed session admission/revocation, bank startup/runtime validation and deployment guards are implemented | auth/session tests; hash/current-session revoke and audit-export HTTP lifecycle regression; `bank_governance_deployment_matrix_fails_closed`; live PostgreSQL/RLS proof and restore drill |
 
 ## Focused Verification Evidence
@@ -27,41 +27,49 @@ called tested only when a named test, guard, benchmark or artifact is recorded.
 | --- | --- | --- |
 | Application inspection | `cargo test -q -p prodex-application --test governance_inspection` | 5 passed |
 | Application obligations/pipeline | `crates/prodex-application/tests/governance_obligations.rs`, `governance_pipeline.rs` | Focused suite passed in candidate verification |
-| Governed routing | `crates/prodex-provider-spi/tests/governed_routing.rs` | Hard filters, fixed-point scoring, fallback, affinity, revocation, bounds and redacted debug covered |
+| Execution approval | `execution_fingerprint_is_stable_and_bound_to_the_request_context`; `execution_approval_is_policy_selected_quorum_gated_and_one_use`; `gateway_execution_approval_http_lists_shows_and_reviews_without_payloads` | Request digest, quorum, one use and content-free admin HTTP covered |
+| Governed routing | `governed_routing_runtime_signals_change_selection_and_keep_only_eligible_fallbacks`; `provider_registry_resolves_selected_heterogeneous_projected_adapter`; precommit fallback regressions | Dynamic eligible-only heterogeneous selection and no-postcommit retry covered |
 | Runtime policy/bank config | `bank_governance_deployment_matrix_fails_closed`; enforcing snapshot/mode validation tests | Focused suite passed in candidate verification |
 | Governance SQLite lifecycle/session/audit/export | `cargo test -q -p prodex-storage-sqlite-runtime --test governance_repository -- --test-threads=1` | 9 passed |
 | Governance PostgreSQL lifecycle/session/audit/export | `npm run ci:storage-postgres-proof`; `postgres_policy_governance_activates_and_replays_idempotently`; `postgres_governance_lifecycle_supports_all_artifact_kinds` | live Docker PostgreSQL, RLS, TLS and four runtime tests passed |
-| Governance restore | `npm run ci:backup-restore-drill` | pass; measured RPO 1.65 s, RTO 1.243 s, restored tenant/governance fingerprints and audit-chain links intact |
+| Governance restore | `npm run ci:backup-restore-drill` | pass; AES-256-GCM backup and isolated restore measured final synthetic RPO 1.813 s and RTO 1.280 s; tenant/governance fingerprints, RLS and audit-chain links intact |
 | Gateway lifecycle/session/export | `gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg`; `gateway_governance_artifacts_use_generic_maker_checker_lifecycle` | Focused HTTP regressions passed |
+| Cross-replica revocation epoch | `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly` | Shared-authority epoch invalidates cached sessions; deployed two-gateway chaos remains pending |
+| Edge Host/proxy boundary | `production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_spoofing`; `non_loopback_server_requires_explicit_expected_host` | Exact trusted proxy, forwarding stripping and explicit non-loopback Host authority covered |
+| Gateway metrics | `prometheus_text_aggregates_keys_without_high_cardinality_labels` | Aggregate metrics contain no key, tenant or epoch labels |
 | Tool metadata bound | `requested_tool_metadata_is_bounded` | passed |
 | Webhook content safety | `guardrail_webhook_policy_reason_is_stable_and_content_free` | passed |
 | Architecture/security guards | production, application, auth, config, provider-SPI, deployment-security and observability boundary guards | passed in focused verification |
+| Full repository gate | `npm run test:full -- --timings` | passed for the current tranche |
+| Formatting and lint | `cargo fmt --all --check`; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` | passed for the current tranche |
+| Dependency policy | `cargo audit`; `cargo deny check advisories sources licenses bans` | no advisories or policy violations; stale skip entries emitted non-fatal warnings |
+| Runtime load and stress | `npm run ci:runtime-load-smoke`; `npm run ci:runtime-stress` | 32/32 load requests passed at 69.25 ms p95 TTFT; 445-test stress tranche and continuation repetitions passed |
 | Documentation/JSON | Docs lint, JSON parse and diff check | See final gate record below |
 
 ## Governance Benchmark Evidence
 
-Recorded on 2026-07-13 from the candidate based on `e308fdf6`, using Linux
-6.17, an AMD Ryzen 5 PRO 4650G (6 cores/12 threads), and 30 GiB RAM. Criterion
-used 100 per-iteration samples. The timed run used 109% CPU and 24,200 KiB peak
-RSS.
+`cargo bench --locked --features bench-support --bench governance_hot_paths`
+was rerun for the `8ca79a62` tranche on 2026-07-14 with Criterion's 100-sample
+configuration. The current maximum-bound estimate intervals were:
 
-| Maximum-bound case | p50 | p95 | p99 | p50 throughput | Status |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Inspection result, maximum findings | 26.926 us | 27.755 us | 28.221 us | 37,139/s | pass |
-| PDP, 256 compiled rules | 1.963 us | 2.043 us | 2.066 us | 509,422/s | pass |
-| Governed routing, 64 candidates | 5.734 us | 6.069 us | 6.530 us | 174,411/s | pass |
+| Maximum-bound case | Criterion estimate interval | Status |
+| --- | ---: | --- |
+| Inspection result, maximum findings | 27.143-27.238 us | pass |
+| PDP, 256 compiled rules | 2.768-2.796 us | pass |
+| Governed routing, 64 candidates | 6.290-6.393 us | pass |
 
-The CPU-pinned compatibility comparison passed all eight disabled-path p95/p99
-budgets; the worst p99 delta was +4.4%. The deterministic local load smoke
-passed 32/32 requests at 68.56 ms p95 TTFT. These results do not claim external
-provider capacity, multi-replica soak, or production queue/lock/resource SLOs.
+The earlier CPU-pinned compatibility comparison against `e308fdf6` passed all
+eight disabled-path p95/p99 budgets; the worst p99 delta was +4.4%. The current
+deterministic local load smoke passed 32/32 requests at 69.25 ms p95 TTFT.
+These results do not claim external provider capacity, multi-replica soak, or
+production queue/lock/resource SLOs.
 
 ## Architecture and Data Flow
 
 Supported channels enter one authenticated gateway boundary, then execute one
 ordered application plan: bounded inspection, monotonic classification, pure
 PDP, obligation admission, hard-filtered deterministic routing, attached SPI
-dispatch, incremental response enforcement, accounting and durable audit. Four
+adapter dispatch, incremental response enforcement, accounting and durable audit. Four
 independent per-tenant ArcSwap authorities publish policy, classification,
 provider-registry and routing-score active/LKG snapshots. SQLite is the local
 compatibility runtime; PostgreSQL with transaction-local tenant context and RLS
@@ -110,10 +118,10 @@ original eligible set.
 
 ## Exact Residual Risks and Boundaries
 
-1. One local rewrite process owns one attached executable provider adapter,
-   upstream configuration and credential family. Simultaneous heterogeneous
-   adapter dispatch and cross-provider fallback are unsupported. A route naming
-   another provider must fail unavailable before dispatch.
+1. Dynamic routing resolves eligible heterogeneous projected-credential
+   adapters and may advance through the immutable eligible fallback set only
+   before response commitment. Unsupported/unbound adapters fail unavailable;
+   managed regional provider failover remains deployment acceptance evidence.
 2. Mandatory governed data-plane audit is submitted to a bounded background
    writer and synchronously acknowledged only after the tenant audit-chain and
    SIEM-outbox transaction commits. This avoids request-thread filesystem/DB
@@ -127,11 +135,11 @@ original eligible set.
    audit/outbox writes and leased SIEM delivery passed the disposable live
    backend proof. Managed-database failover and a real external SIEM outage
    exercise remain deployment acceptance work.
-5. Durable session state is hydrated by configured authority tenant and
-   periodically refreshed. Local revocation is immediate, while another
-   replica may retain a revoked session until the next five-second refresh;
-   cross-replica invalidation/pub-sub and a two-gateway chaos proof are not
-   implemented.
+5. Durable session state is hydrated by configured authority tenant. Each
+   revocation advances the shared authority epoch and replicas poll it every
+   250 milliseconds before refreshing cached sessions. The epoch path has a
+   focused shared-authority regression; a deployed two-gateway chaos proof is
+   not recorded.
 6. Both hash-targeted and current-session revoke routes are authenticated
    control-plane routes. The current route hashes the raw `session_id` header
    server-side; a separate ordinary data-plane self-service logout route is not
@@ -143,18 +151,27 @@ original eligible set.
 8. Browser Authorization Code plus PKCE is not a supported gateway-admin flow;
    browser-originated administration remains disabled. Device/service identity
    paths are the supported authenticated surfaces.
-9. Execution approval and governance break-glass activation are disabled. The
-   repository retains bounded domain primitives and ADRs, but no authoritative
-   production token-consumption path is claimed.
+9. Policy-selected execution approval is request-digest/revision bound,
+   quorum-gated, atomically single-use, and exposed through content-free admin
+   HTTP. Governance break-glass activation remains disabled.
 10. Group/department ABAC attributes are not supplied by the current identity
     evidence contract. Tenant, principal, role, project, classification,
     provider and revision attributes are enforced.
-11. `npm ci` is not an executable gate in this workspace: no lockfile is
+11. Configured `gateway.workload_identity` or `mtls_required` fails startup as
+    unsupported until runtime verifies the workload token and mTLS peer.
+    Trusted external termination and authenticated peer-evidence binding remain
+    unresolved acceptance work.
+12. `npm ci` is not an executable gate in this workspace: no lockfile is
     tracked, and a generated lockfile rejects the root's intentionally
     cross-platform workspace packages on one host. `npm test` is the supported
     repository gate.
 
-## Release and Full-Gate Record
+## Prior Release and Full-Gate Record
+
+The table below is retained historical evidence from the earlier release
+candidate. It is not a release decision or full-gate claim for the current
+`8ca79a62` tranche. Current external deployment, SIEM, managed failover, mTLS
+peer verification and multi-replica acceptance blockers remain open.
 
 | Gate | Status | Final evidence owner |
 | --- | --- | --- |
@@ -168,11 +185,11 @@ original eligible set.
 | Fuzz and load/stress gates | passed | 117,401 fuzz executions; 32/32 load smoke; runtime stress pass |
 | Multi-replica soak/chaos | not claimed | deployment acceptance owner |
 | Governance-disabled compatibility delta | passed | CPU-pinned baseline/candidate comparison |
-| Release decision | approved | publish npm/GitHub `0.285.0`; crates.io excluded |
+| Prior release decision | approved | historical npm/GitHub `0.285.0`; not a current-tranche release decision |
 
-## Commands Executed
+## Prior Candidate Commands
 
-The final candidate passed:
+The earlier candidate recorded:
 
 ```bash
 cargo fmt --all -- --check

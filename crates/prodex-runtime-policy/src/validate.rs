@@ -263,6 +263,31 @@ fn validate_governance_policy_rules(
                 path.display()
             );
         }
+        if rule
+            .condition
+            .channel
+            .is_some_and(|channel| channel != crate::types::RuntimeGovernancePolicyChannel::Api)
+        {
+            bail!(
+                "gateway governance policy channel selector must be api in {}",
+                path.display()
+            );
+        }
+        for selector in [
+            rule.condition.team_id.as_deref(),
+            rule.condition.project_id.as_deref(),
+            rule.condition.user_id.as_deref(),
+            rule.condition.requested_model.as_deref(),
+            rule.condition.requested_tool.as_deref(),
+            rule.condition.break_glass_scope.as_deref(),
+        ] {
+            if selector.is_some_and(|selector| PolicySelector::new(selector).is_err()) {
+                bail!(
+                    "governance policy attribute selector is invalid in {}",
+                    path.display()
+                );
+            }
+        }
         if rule.obligations.len() > MAX_POLICY_OBLIGATIONS {
             bail!(
                 "governance policy obligation count exceeds {} in {}",
@@ -380,6 +405,12 @@ fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<(
             path.display()
         );
     }
+    if policy.gateway.expected_host.is_none() {
+        bail!(
+            "bank governance mode requires an exact gateway expected host in {}",
+            path.display()
+        );
+    }
     if policy.gateway.restricted_egress != Some(true) {
         bail!(
             "bank governance mode requires restricted egress in {}",
@@ -421,15 +452,6 @@ fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<(
     if sso.browser_flow == Some(true) {
         bail!(
             "bank governance mode cannot enable unsupported browser OIDC flow in {}",
-            path.display()
-        );
-    }
-    let workload = &policy.gateway.workload_identity;
-    if workload.enabled == Some(true)
-        && (workload.mtls_required != Some(true) || workload.mtls_ca_ref.is_none())
-    {
-        bail!(
-            "bank governance mode requires mTLS-bound workload identity when configured in {}",
             path.display()
         );
     }

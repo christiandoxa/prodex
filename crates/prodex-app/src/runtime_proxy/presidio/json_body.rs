@@ -242,12 +242,17 @@ mod tests {
 
     #[test]
     fn walker_reports_unsupported_modalities_and_depth_limits() {
-        let content = collect_json_content(&serde_json::json!({
-            "input": "inspect me",
-            "input_image": {"url": "https://example.com/synthetic.png"}
-        }))
-        .unwrap();
-        assert_eq!(content.coverage, InspectionCoverage::Partial);
+        for value in [
+            serde_json::json!({
+                "input": "inspect me",
+                "input_image": {"url": "https://example.com/synthetic.png"}
+            }),
+            serde_json::json!({"input": "inspect me", "input_audio": "synthetic-audio"}),
+            serde_json::json!({"input": "inspect me", "input_file": "synthetic-file"}),
+        ] {
+            let content = collect_json_content(&value).unwrap();
+            assert_eq!(content.coverage, InspectionCoverage::Partial);
+        }
 
         let mut value = serde_json::json!("deep");
         for _ in 0..=MAX_PRESIDIO_JSON_DEPTH {

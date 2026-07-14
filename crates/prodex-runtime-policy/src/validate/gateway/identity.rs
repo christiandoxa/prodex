@@ -253,12 +253,6 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
 
 fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
     let workload = &policy.gateway.workload_identity;
-    crate::validate_secrets::validate_gateway_secret_ref(
-        policy,
-        path,
-        "gateway.workload_identity.mtls_ca_ref",
-        workload.mtls_ca_ref.as_ref(),
-    )?;
     let configured = workload.enabled.is_some()
         || workload.issuer.is_some()
         || workload.audience.is_some()
@@ -268,41 +262,8 @@ fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -
     if !configured {
         return Ok(());
     }
-    if workload.enabled != Some(true)
-        || workload.issuer.is_none()
-        || workload.audience.is_none()
-        || workload.required_scope.as_deref() != Some("data_plane")
-    {
-        bail!(
-            "gateway.workload_identity in {} requires enabled=true, exact issuer/audience, and data_plane scope",
-            path.display()
-        );
-    }
-    ValidatedOidcIssuer::parse(
-        workload
-            .issuer
-            .as_deref()
-            .expect("workload issuer presence checked"),
+    bail!(
+        "gateway.workload_identity in {} is unsupported until the runtime verifies workload tokens and mTLS peer identity",
+        path.display()
     )
-    .with_context(|| {
-        format!(
-            "gateway.workload_identity.issuer in {} must be an exact HTTPS issuer",
-            path.display()
-        )
-    })?;
-    validate_gateway_exact_identifier(
-        workload
-            .audience
-            .as_deref()
-            .expect("workload audience presence checked"),
-        path,
-        "gateway.workload_identity.audience",
-    )?;
-    if workload.mtls_required == Some(true) && workload.mtls_ca_ref.is_none() {
-        bail!(
-            "gateway.workload_identity.mtls_ca_ref in {} is required when mTLS is required",
-            path.display()
-        );
-    }
-    Ok(())
 }

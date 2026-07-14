@@ -411,6 +411,15 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 body,
                 prepared_auth,
             )?;
+            if response.status().as_u16() >= 400 {
+                return Ok(RuntimeLocalRewriteUpstreamResult {
+                    response: RuntimeLocalRewriteUpstreamResponse::Buffered(
+                        runtime_local_rewrite_buffered_response_from_response(response)?,
+                    ),
+                    gemini_context: None,
+                    copilot_context: None,
+                });
+            }
             Ok(RuntimeLocalRewriteUpstreamResult {
                 response: RuntimeLocalRewriteUpstreamResponse::Live(
                     RuntimeLocalRewriteLiveResponse::new(response),

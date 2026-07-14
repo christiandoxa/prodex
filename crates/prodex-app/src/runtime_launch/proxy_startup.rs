@@ -211,10 +211,12 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     } = options;
     validate_credential_free_http_url(&upstream_base_url, "runtime upstream base URL")?;
     let runtime_config = Arc::new(RuntimeConfig::from_env_policy_and_cli(paths)?);
-    if runtime_config.governance.mode.is_enforcing() {
-        bail!(
-            "enterprise governance enforcement requires the authenticated unified gateway data plane"
-        );
+    if !runtime_config
+        .governance
+        .mode
+        .allows_anonymous_compatibility()
+    {
+        bail!("enterprise governance modes require the authenticated unified gateway data plane");
     }
     let log_path = initialize_runtime_proxy_log_path_from_config(&runtime_config);
     for key in runtime_config.compatibility_defaults() {

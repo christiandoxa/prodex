@@ -283,3 +283,72 @@ CREATE INDEX IF NOT EXISTS prodex_governance_sessions_refresh_idx
     ON prodex_governance_sessions (tenant_id, last_seen_at_unix_ms DESC, session_id_hash);
 "#,
 };
+
+pub const LOCAL_APPROVAL_TERMINATION_REASON_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(7),
+    phase: SqliteMigrationPhase::Expand,
+    name: "007_approval_termination_reason",
+    sql: r#"
+ALTER TABLE prodex_approvals ADD COLUMN termination_reason TEXT
+    CHECK (termination_reason IS NULL OR length(termination_reason) BETWEEN 1 AND 128);
+"#,
+};
+
+pub const LOCAL_SESSION_REVOCATION_EPOCH_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(8),
+    phase: SqliteMigrationPhase::Expand,
+    name: "008_session_revocation_epoch",
+    sql: r#"
+ALTER TABLE prodex_tenants ADD COLUMN session_revocation_epoch INTEGER NOT NULL DEFAULT 0
+    CHECK (session_revocation_epoch >= 0);
+"#,
+};
+
+pub const LOCAL_GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION: SqliteMigration =
+    SqliteMigration {
+        version: SqliteMigrationVersion(6),
+        phase: SqliteMigrationPhase::Expand,
+        name: "006_governance_session_provider_revisions",
+        sql: r#"
+ALTER TABLE prodex_governance_sessions
+    RENAME COLUMN registry_revision_id TO provider_registry_revision;
+ALTER TABLE prodex_governance_sessions
+    ADD COLUMN provider_descriptor_revision INTEGER NOT NULL DEFAULT 0
+    CHECK (provider_descriptor_revision >= 0);
+
+UPDATE prodex_governance_sessions
+SET provider_descriptor_revision = CAST(
+        substr(provider_registry_revision, instr(provider_registry_revision, ':') + 1)
+        AS INTEGER
+    )
+WHERE instr(provider_registry_revision, ':') > 1;
+UPDATE prodex_governance_sessions
+SET provider_registry_revision = substr(
+        provider_registry_revision, 1, instr(provider_registry_revision, ':') - 1
+    )
+WHERE instr(provider_registry_revision, ':') > 1;
+
+-- Remove these compatibility updates once every deployment has crossed schema v6.
+CREATE TRIGGER IF NOT EXISTS prodex_governance_sessions_provider_registry_insert_fk
+BEFORE INSERT ON prodex_governance_sessions
+WHEN NOT EXISTS (
+    SELECT 1 FROM prodex_provider_registry_revisions registry
+    WHERE registry.tenant_id = NEW.tenant_id
+      AND registry.revision_id = NEW.provider_registry_revision
+)
+BEGIN
+    SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prodex_governance_sessions_provider_registry_update_fk
+BEFORE UPDATE OF tenant_id, provider_registry_revision ON prodex_governance_sessions
+WHEN NOT EXISTS (
+    SELECT 1 FROM prodex_provider_registry_revisions registry
+    WHERE registry.tenant_id = NEW.tenant_id
+      AND registry.revision_id = NEW.provider_registry_revision
+)
+BEGIN
+    SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed');
+END;
+"#,
+    };

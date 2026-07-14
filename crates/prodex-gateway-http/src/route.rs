@@ -376,7 +376,11 @@ fn control_plane_operation_for_path(
         }
         ["budgets", ..] => Some(GatewayControlPlaneOperation::BudgetUpdate),
         [
-            "policies" | "classification-rules" | "provider-registries" | "routing-scores",
+            "policies"
+            | "classification-rules"
+            | "provider-registries"
+            | "routing-scores"
+            | "execution-approvals",
             ..,
         ] => Some(GatewayControlPlaneOperation::PolicyPublish),
         ["sessions", _, "revoke"] => Some(GatewayControlPlaneOperation::PolicyPublish),

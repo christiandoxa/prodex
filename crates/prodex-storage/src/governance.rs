@@ -2,9 +2,11 @@
 
 use super::*;
 use prodex_domain::{
-    ApprovalFingerprint, ApprovalId, ApprovalRecord, ApprovalState, AuditEventId, Channel,
-    CredentialScope, DataClassification, IdempotencyKey, PolicyRevisionId, Principal, PrincipalId,
-    TenantId,
+    ApprovalError, ApprovalFingerprint, ApprovalId, ApprovalReasonCode, ApprovalRecord,
+    ApprovalState, AuditAction, AuditDigest, AuditEvent, AuditEventId, AuditOutcome,
+    AuditReasonCode, AuditResource, AuditResourceId, AuditTimestamp, Channel, CredentialScope,
+    DataClassification, IdempotencyKey, PolicyRevisionId, Principal, PrincipalId, TenantId,
+    compute_audit_chain_digest,
 };
 
 pub const MAX_COMPILED_GOVERNANCE_ARTIFACT_BYTES: usize = 1024 * 1024;
@@ -90,7 +92,231 @@ pub struct ApprovalVoteRequest {
     pub actor: Principal,
     pub expected_version: u64,
     pub now_unix_ms: u64,
+    pub reason: Option<ApprovalReasonCode>,
     pub audit_outbox: AuditOutboxWriteCommand,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ApprovalVoteIdempotency {
+    pub operation: IdempotentOperation,
+    pub started_at_unix_ms: u64,
+}
+
+impl fmt::Debug for ApprovalVoteIdempotency {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApprovalVoteIdempotency")
+            .field("operation", &"<redacted>")
+            .field("started_at_unix_ms", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApprovalVoteStableDenial {
+    SelfApproval,
+    StaleVersion,
+    InvalidTransition,
+}
+
+impl ApprovalVoteStableDenial {
+    pub const fn from_approval_error(error: ApprovalError) -> Option<Self> {
+        match error {
+            ApprovalError::SelfApprovalDenied => Some(Self::SelfApproval),
+            ApprovalError::StaleVersion => Some(Self::StaleVersion),
+            ApprovalError::InvalidTransition => Some(Self::InvalidTransition),
+            ApprovalError::InvalidToken
+            | ApprovalError::InvalidQuorum
+            | ApprovalError::InvalidExpiry
+            | ApprovalError::TenantMismatch
+            | ApprovalError::ReplayMismatch => None,
+        }
+    }
+
+    pub const fn reason_code(self) -> &'static str {
+        match self {
+            Self::SelfApproval => "approval.self_approval_denied",
+            Self::StaleVersion => "approval.stale_version",
+            Self::InvalidTransition => "approval.invalid_transition",
+        }
+    }
+
+    pub const fn repository_error(self) -> GovernanceRepositoryError {
+        match self {
+            Self::SelfApproval => GovernanceRepositoryError::ApprovalSelfAction,
+            Self::StaleVersion => GovernanceRepositoryError::StaleVersion,
+            Self::InvalidTransition => GovernanceRepositoryError::InvalidTransition,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApprovalVoteSnapshot {
+    pub state: ApprovalState,
+    pub version: u64,
+    pub required_quorum: u8,
+    pub vote_count: usize,
+    pub expires_at_unix_ms: u64,
+    pub activated_at_unix_ms: Option<u64>,
+}
+
+impl ApprovalVoteSnapshot {
+    pub fn from_record(record: &ApprovalRecord) -> Self {
+        Self {
+            state: record.state,
+            version: record.version,
+            required_quorum: record.effective_required_quorum(),
+            vote_count: record.votes.len(),
+            expires_at_unix_ms: record.expires_at_unix_ms,
+            activated_at_unix_ms: record.activated_at_unix_ms,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApprovalVoteStableOutcome {
+    Success(ApprovalVoteSnapshot),
+    Denied(ApprovalVoteStableDenial),
+}
+
+impl ApprovalVoteStableOutcome {
+    pub fn encode(self) -> Vec<u8> {
+        match self {
+            Self::Success(snapshot) => format!(
+                "v1|ok|{}|{}|{}|{}|{}|{}",
+                approval_state_storage_label(snapshot.state),
+                snapshot.version,
+                snapshot.required_quorum,
+                snapshot.vote_count,
+                snapshot.expires_at_unix_ms,
+                snapshot
+                    .activated_at_unix_ms
+                    .map_or_else(|| "none".to_string(), |value| value.to_string()),
+            )
+            .into_bytes(),
+            Self::Denied(denial) => format!("v1|denied|{}", denial.reason_code()).into_bytes(),
+        }
+    }
+
+    pub fn decode(value: &[u8]) -> Result<Self, GovernanceRepositoryError> {
+        if value.len() > 256 {
+            return Err(GovernanceRepositoryError::InvalidInput);
+        }
+        let value =
+            std::str::from_utf8(value).map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+        let fields = value.split('|').collect::<Vec<_>>();
+        match fields.as_slice() {
+            ["v1", "denied", reason] => Ok(Self::Denied(match *reason {
+                "approval.self_approval_denied" => ApprovalVoteStableDenial::SelfApproval,
+                "approval.stale_version" => ApprovalVoteStableDenial::StaleVersion,
+                "approval.invalid_transition" => ApprovalVoteStableDenial::InvalidTransition,
+                _ => return Err(GovernanceRepositoryError::InvalidInput),
+            })),
+            [
+                "v1",
+                "ok",
+                state,
+                version,
+                quorum,
+                vote_count,
+                expires,
+                activated,
+            ] => {
+                let state = approval_state_from_storage_label(state)
+                    .ok_or(GovernanceRepositoryError::InvalidInput)?;
+                let required_quorum = quorum
+                    .parse::<u8>()
+                    .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+                if required_quorum == 0 || required_quorum > prodex_domain::MAX_APPROVAL_QUORUM {
+                    return Err(GovernanceRepositoryError::InvalidInput);
+                }
+                let version = version
+                    .parse()
+                    .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+                let vote_count = vote_count
+                    .parse()
+                    .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+                let expires_at_unix_ms = expires
+                    .parse()
+                    .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+                if version == 0
+                    || expires_at_unix_ms == 0
+                    || vote_count > usize::from(prodex_domain::MAX_APPROVAL_QUORUM)
+                {
+                    return Err(GovernanceRepositoryError::InvalidInput);
+                }
+                Ok(Self::Success(ApprovalVoteSnapshot {
+                    state,
+                    version,
+                    required_quorum,
+                    vote_count,
+                    expires_at_unix_ms,
+                    activated_at_unix_ms: if *activated == "none" {
+                        None
+                    } else {
+                        Some(
+                            activated
+                                .parse()
+                                .map_err(|_| GovernanceRepositoryError::InvalidInput)?,
+                        )
+                    },
+                }))
+            }
+            _ => Err(GovernanceRepositoryError::InvalidInput),
+        }
+    }
+
+    pub fn replay(value: &[u8]) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        match Self::decode(value)? {
+            Self::Success(snapshot) => Ok(ApprovalVoteMutationOutcome::Replayed(snapshot)),
+            Self::Denied(denial) => Err(denial.repository_error()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApprovalVoteMutationOutcome {
+    Applied(ApprovalRecord),
+    Replayed(ApprovalVoteSnapshot),
+}
+
+pub fn denied_approval_audit_outbox(
+    mut command: AuditOutboxWriteCommand,
+    denial: ApprovalVoteStableDenial,
+) -> AuditOutboxWriteCommand {
+    command.audit.event.outcome = AuditOutcome::Denied;
+    command.audit.event.reason_code = Some(denial.reason_code().to_string());
+    command.audit.event_digest =
+        compute_audit_chain_digest(command.audit.previous_digest.as_ref(), &command.audit.event);
+    command
+}
+
+fn approval_state_storage_label(state: ApprovalState) -> &'static str {
+    match state {
+        ApprovalState::Draft => "draft",
+        ApprovalState::PendingApproval => "pending_approval",
+        ApprovalState::Approved => "approved",
+        ApprovalState::Rejected => "rejected",
+        ApprovalState::Expired => "expired",
+        ApprovalState::Cancelled => "cancelled",
+        ApprovalState::Active => "active",
+        ApprovalState::Superseded => "superseded",
+        ApprovalState::RolledBack => "rolled_back",
+    }
+}
+
+fn approval_state_from_storage_label(value: &str) -> Option<ApprovalState> {
+    match value {
+        "draft" => Some(ApprovalState::Draft),
+        "pending_approval" => Some(ApprovalState::PendingApproval),
+        "approved" => Some(ApprovalState::Approved),
+        "rejected" => Some(ApprovalState::Rejected),
+        "expired" => Some(ApprovalState::Expired),
+        "cancelled" => Some(ApprovalState::Cancelled),
+        "active" => Some(ApprovalState::Active),
+        "superseded" => Some(ApprovalState::Superseded),
+        "rolled_back" => Some(ApprovalState::RolledBack),
+        _ => None,
+    }
 }
 
 impl fmt::Debug for ApprovalVoteRequest {
@@ -101,6 +327,7 @@ impl fmt::Debug for ApprovalVoteRequest {
             .field("actor", &"<redacted>")
             .field("expected_version", &"<redacted>")
             .field("now_unix_ms", &"<redacted>")
+            .field("reason", &self.reason.as_ref().map(|_| "<redacted>"))
             .field("audit_outbox", &"<redacted>")
             .finish()
     }
@@ -145,7 +372,8 @@ pub struct GovernanceSessionUpsertCommand {
     pub credential_scope: CredentialScope,
     pub classification: DataClassification,
     pub policy_revision_id: PolicyRevisionId,
-    pub registry_revision_id: String,
+    pub provider_registry_revision: String,
+    pub provider_descriptor_revision: u64,
     pub provider_affinity: Option<String>,
     pub created_at_unix_ms: u64,
     pub last_seen_at_unix_ms: u64,
@@ -164,7 +392,8 @@ impl fmt::Debug for GovernanceSessionUpsertCommand {
             .field("credential_scope", &self.credential_scope)
             .field("classification", &self.classification)
             .field("policy_revision_id", &"<redacted>")
-            .field("registry_revision_id", &"<redacted>")
+            .field("provider_registry_revision", &"<redacted>")
+            .field("provider_descriptor_revision", &"<redacted>")
             .field(
                 "provider_affinity",
                 &self.provider_affinity.as_ref().map(|_| "<redacted>"),
@@ -187,7 +416,8 @@ pub struct GovernanceSessionRecord {
     pub credential_scope: CredentialScope,
     pub classification: DataClassification,
     pub policy_revision_id: PolicyRevisionId,
-    pub registry_revision_id: String,
+    pub provider_registry_revision: String,
+    pub provider_descriptor_revision: u64,
     pub provider_affinity: Option<String>,
     pub created_at_unix_ms: u64,
     pub last_seen_at_unix_ms: u64,
@@ -207,7 +437,8 @@ impl fmt::Debug for GovernanceSessionRecord {
             .field("credential_scope", &self.credential_scope)
             .field("classification", &self.classification)
             .field("policy_revision_id", &"<redacted>")
-            .field("registry_revision_id", &"<redacted>")
+            .field("provider_registry_revision", &"<redacted>")
+            .field("provider_descriptor_revision", &"<redacted>")
             .field(
                 "provider_affinity",
                 &self.provider_affinity.as_ref().map(|_| "<redacted>"),
@@ -223,7 +454,7 @@ impl fmt::Debug for GovernanceSessionRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GovernanceSessionUpsertOutcome {
-    Stored(GovernanceSessionRecord),
+    Stored(Box<GovernanceSessionRecord>),
     ConcurrentLimitReached,
 }
 
@@ -286,6 +517,125 @@ pub struct GovernanceAuditExportRecord {
     pub reason_code: Option<String>,
     pub previous_digest: Option<String>,
     pub event_digest: String,
+}
+
+/// Verifies both the topology and the canonical digest of every persisted audit event.
+/// Invalid persisted fields deliberately collapse to the same redacted health result.
+pub fn verify_governance_audit_integrity(
+    tenant_id: TenantId,
+    records: &[GovernanceAuditExportRecord],
+) -> GovernanceAuditIntegrityHealth {
+    use std::collections::{HashMap, HashSet};
+
+    let event_count = u64::try_from(records.len()).unwrap_or(u64::MAX);
+    let mut valid = true;
+    let mut digests = HashSet::with_capacity(records.len());
+    let mut child_by_previous = HashMap::with_capacity(records.len());
+    let mut root = None;
+
+    for record in records {
+        if !digests.insert(record.event_digest.clone()) {
+            valid = false;
+        }
+        match record.previous_digest.as_ref() {
+            Some(previous) => {
+                if child_by_previous
+                    .insert(previous.clone(), record.event_digest.clone())
+                    .is_some()
+                {
+                    valid = false;
+                }
+            }
+            None => {
+                if root.replace(record.event_digest.clone()).is_some() {
+                    valid = false;
+                }
+            }
+        }
+        valid &= audit_record_digest_is_valid(tenant_id, record);
+    }
+
+    valid &= child_by_previous
+        .keys()
+        .all(|previous| digests.contains(previous));
+    let chain_head_count = u64::try_from(
+        digests
+            .iter()
+            .filter(|digest| !child_by_previous.contains_key(digest.as_str()))
+            .count(),
+    )
+    .unwrap_or(u64::MAX);
+
+    if records.is_empty() {
+        valid &= root.is_none() && chain_head_count == 0;
+    } else if let Some(mut current) = root {
+        let mut visited = HashSet::with_capacity(records.len());
+        while visited.insert(current.clone()) {
+            let Some(next) = child_by_previous.get(&current) else {
+                break;
+            };
+            current = next.clone();
+        }
+        valid &= visited.len() == records.len() && chain_head_count == 1;
+    } else {
+        valid = false;
+    }
+
+    GovernanceAuditIntegrityHealth {
+        event_count,
+        chain_head_count,
+        chain_valid: valid,
+    }
+}
+
+fn audit_record_digest_is_valid(tenant_id: TenantId, record: &GovernanceAuditExportRecord) -> bool {
+    let parsed = (|| {
+        let id = record.audit_event_id.parse::<AuditEventId>().ok()?;
+        AuditTimestamp::new(record.occurred_at_unix_ms).ok()?;
+        let principal_id = record.principal_id.parse::<PrincipalId>().ok()?;
+        let action = AuditAction::try_new(record.action.clone()).ok()?;
+        let resource_id = record
+            .resource_id
+            .clone()
+            .map(AuditResourceId::new)
+            .transpose()
+            .ok()?;
+        let resource = AuditResource::new_with_resource_id(
+            record.resource_kind.clone(),
+            resource_id,
+            Some(tenant_id),
+        )
+        .ok()?;
+        let outcome = AuditOutcome::parse(&record.outcome).ok()?;
+        if let Some(reason_code) = record.reason_code.as_ref() {
+            AuditReasonCode::new(reason_code.clone()).ok()?;
+        }
+        let previous_digest = record
+            .previous_digest
+            .clone()
+            .map(AuditDigest::new)
+            .transpose()
+            .ok()?;
+        let stored_digest = AuditDigest::new(record.event_digest.clone()).ok()?;
+        Some((
+            AuditEvent {
+                id,
+                occurred_at_unix_ms: record.occurred_at_unix_ms,
+                tenant_id,
+                principal_id,
+                action,
+                resource,
+                outcome,
+                reason_code: record.reason_code.clone(),
+            },
+            previous_digest,
+            stored_digest,
+        ))
+    })();
+    let Some((event, previous_digest, stored_digest)) = parsed else {
+        return false;
+    };
+    compute_audit_chain_digest(previous_digest.as_ref(), &event) == stored_digest
 }
 
 impl fmt::Debug for GovernanceAuditExportRecord {

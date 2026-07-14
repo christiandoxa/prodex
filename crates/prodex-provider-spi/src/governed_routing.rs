@@ -13,7 +13,7 @@ pub const ROUTING_SCORE_SCALE: u16 = 10_000;
 pub const MAX_GOVERNED_ROUTING_CANDIDATES: usize = 64;
 pub const MAX_GOVERNED_ROUTING_FALLBACKS: usize = 8;
 pub const MAX_GOVERNED_PROVIDER_REGIONS: usize = 16;
-pub const MAX_GOVERNED_HARD_FILTER_REASONS: usize = 16;
+pub const MAX_GOVERNED_HARD_FILTER_REASONS: usize = 17;
 pub const GOVERNED_SCORE_COMPONENT_COUNT: usize = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,6 +23,7 @@ pub enum GovernedHardFilterReason {
     ProviderRevoked,
     CircuitOpen,
     QuotaUnavailable,
+    InFlightCapReached,
     CredentialUnavailable,
     ClassificationUnsupported,
     CapabilityMissing,
@@ -44,6 +45,7 @@ impl GovernedHardFilterReason {
             Self::ProviderRevoked => "routing.hard.provider_revoked",
             Self::CircuitOpen => "routing.hard.circuit_open",
             Self::QuotaUnavailable => "routing.hard.quota_unavailable",
+            Self::InFlightCapReached => "routing.hard.inflight_cap_reached",
             Self::CredentialUnavailable => "routing.hard.credential_unavailable",
             Self::ClassificationUnsupported => "routing.hard.classification_unsupported",
             Self::CapabilityMissing => "routing.hard.capability_missing",
@@ -167,8 +169,11 @@ impl fmt::Debug for GovernedCandidateEvaluation {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct GovernedRoutingSignals {
-    pub health: u16,
+    /// `None` means no bounded runtime health sample is available.
+    pub health: Option<u16>,
     pub load: u16,
+    /// `None` means the provider does not expose a comparable quota window.
+    pub quota_headroom: Option<u16>,
     pub cost: u16,
     pub latency: u16,
     pub risk: u16,
@@ -183,16 +188,13 @@ impl fmt::Debug for GovernedRoutingSignals {
 
 impl GovernedRoutingSignals {
     fn is_valid(self) -> bool {
-        [
-            self.health,
-            self.load,
-            self.cost,
-            self.latency,
-            self.risk,
-            self.priority,
-        ]
-        .into_iter()
-        .all(|value| value <= ROUTING_SCORE_SCALE)
+        [self.load, self.cost, self.latency, self.risk, self.priority]
+            .into_iter()
+            .all(|value| value <= ROUTING_SCORE_SCALE)
+            && self.health.is_none_or(|value| value <= ROUTING_SCORE_SCALE)
+            && self
+                .quota_headroom
+                .is_none_or(|value| value <= ROUTING_SCORE_SCALE)
     }
 }
 
@@ -258,6 +260,7 @@ pub struct GovernedProviderDescriptor {
     pub revoked: bool,
     pub circuit_open: bool,
     pub quota_available: bool,
+    pub inflight_cap_reached: bool,
     pub local_execution: bool,
     pub trust_tier: ProviderTrustTier,
     pub maximum_classification: DataClassification,
@@ -574,11 +577,17 @@ fn provider_rejection_reasons(
     if provider.revoked {
         reasons.push(GovernedHardFilterReason::ProviderRevoked);
     }
-    if provider.circuit_open {
+    // Continuations retain hard affinity across temporary runtime degradation. Static
+    // eligibility (including revocation and policy) remains authoritative.
+    let has_hard_affinity = request.affinity_provider == Some(provider.provider);
+    if provider.circuit_open && !has_hard_affinity {
         reasons.push(GovernedHardFilterReason::CircuitOpen);
     }
-    if !provider.quota_available {
+    if !provider.quota_available && !has_hard_affinity {
         reasons.push(GovernedHardFilterReason::QuotaUnavailable);
+    }
+    if provider.inflight_cap_reached && !has_hard_affinity {
+        reasons.push(GovernedHardFilterReason::InFlightCapReached);
     }
     if !provider.credential_available {
         reasons.push(GovernedHardFilterReason::CredentialUnavailable);
@@ -679,12 +688,15 @@ fn score_provider(
     let components = [
         score_component(
             GovernedScoreComponentKind::Health,
-            provider.signals.health,
+            provider.signals.health.unwrap_or(ROUTING_SCORE_SCALE / 2),
             weights.health,
         ),
         score_component(
             GovernedScoreComponentKind::AvailableCapacity,
-            inverse(provider.signals.load),
+            provider.signals.quota_headroom.map_or_else(
+                || inverse(provider.signals.load),
+                |quota| quota.min(inverse(provider.signals.load)),
+            ),
             weights.load,
         ),
         score_component(

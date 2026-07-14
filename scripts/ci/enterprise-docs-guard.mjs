@@ -62,6 +62,58 @@ const DOCUMENTS = [
   },
 ];
 
+const REQUIRED_ENTERPRISE_ARTIFACT_PATHS = [
+  ...[
+    "00-baseline-and-inventory.md",
+    "01-target-architecture.md",
+    "02-trust-boundaries-and-data-flow.md",
+    "03-data-classification-and-inspection.md",
+    "04-policy-model-and-obligations.md",
+    "05-approval-and-break-glass.md",
+    "06-provider-registry-and-routing.md",
+    "07-identity-session-and-api-gateway.md",
+    "08-audit-siem-and-secret-management.md",
+    "09-storage-ha-backup-and-dr.md",
+    "10-rollout-rollback-and-compatibility.md",
+    "11-security-test-matrix.md",
+    "12-performance-baseline-and-results.md",
+    "13-operator-runbooks.md",
+    "14-final-implementation-report.md",
+    "implementation-ledger.md",
+    "test-matrix.json",
+  ].map((name) => `docs/enterprise-governance/${name}`),
+  ...[
+    "0001-classification-and-inspection.md",
+    "0002-pdp-pap-pip-pep-snapshots.md",
+    "0003-policy-approval-activation-lkg.md",
+    "0004-execution-approval.md",
+    "0005-provider-registry-routing.md",
+    "0006-continuation-pinning-revocation.md",
+    "0007-mandatory-audit-siem-outbox.md",
+    "0008-session-trusted-proxy.md",
+    "0009-external-secret-vault.md",
+    "0010-bank-profile-fail-closed.md",
+    "0011-sqlite-runtime-boundary.md",
+  ].map((name) => `docs/enterprise-governance/adrs/${name}`),
+  ...[
+    "01-approved-cloud-public-internal.json",
+    "02-confidential-region-retention.json",
+    "03-restricted-local-only.json",
+    "04-disable-tools-high-risk.json",
+    "05-high-risk-execution-approval.json",
+    "06-compliant-provider-outage-fallback.json",
+    "07-bank-mode-fail-closed.json",
+  ].map((name) => `docs/enterprise-governance/samples/${name}`),
+];
+const TEST_MATRIX_PATH = "docs/enterprise-governance/test-matrix.json";
+const TEST_MATRIX_STATUSES = new Set([
+  "tested",
+  "implemented",
+  "pending_validation",
+  "partial",
+  "planned",
+]);
+
 const WORKFLOW_PATH = ".github/workflows/ci.yml";
 const PACKAGE_JSON_PATH = "package.json";
 const TEST_IMPACT_MANIFEST_PATH = "scripts/ci/test-impact-manifest.json";
@@ -107,6 +159,40 @@ function validateDocument(document) {
       errors.push(`${document.path}: missing required enterprise documentation phrase '${required}'`);
     }
   }
+  return errors;
+}
+
+function validateRequiredArtifacts(root = repoRoot, exists = fs.existsSync) {
+  return REQUIRED_ENTERPRISE_ARTIFACT_PATHS.filter(
+    (relativePath) => !exists(path.join(root, relativePath)),
+  ).map((relativePath) => `${relativePath}: required enterprise artifact is missing`);
+}
+
+function validateTestMatrix(content, matrixPath = TEST_MATRIX_PATH) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return [`${matrixPath}: invalid JSON: ${message}`];
+  }
+
+  const errors = [];
+  if (!Number.isInteger(parsed?.schema_version) || parsed.schema_version < 1) {
+    errors.push(`${matrixPath}: schema_version must be a positive integer`);
+  }
+  if (!Array.isArray(parsed?.tests) || parsed.tests.length === 0) {
+    errors.push(`${matrixPath}: tests must be a non-empty array`);
+    return errors;
+  }
+  parsed.tests.forEach((test, index) => {
+    if (typeof test?.id !== "string" || test.id.trim() === "") {
+      errors.push(`${matrixPath}: tests[${index}].id must be a non-empty string`);
+    }
+    if (!TEST_MATRIX_STATUSES.has(test?.implementation_status)) {
+      errors.push(`${matrixPath}: tests[${index}].implementation_status is invalid`);
+    }
+  });
   return errors;
 }
 
@@ -256,6 +342,33 @@ function runSelfTest() {
     throw new Error("self-test failed: required phrase detection broken");
   }
 
+  const missingArtifact = REQUIRED_ENTERPRISE_ARTIFACT_PATHS[0];
+  const artifactErrors = validateRequiredArtifacts("/repo", (candidate) =>
+    candidate !== path.join("/repo", missingArtifact),
+  );
+  if (artifactErrors.length !== 1 || !artifactErrors[0].includes(missingArtifact)) {
+    throw new Error("self-test failed: missing enterprise artifact accepted");
+  }
+
+  const plannedMatrix = JSON.stringify({
+    schema_version: 1,
+    tests: [{ id: "SEC-TEST-001", implementation_status: "planned" }],
+  });
+  if (validateTestMatrix(plannedMatrix, "test-matrix.json").length !== 0) {
+    throw new Error("self-test failed: valid incomplete test matrix rejected");
+  }
+  const invalidMatrix = JSON.stringify({
+    schema_version: 1,
+    tests: [{ id: "SEC-TEST-001", implementation_status: "complete" }],
+  });
+  if (
+    !validateTestMatrix(invalidMatrix, "test-matrix.json").some((error) =>
+      error.includes("implementation_status is invalid"),
+    )
+  ) {
+    throw new Error("self-test failed: invalid test matrix status accepted");
+  }
+
   const incompleteWorkflow = "name: CI\n- name: Enforce enterprise boundary guards\n  run: npm run ci:enterprise-docs-guard\n";
   const workflowErrors = validateEnterpriseWorkflow(incompleteWorkflow, "ci.yml");
   if (
@@ -391,6 +504,13 @@ function main() {
   runSelfTest();
 
   const errors = DOCUMENTS.flatMap(validateDocument);
+  errors.push(...validateRequiredArtifacts());
+  const testMatrixPath = path.join(repoRoot, TEST_MATRIX_PATH);
+  if (fs.existsSync(testMatrixPath)) {
+    errors.push(
+      ...validateTestMatrix(fs.readFileSync(testMatrixPath, "utf8"), TEST_MATRIX_PATH),
+    );
+  }
   errors.push(...validateForbiddenEnterpriseDocPhrases());
   const workflowPath = path.join(repoRoot, WORKFLOW_PATH);
   if (!fs.existsSync(workflowPath)) {

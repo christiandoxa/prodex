@@ -7,15 +7,15 @@ use prodex_application::{
 use prodex_domain::{
     CanonicalRoute, CapabilitySet, Channel, ClassificationRequest, ClassificationRule,
     ClassificationRuleSet, ClassificationRuleSetChecksum, ClassificationRuleSetRevisionId,
-    ContentLocation, CredentialScope, DataClassification, DataPolicyContext, DetectorId,
-    DetectorRevisionId, EnvironmentContext, FindingKind, GovernanceObligation,
+    ContentLocation, CredentialScope, DataClassification, DataModality, DataPolicyContext,
+    DetectorId, DetectorRevisionId, EnvironmentContext, FindingKind, GovernanceObligation,
     GovernancePolicyArtifact, GovernancePolicyRule, GovernancePolicyRuleId, GovernedAction,
     InspectionCoverage, InspectionFinding, InspectionLimits, InspectionReasonCode, NetworkZone,
     PolicyDecision, PolicyEffect, PolicyInput, PolicyReasonCode, PolicyRevisionId,
-    PolicyRuleCondition, Principal, PrincipalId, PrincipalKind, ProviderTrustTier, QuotaContext,
-    RequestRisk, Role, SecretRef, SessionPolicyContext, TenantContext, TenantId,
-    classify_inspection, compile_classification_rule_set, compile_governance_policy,
-    evaluate_governance_policy,
+    PolicyRuleCondition, Principal, PrincipalId, PrincipalKind, PrincipalPolicyAttributes,
+    ProviderTrustTier, QuotaContext, RequestPolicyAttributes, RequestRisk, Role, SecretRef,
+    SessionPolicyContext, TenantContext, TenantId, classify_inspection,
+    compile_classification_rule_set, compile_governance_policy, evaluate_governance_policy,
 };
 use prodex_provider_core::ProviderId;
 use prodex_provider_spi::{
@@ -155,9 +155,15 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
         rules,
     })
     .unwrap();
+    let principal_attributes =
+        PrincipalPolicyAttributes::new(Some("bench-team"), Some("bench-project"), None).unwrap();
+    let request_attributes =
+        RequestPolicyAttributes::new(Some("bench-model"), &[], vec![DataModality::Text], None, 0)
+            .unwrap();
     let policy_input = PolicyInput {
         tenant,
         principal: &principal,
+        principal_attributes: &principal_attributes,
         channel: Channel::Api,
         credential_scope: CredentialScope::DataPlane,
         session: SessionPolicyContext {
@@ -175,6 +181,7 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
         },
         request_risk: RequestRisk::Low,
         requested_capabilities: &capabilities,
+        request_attributes: &request_attributes,
         quota: QuotaContext {
             has_headroom: true,
             reservation_required: true,
@@ -360,6 +367,7 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
             revoked: false,
             circuit_open: false,
             quota_available: true,
+            inflight_cap_reached: false,
             local_execution: false,
             trust_tier: ProviderTrustTier::Enterprise,
             maximum_classification: DataClassification::Confidential,
@@ -368,8 +376,9 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
             retention_seconds: 0,
             training_use: false,
             signals: GovernedRoutingSignals {
-                health: 9_000,
+                health: Some(9_000),
                 load: (index as u16).saturating_mul(100),
+                quota_headroom: None,
                 cost: 2_000,
                 latency: 3_000,
                 risk: 2_000,

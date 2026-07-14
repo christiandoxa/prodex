@@ -38,8 +38,7 @@ pub(super) fn runtime_gateway_respond_route_explain(
             if let Some(admin_auth) = preauthorized_admin.as_ref() {
                 runtime_gateway_audit_admin_request_denied_event(
                     shared,
-                    &admin_auth.auth.name,
-                    admin_auth.auth.role.as_str(),
+                    &admin_auth.auth,
                     code,
                     request.method(),
                     path_without_query(request_path),

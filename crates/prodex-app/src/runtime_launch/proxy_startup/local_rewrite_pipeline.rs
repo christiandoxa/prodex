@@ -27,6 +27,8 @@ use super::local_rewrite_application_boundary::{
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationAdmission, runtime_gateway_application_http_policy,
     runtime_gateway_application_local_admission, runtime_gateway_application_provider_dispatch,
+    runtime_gateway_application_provider_dispatch_attempt,
+    runtime_gateway_application_provider_retry_precommit,
 };
 use super::local_rewrite_constraints::{
     RuntimeGatewayPendingConstraintPlan, runtime_gateway_prepare_constraint_plan,
@@ -68,8 +70,12 @@ use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_response::{
     respond_runtime_local_rewrite_proxy_request, runtime_local_rewrite_response_with_call_id,
 };
-use super::local_rewrite_upstream::send_runtime_local_rewrite_upstream_request;
+use super::local_rewrite_upstream::{
+    RuntimeLocalRewriteUpstreamResponse, RuntimeLocalRewriteUpstreamResult,
+    send_runtime_local_rewrite_upstream_request,
+};
 use super::provider_bridge::{
+    RuntimeProviderBridgeKind, runtime_provider_error_class,
     runtime_provider_models_buffered_response, runtime_provider_request_ledger_message,
 };
 use crate::runtime_proxy::{
@@ -223,7 +229,7 @@ fn try_run_runtime_local_rewrite_pipeline(
     let governed = runtime_local_rewrite_pre_reservation_governance(prepared, shared)?;
     let reserved = runtime_local_rewrite_reserve_virtual_key(governed, shared)?;
     let reserved = runtime_local_rewrite_post_reservation_governance(reserved, shared)?;
-    let ready = runtime_local_rewrite_apply_constraints(reserved)?;
+    let ready = runtime_local_rewrite_apply_constraints(reserved, shared)?;
     let ready = runtime_local_rewrite_dispatch_compact(ready, shared)?;
     let ready = runtime_local_rewrite_dispatch_builtin_models(ready, shared)?;
     runtime_local_rewrite_dispatch_provider(ready, shared)

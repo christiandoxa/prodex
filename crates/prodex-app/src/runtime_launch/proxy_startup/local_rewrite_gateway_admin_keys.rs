@@ -429,8 +429,7 @@ fn enforce_key_entity_tag_with_audit(
     };
     runtime_gateway_audit_admin_request_denied_event(
         shared,
-        &admin_auth.name,
-        admin_auth.role.as_str(),
+        admin_auth,
         "precondition_failed",
         &captured.method,
         request_path(captured),
@@ -452,12 +451,7 @@ fn audit_key_identity_denial(
             | ApplicationGatewayIdentityMutationError::ResourceIdMismatch
     ) {
         runtime_gateway_audit_admin_authorization_denied_event(
-            shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            "key",
-            action,
-            key_name,
+            shared, admin_auth, "key", action, key_name,
         );
     }
     runtime_gateway_identity_error(RuntimeGatewayIdentityKind::VirtualKey, error)
@@ -476,8 +470,7 @@ fn policy_key_mutation_denied(
     // Policy keys live outside the mutable admin store, so source routing must reject them here.
     runtime_gateway_audit_admin_key_mutation_denied_event(
         shared,
-        &admin_auth.name,
-        admin_auth.role.as_str(),
+        admin_auth,
         "gateway_key_read_only",
         action,
         &entry.key.name,
@@ -500,12 +493,7 @@ fn runtime_gateway_admin_key_scope_forbidden_response(
     key_name: &str,
 ) -> tiny_http::ResponseBox {
     runtime_gateway_audit_admin_authorization_denied_event(
-        shared,
-        &admin_auth.name,
-        admin_auth.role.as_str(),
-        "key",
-        action,
-        key_name,
+        shared, admin_auth, "key", action, key_name,
     );
     build_runtime_proxy_json_error_response(
         403,

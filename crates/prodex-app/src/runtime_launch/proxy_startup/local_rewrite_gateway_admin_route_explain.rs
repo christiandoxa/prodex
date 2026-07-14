@@ -67,13 +67,7 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
     let http = runtime_gateway_http_request_meta(captured, path);
     let Some(control_plane_plan) = runtime_gateway_admin_route_explain_plan(&http, admin_auth)
     else {
-        runtime_gateway_audit_admin_role_denied_event(
-            shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
-            &captured.method,
-            path,
-        );
+        runtime_gateway_audit_admin_role_denied_event(shared, admin_auth, &captured.method, path);
         return build_runtime_proxy_json_error_response(
             403,
             "gateway_admin_role_forbidden",
@@ -86,8 +80,7 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
         Err(error) => {
             runtime_gateway_audit_admin_request_denied_event(
                 shared,
-                &admin_auth.name,
-                admin_auth.role.as_str(),
+                admin_auth,
                 error.code(),
                 &captured.method,
                 path,
@@ -103,8 +96,7 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
         );
         runtime_gateway_audit_admin_request_denied_event(
             shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
+            admin_auth,
             error.code(),
             &captured.method,
             path,
@@ -122,8 +114,7 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
                 );
                 runtime_gateway_audit_admin_request_denied_event(
                     shared,
-                    &admin_auth.name,
-                    admin_auth.role.as_str(),
+                    admin_auth,
                     error.code(),
                     &captured.method,
                     path,
@@ -160,8 +151,7 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
             );
             runtime_gateway_audit_admin_request_denied_event(
                 shared,
-                &admin_auth.name,
-                admin_auth.role.as_str(),
+                admin_auth,
                 error.code(),
                 &captured.method,
                 path,

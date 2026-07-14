@@ -35,6 +35,7 @@ fn approved(tenant_id: TenantId, fingerprint: ApprovalFingerprint) -> ApprovalRe
         action: ApprovalAction::Approve,
         expected_version: 1,
         now_unix_ms: 100,
+        reason: None,
     })
     .unwrap()
     .record

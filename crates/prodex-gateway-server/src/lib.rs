@@ -2,7 +2,12 @@
 //! Bounded async HTTP/1 front for in-process or compatibility gateway handlers.
 
 use std::{
-    convert::Infallible, error::Error, fmt, future::Future, net::SocketAddr, sync::Arc,
+    convert::Infallible,
+    error::Error,
+    fmt,
+    future::Future,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -22,8 +27,9 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
 };
 use prodex_gateway_http::{
-    CanonicalRequestTarget, GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane,
-    classify_request_target,
+    CanonicalRequestTarget, GatewayEdgeSecurityError, GatewayEdgeSecurityPolicy, GatewayHttpHeader,
+    GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane, classify_request_target,
+    validate_gateway_edge_security,
 };
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
@@ -62,6 +68,9 @@ const BACKEND_UNAVAILABLE: &[u8] =
     br#"{"error":{"code":"backend_unavailable","message":"gateway backend is unavailable"}}"#;
 const LOCAL_OVERLOAD: &[u8] =
     br#"{"error":{"code":"service_unavailable","message":"gateway is temporarily overloaded"}}"#;
+const EDGE_REQUEST_DENIED: &[u8] =
+    br#"{"error":{"code":"edge_request_denied","message":"gateway edge request is denied"}}"#;
+const MAX_FORWARDED_FOR_HOPS: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GatewayServerMode {
@@ -69,7 +78,7 @@ pub enum GatewayServerMode {
     ControlPlane,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GatewayServerConfig {
     pub listen_addr: SocketAddr,
     pub mode: GatewayServerMode,
@@ -77,10 +86,46 @@ pub struct GatewayServerConfig {
     pub max_request_body_bytes: usize,
     pub response_header_timeout: Duration,
     pub drain_timeout: Duration,
+    pub edge_security: GatewayServerEdgeSecurity,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GatewayServerEdgeSecurity {
+    pub trusted_proxies: Vec<IpAddr>,
+    pub expected_host: String,
+    pub browser: Option<GatewayServerBrowserSecurity>,
+}
+
+impl fmt::Debug for GatewayServerEdgeSecurity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayServerEdgeSecurity")
+            .field("trusted_proxies", &self.trusted_proxies)
+            .field("expected_host", &"<redacted>")
+            .field("browser", &self.browser)
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GatewayServerBrowserSecurity {
+    pub expected_origin: String,
+    pub expected_csrf_token: String,
+}
+
+impl fmt::Debug for GatewayServerBrowserSecurity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayServerBrowserSecurity")
+            .field("expected_origin", &"<redacted>")
+            .field("expected_csrf_token", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Canonical, route-classified request delivered to an in-process gateway handler.
 pub struct GatewayHandlerRequest {
+    pub peer_addr: SocketAddr,
+    pub client_ip: IpAddr,
+    pub peer_is_trusted_proxy: bool,
     pub target: CanonicalRequestTarget,
     pub route: GatewayHttpRouteKind,
     pub request: Request<GatewayRequestBody>,
@@ -205,10 +250,19 @@ impl GatewayServerConfig {
             max_request_body_bytes: policy.max_body_bytes,
             response_header_timeout: Duration::from_millis(policy.request_timeout_ms),
             drain_timeout: Duration::from_millis(policy.connection_drain_timeout_ms),
+            edge_security: GatewayServerEdgeSecurity {
+                trusted_proxies: Vec::new(),
+                expected_host: if listen_addr.ip().is_loopback() {
+                    listen_addr.to_string()
+                } else {
+                    String::new()
+                },
+                browser: None,
+            },
         }
     }
 
-    fn validate(self) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         ensure!(
             self.max_connections > 0 && self.max_connections <= u32::MAX as usize,
             "gateway max_connections must be between 1 and u32::MAX"
@@ -225,6 +279,27 @@ impl GatewayServerConfig {
             !self.drain_timeout.is_zero(),
             "gateway drain_timeout must be non-zero"
         );
+        ensure!(
+            !self.edge_security.expected_host.is_empty()
+                && self.edge_security.expected_host.len() <= 263
+                && !self
+                    .edge_security
+                    .expected_host
+                    .chars()
+                    .any(char::is_whitespace)
+                && self
+                    .edge_security
+                    .expected_host
+                    .parse::<hyper::http::uri::Authority>()
+                    .is_ok(),
+            "gateway expected_host must be a bounded exact HTTP authority"
+        );
+        if let Some(browser) = &self.edge_security.browser {
+            ensure!(
+                !browser.expected_origin.is_empty() && !browser.expected_csrf_token.is_empty(),
+                "gateway browser edge policy must be complete"
+            );
+        }
         Ok(())
     }
 }
@@ -279,6 +354,9 @@ impl LoopbackBackend {
 
     async fn handle(&self, request: GatewayHandlerRequest) -> GatewayHandlerResult {
         let GatewayHandlerRequest {
+            peer_addr: _,
+            client_ip: _,
+            peer_is_trusted_proxy: _,
             target,
             route: _,
             request,
@@ -321,6 +399,7 @@ impl LoopbackBackend {
 struct ServerState<H> {
     mode: GatewayServerMode,
     handler: Arc<H>,
+    edge_security: Arc<GatewayServerEdgeSecurity>,
     max_request_body_bytes: usize,
     response_header_timeout: Duration,
     shutdown: watch::Receiver<bool>,
@@ -331,6 +410,7 @@ impl<H> Clone for ServerState<H> {
         Self {
             mode: self.mode,
             handler: Arc::clone(&self.handler),
+            edge_security: Arc::clone(&self.edge_security),
             max_request_body_bytes: self.max_request_body_bytes,
             response_header_timeout: self.response_header_timeout,
             shutdown: self.shutdown.clone(),
@@ -351,6 +431,7 @@ where
 {
     config.validate()?;
     let handler = Arc::new(handler);
+    let edge_security = Arc::new(config.edge_security.clone());
     let connections = Arc::new(Semaphore::new(config.max_connections));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut tasks = JoinSet::new();
@@ -370,7 +451,7 @@ where
             }
             accepted = listener.accept() => accepted,
         };
-        let (stream, _) = match accepted {
+        let (stream, peer_addr) = match accepted {
             Ok(accepted) => accepted,
             Err(_) => {
                 drop(permit);
@@ -383,11 +464,12 @@ where
         let state = ServerState {
             mode: config.mode,
             handler: Arc::clone(&handler),
+            edge_security: Arc::clone(&edge_security),
             max_request_body_bytes: config.max_request_body_bytes,
             response_header_timeout: config.response_header_timeout,
             shutdown: shutdown_rx.clone(),
         };
-        tasks.spawn(serve_connection(stream, state, permit));
+        tasks.spawn(serve_connection(stream, peer_addr, state, permit));
     };
 
     drop(listener);
@@ -415,6 +497,7 @@ where
 
 async fn serve_connection<H, Fut>(
     stream: TcpStream,
+    peer_addr: SocketAddr,
     state: ServerState<H>,
     permit: OwnedSemaphorePermit,
 ) where
@@ -424,7 +507,7 @@ async fn serve_connection<H, Fut>(
     let permit = Arc::new(permit);
     let mut shutdown = state.shutdown.clone();
     let service = service_fn(move |request| {
-        handle_ingress_request(request, state.clone(), Arc::clone(&permit))
+        handle_ingress_request(request, peer_addr, state.clone(), Arc::clone(&permit))
     });
     let connection = http1::Builder::new()
         .serve_connection(TokioIo::new(stream), service)
@@ -441,6 +524,7 @@ async fn serve_connection<H, Fut>(
 
 async fn handle_ingress_request<H, Fut>(
     mut request: Request<Incoming>,
+    peer_addr: SocketAddr,
     state: ServerState<H>,
     permit: Arc<OwnedSemaphorePermit>,
 ) -> Result<Response<GatewayResponseBody>, Infallible>
@@ -464,6 +548,49 @@ where
     if !route_allowed(state.mode, route.plane) {
         return Ok(json_error(StatusCode::NOT_FOUND, ROUTE_UNAVAILABLE));
     }
+    let headers = match gateway_http_headers(&request) {
+        Some(headers) => headers,
+        None => return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)),
+    };
+    let peer_is_trusted_proxy = state
+        .edge_security
+        .trusted_proxies
+        .contains(&peer_addr.ip());
+    let client_ip =
+        match derive_gateway_client_ip(peer_addr, &state.edge_security.trusted_proxies, &headers) {
+            Ok(client_ip) => client_ip,
+            Err(_) => return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)),
+        };
+    if route.plane == GatewayHttpRoutePlane::ControlPlane {
+        let browser_capable = browser_capable_request(&request);
+        let browser = if browser_capable {
+            match state.edge_security.browser.as_ref() {
+                Some(browser) => Some(browser),
+                None => return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)),
+            }
+        } else {
+            None
+        };
+        let expected_csrf_token = browser
+            .filter(|_| state_changing_method(request.method()))
+            .map(|browser| browser.expected_csrf_token.as_str());
+        if validate_gateway_edge_security(
+            GatewayEdgeSecurityPolicy {
+                peer_is_trusted_proxy,
+                expected_host: loopback_compatible_expected_host(
+                    &state.edge_security.expected_host,
+                    &headers,
+                ),
+                expected_origin: browser.map(|browser| browser.expected_origin.as_str()),
+                expected_csrf_token,
+            },
+            &headers,
+        )
+        .is_err()
+        {
+            return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED));
+        }
+    }
     let route = route.kind;
     match content_length(&request) {
         Err(()) => return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)),
@@ -477,8 +604,24 @@ where
         .headers()
         .contains_key(hyper::header::UPGRADE)
         .then(|| upgrade::on(&mut request));
+    let forwarding_headers = request
+        .headers()
+        .keys()
+        .filter(|name| {
+            name.as_str() == "forwarded"
+                || name.as_str().starts_with("x-forwarded-")
+                || name.as_str() == "x-real-ip"
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for name in forwarding_headers {
+        request.headers_mut().remove(name);
+    }
     let (parts, body) = request.into_parts();
     let request = GatewayHandlerRequest {
+        peer_addr,
+        client_ip,
+        peer_is_trusted_proxy,
         target,
         route,
         request: Request::from_parts(parts, Limited::new(body, state.max_request_body_bytes)),
@@ -520,6 +663,125 @@ where
         }
     }
     Ok(response)
+}
+
+fn gateway_http_headers(request: &Request<Incoming>) -> Option<Vec<GatewayHttpHeader>> {
+    request
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| GatewayHttpHeader::new(name.as_str(), value))
+        })
+        .collect()
+}
+
+/// Derives client network metadata only from the authenticated transport peer.
+/// The right-most untrusted address defeats caller-prepended spoofed hops.
+fn derive_gateway_client_ip(
+    peer_addr: SocketAddr,
+    trusted_proxies: &[IpAddr],
+    headers: &[GatewayHttpHeader],
+) -> Result<IpAddr, GatewayEdgeSecurityError> {
+    let peer_is_trusted_proxy = trusted_proxies.contains(&peer_addr.ip());
+    let has_forwarding_metadata = headers.iter().any(|header| {
+        matches!(
+            header.normalized_name().as_str(),
+            "forwarded"
+                | "x-forwarded-for"
+                | "x-forwarded-host"
+                | "x-forwarded-proto"
+                | "x-real-ip"
+        )
+    });
+    if has_forwarding_metadata && !peer_is_trusted_proxy {
+        return Err(GatewayEdgeSecurityError::ForwardedHeaderFromUntrustedPeer);
+    }
+    let mut values = headers
+        .iter()
+        .filter(|header| header.normalized_name() == "x-forwarded-for")
+        .map(|header| header.value.as_str());
+    let Some(value) = values.next() else {
+        return Ok(peer_addr.ip());
+    };
+    if values.next().is_some() {
+        return Err(GatewayEdgeSecurityError::ForwardedClientAddressInvalid);
+    }
+    let hops = value
+        .split(',')
+        .map(str::trim)
+        .map(str::parse::<IpAddr>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| GatewayEdgeSecurityError::ForwardedClientAddressInvalid)?;
+    if hops.is_empty() || hops.len() > MAX_FORWARDED_FOR_HOPS {
+        return Err(GatewayEdgeSecurityError::ForwardedClientAddressInvalid);
+    }
+    Ok(hops
+        .iter()
+        .rev()
+        .find(|address| !trusted_proxies.contains(address))
+        .copied()
+        .unwrap_or(hops[0]))
+}
+
+fn loopback_compatible_expected_host<'a>(
+    configured: &'a str,
+    headers: &'a [GatewayHttpHeader],
+) -> &'a str {
+    let Ok(expected) = configured.parse::<SocketAddr>() else {
+        return configured;
+    };
+    if !expected.ip().is_loopback() {
+        return configured;
+    }
+    let mut hosts = headers
+        .iter()
+        .filter(|header| header.normalized_name() == "host")
+        .map(|header| header.value.as_str());
+    let Some(host) = hosts.next() else {
+        return configured;
+    };
+    if hosts.next().is_some() {
+        return configured;
+    }
+    let Ok(authority) = host.parse::<hyper::http::uri::Authority>() else {
+        return configured;
+    };
+    if authority.port_u16().unwrap_or(80) != expected.port() {
+        return configured;
+    }
+    let name = authority.host().trim_matches(['[', ']']);
+    if name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+    {
+        host
+    } else {
+        configured
+    }
+}
+
+fn browser_capable_request(request: &Request<Incoming>) -> bool {
+    [
+        "origin",
+        "cookie",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-dest",
+        "x-csrf-token",
+    ]
+    .into_iter()
+    .any(|name| request.headers().contains_key(name))
+}
+
+fn state_changing_method(method: &hyper::Method) -> bool {
+    !matches!(
+        *method,
+        hyper::Method::GET | hyper::Method::HEAD | hyper::Method::OPTIONS
+    )
 }
 
 fn handler_error_response(error: GatewayHandlerError) -> Response<GatewayResponseBody> {

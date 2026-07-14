@@ -151,6 +151,7 @@ impl RuntimeGatewayPendingConstraintPlan<'_> {
             runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::ModelNotAllowed
             | runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceDenied
             | runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceApprovalRequired
+            | runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::GovernanceSessionRequired
             | runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::NoEligibleProvider => {
                 runtime_proxy_crate::RuntimeRouteDecisionStage::Governance
             }
@@ -169,7 +170,7 @@ impl RuntimeGatewayPendingConstraintPlan<'_> {
     pub(super) fn apply(
         &mut self,
         request: &mut RuntimeProxyRequest,
-    ) -> Result<Option<RuntimeGatewayRouteLoadGuard>, tiny_http::ResponseBox> {
+    ) -> Result<(Option<RuntimeGatewayRouteLoadGuard>, bool), tiny_http::ResponseBox> {
         let rewrite_required = self
             .plan
             .as_ref()
@@ -191,7 +192,7 @@ impl RuntimeGatewayPendingConstraintPlan<'_> {
             ));
         }
         let Some(plan) = self.plan.take() else {
-            return Ok(None);
+            return Ok((None, false));
         };
         let model = plan.selected_model.as_deref();
         let alias = self
@@ -257,6 +258,7 @@ impl RuntimeGatewayPendingConstraintPlan<'_> {
                 ),
             );
         }
+        let transformed = matches!(rewritten_body, Some(Some(_)));
         if let Some(Some(rewritten_body)) = rewritten_body {
             request.body = rewritten_body;
         }
@@ -273,7 +275,7 @@ impl RuntimeGatewayPendingConstraintPlan<'_> {
             );
         }
         emit_route_trace(self.request_id, &trace, self.shared);
-        Ok(guard)
+        Ok((guard, transformed))
     }
 
     fn finish_rejected(

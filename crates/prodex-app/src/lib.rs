@@ -169,7 +169,7 @@ pub use gateway_application::{
 pub use gateway_backend::{
     GatewayBackend, start_policy_gateway_backend, start_policy_gateway_backend_for_mode,
 };
-pub use prodex_runtime_policy::RuntimePolicyServiceMode;
+pub use prodex_runtime_policy::{RuntimePolicyServiceMode, runtime_policy_gateway};
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;

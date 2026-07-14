@@ -149,6 +149,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
     shared: &RuntimeLocalRewriteProxyShared,
     authorized: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
 ) {
+    let network_zone = request.network_zone();
     let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = &shared.provider else {
         let _ = request.respond(build_runtime_proxy_text_response(
             501,
@@ -170,6 +171,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
             authorized,
             preflight.text.as_ref(),
             shared,
+            network_zone,
             &preflight.inspection,
         )
         .is_err()
@@ -271,6 +273,7 @@ pub(super) fn handle_runtime_gemini_live_websocket_request(
         &mut local_socket,
         &mut upstream_socket,
         shared,
+        network_zone,
         authorized,
     ) {
         runtime_proxy_log(
@@ -398,6 +401,7 @@ fn handle_runtime_gemini_live_tcp_stream(
         &mut local_socket,
         &mut upstream_socket,
         shared,
+        prodex_domain::NetworkZone::Local,
         None,
     ) {
         runtime_proxy_log(

@@ -103,11 +103,16 @@ impl RuntimeGatewayApplication {
         }
 
         let GatewayHandlerRequest {
+            peer_addr,
+            client_ip,
+            peer_is_trusted_proxy,
             target,
             route: _,
             request,
         } = handler_request;
         let method = request.method().as_str().to_string();
+        let network_zone =
+            runtime_gateway_network_zone(peer_addr, client_ip, peer_is_trusted_proxy);
         let headers = request
             .headers()
             .iter()
@@ -175,6 +180,7 @@ impl RuntimeGatewayApplication {
                 method,
                 target.path_and_query().to_string(),
                 headers,
+                network_zone,
                 body,
                 head_sender,
                 Arc::clone(&_permit),
@@ -234,6 +240,33 @@ impl RuntimeGatewayApplication {
         }
         runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path);
         workers_finished
+    }
+}
+
+fn runtime_gateway_network_zone(
+    peer_addr: std::net::SocketAddr,
+    client_ip: std::net::IpAddr,
+    peer_is_trusted_proxy: bool,
+) -> prodex_domain::NetworkZone {
+    if client_ip.is_loopback() {
+        prodex_domain::NetworkZone::Local
+    } else if peer_is_trusted_proxy && client_ip_is_private(client_ip) {
+        prodex_domain::NetworkZone::TrustedInternal
+    } else if peer_is_trusted_proxy {
+        prodex_domain::NetworkZone::Public
+    } else if peer_addr.ip().is_loopback() {
+        prodex_domain::NetworkZone::Local
+    } else {
+        prodex_domain::NetworkZone::Unknown
+    }
+}
+
+fn client_ip_is_private(client_ip: std::net::IpAddr) -> bool {
+    match client_ip {
+        std::net::IpAddr::V4(address) => address.is_private() || address.is_link_local(),
+        std::net::IpAddr::V6(address) => {
+            address.is_unique_local() || address.is_unicast_link_local()
+        }
     }
 }
 
@@ -355,5 +388,41 @@ mod tests {
         assert_eq!(detach_unfinished_workers(&mut workers), 1);
         assert!(started.elapsed() < Duration::from_millis(50));
         assert!(workers.is_empty());
+    }
+
+    #[test]
+    fn validated_peer_metadata_maps_to_low_cardinality_governance_zone() {
+        assert_eq!(
+            runtime_gateway_network_zone(
+                "127.0.0.1:4317".parse().unwrap(),
+                "127.0.0.1".parse().unwrap(),
+                false,
+            ),
+            prodex_domain::NetworkZone::Local
+        );
+        assert_eq!(
+            runtime_gateway_network_zone(
+                "10.0.0.2:4317".parse().unwrap(),
+                "10.0.1.7".parse().unwrap(),
+                true,
+            ),
+            prodex_domain::NetworkZone::TrustedInternal
+        );
+        assert_eq!(
+            runtime_gateway_network_zone(
+                "10.0.0.2:4317".parse().unwrap(),
+                "203.0.113.7".parse().unwrap(),
+                true,
+            ),
+            prodex_domain::NetworkZone::Public
+        );
+        assert_eq!(
+            runtime_gateway_network_zone(
+                "192.168.1.2:4317".parse().unwrap(),
+                "192.168.1.2".parse().unwrap(),
+                false,
+            ),
+            prodex_domain::NetworkZone::Unknown
+        );
     }
 }

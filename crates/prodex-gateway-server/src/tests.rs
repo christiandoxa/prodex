@@ -28,8 +28,8 @@ use tokio::{
 };
 
 use super::{
-    GatewayHandlerRequest, GatewayHandlerResponse, GatewayServerConfig, GatewayServerMode,
-    LoopbackBackend, run_with_handler,
+    GatewayHandlerRequest, GatewayHandlerResponse, GatewayServerBrowserSecurity,
+    GatewayServerConfig, GatewayServerMode, LoopbackBackend, run_with_handler,
 };
 use prodex_gateway_http::GatewayHttpRouteKind;
 
@@ -672,6 +672,141 @@ async fn chunked_body_over_limit_is_rejected_while_streaming() {
     assert!(headers.starts_with("HTTP/1.1 413"), "{headers}");
     stop_frontend(stop, front).await;
     backend.abort();
+}
+
+#[tokio::test]
+async fn production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_spoofing() {
+    let untrusted_calls = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::clone(&untrusted_calls);
+    let (untrusted_addr, untrusted_stop, untrusted_front) = spawn_direct_frontend(
+        GatewayServerMode::DataPlane,
+        |_| {},
+        move |_| {
+            let calls = Arc::clone(&calls);
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                full_response(b"ok")
+            }
+        },
+    )
+    .await;
+    let normal = send_raw_request(
+        untrusted_addr,
+        format!("POST /responses HTTP/1.1\r\nHost: {untrusted_addr}\r\nContent-Length: 0\r\n\r\n"),
+    )
+    .await;
+    assert!(normal.starts_with("HTTP/1.1 200"), "{normal}");
+    let spoofed = send_raw_request(
+        untrusted_addr,
+        format!(
+            "POST /responses HTTP/1.1\r\nHost: {untrusted_addr}\r\nX-Forwarded-For: 198.51.100.7\r\nContent-Length: 0\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(spoofed.starts_with("HTTP/1.1 403"), "{spoofed}");
+    assert_eq!(untrusted_calls.load(Ordering::SeqCst), 1);
+    stop_frontend(untrusted_stop, untrusted_front).await;
+
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let handler_observed = Arc::clone(&observed);
+    let (trusted_addr, trusted_stop, trusted_front) = spawn_direct_frontend(
+        GatewayServerMode::ControlPlane,
+        |config| {
+            config.edge_security.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+            config.edge_security.browser = Some(GatewayServerBrowserSecurity {
+                expected_origin: format!("http://{}", config.edge_security.expected_host),
+                expected_csrf_token: "synthetic-csrf-token".to_string(),
+            });
+        },
+        move |request| {
+            let observed = Arc::clone(&handler_observed);
+            async move {
+                let has_forwarding_header = request.request.headers().keys().any(|name| {
+                    name.as_str() == "forwarded" || name.as_str().starts_with("x-forwarded-")
+                });
+                observed.lock().unwrap().push((
+                    request.peer_addr,
+                    request.client_ip,
+                    has_forwarding_header,
+                ));
+                full_response(b"ok")
+            }
+        },
+    )
+    .await;
+    let trusted = send_raw_request(
+        trusted_addr,
+        format!(
+            "POST /admin/keys HTTP/1.1\r\nHost: {trusted_addr}\r\nX-Forwarded-For: 198.51.100.99, 203.0.113.7, 127.0.0.1\r\nContent-Length: 0\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(trusted.starts_with("HTTP/1.1 200"), "{trusted}");
+    let loopback_alias = send_raw_request(
+        trusted_addr,
+        format!(
+            "POST /admin/keys HTTP/1.1\r\nHost: localhost:{}\r\nContent-Length: 0\r\n\r\n",
+            trusted_addr.port()
+        ),
+    )
+    .await;
+    assert!(
+        loopback_alias.starts_with("HTTP/1.1 200"),
+        "{loopback_alias}"
+    );
+
+    for request in [
+        "POST /admin/keys HTTP/1.1\r\nHost: attacker.example.com\r\nContent-Length: 0\r\n\r\n"
+            .to_string(),
+        format!(
+            "POST /admin/keys HTTP/1.1\r\nHost: {trusted_addr}\r\nOrigin: https://attacker.example.com\r\nX-CSRF-Token: synthetic-csrf-token\r\nContent-Length: 0\r\n\r\n"
+        ),
+        format!(
+            "POST /admin/keys HTTP/1.1\r\nHost: {trusted_addr}\r\nOrigin: http://{trusted_addr}\r\nX-CSRF-Token: wrong-token\r\nContent-Length: 0\r\n\r\n"
+        ),
+    ] {
+        let response = send_raw_request(trusted_addr, request).await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+    }
+    let browser = send_raw_request(
+        trusted_addr,
+        format!(
+            "POST /admin/keys HTTP/1.1\r\nHost: {trusted_addr}\r\nOrigin: http://{trusted_addr}\r\nX-CSRF-Token: synthetic-csrf-token\r\nContent-Length: 0\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(browser.starts_with("HTTP/1.1 200"), "{browser}");
+    {
+        let observed = observed.lock().unwrap();
+        assert_eq!(observed.len(), 3);
+        assert!(
+            observed
+                .iter()
+                .all(|(peer, _, forwarded)| peer.ip().is_loopback() && !forwarded)
+        );
+        assert_eq!(
+            observed[0].1,
+            "203.0.113.7".parse::<std::net::IpAddr>().unwrap()
+        );
+    }
+    stop_frontend(trusted_stop, trusted_front).await;
+}
+
+#[test]
+fn non_loopback_server_requires_explicit_expected_host() {
+    let mut config = GatewayServerConfig::production(
+        "0.0.0.0:4317".parse().unwrap(),
+        GatewayServerMode::DataPlane,
+    );
+    assert!(config.validate().is_err());
+    config.edge_security.expected_host = "gateway.example.com".to_string();
+    assert!(config.validate().is_ok());
+}
+
+async fn send_raw_request(addr: std::net::SocketAddr, request: String) -> String {
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    client.write_all(request.as_bytes()).await.unwrap();
+    read_headers(&mut client).await
 }
 
 async fn read_headers(stream: &mut TcpStream) -> String {

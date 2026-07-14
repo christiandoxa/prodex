@@ -1,3 +1,34 @@
+use prodex_domain::AuditOutcome;
+
+fn runtime_local_rewrite_material_audit(
+    application: Option<&prodex_application::ApplicationAuthorizedRequestContext<'_>>,
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+    action: &str,
+    outcome: AuditOutcome,
+    reason: &str,
+) -> Option<Result<(), prodex_storage::GovernanceRepositoryError>> {
+    if !super::super::local_rewrite_governance_audit::runtime_governance_audit_is_durable(shared) {
+        return None;
+    }
+    let context = application.and_then(
+        super::super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext::from_authorized,
+    )?;
+    Some(
+        super::super::local_rewrite_governance_audit::persist_runtime_material_governance_audit(
+            shared, &context, request_id, action, outcome, reason,
+        ),
+    )
+}
+
+fn runtime_local_rewrite_audit_unavailable_response() -> tiny_http::ResponseBox {
+    build_runtime_proxy_json_error_response(
+        503,
+        "governance_audit_unavailable",
+        "gateway governance audit is temporarily unavailable",
+    )
+}
+
 pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
     mut request: RuntimeLocalRewriteCapturedRequest<'target>,
     shared: &'shared RuntimeLocalRewriteProxyShared,
@@ -27,10 +58,25 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
             if let Some(plan) = constraints.as_mut() {
                 plan.reject_governance("presidio_redaction_failed");
             }
-            runtime_gateway_audit_data_plane_presidio_redaction_failed(
+            match runtime_local_rewrite_material_audit(
+                request.state.application.as_ref(),
+                request.state.request_id,
                 shared,
-                &request.captured.path_and_query,
-            );
+                "request_inspection_failed",
+                AuditOutcome::Denied,
+                "presidio_redaction_failed",
+            ) {
+                Some(Err(_)) => {
+                    return Err(request
+                        .state
+                        .reject(runtime_local_rewrite_audit_unavailable_response()));
+                }
+                Some(Ok(())) => {}
+                None => runtime_gateway_audit_data_plane_presidio_redaction_failed(
+                    shared,
+                    &request.captured.path_and_query,
+                ),
+            }
             runtime_proxy_log(
                 &shared.runtime_shared,
                 runtime_proxy_structured_log_message(
@@ -52,6 +98,21 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
             )));
         }
     };
+    if !inspection.masked_findings.is_empty()
+        && runtime_local_rewrite_material_audit(
+            request.state.application.as_ref(),
+            request.state.request_id,
+            shared,
+            "request_transform",
+            AuditOutcome::Success,
+            "sensitive_fields_masked",
+        )
+        .is_some_and(|result| result.is_err())
+    {
+        return Err(request
+            .state
+            .reject(runtime_local_rewrite_audit_unavailable_response()));
+    }
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
@@ -114,11 +175,26 @@ pub(super) fn runtime_local_rewrite_pre_reservation_governance<'target, 'shared>
         if let Some(plan) = request.constraints.as_mut() {
             plan.reject_governance(reason);
         }
-        runtime_gateway_audit_data_plane_guardrail_blocked(
+        match runtime_local_rewrite_material_audit(
+            request.state.application.as_ref(),
+            request.state.request_id,
             shared,
-            &request.captured.path_and_query,
+            "admission_denied",
+            AuditOutcome::Denied,
             reason,
-        );
+        ) {
+            Some(Err(_)) => {
+                return Err(request
+                    .state
+                    .reject(runtime_local_rewrite_audit_unavailable_response()));
+            }
+            Some(Ok(())) => {}
+            None => runtime_gateway_audit_data_plane_guardrail_blocked(
+                shared,
+                &request.captured.path_and_query,
+                reason,
+            ),
+        }
         runtime_local_rewrite_log_guardrail(
             request.state.request_id,
             &request.captured.path_and_query,
@@ -175,30 +251,61 @@ pub(super) fn runtime_local_rewrite_reserve_virtual_key<'target, 'shared>(
         request.state.request_id,
         &request.captured,
         shared,
+        request.state.request.network_zone(),
         application,
         &request.inspection,
     ) {
         Ok(admission) => admission,
-        Err(rejection) => {
+        Err(failure) => {
+            let rejection = failure.rejection;
             if let Some(plan) = request.constraints.as_mut() {
                 plan.reject_virtual_key(rejection);
             }
-            runtime_gateway_audit_data_plane_virtual_key_rejected(
+            match runtime_local_rewrite_material_audit(
+                request.state.application.as_ref(),
+                request.state.request_id,
                 shared,
-                &request.captured.path_and_query,
+                "admission_denied",
+                AuditOutcome::Denied,
                 rejection.code(),
-            );
+            ) {
+                Some(Err(_)) => {
+                    return Err(request
+                        .state
+                        .reject(runtime_local_rewrite_audit_unavailable_response()));
+                }
+                Some(Ok(())) => {}
+                None => runtime_gateway_audit_data_plane_virtual_key_rejected(
+                    shared,
+                    &request.captured.path_and_query,
+                    rejection.code(),
+                ),
+            }
             runtime_local_rewrite_log_virtual_key_rejection(
                 request.state.request_id,
                 &request.captured.path_and_query,
                 rejection.code(),
                 shared,
             );
-            let response = build_runtime_proxy_json_error_response(
-                rejection.status(),
-                rejection.code(),
-                "gateway virtual key policy rejected this request",
-            );
+            let response = if let Some((approval_id, state)) = failure.approval {
+                crate::runtime_launch::proxy_startup::local_rewrite_gateway_admin_response::runtime_gateway_admin_json_response(
+                    rejection.status(),
+                    serde_json::json!({
+                        "error": {
+                            "code": rejection.code(),
+                            "message": "execution approval is required before dispatch",
+                            "approval_id": approval_id.as_str(),
+                            "approval_state": execution_approval_state_label(state),
+                        }
+                    }),
+                )
+            } else {
+                build_runtime_proxy_json_error_response(
+                    rejection.status(),
+                    rejection.code(),
+                    "gateway virtual key policy rejected this request",
+                )
+            };
             return Err(request.reject(response));
         }
     };
@@ -220,6 +327,20 @@ pub(super) fn runtime_local_rewrite_reserve_virtual_key<'target, 'shared>(
         request,
         application_admission: admission.application,
     })
+}
+
+fn execution_approval_state_label(state: prodex_domain::ApprovalState) -> &'static str {
+    match state {
+        prodex_domain::ApprovalState::Draft => "draft",
+        prodex_domain::ApprovalState::PendingApproval => "pending_approval",
+        prodex_domain::ApprovalState::Approved => "approved",
+        prodex_domain::ApprovalState::Rejected => "rejected",
+        prodex_domain::ApprovalState::Expired => "expired",
+        prodex_domain::ApprovalState::Cancelled => "cancelled",
+        prodex_domain::ApprovalState::Active => "active",
+        prodex_domain::ApprovalState::Superseded => "superseded",
+        prodex_domain::ApprovalState::RolledBack => "rolled_back",
+    }
 }
 
 fn runtime_local_rewrite_log_virtual_key_rejection(
@@ -259,12 +380,27 @@ pub(super) fn runtime_local_rewrite_post_reservation_governance<'target, 'shared
         if let Some(plan) = request.constraints.as_mut() {
             plan.reject_governance(&block.reason);
         }
-        runtime_gateway_audit_data_plane_guardrail_webhook_blocked(
+        match runtime_local_rewrite_material_audit(
+            request.state.application.as_ref(),
+            request.state.request_id,
             shared,
-            &request.captured.path_and_query,
-            "pre",
+            "admission_denied",
+            AuditOutcome::Denied,
             &block.reason,
-        );
+        ) {
+            Some(Err(_)) => {
+                return Err(request
+                    .state
+                    .reject(runtime_local_rewrite_audit_unavailable_response()));
+            }
+            Some(Ok(())) => {}
+            None => runtime_gateway_audit_data_plane_guardrail_webhook_blocked(
+                shared,
+                &request.captured.path_and_query,
+                "pre",
+                &block.reason,
+            ),
+        }
         runtime_local_rewrite_log_webhook_rejection(&request, &block.reason, shared);
         let response = build_runtime_proxy_json_error_response(
             403,
@@ -280,6 +416,20 @@ pub(super) fn runtime_local_rewrite_post_reservation_governance<'target, 'shared
         let reason = block.kind.as_str();
         if let Some(plan) = request.constraints.as_mut() {
             plan.reject_governance(reason);
+        }
+        if runtime_local_rewrite_material_audit(
+            request.state.application.as_ref(),
+            request.state.request_id,
+            shared,
+            "admission_denied",
+            AuditOutcome::Denied,
+            reason,
+        )
+        .is_some_and(|result| result.is_err())
+        {
+            return Err(request
+                .state
+                .reject(runtime_local_rewrite_audit_unavailable_response()));
         }
         runtime_local_rewrite_log_guardrail(
             request.state.request_id,
@@ -326,18 +476,35 @@ fn runtime_local_rewrite_log_webhook_rejection(
 
 pub(super) fn runtime_local_rewrite_apply_constraints<'target>(
     reserved: RuntimeLocalRewriteReservedRequest<'target, '_>,
+    shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteDispatchReadyRequest<'target>> {
     let RuntimeLocalRewriteReservedRequest {
         mut request,
         application_admission,
     } = reserved;
-    request.state.guards.route_load = match request.constraints.as_mut() {
+    let (route_load, transformed) = match request.constraints.as_mut() {
         Some(plan) => match plan.apply(&mut request.captured) {
-            Ok(guard) => guard,
+            Ok(result) => result,
             Err(response) => return Err(request.reject(response)),
         },
-        None => None,
+        None => (None, false),
     };
+    request.state.guards.route_load = route_load;
+    if transformed
+        && runtime_local_rewrite_material_audit(
+            request.state.application.as_ref(),
+            request.state.request_id,
+            shared,
+            "request_transform",
+            AuditOutcome::Success,
+            "route_constraints_applied",
+        )
+        .is_some_and(|result| result.is_err())
+    {
+        return Err(request
+            .state
+            .reject(runtime_local_rewrite_audit_unavailable_response()));
+    }
     Ok(RuntimeLocalRewriteDispatchReadyRequest {
         state: request.state,
         captured: request.captured,

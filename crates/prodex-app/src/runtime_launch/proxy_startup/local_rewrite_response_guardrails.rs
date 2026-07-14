@@ -11,6 +11,7 @@ const RESPONSE_INSPECTION_WINDOW_BYTES: usize = 4 * 1024;
 pub(super) enum RuntimeGatewayGuardrailStreamPlan {
     Allowed(Box<dyn Read + Send>),
     Blocked(&'static str),
+    AuditUnavailable,
 }
 
 pub(super) fn runtime_gateway_guardrail_stream_body(
@@ -18,6 +19,7 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
     request_id: u64,
     shared: &RuntimeLocalRewriteProxyShared,
     obligations: Option<ApplicationResponseObligationPlan>,
+    audit_context: Option<super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
 ) -> io::Result<RuntimeGatewayGuardrailStreamPlan> {
     let inspector =
         RuntimeGatewayIncrementalInspector::new(&shared.gateway_guardrails.blocked_output_keywords);
@@ -25,6 +27,8 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
         request_id,
         runtime_shared: shared.runtime_shared.clone(),
         state_backend: shared.gateway_state_store.label().to_string(),
+        shared: shared.clone(),
+        context: audit_context,
     };
     if obligations.is_some_and(|plan| {
         plan.enforce
@@ -40,7 +44,9 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
             })
             .map(|_| "response_inspection_incomplete")
             .unwrap_or("response_inspection_unsupported");
-        audit.block(reason, "precommit", "http");
+        if audit.block(reason, "precommit", "http").is_err() {
+            return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable);
+        }
         return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked(reason));
     }
     let maximum_bytes = obligations
@@ -67,7 +73,9 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
         None
     };
     if let Some(reason) = precommit_reason {
-        audit.block(reason, "precommit", "http");
+        if audit.block(reason, "precommit", "http").is_err() {
+            return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable);
+        }
         return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked(reason));
     }
 
@@ -142,38 +150,64 @@ pub(super) fn runtime_gateway_guardrail_websocket_block(
         request_id,
         runtime_shared: shared.runtime_shared.clone(),
         state_backend: shared.gateway_state_store.label().to_string(),
+        shared: shared.clone(),
+        context: None,
     }
-    .block(reason, "postcommit", "websocket");
+    .block(reason, "postcommit", "websocket")
+    .ok();
 }
 
 struct RuntimeGatewayGuardrailAudit {
     request_id: u64,
     runtime_shared: RuntimeRotationProxyShared,
     state_backend: String,
+    shared: RuntimeLocalRewriteProxyShared,
+    context: Option<super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
 }
 
 impl RuntimeGatewayGuardrailAudit {
-    fn block(&self, reason: &'static str, commit_state: &'static str, transport: &'static str) {
-        let payload = serde_json::json!({
-            "state_backend": self.state_backend,
-            "details": {
-                "reason": reason,
-                "commit_state": commit_state,
-            },
-        });
-        let default_log_dir = self
-            .runtime_shared
-            .log_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
-        let path = prodex_audit_log::audit_log_path(default_log_dir);
-        let _ = prodex_audit_log::append_audit_event(
-            &path,
-            "gateway_data_plane",
-            "response_guardrail_blocked",
-            "failure",
-            payload,
-        );
+    fn block(
+        &self,
+        reason: &'static str,
+        commit_state: &'static str,
+        transport: &'static str,
+    ) -> Result<(), prodex_storage::GovernanceRepositoryError> {
+        if commit_state == "precommit"
+            && super::local_rewrite_governance_audit::runtime_governance_audit_is_durable(
+                &self.shared,
+            )
+            && let Some(context) = self.context.as_ref()
+        {
+            super::local_rewrite_governance_audit::persist_runtime_material_governance_audit(
+                &self.shared,
+                context,
+                self.request_id,
+                "response_precommit_block",
+                prodex_domain::AuditOutcome::Denied,
+                reason,
+            )?;
+        } else {
+            let payload = serde_json::json!({
+                "state_backend": self.state_backend,
+                "details": {
+                    "reason": reason,
+                    "commit_state": commit_state,
+                },
+            });
+            let default_log_dir = self
+                .runtime_shared
+                .log_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+            let path = prodex_audit_log::audit_log_path(default_log_dir);
+            let _ = prodex_audit_log::append_audit_event(
+                &path,
+                "gateway_data_plane",
+                "response_guardrail_blocked",
+                "failure",
+                payload,
+            );
+        }
         crate::runtime_proxy_log(
             &self.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -187,6 +221,7 @@ impl RuntimeGatewayGuardrailAudit {
                 ],
             ),
         );
+        Ok(())
     }
 }
 
@@ -226,7 +261,7 @@ impl Read for RuntimeGatewayGuardrailStreamReader {
         };
         if let Some(reason) = reason {
             self.blocked = true;
-            self.audit.block(reason, "postcommit", "http");
+            self.audit.block(reason, "postcommit", "http").ok();
             return Ok(0);
         }
         Ok(read)
@@ -236,6 +271,54 @@ impl Read for RuntimeGatewayGuardrailStreamReader {
 #[cfg(test)]
 mod tests {
     use super::RuntimeGatewayIncrementalInspector;
+
+    #[derive(Clone, Copy)]
+    enum ChunkMode {
+        SseBytes,
+        WebSocketText,
+    }
+
+    fn next_random(seed: &mut u64) -> u64 {
+        *seed ^= *seed << 13;
+        *seed ^= *seed >> 7;
+        *seed ^= *seed << 17;
+        *seed
+    }
+
+    fn deterministic_chunks<'a>(text: &'a str, seed: &mut u64, mode: ChunkMode) -> Vec<&'a [u8]> {
+        let mut chunks = Vec::new();
+        let mut start = 0;
+        while start < text.len() {
+            let width = 1 + usize::try_from(next_random(seed) % 4).unwrap_or_default();
+            let end = match mode {
+                ChunkMode::SseBytes => start.saturating_add(width).min(text.len()),
+                ChunkMode::WebSocketText => {
+                    let remaining = &text[start..];
+                    start
+                        + remaining
+                            .char_indices()
+                            .nth(width)
+                            .map(|(offset, _)| offset)
+                            .unwrap_or(remaining.len())
+                }
+            };
+            chunks.push(&text.as_bytes()[start..end]);
+            start = end;
+        }
+        chunks
+    }
+
+    fn inspect_commit_outcome(keyword: &str, chunks: &[&[u8]]) -> &'static str {
+        let mut inspector = RuntimeGatewayIncrementalInspector::new(&[keyword.to_string()]);
+        let mut committed = false;
+        for chunk in chunks {
+            if inspector.inspect(chunk) {
+                return if committed { "postcommit" } else { "precommit" };
+            }
+            committed = true;
+        }
+        "allowed"
+    }
 
     #[test]
     fn incremental_inspector_finds_every_chunk_boundary() {
@@ -287,5 +370,76 @@ mod tests {
             RuntimeGatewayIncrementalInspector::new(&["blocked-secret".to_string()]);
         assert!(!inspector.inspect(&[0xff, 0xfe]));
         assert!(inspector.inspect(b"blocked-secret"));
+    }
+
+    #[test]
+    fn incremental_inspector_randomized_sse_and_websocket_chunk_corpus() {
+        let corpus = [
+            ("blocked-secret", "prefix:blocked-secret:suffix"),
+            ("clé-secrète", "préfixe:clé-secrète:suffixe"),
+            ("機密-秘密", "前置:機密-秘密:後置"),
+        ];
+        let mut seed = 0x5eed_cafe_f00d_u64;
+        let mut split_unicode_codepoint = false;
+        for mode in [ChunkMode::SseBytes, ChunkMode::WebSocketText] {
+            for (keyword, text) in corpus {
+                for sample in 0..128 {
+                    let chunks = deterministic_chunks(text, &mut seed, mode);
+                    assert!(chunks.len() > 1, "sample={sample}");
+                    if matches!(mode, ChunkMode::SseBytes) {
+                        split_unicode_codepoint |= chunks
+                            .iter()
+                            .any(|chunk| std::str::from_utf8(chunk).is_err());
+                    } else {
+                        assert!(
+                            chunks
+                                .iter()
+                                .all(|chunk| std::str::from_utf8(chunk).is_ok())
+                        );
+                    }
+                    assert!(chunks.iter().all(|chunk| {
+                        !String::from_utf8_lossy(chunk)
+                            .to_lowercase()
+                            .contains(keyword)
+                    }));
+                    let mut inspector =
+                        RuntimeGatewayIncrementalInspector::new(&[keyword.to_string()]);
+                    assert!(
+                        chunks.iter().any(|chunk| inspector.inspect(chunk)),
+                        "sample={sample} keyword={keyword}"
+                    );
+                }
+            }
+        }
+        assert!(split_unicode_codepoint);
+    }
+
+    #[test]
+    fn incremental_inspector_commit_outcome_is_stable_across_transport_chunking() {
+        let keyword = "clé-secrète";
+        assert_eq!(
+            inspect_commit_outcome(keyword, &[keyword.as_bytes()]),
+            "precommit"
+        );
+        for split in 1..keyword.len() {
+            assert_eq!(
+                inspect_commit_outcome(
+                    keyword,
+                    &[&keyword.as_bytes()[..split], &keyword.as_bytes()[split..]],
+                ),
+                "postcommit",
+                "SSE split={split}"
+            );
+            if keyword.is_char_boundary(split) {
+                assert_eq!(
+                    inspect_commit_outcome(
+                        keyword,
+                        &[&keyword.as_bytes()[..split], &keyword.as_bytes()[split..]],
+                    ),
+                    "postcommit",
+                    "WebSocket split={split}"
+                );
+            }
+        }
     }
 }
