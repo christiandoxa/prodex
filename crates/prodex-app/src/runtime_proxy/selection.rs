@@ -43,6 +43,7 @@ pub(crate) use self::dispatch::*;
 #[cfg(test)]
 pub(crate) use self::next::next_runtime_response_candidate_for_route;
 use self::next::next_runtime_response_candidate_for_route_with_prompt_cache_key;
+pub(crate) use self::next::runtime_quota_last_chance_profile_for_route;
 #[cfg(any(test, feature = "bench-support"))]
 pub(crate) use self::previous_response::next_runtime_previous_response_candidate;
 use self::previous_response::next_runtime_previous_response_candidate_with_trace;

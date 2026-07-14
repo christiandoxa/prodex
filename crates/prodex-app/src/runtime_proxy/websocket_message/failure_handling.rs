@@ -192,12 +192,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ),
             );
         }
-        if !runtime_has_route_eligible_quota_fallback(
-            self.shared,
-            &profile_name,
-            &BTreeSet::new(),
-            RuntimeRouteKind::Websocket,
-        )? {
+        if !self.prepare_quota_fallback(&profile_name)? {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
@@ -328,18 +323,53 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ),
             );
         }
-        if !runtime_has_route_eligible_quota_fallback(
-            self.shared,
-            &profile_name,
-            &BTreeSet::new(),
-            RuntimeRouteKind::Websocket,
-        )? {
+        if !self.prepare_quota_fallback(&profile_name)? {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
         self.excluded_profiles.insert(profile_name);
         self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
+    }
+
+    fn prepare_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
+        let mut excluded_profiles = self.excluded_profiles.clone();
+        excluded_profiles.insert(profile_name.to_string());
+        if runtime_has_route_eligible_quota_fallback(
+            self.shared,
+            profile_name,
+            &excluded_profiles,
+            RuntimeRouteKind::Websocket,
+        )? {
+            return Ok(true);
+        }
+        if self.previous_response_id.is_some()
+            || self.request_requires_previous_response_affinity
+            || self.request_turn_state.is_some()
+            || self.pinned_profile.is_some()
+            || self.turn_state_profile.is_some()
+            || self.compact_followup_profile.is_some()
+        {
+            return Ok(false);
+        }
+        let Some(fallback_profile) = runtime_quota_last_chance_profile_for_route(
+            self.shared,
+            &excluded_profiles,
+            RuntimeRouteKind::Websocket,
+            self.prompt_cache_key.as_deref(),
+        )?
+        else {
+            return Ok(false);
+        };
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} quota_last_chance profile={} failed_profile={}",
+                self.request_id, self.session_id, fallback_profile, profile_name
+            ),
+        );
+        self.quota_last_chance_profile = Some(fallback_profile);
+        Ok(true)
     }
 
     fn prepare_workspace_credit_fresh_fallback(
