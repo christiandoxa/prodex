@@ -124,6 +124,13 @@ fn redaction_body_masks_plain_text_secret_assignments() {
 }
 
 #[test]
+fn redaction_large_nonsecret_token_remains_unchanged() {
+    let value = "A".repeat(128 * 1024);
+
+    assert_eq!(redaction_redact_secret_like_text(&value), value);
+}
+
+#[test]
 fn redaction_gateway_body_masks_pii_and_secret_like_content() {
     let bearer_token = fake_named_secret("gateway_bearer");
     let prefixed_key = fake_api_key("sk-proj-", "gateway");

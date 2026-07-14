@@ -107,7 +107,7 @@ pub(crate) fn proxy_runtime_responses_request(
     let mut auto_redeemed_profiles = BTreeSet::new();
     let mut last_failure: Option<(RuntimeUpstreamFailureResponse, bool)> = None;
     let mut saw_inflight_saturation = false;
-    let selection_started_at = Instant::now();
+    let mut selection_started_at = Instant::now();
     let mut selection_attempts = 0usize;
 
     loop {
@@ -480,7 +480,6 @@ pub(crate) fn proxy_runtime_responses_request(
                     | RuntimePreviousResponseNotFoundAction::Rotate => {
                         last_failure =
                             Some((RuntimeUpstreamFailureResponse::Http(response), false));
-                        continue;
                     }
                     RuntimePreviousResponseNotFoundAction::StaleContinuation => {
                         return Ok(runtime_responses_stale_continuation_reply());
@@ -488,5 +487,6 @@ pub(crate) fn proxy_runtime_responses_request(
                 }
             }
         }
+        selection_started_at = Instant::now();
     }
 }
