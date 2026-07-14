@@ -8,8 +8,13 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Restore retries and large session resumes (`29eb66d`)
 
+### CLI
+
+- Keep partial usage profiles available (`8740c4b`)
+
 ### Misc
 
+- Scan secrets inside quoted text (`4ebe905`)
 - Add enterprise governance platform (`e07e2cc`)
 
 ## 0.284.0 - 2026-07-13
