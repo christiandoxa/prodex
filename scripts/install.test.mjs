@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const installerPath = path.join(repoRoot, "install.sh");
+const windowsInstallerPath = path.join(repoRoot, "install.ps1");
 const version = "1.2.3";
 
 function targetForHost() {
@@ -89,9 +90,61 @@ async function runInstaller(fixtureState, extraEnv = {}) {
   });
 }
 
-test("install.sh has valid POSIX shell syntax", async () => {
+test("install.sh has valid POSIX shell syntax", { skip: process.platform === "win32" }, async () => {
   const result = await run("sh", ["-n", installerPath], { cwd: repoRoot });
   assert.equal(result.code, 0, result.stderr);
+});
+
+test("install.ps1 verifies Windows release assets", async () => {
+  const source = await fs.readFile(windowsInstallerPath, "utf8");
+  assert.match(source, /prodex-\$Target\.exe/);
+  assert.match(source, /Get-FileHash[^\n]+SHA256/);
+  assert.match(source, /x86_64-pc-windows-msvc/);
+  assert.match(source, /aarch64-pc-windows-msvc/);
+  assert.match(source, /New-Item -ItemType Junction/);
+});
+
+test("install.ps1 installs the native Windows binary", { skip: process.platform !== "win32" }, async (t) => {
+  const cargoToml = await fs.readFile(path.join(repoRoot, "Cargo.toml"), "utf8");
+  const currentVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+  assert.ok(currentVersion, "Cargo.toml package version should exist");
+
+  const target = process.arch === "arm64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
+  const sourceBinary = path.join(repoRoot, "target", "debug", "prodex.exe");
+  await fs.access(sourceBinary);
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-windows-installer-test-"));
+  const releaseDir = path.join(root, "release");
+  const binDir = path.join(root, "bin");
+  const asset = `prodex-${target}.exe`;
+  await fs.mkdir(releaseDir, { recursive: true });
+  const binary = await fs.readFile(sourceBinary);
+  await fs.writeFile(path.join(releaseDir, asset), binary);
+  await fs.writeFile(
+    path.join(releaseDir, "SHA256SUMS"),
+    `${crypto.createHash("sha256").update(binary).digest("hex")}  ${asset}\n`,
+  );
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  const result = await run(
+    "powershell.exe",
+    ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", windowsInstallerPath, "-Release", currentVersion],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PRODEX_INSTALL_DIR: binDir,
+        PRODEX_NON_INTERACTIVE: "1",
+        PRODEX_NO_PATH_UPDATE: "1",
+        PRODEX_RELEASE_BASE_URL: releaseDir,
+        PRODEX_RUNNING_EXE: "",
+        npm_package_name: "",
+      },
+    },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  const installed = path.join(binDir, "prodex.exe");
+  assert.equal((await run(installed, ["--version"])).stdout.trim(), `prodex ${currentVersion}`);
 });
 
 test("installer verifies and installs the host release binary", async (t) => {

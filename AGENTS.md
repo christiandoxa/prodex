@@ -47,7 +47,7 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-shared-types/`: shared serializable command/runtime models used across modules
 - `crates/prodex-state/`: state models and merge/compaction helpers
 - `crates/prodex-terminal-ui/`: reusable terminal layout and printing helpers
-- `crates/prodex-update-notice/`: npm/latest-version update notice cache and rendering helpers
+- `crates/prodex-update-notice/`: GitHub latest-version update notice cache and rendering helpers
 - `README.md`: full user-facing documentation
 - `QUICKSTART.md`: shorter installation and usage guide
 
@@ -279,10 +279,10 @@ Show quota as a one-shot snapshot:
 prodex quota --all --once
 ```
 
-Reinstall the local binary after runtime changes:
+Build the local binary after runtime changes:
 
 ```bash
-cargo install --path . --force
+cargo build --release --locked
 ```
 
 If you changed dependencies or release metadata, refresh the lockfile before publishing:
@@ -318,7 +318,7 @@ Release versioning on the `0.x` line is incremental by the minor component unles
 2. `0.4.0`
 3. `0.5.0`
 
-After bumping `Cargo.toml`, sync the npm manifests and versioned install snippets in repo docs with:
+After bumping `Cargo.toml`, sync workspace version metadata with:
 
 ```bash
 npm run npm:sync-version
@@ -330,12 +330,12 @@ If asked to publish:
 2. run `npm run npm:sync-version`
 3. update `Cargo.lock`
 4. run tests
-5. publish through `.github/workflows/npm-publish.yml`
+5. publish the standalone binaries through `.github/workflows/npm-publish.yml`
 
-Do not publish to crates.io in the default release path.
+Do not publish to npm or crates.io in the default release path.
 The workspace currently requires publishing many internal `prodex-*` crates before the root `prodex` crate, which can hit crates.io new-crate rate limits and create partial releases.
-Keep release publishing npm/GitHub-only unless crates.io publishing is explicitly re-enabled with a deliberate plan.
+Keep release publishing GitHub-only unless another registry is explicitly re-enabled with a deliberate plan.
 
-The `.github/workflows/npm-publish.yml` workflow is expected to publish the npm packages and create or refresh the matching GitHub Release for the published plain `0.x.y` tag. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep the versioned install snippets in `README.md` and `QUICKSTART.md` synced when the release commit matches `origin/main`.
+The legacy-named `.github/workflows/npm-publish.yml` workflow creates or refreshes the matching standalone GitHub Release for the plain `0.x.y` tag and must not publish npm packages. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep versioned documentation metadata synced when the release commit matches `origin/main`.
 
 If asked to commit, use a conventional commit message.

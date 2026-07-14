@@ -1,6 +1,7 @@
 {
   "name": "@christiandoxa/prodex",
   "version": "0.288.0",
+  "private": true,
   "description": "Multi-provider Codex wrapper with OpenAI quota-aware routing and Claude Code support",
   "license": "Apache-2.0",
   "bin": {

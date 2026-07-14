@@ -6,7 +6,6 @@ import { pathToFileURL } from "node:url";
 import {
   cargoTomlPath,
   packageVersionPattern,
-  platformPackages,
   readCargoVersion,
   repoRoot,
 } from "./common.mjs";
@@ -37,7 +36,7 @@ function usage() {
     "Usage: npm run release:run -- [options]",
     "",
     "Mandatory idempotent release runner. It owns version bump, generated metadata, final changelog rendering, validation, commit, push, CI watch, publish dispatch, and verify.",
-    "It never runs npm publish locally; registry publishing is only triggered through explicit Cargo helper mode or .github/workflows/npm-publish.yml.",
+    "It never publishes to npm or crates.io; .github/workflows/npm-publish.yml creates the standalone GitHub Release.",
     "Do not manually refresh CHANGELOG.md for release commits; release:run renders it with --release-version and validates it through release:prepare.",
     "",
     "Options:",
@@ -57,7 +56,6 @@ function usage() {
     "  --poll-seconds <n>         workflow polling interval (default: 30)",
     "  --gh-retries <n>           gh API retry attempts for timeout-like failures (default: 5)",
     "  --no-cargo-test            pass --no-cargo-test to release:prepare",
-    "  --skip-verify-npm          skip npm registry verification",
     "  --skip-verify-github       skip GitHub release verification",
     "  --cargo-publish <mode>     CI helper: plan, dry-run, or publish Cargo workspace crates, then exit",
     "",
@@ -85,7 +83,6 @@ export function parseArgs(argv) {
     dryRun: false,
     resume: false,
     cargoTest: true,
-    skipVerifyNpm: false,
     skipVerifyGithub: false,
     cargoPublishMode: null,
     stateFile: defaultStateFile,
@@ -112,10 +109,6 @@ export function parseArgs(argv) {
     }
     if (value === "--no-cargo-test") {
       args.cargoTest = false;
-      continue;
-    }
-    if (value === "--skip-verify-npm") {
-      args.skipVerifyNpm = true;
       continue;
     }
     if (value === "--skip-verify-github") {
@@ -723,23 +716,6 @@ async function triggerPublish(repo, version, args) {
   process.stdout.write(`trigger-publish: ${action} ${args.publishWorkflow} for ${args.branch} (${version})\n`);
 }
 
-async function verifyNpm(version, args) {
-  if (args.skipVerifyNpm) {
-    process.stdout.write("verify: npm registry skipped\n");
-    return;
-  }
-  const packages = ["@christiandoxa/prodex", ...platformPackages.map((spec) => spec.packageName)];
-  for (const packageName of packages) {
-    const found = (await runCommand("npm", ["view", `${packageName}@${version}`, "version"], {
-      capture: true,
-      dryRun: args.dryRun,
-    })).trim();
-    if (!args.dryRun && found !== version) {
-      throw new Error(`npm verify failed for ${packageName}@${version}: found ${found || "<missing>"}`);
-    }
-  }
-}
-
 async function verifyGithubRelease(repo, version, args) {
   if (args.skipVerifyGithub) {
     process.stdout.write("verify: GitHub release skipped\n");
@@ -801,7 +777,6 @@ async function runSelectedStep(step, version, repo, args) {
       });
       return;
     case "verify":
-      await verifyNpm(version, args);
       if (!args.skipVerifyGithub) {
         requireGithubRepo(repo, step);
       }

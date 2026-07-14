@@ -95,6 +95,8 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
         version_check_row("Claude Code", claude_bin(), "--version"),
         version_check_row("Kiro CLI", kiro_bin(), "--version"),
         version_check_row("RTK", "rtk", "--version"),
+        version_check_row("Node.js", "node", "--version"),
+        version_check_row("npx", "npx", "--version"),
         probe_check_row("codebase-memory-mcp"),
     ];
     rows.push((
@@ -151,6 +153,7 @@ pub(crate) fn collect_super_tool_statuses(
             "codebase-memory-mcp MCP tools/list",
             "codebase-memory-mcp",
         ),
+        playwright_mcp_tool_status(),
         ponytail_tool_status(paths),
         SuperToolStatus {
             name: "smart-context",
@@ -391,7 +394,7 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
         ),
         (
             "Super tools".to_string(),
-            "probe codex, claude, rtk, codebase-memory-mcp, ponytail, and Presidio".to_string(),
+            "probe codex, claude, rtk, npx, Codebase Memory MCP, Playwright MCP, Ponytail, and Presidio".to_string(),
         ),
     ]
 }
@@ -417,6 +420,12 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
             "optimizer",
             Some("codebase-memory-mcp"),
             "structural codebase graph MCP",
+        ),
+        capability(
+            "playwright-mcp",
+            "optimizer",
+            Some("npx"),
+            "isolated headless browser automation MCP",
         ),
         capability(
             "ponytail",
@@ -584,6 +593,25 @@ fn command_tool_status(
         args,
         format!("{command} was not found on PATH"),
     )
+}
+
+fn playwright_mcp_tool_status() -> SuperToolStatus {
+    match prodex_caveman_assets::super_playwright_npx_command() {
+        Some(path) => command_path_tool_status(
+            "playwright-mcp",
+            "Node.js 18+ and npx",
+            path,
+            &["--version"],
+            "npx was not executable".to_string(),
+        ),
+        None => SuperToolStatus {
+            name: "playwright-mcp",
+            check: "Node.js 18+ and npx",
+            ready: false,
+            status: "missing".to_string(),
+            detail: "Playwright MCP requires Node.js 18 or newer and npx on PATH".to_string(),
+        },
+    }
 }
 
 fn optimizer_tool_status(

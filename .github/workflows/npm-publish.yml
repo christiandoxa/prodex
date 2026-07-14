@@ -1,4 +1,4 @@
-name: release publish
+name: standalone release publish
 
 on:
   workflow_dispatch:
@@ -247,8 +247,8 @@ jobs:
           overwrite: true
           retention-days: 7
 
-  publish-npm:
-    name: Stage and publish npm packages
+  prepare-release:
+    name: Prepare release SBOM
     runs-on: ubuntu-latest
     needs:
       - build
@@ -262,25 +262,12 @@ jobs:
         with:
           path: artifacts
 
-      - name: Install Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-
-      - name: Stage npm packages
-        run: node scripts/npm/stage.mjs --input-dir artifacts --output-dir release
-
-      - name: Sync package versions
-        run: node scripts/npm/sync-version.mjs --root release/packages
-
       - name: Generate release SBOM
         shell: bash
         run: |
           set -euo pipefail
           docker run --rm \
-            -v "${PWD}/release:/source:ro" \
+            -v "${PWD}/artifacts:/source:ro" \
             anchore/syft:v1.41.2@sha256:962c5626d30cdfb814802598cbb7b63cb690bf979a4bc0ff1d9c6e0cb441db7f \
             dir:/source -o spdx-json > release-sbom.spdx.json
 
@@ -297,16 +284,11 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-      - name: Publish staged packages
-        run: node scripts/npm/publish.mjs --root release --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
   sync-release-docs:
     name: Sync release docs
     runs-on: ubuntu-latest
     needs:
-      - publish-npm
+      - prepare-release
     permissions:
       contents: write
 
@@ -362,7 +344,7 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Sync versioned install snippets
+      - name: Sync documentation version metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -388,7 +370,7 @@ jobs:
     name: Publish GitHub release
     runs-on: ubuntu-latest
     needs:
-      - publish-npm
+      - prepare-release
     permissions:
       attestations: write
       contents: write
@@ -463,12 +445,15 @@ jobs:
           done < <(find artifacts -mindepth 2 -maxdepth 2 -type f \( -name 'prodex' -o -name 'prodex.exe' \) -print0)
           cp artifacts/release-sbom/release-sbom.spdx.json release-assets/release-sbom.spdx.json
           cp install.sh release-assets/install.sh
+          cp install.ps1 release-assets/install.ps1
           chmod 0755 release-assets/install.sh
 
       - name: Attest installer provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
-          subject-path: release-assets/install.sh
+          subject-path: |
+            release-assets/install.sh
+            release-assets/install.ps1
 
       - name: Generate and verify release checksums
         shell: bash
@@ -476,7 +461,7 @@ jobs:
           set -euo pipefail
           (
             cd release-assets
-            sha256sum install.sh prodex-* release-sbom.spdx.json > SHA256SUMS
+            sha256sum install.sh install.ps1 prodex-* release-sbom.spdx.json > SHA256SUMS
             sha256sum --check SHA256SUMS
           )
 
@@ -510,6 +495,12 @@ jobs:
           curl -fsSL https://github.com/christiandoxa/prodex/releases/download/${version}/install.sh | sh -s -- --release ${version}
           \`\`\`
 
+          Windows PowerShell:
+
+          \`\`\`powershell
+          \$env:PRODEX_RELEASE='${version}'; irm https://github.com/christiandoxa/prodex/releases/download/${version}/install.ps1 | iex
+          \`\`\`
+
           Update future releases with \`prodex update\`.
           EOF
           if gh release view "${tag}" >/dev/null 2>&1; then
@@ -530,7 +521,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
-      - publish-npm
+      - prepare-release
       - sync-release-docs
       - publish-github-release
     if: ${{ always() }}

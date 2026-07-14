@@ -57,6 +57,7 @@ fn configure_super_optimizer_codex_home_writes_awareness_and_agents_reference() 
         .expect("SUPER_OPTIMIZERS.md should exist");
     assert!(awareness.contains("Use visible `rtk <cmd>`"));
     assert!(awareness.contains("codebase-memory-mcp"));
+    assert!(awareness.contains("playwright-mcp"));
     assert!(awareness.contains("Ponytail"));
     for removed in [
         "prodex-sqz",
