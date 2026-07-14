@@ -169,6 +169,7 @@ fn missing_five_hour_window_does_not_block_available_weekly_window() {
             collect_blocked_limits(&plan_usage, false).is_empty(),
             "weekly-only quota should be ready for plan {plan}"
         );
+        assert_eq!(format_openai_quota_status(&plan_usage), "Ready");
     }
     let fields = quota_pool_summary_fields(&[openai_report("weekly-only", usage)]);
     assert!(fields.contains(&("Available".to_string(), "1/1 profile".to_string())));
@@ -180,6 +181,46 @@ fn missing_five_hour_window_does_not_block_available_weekly_window() {
     assert!(fields.iter().any(|(label, value)| {
         label == "Weekly remaining pool" && value.starts_with("100% across 1 profile(s)")
     }));
+}
+
+#[test]
+fn unknown_five_hour_usage_does_not_block_known_weekly_quota() {
+    let usage = UsageResponse {
+        email: None,
+        plan_type: Some("plus".to_string()),
+        rate_limit: Some(WindowPair {
+            primary_window: Some(UsageWindow {
+                used_percent: None,
+                reset_at: None,
+                limit_window_seconds: Some(18_000),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: Some(1),
+                reset_at: Some(1_700_259_200),
+                limit_window_seconds: Some(604_800),
+            }),
+        }),
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: Vec::new(),
+    };
+
+    assert_eq!(format_openai_quota_status(&usage), "Ready");
+    assert!(collect_blocked_limits(&usage, false).is_empty());
+}
+
+#[test]
+fn unavailable_quota_is_not_reported_as_blocked() {
+    let usage = UsageResponse {
+        email: None,
+        plan_type: Some("plus".to_string()),
+        rate_limit: None,
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: Vec::new(),
+    };
+
+    assert_eq!(format_openai_quota_status(&usage), "Unavailable");
 }
 
 #[test]
@@ -365,7 +406,7 @@ fn profile_quota_render_contains_core_fields() {
     let rendered = render_profile_quota_with_width("main", &usage, 80);
     assert!(rendered.contains("Quota main"));
     assert!(rendered.contains("me@example.com"));
-    assert!(rendered.contains("Blocked 5h"));
+    assert!(rendered.contains("Unavailable"));
 }
 
 #[test]
