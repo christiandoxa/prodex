@@ -149,6 +149,8 @@ pub struct CavemanArgs {
     /// External provider API key supplied by a higher-level launch shortcut.
     #[arg(skip)]
     pub external_provider_api_key: Option<String>,
+    #[arg(skip)]
+    pub harness: Option<prodex_provider_core::HarnessMode>,
     #[command(flatten)]
     pub codex_features: CodexRuntimeFeatureArgs,
     /// Arguments passed through to `codex`. A lone session id is normalized to `codex resume <session-id>`.
@@ -171,6 +173,7 @@ impl fmt::Debug for CavemanArgs {
             .field("smart_context", &self.smart_context)
             .field("super_optimizer_overlay", &self.super_optimizer_overlay)
             .field("external_provider", &self.external_provider)
+            .field("harness", &self.harness)
             .field(
                 "external_provider_api_key",
                 &self
@@ -227,6 +230,14 @@ pub struct SuperArgs {
     /// External provider preset to use through Codex/Super.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
+    /// Model-facing harness policy for local --provider or --url bridges. Defaults to auto.
+    #[arg(
+        long,
+        value_name = "auto|native|minimal",
+        value_parser = parse_harness_mode,
+        requires = "provider_or_url"
+    )]
+    pub harness: Option<prodex_provider_core::HarnessMode>,
     /// Agent CLI to launch. Gemini CLI requires the Gemini provider; Kiro CLI uses an imported Kiro profile.
     #[arg(long, value_name = "CLI", value_enum)]
     pub cli: Option<SuperCliAgent>,
@@ -279,6 +290,7 @@ impl fmt::Debug for SuperArgs {
             .field("no_presidio", &self.no_presidio)
             .field("url_configured", &self.url.is_some())
             .field("provider", &self.provider)
+            .field("harness", &self.harness)
             .field("cli", &self.cli)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("local_model", &self.local_model)
@@ -419,6 +431,13 @@ pub struct GatewayArgs {
     /// External provider preset for the gateway. Omit for an OpenAI-compatible upstream.
     #[arg(long, value_name = "PROVIDER", value_parser = parse_super_external_provider)]
     pub provider: Option<SuperExternalProvider>,
+    /// Model-facing harness policy. Defaults to policy.toml or auto.
+    #[arg(
+        long,
+        value_name = "auto|native|minimal",
+        value_parser = parse_harness_mode
+    )]
+    pub harness: Option<prodex_provider_core::HarnessMode>,
     /// Upstream base URL. Defaults to the selected provider default, policy.toml, or OPENAI_BASE_URL.
     #[arg(long = "base-url", visible_alias = "url", value_name = "URL")]
     pub base_url: Option<String>,
@@ -445,6 +464,7 @@ impl fmt::Debug for GatewayArgs {
             .field("command", &self.command)
             .field("listen", &self.listen)
             .field("provider", &self.provider)
+            .field("harness", &self.harness)
             .field("base_url_configured", &self.base_url.is_some())
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field(
@@ -493,6 +513,17 @@ impl SuperArgs {
     }
 
     pub fn validate_urls(&self) -> std::result::Result<(), String> {
+        if self.harness.is_some() && self.provider.is_none() && self.url.is_none() {
+            return Err("--harness requires --provider or --url".to_string());
+        }
+        if self.harness.is_some()
+            && matches!(
+                self.cli,
+                Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+            )
+        {
+            return Err("--harness is only supported with the Codex CLI bridge".to_string());
+        }
         if let Some(base_url) = self.base_url.as_deref() {
             parse_runtime_base_url(base_url)?;
         }
@@ -581,10 +612,17 @@ impl SuperArgs {
             super_optimizer_overlay: true,
             external_provider: self.provider,
             external_provider_api_key: self.api_key,
+            harness: self.harness,
             codex_features: CodexRuntimeFeatureArgs::default(),
             codex_args,
         }
     }
+}
+
+fn parse_harness_mode(
+    value: &str,
+) -> Result<prodex_provider_core::HarnessMode, prodex_provider_core::ParseHarnessModeError> {
+    value.parse()
 }
 
 fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, Vec<OsString>) {
@@ -959,6 +997,7 @@ mod tests {
         SuperArgs {
             codex_args: os,
             provider: None,
+            harness: None,
             api_key: None,
             local_model: None,
             profile: None,

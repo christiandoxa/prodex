@@ -33,6 +33,25 @@ pub(super) fn extract_provider_overrides_from_codex_args(
                     (1, false)
                 }
             }
+            "--harness" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
+                Some(value) => match value.parse() {
+                    Ok(harness) => {
+                        args.harness = Some(harness);
+                        (2, true)
+                    }
+                    Err(err) => return Err(err.to_string()),
+                },
+                None => return Err("--harness requires auto, native, or minimal".to_string()),
+            },
+            value if value.starts_with("--harness=") => {
+                let harness = value
+                    .strip_prefix("--harness=")
+                    .expect("matched harness prefix")
+                    .parse()
+                    .map_err(|err: prodex_provider_core::ParseHarnessModeError| err.to_string())?;
+                args.harness = Some(harness);
+                (1, true)
+            }
             "--api-key" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
                 Some(val) => {
                     args.api_key = Some(val.to_string());

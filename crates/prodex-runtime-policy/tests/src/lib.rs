@@ -346,6 +346,7 @@ version = 1
 [gateway]
 listen_addr = "127.0.0.1:4100"
 provider = "gemini"
+harness = "minimal"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 require_auth = true
 
@@ -457,6 +458,10 @@ webhook_fail_closed = true
         Some("127.0.0.1:4100")
     );
     assert_eq!(loaded.gateway.provider.as_deref(), Some("gemini"));
+    assert_eq!(
+        loaded.gateway.harness,
+        Some(prodex_provider_core::HarnessMode::Minimal)
+    );
     assert_eq!(loaded.gateway.adaptive_routing.enabled, Some(true));
     assert_eq!(loaded.gateway.adaptive_routing.shadow_mode, Some(true));
     assert_eq!(loaded.gateway.adaptive_routing.window_size, Some(64));
@@ -639,6 +644,26 @@ webhook_fail_closed = true
     );
     assert_eq!(loaded.gateway.guardrails.webhook_fail_closed, Some(true));
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_rejects_unknown_gateway_harness() {
+    let root = temp_root("gateway-harness-unknown");
+    fs::write(
+        runtime_policy_path(&root),
+        "version = 1\n[gateway]\nharness = \"unknown\"\n",
+    )
+    .unwrap();
+
+    let error = load_runtime_policy_from_root(&root)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("unknown variant") || error.contains("unknown"),
+        "{error}"
+    );
     let _ = fs::remove_dir_all(root);
 }
 

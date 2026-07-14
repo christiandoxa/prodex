@@ -5,6 +5,7 @@ mod cleanup;
 mod dashboard;
 mod expose;
 mod external_provider;
+mod harness;
 mod ping;
 mod redeem;
 mod runtime_features;
@@ -47,6 +48,7 @@ fn assert_same_caveman_args(left: CavemanArgs, right: CavemanArgs) {
     assert_eq!(left.smart_context, right.smart_context);
     assert_eq!(left.super_optimizer_overlay, right.super_optimizer_overlay);
     assert_eq!(left.external_provider, right.external_provider);
+    assert_eq!(left.harness, right.harness);
     assert_eq!(
         left.external_provider_api_key,
         right.external_provider_api_key
@@ -247,6 +249,7 @@ fn super_and_s_parse_to_same_super_behavior_with_options() {
     ]);
     assert_same_caveman_args(super_args, alias_args);
 }
+
 #[test]
 fn s_profile_shortcut_selects_profile() {
     let command = parse_cli_command_from(["prodex", "s", "--profile", "nama_profile"])
