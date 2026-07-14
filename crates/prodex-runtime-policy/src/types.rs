@@ -433,6 +433,7 @@ pub struct RuntimePolicyGatewaySettings {
     pub replica_count: Option<u16>,
     pub require_multi_replica_accounting_checks: Option<bool>,
     pub provider: Option<String>,
+    pub harness: Option<prodex_provider_core::HarnessMode>,
     pub base_url: Option<String>,
     pub require_auth: Option<bool>,
     pub auth_token_ref: Option<SecretRef>,

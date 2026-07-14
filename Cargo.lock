@@ -2546,6 +2546,7 @@ name = "prodex-cli"
 version = "0.285.0"
 dependencies = [
  "clap",
+ "prodex-provider-core",
  "prodex-runtime-gemini",
  "reqwest",
  "serde",
@@ -2878,6 +2879,7 @@ dependencies = [
  "prodex-authn",
  "prodex-core",
  "prodex-domain",
+ "prodex-provider-core",
  "prodex-secret-store",
  "serde",
  "toml",

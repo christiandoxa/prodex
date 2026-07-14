@@ -48,6 +48,7 @@ fn control_plane_data_plane_field(policy: &RuntimePolicyFile) -> Option<&'static
     let gateway = &policy.gateway;
     [
         ("gateway.provider", gateway.provider.is_some()),
+        ("gateway.harness", gateway.harness.is_some()),
         ("gateway.base_url", gateway.base_url.is_some()),
         ("gateway.require_auth", gateway.require_auth.is_some()),
         ("gateway.auth_token_ref", gateway.auth_token_ref.is_some()),
