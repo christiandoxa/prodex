@@ -14,15 +14,15 @@ fn prodex_update_notice_uses_the_self_update_command() {
 }
 
 #[test]
-fn current_prodex_release_source_is_npm_when_wrapped_by_npm() {
+fn current_prodex_release_source_is_github_when_wrapped_by_npm() {
     let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "@christiandoxa/prodex");
-    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::Npm);
+    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::GitHub);
 }
 
 #[test]
-fn current_prodex_release_source_defaults_to_npm() {
+fn current_prodex_release_source_defaults_to_github() {
     let _npm_name_guard = TestEnvVarGuard::set("npm_package_name", "");
-    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::Npm);
+    assert_eq!(current_prodex_release_source(), ProdexReleaseSource::GitHub);
 }
 
 #[test]
@@ -32,15 +32,15 @@ fn cached_update_version_is_scoped_to_release_source() {
         ProdexReleaseSource::CratesIo,
         "0.2.99",
         now,
-        ProdexReleaseSource::Npm,
+        ProdexReleaseSource::GitHub,
         current_prodex_version(),
         now
     ));
     assert!(should_use_cached_update_version(
-        ProdexReleaseSource::Npm,
+        ProdexReleaseSource::GitHub,
         "0.2.99",
         now,
-        ProdexReleaseSource::Npm,
+        ProdexReleaseSource::GitHub,
         current_prodex_version(),
         now
     ));

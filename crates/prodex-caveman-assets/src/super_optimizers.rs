@@ -15,6 +15,7 @@ mod ponytail;
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
 const PRODEX_HOME_ENV: &str = "PRODEX_HOME";
+const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.78";
 
 pub fn configure_super_optimizer_codex_home(codex_home: &Path) -> Result<()> {
     configure_super_optimizer_codex_home_with_presidio(codex_home, false)
@@ -29,19 +30,25 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
     let optimizer_roots = discovery::managed_optimizer_roots();
     let codebase_memory_command =
         find_optimizer_command("codebase-memory-mcp", &path_dirs, &optimizer_roots);
+    let npx_command = find_playwright_npx_command(&path_dirs);
     let ponytail_checkout = ponytail::find_ponytail_checkout(&optimizer_roots);
 
     let optimizers_path = codex_home.join(SUPER_OPTIMIZERS_MD);
     let awareness = render_super_optimizer_awareness(
         &path_dirs,
         codebase_memory_command.as_deref(),
+        npx_command.as_deref(),
         ponytail_checkout.as_deref(),
         presidio_enabled,
     );
     write_text_file(&optimizers_path, &awareness)?;
     localize_text_file(&codex_home.join(AGENTS_MD))?;
     ensure_agents_reference(codex_home, &optimizers_path)?;
-    configure_codebase_memory_mcp(codex_home, codebase_memory_command.as_deref())?;
+    configure_super_mcp_servers(
+        codex_home,
+        codebase_memory_command.as_deref(),
+        npx_command.as_deref(),
+    )?;
     if let Some(checkout) = ponytail_checkout {
         ponytail::install_ponytail_plugin(codex_home, &checkout)?;
     }
@@ -51,6 +58,7 @@ pub fn configure_super_optimizer_codex_home_with_presidio(
 fn render_super_optimizer_awareness(
     path_dirs: &[PathBuf],
     codebase_memory_command: Option<&Path>,
+    npx_command: Option<&Path>,
     ponytail_checkout: Option<&Path>,
     presidio_enabled: bool,
 ) -> String {
@@ -63,6 +71,10 @@ fn render_super_optimizer_awareness(
     awareness.push_str(&format!(
         "- codebase-memory-mcp: {}\n",
         availability_label(codebase_memory_command)
+    ));
+    awareness.push_str(&format!(
+        "- playwright-mcp: {}\n",
+        availability_label(npx_command)
     ));
     awareness.push_str(&format!(
         "- ponytail plugin: {}\n",
@@ -100,14 +112,14 @@ fn ensure_agents_reference(codex_home: &Path, reference_path: &Path) -> Result<(
     write_text_file(&agents_path, &updated)
 }
 
-fn configure_codebase_memory_mcp(codex_home: &Path, command: Option<&Path>) -> Result<()> {
-    let Some(command) = command else {
+fn configure_super_mcp_servers(
+    codex_home: &Path,
+    codebase_memory_command: Option<&Path>,
+    npx_command: Option<&Path>,
+) -> Result<()> {
+    if codebase_memory_command.is_none() && npx_command.is_none() {
         return Ok(());
-    };
-    let Some((bridge, bridge_args)) = mcp_jsonl_bridge_command_args(command) else {
-        return Ok(());
-    };
-
+    }
     let config_path = codex_home.join("config.toml");
     let contents = read_text_file_limited(&config_path)?.unwrap_or_default();
     let mut table = if contents.trim().is_empty() {
@@ -120,16 +132,50 @@ fn configure_codebase_memory_mcp(codex_home: &Path, command: Option<&Path>) -> R
             _ => anyhow::bail!("{} did not parse as a TOML table", config_path.display()),
         }
     };
-    configure_stdio_mcp_server(
-        &mut table,
-        "codebase-memory-mcp",
-        bridge,
-        &bridge_args,
-        &codebase_memory_mcp_env(),
-    );
+    if let Some((bridge, bridge_args)) =
+        codebase_memory_command.and_then(mcp_jsonl_bridge_command_args)
+    {
+        configure_stdio_mcp_server(
+            &mut table,
+            "codebase-memory-mcp",
+            bridge,
+            &bridge_args,
+            &codebase_memory_mcp_env(),
+        );
+    }
+    if let Some(command) = npx_command {
+        configure_default_playwright_mcp_server(&mut table, command);
+    }
     let rendered = toml::to_string(&toml::Value::Table(table))
         .context("failed to render Super optimizer config overlay")?;
     write_text_file(&config_path, &rendered)
+}
+
+fn configure_default_playwright_mcp_server(table: &mut toml::Table, command: &Path) {
+    let Some(mcp_servers) = mcp_servers_table(table) else {
+        return;
+    };
+    if mcp_servers.contains_key("playwright") {
+        return;
+    }
+    let server = ensure_child_table(mcp_servers, "playwright");
+    configure_stdio_mcp_server_fields(
+        server,
+        command.to_path_buf(),
+        &[
+            "-y".to_string(),
+            PLAYWRIGHT_MCP_PACKAGE.to_string(),
+            "--headless".to_string(),
+            "--isolated".to_string(),
+        ],
+        &[],
+    );
+    server.insert("enabled".to_string(), toml::Value::Boolean(true));
+    server.insert("startup_timeout_sec".to_string(), toml::Value::Integer(60));
+    server.insert(
+        "default_tools_approval_mode".to_string(),
+        toml::Value::String("writes".to_string()),
+    );
 }
 
 fn configure_stdio_mcp_server(
@@ -143,6 +189,15 @@ fn configure_stdio_mcp_server(
         return;
     };
     let server = ensure_child_table(mcp_servers, name);
+    configure_stdio_mcp_server_fields(server, command, args, env_vars);
+}
+
+fn configure_stdio_mcp_server_fields(
+    server: &mut toml::Table,
+    command: PathBuf,
+    args: &[String],
+    env_vars: &[(&str, String)],
+) {
     server.insert(
         "command".to_string(),
         toml::Value::String(command.display().to_string()),
@@ -214,13 +269,39 @@ fn find_path_command(command: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
         }
         #[cfg(windows)]
         {
-            let candidate = dir.join(format!("{command}.exe"));
-            if optimizer_command_ready(command, &candidate) {
-                return Some(candidate);
+            for suffix in [".exe", ".cmd", ".bat"] {
+                let candidate = dir.join(format!("{command}{suffix}"));
+                if optimizer_command_ready(command, &candidate) {
+                    return Some(candidate);
+                }
             }
         }
     }
     None
+}
+
+pub fn super_playwright_npx_command() -> Option<PathBuf> {
+    find_playwright_npx_command(&discovery::path_dirs_from_env())
+}
+
+fn find_playwright_npx_command(path_dirs: &[PathBuf]) -> Option<PathBuf> {
+    let node = find_path_command("node", path_dirs)?;
+    let output = Command::new(node).arg("--version").output().ok()?;
+    if !output.status.success() || node_major_version(&output.stdout)? < 18 {
+        return None;
+    }
+    find_path_command("npx", path_dirs)
+}
+
+fn node_major_version(output: &[u8]) -> Option<u64> {
+    std::str::from_utf8(output)
+        .ok()?
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
 }
 
 fn find_managed_optimizer_command(command: &str, optimizer_roots: &[PathBuf]) -> Option<PathBuf> {

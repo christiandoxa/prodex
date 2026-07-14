@@ -134,35 +134,25 @@ Install the standalone macOS or Linux binary from the latest GitHub Release:
 curl -fsSL https://github.com/christiandoxa/prodex/releases/latest/download/install.sh | sh
 ```
 
-The installer downloads the matching release asset, verifies it against `SHA256SUMS`, and installs `prodex` to `~/.local/bin`. Its auditable source is also available directly from the repository:
+On Windows, run this from PowerShell or Command Prompt:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex"
+```
+
+The installers download the matching release asset and verify it against `SHA256SUMS`. The macOS/Linux target is `~/.local/bin`; Windows uses `%LOCALAPPDATA%\Programs\Prodex\bin`. Their auditable sources are also available directly from the repository:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/christiandoxa/prodex/main/install.sh | sh
 ```
 
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/christiandoxa/prodex/main/install.ps1 | iex"
+```
+
 Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available.
 
-<details>
-<summary>Legacy npm installation</summary>
-
-```bash
-npm install -g @christiandoxa/prodex
-```
-
-The npm package uses its bundled `@openai/codex@latest` dependency by default. Running `prodex update` migrates this installation to the standalone GitHub Release binary and preserves Codex as its own global npm command. If the bundled native Codex optional package is missing or not executable, Prodex falls back to an executable external `codex` on `PATH` and prints a notice before launch. This includes nvm-managed global Codex installs when the active nvm version's `bin` directory is on `PATH`. If neither bundled nor external Codex is usable, set `PRODEX_CODEX_AUTO_INSTALL=1` to let Prodex run `npm install -g @openai/codex@latest` once before retrying PATH resolution. To deliberately pin a separate Codex CLI from your machine, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`.
-
-</details>
-
-<details>
-<summary>Legacy source installation</summary>
-
-```bash
-cargo install --path .
-```
-
-If you install from source, make sure the `codex` binary in your `PATH` is already installed and up to date.
-
-</details>
+npm and Cargo installations are no longer supported. Existing copies from either legacy channel should run `prodex update` once to migrate to the standalone installer. Contributors should use normal workspace development commands such as `cargo build` instead of treating a source build as a supported installation channel.
 
 ## Optional tools
 
@@ -170,10 +160,11 @@ Prodex Super keeps a deliberately small optional stack:
 
 - [RTK](https://github.com/rtk-ai/rtk) for noisy shell output.
 - [Codebase Memory MCP](https://github.com/DeusData/codebase-memory-mcp) for structural code navigation.
+- [Playwright MCP](https://github.com/microsoft/playwright-mcp) for browser inspection and automation.
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman and Smart Context are built into Prodex. Prodex runs without every external tool above; missing tools are skipped instead of blocking launch.
+Caveman and Smart Context are built into Prodex. Every default Codex-based `prodex s` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking launch.
 
 <details>
 <summary>Install and verify the Super tools</summary>
@@ -195,6 +186,17 @@ Codebase Memory MCP:
 curl -fsSL https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh | bash -s -- --skip-config
 codebase-memory-mcp --help
 ```
+
+Playwright MCP:
+
+```bash
+node --version
+npx --version
+```
+
+Playwright starts through `npx` in headless, isolated mode, so concurrent Prodex terminals do not share browser login state. It requires a browser usable by Playwright and prompts before tools marked as writes. Playwright MCP is not a security boundary.
+
+Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entry to the base profile's `config.toml` to change flags, use a persistent/headed browser, or set `enabled = false`; the temporary Super overlay will not replace it.
 
 Ponytail:
 
@@ -329,6 +331,7 @@ This reads the installed Kiro CLI state from the local auth database, snapshots 
 - Caveman and Ponytail.
 - RTK shell-output guidance.
 - Codebase Memory MCP when installed.
+- Playwright MCP when Node.js 18+ and `npx` are available.
 - Smart Context Autopilot.
 - launch-time full access.
 - optional Presidio redaction.
@@ -458,7 +461,7 @@ prodex update --help
 prodex update
 ```
 
-`prodex update` downloads the latest checksum-verified GitHub Release binary. Existing npm or Cargo installations are removed and replaced with the standalone binary in `~/.local/bin`. Update notices emitted by this version use the same command.
+`prodex update` downloads the latest checksum-verified GitHub Release binary on macOS, Linux, and Windows. Existing npm or legacy Cargo installations migrate to the standalone path. Update notices state that both legacy installation channels are unsupported and direct them to this command.
 
 </details>
 

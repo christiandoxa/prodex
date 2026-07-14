@@ -312,9 +312,9 @@ test("release-run dry-run covers mandatory release order without mutation or net
       "release-run: watch-publish (0.2.0)",
       "dry-run: watch npm-publish.yml for ",
       "release-run: verify (0.2.0)",
-      "dry-run: npm view @christiandoxa/prodex@0.2.0 version",
       "dry-run: gh api --method GET /repos/example/prodex/releases/tags/0.2.0",
     ]);
+    assert.doesNotMatch(stdout, /npm view|npm publish/);
 
     assert.equal(await pathExists(stateFile), false);
     assert.match(await fs.readFile(path.join(root, "Cargo.toml"), "utf8"), /version = "0\.1\.0"/);

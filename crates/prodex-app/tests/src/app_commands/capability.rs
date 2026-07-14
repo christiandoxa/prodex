@@ -74,3 +74,13 @@ fn super_status_managed_optimizer_candidates_match_overlay_layouts() {
         managed_optimizer_command_candidates_for_super_status(&root, "codebase-memory-mcp");
     assert!(candidates.contains(&root.join("codebase-memory-mcp/build/c/codebase-memory-mcp")));
 }
+
+#[test]
+fn capabilities_include_super_mcp_defaults() {
+    let capabilities = collect_capabilities();
+    assert!(
+        capabilities
+            .iter()
+            .any(|capability| capability.name == "playwright-mcp")
+    );
+}
