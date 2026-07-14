@@ -13,14 +13,17 @@
       "id": "SEC-ID-001",
       "phase": 5,
       "threat": "Caller forges forwarded identity, role, tenant, or client address headers.",
-      "control": "Trusted-proxy canonicalization and server-side identity/tenant binding.",
+      "control": "Exact expected Host, trusted-proxy canonicalization, forwarding-header stripping and server-side identity/tenant binding.",
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
-      "expected": "Untrusted forwarding headers are ignored or rejected; no privilege or tenant change occurs.",
+      "expected": "Non-loopback listeners require an exact expected Host; untrusted forwarding headers reject and trusted forwarding metadata is stripped before application dispatch.",
       "implementation_status": "tested",
       "evidence_required": "Gateway tests through trusted and untrusted proxy hops with duplicate and conflicting headers.",
       "evidence": [
         "edge_security_rejects_forwarding_spoof_and_host_origin_csrf_mismatch",
+        "production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_spoofing",
+        "non_loopback_server_requires_explicit_expected_host",
+        "validated_peer_metadata_maps_to_low_cardinality_governance_zone",
         "principal_evidence_enforces_required_scope_and_anonymous_policy",
         "auth-boundary-guard.mjs"
       ]
@@ -48,7 +51,7 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
       "expected": "Fixed, expired, revoked, replayed, or privilege-stale sessions are rejected on every replica.",
-      "implementation_status": "partial",
+      "implementation_status": "implemented",
       "evidence_required": "Clock-controlled fixation/expiry/revocation tests across at least two gateway replicas.",
       "evidence": [
         "session_context_propagates_age_idle_classification_and_affinity",
@@ -56,7 +59,8 @@
         "configured_timeouts_and_concurrency_fail_closed",
         "governance_sessions_are_monotonic_bounded_and_revocable",
         "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg hash/current-session revoke assertions",
-        "cross-replica invalidation window and multi-replica validation pending"
+        "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
+        "deployed two-gateway chaos validation pending"
       ]
     },
     {
@@ -100,11 +104,14 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
       "expected": "Observe records would-deny; enforce constrains/denies; bank denies required unresolved inspection.",
-      "implementation_status": "partial",
+      "implementation_status": "tested",
       "evidence_required": "Text, image, audio, file, non-UTF8, timeout and detector-outage matrix.",
       "evidence": [
         "application_inspection_is_unsupported_without_detector_evidence",
         "bank_response_inspection_requires_full_coverage",
+        "walker_reports_unsupported_modalities_and_depth_limits",
+        "runtime_presidio_detector_failure_matrix_is_bounded_and_content_preserving",
+        "inspection_failure_mode_matrix_preserves_shadow_and_fail_closed_semantics",
         "gateway_presidio_redaction_failure_is_audited_without_payload_or_endpoint_leakage"
       ]
     },
@@ -114,14 +121,16 @@
       "threat": "Sensitive output spans stream chunks and escapes a per-chunk detector.",
       "control": "Incremental bounded response inspection with overlap and one precommit deadline.",
       "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "stream_integration_fuzz",
-      "expected": "Boundary-spanning findings are enforced before local commit without unbounded buffering.",
-      "implementation_status": "partial",
-      "evidence_required": "Random chunk-boundary corpus for SSE and WebSocket response streams.",
+      "test_type": "deterministic_stream_corpus",
+      "expected": "Boundary-spanning findings are detected under both transport-equivalent chunk models; outcomes classify as precommit before any safe chunk and postcommit afterward.",
+      "implementation_status": "tested",
+      "evidence_required": "Deterministic randomized shared-inspector corpus for SSE byte reads and valid UTF-8 WebSocket frames, including Unicode splits and commit-state outcomes.",
       "evidence": [
         "incremental_inspector_finds_every_chunk_boundary",
         "incremental_inspector_finds_unicode_across_three_chunks",
-        "full SSE/WebSocket randomized corpus pending"
+        "incremental_inspector_randomized_sse_and_websocket_chunk_corpus",
+        "incremental_inspector_commit_outcome_is_stable_across_transport_chunking",
+        "gateway_streaming_response_guardrail_blocked_output_is_audited_without_value_leakage"
       ]
     },
     {
@@ -198,11 +207,12 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "integration_security",
       "expected": "Mismatched, revoked, expired or exhausted approval denies and cannot expand policy eligibility.",
-      "implementation_status": "planned",
+      "implementation_status": "tested",
       "evidence_required": "Mutation/replay/race matrix matching sample 05.",
       "evidence": [
-        "Typed request-bound approval model exists",
-        "authoritative atomic execution-token consumption pending"
+        "execution_fingerprint_is_stable_and_bound_to_the_request_context",
+        "execution_approval_is_policy_selected_quorum_gated_and_one_use",
+        "gateway_execution_approval_http_lists_shows_and_reviews_without_payloads"
       ]
     },
     {
@@ -232,7 +242,9 @@
       "evidence_required": "Generated provider/constraint sets and seven synthetic scenario assertions.",
       "evidence": [
         "governed_routing_enforces_every_hard_eligibility_gate",
-        "governed_routing_never_places_ineligible_or_cross_tenant_routes_in_fallback"
+        "governed_routing_never_places_ineligible_or_cross_tenant_routes_in_fallback",
+        "governed_routing_runtime_signals_change_selection_and_keep_only_eligible_fallbacks",
+        "provider_registry_resolves_selected_heterogeneous_projected_adapter"
       ]
     },
     {
@@ -279,7 +291,8 @@
       "evidence": [
         "explicit_quota_codes_rotate_only_before_commit",
         "transient_5xx_retries_only_before_commit",
-        "provider_retry_boundary_marks_irreversible_stages_committed"
+        "provider_retry_boundary_marks_irreversible_stages_committed",
+        "provider_fallback_requires_explicit_rate_limit_or_retryable_precommit_error"
       ]
     },
     {
@@ -368,7 +381,7 @@
       "id": "SEC-STO-001",
       "phase": 5,
       "threat": "Migration or rollback mixes incompatible schemas or loses tenant/audit/policy state.",
-      "control": "Versioned expand/migrate/contract migrations, compatibility window and export/restore proof.",
+      "control": "Versioned migrations plus authenticated AES-256-GCM backup, isolated restore and governance-link verification.",
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "migration_restore_integration",
       "expected": "Old/new supported images interoperate and restored durable state preserves isolation, hashes and pointers.",
@@ -377,7 +390,7 @@
       "evidence": [
         "all_governance_artifact_kinds_use_revisioned_authority",
         "governance migration catalog tests",
-        "npm run ci:backup-restore-drill governance fingerprint and audit-link verification"
+        "npm run ci:backup-restore-drill: final synthetic RPO 2.004 s, RTO 1.442 s, governance fingerprint and audit-link verification"
       ]
     },
     {
@@ -393,6 +406,7 @@
       "evidence": [
         "concurrent_activation_uses_etag_compare_and_swap",
         "two live PostgreSQL repositories enforce atomic reservation/accounting",
+        "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
         "Redis-backed boundary proof passed; Redis restart and database failover remain deployment tests"
       ]
     },
@@ -430,6 +444,21 @@
       ]
     },
     {
+      "id": "SEC-OBS-001",
+      "phase": 5,
+      "threat": "Caller-controlled tenant, key, epoch, route or content values create unbounded metrics cardinality or leak identifiers.",
+      "control": "Aggregate gateway counters with fixed metric names and no caller-controlled labels.",
+      "modes": ["personal", "enterprise_observe", "enterprise_enforce", "bank_enforce"],
+      "test_type": "unit_security",
+      "expected": "Metrics aggregate usage without key, tenant, epoch or content labels.",
+      "implementation_status": "tested",
+      "evidence_required": "Focused metric rendering test plus production exporter/alert acceptance.",
+      "evidence": [
+        "prometheus_text_aggregates_keys_without_high_cardinality_labels",
+        "live alert, pager and achieved-SLO evidence remains deployment acceptance work"
+      ]
+    },
+    {
       "id": "SEC-BNK-001",
       "phase": 5,
       "threat": "Bank label starts with a public listener, bypass, missing mandatory dependency, raw secret or broad egress.",
@@ -442,6 +471,7 @@
       "evidence": [
         "bank_governance_deployment_matrix_fails_closed",
         "bank_runtime_listener_guard_rejects_public_or_wildcard_addresses",
+        "non_loopback_server_requires_explicit_expected_host",
         "deployment-security-guard.mjs"
       ]
     },

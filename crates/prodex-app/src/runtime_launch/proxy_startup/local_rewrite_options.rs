@@ -31,6 +31,13 @@ impl RuntimeProjectedProviderCredential {
     pub(super) fn provider(&self) -> &ProjectedSecretProvider {
         &self.provider
     }
+
+    pub(super) fn with_reference(&self, reference: SecretRef) -> Option<Self> {
+        (reference.provider() == self.reference.provider()).then(|| Self {
+            reference,
+            provider: self.provider.clone(),
+        })
+    }
 }
 
 impl fmt::Debug for RuntimeProjectedProviderCredential {

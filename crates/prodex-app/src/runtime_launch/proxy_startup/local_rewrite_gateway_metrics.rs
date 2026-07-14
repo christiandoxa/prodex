@@ -7,64 +7,73 @@ use std::collections::BTreeMap;
 
 #[derive(Clone)]
 pub(super) struct RuntimeGatewayPrometheusRow {
-    pub(super) source: String,
-    pub(super) disabled: bool,
-    pub(super) tenant_id: Option<String>,
-    pub(super) team_id: Option<String>,
-    pub(super) project_id: Option<String>,
-    pub(super) user_id: Option<String>,
-    pub(super) budget_id: Option<String>,
     pub(super) usage: runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage,
 }
 
 pub(super) fn runtime_gateway_prometheus_text(
     rows: &BTreeMap<String, RuntimeGatewayPrometheusRow>,
 ) -> String {
+    let totals = rows.values().fold(
+        runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage::default(),
+        |mut totals, row| {
+            totals.requests_total = totals
+                .requests_total
+                .saturating_add(row.usage.requests_total);
+            totals.spend_microusd = totals
+                .spend_microusd
+                .saturating_add(row.usage.spend_microusd);
+            match row.usage.minute_epoch.cmp(&totals.minute_epoch) {
+                std::cmp::Ordering::Greater => {
+                    totals.minute_epoch = row.usage.minute_epoch;
+                    totals.requests_this_minute = row.usage.requests_this_minute;
+                    totals.tokens_this_minute = row.usage.tokens_this_minute;
+                }
+                std::cmp::Ordering::Equal => {
+                    totals.requests_this_minute = totals
+                        .requests_this_minute
+                        .saturating_add(row.usage.requests_this_minute);
+                    totals.tokens_this_minute = totals
+                        .tokens_this_minute
+                        .saturating_add(row.usage.tokens_this_minute);
+                }
+                std::cmp::Ordering::Less => {}
+            }
+            totals
+        },
+    );
     let mut body = String::new();
     body.push_str(
-        "# HELP prodex_gateway_virtual_key_requests_total Total accepted gateway requests by virtual key.\n",
+        "# HELP prodex_gateway_virtual_key_requests_total Total accepted gateway requests visible to this caller.\n",
     );
     body.push_str("# TYPE prodex_gateway_virtual_key_requests_total counter\n");
-    for (name, row) in rows {
-        let labels = runtime_gateway_prometheus_key_labels(name, row);
-        body.push_str(&format!(
-            "prodex_gateway_virtual_key_requests_total{{{labels}}} {}\n",
-            row.usage.requests_total
-        ));
-    }
+    body.push_str(&format!(
+        "prodex_gateway_virtual_key_requests_total {}\n",
+        totals.requests_total
+    ));
     body.push_str(
-        "# HELP prodex_gateway_virtual_key_spend_microusd_total Estimated gateway spend by virtual key in micro-USD.\n",
+        "# HELP prodex_gateway_virtual_key_spend_microusd_total Estimated gateway spend visible to this caller in micro-USD.\n",
     );
     body.push_str("# TYPE prodex_gateway_virtual_key_spend_microusd_total counter\n");
-    for (name, row) in rows {
-        let labels = runtime_gateway_prometheus_key_labels(name, row);
-        body.push_str(&format!(
-            "prodex_gateway_virtual_key_spend_microusd_total{{{labels}}} {}\n",
-            row.usage.spend_microusd
-        ));
-    }
+    body.push_str(&format!(
+        "prodex_gateway_virtual_key_spend_microusd_total {}\n",
+        totals.spend_microusd
+    ));
     body.push_str(
-        "# HELP prodex_gateway_virtual_key_minute_requests Current minute accepted gateway requests by virtual key.\n",
+        "# HELP prodex_gateway_virtual_key_minute_requests Current minute accepted gateway requests visible to this caller.\n",
     );
     body.push_str("# TYPE prodex_gateway_virtual_key_minute_requests gauge\n");
-    for (name, row) in rows {
-        let labels = runtime_gateway_prometheus_key_labels(name, row);
-        body.push_str(&format!(
-            "prodex_gateway_virtual_key_minute_requests{{{labels},minute_epoch=\"{}\"}} {}\n",
-            row.usage.minute_epoch, row.usage.requests_this_minute
-        ));
-    }
+    body.push_str(&format!(
+        "prodex_gateway_virtual_key_minute_requests {}\n",
+        totals.requests_this_minute
+    ));
     body.push_str(
-        "# HELP prodex_gateway_virtual_key_minute_tokens Current minute estimated input tokens by virtual key.\n",
+        "# HELP prodex_gateway_virtual_key_minute_tokens Current minute estimated input tokens visible to this caller.\n",
     );
     body.push_str("# TYPE prodex_gateway_virtual_key_minute_tokens gauge\n");
-    for (name, row) in rows {
-        let labels = runtime_gateway_prometheus_key_labels(name, row);
-        body.push_str(&format!(
-            "prodex_gateway_virtual_key_minute_tokens{{{labels},minute_epoch=\"{}\"}} {}\n",
-            row.usage.minute_epoch, row.usage.tokens_this_minute
-        ));
-    }
+    body.push_str(&format!(
+        "prodex_gateway_virtual_key_minute_tokens {}\n",
+        totals.tokens_this_minute
+    ));
     body
 }
 
@@ -91,16 +100,7 @@ pub(super) fn runtime_gateway_prometheus_response(
         let usage = usage.get(&entry.key.name).cloned().unwrap_or_default();
         rows.insert(
             entry.key.name.clone(),
-            RuntimeGatewayPrometheusRow {
-                source: entry.source.as_str().to_string(),
-                disabled: entry.disabled,
-                tenant_id: entry.tenant_id.clone(),
-                team_id: entry.key.team_id.clone(),
-                project_id: entry.key.project_id.clone(),
-                user_id: entry.key.user_id.clone(),
-                budget_id: entry.key.budget_id.clone(),
-                usage,
-            },
+            RuntimeGatewayPrometheusRow { usage },
         );
     }
     for (name, usage) in usage {
@@ -109,16 +109,7 @@ pub(super) fn runtime_gateway_prometheus_response(
             continue;
         }
         rows.entry(name)
-            .or_insert_with(|| RuntimeGatewayPrometheusRow {
-                source: "unknown".to_string(),
-                disabled: false,
-                tenant_id: None,
-                team_id: None,
-                project_id: None,
-                user_id: None,
-                budget_id: None,
-                usage,
-            });
+            .or_insert_with(|| RuntimeGatewayPrometheusRow { usage });
     }
 
     let body = runtime_gateway_prometheus_text(&rows);
@@ -137,80 +128,47 @@ pub(super) fn runtime_gateway_prometheus_response(
     })
 }
 
-fn runtime_gateway_prometheus_key_labels(name: &str, row: &RuntimeGatewayPrometheusRow) -> String {
-    format!(
-        "key_hash=\"{}\",source=\"{}\",disabled=\"{}\",tenant_scoped=\"{}\",team_scoped=\"{}\",project_scoped=\"{}\",user_scoped=\"{}\",budget_scoped=\"{}\"",
-        runtime_gateway_prometheus_label_escape(&runtime_gateway_prometheus_stable_hash(name)),
-        runtime_gateway_prometheus_label_escape(&row.source),
-        row.disabled,
-        row.tenant_id.is_some(),
-        row.team_id.is_some(),
-        row.project_id.is_some(),
-        row.user_id.is_some(),
-        row.budget_id.is_some()
-    )
-}
-
-fn runtime_gateway_prometheus_stable_hash(value: &str) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
-}
-
-fn runtime_gateway_prometheus_label_escape(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '\\' => escaped.push_str("\\\\"),
-            '"' => escaped.push_str("\\\""),
-            '\n' => escaped.push_str("\\n"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn prometheus_text_omits_raw_high_cardinality_labels() {
-        assert_eq!(
-            runtime_gateway_prometheus_stable_hash("team-a"),
-            "de90a3717d1252d6"
-        );
+    fn prometheus_text_aggregates_keys_without_high_cardinality_labels() {
         let key_name = "team\"a\\b\nmain";
         let mut rows = BTreeMap::new();
         rows.insert(
             key_name.to_string(),
             RuntimeGatewayPrometheusRow {
-                source: "policy".to_string(),
-                disabled: false,
-                tenant_id: Some("tenant\nx".to_string()),
-                team_id: None,
-                project_id: None,
-                user_id: None,
-                budget_id: None,
                 usage: runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
                     requests_total: 7,
-                    ..Default::default()
+                    spend_microusd: 11,
+                    minute_epoch: 20,
+                    requests_this_minute: 2,
+                    tokens_this_minute: 3,
+                },
+            },
+        );
+        rows.insert(
+            "other-key".to_string(),
+            RuntimeGatewayPrometheusRow {
+                usage: runtime_proxy_crate::RuntimeGatewayVirtualKeyUsage {
+                    requests_total: 5,
+                    spend_microusd: 13,
+                    minute_epoch: 20,
+                    requests_this_minute: 4,
+                    tokens_this_minute: 6,
                 },
             },
         );
         let body = runtime_gateway_prometheus_text(&rows);
         assert!(!body.contains("team\\\"a\\\\b\\nmain"));
-        assert!(body.contains(&format!(
-            "key_hash=\"{}\"",
-            runtime_gateway_prometheus_stable_hash(key_name)
-        )));
+        assert!(!body.contains("key_hash="));
+        assert!(!body.contains("minute_epoch="));
         assert!(!body.contains("tenant_id="));
         assert!(!body.contains("tenant\\nx"));
-        assert!(body.contains("tenant_scoped=\"true\""));
-        assert!(body.contains("user_scoped=\"false\""));
-        assert!(body.contains(" 7\n"));
+        assert!(body.contains("prodex_gateway_virtual_key_requests_total 12\n"));
+        assert!(body.contains("prodex_gateway_virtual_key_spend_microusd_total 24\n"));
+        assert!(body.contains("prodex_gateway_virtual_key_minute_requests 6\n"));
+        assert!(body.contains("prodex_gateway_virtual_key_minute_tokens 9\n"));
     }
 }

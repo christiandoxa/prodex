@@ -212,6 +212,7 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
                 actor: checker,
                 expected_version: 1,
                 now_unix_ms: 1_800_000_000_003,
+                reason: None,
                 audit_outbox: vote_audit,
             },
             ApprovalAction::Approve,
@@ -329,7 +330,8 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
         credential_scope: CredentialScope::DataPlane,
         classification: DataClassification::Confidential,
         policy_revision_id: revision_id,
-        registry_revision_id: registry_revision.to_string(),
+        provider_registry_revision: registry_revision.to_string(),
+        provider_descriptor_revision: 1,
         provider_affinity: Some("provider-v1".to_string()),
         created_at_unix_ms: 1_800_000_000_007,
         last_seen_at_unix_ms: 1_800_000_000_007,
@@ -387,17 +389,39 @@ async fn postgres_policy_governance_activates_and_replays_idempotently() {
         audit_outbox: revoke_audit,
     };
     assert_eq!(
+        repository
+            .governance_session_revocation_epoch(tenant_id)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
         repository_two
             .governance_revoke_session(revoke.clone())
             .await
             .unwrap(),
         GovernanceWriteOutcome::Applied
     );
+    assert_eq!(
+        repository
+            .governance_session_revocation_epoch(tenant_id)
+            .await
+            .unwrap(),
+        1
+    );
     let mut replay = revoke;
     replay.revoked_at_unix_ms += 1;
     assert_eq!(
         repository.governance_revoke_session(replay).await.unwrap(),
         GovernanceWriteOutcome::Replayed
+    );
+    assert_eq!(
+        repository
+            .governance_session_revocation_epoch(tenant_id)
+            .await
+            .unwrap(),
+        1,
+        "idempotent replay must not publish another invalidation"
     );
     assert_eq!(
         repository
@@ -524,6 +548,7 @@ async fn postgres_governance_lifecycle_supports_all_artifact_kinds() {
                     actor: checker.clone(),
                     expected_version: 1,
                     now_unix_ms: now,
+                    reason: None,
                     audit_outbox: vote_audit,
                 },
                 ApprovalAction::Approve,

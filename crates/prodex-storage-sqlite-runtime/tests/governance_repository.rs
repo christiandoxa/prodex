@@ -2,15 +2,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
 
 use prodex_domain::{
-    ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalRecord, ApprovalScope, AuditAction,
-    AuditDigest, AuditEvent, AuditEventId, AuditOutcome, AuditResource, Channel, CredentialScope,
-    DataClassification, IdempotencyKey, PolicyRevisionId, Principal, PrincipalId, PrincipalKind,
-    Role, TenantContext, TenantId,
+    ApprovalAction, ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalReasonCode,
+    ApprovalRecord, ApprovalScope, ApprovalState, AuditAction, AuditDigest, AuditEvent,
+    AuditEventId, AuditOutcome, AuditResource, Channel, CredentialScope, DataClassification,
+    IdempotencyKey, IdempotentOperation, PolicyRevisionId, Principal, PrincipalId, PrincipalKind,
+    Role, TenantContext, TenantId, compute_audit_chain_digest,
 };
 use prodex_storage::{
-    AppendOnlyAuditCommand, AuditOutboxWriteCommand, GovernanceArtifactKind,
-    GovernanceRevisionWriteCommand, GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
-    GovernanceSessionUpsertOutcome, SiemOutboxRetryPolicy, TenantStorageKey,
+    AppendOnlyAuditCommand, ApprovalVoteIdempotency, AuditOutboxWriteCommand,
+    GovernanceArtifactKind, GovernanceRevisionWriteCommand, GovernanceSessionRevokeCommand,
+    GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome, SiemOutboxRetryPolicy,
+    TenantStorageKey,
 };
 use prodex_storage_sqlite::SQLITE_MIGRATIONS;
 use prodex_storage_sqlite_runtime::{
@@ -81,16 +83,15 @@ impl AuditCursor {
         action: &str,
     ) -> AuditOutboxWriteCommand {
         self.sequence += 1;
-        let digest = format!("digest-{}", AuditEventId::new());
         let command = audit_outbox(
             tenant_id,
             principal,
             action,
             1_000 + self.sequence,
             self.previous_digest.as_deref(),
-            &digest,
+            "ignored",
         );
-        self.previous_digest = Some(digest);
+        self.previous_digest = Some(command.audit.event_digest.as_str().to_string());
         command
     }
 
@@ -222,6 +223,7 @@ fn prepare_approval_for_existing(
             actor: checker.clone(),
             expected_version: 1,
             now_unix_ms: 2_000,
+            reason: None,
             audit_outbox: audit.next(tenant_id, checker, "governance.approval.vote"),
         })
         .unwrap()
@@ -254,13 +256,385 @@ fn activation_request(
     }
 }
 
+#[test]
+fn cancellation_reason_survives_storage_and_replays_idempotently() {
+    let tenant_id = TenantId::new();
+    let database = TestDatabase::new(&[tenant_id]);
+    let repository = database.repository();
+    let maker = principal(tenant_id);
+    let mut audit = AuditCursor::default();
+    let command = revision_command(
+        tenant_id,
+        GovernanceArtifactKind::Policy,
+        &PolicyRevisionId::new().to_string(),
+        b"policy",
+        maker.id,
+    );
+    repository
+        .write_revision(
+            command.clone(),
+            audit.next(tenant_id, &maker, "governance.revision.write"),
+        )
+        .unwrap();
+    let approval = ApprovalRecord::pending(
+        ApprovalId::new("cancel-persisted").unwrap(),
+        tenant_id,
+        ApprovalKind::PolicyRevision,
+        ApprovalScope::new("policy/cancel").unwrap(),
+        command.fingerprint,
+        maker.id,
+        1,
+        100_000,
+    )
+    .unwrap();
+    repository
+        .create_approval(
+            approval.clone(),
+            audit.next(tenant_id, &maker, "governance.approval.create"),
+        )
+        .unwrap();
+    let reason = ApprovalReasonCode::new("operator.cancelled").unwrap();
+    let cancelled = repository
+        .transition_approval(
+            ApprovalVoteRequest {
+                tenant_id,
+                approval_id: approval.id.clone(),
+                actor: maker.clone(),
+                expected_version: 1,
+                now_unix_ms: 2_000,
+                reason: Some(reason.clone()),
+                audit_outbox: audit.next(tenant_id, &maker, "governance.approval.cancel"),
+            },
+            ApprovalAction::Cancel,
+        )
+        .unwrap();
+    assert_eq!(cancelled.state, ApprovalState::Cancelled);
+    assert_eq!(cancelled.termination_reason, Some(reason.clone()));
+    let loaded = repository.get_approval(tenant_id, &approval.id).unwrap();
+    assert_eq!(loaded.termination_reason, Some(reason.clone()));
+
+    let replay = repository
+        .transition_approval(
+            ApprovalVoteRequest {
+                tenant_id,
+                approval_id: approval.id,
+                actor: maker.clone(),
+                expected_version: 2,
+                now_unix_ms: 2_001,
+                reason: Some(reason),
+                audit_outbox: audit.next(tenant_id, &maker, "governance.approval.cancel"),
+            },
+            ApprovalAction::Cancel,
+        )
+        .unwrap();
+    assert_eq!(replay.version, 2);
+}
+
+#[test]
+fn execution_approval_is_quorum_gated_and_consumed_once() {
+    let tenant_id = TenantId::new();
+    let database = TestDatabase::new(&[tenant_id]);
+    let repository = database.repository();
+    let maker = Principal::new(
+        PrincipalId::new(),
+        Some(tenant_id),
+        PrincipalKind::User,
+        Role::Admin,
+        CredentialScope::DataPlane,
+    );
+    let checker_one = principal(tenant_id);
+    let checker_two = principal(tenant_id);
+    let mut audit = AuditCursor::default();
+    let approval = ApprovalRecord::pending(
+        ApprovalId::new("execution:sha256:fixture").unwrap(),
+        tenant_id,
+        ApprovalKind::Execution,
+        ApprovalScope::new("execution").unwrap(),
+        ApprovalFingerprint::new("sha256:execution-fixture").unwrap(),
+        maker.id,
+        1,
+        100_000,
+    )
+    .unwrap();
+
+    repository
+        .create_approval(
+            approval.clone(),
+            audit.next(tenant_id, &maker, "governance.execution_approval.create"),
+        )
+        .unwrap();
+    let first = repository
+        .vote_approval(ApprovalVoteRequest {
+            tenant_id,
+            approval_id: approval.id.clone(),
+            actor: checker_one.clone(),
+            expected_version: 1,
+            now_unix_ms: 2_000,
+            reason: None,
+            audit_outbox: audit.next(
+                tenant_id,
+                &checker_one,
+                "governance.execution_approval.vote",
+            ),
+        })
+        .unwrap();
+    assert_eq!(first.state, ApprovalState::PendingApproval);
+    let approved = repository
+        .vote_approval(ApprovalVoteRequest {
+            tenant_id,
+            approval_id: approval.id.clone(),
+            actor: checker_two.clone(),
+            expected_version: 2,
+            now_unix_ms: 2_001,
+            reason: None,
+            audit_outbox: audit.next(
+                tenant_id,
+                &checker_two,
+                "governance.execution_approval.vote",
+            ),
+        })
+        .unwrap();
+    assert_eq!(approved.state, ApprovalState::Approved);
+    let consumed = repository
+        .transition_approval(
+            ApprovalVoteRequest {
+                tenant_id,
+                approval_id: approval.id.clone(),
+                actor: maker.clone(),
+                expected_version: 3,
+                now_unix_ms: 3_000,
+                reason: None,
+                audit_outbox: audit.next(
+                    tenant_id,
+                    &maker,
+                    "governance.execution_approval.consume",
+                ),
+            },
+            ApprovalAction::Activate,
+        )
+        .unwrap();
+    assert_eq!(consumed.state, ApprovalState::Active);
+    let replay = repository.transition_approval(
+        ApprovalVoteRequest {
+            tenant_id,
+            approval_id: approval.id,
+            actor: maker.clone(),
+            expected_version: 4,
+            now_unix_ms: 3_001,
+            reason: None,
+            audit_outbox: audit.next(tenant_id, &maker, "governance.execution_approval.consume"),
+        },
+        ApprovalAction::Activate,
+    );
+    assert_eq!(replay, Err(GovernanceRepositoryError::InvalidTransition));
+}
+
+#[test]
+fn execution_vote_idempotency_replays_denial_without_vote_or_duplicate_audit() {
+    let tenant_id = TenantId::new();
+    let database = TestDatabase::new(&[tenant_id]);
+    let repository = database.repository();
+    let maker = principal(tenant_id);
+    let mut audit = AuditCursor::default();
+    let approval = ApprovalRecord::pending(
+        ApprovalId::new("execution:sha256:self-denied").unwrap(),
+        tenant_id,
+        ApprovalKind::Execution,
+        ApprovalScope::new("execution").unwrap(),
+        ApprovalFingerprint::new("sha256:self-denied").unwrap(),
+        maker.id,
+        2,
+        100_000,
+    )
+    .unwrap();
+    repository
+        .create_approval(
+            approval.clone(),
+            audit.next(tenant_id, &maker, "governance.execution_approval.create"),
+        )
+        .unwrap();
+    let operation = IdempotentOperation::new(
+        tenant_id,
+        IdempotencyKey::new("execution-self-denial").unwrap(),
+        "sha256:self-denial-request",
+    )
+    .unwrap();
+    let vote = |audit_outbox| ApprovalVoteRequest {
+        tenant_id,
+        approval_id: approval.id.clone(),
+        actor: maker.clone(),
+        expected_version: 1,
+        now_unix_ms: 2_000,
+        reason: None,
+        audit_outbox,
+    };
+    let idempotency = ApprovalVoteIdempotency {
+        operation: operation.clone(),
+        started_at_unix_ms: 1_999,
+    };
+    assert_eq!(
+        repository.transition_approval_idempotent(
+            vote(audit.next(tenant_id, &maker, "governance.execution_approval.approve",)),
+            ApprovalAction::Approve,
+            idempotency.clone(),
+        ),
+        Err(GovernanceRepositoryError::ApprovalSelfAction)
+    );
+    audit.previous_digest = repository
+        .latest_audit_digest(tenant_id)
+        .unwrap()
+        .map(|digest| digest.as_str().to_string());
+    assert_eq!(
+        repository.transition_approval_idempotent(
+            vote(audit.next(tenant_id, &maker, "governance.execution_approval.approve",)),
+            ApprovalAction::Approve,
+            idempotency,
+        ),
+        Err(GovernanceRepositoryError::ApprovalSelfAction)
+    );
+    assert_eq!(
+        repository.transition_approval_idempotent(
+            vote(audit.next(tenant_id, &maker, "governance.execution_approval.approve",)),
+            ApprovalAction::Approve,
+            ApprovalVoteIdempotency {
+                operation: IdempotentOperation::new(
+                    tenant_id,
+                    operation.key,
+                    "sha256:conflicting-request",
+                )
+                .unwrap(),
+                started_at_unix_ms: 1_999,
+            },
+        ),
+        Err(GovernanceRepositoryError::Conflict)
+    );
+
+    let connection = Connection::open(database.path()).unwrap();
+    let counts = connection
+        .query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM prodex_approval_votes WHERE tenant_id = ?1),
+                (SELECT COUNT(*) FROM prodex_audit_log WHERE tenant_id = ?1),
+                (SELECT COUNT(*) FROM prodex_siem_outbox WHERE tenant_id = ?1),
+                (SELECT COUNT(*) FROM prodex_idempotency_records WHERE tenant_id = ?1)",
+            [tenant_id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(counts, (0, 2, 2, 1));
+    let (outcome, reason, response): (String, String, Vec<u8>) = connection
+        .query_row(
+            "SELECT audit.outcome, audit.reason_code, idem.response_body
+             FROM prodex_audit_log audit
+             JOIN prodex_idempotency_records idem ON idem.tenant_id = audit.tenant_id
+             WHERE audit.tenant_id = ?1 AND audit.reason_code IS NOT NULL",
+            [tenant_id.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(outcome, "denied");
+    assert_eq!(reason, "approval.self_approval_denied");
+    let response = String::from_utf8(response).unwrap();
+    assert_eq!(response, "v1|denied|approval.self_approval_denied");
+    assert!(!response.contains("prompt"));
+}
+
+#[test]
+fn stale_and_invalid_execution_votes_are_canonically_audited() {
+    for (state, version, expected_version, expected_error, reason) in [
+        (
+            "pending_approval",
+            1,
+            9,
+            GovernanceRepositoryError::StaleVersion,
+            "approval.stale_version",
+        ),
+        (
+            "approved",
+            2,
+            2,
+            GovernanceRepositoryError::InvalidTransition,
+            "approval.invalid_transition",
+        ),
+    ] {
+        let tenant_id = TenantId::new();
+        let database = TestDatabase::new(&[tenant_id]);
+        let repository = database.repository();
+        let maker = principal(tenant_id);
+        let checker = principal(tenant_id);
+        let mut audit = AuditCursor::default();
+        let approval = ApprovalRecord::pending(
+            ApprovalId::new(format!("execution:sha256:{reason}")).unwrap(),
+            tenant_id,
+            ApprovalKind::Execution,
+            ApprovalScope::new("execution").unwrap(),
+            ApprovalFingerprint::new(format!("sha256:{reason}")).unwrap(),
+            maker.id,
+            2,
+            100_000,
+        )
+        .unwrap();
+        repository
+            .create_approval(
+                approval.clone(),
+                audit.next(tenant_id, &maker, "governance.execution_approval.create"),
+            )
+            .unwrap();
+        Connection::open(database.path())
+            .unwrap()
+            .execute(
+                "UPDATE prodex_approvals SET lifecycle_state = ?2, resource_version = ?3
+                 WHERE tenant_id = ?1",
+                rusqlite::params![tenant_id.to_string(), state, version],
+            )
+            .unwrap();
+        assert_eq!(
+            repository.transition_approval(
+                ApprovalVoteRequest {
+                    tenant_id,
+                    approval_id: approval.id,
+                    actor: checker.clone(),
+                    expected_version,
+                    now_unix_ms: 2_000,
+                    reason: None,
+                    audit_outbox: audit.next(
+                        tenant_id,
+                        &checker,
+                        "governance.execution_approval.approve",
+                    ),
+                },
+                ApprovalAction::Approve,
+            ),
+            Err(expected_error)
+        );
+        let connection = Connection::open(database.path()).unwrap();
+        let (outcome, stored_reason): (String, String) = connection
+            .query_row(
+                "SELECT outcome, reason_code FROM prodex_audit_log
+                 WHERE tenant_id = ?1 AND reason_code IS NOT NULL",
+                [tenant_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "denied");
+        assert_eq!(stored_reason, reason);
+    }
+}
+
 fn audit_outbox(
     tenant_id: TenantId,
     principal: &Principal,
     action: &str,
     occurred_at_unix_ms: u64,
     previous_digest: Option<&str>,
-    event_digest: &str,
+    _event_digest: &str,
 ) -> AuditOutboxWriteCommand {
     let event = AuditEvent::new(
         occurred_at_unix_ms,
@@ -271,13 +645,15 @@ fn audit_outbox(
         AuditOutcome::Success,
         None::<String>,
     );
+    let previous_digest = previous_digest.map(|value| AuditDigest::new(value).unwrap());
+    let event_digest = compute_audit_chain_digest(previous_digest.as_ref(), &event);
     AuditOutboxWriteCommand {
         outbox_event_id: AuditEventId::new(),
         audit: AppendOnlyAuditCommand {
             storage_key: TenantStorageKey::tenant(tenant_id),
             event,
-            previous_digest: previous_digest.map(|value| AuditDigest::new(value).unwrap()),
-            event_digest: AuditDigest::new(event_digest).unwrap(),
+            previous_digest,
+            event_digest,
         },
     }
 }
@@ -828,6 +1204,36 @@ fn audit_integrity_health_detects_missing_same_tenant_parent() {
 }
 
 #[test]
+fn audit_integrity_health_detects_canonical_field_tampering() {
+    let tenant_id = TenantId::new();
+    let database = TestDatabase::new(&[tenant_id]);
+    let repository = database.repository();
+    repository
+        .append_audit_outbox(audit_outbox(
+            tenant_id,
+            &principal(tenant_id),
+            "governance.audit.test",
+            1_000,
+            None,
+            "ignored",
+        ))
+        .unwrap();
+    let connection = Connection::open(database.path()).unwrap();
+    connection
+        .execute(
+            "UPDATE prodex_audit_log SET action = 'governance.audit.tampered'
+             WHERE tenant_id = ?1",
+            [tenant_id.to_string()],
+        )
+        .unwrap();
+
+    let health = repository.audit_integrity_health(tenant_id).unwrap();
+    assert_eq!(health.event_count, 1);
+    assert_eq!(health.chain_head_count, 1);
+    assert!(!health.chain_valid);
+}
+
+#[test]
 fn governance_sessions_are_monotonic_bounded_and_revocable() {
     let tenant_id = TenantId::new();
     let database = TestDatabase::new(&[tenant_id]);
@@ -872,7 +1278,8 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
     let command = |session_id_hash: String,
                    classification,
                    policy_revision_id,
-                   registry_revision_id: &str,
+                   provider_registry_revision: &str,
+                   provider_descriptor_revision,
                    provider_affinity: &str,
                    created_at_unix_ms,
                    last_seen_at_unix_ms| GovernanceSessionUpsertCommand {
@@ -883,7 +1290,8 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
         credential_scope: CredentialScope::DataPlane,
         classification,
         policy_revision_id,
-        registry_revision_id: registry_revision_id.to_string(),
+        provider_registry_revision: provider_registry_revision.to_string(),
+        provider_descriptor_revision,
         provider_affinity: Some(provider_affinity.to_string()),
         created_at_unix_ms,
         last_seen_at_unix_ms,
@@ -897,6 +1305,7 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
             DataClassification::Public,
             policy_v1,
             registry_v1,
+            11,
             "provider-v1",
             1_000,
             1_000,
@@ -910,6 +1319,7 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
                 DataClassification::Internal,
                 policy_v1,
                 registry_v1,
+                11,
                 "provider-v1",
                 1_001,
                 1_001,
@@ -924,6 +1334,7 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
             DataClassification::Restricted,
             policy_v2,
             registry_v2,
+            22,
             "provider-v2",
             900,
             900,
@@ -934,7 +1345,8 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
     };
     assert_eq!(stale.classification, DataClassification::Restricted);
     assert_eq!(stale.policy_revision_id, policy_v1);
-    assert_eq!(stale.registry_revision_id, registry_v1);
+    assert_eq!(stale.provider_registry_revision, registry_v1);
+    assert_eq!(stale.provider_descriptor_revision, 11);
     assert_eq!(stale.provider_affinity.as_deref(), Some("provider-v1"));
 
     let fresh = repository
@@ -943,6 +1355,7 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
             DataClassification::Confidential,
             policy_v2,
             registry_v2,
+            22,
             "provider-v2",
             1_000,
             1_100,
@@ -953,7 +1366,8 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
     };
     assert_eq!(fresh.classification, DataClassification::Restricted);
     assert_eq!(fresh.policy_revision_id, policy_v2);
-    assert_eq!(fresh.registry_revision_id, registry_v2);
+    assert_eq!(fresh.provider_registry_revision, registry_v2);
+    assert_eq!(fresh.provider_descriptor_revision, 22);
     assert_eq!(fresh.provider_affinity.as_deref(), Some("provider-v2"));
     assert_eq!(
         repository
@@ -971,15 +1385,34 @@ fn governance_sessions_are_monotonic_bounded_and_revocable() {
     };
     assert_eq!(
         repository
+            .governance_session_revocation_epoch(tenant_id)
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        repository
             .governance_revoke_session(revoke.clone())
             .unwrap(),
         GovernanceWriteOutcome::Applied
+    );
+    assert_eq!(
+        repository
+            .governance_session_revocation_epoch(tenant_id)
+            .unwrap(),
+        1
     );
     let mut replay = revoke;
     replay.revoked_at_unix_ms += 1;
     assert_eq!(
         repository.governance_revoke_session(replay).unwrap(),
         GovernanceWriteOutcome::Replayed
+    );
+    assert_eq!(
+        repository
+            .governance_session_revocation_epoch(tenant_id)
+            .unwrap(),
+        1,
+        "idempotent replay must not publish another invalidation"
     );
     assert_eq!(
         repository

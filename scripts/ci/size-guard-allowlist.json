@@ -36,8 +36,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1757,
-    "reason": "The typed gateway data-plane boundary now carries inspection, classification, PDP obligations, deterministic governed routing, provider dispatch, and reconciliation in one auditable pipeline; capped until governance planning moves to a sibling module."
+    "maxLines": 2266,
+    "reason": "The typed data-plane boundary now carries PIP attributes, execution approval, dynamic governed routing, eligible precommit fallback, audit context, dispatch, and reconciliation; capped until governance and provider planning move to focused sibling modules."
   },
   {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
@@ -206,8 +206,8 @@
   },
   {
     "file": "crates/prodex-storage-sqlite/src/lib.rs",
-    "maxLines": 1741,
-    "reason": "SQLite compatibility SQL-plan contracts now export the focused enterprise-governance migration module; capped until local accounting, idempotency, and readiness plans are split."
+    "maxLines": 1747,
+    "reason": "SQLite compatibility SQL-plan contracts export versioned enterprise-governance migrations including session revision and revocation metadata; capped until local accounting, idempotency, and readiness plans are split."
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
@@ -266,28 +266,28 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1429,
-    "reason": "Gateway launch now composes four governed snapshot authorities, immutable harness startup diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
+    "maxLines": 1434,
+    "reason": "Gateway launch composes governed snapshot authorities, durable audit/session workers, immutable harness diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 1321,
-    "reason": "One generic four-artifact maker-checker HTTP lifecycle remains colocated to preserve identical tenant, replay, ETag, audit, activation, and rollback semantics."
+    "maxLines": 1592,
+    "reason": "The four-artifact maker-checker lifecycle and payload-free execution-approval HTTP flow remain colocated to preserve tenant, idempotency, ETag, audit, activation, and rollback semantics."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
-    "maxLines": 924,
-    "reason": "The bounded session bank keeps admission, durable command handling, refresh, revocation, and monotonic classification invariants together."
+    "maxLines": 1147,
+    "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs",
-    "maxLines": 863,
-    "reason": "Generic lifecycle HTTP coverage exercises all four governed artifact kinds through shared maker-checker fixtures."
+    "maxLines": 1219,
+    "reason": "Lifecycle HTTP coverage exercises four governed artifact kinds plus execution-approval quorum, denial audit, idempotent replay, and content-free responses through shared fixtures."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio.rs",
-    "maxLines": 1399,
-    "reason": "The compatibility adapter now shares bounded typed classification rules across HTTP and WebSocket inspection while preserving existing transport behavior."
+    "maxLines": 1520,
+    "reason": "The compatibility adapter shares bounded typed classification rules and explicit detector failure matrices across HTTP and WebSocket inspection while preserving transport behavior."
   },
   {
     "file": "crates/prodex-app/src/runtime_tuning/config.rs",
@@ -296,37 +296,72 @@
   },
   {
     "file": "crates/prodex-config/src/lib.rs",
-    "maxLines": 894,
-    "reason": "Typed deployment configuration now validates governance mode floors alongside existing enterprise topology contracts."
+    "maxLines": 898,
+    "reason": "Typed deployment configuration validates governance mode floors, anonymous compatibility, and enterprise topology contracts."
   },
   {
     "file": "crates/prodex-provider-spi/tests/governed_routing.rs",
-    "maxLines": 950,
-    "reason": "Governed routing security coverage keeps every hard filter, deterministic score, fallback, affinity, revocation, and bound in one matrix."
+    "maxLines": 1041,
+    "reason": "Governed routing security coverage keeps hard filters, runtime health/quota/load signals, deterministic score, eligible fallback, affinity, revocation, and bounds in one matrix."
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 938,
-    "reason": "Runtime policy types now carry fixed gateway harness selection plus bounded governance authority, lifecycle, session, audit, and retention configuration in the existing typed schema."
+    "maxLines": 947,
+    "reason": "Runtime policy types carry fixed gateway harness selection plus bounded PIP selectors, governance authority, lifecycle, session, audit, and retention configuration in one typed schema."
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",
-    "maxLines": 1126,
-    "reason": "Runtime-policy validation coverage keeps governance mode and dependency failure matrices with the existing gateway policy suite."
+    "maxLines": 1145,
+    "reason": "Runtime-policy validation coverage keeps governance mode, PIP selector, unsupported workload identity, and dependency failure matrices with the gateway policy suite."
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/governance.rs",
-    "maxLines": 2268,
-    "reason": "The PostgreSQL runtime adapter keeps four-kind lifecycle, sessions, audit chain, bounded export, and leased SIEM transactions under one tenant-scoped repository boundary."
+    "maxLines": 2606,
+    "reason": "The PostgreSQL runtime adapter keeps four-kind lifecycle, idempotent approvals, revisioned sessions, revocation epochs, audit integrity, bounded export, and leased SIEM transactions under one tenant-scoped repository boundary."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/src/governance_repository.rs",
-    "maxLines": 1984,
-    "reason": "The isolated SQLite runtime adapter mirrors the authoritative governance repository contract without leaking driver code into the SQL-plan crate."
+    "maxLines": 2278,
+    "reason": "The isolated SQLite runtime adapter mirrors authoritative idempotent approvals, revisioned sessions, revocation epochs, audit integrity, and outbox contracts without leaking driver code into the SQL-plan crate."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
-    "maxLines": 998,
-    "reason": "SQLite governance integration coverage proves lifecycle, race, session, audit, bounded export, and SIEM outbox behavior against the executing adapter."
+    "maxLines": 1431,
+    "reason": "SQLite governance integration coverage proves lifecycle, approval idempotency and denial audit, session revisions/revocation, audit integrity, bounded export, and SIEM outbox behavior."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_governance.rs",
+    "maxLines": 970,
+    "reason": "Runtime governance compiles built-in and tenant policy snapshots plus bounded PIP selectors and compiler regressions; capped until DTO translation moves to a focused module."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
+    "maxLines": 889,
+    "reason": "Gateway virtual-key admission now carries trusted team, project, and user scope into the governed PIP while preserving key mutation and accounting behavior."
+  },
+  {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
+    "maxLines": 1112,
+    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, and focused conformance tests; capped until adapter projection splits out."
+  },
+  {
+    "file": "crates/prodex-domain/src/governance/policy_decision.rs",
+    "maxLines": 959,
+    "reason": "The pure governance PDP keeps bounded PIP attributes, typed conditions and obligations, conflict analysis, deterministic evaluation, and redacted contracts together."
+  },
+  {
+    "file": "crates/prodex-gateway-server/src/lib.rs",
+    "maxLines": 942,
+    "reason": "The async gateway server now owns transport peer trust, bounded forwarded-chain parsing, Host/Origin/CSRF enforcement, body limits, upgrades, and graceful drain; capped until edge transport splits out."
+  },
+  {
+    "file": "crates/prodex-gateway-server/src/tests.rs",
+    "maxLines": 904,
+    "reason": "Gateway server integration coverage keeps canonical targets, streaming limits, overload, trusted proxy, forwarding privacy, Host/Origin/CSRF, and expected-host cases in one harness."
+  },
+  {
+    "file": "crates/prodex-storage/src/governance.rs",
+    "maxLines": 936,
+    "reason": "The governance storage contract keeps revision lifecycle, idempotent approvals, boxed session outcomes, revocation epochs, audit integrity, and SIEM outbox types under one adapter-neutral boundary."
   }
 ]

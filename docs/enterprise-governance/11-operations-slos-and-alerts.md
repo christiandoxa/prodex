@@ -38,8 +38,8 @@ following operational residuals remain explicit:
 - policy-selected Presidio and guardrail webhooks are bounded request-path
   network dependencies; fail-closed mode denies on timeout, capacity, malformed
   response or unavailable required inspection;
-- each process has one attached executable provider adapter, so a different
-  provider cannot be used as an in-process fallback; and
+- heterogeneous projected-credential adapters are eligible only through the
+  immutable governed snapshot, and fallback is bounded to precommit; and
 - PostgreSQL/TLS/RLS and SIEM outbox lifecycle validation passed; managed
   failover, external SIEM delivery and production SLOs remain deployment evidence.
 
@@ -50,7 +50,7 @@ following operational residuals remain explicit:
 | Mandatory governance audit append fails | Deny before provider dispatch | Implemented; synchronous precommit residual |
 | Presidio unavailable, saturated, timed out, or oversized | Produce typed unavailable coverage; enforcing/bank policy denies when full inspection is mandatory | Focused adapter/config/failure tests |
 | Guardrail webhook fails or denies | Fixed timeout/response bound; configured fail-open/closed behavior; denial uses stable `webhook_denied` reason | Focused webhook regression |
-| Selected provider differs from attached adapter | Fail unavailable before dispatch; never reinterpret through attached adapter | Provider registry/application dispatch tests and production guard |
+| Selected provider lacks an eligible executable binding | Fail unavailable before dispatch; never reinterpret through another adapter | Provider registry/application dispatch tests and production guard |
 | Failure after response commitment | Surface natural transport/stream termination; never retry or rotate | Runtime precommit/postcommit regressions |
 | PostgreSQL governance or SIEM exporter failure | Fail-closed transaction or durable asynchronous retry/dead-letter, respectively | SQLite exporter and live PostgreSQL outbox lifecycle passed; external sink outage remains deployment evidence |
 

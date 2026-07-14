@@ -273,8 +273,7 @@ fn runtime_gateway_plan_and_apply_scim_mutation(
     enforce_scim_entity_tag(entity_tag, store, &mutation).inspect_err(|_| {
         runtime_gateway_audit_admin_authorization_denied_event(
             shared,
-            &admin_auth.name,
-            admin_auth.role.as_str(),
+            admin_auth,
             "scim_user",
             audit_action,
             &audit_resource_id,
@@ -302,8 +301,7 @@ fn runtime_gateway_plan_and_apply_scim_mutation(
         ) {
                 runtime_gateway_audit_admin_authorization_denied_event(
                     shared,
-                    &admin_auth.name,
-                    admin_auth.role.as_str(),
+                    admin_auth,
                     "scim_user",
                     audit_action,
                     &audit_resource_id,
@@ -374,8 +372,7 @@ fn runtime_gateway_admin_scim_scope_forbidden_response(
 ) -> tiny_http::ResponseBox {
     runtime_gateway_audit_admin_authorization_denied_event(
         shared,
-        &admin_auth.name,
-        admin_auth.role.as_str(),
+        admin_auth,
         "scim_user",
         action,
         user_id,

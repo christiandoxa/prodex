@@ -20,7 +20,7 @@ PEP or dependency is absent.
 
 ## Current candidate checkpoint
 
-The candidate based on `e308fdf6` has implemented the typed governance stages,
+The current tranche based on `8ca79a62` has implemented the typed governance stages,
 focused security tests, architecture/deployment guards, live PostgreSQL/RLS and
 SIEM-outbox validation, restore evidence, fuzz/load/stress checks and bounded
 benchmarks. Managed failover, external SIEM delivery and multi-replica soak are

@@ -249,14 +249,14 @@ pub fn plan_application_obligation_execution(
             Some(_) => {}
         }
     }
-    if !allowed_models.is_empty()
-        && context.requested_model.is_some_and(|model| {
-            !allowed_models
-                .iter()
-                .any(|allowed| *allowed == "*" || *allowed == model)
-        })
-    {
-        violations.push(ApplicationObligationViolation::ModelNotAllowed);
+    if !allowed_models.is_empty() {
+        match context.requested_model {
+            Some(model)
+                if allowed_models
+                    .iter()
+                    .any(|allowed| *allowed == "*" || *allowed == model) => {}
+            Some(_) | None => violations.push(ApplicationObligationViolation::ModelNotAllowed),
+        }
     }
     if !allowed_modalities.is_empty()
         && context

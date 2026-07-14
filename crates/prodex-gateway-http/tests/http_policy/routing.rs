@@ -413,6 +413,18 @@ fn control_plane_route_planner_maps_admin_paths_to_explicit_operations() {
         ),
         (
             GatewayHttpMethod::Get,
+            "/prodex/gateway/execution-approvals",
+            GatewayControlPlaneOperation::PolicyPublish,
+            false,
+        ),
+        (
+            GatewayHttpMethod::Post,
+            "/prodex/gateway/execution-approvals/approval-1/votes",
+            GatewayControlPlaneOperation::PolicyPublish,
+            true,
+        ),
+        (
+            GatewayHttpMethod::Get,
             "/prodex/gateway/governance/outbox",
             GatewayControlPlaneOperation::PolicyPublish,
             false,

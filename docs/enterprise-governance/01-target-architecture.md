@@ -12,7 +12,7 @@ No statement in this document is a certification or legal conclusion.
 
 ## Candidate Implementation State
 
-The release candidate based on baseline `e308fdf6` implements the canonical
+The current tranche based on baseline `8ca79a62` implements the canonical
 typed inspection, classification, policy, obligation, session and governed
 routing stages in the local rewrite application boundary. Production guards
 require supported HTTP/compact/WebSocket dispatch to consume that boundary and
@@ -21,18 +21,22 @@ an audited governed routing decision in enforcement modes.
 The implementation is intentionally narrower than the target diagram in four
 places:
 
-- one local rewrite process has one attached executable provider adapter;
-  simultaneous heterogeneous adapter selection and cross-provider fallback are
-  unavailable;
+- the runtime can select heterogeneous projected-credential adapters and move
+  through the original eligible fallback set only before response commitment;
 - mandatory governed data-plane audit is a synchronous precommit append;
+- authenticated tenant transforms, precommit response blocks, and admission or
+  admin denials use the durable tenant hash-chain/SIEM outbox writer; only
+  failures without a resolvable durable tenant authority (anonymous
+  authentication failures, personal compatibility, and postcommit transport
+  observations) remain content-free operational JSONL;
 - policy-selected Presidio and guardrail-webhook calls execute on the request
   path under fixed timeout, redirect, response-size and concurrency bounds; and
 - live PostgreSQL governance/RLS and SIEM outbox validation passed; managed
   failover and external SIEM delivery remain deployment acceptance work.
 
 These are declared release residuals, not hidden fallback behavior. The router
-must reject a selected provider that is not the attached adapter, never send it
-through another adapter, and never retry after response commitment.
+must reject an adapter without an executable eligible binding and never retry
+after response commitment.
 
 ## Six-Layer Architecture
 
@@ -150,10 +154,10 @@ revisions unless an explicit policy prohibition or provider revocation applies.
 Fallback remains inside the original eligible set and stops after response
 commit.
 
-In the current single-adapter process, the eligible set contains only targets
-that the attached adapter can execute. A future heterogeneous broker may own
-multiple adapter processes, but it must preserve the same immutable decision,
-audit and precommit-only fallback contract.
+The current process resolves eligible heterogeneous projected-credential
+adapters from one immutable registry snapshot. Every selected/fallback adapter
+must have an executable binding and preserves the same decision, audit and
+precommit-only fallback contract.
 
 ## Canonical Control-Plane Pipeline
 

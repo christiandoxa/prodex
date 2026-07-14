@@ -24,6 +24,7 @@ pub(super) struct RuntimeLocalRewriteRequest {
     method: String,
     path_and_query: String,
     headers: Vec<(String, String)>,
+    network_zone: prodex_domain::NetworkZone,
     transport: RuntimeLocalRewriteTransport,
 }
 
@@ -59,6 +60,16 @@ struct RuntimeDirectReply {
 
 impl RuntimeLocalRewriteRequest {
     pub(super) fn tiny(request: tiny_http::Request) -> Self {
+        let network_zone =
+            request
+                .remote_addr()
+                .map_or(prodex_domain::NetworkZone::Unknown, |peer| {
+                    if peer.ip().is_loopback() {
+                        prodex_domain::NetworkZone::Local
+                    } else {
+                        prodex_domain::NetworkZone::Unknown
+                    }
+                });
         let method = request.method().as_str().to_string();
         let path_and_query = request.url().to_string();
         let headers = request
@@ -75,6 +86,7 @@ impl RuntimeLocalRewriteRequest {
             method,
             path_and_query,
             headers,
+            network_zone,
             transport: RuntimeLocalRewriteTransport::Tiny(request),
         }
     }
@@ -83,6 +95,7 @@ impl RuntimeLocalRewriteRequest {
         method: String,
         path_and_query: String,
         headers: Vec<(String, String)>,
+        network_zone: prodex_domain::NetworkZone,
         body: RuntimeDirectRequestBody,
         head: oneshot::Sender<GatewayHandlerResult>,
         permit: Arc<tokio::sync::OwnedSemaphorePermit>,
@@ -91,6 +104,7 @@ impl RuntimeLocalRewriteRequest {
             method,
             path_and_query,
             headers,
+            network_zone,
             transport: RuntimeLocalRewriteTransport::Direct {
                 body,
                 reply: RuntimeDirectReply {
@@ -111,6 +125,10 @@ impl RuntimeLocalRewriteRequest {
 
     pub(super) fn headers(&self) -> &[(String, String)] {
         &self.headers
+    }
+
+    pub(super) fn network_zone(&self) -> prodex_domain::NetworkZone {
+        self.network_zone
     }
 
     pub(super) fn is_websocket_upgrade(&self) -> bool {

@@ -30,6 +30,10 @@ impl GovernanceMode {
     pub const fn is_enforcing(self) -> bool {
         matches!(self, Self::EnterpriseEnforce | Self::BankEnforce)
     }
+
+    pub const fn allows_anonymous_compatibility(self) -> bool {
+        matches!(self, Self::Personal)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

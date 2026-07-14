@@ -1176,17 +1176,19 @@ mod tests {
     use super::{
         PresidioAnalyzerResult, PresidioJsonString, PresidioLanguageMode,
         RuntimePresidioRedactionAttempt, RuntimePresidioRedactionConfig,
-        RuntimePresidioRedactionState, runtime_inspection_metric_message,
-        runtime_local_inspection_required, runtime_presidio_findings,
-        runtime_presidio_inspection_plan, runtime_presidio_redact_body,
+        RuntimePresidioRedactionState, runtime_inspection_error_outcome,
+        runtime_inspection_metric_message, runtime_local_inspection_required,
+        runtime_presidio_findings, runtime_presidio_inspection_plan, runtime_presidio_redact_body,
         validate_runtime_presidio_registry_insert,
     };
     use prodex_observability::{
         InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction,
         InspectionOutcome, InspectionStage, plan_inspection_metric,
     };
+    use std::net::TcpListener;
     use std::sync::Arc;
     use std::thread;
+    use std::time::Duration;
     use tiny_http::{Header as TinyHeader, Response as TinyResponse, Server as TinyServer};
     use tokio::runtime::Builder as TokioRuntimeBuilder;
 
@@ -1194,6 +1196,20 @@ mod tests {
         response_body: &'static str,
         expected_path: &'static str,
         expected_snippet: &'static str,
+    ) -> (String, thread::JoinHandle<()>) {
+        start_presidio_fixture_with_delay(
+            response_body,
+            expected_path,
+            expected_snippet,
+            Duration::ZERO,
+        )
+    }
+
+    fn start_presidio_fixture_with_delay(
+        response_body: &'static str,
+        expected_path: &'static str,
+        expected_snippet: &'static str,
+        delay: Duration,
     ) -> (String, thread::JoinHandle<()>) {
         let server = TinyServer::http("127.0.0.1:0").unwrap();
         let addr = server.server_addr().to_ip().unwrap();
@@ -1203,9 +1219,10 @@ mod tests {
             let mut body = String::new();
             request.as_reader().read_to_string(&mut body).unwrap();
             assert!(body.contains(expected_snippet), "{body}");
+            thread::sleep(delay);
             let response = TinyResponse::from_string(response_body)
                 .with_header(TinyHeader::from_bytes("Content-Type", "application/json").unwrap());
-            request.respond(response).unwrap();
+            let _ = request.respond(response);
         });
         (format!("http://{addr}"), handle)
     }
@@ -1259,6 +1276,110 @@ mod tests {
         assert_eq!(json["input"], "contact <EMAIL_ADDRESS>");
         analyzer_handle.join().unwrap();
         anonymizer_handle.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_presidio_detector_failure_matrix_is_bounded_and_content_preserving() {
+        enum FailureCase {
+            Timeout,
+            Unavailable,
+            Malformed,
+            NonUtf8,
+        }
+
+        for case in [
+            FailureCase::Timeout,
+            FailureCase::Unavailable,
+            FailureCase::Malformed,
+            FailureCase::NonUtf8,
+        ] {
+            let (body, analyzer_url, timeout_ms, handle, expected_outcome, expected_error) =
+                match case {
+                    FailureCase::Timeout => {
+                        let (url, handle) = start_presidio_fixture_with_delay(
+                            "[]",
+                            "/analyze",
+                            "synthetic-timeout",
+                            Duration::from_millis(100),
+                        );
+                        (
+                            br#"{"input":"synthetic-timeout"}"#.to_vec(),
+                            url,
+                            10,
+                            Some(handle),
+                            InspectionOutcome::Timeout,
+                            "failed to call Presidio Analyzer",
+                        )
+                    }
+                    FailureCase::Unavailable => {
+                        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                        let url = format!("http://{}", listener.local_addr().unwrap());
+                        drop(listener);
+                        (
+                            br#"{"input":"synthetic-unavailable"}"#.to_vec(),
+                            url,
+                            1_000,
+                            None,
+                            InspectionOutcome::Error,
+                            "failed to call Presidio Analyzer",
+                        )
+                    }
+                    FailureCase::Malformed => {
+                        let (url, handle) =
+                            start_presidio_fixture("not-json", "/analyze", "synthetic-malformed");
+                        (
+                            br#"{"input":"synthetic-malformed"}"#.to_vec(),
+                            url,
+                            1_000,
+                            Some(handle),
+                            InspectionOutcome::Error,
+                            "failed to parse Presidio Analyzer response",
+                        )
+                    }
+                    FailureCase::NonUtf8 => (
+                        vec![0xff, 0xfe],
+                        "http://127.0.0.1:1".to_string(),
+                        1_000,
+                        None,
+                        InspectionOutcome::Error,
+                        "request body is not UTF-8",
+                    ),
+                };
+            let original = body.clone();
+            let state = Arc::new(
+                RuntimePresidioRedactionState::new(RuntimePresidioRedactionConfig {
+                    analyzer_url: analyzer_url.clone(),
+                    anonymizer_url: analyzer_url,
+                    languages: vec!["en".to_string()],
+                    language_mode: PresidioLanguageMode::Fixed,
+                    fail_closed: false,
+                    trusted_hosts: Vec::new(),
+                    timeout_ms,
+                    max_response_bytes: 1024,
+                    max_concurrency: 1,
+                })
+                .unwrap(),
+            );
+            let runtime = TokioRuntimeBuilder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let attempt = runtime
+                .block_on(runtime_presidio_redact_body(body, state))
+                .unwrap();
+            let RuntimePresidioRedactionAttempt::Failure(failure) = attempt else {
+                panic!("detector failure fixture must not succeed");
+            };
+            assert_eq!(failure.body, original);
+            assert_eq!(
+                runtime_inspection_error_outcome(&failure.error),
+                expected_outcome
+            );
+            assert!(failure.error.to_string().contains(expected_error));
+            if let Some(handle) = handle {
+                handle.join().unwrap();
+            }
+        }
     }
 
     #[test]

@@ -7,21 +7,26 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use prodex_domain::{
-    ApprovalAction, ApprovalError, ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalRecord,
-    ApprovalScope, ApprovalState, ApprovalTransitionRequest, ApprovalVote, AuditDigest,
-    AuditEventId, Channel, CredentialScope, DataClassification, PolicyRevisionId, Principal,
-    PrincipalId, Role, TenantId, transition_approval,
+    ApprovalAction, ApprovalError, ApprovalFingerprint, ApprovalId, ApprovalKind,
+    ApprovalReasonCode, ApprovalRecord, ApprovalScope, ApprovalState, ApprovalTransitionRequest,
+    ApprovalVote, AuditDigest, AuditEventId, Channel, CredentialScope, DataClassification,
+    IdempotencyReplayDecision, PolicyRevisionId, Principal, PrincipalId, Role, TenantId,
+    decide_idempotency_replay, transition_approval,
 };
 use prodex_storage::{
-    ApprovalVoteRequest, AuditOutboxWriteCommand, GovernanceActivationAction,
-    GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactKind,
-    GovernanceAuditExportRecord, GovernanceAuditExporter, GovernanceAuditIntegrityHealth,
-    GovernanceOutboxHealth, GovernanceRepositoryError, GovernanceRevisionSummary,
-    GovernanceRevisionWriteCommand, GovernanceSessionRecord, GovernanceSessionRevokeCommand,
-    GovernanceSessionUpsertCommand, GovernanceSessionUpsertOutcome, GovernanceSnapshot,
-    GovernanceSnapshotSource, GovernanceStatus, GovernanceWriteOutcome, SiemExportBatch,
-    SiemExportEvent, SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy, plan_audit_outbox_write,
-    plan_governance_revision_write, plan_siem_outbox_delivery,
+    ApprovalVoteIdempotency, ApprovalVoteMutationOutcome, ApprovalVoteRequest,
+    ApprovalVoteSnapshot, ApprovalVoteStableDenial, ApprovalVoteStableOutcome,
+    AuditOutboxWriteCommand, GovernanceActivationAction, GovernanceActivationRequest,
+    GovernanceActivationResult, GovernanceArtifactKind, GovernanceAuditExportRecord,
+    GovernanceAuditExporter, GovernanceAuditIntegrityHealth, GovernanceOutboxHealth,
+    GovernanceRepositoryError, GovernanceRevisionSummary, GovernanceRevisionWriteCommand,
+    GovernanceSessionRecord, GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
+    GovernanceSessionUpsertOutcome, GovernanceSnapshot, GovernanceSnapshotSource, GovernanceStatus,
+    GovernanceWriteOutcome, IdempotencyRecordLookupRow, IdempotencyRecordLookupRowStatus,
+    SiemExportBatch, SiemExportEvent, SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy,
+    denied_approval_audit_outbox, materialize_idempotency_record_lookup_row,
+    plan_audit_outbox_write, plan_governance_revision_write, plan_siem_outbox_delivery,
+    verify_governance_audit_integrity,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
@@ -156,18 +161,22 @@ impl GovernanceSqliteRepository {
         {
             return Err(GovernanceRepositoryError::InvalidInput);
         }
-        let kind = artifact_kind_from_approval(approval.kind)?;
+        let kind = approval_artifact_kind(approval.kind)?;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(database_error)?;
-        let revision_id = revision_id_for_fingerprint(
-            &transaction,
-            approval.tenant_id,
-            kind,
-            approval.fingerprint.as_str(),
-        )?
-        .ok_or(GovernanceRepositoryError::NotFound)?;
+        let revision_id = kind
+            .map(|kind| {
+                revision_id_for_fingerprint(
+                    &transaction,
+                    approval.tenant_id,
+                    kind,
+                    approval.fingerprint.as_str(),
+                )?
+                .ok_or(GovernanceRepositoryError::NotFound)
+            })
+            .transpose()?;
 
         if let Some(existing) = load_approval_tx(&transaction, approval.tenant_id, &approval.id)? {
             if existing == approval {
@@ -181,8 +190,8 @@ impl GovernanceSqliteRepository {
                 "INSERT INTO prodex_approvals (
                     tenant_id, approval_id, approval_kind, approval_scope, fingerprint,
                     maker_id, lifecycle_state, required_quorum, expires_at_unix_ms,
-                    activated_at_unix_ms, resource_version
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)",
+                    activated_at_unix_ms, termination_reason, resource_version
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, ?10)",
                 params![
                     approval.tenant_id.to_string(),
                     approval.id.as_str(),
@@ -197,13 +206,15 @@ impl GovernanceSqliteRepository {
                 ],
             )
             .map_err(database_error)?;
-        update_revision_state(
-            &transaction,
-            approval.tenant_id,
-            kind,
-            &revision_id,
-            "pending_approval",
-        )?;
+        if let (Some(kind), Some(revision_id)) = (kind, revision_id.as_deref()) {
+            update_revision_state(
+                &transaction,
+                approval.tenant_id,
+                kind,
+                revision_id,
+                "pending_approval",
+            )?;
+        }
         append_audit_outbox_tx(&transaction, audit_outbox)?;
         transaction.commit().map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
@@ -221,30 +232,118 @@ impl GovernanceSqliteRepository {
         request: ApprovalVoteRequest,
         action: ApprovalAction,
     ) -> Result<ApprovalRecord, GovernanceRepositoryError> {
-        if !matches!(action, ApprovalAction::Approve | ApprovalAction::Reject) {
+        match self.transition_approval_inner(request, action, None)? {
+            ApprovalVoteMutationOutcome::Applied(approval) => Ok(approval),
+            ApprovalVoteMutationOutcome::Replayed(_) => {
+                Err(GovernanceRepositoryError::InvalidInput)
+            }
+        }
+    }
+
+    pub fn transition_approval_idempotent(
+        &self,
+        request: ApprovalVoteRequest,
+        action: ApprovalAction,
+        idempotency: ApprovalVoteIdempotency,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        self.transition_approval_inner(request, action, Some(idempotency))
+    }
+
+    fn transition_approval_inner(
+        &self,
+        request: ApprovalVoteRequest,
+        action: ApprovalAction,
+        idempotency: Option<ApprovalVoteIdempotency>,
+    ) -> Result<ApprovalVoteMutationOutcome, GovernanceRepositoryError> {
+        if !matches!(
+            action,
+            ApprovalAction::Approve
+                | ApprovalAction::Reject
+                | ApprovalAction::Cancel
+                | ApprovalAction::Activate
+        ) {
             return Err(GovernanceRepositoryError::InvalidInput);
         }
-        require_control_plane_admin(request.tenant_id, &request.actor)?;
+        if action != ApprovalAction::Activate {
+            require_control_plane_admin(request.tenant_id, &request.actor)?;
+        }
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(database_error)?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            match approval_idempotency_replay_sqlite(&transaction, request.tenant_id, idempotency)?
+            {
+                IdempotencyReplayDecision::ExecuteAndRecordPending => {
+                    insert_approval_idempotency_pending_sqlite(
+                        &transaction,
+                        request.tenant_id,
+                        idempotency,
+                    )?;
+                }
+                IdempotencyReplayDecision::AlreadyInProgress { .. } => {
+                    return Err(GovernanceRepositoryError::Conflict);
+                }
+                IdempotencyReplayDecision::Replay(response) => {
+                    transaction.commit().map_err(database_error)?;
+                    return ApprovalVoteStableOutcome::replay(&response);
+                }
+            }
+        }
         let current = load_approval_tx(&transaction, request.tenant_id, &request.approval_id)?
             .ok_or(GovernanceRepositoryError::NotFound)?;
-        let transition = transition_approval(ApprovalTransitionRequest {
+        if action == ApprovalAction::Activate && current.kind != ApprovalKind::Execution {
+            return Err(GovernanceRepositoryError::InvalidInput);
+        }
+        let transition = match transition_approval(ApprovalTransitionRequest {
             record: &current,
             actor: &request.actor,
             action,
             expected_version: request.expected_version,
             now_unix_ms: request.now_unix_ms,
-        })
-        .map_err(approval_transition_error)?;
+            reason: request.reason.as_ref(),
+        }) {
+            Ok(transition) => transition,
+            Err(error) => {
+                let Some(denial) = ApprovalVoteStableDenial::from_approval_error(error) else {
+                    return Err(approval_transition_error(error));
+                };
+                append_audit_outbox_tx(
+                    &transaction,
+                    denied_approval_audit_outbox(request.audit_outbox, denial),
+                )?;
+                if let Some(idempotency) = idempotency.as_ref() {
+                    complete_approval_idempotency_sqlite(
+                        &transaction,
+                        request.tenant_id,
+                        idempotency,
+                        ApprovalVoteStableOutcome::Denied(denial),
+                        request.now_unix_ms,
+                    )?;
+                }
+                transaction.commit().map_err(database_error)?;
+                return Err(denial.repository_error());
+            }
+        };
         if !transition.changed {
+            if let Some(idempotency) = idempotency.as_ref() {
+                complete_approval_idempotency_sqlite(
+                    &transaction,
+                    request.tenant_id,
+                    idempotency,
+                    ApprovalVoteStableOutcome::Success(ApprovalVoteSnapshot::from_record(
+                        &transition.record,
+                    )),
+                    request.now_unix_ms,
+                )?;
+            }
             transaction.commit().map_err(database_error)?;
-            return Ok(transition.record);
+            return Ok(ApprovalVoteMutationOutcome::Applied(transition.record));
         }
         persist_approval_transition(&transaction, &current, &transition.record)?;
-        if transition.record.state == ApprovalState::Approved {
+        if transition.record.kind != ApprovalKind::Execution
+            && transition.record.state == ApprovalState::Approved
+        {
             let kind = artifact_kind_from_approval(transition.record.kind)?;
             let revision_id = revision_id_for_fingerprint(
                 &transaction,
@@ -260,7 +359,9 @@ impl GovernanceSqliteRepository {
                 &revision_id,
                 "approved",
             )?;
-        } else if transition.record.state == ApprovalState::Rejected {
+        } else if transition.record.kind != ApprovalKind::Execution
+            && transition.record.state == ApprovalState::Rejected
+        {
             let kind = artifact_kind_from_approval(transition.record.kind)?;
             let revision_id = revision_id_for_fingerprint(
                 &transaction,
@@ -278,8 +379,19 @@ impl GovernanceSqliteRepository {
             )?;
         }
         append_audit_outbox_tx(&transaction, request.audit_outbox)?;
+        if let Some(idempotency) = idempotency.as_ref() {
+            complete_approval_idempotency_sqlite(
+                &transaction,
+                request.tenant_id,
+                idempotency,
+                ApprovalVoteStableOutcome::Success(ApprovalVoteSnapshot::from_record(
+                    &transition.record,
+                )),
+                request.now_unix_ms,
+            )?;
+        }
         transaction.commit().map_err(database_error)?;
-        Ok(transition.record)
+        Ok(ApprovalVoteMutationOutcome::Applied(transition.record))
     }
 
     pub fn list_revisions(
@@ -341,6 +453,32 @@ impl GovernanceSqliteRepository {
         let connection = self.connection()?;
         load_approval_tx(&connection, tenant_id, approval_id)?
             .ok_or(GovernanceRepositoryError::NotFound)
+    }
+
+    pub fn list_execution_approvals(
+        &self,
+        tenant_id: TenantId,
+    ) -> Result<Vec<ApprovalRecord>, GovernanceRepositoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT approval_id FROM prodex_approvals
+                 WHERE tenant_id = ?1 AND approval_kind = 'execution'
+                 ORDER BY expires_at_unix_ms DESC, approval_id DESC",
+            )
+            .map_err(database_error)?;
+        let ids = statement
+            .query_map([tenant_id.to_string()], |row| row.get::<_, String>(0))
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?;
+        ids.into_iter()
+            .map(|id| {
+                let id = ApprovalId::new(id).map_err(|_| GovernanceRepositoryError::Database)?;
+                load_approval_tx(&connection, tenant_id, &id)?
+                    .ok_or(GovernanceRepositoryError::Database)
+            })
+            .collect()
     }
 
     pub fn status(
@@ -442,42 +580,34 @@ impl GovernanceSqliteRepository {
         tenant_id: TenantId,
     ) -> Result<GovernanceAuditIntegrityHealth, GovernanceRepositoryError> {
         let connection = self.connection()?;
-        let (events, heads, invalid_links, roots) = connection
-            .query_row(
-                "SELECT
-                    COUNT(*),
-                    SUM(CASE WHEN NOT EXISTS (
-                        SELECT 1 FROM prodex_audit_log child
-                        WHERE child.tenant_id = audit.tenant_id
-                          AND child.previous_digest = audit.event_digest
-                    ) THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN audit.previous_digest IS NOT NULL AND NOT EXISTS (
-                        SELECT 1 FROM prodex_audit_log parent
-                        WHERE parent.tenant_id = audit.tenant_id
-                          AND parent.event_digest = audit.previous_digest
-                    ) THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN audit.previous_digest IS NULL THEN 1 ELSE 0 END)
-                 FROM prodex_audit_log audit WHERE audit.tenant_id = ?1",
-                [tenant_id.to_string()],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                        row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-                        row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                    ))
-                },
+        let mut statement = connection
+            .prepare(
+                "SELECT audit_event_id, occurred_at_unix_ms, principal_id, action,
+                        resource_kind, resource_id, outcome, reason_code,
+                        previous_digest, event_digest
+                 FROM prodex_audit_log WHERE tenant_id = ?1",
             )
             .map_err(database_error)?;
-        let event_count = from_i64(events)?;
-        let chain_head_count = from_i64(heads)?;
-        Ok(GovernanceAuditIntegrityHealth {
-            event_count,
-            chain_head_count,
-            chain_valid: invalid_links == 0
-                && chain_head_count <= 1
-                && ((event_count == 0 && roots == 0) || (event_count > 0 && roots == 1)),
-        })
+        let records = statement
+            .query_map([tenant_id.to_string()], |row| {
+                Ok(GovernanceAuditExportRecord {
+                    audit_event_id: row.get(0)?,
+                    occurred_at_unix_ms: from_i64(row.get(1)?)
+                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, i64::MAX))?,
+                    principal_id: row.get(2)?,
+                    action: row.get(3)?,
+                    resource_kind: row.get(4)?,
+                    resource_id: row.get(5)?,
+                    outcome: row.get(6)?,
+                    reason_code: row.get(7)?,
+                    previous_digest: row.get(8)?,
+                    event_digest: row.get(9)?,
+                })
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?;
+        Ok(verify_governance_audit_integrity(tenant_id, &records))
     }
 
     pub fn governance_export_audit(
@@ -589,6 +719,7 @@ impl GovernanceSqliteRepository {
             action: ApprovalAction::Activate,
             expected_version: approval.version,
             now_unix_ms: request.activated_at_unix_ms,
+            reason: None,
         })
         .map_err(|_| GovernanceRepositoryError::ApprovalRequired)?;
 
@@ -746,10 +877,11 @@ impl GovernanceSqliteRepository {
             .execute(
                 "INSERT INTO prodex_governance_sessions (
                     tenant_id, session_id_hash, principal_id, channel, credential_scope,
-                    classification, policy_revision_id, registry_revision_id, provider_affinity,
+                    classification, policy_revision_id, provider_registry_revision,
+                    provider_descriptor_revision, provider_affinity,
                     created_at_unix_ms, last_seen_at_unix_ms, absolute_expires_at_unix_ms,
                     idle_expires_at_unix_ms
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT (tenant_id, session_id_hash) DO UPDATE SET
                     classification = CASE
                         WHEN prodex_governance_sessions.classification = 'restricted'
@@ -762,9 +894,14 @@ impl GovernanceSqliteRepository {
                     policy_revision_id = CASE
                         WHEN excluded.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
                         THEN excluded.policy_revision_id ELSE prodex_governance_sessions.policy_revision_id END,
-                    registry_revision_id = CASE
+                    provider_registry_revision = CASE
                         WHEN excluded.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
-                        THEN excluded.registry_revision_id ELSE prodex_governance_sessions.registry_revision_id END,
+                        THEN excluded.provider_registry_revision
+                        ELSE prodex_governance_sessions.provider_registry_revision END,
+                    provider_descriptor_revision = CASE
+                        WHEN excluded.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
+                        THEN excluded.provider_descriptor_revision
+                        ELSE prodex_governance_sessions.provider_descriptor_revision END,
                     provider_affinity = CASE
                         WHEN excluded.last_seen_at_unix_ms >= prodex_governance_sessions.last_seen_at_unix_ms
                         THEN excluded.provider_affinity ELSE prodex_governance_sessions.provider_affinity END,
@@ -788,7 +925,8 @@ impl GovernanceSqliteRepository {
                     credential_scope_label(command.credential_scope),
                     command.classification.as_str(),
                     command.policy_revision_id.to_string(),
-                    command.registry_revision_id,
+                    command.provider_registry_revision,
+                    to_i64(command.provider_descriptor_revision)?,
                     command.provider_affinity,
                     to_i64(command.created_at_unix_ms)?,
                     to_i64(command.last_seen_at_unix_ms)?,
@@ -801,7 +939,7 @@ impl GovernanceSqliteRepository {
             load_governance_session_tx(&transaction, command.tenant_id, &command.session_id_hash)?
                 .ok_or(GovernanceRepositoryError::Database)?;
         transaction.commit().map_err(database_error)?;
-        Ok(GovernanceSessionUpsertOutcome::Stored(stored))
+        Ok(GovernanceSessionUpsertOutcome::Stored(Box::new(stored)))
     }
 
     pub fn governance_load_sessions(
@@ -818,8 +956,9 @@ impl GovernanceSqliteRepository {
             .prepare(
                 "SELECT session.session_id_hash, session.principal_id, session.channel,
                         session.credential_scope, session.classification,
-                        session.policy_revision_id, session.registry_revision_id,
-                        session.provider_affinity, session.created_at_unix_ms,
+                        session.policy_revision_id, session.provider_registry_revision,
+                        session.provider_descriptor_revision, session.provider_affinity,
+                        session.created_at_unix_ms,
                         session.last_seen_at_unix_ms, session.absolute_expires_at_unix_ms,
                         session.idle_expires_at_unix_ms, revocation.revoked_at_unix_ms,
                         revocation.reason_code
@@ -860,6 +999,23 @@ impl GovernanceSqliteRepository {
     ) -> Result<u64, GovernanceRepositoryError> {
         let connection = self.connection()?;
         count_concurrent_sessions_tx(&connection, tenant_id, principal_id, now_unix_ms)
+    }
+
+    pub fn governance_session_revocation_epoch(
+        &self,
+        tenant_id: TenantId,
+    ) -> Result<u64, GovernanceRepositoryError> {
+        let connection = self.connection()?;
+        let epoch = connection
+            .query_row(
+                "SELECT session_revocation_epoch FROM prodex_tenants WHERE tenant_id = ?1",
+                params![tenant_id.to_string()],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or(GovernanceRepositoryError::NotFound)?;
+        from_i64(epoch)
     }
 
     pub fn governance_revoke_session(
@@ -905,6 +1061,17 @@ impl GovernanceSqliteRepository {
                 ],
             )
             .map_err(database_error)?;
+        let updated = transaction
+            .execute(
+                "UPDATE prodex_tenants
+                 SET session_revocation_epoch = session_revocation_epoch + 1
+                 WHERE tenant_id = ?1",
+                params![command.tenant_id.to_string()],
+            )
+            .map_err(database_error)?;
+        if updated != 1 {
+            return Err(GovernanceRepositoryError::NotFound);
+        }
         append_audit_outbox_tx(&transaction, command.audit_outbox)?;
         transaction.commit().map_err(database_error)?;
         Ok(GovernanceWriteOutcome::Applied)
@@ -1091,7 +1258,8 @@ struct RawGovernanceSessionRow {
     credential_scope: String,
     classification: String,
     policy_revision_id: String,
-    registry_revision_id: String,
+    provider_registry_revision: String,
+    provider_descriptor_revision: i64,
     provider_affinity: Option<String>,
     created_at_unix_ms: i64,
     last_seen_at_unix_ms: i64,
@@ -1109,14 +1277,15 @@ fn governance_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawGovern
         credential_scope: row.get(3)?,
         classification: row.get(4)?,
         policy_revision_id: row.get(5)?,
-        registry_revision_id: row.get(6)?,
-        provider_affinity: row.get(7)?,
-        created_at_unix_ms: row.get(8)?,
-        last_seen_at_unix_ms: row.get(9)?,
-        absolute_expires_at_unix_ms: row.get(10)?,
-        idle_expires_at_unix_ms: row.get(11)?,
-        revoked_at_unix_ms: row.get(12)?,
-        revocation_reason_code: row.get(13)?,
+        provider_registry_revision: row.get(6)?,
+        provider_descriptor_revision: row.get(7)?,
+        provider_affinity: row.get(8)?,
+        created_at_unix_ms: row.get(9)?,
+        last_seen_at_unix_ms: row.get(10)?,
+        absolute_expires_at_unix_ms: row.get(11)?,
+        idle_expires_at_unix_ms: row.get(12)?,
+        revoked_at_unix_ms: row.get(13)?,
+        revocation_reason_code: row.get(14)?,
     })
 }
 
@@ -1134,7 +1303,8 @@ fn governance_session_from_values(
         classification: classification_from_label(&row.classification)?,
         policy_revision_id: PolicyRevisionId::from_str(&row.policy_revision_id)
             .map_err(|_| GovernanceRepositoryError::Database)?,
-        registry_revision_id: row.registry_revision_id,
+        provider_registry_revision: row.provider_registry_revision,
+        provider_descriptor_revision: from_i64(row.provider_descriptor_revision)?,
         provider_affinity: row.provider_affinity,
         created_at_unix_ms: from_i64(row.created_at_unix_ms)?,
         last_seen_at_unix_ms: from_i64(row.last_seen_at_unix_ms)?,
@@ -1154,8 +1324,9 @@ fn load_governance_session_tx(
         .query_row(
             "SELECT session.session_id_hash, session.principal_id, session.channel,
                     session.credential_scope, session.classification,
-                    session.policy_revision_id, session.registry_revision_id,
-                    session.provider_affinity, session.created_at_unix_ms,
+                    session.policy_revision_id, session.provider_registry_revision,
+                    session.provider_descriptor_revision, session.provider_affinity,
+                    session.created_at_unix_ms,
                     session.last_seen_at_unix_ms, session.absolute_expires_at_unix_ms,
                     session.idle_expires_at_unix_ms, revocation.revoked_at_unix_ms,
                     revocation.reason_code
@@ -1339,7 +1510,8 @@ fn persist_approval_transition(
     let changed = transaction
         .execute(
             "UPDATE prodex_approvals
-             SET lifecycle_state = ?4, activated_at_unix_ms = ?5, resource_version = ?6
+             SET lifecycle_state = ?4, activated_at_unix_ms = ?5,
+                 termination_reason = ?6, resource_version = ?7
              WHERE tenant_id = ?1 AND approval_id = ?2 AND resource_version = ?3",
             params![
                 next.tenant_id.to_string(),
@@ -1347,6 +1519,9 @@ fn persist_approval_transition(
                 to_i64(previous.version)?,
                 approval_state_label(next.state),
                 next.activated_at_unix_ms.map(to_i64).transpose()?,
+                next.termination_reason
+                    .as_ref()
+                    .map(ApprovalReasonCode::as_str),
                 to_i64(next.version)?,
             ],
         )
@@ -1380,7 +1555,8 @@ fn load_approval_tx(
     let row = connection
         .query_row(
             "SELECT approval_kind, approval_scope, fingerprint, maker_id, lifecycle_state,
-                    required_quorum, expires_at_unix_ms, activated_at_unix_ms, resource_version
+                    required_quorum, expires_at_unix_ms, activated_at_unix_ms,
+                    termination_reason, resource_version
              FROM prodex_approvals WHERE tenant_id = ?1 AND approval_id = ?2",
             params![tenant_id.to_string(), approval_id.as_str()],
             |row| {
@@ -1393,13 +1569,15 @@ fn load_approval_tx(
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, Option<i64>>(7)?,
-                    row.get::<_, i64>(8)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, i64>(9)?,
                 ))
             },
         )
         .optional()
         .map_err(database_error)?;
-    let Some((kind, scope, fingerprint, maker, state, quorum, expires, activated, version)) = row
+    let Some((kind, scope, fingerprint, maker, state, quorum, expires, activated, reason, version)) =
+        row
     else {
         return Ok(None);
     };
@@ -1437,6 +1615,10 @@ fn load_approval_tx(
         votes,
         expires_at_unix_ms: from_i64(expires)?,
         activated_at_unix_ms: activated.map(from_i64).transpose()?,
+        termination_reason: reason
+            .map(ApprovalReasonCode::new)
+            .transpose()
+            .map_err(|_| GovernanceRepositoryError::Database)?,
         version: from_i64(version)?,
     }))
 }
@@ -1738,10 +1920,109 @@ fn require_control_plane_admin(
     Ok(())
 }
 
+fn approval_idempotency_replay_sqlite(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    idempotency: &ApprovalVoteIdempotency,
+) -> Result<IdempotencyReplayDecision<Vec<u8>>, GovernanceRepositoryError> {
+    if idempotency.operation.tenant_id != tenant_id || idempotency.started_at_unix_ms == 0 {
+        return Err(GovernanceRepositoryError::InvalidInput);
+    }
+    let row = transaction
+        .query_row(
+            "SELECT request_fingerprint, entry_status, started_at_unix_ms, completed_at_unix_ms, response_body
+             FROM prodex_idempotency_records
+             WHERE tenant_id = ?1 AND idempotency_key = ?2",
+            params![tenant_id.to_string(), idempotency.operation.key.as_str()],
+            |row| {
+                let status = match row.get::<_, String>(1)?.as_str() {
+                    "pending" => IdempotencyRecordLookupRowStatus::Pending,
+                    "completed" => IdempotencyRecordLookupRowStatus::Completed,
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                };
+                Ok(IdempotencyRecordLookupRow {
+                    tenant_id,
+                    idempotency_key: idempotency.operation.key.clone(),
+                    request_fingerprint: row.get(0)?,
+                    status,
+                    started_at_unix_ms: from_i64(row.get(2)?)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    completed_at_unix_ms: row
+                        .get::<_, Option<i64>>(3)?
+                        .map(from_i64)
+                        .transpose()
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    response_body: row.get(4)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(database_error)?;
+    let entry = row
+        .map(|row| materialize_idempotency_record_lookup_row(&idempotency.operation, row))
+        .transpose()
+        .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+    decide_idempotency_replay(&idempotency.operation, entry.as_ref())
+        .map_err(|_| GovernanceRepositoryError::Conflict)
+}
+
+fn insert_approval_idempotency_pending_sqlite(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    idempotency: &ApprovalVoteIdempotency,
+) -> Result<(), GovernanceRepositoryError> {
+    let inserted = transaction
+        .execute(
+            "INSERT INTO prodex_idempotency_records (
+                tenant_id, idempotency_key, request_fingerprint, entry_status, started_at_unix_ms
+             ) VALUES (?1, ?2, ?3, 'pending', ?4)",
+            params![
+                tenant_id.to_string(),
+                idempotency.operation.key.as_str(),
+                idempotency.operation.request_fingerprint,
+                to_i64(idempotency.started_at_unix_ms)?,
+            ],
+        )
+        .map_err(database_error)?;
+    if inserted != 1 {
+        return Err(GovernanceRepositoryError::Conflict);
+    }
+    Ok(())
+}
+
+fn complete_approval_idempotency_sqlite(
+    transaction: &Transaction<'_>,
+    tenant_id: TenantId,
+    idempotency: &ApprovalVoteIdempotency,
+    outcome: ApprovalVoteStableOutcome,
+    completed_at_unix_ms: u64,
+) -> Result<(), GovernanceRepositoryError> {
+    let updated = transaction
+        .execute(
+            "UPDATE prodex_idempotency_records
+             SET entry_status = 'completed', completed_at_unix_ms = ?4, response_body = ?5
+             WHERE tenant_id = ?1 AND idempotency_key = ?2
+               AND request_fingerprint = ?3 AND entry_status = 'pending'",
+            params![
+                tenant_id.to_string(),
+                idempotency.operation.key.as_str(),
+                idempotency.operation.request_fingerprint,
+                to_i64(completed_at_unix_ms)?,
+                outcome.encode(),
+            ],
+        )
+        .map_err(database_error)?;
+    if updated != 1 {
+        return Err(GovernanceRepositoryError::Conflict);
+    }
+    Ok(())
+}
+
 fn approval_transition_error(error: ApprovalError) -> GovernanceRepositoryError {
     match error {
         ApprovalError::SelfApprovalDenied => GovernanceRepositoryError::ApprovalSelfAction,
         ApprovalError::StaleVersion => GovernanceRepositoryError::StaleVersion,
+        ApprovalError::ReplayMismatch => GovernanceRepositoryError::Conflict,
         ApprovalError::InvalidTransition => GovernanceRepositoryError::InvalidTransition,
         ApprovalError::TenantMismatch => GovernanceRepositoryError::TenantMismatch,
         ApprovalError::InvalidToken
@@ -1764,6 +2045,18 @@ fn artifact_kind_from_approval(
     }
 }
 
+fn approval_artifact_kind(
+    approval_kind: ApprovalKind,
+) -> Result<Option<GovernanceArtifactKind>, GovernanceRepositoryError> {
+    match approval_kind {
+        ApprovalKind::Execution => Ok(None),
+        ApprovalKind::HighImpactConfiguration | ApprovalKind::BreakGlass => {
+            Err(GovernanceRepositoryError::InvalidInput)
+        }
+        _ => artifact_kind_from_approval(approval_kind).map(Some),
+    }
+}
+
 fn artifact_kind_label(kind: GovernanceArtifactKind) -> &'static str {
     match kind {
         GovernanceArtifactKind::Policy => "policy",
@@ -1777,7 +2070,8 @@ fn validate_governance_session_upsert(
     command: &GovernanceSessionUpsertCommand,
 ) -> Result<(), GovernanceRepositoryError> {
     if !session_hash_is_valid(&command.session_id_hash)
-        || !bounded_session_token(&command.registry_revision_id)
+        || !bounded_session_token(&command.provider_registry_revision)
+        || command.provider_descriptor_revision == 0
         || command
             .provider_affinity
             .as_deref()

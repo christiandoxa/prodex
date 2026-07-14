@@ -80,7 +80,7 @@ mod tests {
     const COMPONENTS_DIGEST: &str =
         "0793d38857e524a3a14fa77974ebaf7cc56d5a4b8afc9243de5faddbbbdbc3c0";
     const DOCUMENT_DIGEST: &str =
-        "11f3647119871fa3e1172f901f43dcbe0255b98c8afd52ddbfc595ba636418da";
+        "647257375d379cc0e5e9eb991dbe950f53317f16d446d615cb9d911f7ec5e2b4";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -264,6 +264,9 @@ mod tests {
         let spec = runtime_gateway_openapi_spec_for_mount("/v1/");
         let paths = &spec["paths"];
         for path in [
+            "/v1/prodex/gateway/execution-approvals",
+            "/v1/prodex/gateway/execution-approvals/{approval_id}",
+            "/v1/prodex/gateway/execution-approvals/{approval_id}/votes",
             "/v1/prodex/gateway/policies",
             "/v1/prodex/gateway/policies/validate",
             "/v1/prodex/gateway/policies/status",

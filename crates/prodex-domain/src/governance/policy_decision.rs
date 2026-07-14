@@ -15,6 +15,7 @@ use super::{DataClassification, FindingKind, InspectionCoverage};
 pub const MAX_GOVERNANCE_POLICY_RULES: usize = 256;
 pub const MAX_POLICY_OBLIGATIONS: usize = 64;
 pub const MAX_POLICY_REASON_CODES: usize = 32;
+pub const MAX_POLICY_REQUESTED_TOOLS: usize = 128;
 const MAX_POLICY_TOKEN_BYTES: usize = 128;
 
 macro_rules! policy_token {
@@ -142,9 +143,164 @@ pub struct EnvironmentContext {
     pub mfa_satisfied: bool,
 }
 
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct PrincipalPolicyAttributes {
+    team_id: Option<PolicySelector>,
+    project_id: Option<PolicySelector>,
+    user_id: Option<PolicySelector>,
+}
+
+impl PrincipalPolicyAttributes {
+    pub fn new(
+        team_id: Option<&str>,
+        project_id: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<Self, GovernancePolicyError> {
+        Ok(Self {
+            team_id: team_id.map(PolicySelector::new).transpose()?,
+            project_id: project_id.map(PolicySelector::new).transpose()?,
+            user_id: user_id.map(PolicySelector::new).transpose()?,
+        })
+    }
+
+    pub fn team_id(&self) -> Option<&str> {
+        self.team_id.as_ref().map(PolicySelector::as_str)
+    }
+
+    pub fn project_id(&self) -> Option<&str> {
+        self.project_id.as_ref().map(PolicySelector::as_str)
+    }
+
+    pub fn user_id(&self) -> Option<&str> {
+        self.user_id.as_ref().map(PolicySelector::as_str)
+    }
+}
+
+impl fmt::Debug for PrincipalPolicyAttributes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PrincipalPolicyAttributes")
+            .field("team_id", &self.team_id.as_ref().map(|_| "<redacted>"))
+            .field(
+                "project_id",
+                &self.project_id.as_ref().map(|_| "<redacted>"),
+            )
+            .field("user_id", &self.user_id.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct BreakGlassPolicyContext {
+    scope: PolicySelector,
+    expires_at_unix_ms: u64,
+}
+
+impl BreakGlassPolicyContext {
+    pub fn new(
+        scope: impl Into<String>,
+        expires_at_unix_ms: u64,
+    ) -> Result<Self, GovernancePolicyError> {
+        if expires_at_unix_ms == 0 {
+            return Err(GovernancePolicyError::InvalidExpiry);
+        }
+        Ok(Self {
+            scope: PolicySelector::new(scope)?,
+            expires_at_unix_ms,
+        })
+    }
+
+    fn is_valid_at(&self, evaluated_at_unix_ms: u64) -> bool {
+        evaluated_at_unix_ms < self.expires_at_unix_ms
+    }
+}
+
+impl fmt::Debug for BreakGlassPolicyContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BreakGlassPolicyContext")
+            .field("scope", &"<redacted>")
+            .field("expires_at_unix_ms", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct RequestPolicyAttributes {
+    requested_model: Option<PolicySelector>,
+    requested_tools: Vec<PolicySelector>,
+    requested_modalities: Vec<DataModality>,
+    break_glass: Option<BreakGlassPolicyContext>,
+    evaluated_at_unix_ms: u64,
+}
+
+impl RequestPolicyAttributes {
+    pub fn new(
+        requested_model: Option<&str>,
+        requested_tools: &[String],
+        mut requested_modalities: Vec<DataModality>,
+        break_glass: Option<BreakGlassPolicyContext>,
+        evaluated_at_unix_ms: u64,
+    ) -> Result<Self, GovernancePolicyError> {
+        if requested_tools.len() > MAX_POLICY_REQUESTED_TOOLS {
+            return Err(GovernancePolicyError::AttributeLimitExceeded);
+        }
+        let mut requested_tools = requested_tools
+            .iter()
+            .map(PolicySelector::new)
+            .collect::<Result<Vec<_>, _>>()?;
+        requested_tools.sort();
+        requested_tools.dedup();
+        requested_modalities.sort();
+        requested_modalities.dedup();
+        Ok(Self {
+            requested_model: requested_model.map(PolicySelector::new).transpose()?,
+            requested_tools,
+            requested_modalities,
+            break_glass,
+            evaluated_at_unix_ms,
+        })
+    }
+
+    pub fn requested_model(&self) -> Option<&str> {
+        self.requested_model.as_ref().map(PolicySelector::as_str)
+    }
+
+    pub fn requested_tools(&self) -> impl Iterator<Item = &str> {
+        self.requested_tools.iter().map(PolicySelector::as_str)
+    }
+
+    pub fn requested_modalities(&self) -> &[DataModality] {
+        &self.requested_modalities
+    }
+
+    fn valid_break_glass(&self) -> Option<&BreakGlassPolicyContext> {
+        self.break_glass
+            .as_ref()
+            .filter(|grant| grant.is_valid_at(self.evaluated_at_unix_ms))
+    }
+}
+
+impl fmt::Debug for RequestPolicyAttributes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RequestPolicyAttributes")
+            .field(
+                "requested_model",
+                &self.requested_model.as_ref().map(|_| "<redacted>"),
+            )
+            .field("requested_tool_count", &self.requested_tools.len())
+            .field("requested_modalities", &self.requested_modalities)
+            .field(
+                "break_glass",
+                &self.break_glass.as_ref().map(|_| "<redacted>"),
+            )
+            .field("evaluated_at_unix_ms", &"<redacted>")
+            .finish()
+    }
+}
+
 pub struct PolicyInput<'a> {
     pub tenant: TenantContext,
     pub principal: &'a Principal,
+    pub principal_attributes: &'a PrincipalPolicyAttributes,
     pub channel: Channel,
     pub credential_scope: CredentialScope,
     pub session: SessionPolicyContext,
@@ -153,6 +309,7 @@ pub struct PolicyInput<'a> {
     pub data: DataPolicyContext,
     pub request_risk: RequestRisk,
     pub requested_capabilities: &'a CapabilitySet,
+    pub request_attributes: &'a RequestPolicyAttributes,
     pub quota: QuotaContext,
     pub environment: EnvironmentContext,
 }
@@ -162,6 +319,7 @@ impl fmt::Debug for PolicyInput<'_> {
         f.debug_struct("PolicyInput")
             .field("tenant", &self.tenant)
             .field("principal", &self.principal)
+            .field("principal_attributes", &self.principal_attributes)
             .field("channel", &self.channel)
             .field("credential_scope", &self.credential_scope)
             .field("session", &self.session)
@@ -170,6 +328,7 @@ impl fmt::Debug for PolicyInput<'_> {
             .field("data", &self.data)
             .field("request_risk", &self.request_risk)
             .field("requested_capabilities", &self.requested_capabilities)
+            .field("request_attributes", &self.request_attributes)
             .field("quota", &self.quota)
             .field("environment", &self.environment)
             .finish()
@@ -282,6 +441,9 @@ fn policy_obligation_safe_debug(obligation: &GovernanceObligation) -> &'static s
 pub struct PolicyRuleCondition {
     pub channel: Option<Channel>,
     pub principal_kind: Option<PrincipalKind>,
+    pub team_id: Option<PolicySelector>,
+    pub project_id: Option<PolicySelector>,
+    pub user_id: Option<PolicySelector>,
     pub minimum_role: Option<Role>,
     pub credential_scope: Option<CredentialScope>,
     pub action: Option<GovernedAction>,
@@ -298,6 +460,11 @@ pub struct PolicyRuleCondition {
     pub minimum_authentication_strength: Option<u8>,
     pub environment_mfa_satisfied: Option<bool>,
     pub requested_capability: Option<ModelCapability>,
+    pub requested_model: Option<PolicySelector>,
+    pub requested_tool: Option<PolicySelector>,
+    pub requested_modality: Option<DataModality>,
+    pub break_glass_required: Option<bool>,
+    pub break_glass_scope: Option<PolicySelector>,
     pub quota_has_headroom: Option<bool>,
     pub quota_reservation_required: Option<bool>,
 }
@@ -308,6 +475,24 @@ impl PolicyRuleCondition {
             && self
                 .principal_kind
                 .is_none_or(|value| value == input.principal.kind)
+            && self.team_id.as_ref().is_none_or(|selector| {
+                input
+                    .principal_attributes
+                    .team_id()
+                    .is_some_and(|value| selector_matches(selector, value))
+            })
+            && self.project_id.as_ref().is_none_or(|selector| {
+                input
+                    .principal_attributes
+                    .project_id()
+                    .is_some_and(|value| selector_matches(selector, value))
+            })
+            && self.user_id.as_ref().is_none_or(|selector| {
+                input
+                    .principal_attributes
+                    .user_id()
+                    .is_some_and(|value| selector_matches(selector, value))
+            })
             && self
                 .minimum_role
                 .is_none_or(|value| input.principal.role >= value)
@@ -352,6 +537,33 @@ impl PolicyRuleCondition {
             && self
                 .requested_capability
                 .is_none_or(|value| input.requested_capabilities.contains(value))
+            && self.requested_model.as_ref().is_none_or(|selector| {
+                input
+                    .request_attributes
+                    .requested_model()
+                    .is_some_and(|value| selector_matches(selector, value))
+            })
+            && self.requested_tool.as_ref().is_none_or(|selector| {
+                input
+                    .request_attributes
+                    .requested_tools()
+                    .any(|value| selector_matches(selector, value))
+            })
+            && self.requested_modality.is_none_or(|modality| {
+                input
+                    .request_attributes
+                    .requested_modalities()
+                    .contains(&modality)
+            })
+            && self.break_glass_required.is_none_or(|required| {
+                input.request_attributes.valid_break_glass().is_some() == required
+            })
+            && self.break_glass_scope.as_ref().is_none_or(|selector| {
+                input
+                    .request_attributes
+                    .valid_break_glass()
+                    .is_some_and(|grant| selector_matches(selector, grant.scope.as_str()))
+            })
             && self
                 .quota_has_headroom
                 .is_none_or(|value| value == input.quota.has_headroom)
@@ -361,11 +573,21 @@ impl PolicyRuleCondition {
     }
 }
 
+fn selector_matches(selector: &PolicySelector, value: &str) -> bool {
+    selector.as_str() == "*" || selector.as_str() == value
+}
+
 impl fmt::Debug for PolicyRuleCondition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PolicyRuleCondition")
             .field("channel", &self.channel)
             .field("principal_kind", &self.principal_kind)
+            .field("team_id", &self.team_id.as_ref().map(|_| "<redacted>"))
+            .field(
+                "project_id",
+                &self.project_id.as_ref().map(|_| "<redacted>"),
+            )
+            .field("user_id", &self.user_id.as_ref().map(|_| "<redacted>"))
             .field("minimum_role", &self.minimum_role)
             .field("credential_scope", &self.credential_scope)
             .field("action", &self.action)
@@ -394,6 +616,20 @@ impl fmt::Debug for PolicyRuleCondition {
             )
             .field("environment_mfa_satisfied", &self.environment_mfa_satisfied)
             .field("requested_capability", &self.requested_capability)
+            .field(
+                "requested_model",
+                &self.requested_model.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "requested_tool",
+                &self.requested_tool.as_ref().map(|_| "<redacted>"),
+            )
+            .field("requested_modality", &self.requested_modality)
+            .field("break_glass_required", &self.break_glass_required)
+            .field(
+                "break_glass_scope",
+                &self.break_glass_scope.as_ref().map(|_| "<redacted>"),
+            )
             .field("quota_has_headroom", &self.quota_has_headroom)
             .field(
                 "quota_reservation_required",
@@ -472,12 +708,134 @@ pub fn compile_governance_policy(
         rule.obligations.sort();
         rule.obligations.dedup();
     }
+    validate_governance_obligation_conflicts(&artifact.rules)?;
     Ok(CompiledGovernancePolicy {
         revision: artifact.revision,
         valid_until_unix_ms: artifact.valid_until_unix_ms,
         default_effect: artifact.default_effect,
         rules: artifact.rules,
     })
+}
+
+fn validate_governance_obligation_conflicts(
+    rules: &[GovernancePolicyRule],
+) -> Result<(), GovernancePolicyError> {
+    for (index, rule) in rules.iter().enumerate() {
+        if rule
+            .obligations
+            .iter()
+            .any(governance_obligation_bound_is_invalid)
+        {
+            return Err(GovernancePolicyError::ConflictingObligations);
+        }
+        for (left_index, left) in rule.obligations.iter().enumerate() {
+            if rule.obligations[left_index + 1..]
+                .iter()
+                .any(|right| governance_obligations_conflict(left, right))
+            {
+                return Err(GovernancePolicyError::ConflictingObligations);
+            }
+        }
+        for prior in &rules[..index] {
+            if policy_rule_conditions_overlap(&rule.condition, &prior.condition)
+                && rule.obligations.iter().any(|left| {
+                    prior
+                        .obligations
+                        .iter()
+                        .any(|right| governance_obligations_conflict(left, right))
+                })
+            {
+                return Err(GovernancePolicyError::ConflictingObligations);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> bool {
+    matches!(
+        obligation,
+        GovernanceObligation::MaxInputTokens(0)
+            | GovernanceObligation::MaxOutputTokens(0)
+            | GovernanceObligation::MaxContextTokens(0)
+            | GovernanceObligation::SessionIdleTimeoutSeconds(0)
+            | GovernanceObligation::SessionAbsoluteTimeoutSeconds(0)
+    )
+}
+
+fn governance_obligations_conflict(
+    left: &GovernanceObligation,
+    right: &GovernanceObligation,
+) -> bool {
+    use GovernanceObligation::{
+        AllowProvider, AllowTool, DenyProvider, DisableTools, MaxContextTokens, MaxInputTokens,
+        MaxOutputTokens, ProhibitRetention, RequireRegion, RetentionSeconds,
+    };
+
+    match (left, right) {
+        (AllowProvider(allowed), DenyProvider(denied))
+        | (DenyProvider(denied), AllowProvider(allowed)) => {
+            denied.as_str() == "*" || allowed == denied
+        }
+        (RequireRegion(left), RequireRegion(right)) => {
+            left.as_str() != "*" && right.as_str() != "*" && left != right
+        }
+        (ProhibitRetention, RetentionSeconds(seconds))
+        | (RetentionSeconds(seconds), ProhibitRetention) => *seconds != 0,
+        (DisableTools, AllowTool(_)) | (AllowTool(_), DisableTools) => true,
+        (MaxInputTokens(limit), MaxContextTokens(context))
+        | (MaxContextTokens(context), MaxInputTokens(limit))
+        | (MaxOutputTokens(limit), MaxContextTokens(context))
+        | (MaxContextTokens(context), MaxOutputTokens(limit)) => limit > context,
+        _ => false,
+    }
+}
+
+fn policy_rule_conditions_overlap(left: &PolicyRuleCondition, right: &PolicyRuleCondition) -> bool {
+    optional_policy_attributes_overlap(&left.channel, &right.channel)
+        && optional_policy_attributes_overlap(&left.principal_kind, &right.principal_kind)
+        && policy_selectors_overlap(&left.team_id, &right.team_id)
+        && policy_selectors_overlap(&left.project_id, &right.project_id)
+        && policy_selectors_overlap(&left.user_id, &right.user_id)
+        && optional_policy_attributes_overlap(&left.credential_scope, &right.credential_scope)
+        && optional_policy_attributes_overlap(&left.action, &right.action)
+        && optional_policy_attributes_overlap(&left.route, &right.route)
+        && optional_policy_attributes_overlap(&left.inspection_coverage, &right.inspection_coverage)
+        && optional_policy_attributes_overlap(&left.network_zone, &right.network_zone)
+        && optional_policy_attributes_overlap(&left.session_revoked, &right.session_revoked)
+        && optional_policy_attributes_overlap(
+            &left.session_mfa_satisfied,
+            &right.session_mfa_satisfied,
+        )
+        && optional_policy_attributes_overlap(
+            &left.environment_mfa_satisfied,
+            &right.environment_mfa_satisfied,
+        )
+        && policy_selectors_overlap(&left.requested_model, &right.requested_model)
+        && policy_selectors_overlap(&left.requested_tool, &right.requested_tool)
+        && optional_policy_attributes_overlap(&left.requested_modality, &right.requested_modality)
+        && optional_policy_attributes_overlap(
+            &left.break_glass_required,
+            &right.break_glass_required,
+        )
+        && policy_selectors_overlap(&left.break_glass_scope, &right.break_glass_scope)
+        && optional_policy_attributes_overlap(&left.quota_has_headroom, &right.quota_has_headroom)
+        && optional_policy_attributes_overlap(
+            &left.quota_reservation_required,
+            &right.quota_reservation_required,
+        )
+}
+
+fn policy_selectors_overlap(left: &Option<PolicySelector>, right: &Option<PolicySelector>) -> bool {
+    !matches!(
+        (left, right),
+        (Some(left), Some(right))
+            if left.as_str() != "*" && right.as_str() != "*" && left != right
+    )
+}
+
+fn optional_policy_attributes_overlap<T: PartialEq>(left: &Option<T>, right: &Option<T>) -> bool {
+    !matches!((left, right), (Some(left), Some(right)) if left != right)
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -507,6 +865,7 @@ pub fn evaluate_governance_policy(
 ) -> Result<PolicyDecision, GovernancePolicyError> {
     if input.principal.tenant_id != Some(input.tenant.tenant_id)
         || input.principal.credential_scope != input.credential_scope
+        || !policy_required_attributes_present(policy, input)
     {
         return Ok(PolicyDecision {
             effect: PolicyEffect::Deny,
@@ -556,6 +915,28 @@ pub fn evaluate_governance_policy(
     })
 }
 
+fn policy_required_attributes_present(
+    policy: &CompiledGovernancePolicy,
+    input: &PolicyInput<'_>,
+) -> bool {
+    policy.rules.iter().all(|rule| {
+        (rule.condition.team_id.is_none() || input.principal_attributes.team_id().is_some())
+            && (rule.condition.project_id.is_none()
+                || input.principal_attributes.project_id().is_some())
+            && (rule.condition.user_id.is_none() || input.principal_attributes.user_id().is_some())
+            && (rule.condition.requested_model.is_none()
+                || input.request_attributes.requested_model().is_some())
+            && (rule.condition.requested_tool.is_none()
+                || input.request_attributes.requested_tools().next().is_some())
+            && (rule.condition.requested_modality.is_none()
+                || !input.request_attributes.requested_modalities().is_empty())
+            && (rule.condition.break_glass_scope.is_none()
+                || input.request_attributes.valid_break_glass().is_some())
+            && (rule.condition.break_glass_required != Some(true)
+                || input.request_attributes.valid_break_glass().is_some())
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GovernancePolicyError {
     InvalidToken,
@@ -564,7 +945,9 @@ pub enum GovernancePolicyError {
     DuplicateRule,
     ObligationLimitExceeded,
     DenyRuleHasObligations,
+    ConflictingObligations,
     ReasonLimitExceeded,
+    AttributeLimitExceeded,
 }
 
 impl fmt::Display for GovernancePolicyError {

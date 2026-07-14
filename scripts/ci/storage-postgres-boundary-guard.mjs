@@ -9,6 +9,7 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 const MANIFEST = "crates/prodex-storage-postgres/Cargo.toml";
 const SRC_DIR = "crates/prodex-storage-postgres/src";
 const LIB = "crates/prodex-storage-postgres/src/lib.rs";
+const MIGRATION_CATALOG = "crates/prodex-storage-postgres/src/migration_catalog.rs";
 const RUNTIME_MANIFEST = "crates/prodex-storage-postgres-runtime/Cargo.toml";
 const RUNTIME_SRC_DIR = "crates/prodex-storage-postgres-runtime/src";
 const RUNTIME_LIB = "crates/prodex-storage-postgres-runtime/src/lib.rs";
@@ -147,6 +148,19 @@ export function validateSource(sourceText, sourcePath = "source.rs") {
   if (sourcePath === LIB && !sourceText.includes("#![forbid(unsafe_code)]")) {
     errors.push(`${sourcePath}: prodex-storage-postgres crate root must forbid unsafe code`);
   }
+  if (sourcePath === MIGRATION_CATALOG) {
+    for (const marker of [
+      "TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION",
+      "policyname = tablename || '_tenant_isolation'",
+      "ALTER TABLE %I FORCE ROW LEVEL SECURITY",
+      "BEFORE UPDATE OR DELETE ON prodex_audit_log",
+      "BEFORE TRUNCATE ON prodex_audit_log",
+    ]) {
+      if (!sourceText.includes(marker)) {
+        errors.push(`${sourcePath}: tenant RLS/audit immutability marker is missing '${marker}'`);
+      }
+    }
+  }
   return errors;
 }
 
@@ -243,6 +257,10 @@ prodex_storage = { workspace = true }
   assertSelfTest(
     validateSource("pub const SQL: &str = \"SELECT 1\";", LIB).some((error) => error.includes("forbid unsafe code")),
     "crate root without unsafe forbid accepted",
+  );
+  assertSelfTest(
+    validateSource("pub const SQL: &str = \"SELECT 1\";", MIGRATION_CATALOG).some((error) => error.includes("audit immutability")),
+    "migration catalog without tenant RLS/audit immutability accepted",
   );
   assertSelfTest(
     validateRuntimeManifest(

@@ -2,10 +2,10 @@
 
 The target has two separate workflows: approval of policy revisions and
 approval of a particular high-risk execution. Break-glass is a third, narrower
-emergency grant. They must not share a broad bypass flag. Current generic RBAC
-and audit primitives are foundations; durable maker-checker, execution approval
-and bounded break-glass stores are not yet complete. The fuller persistence
-design is in
+emergency grant. They must not share a broad bypass flag. The current tranche
+implements durable maker-checker and policy-selected execution approval; the
+bounded governance break-glass activation path remains disabled. The fuller
+persistence design is in
 [`07-policy-approval-and-store.md`](07-policy-approval-and-store.md).
 
 ## Policy revision workflow
@@ -41,6 +41,12 @@ new decision and approval.
 Approval is consumed atomically with idempotency and reservation. An expired,
 revoked, used-up or mismatched approval is denied. Approval never permits a
 provider, region, tool or retention choice excluded by the active policy.
+
+Current evidence binds a SHA-256 request-body digest with tenant, principal,
+session hash, operation, model, tools and policy revision; enforces configured
+quorum and one use; and lists, shows and reviews approvals over content-free
+administrative HTTP representations. Raw request payloads are not stored or
+returned.
 
 ## Break-glass
 

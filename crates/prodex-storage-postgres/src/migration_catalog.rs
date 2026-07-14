@@ -583,6 +583,158 @@ CREATE INDEX IF NOT EXISTS prodex_governance_sessions_refresh_idx
 "#,
 };
 
+pub const TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(8),
+    phase: PostgresMigrationPhase::Expand,
+    name: "008_tenant_rls_and_audit_immutability",
+    sql: r#"
+DO $migration$
+DECLARE tenant_table TEXT;
+BEGIN
+    FOR tenant_table IN
+        SELECT tablename
+        FROM pg_policies
+        WHERE schemaname = current_schema()
+          AND policyname = tablename || '_tenant_isolation'
+    LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tenant_table);
+        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tenant_table);
+    END LOOP;
+END $migration$;
+
+CREATE OR REPLACE FUNCTION prodex_reject_audit_mutation()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+BEGIN
+    RAISE EXCEPTION 'audit events are immutable';
+END $function$;
+
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'prodex_audit_log'::regclass
+          AND tgname = 'prodex_audit_log_immutable'
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER prodex_audit_log_immutable
+        BEFORE UPDATE OR DELETE ON prodex_audit_log
+        FOR EACH ROW EXECUTE FUNCTION prodex_reject_audit_mutation();
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'prodex_audit_log'::regclass
+          AND tgname = 'prodex_audit_log_no_truncate'
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER prodex_audit_log_no_truncate
+        BEFORE TRUNCATE ON prodex_audit_log
+        FOR EACH STATEMENT EXECUTE FUNCTION prodex_reject_audit_mutation();
+    END IF;
+END $migration$;
+
+REVOKE UPDATE, DELETE, TRUNCATE ON prodex_audit_log FROM PUBLIC;
+"#,
+};
+
+pub const GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(9),
+    phase: PostgresMigrationPhase::Expand,
+    name: "009_governance_session_provider_revisions",
+    sql: r#"
+ALTER TABLE prodex_governance_sessions
+    ADD COLUMN IF NOT EXISTS provider_descriptor_revision BIGINT NOT NULL DEFAULT 0;
+
+DO $migration$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'prodex_governance_sessions'
+          AND column_name = 'registry_revision_id'
+    ) THEN
+        UPDATE prodex_governance_sessions
+        SET provider_descriptor_revision = split_part(registry_revision_id, ':', 2)::BIGINT
+        WHERE registry_revision_id ~ '^[0-9]+:[0-9]+$';
+
+        ALTER TABLE prodex_governance_sessions
+            RENAME COLUMN registry_revision_id TO provider_registry_revision;
+    END IF;
+END $migration$;
+
+-- Split only rows whose registry half satisfies the existing tenant-scoped FK.
+UPDATE prodex_governance_sessions session
+SET provider_registry_revision = split_part(session.provider_registry_revision, ':', 1)
+WHERE session.provider_registry_revision ~ '^[0-9]+:[0-9]+$'
+  AND EXISTS (
+      SELECT 1 FROM prodex_provider_registry_revisions registry
+      WHERE registry.tenant_id = session.tenant_id
+        AND registry.revision_id = split_part(session.provider_registry_revision, ':', 1)
+  );
+
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'prodex_governance_sessions'::regclass
+          AND conname = 'prodex_governance_sessions_provider_descriptor_revision_check'
+    ) THEN
+        ALTER TABLE prodex_governance_sessions
+            ADD CONSTRAINT prodex_governance_sessions_provider_descriptor_revision_check
+            CHECK (provider_descriptor_revision >= 0) NOT VALID;
+    END IF;
+END $migration$;
+
+-- Legacy packed-row backfill above can be removed after every deployment has crossed schema v9.
+"#,
+};
+
+pub const APPROVAL_TERMINATION_REASON_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(10),
+    phase: PostgresMigrationPhase::Expand,
+    name: "010_approval_termination_reason",
+    sql: r#"
+ALTER TABLE prodex_approvals
+    ADD COLUMN IF NOT EXISTS termination_reason TEXT;
+
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'prodex_approvals'::regclass
+          AND conname = 'prodex_approvals_termination_reason_bounded'
+    ) THEN
+        ALTER TABLE prodex_approvals
+            ADD CONSTRAINT prodex_approvals_termination_reason_bounded
+            CHECK (termination_reason IS NULL OR char_length(termination_reason) BETWEEN 1 AND 128)
+            NOT VALID;
+    END IF;
+END $migration$;
+"#,
+};
+
+pub const SESSION_REVOCATION_EPOCH_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(11),
+    phase: PostgresMigrationPhase::Expand,
+    name: "011_session_revocation_epoch",
+    sql: r#"
+ALTER TABLE prodex_tenants
+    ADD COLUMN IF NOT EXISTS session_revocation_epoch BIGINT NOT NULL DEFAULT 0;
+
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'prodex_tenants'::regclass
+          AND conname = 'prodex_tenants_session_revocation_epoch_nonnegative'
+    ) THEN
+        ALTER TABLE prodex_tenants
+            ADD CONSTRAINT prodex_tenants_session_revocation_epoch_nonnegative
+            CHECK (session_revocation_epoch >= 0) NOT VALID;
+    END IF;
+END $migration$;
+"#,
+};
+
 pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     INITIAL_TENANT_ACCOUNTING_MIGRATION,
     GROUPED_REQUEST_BUDGET_MIGRATION,
@@ -591,8 +743,12 @@ pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     GOVERNANCE_LIFECYCLE_MIGRATION,
     SIEM_OUTBOX_LEASING_MIGRATION,
     GOVERNANCE_SESSION_INDEX_MIGRATION,
+    TENANT_RLS_AND_AUDIT_IMMUTABILITY_MIGRATION,
+    GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
+    APPROVAL_TERMINATION_REASON_MIGRATION,
+    SESSION_REVOCATION_EPOCH_MIGRATION,
 ];
-pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(7);
+pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(11);
 
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,

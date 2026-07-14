@@ -1002,7 +1002,12 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
         worker_threads.push(
             shared
                 .governance_sessions
-                .spawn_durable_bank(authority.clone(), Arc::clone(shutdown))
+                .spawn_durable_bank(
+                    authority.clone(),
+                    shared.runtime_shared.runtime_config.governance.mode
+                        == prodex_config::GovernanceMode::BankEnforce,
+                    Arc::clone(shutdown),
+                )
                 .map_err(|_| anyhow::anyhow!("failed to start governance session bank"))?,
         );
         worker_threads.push(
@@ -1303,12 +1308,12 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
         ));
     }
     let gemini_live_sidecar_addr = if spawn_gemini_sidecar_listener
-        && !shared
+        && shared
             .runtime_shared
             .runtime_config
             .governance
             .mode
-            .is_enforcing()
+            .allows_anonymous_compatibility()
         && matches!(
             &shared.provider,
             RuntimeLocalRewriteProviderOptions::Gemini { .. }

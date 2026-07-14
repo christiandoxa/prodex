@@ -68,6 +68,7 @@ serving; secret files are not read on the request hot path.
 | Policy key | Environment override | Default | Meaning |
 | --- | --- | --- | --- |
 | `gateway.listen_addr` | none | `127.0.0.1:4000` | Gateway bind address. Non-loopback binds require `--auth-token`, `PRODEX_GATEWAY_TOKEN`, or `gateway.virtual_keys`. |
+| `gateway.expected_host` | none | Exact loopback listen authority on loopback; required otherwise | Exact HTTP `Host` authority accepted by the control-plane/admin edge. Values are bounded and must not contain a scheme, path, query, userinfo, comma, or whitespace. |
 | `gateway.provider` | CLI `--provider` | OpenAI-compatible upstream | Exact provider preset: `anthropic`, `copilot`, `deepseek`, `gemini`, or `kiro`. Unsupported values fail closed instead of falling back to the OpenAI-compatible default. |
 | `gateway.harness` | CLI `--harness` | `auto`, resolving to `native` in v1 | Model-facing request policy: `auto`, `native`, or `minimal`. CLI selection wins; the resolved mode is fixed for the gateway lifetime. |
 | `gateway.base_url` | CLI `--base-url`; `OPENAI_BASE_URL` for OpenAI-compatible mode | Provider default, or `https://api.openai.com/v1` | Upstream base URL. Explicit values must be non-empty and whitespace-free. OpenAI-compatible mode appends `/v1` when the URL has no path. |
@@ -183,6 +184,7 @@ Example:
 ```toml
 [gateway]
 listen_addr = "127.0.0.1:4000"
+expected_host = "127.0.0.1:4000"
 provider = "gemini"
 harness = "minimal"
 require_auth = true
@@ -306,21 +308,33 @@ reason_code = "policy.session_revoked"
 
 [governance.policy_rules.condition]
 channel = "api"
+team_id = "platform"
 credential_scope = "data_plane"
 session_revoked = true
 requested_capability = "tools"
+requested_model = "model-a"
+requested_tool = "shell"
+requested_modality = "audio"
 ```
 
 Each rule requires `id`, `condition`, `effect`, `obligations`, and `reason_code`.
-The strict condition schema supports channel, principal kind, minimum role,
-credential scope, action, canonical route, minimum data classification, inspection
-coverage, minimum request risk, network zone, maximum session age/idle time,
-session revoked/MFA state, minimum retained classification, minimum authentication
-strength, environment MFA state, one requested capability, and quota
-headroom/reservation flags. Tenant is implicit in the tenant-bound snapshot.
-Group and department attributes are not currently supported. Provider eligibility
-is expressed through typed obligations and the separately activated provider
-registry/routing artifacts, not free-form policy attributes.
+The strict condition schema supports API channel, principal kind, bounded exact
+team/project/user selectors, minimum role, credential scope, action, canonical
+route, minimum data classification, inspection coverage, minimum request risk,
+network zone, maximum session age/idle time, session revoked/MFA state, minimum
+retained classification, minimum authentication strength, environment MFA state,
+one requested capability, bounded requested model/tool selectors, route-derived
+text/image/audio/file modalities, optional bounded break-glass scope/expiry
+context, and quota headroom/reservation flags. Tenant is implicit in the
+tenant-bound snapshot. Missing attributes required by any configured selector
+fail closed. Virtual-key scope supplies trusted team/project/user values; caller
+headers cannot override them. Non-API channel selectors are rejected during file
+validation and stored-artifact compilation. Break-glass attributes require a
+valid server-supplied unexpired context; the gateway does not trust caller headers
+for them. Exhaustive route mapping prevents future file/video routes from silently
+defaulting to text. Provider eligibility is expressed through typed obligations
+and the separately activated provider registry/routing artifacts, not free-form
+policy attributes.
 
 Effects are `allow`, `require_approval`, and `deny`. A deny rule cannot carry
 obligations. Typed obligation kinds are `mask_finding`,

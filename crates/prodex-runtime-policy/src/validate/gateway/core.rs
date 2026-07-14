@@ -40,6 +40,23 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
     }
     if let Some(listen_addr) = policy.gateway.listen_addr.as_deref() {
         validate_gateway_exact_identifier(listen_addr, path, "gateway.listen_addr")?;
+        let loopback = listen_addr
+            .parse::<std::net::SocketAddr>()
+            .is_ok_and(|address| address.ip().is_loopback());
+        if !loopback && policy.gateway.expected_host.is_none() {
+            bail!(
+                "gateway.expected_host in {} is required for a non-loopback gateway listen address",
+                path.display()
+            );
+        }
+    }
+    if let Some(expected_host) = policy.gateway.expected_host.as_deref()
+        && !valid_gateway_expected_host(expected_host)
+    {
+        bail!(
+            "gateway.expected_host in {} must be a bounded exact HTTP authority",
+            path.display()
+        );
     }
     if policy
         .gateway
@@ -106,6 +123,41 @@ pub(super) fn validate_gateway_core(policy: &RuntimePolicyFile, path: &Path) -> 
         }
     }
     Ok(())
+}
+
+fn valid_gateway_expected_host(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 263
+        || value.chars().any(char::is_whitespace)
+        || value
+            .bytes()
+            .any(|byte| matches!(byte, b'/' | b'\\' | b'@' | b',' | b'#' | b'?'))
+    {
+        return false;
+    }
+    if value.parse::<std::net::SocketAddr>().is_ok() {
+        return true;
+    }
+    let (host, port) = value
+        .rsplit_once(':')
+        .filter(|(_, port)| port.parse::<u16>().is_ok_and(|port| port != 0))
+        .map_or((value, None), |(host, port)| (host, Some(port)));
+    if value.contains(':') && port.is_none() {
+        return value
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+            .is_some_and(|host| host.parse::<std::net::Ipv6Addr>().is_ok());
+    }
+    host.len() <= 253
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
 }
 
 pub(super) fn validate_gateway_state(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {

@@ -6,8 +6,9 @@ use prodex_domain::{
     CanonicalRoute, CapabilitySet, Channel, ClassificationRuleSet, ClassificationRuleSetChecksum,
     ClassificationRuleSetRevisionId, CredentialScope, DataClassification, EnvironmentContext,
     GovernancePolicyArtifact, GovernedAction, NetworkZone, PolicyEffect, PolicyRevisionId,
-    Principal, QuotaContext, RequestRisk, SessionPolicyContext, TenantContext, TenantId,
-    compile_classification_rule_set, compile_governance_policy,
+    Principal, PrincipalPolicyAttributes, QuotaContext, RequestPolicyAttributes, RequestRisk,
+    SessionPolicyContext, TenantContext, TenantId, compile_classification_rule_set,
+    compile_governance_policy,
 };
 
 pub(super) fn test_governance_plan(
@@ -33,6 +34,8 @@ pub(super) fn test_governance_plan(
     };
     let route = CanonicalRoute::new("responses").unwrap();
     let capabilities = CapabilitySet::new(Vec::new());
+    let principal_attributes = PrincipalPolicyAttributes::default();
+    let request_attributes = RequestPolicyAttributes::default();
     plan_application_governance(
         &snapshot,
         ApplicationGovernanceRequest {
@@ -45,6 +48,7 @@ pub(super) fn test_governance_plan(
             request_risk_floor: DataClassification::Public,
             tenant: TenantContext { tenant_id },
             principal,
+            principal_attributes: &principal_attributes,
             channel: Channel::Api,
             credential_scope: CredentialScope::DataPlane,
             session: SessionPolicyContext {
@@ -58,6 +62,7 @@ pub(super) fn test_governance_plan(
             route: &route,
             request_risk: RequestRisk::Low,
             requested_capabilities: &capabilities,
+            request_attributes: &request_attributes,
             quota: QuotaContext {
                 has_headroom: true,
                 reservation_required: true,
