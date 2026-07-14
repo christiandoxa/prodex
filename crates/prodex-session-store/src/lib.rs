@@ -8,14 +8,18 @@ use rusqlite::{Connection, OpenFlags};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 mod session_meta;
 
 const SESSIONS_DIR: &str = "sessions";
 const ARCHIVED_SESSIONS_DIR: &str = "archived_sessions";
-const SESSION_STORE_FILE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const SESSION_STORE_FILE_MAX_BYTES: u64 = if cfg!(test) {
+    64 * 1024
+} else {
+    64 * 1024 * 1024
+};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SessionReportFilter<'a> {
@@ -738,21 +742,23 @@ fn read_session_report(path: &Path, state: &AppState) -> Result<Option<SessionRe
             apply_session_json_lines(&mut report, raw.lines());
         }
     } else {
-        let raw = read_session_file_to_string(path)?;
         let mut saw_resume_metadata = false;
-        for line in raw.lines() {
+        let mut valid_resume_metadata = true;
+        visit_session_lines(path, |line| {
             if !saw_resume_metadata {
                 if line.trim().is_empty() {
-                    continue;
+                    return true;
                 }
                 if !session_line_starts_resume_metadata(line) {
-                    return Ok(None);
+                    valid_resume_metadata = false;
+                    return false;
                 }
                 saw_resume_metadata = true;
             }
             apply_session_json_line(&mut report, line);
-        }
-        if !saw_resume_metadata {
+            true
+        })?;
+        if !saw_resume_metadata || !valid_resume_metadata {
             return Ok(None);
         }
     }
@@ -765,6 +771,13 @@ fn read_session_report(path: &Path, state: &AppState) -> Result<Option<SessionRe
 
 fn read_session_file_to_string(path: &Path) -> Result<String> {
     let file = open_session_regular_file(path)?;
+    if file.metadata()?.len() > SESSION_STORE_FILE_MAX_BYTES {
+        bail!(
+            "session {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            SESSION_STORE_FILE_MAX_BYTES
+        );
+    }
     let mut bytes = Vec::new();
     file.take(SESSION_STORE_FILE_MAX_BYTES.saturating_add(1))
         .read_to_end(&mut bytes)
@@ -779,6 +792,34 @@ fn read_session_file_to_string(path: &Path) -> Result<String> {
     String::from_utf8(bytes).with_context(|| format!("failed to decode session {}", path.display()))
 }
 
+fn visit_session_lines(path: &Path, mut visit: impl FnMut(&str) -> bool) -> Result<()> {
+    let file = open_session_regular_file(path)?;
+    let file_len = file.metadata()?.len();
+    let mut reader = BufReader::new(file.take(file_len));
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = (&mut reader)
+            .take(SESSION_STORE_FILE_MAX_BYTES.saturating_add(1))
+            .read_line(&mut line)
+            .with_context(|| format!("failed to read session {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        if read as u64 > SESSION_STORE_FILE_MAX_BYTES {
+            bail!(
+                "session line {} exceeds safe size limit ({} bytes)",
+                path.display(),
+                SESSION_STORE_FILE_MAX_BYTES
+            );
+        }
+        if !visit(&line) {
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn open_session_regular_file(path: &Path) -> Result<fs::File> {
     let metadata = fs::symlink_metadata(path)
         .with_context(|| format!("failed to inspect session {}", path.display()))?;
@@ -790,13 +831,6 @@ fn open_session_regular_file(path: &Path) -> Result<fs::File> {
     }
     if !metadata.file_type().is_file() {
         bail!("session path {} is not a file", path.display());
-    }
-    if metadata.len() > SESSION_STORE_FILE_MAX_BYTES {
-        bail!(
-            "session {} exceeds safe size limit ({} bytes)",
-            path.display(),
-            SESSION_STORE_FILE_MAX_BYTES
-        );
     }
     let file = fs::File::open(path)
         .with_context(|| format!("failed to read session {}", path.display()))?;
@@ -847,6 +881,25 @@ fn repair_session_file_metadata_prefix(
     selector: &str,
     synthesize_missing_metadata: bool,
 ) -> Result<bool> {
+    if fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect session {}", path.display()))?
+        .len()
+        > SESSION_STORE_FILE_MAX_BYTES
+    {
+        let mut first_line_is_matching_codex_metadata = false;
+        visit_session_lines(path, |line| {
+            if line.trim().is_empty() {
+                return true;
+            }
+            first_line_is_matching_codex_metadata = session_line_resume_id_matches(line, selector)
+                && session_line_starts_resume_metadata(line)
+                && session_meta::line_starts_codex_rollout_metadata(line);
+            false
+        })?;
+        if first_line_is_matching_codex_metadata {
+            return Ok(false);
+        }
+    }
     let raw = read_session_file_to_string(path)?;
     let lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
     let Some(first_content_index) = lines.iter().position(|line| !line.trim().is_empty()) else {
@@ -941,21 +994,22 @@ fn session_file_repair_match(path: &Path, selector: &str, exact: bool) -> Result
     if session_path_id_matches_selector(path, selector, exact) {
         return Ok(Some(path.to_path_buf()));
     }
-    let raw = read_session_file_to_string(path)?;
-    for line in raw.lines() {
-        if session_line_resume_id_matches_mode(line, selector, exact) {
-            return Ok(Some(path.to_path_buf()));
-        }
-    }
-    Ok(None)
+    let mut matched = false;
+    visit_session_lines(path, |line| {
+        matched = session_line_resume_id_matches_mode(line, selector, exact);
+        !matched
+    })?;
+    Ok(matched.then(|| path.to_path_buf()))
 }
 
 fn session_file_has_resume_metadata_for_selector(path: &Path, selector: &str) -> Result<bool> {
-    let raw = read_session_file_to_string(path)?;
-    Ok(raw.lines().any(|line| {
-        session_meta::line_starts_codex_rollout_metadata(line)
-            && session_line_resume_id_matches(line, selector)
-    }))
+    let mut matched = false;
+    visit_session_lines(path, |line| {
+        matched = session_meta::line_starts_codex_rollout_metadata(line)
+            && session_line_resume_id_matches(line, selector);
+        !matched
+    })?;
+    Ok(matched)
 }
 
 fn session_line_resume_id_matches(line: &str, selector: &str) -> bool {

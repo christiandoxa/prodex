@@ -303,6 +303,9 @@ fn redaction_redact_sensitive_key_value_text(value: &str) -> String {
                 index = value_end;
                 continue;
             }
+            redacted.push_str(&value[index..after_key]);
+            index = after_key;
+            continue;
         }
 
         let Some(ch) = value[index..].chars().next() else {
