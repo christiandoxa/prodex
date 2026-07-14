@@ -182,6 +182,18 @@ jobs:
       - name: Test native broker capability persistence
         run: cargo test --locked -p prodex-app --all-features --lib 'runtime_broker::registry::store::tests::' -- --test-threads=1
 
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Build Windows installer fixture binary
+        run: cargo build --locked --bin prodex
+
+      - name: Test Windows installer
+        run: npm run installer:test
+
   process-guard:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -515,28 +527,15 @@ jobs:
           npm run npm:sync-version
           npm run ci:generated-metadata-clean
 
-  npm-package-smoke:
+  standalone-installer:
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-        with:
-          toolchain: 1.97.0
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Install Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -546,12 +545,6 @@ jobs:
 
       - name: Test standalone installer
         run: npm run installer:test
-
-      - name: Build host release binary
-        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
-
-      - name: Smoke staged npm package
-        run: node scripts/ci/npm-package-smoke.mjs --binary-dir target/x86_64-unknown-linux-gnu/release
 
   auto-rotate:
     needs: changes
@@ -1003,7 +996,7 @@ jobs:
       - compat-replay-gate
       - supply-chain
       - release-sync
-      - npm-package-smoke
+      - standalone-installer
       - auto-rotate
       - profile-commands-internal
       - main-internal-core

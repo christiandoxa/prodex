@@ -26,16 +26,10 @@ function parseArgs(argv) {
 }
 
 function syncDocVersion(contents, version) {
-  let next = contents;
-  next = next.replace(
-    /(The current local version in this repo is `)([^`]+)(`:)/g,
+  return contents.replace(
+    /(The current local version in this repo is `)([^`]+)(`)/g,
     `$1${version}$3`,
   );
-  next = next.replace(
-    /(npm install -g @christiandoxa\/prodex@)([^\s`]+)/g,
-    `$1${version}`,
-  );
-  return next;
 }
 
 async function main() {
@@ -45,7 +39,7 @@ async function main() {
       [
         "Usage: node scripts/npm/sync-docs-version.mjs [--version <version>]",
         "",
-        "Updates versioned install snippets in README.md and QUICKSTART.md.",
+        "Updates version metadata in README.md and QUICKSTART.md.",
       ].join("\n") + "\n",
     );
     return;

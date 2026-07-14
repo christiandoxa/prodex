@@ -16,8 +16,9 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex rtk` or default `prodex super` RTK shell-command guidance
 - Optional: Codebase Memory MCP and a Ponytail checkout for the minimal Super stack; Presidio services when you need PII redaction
+- Optional: Node.js 18+ with `npx` for the Playwright MCP server automatically added to Codex-based `prodex s` sessions
 
-If you install `@christiandoxa/prodex` from npm, Prodex uses its bundled `@openai/codex@latest` dependency by default so a broken or architecture-mismatched global `codex` on `PATH` does not affect `prodex run`. If the bundled native Codex optional package is missing or not executable, Prodex falls back to an executable external `codex` on `PATH` and prints a notice before launch, including nvm-managed global Codex installs when the active nvm version's `bin` directory is on `PATH`. If neither bundled nor external Codex is usable, set `PRODEX_CODEX_AUTO_INSTALL=1` to let Prodex run `npm install -g @openai/codex@latest` once before retrying PATH resolution. To deliberately use an external Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
+Standalone Prodex uses the `codex` command on `PATH`; install Codex first and keep it current. To pin a specific Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
 ## Install
 
@@ -27,23 +28,19 @@ Install the latest standalone macOS or Linux binary:
 curl -fsSL https://github.com/christiandoxa/prodex/releases/latest/download/install.sh | sh
 ```
 
+Install the latest standalone Windows binary:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex"
+```
+
 The repository source URL is also usable directly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/christiandoxa/prodex/main/install.sh | sh
 ```
 
-Legacy npm installation:
-
-```bash
-npm install -g @christiandoxa/prodex
-```
-
-Legacy source installation:
-
-```bash
-cargo install --path .
-```
+On Windows, replace `install.sh` with `install.ps1` and run it through PowerShell as shown above. npm and Cargo installations are no longer supported. Existing copies from either legacy channel should run `prodex update` once.
 
 ## Update
 
@@ -56,19 +53,14 @@ prodex update
 
 The current local version in this repo is `0.288.0`:
 
-```bash
-npm install -g @christiandoxa/prodex@0.288.0
-```
-
 Dependency status in this repo:
 
-- The npm runtime dependency follows `@openai/codex@latest` in the workspace package manifest and is used by default; external Codex is opt-in through `PRODEX_CODEX_BIN` or `PRODEX_CODEX_RESOLUTION=external`, and one-shot npm repair is opt-in through `PRODEX_CODEX_AUTO_INSTALL=1`
-- Source installs still use whatever `codex` binary is on your `PATH`
+- Standalone Prodex uses the Codex executable selected by `PRODEX_CODEX_BIN`, `PRODEX_CODEX_RESOLUTION`, or `PATH`
+- Local development builds use whatever `codex` binary is on your `PATH`
 - Packaged Codex runtime resources, including the Codex 0.136.0 and newer bundled zsh runtime helper, stay owned by the Codex package; Prodex does not override `zsh_path`
-- `prodex update` verifies and installs the latest GitHub Release binary; npm and Cargo installations are removed during the first migration
-- Update notices from this release onward direct users to `prodex update`
+- `prodex update` verifies and installs the latest GitHub Release binary on macOS, Linux, and Windows; npm and legacy Cargo installations migrate during the first update
+- npm and Cargo installations are unsupported; update notices direct both legacy channels to `prodex update`
 - Run `cargo update` whenever dependency metadata changes so the workspace lockfile stays in sync
-- Versioned npm install snippets in this guide and `README.md` are synced from `Cargo.toml`
 
 Manual migration is unnecessary; run:
 
@@ -223,7 +215,7 @@ prodex caveman exec "review this repo in caveman mode"
 
 Prodex launches Caveman from a temporary overlay `CODEX_HOME`; the base profile stays unchanged. `prodex rtk` and `prodex ponytail` are shortcuts for the matching Caveman prefix.
 
-`prodex super` and `prodex s` enable Caveman, RTK guidance, Ponytail when installed, Codebase Memory MCP when installed, Smart Context, and launch-time full access. They ask only whether to enable Presidio. Use `--presidio` or `--no-presidio` for non-interactive launches.
+`prodex super` and `prodex s` enable Caveman, RTK guidance, Ponytail when installed, Codebase Memory MCP when installed, Playwright MCP when Node.js 18+ and `npx` are available, Smart Context, and launch-time full access. They ask only whether to enable Presidio. Use `--presidio` or `--no-presidio` for non-interactive launches. This MCP default applies to the Codex Super front end; native `--cli gemini`, `--cli kiro`, and `--cli agy` launches keep their own MCP configuration.
 
 Use `prodex s doctor --strict` to verify the minimal stack. Add `--presidio` to check the configured Analyzer and Anonymizer services.
 

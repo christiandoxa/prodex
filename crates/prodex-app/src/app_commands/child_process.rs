@@ -223,10 +223,44 @@ pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
+    let running_exe = std::env::current_exe().context("failed to locate current prodex binary")?;
+    let mut child = Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "-",
+        ])
+        .env("PRODEX_RUNNING_EXE", running_exe)
+        .env("PRODEX_MIGRATE", "1")
+        .env("PRODEX_NON_INTERACTIVE", "1")
+        .stdin(Stdio::piped())
+        .spawn()
+        .context("failed to start the embedded Prodex installer with PowerShell")?;
+    child
+        .stdin
+        .take()
+        .context("failed to open Prodex installer stdin")?
+        .write_all(include_bytes!("../../../../install.ps1"))
+        .context("failed to send the embedded Prodex installer to PowerShell")?;
+    let status = child
+        .wait()
+        .context("failed to wait for Prodex installer")?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("Prodex installer exited with {status}")
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub(crate) fn handle_prodex_update(_args: ProdexUpdateArgs) -> Result<()> {
     anyhow::bail!(
-        "prodex update currently supports macOS and Linux; download the Windows binary from https://github.com/christiandoxa/prodex/releases/latest"
+        "prodex update supports macOS, Linux, and Windows; download a binary from https://github.com/christiandoxa/prodex/releases/latest"
     )
 }
 

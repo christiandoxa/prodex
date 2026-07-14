@@ -17,8 +17,7 @@
     "QUICKSTART.md"
   ],
   "docVersionMetadataLineSources": [
-    "\\bThe current local version in this repo is\\b",
-    "\\bnpm install -g @christiandoxa/prodex@v?\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?\\b"
+    "\\bThe current local version in this repo is\\b"
   ],
   "versionMetadataPatterns": [
     "Cargo.toml",
@@ -199,6 +198,7 @@
       "exact": [
         "Cargo.lock",
         "Cargo.toml",
+        "install.ps1",
         "install.sh",
         "scripts/install.test.mjs",
         "scripts/ci/main-internal-core-shard.mjs",

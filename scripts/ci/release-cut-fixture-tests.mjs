@@ -97,11 +97,7 @@ function docs(version, label) {
   return [
     `# ${label}`,
     "",
-    `The current local version in this repo is \`${version}\`:`,
-    "",
-    "```bash",
-    `npm install -g @christiandoxa/prodex@${version}`,
-    "```",
+    `The current local version in this repo is \`${version}\`.`,
     "",
   ].join("\n");
 }
@@ -211,7 +207,6 @@ async function assertVersionSynced(fixtureRoot, version) {
 
   for (const relativePath of ["README.md", "QUICKSTART.md"]) {
     const contents = await fs.readFile(path.join(fixtureRoot, relativePath), "utf8");
-    assert(contents.includes(`@christiandoxa/prodex@${version}`), `${relativePath} install snippet missing ${version}`);
     assert(contents.includes(`\`${version}\``), `${relativePath} local version missing ${version}`);
   }
 

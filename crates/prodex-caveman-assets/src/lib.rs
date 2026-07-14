@@ -22,7 +22,7 @@ pub use marketplace::{
 pub use rtk::configure_rtk_codex_home;
 pub use super_optimizers::{
     configure_super_optimizer_codex_home, configure_super_optimizer_codex_home_with_presidio,
-    super_optimizer_command_ready,
+    super_optimizer_command_ready, super_playwright_npx_command,
 };
 
 pub const PRODEX_CAVEMAN_MARKETPLACE_NAME: &str = "prodex-caveman";
@@ -84,10 +84,11 @@ which rtk
 
 pub(crate) const PRODEX_SUPER_OPTIMIZER_AWARENESS: &str = r#"# Prodex Super Tools
 
-Prodex Super enables Caveman, Ponytail, RTK, Codebase Memory MCP, Smart Context, and optional Presidio.
+Prodex Super enables Caveman, Ponytail, RTK, Codebase Memory MCP, Playwright MCP, Smart Context, and optional Presidio.
 
 - Use visible `rtk <cmd>` for noisy shell output.
 - Use `codebase-memory-mcp` for architecture, call-chain, impact, and structural code search.
+- Use Playwright for browser inspection and automation when its MCP server is available.
 - Follow Ponytail's smallest-correct-implementation pressure when its plugin is available.
 - Treat Presidio as enabled only when the session status says so.
 

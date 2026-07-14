@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import {
   cargoTomlPath,
+  gatewaySdkPackageName,
   mainPackageName,
   openaiCodexDependencySpecifier,
   openaiCodexPlatformDependencySpecifier,
@@ -21,11 +22,7 @@ import { DOC_METADATA_PATHS, KNOWN_NPM_LOCKFILE_PATHS } from "../ci/test-impact-
 const DOC_VERSION_PATTERNS = [
   {
     label: "current local version",
-    pattern: /(The current local version in this repo is `)([^`]+)(`:)/g,
-  },
-  {
-    label: "npm versioned install",
-    pattern: /(npm install -g @christiandoxa\/prodex@)([^\s`]+)/g,
+    pattern: /(The current local version in this repo is `)([^`]+)(`)/g,
   },
 ];
 
@@ -140,6 +137,7 @@ function expectEqual(errors, label, actual, expected) {
 async function checkPackageManifests(version, errors) {
   const mainManifest = await readJsonFile(path.join(repoRoot, "npm/prodex/package.json"));
   expectEqual(errors, `${mainPackageName} version`, mainManifest.version, version);
+  expectEqual(errors, `${mainPackageName} private`, mainManifest.private, true);
   expectEqual(
     errors,
     `${mainPackageName} dependency @openai/codex`,
@@ -169,7 +167,14 @@ async function checkPackageManifests(version, errors) {
     const manifest = await readJsonFile(path.join(repoRoot, relativePath));
     expectEqual(errors, `${relativePath} name`, manifest.name, spec.packageName);
     expectEqual(errors, `${relativePath} version`, manifest.version, version);
+    expectEqual(errors, `${relativePath} private`, manifest.private, true);
   }
+
+  const gatewayManifest = await readJsonFile(
+    path.join(repoRoot, "npm/prodex-gateway-sdk/package.json"),
+  );
+  expectEqual(errors, `${gatewaySdkPackageName} version`, gatewayManifest.version, version);
+  expectEqual(errors, `${gatewaySdkPackageName} private`, gatewayManifest.private, true);
 }
 
 async function checkDocs(version, errors) {
