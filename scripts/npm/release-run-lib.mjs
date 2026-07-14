@@ -14,7 +14,7 @@ import { RELEASE_COMMIT_PATHS } from "../ci/test-impact-manifest.mjs";
 const defaultStateFile = path.join(repoRoot, "target", "release-run", "state.json");
 const defaultBranch = "main";
 const defaultCiWorkflow = "ci.yml";
-const defaultPublishWorkflow = "npm-publish.yml";
+const defaultPublishWorkflow = "standalone-release.yml";
 const mutatingMetadataSteps = new Set(["bump", "sync"]);
 const githubRepoSteps = new Set(["watch-ci", "trigger-publish", "watch-publish"]);
 const cargoPublishModes = new Set(["plan", "dry-run", "publish"]);
@@ -36,7 +36,7 @@ function usage() {
     "Usage: npm run release:run -- [options]",
     "",
     "Mandatory idempotent release runner. It owns version bump, generated metadata, final changelog rendering, validation, commit, push, CI watch, publish dispatch, and verify.",
-    "It never publishes to npm or crates.io; .github/workflows/npm-publish.yml creates the standalone GitHub Release.",
+    "It never publishes to npm or crates.io; .github/workflows/standalone-release.yml creates the standalone GitHub Release.",
     "Do not manually refresh CHANGELOG.md for release commits; release:run renders it with --release-version and validates it through release:prepare.",
     "",
     "Options:",
@@ -50,7 +50,7 @@ function usage() {
     "  --branch <name>            branch/ref for push, CI watch, and workflow dispatch (default: main)",
     "  --remote <name>            git remote for push (default: origin)",
     "  --ci-workflow <file>       workflow to watch after push (default: ci.yml)",
-    "  --publish-workflow <file>  workflow to dispatch/watch (default: npm-publish.yml)",
+    "  --publish-workflow <file>  workflow to dispatch/watch (default: standalone-release.yml)",
     "  --ci-timeout-minutes <n>   CI watch timeout (default: 90)",
     "  --publish-timeout-minutes <n> publish workflow watch timeout (default: 120)",
     "  --poll-seconds <n>         workflow polling interval (default: 30)",

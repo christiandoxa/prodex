@@ -1,4 +1,4 @@
-name: standalone release publish
+name: standalone release
 
 on:
   workflow_dispatch:
