@@ -330,12 +330,12 @@ If asked to publish:
 2. run `npm run npm:sync-version`
 3. update `Cargo.lock`
 4. run tests
-5. publish the standalone binaries through `.github/workflows/npm-publish.yml`
+5. publish the standalone binaries through `.github/workflows/standalone-release.yml`
 
 Do not publish to npm or crates.io in the default release path.
 The workspace currently requires publishing many internal `prodex-*` crates before the root `prodex` crate, which can hit crates.io new-crate rate limits and create partial releases.
 Keep release publishing GitHub-only unless another registry is explicitly re-enabled with a deliberate plan.
 
-The legacy-named `.github/workflows/npm-publish.yml` workflow creates or refreshes the matching standalone GitHub Release for the plain `0.x.y` tag and must not publish npm packages. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep versioned documentation metadata synced when the release commit matches `origin/main`.
+The `.github/workflows/standalone-release.yml` workflow creates or refreshes the matching standalone GitHub Release for the plain `0.x.y` tag and must not publish npm packages. The release title should stay version-only, for example `0.3.0`, rather than `prodex v0.3.0`. It should also keep versioned documentation metadata synced when the release commit matches `origin/main`.
 
 If asked to commit, use a conventional commit message.

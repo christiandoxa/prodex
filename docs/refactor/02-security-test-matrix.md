@@ -54,7 +54,7 @@ HTTP metadata that can reach a valid typed runtime snapshot.
 | Secret-bearing CLI arg or URL query reintroduced | source guard with malicious self-tests | `ci:secret-boundary-guard` | `scripts/ci/secret-boundary-guard.mjs` | pass |
 | Credentials embedded in service URLs | reject userinfo, passwords, queries, and fragments before request, logging, registry, audit, or child-plan construction; redact URL-bearing `Debug` surfaces | quota/env, Super tail/top-level, profile plan, Presidio, runtime log/registry/local-rewrite, webhook, and telemetry sentinels | `crates/prodex-app/src/quota_support.rs`; `crates/prodex-app/src/profile_local_config.rs`; `crates/prodex-app/src/runtime_broker/spawn.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup.rs`; `crates/prodex-cli/src/runtime_args.rs`; `crates/prodex-presidio/src/lib.rs` | pass |
 | Unsafe code spreads | workspace guard and platform safety contract | Clippy/allow/size/boundary guards | `Cargo.toml`; `scripts/ci/allow-attribute-guard.mjs`; `crates/prodex-secret-store/src/secure_file` | pass |
-| Dependency/supply-chain compromise | locked audit/deny, immutable inputs, SBOM, checksums, provenance, Gitleaks | supply-chain job and self-test guard | `.github/workflows/ci.yml`; `.github/workflows/npm-publish.yml`; `scripts/ci/supply-chain-guard.mjs` | pass |
+| Dependency/supply-chain compromise | locked audit/deny, immutable inputs, SBOM, checksums, provenance, Gitleaks | supply-chain job and self-test guard | `.github/workflows/ci.yml`; `.github/workflows/standalone-release.yml`; `scripts/ci/supply-chain-guard.mjs` | pass |
 
 ## Phase 4 Secret-File Controls
 
@@ -87,7 +87,7 @@ Windows runtime-pass claim until its first successful CI run.
 | Immutable container inputs | verified image digests and Docker/Compose checks | `Dockerfile`; `compose.yaml`; `deploy/kubernetes/prodex-gateway.yaml` | pass |
 | License and dependency policy | audit plus deny advisories/bans/licenses/sources | `deny.toml`; `.github/workflows/ci.yml` | pass |
 | Unused direct dependencies | pinned `cargo-machete 0.9.2 --with-metadata` | `.github/workflows/ci.yml` | pass |
-| Release integrity | SPDX SBOM, attestations, and verified `SHA256SUMS` | `.github/workflows/npm-publish.yml` | pass |
+| Release integrity | SPDX SBOM, attestations, and verified `SHA256SUMS` | `.github/workflows/standalone-release.yml` | pass |
 | Credential leak scan | digest-pinned Gitleaks and CLI/URL capability guard | `.github/workflows/ci.yml`; `scripts/ci/secret-boundary-guard.mjs` | pass |
 | Production secret projection | gateway, control-plane, and migration commands resolve projected `SecretRef` files | `compose.yaml`; `deploy/compose-gateway-policy.toml`; `deploy/kubernetes/prodex-gateway.yaml`; `src/bin/prodex-gateway.rs`; `src/bin/prodex-control-plane.rs`; `src/enterprise_serve.rs` | pass: dedicated data-plane and control-plane policies use typed projected secrets; the control plane has its own non-provider policy and one-replica deployment |
 
