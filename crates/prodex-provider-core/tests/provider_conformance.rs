@@ -1,9 +1,10 @@
 use prodex_provider_core::{
-    PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContract, ProviderCapabilityStatus,
-    ProviderEndpoint, ProviderId, ProviderTransformPhase, ProviderWireFormat, extract_usage_tokens,
-    provider_adapter, provider_adapter_contract_matrix, provider_capabilities_markdown,
-    provider_model_catalog, provider_model_catalog_json, provider_model_fallback_chain,
-    provider_replay_cases, provider_translator,
+    EffectiveHarnessMode, PROVIDER_CONTRACT_PROVIDERS, ProviderAdapterContract,
+    ProviderCapabilityStatus, ProviderEndpoint, ProviderId, ProviderTransformPhase,
+    ProviderWireFormat, extract_usage_tokens, provider_adapter, provider_adapter_contract_matrix,
+    provider_capabilities_markdown, provider_contract_catalog, provider_model_catalog,
+    provider_model_catalog_json, provider_model_fallback_chain, provider_replay_cases,
+    provider_translator,
 };
 
 #[test]
@@ -166,6 +167,40 @@ fn public_contract_matrix_is_machine_readable() {
             && endpoint["status"].is_string()
             && endpoint["tested"].as_bool().unwrap()
     ));
+}
+
+#[test]
+fn public_contract_catalog_exposes_typed_harness_metadata() {
+    let catalog = provider_contract_catalog(EffectiveHarnessMode::Minimal);
+    assert_eq!(
+        catalog.supported_harness_modes,
+        ["auto", "native", "minimal"]
+    );
+    assert_eq!(catalog.default_harness_mode, "auto");
+    assert_eq!(catalog.resolved_harness_mode, "minimal");
+    assert_eq!(
+        catalog
+            .harness_modes
+            .iter()
+            .map(|mode| mode.id)
+            .collect::<Vec<_>>(),
+        catalog.supported_harness_modes
+    );
+    assert!(catalog.harness_modes.iter().all(|mode| mode.selectable));
+    assert!(
+        catalog
+            .harness_modes
+            .iter()
+            .all(|mode| !mode.response_shaping && !mode.stream_shaping)
+    );
+
+    let json = serde_json::to_value(&catalog).expect("contract catalog should serialize");
+    assert_eq!(json["default_harness_mode"], "auto");
+    assert_eq!(json["resolved_harness_mode"], "minimal");
+    assert_eq!(
+        json["harness_modes"][2]["supported_canonical_request_routes"][0],
+        "responses"
+    );
 }
 
 #[test]

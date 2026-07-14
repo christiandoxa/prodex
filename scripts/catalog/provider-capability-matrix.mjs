@@ -9,7 +9,7 @@ const write = process.argv.includes("--write");
 const outPath = resolve(root, "docs/provider-capabilities.md");
 const conformancePath = resolve(root, "crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json");
 const conformance = JSON.parse(readFileSync(conformancePath, "utf8"));
-const contracts = JSON.parse(
+const contractCatalog = JSON.parse(
   spawnSync(
     "cargo",
     ["run", "-q", "-p", "prodex-provider-core", "--example", "provider-contract-matrix"],
@@ -19,6 +19,8 @@ const contracts = JSON.parse(
     },
   ).stdout,
 );
+const contracts = contractCatalog.providers;
+const harnessModes = contractCatalog.harness_modes;
 const catalog = JSON.parse(
   spawnSync(process.execPath, ["scripts/catalog/provider-catalog-check.mjs", "--json"], {
     cwd: root,
@@ -141,7 +143,7 @@ function render() {
   const lines = [
     "# Provider Capabilities",
     "",
-    "Generated from `prodex_provider_core::provider_adapter_contract_matrix()`, `crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json`, and `crates/prodex-provider-core/catalog/models.json`.",
+    "Generated from `prodex_provider_core::provider_contract_catalog()`, `crates/prodex-provider-core/tests/fixtures/provider_conformance_cases.json`, and `crates/prodex-provider-core/catalog/models.json`.",
     "",
     "| Provider | Models | Transform | Streaming | Fallback | Fixtures req/resp/stream | " + endpointColumns.join(" | ") + " |",
     "|---|---:|---|---|---|---|" + endpointColumns.map(() => "---").join("|") + "|",
@@ -165,6 +167,16 @@ function render() {
   lines.push("Status values: `native`, `translated`, `passthrough`, `emulated`, `partial`, `untested`, `unsupported`.");
   lines.push("");
   lines.push("Fixture summary counts are `request/response/stream-event` conformance cases per provider.");
+  lines.push("");
+  lines.push("## Harness modes");
+  lines.push("");
+  lines.push(`Default requested mode: \`${contractCatalog.default_harness_mode}\`. V1 default resolution: \`${contractCatalog.resolved_harness_mode}\`.`);
+  lines.push("");
+  lines.push("| Mode | Label | Selectable | Default effective | Canonical request routes | Request shaping | Response shaping | Stream shaping | Description |");
+  lines.push("|---|---|---|---|---|---|---|---|---|");
+  for (const mode of harnessModes) {
+    lines.push(`| ${mode.id} | ${mode.display_label} | ${mode.selectable} | ${mode.default_effective_mode} | ${mode.supported_canonical_request_routes.join(", ")} | ${mode.request_shaping} | ${mode.response_shaping} | ${mode.stream_shaping} | ${mode.description} |`);
+  }
   lines.push("");
   const translatedLimitations = contracts
     .map((contract) => {
