@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.296.0 - 2026-07-16
+
+- No grouped changes.
+
 ## 0.295.0 - 2026-07-15
 
 - No grouped changes.
@@ -83,13 +87,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Scan secrets inside quoted text (`4ebe905`)
 - Add enterprise governance platform (`e07e2cc`)
-
-## 0.284.0 - 2026-07-13
-
-### CLI
-
-- Trust hooks on launch (`b7c1f04`)
-
-### Misc
-
-- Add live monitoring dashboard (`82ca042`)
