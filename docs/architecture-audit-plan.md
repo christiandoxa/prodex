@@ -385,8 +385,9 @@ Current incremental bridge status:
   - `crates/prodex-provider-core/src/bridge/chat_compat/response.rs` owns chat-compatible buffered response conversion
   - `crates/prodex-provider-core/src/bridge/chat_compat/tool_calls.rs` owns chat-compatible tool-call bridge helpers
   - `crates/prodex-provider-core/src/bridge/chat_compat/usage.rs` owns chat-compatible token usage mapping
-- Anthropic live Responses request forwarding now prefers a lossless provider-core request body in:
-  - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs`
+- Anthropic dispatch is split by runtime responsibility:
+  - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs` keeps shared request shaping and provider dispatch
+  - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_anthropic.rs` owns Anthropic URL/auth/model attempt ordering, translation selection, retry classification, pending-conversation cleanup, and response construction
 - buffered chat-compatible response rewriting already prefers provider-core lossless/degraded output before falling back to app-side translation in:
   - `crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite/response.rs`
 - DeepSeek chat-compatible SSE runtime state is now split by responsibility:
@@ -405,6 +406,8 @@ Current incremental bridge status:
   - `crates/prodex-provider-core/src/translators/kiro/stream.rs` owns chat-completion stream chunk/delta/terminal-delta shaping, Responses stream event shaping, stream tool-call argument/delta bridge shaping, stream content text extraction, stream tool-call item shaping, Kiro ACP tool-call item shaping, and Kiro ACP usage-update shaping
   - `crates/prodex-provider-core/src/translators/kiro/compact.rs` owns semantic compact helpers
   - `crates/prodex-provider-core/src/translators/kiro/tests.rs` owns Kiro characterization tests
+  - `crates/prodex-provider-core/src/translators/kiro/request_tests.rs` owns request-control, prompt, legacy-function, and tool-choice parity tests
+- `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs` now keeps only ACP process/session lifecycle, stream ordering, transport assembly, persistence, auth staging, and runtime metadata orchestration; pure protocol and body shaping is delegated to provider-core.
 
 So the remaining duplication is narrower than before, but not done:
 
@@ -489,6 +492,7 @@ Provider knowledge is still concentrated in `prodex-app` runtime launch paths:
 - `runtime_launch/proxy_startup/provider_bridge.rs`
 - `runtime_launch/proxy_startup/local_rewrite_response_chat_compatible.rs`
 - `runtime_launch/proxy_startup/local_rewrite_upstream.rs`
+- `runtime_launch/proxy_startup/local_rewrite_anthropic.rs`
 - `app_commands/runtime_launch/providers.rs`
 - `app_commands/runtime_launch/gateway_provider_config.rs`
 - `app_commands/runtime_launch/gateway_config.rs`
@@ -632,7 +636,8 @@ Recent split or verified-below-threshold files:
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/auth.rs` (~142; auth attempts/header filtering)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs` (~167; gateway spend sinks)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/upstream_url.rs` (~148; upstream URL mapping)
-- `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs` (~441; provider dispatch/upstream send orchestration)
+- `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs` (~572; shared provider dispatch/upstream send orchestration)
+- `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_anthropic.rs` (~632; Anthropic auth/model attempt state machine and response construction)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream_embeddings.rs` (~146; deterministic local embeddings fallback)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_copilot.rs` (~379; Copilot provider dispatch/request shaping after state split)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_copilot/auth.rs` (~144; Copilot auth attempt ordering and response affinity)
@@ -829,9 +834,17 @@ Recent split or verified-below-threshold files:
 - `crates/prodex-app/src/runtime_proxy/affinity/prompt_cache.rs` (~254; prompt-cache profile affinity state)
 - `crates/prodex-app/src/runtime_proxy/response_forwarding.rs` (~391; response success forwarding after SSE tap reader split)
 - `crates/prodex-app/src/runtime_proxy/response_forwarding/sse_tap.rs` (~155; SSE tap reader and stream side effects)
-- `crates/prodex-app/src/runtime_proxy/presidio.rs` (~385; Presidio redaction orchestration after analyzer and JSON-body splits)
+- `crates/prodex-app/src/runtime_proxy/presidio.rs` (~25; Presidio module facade)
 - `crates/prodex-app/src/runtime_proxy/presidio/analyzer.rs` (~92; Presidio language detection and analyzer result merge helpers)
-- `crates/prodex-app/src/runtime_proxy/presidio/json_body.rs` (~62; JSON string extraction and replacement helpers)
+- `crates/prodex-app/src/runtime_proxy/presidio/engine.rs` (~278; shared typed inspection/redaction execution)
+- `crates/prodex-app/src/runtime_proxy/presidio/findings.rs` (~181; bounded finding normalization and Unicode offset conversion)
+- `crates/prodex-app/src/runtime_proxy/presidio/http.rs` (~223; HTTP request adaptation and result application)
+- `crates/prodex-app/src/runtime_proxy/presidio/json_body.rs` (~281; JSON string extraction and replacement helpers)
+- `crates/prodex-app/src/runtime_proxy/presidio/local.rs` (~629; local detector execution)
+- `crates/prodex-app/src/runtime_proxy/presidio/registry.rs` (~90; bounded per-log-path runtime registry)
+- `crates/prodex-app/src/runtime_proxy/presidio/telemetry.rs` (~225; bounded content-free metrics and structured logging)
+- `crates/prodex-app/src/runtime_proxy/presidio/websocket.rs` (~250; WebSocket text adaptation)
+- `crates/prodex-app/src/runtime_proxy/presidio/tests.rs` (~395; transport and detector failure-matrix characterization)
 - `crates/prodex-app/src/runtime_proxy/lineage/remember.rs` (~438; non-compact lineage recording after compact lineage split)
 - `crates/prodex-app/src/runtime_proxy/lineage/remember/compact.rs` (~136; compact-route session/turn lineage recording)
 - `crates/prodex-app/src/runtime_proxy/quota/auto_redeem.rs` (~243; auto-redeem execution orchestration after pool and summary splits)

@@ -210,6 +210,9 @@ pub fn classify_request_target(target: &CanonicalRequestTarget) -> Option<Gatewa
 }
 
 pub fn classify_canonical_route(target: &CanonicalRequestTarget) -> GatewayHttpRouteKind {
+    if parsed_gateway_admin_route(target.path()).is_some() {
+        return GatewayHttpRouteKind::ControlPlane;
+    }
     let path = canonical_control_plane_path(target.path());
     match path.as_ref() {
         "/livez" => GatewayHttpRouteKind::HealthLive,
@@ -318,6 +321,9 @@ fn control_plane_operation_for_path(
     path: &str,
     method: GatewayHttpMethod,
 ) -> Option<GatewayControlPlaneOperation> {
+    if let Some(route) = parsed_gateway_admin_route(path) {
+        return route.operation(method);
+    }
     let path = canonical_control_plane_path(path);
     let path = path.as_ref();
     if let Some(scim_path) = strip_control_plane_mount(path, "/scim")
@@ -401,6 +407,10 @@ fn control_plane_operation_for_path(
         }
         _ => None,
     }
+}
+
+fn parsed_gateway_admin_route(path: &str) -> Option<GatewayAdminRoute<'_>> {
+    parse_gateway_admin_route("", path).or_else(|| parse_gateway_admin_route("/v1", path))
 }
 
 fn canonical_control_plane_path(path: &str) -> Cow<'_, str> {

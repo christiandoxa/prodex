@@ -1,6 +1,6 @@
 //! Presidio analyzer language selection and result merge helpers.
 
-use super::PresidioAnalyzerResult;
+use super::findings::PresidioAnalyzerResult;
 
 pub(super) fn detect_presidio_language(text: &str, candidates: &[String]) -> Option<String> {
     if candidates.len() == 1 {

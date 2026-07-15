@@ -1,18 +1,15 @@
-use self::data::{
+use super::frame_data::{
     build_all_quota_watch_tui_row, quota_human_tui_compact_label, quota_watch_profile_fields,
 };
 use super::*;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use terminal_ui::{
-    pad_cell, tui_border_style, tui_detail_style, tui_error_style, tui_muted_style,
-    tui_success_style, tui_title_style,
+    pad_cell, tui_border_style, tui_connected_footer_block, tui_connected_separator_line,
+    tui_detail_style, tui_error_style, tui_muted_style, tui_success_style, tui_title_style,
 };
-
-#[path = "frame_data.rs"]
-mod data;
 
 pub(crate) struct AllQuotaWatchTuiFrame {
     pub(crate) title: String,
@@ -55,8 +52,8 @@ pub(crate) fn build_all_quota_watch_tui_frame(
                 layout.scroll_offset,
             );
             (
-                "Quota Overview".to_string(),
-                quota_pool_summary_fields_for_reports(&filtered_reports),
+                String::new(),
+                quota_watch_tui_overview_fields(&filtered_reports),
                 Some(build_all_quota_watch_tui_table(
                     &filtered_reports,
                     layout,
@@ -98,6 +95,21 @@ pub(crate) fn build_all_quota_watch_tui_frame(
             provider_hint
         ),
     }
+}
+
+fn quota_watch_tui_overview_fields(reports: &[QuotaReport]) -> Vec<(String, String)> {
+    let mut fields = quota_pool_summary_fields_for_reports(reports);
+    if fields
+        .first()
+        .is_some_and(|(label, _)| label == "Available")
+        && fields
+            .get(1)
+            .is_some_and(|(label, _)| label == "Last Updated")
+    {
+        let updated = fields.remove(1).1;
+        fields[0].1 = format!("{} | updated {updated}", fields[0].1);
+    }
+    fields
 }
 
 fn quota_watch_status_fields(message: &str, updated: &str) -> Vec<(String, String)> {
@@ -158,7 +170,7 @@ pub(crate) fn render_all_quota_watch_tui(
 
     let body_block = Block::default()
         .title(Line::styled(data.title.as_str(), quota_watch_title_style()))
-        .borders(Borders::ALL)
+        .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
         .border_style(quota_watch_border_style());
     let body_area = body_block.inner(chunks[0]);
     frame.render_widget(body_block, chunks[0]);
@@ -177,12 +189,7 @@ pub(crate) fn render_all_quota_watch_tui(
         let overview = Paragraph::new(quota_watch_fields_text(&data.body, &data.overview_fields))
             .wrap(ratatui::widgets::Wrap { trim: false });
         frame.render_widget(overview, body_chunks[0]);
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::TOP)
-                .border_style(quota_watch_border_style()),
-            body_chunks[1],
-        );
+        render_quota_watch_connected_separator(frame, chunks[0], body_chunks[1].y);
         render_all_quota_watch_tui_table(frame, body_chunks[2], table);
     } else if !data.overview_fields.is_empty() {
         let body = Paragraph::new(quota_watch_fields_text(&data.body, &data.overview_fields))
@@ -198,12 +205,27 @@ pub(crate) fn render_all_quota_watch_tui(
         data.footer.as_str(),
         quota_watch_footer_style(),
     ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(quota_watch_border_style()),
-    );
+    .block(tui_connected_footer_block(quota_watch_border_style()));
     frame.render_widget(footer, chunks[1]);
+}
+
+fn render_quota_watch_connected_separator(frame: &mut ratatui::Frame<'_>, outer: Rect, y: u16) {
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            quota_watch_separator_line(outer.width),
+            quota_watch_border_style(),
+        )),
+        Rect {
+            x: outer.x,
+            y,
+            width: outer.width,
+            height: 1,
+        },
+    );
+}
+
+pub(crate) fn quota_watch_separator_line(width: u16) -> String {
+    tui_connected_separator_line(width)
 }
 
 fn render_all_quota_watch_tui_table(
@@ -217,7 +239,7 @@ fn render_all_quota_watch_tui_table(
 }
 
 pub(crate) fn quota_watch_overview_height(field_count: usize, max_height: u16) -> u16 {
-    u16::try_from(field_count.saturating_add(1))
+    u16::try_from(field_count)
         .unwrap_or(max_height)
         .min(max_height)
 }
@@ -281,7 +303,10 @@ fn quota_watch_first_cell(lines: &[String]) -> &str {
 }
 
 fn quota_watch_fields_text(title: &str, fields: &[(String, String)]) -> Text<'static> {
-    let mut lines = vec![Line::styled(title.to_string(), quota_watch_title_style())];
+    let mut lines = Vec::new();
+    if !title.is_empty() {
+        lines.push(Line::styled(title.to_string(), quota_watch_title_style()));
+    }
     lines.extend(fields.iter().map(|(label, value)| {
         Line::from(vec![
             Span::styled(format!("{label}:"), tui_title_style()),
@@ -383,13 +408,28 @@ pub(crate) fn quota_watch_tui_table_lines(
     let body_inner = usize::from(terminal_height)
         .saturating_sub(3)
         .saturating_sub(2);
-    let overview_height = overview_field_count.saturating_add(1).min(body_inner);
+    let overview_height = overview_field_count.min(body_inner);
     Some(
         body_inner
             .saturating_sub(overview_height)
             .saturating_sub(1)
             .max(1),
     )
+}
+
+pub(crate) fn quota_watch_snapshot_overview_field_count(
+    snapshot: &AllQuotaWatchSnapshot,
+    provider_filter: QuotaProviderFilter,
+) -> usize {
+    match snapshot {
+        AllQuotaWatchSnapshot::Reports { reports, .. } => quota_watch_tui_overview_fields(
+            &filter_quota_reports_by_provider(reports, provider_filter),
+        )
+        .len(),
+        AllQuotaWatchSnapshot::Loading { .. }
+        | AllQuotaWatchSnapshot::Empty { .. }
+        | AllQuotaWatchSnapshot::Error { .. } => 2,
+    }
 }
 
 fn quota_watch_visible_profile_count(

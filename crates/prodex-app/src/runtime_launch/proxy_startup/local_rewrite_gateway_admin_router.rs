@@ -40,54 +40,26 @@ use prodex_application::{
     plan_application_control_plane_http_route_error_response,
 };
 use prodex_control_plane::ControlPlaneDecision;
-use prodex_gateway_http::{GatewayHttpHeader, GatewayHttpMethod, GatewayHttpRequestMeta};
+use prodex_gateway_http::{
+    GatewayAdminRoute, GatewayHttpHeader, GatewayHttpMethod, GatewayHttpRequestMeta,
+    parse_gateway_admin_route,
+};
 
 pub(super) fn runtime_gateway_request_path_is_admin(
     request_path: &str,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> bool {
-    let path = path_without_query(request_path);
-    let admin_prefix = format!("{}/prodex/gateway", shared.mount_path.trim_end_matches('/'));
-    path == format!("{admin_prefix}/admin")
-        || path == format!("{admin_prefix}/openapi.json")
-        || path == format!("{admin_prefix}/metrics")
-        || path == format!("{admin_prefix}/providers")
-        || path == format!("{admin_prefix}/observability")
-        || path == format!("{admin_prefix}/guardrails")
-        || path == format!("{admin_prefix}/policies")
-        || path.starts_with(&format!("{admin_prefix}/policies/"))
-        || path == format!("{admin_prefix}/execution-approvals")
-        || path.starts_with(&format!("{admin_prefix}/execution-approvals/"))
-        || path == format!("{admin_prefix}/classification-rules")
-        || path.starts_with(&format!("{admin_prefix}/classification-rules/"))
-        || path == format!("{admin_prefix}/provider-registries")
-        || path.starts_with(&format!("{admin_prefix}/provider-registries/"))
-        || path == format!("{admin_prefix}/routing-scores")
-        || path.starts_with(&format!("{admin_prefix}/routing-scores/"))
-        || path.starts_with(&format!("{admin_prefix}/sessions/"))
-        || path == format!("{admin_prefix}/governance/outbox")
-        || path == format!("{admin_prefix}/governance/outbox/claim")
-        || path == format!("{admin_prefix}/governance/audit/integrity")
-        || path == format!("{admin_prefix}/audit/exports")
-        || path == format!("{admin_prefix}/routes/explain")
-        || path == format!("{admin_prefix}/usage")
-        || path == format!("{admin_prefix}/keys")
-        || path.starts_with(&format!("{admin_prefix}/keys/"))
-        || path == format!("{admin_prefix}/ledger")
-        || path == format!("{admin_prefix}/ledger.csv")
-        || path == format!("{admin_prefix}/ledger/summary")
-        || path == format!("{admin_prefix}/ledger/summary.csv")
-        || path == format!("{admin_prefix}/scim/v2/Users")
-        || path.starts_with(&format!("{admin_prefix}/scim/v2/Users/"))
+    parse_gateway_admin_route(&shared.mount_path, request_path).is_some()
 }
 
 pub(super) fn runtime_gateway_request_path_is_route_explain(
     request_path: &str,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> bool {
-    let path = path_without_query(request_path);
-    let admin_prefix = format!("{}/prodex/gateway", shared.mount_path.trim_end_matches('/'));
-    path == format!("{admin_prefix}/routes/explain")
+    matches!(
+        parse_gateway_admin_route(&shared.mount_path, request_path),
+        Some(GatewayAdminRoute::RouteExplain)
+    )
 }
 
 pub(super) fn runtime_gateway_request_path_requires_admin_auth(
@@ -138,74 +110,8 @@ pub(super) fn runtime_gateway_admin_response(
     preauthorized: Option<RuntimeGatewayAdminPreauthorization<'_>>,
 ) -> Option<tiny_http::ResponseBox> {
     let path = path_without_query(&captured.path_and_query);
+    let route = parse_gateway_admin_route(&shared.mount_path, path)?;
     let admin_prefix = format!("{}/prodex/gateway", shared.mount_path.trim_end_matches('/'));
-    let keys_path = format!("{admin_prefix}/keys");
-    let usage_path = format!("{admin_prefix}/usage");
-    let ledger_path = format!("{admin_prefix}/ledger");
-    let ledger_csv_path = format!("{ledger_path}.csv");
-    let ledger_summary_path = format!("{ledger_path}/summary");
-    let ledger_summary_csv_path = format!("{ledger_summary_path}.csv");
-    let metrics_path = format!("{admin_prefix}/metrics");
-    let providers_path = format!("{admin_prefix}/providers");
-    let observability_path = format!("{admin_prefix}/observability");
-    let guardrails_path = format!("{admin_prefix}/guardrails");
-    let route_explain_path = format!("{admin_prefix}/routes/explain");
-    let openapi_path = format!("{admin_prefix}/openapi.json");
-    let admin_path = format!("{admin_prefix}/admin");
-    let scim_users_path = format!("{admin_prefix}/scim/v2/Users");
-    let policy_path = path == format!("{admin_prefix}/policies")
-        || path.starts_with(&format!("{admin_prefix}/policies/"))
-        || path == format!("{admin_prefix}/execution-approvals")
-        || path.starts_with(&format!("{admin_prefix}/execution-approvals/"))
-        || path == format!("{admin_prefix}/classification-rules")
-        || path.starts_with(&format!("{admin_prefix}/classification-rules/"))
-        || path == format!("{admin_prefix}/provider-registries")
-        || path.starts_with(&format!("{admin_prefix}/provider-registries/"))
-        || path == format!("{admin_prefix}/routing-scores")
-        || path.starts_with(&format!("{admin_prefix}/routing-scores/"))
-        || path == format!("{admin_prefix}/governance/outbox")
-        || path == format!("{admin_prefix}/governance/outbox/claim")
-        || path == format!("{admin_prefix}/governance/audit/integrity")
-        || path == format!("{admin_prefix}/audit/exports");
-    let session_path = path.starts_with(&format!("{admin_prefix}/sessions/"));
-    let key_resource = path
-        .strip_prefix(&(keys_path.clone() + "/"))
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let key_secret_name = key_resource
-        .and_then(|value| {
-            value
-                .strip_suffix("/secret")
-                .or_else(|| value.strip_suffix("/secrets"))
-        })
-        .filter(|value| !value.is_empty() && !value.contains('/'));
-    let key_name = key_resource.filter(|value| !value.contains('/'));
-    let scim_user_id = path
-        .strip_prefix(&(scim_users_path.clone() + "/"))
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    if path != usage_path
-        && path != ledger_path
-        && path != ledger_csv_path
-        && path != ledger_summary_path
-        && path != ledger_summary_csv_path
-        && path != metrics_path
-        && path != providers_path
-        && path != observability_path
-        && path != guardrails_path
-        && path != route_explain_path
-        && path != admin_path
-        && path != keys_path
-        && path != openapi_path
-        && path != scim_users_path
-        && !policy_path
-        && !session_path
-        && key_name.is_none()
-        && key_secret_name.is_none()
-        && scim_user_id.is_none()
-    {
-        return None;
-    }
     let Some(preauthorized) = preauthorized else {
         if shared.gateway_admin_tokens.is_empty()
             && shared.gateway_sso.proxy_token_hash.is_none()
@@ -254,9 +160,8 @@ pub(super) fn runtime_gateway_admin_response(
         ));
     };
     let admin_auth = &preauthorized.auth;
-    let authorized_action = preauthorized.control_plane_action();
 
-    if path == route_explain_path
+    if matches!(&route, GatewayAdminRoute::RouteExplain)
         && !captured.method.eq_ignore_ascii_case("POST")
         && !runtime_gateway_audit_admin_request_denied_event(
             shared,
@@ -276,43 +181,74 @@ pub(super) fn runtime_gateway_admin_response(
         return Some(response);
     }
 
-    if path == admin_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway admin dashboard endpoint requires GET",
-            ));
+    Some(runtime_gateway_admin_dispatch(
+        route,
+        captured,
+        path,
+        &admin_prefix,
+        shared,
+        &preauthorized,
+    ))
+}
+
+fn runtime_gateway_admin_dispatch(
+    route: GatewayAdminRoute<'_>,
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    admin_prefix: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    preauthorized: &RuntimeGatewayAdminPreauthorization<'_>,
+) -> tiny_http::ResponseBox {
+    let admin_auth = &preauthorized.auth;
+    let authorized_action = preauthorized.control_plane_action();
+    let method = captured.method.to_ascii_uppercase();
+
+    match route {
+        GatewayAdminRoute::Dashboard => runtime_gateway_admin_dashboard_response(shared),
+        GatewayAdminRoute::OpenApi => {
+            runtime_gateway_admin_json_response(200, runtime_gateway_openapi_spec(shared))
         }
-        return Some(runtime_gateway_admin_dashboard_response(shared));
-    }
-    let admin_method = captured.method.to_ascii_uppercase();
-    if path == openapi_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway OpenAPI endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_json_response(
+        GatewayAdminRoute::Metrics => runtime_gateway_prometheus_response(shared, admin_auth),
+        GatewayAdminRoute::Providers => runtime_gateway_admin_json_response(
             200,
-            runtime_gateway_openapi_spec(shared),
-        ));
-    }
-
-    if path == route_explain_path {
-        return Some(runtime_gateway_admin_route_explain_response(
-            captured, shared, admin_auth,
-        ));
-    }
-
-    if policy_path {
-        return Some(match authorized_action {
+            runtime_gateway_admin_providers_payload(shared),
+        ),
+        GatewayAdminRoute::Observability => runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_admin_observability_payload(shared),
+        ),
+        GatewayAdminRoute::Guardrails => runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_admin_guardrails_payload(shared),
+        ),
+        GatewayAdminRoute::RouteExplain => {
+            runtime_gateway_admin_route_explain_response(captured, shared, admin_auth)
+        }
+        GatewayAdminRoute::Usage => runtime_gateway_admin_json_response(
+            200,
+            runtime_gateway_admin_keys_payload(shared, "gateway.usage", Some(admin_auth)),
+        ),
+        GatewayAdminRoute::Ledger => {
+            runtime_gateway_admin_ledger_response(&captured.path_and_query, shared, admin_auth)
+        }
+        GatewayAdminRoute::LedgerCsv => {
+            runtime_gateway_admin_ledger_csv_response(shared, admin_auth)
+        }
+        GatewayAdminRoute::LedgerSummary => {
+            runtime_gateway_admin_ledger_summary_response(shared, admin_auth)
+        }
+        GatewayAdminRoute::LedgerSummaryCsv => {
+            runtime_gateway_admin_ledger_summary_csv_response(shared, admin_auth)
+        }
+        GatewayAdminRoute::Governance { .. }
+        | GatewayAdminRoute::GovernanceOutbox
+        | GatewayAdminRoute::GovernanceOutboxClaim
+        | GatewayAdminRoute::GovernanceAuditIntegrity
+        | GatewayAdminRoute::AuditExports => match authorized_action {
             Some(base_action) => runtime_gateway_admin_policy_response(
                 captured,
                 path,
-                &admin_prefix,
+                admin_prefix,
                 shared,
                 admin_auth,
                 base_action,
@@ -325,212 +261,34 @@ pub(super) fn runtime_gateway_admin_response(
                 )
             }),
             None => runtime_gateway_admin_missing_action_response(),
-        });
-    }
-
-    if session_path {
-        return Some(match authorized_action {
-            Some(base_action) => runtime_gateway_admin_session_response(
-                captured,
-                path,
-                &admin_prefix,
-                shared,
-                admin_auth,
-                base_action,
-            )
-            .unwrap_or_else(|| {
-                build_runtime_proxy_json_error_response(
-                    404,
-                    "governance_session_not_found",
-                    "session governance resource was not found",
+        },
+        GatewayAdminRoute::SessionRevoke { .. } | GatewayAdminRoute::SessionUnknown(_) => {
+            match authorized_action {
+                Some(base_action) => runtime_gateway_admin_session_response(
+                    captured,
+                    path,
+                    admin_prefix,
+                    shared,
+                    admin_auth,
+                    base_action,
                 )
-            }),
-            None => runtime_gateway_admin_missing_action_response(),
-        });
-    }
-
-    if path == usage_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway usage endpoint requires GET",
-            ));
+                .unwrap_or_else(|| {
+                    build_runtime_proxy_json_error_response(
+                        404,
+                        "governance_session_not_found",
+                        "session governance resource was not found",
+                    )
+                }),
+                None => runtime_gateway_admin_missing_action_response(),
+            }
         }
-        return Some(runtime_gateway_admin_json_response(
-            200,
-            runtime_gateway_admin_keys_payload(shared, "gateway.usage", Some(admin_auth)),
-        ));
-    }
-
-    if path == ledger_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway ledger endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_ledger_response(
-            &captured.path_and_query,
-            shared,
-            admin_auth,
-        ));
-    }
-
-    if path == ledger_csv_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway ledger CSV endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_ledger_csv_response(
-            shared, admin_auth,
-        ));
-    }
-
-    if path == ledger_summary_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway ledger summary endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_ledger_summary_response(
-            shared, admin_auth,
-        ));
-    }
-
-    if path == ledger_summary_csv_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway ledger summary CSV endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_ledger_summary_csv_response(
-            shared, admin_auth,
-        ));
-    }
-
-    if path == metrics_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway metrics endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_prometheus_response(shared, admin_auth));
-    }
-
-    if path == providers_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway providers endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_json_response(
-            200,
-            runtime_gateway_admin_providers_payload(shared),
-        ));
-    }
-
-    if path == observability_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway observability endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_json_response(
-            200,
-            runtime_gateway_admin_observability_payload(shared),
-        ));
-    }
-
-    if path == guardrails_path {
-        if !captured.method.eq_ignore_ascii_case("GET") {
-            return Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway guardrails endpoint requires GET",
-            ));
-        }
-        return Some(runtime_gateway_admin_json_response(
-            200,
-            runtime_gateway_admin_guardrails_payload(shared),
-        ));
-    }
-
-    if path == keys_path {
-        return match admin_method.as_str() {
-            "GET" => Some(runtime_gateway_admin_json_response(
+        GatewayAdminRoute::Keys => match method.as_str() {
+            "GET" => runtime_gateway_admin_json_response(
                 200,
                 runtime_gateway_admin_keys_payload(shared, "gateway.keys", Some(admin_auth)),
-            )),
-            "POST" => Some(match authorized_action {
+            ),
+            "POST" => match authorized_action {
                 Some(base_action) => runtime_gateway_admin_create_key_response(
-                    captured,
-                    shared,
-                    admin_auth,
-                    base_action,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
-            }),
-            _ => Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway keys endpoint supports GET and POST",
-            )),
-        };
-    }
-
-    if path == scim_users_path {
-        return match admin_method.as_str() {
-            "GET" => Some(runtime_gateway_admin_scim_list_users_response(
-                shared, admin_auth,
-            )),
-            "POST" => Some(match authorized_action {
-                Some(base_action) => runtime_gateway_admin_scim_create_user_response(
-                    captured,
-                    shared,
-                    admin_auth,
-                    base_action,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
-            }),
-            _ => Some(build_runtime_proxy_json_error_response(
-                405,
-                "method_not_allowed",
-                "gateway SCIM Users endpoint supports GET and POST",
-            )),
-        };
-    }
-
-    if let Some(scim_user_id) = scim_user_id {
-        return Some(match admin_method.as_str() {
-            "GET" => runtime_gateway_admin_scim_get_user_response(scim_user_id, shared, admin_auth),
-            "PATCH" | "PUT" => match authorized_action {
-                Some(base_action) => runtime_gateway_admin_scim_update_user_response(
-                    scim_user_id,
-                    captured,
-                    shared,
-                    admin_auth,
-                    base_action,
-                ),
-                None => runtime_gateway_admin_missing_action_response(),
-            },
-            "DELETE" => match authorized_action {
-                Some(base_action) => runtime_gateway_admin_scim_delete_user_response(
-                    scim_user_id,
                     captured,
                     shared,
                     admin_auth,
@@ -541,13 +299,20 @@ pub(super) fn runtime_gateway_admin_response(
             _ => build_runtime_proxy_json_error_response(
                 405,
                 "method_not_allowed",
-                "gateway SCIM User endpoint supports GET, PATCH, PUT, and DELETE",
+                "gateway keys endpoint supports GET and POST",
             ),
-        });
-    }
-
-    if let Some(key_name) = key_secret_name {
-        return Some(match admin_method.as_str() {
+        },
+        GatewayAdminRoute::Key { key_name } => runtime_gateway_admin_key_response(
+            key_name,
+            captured,
+            shared,
+            admin_auth,
+            authorized_action,
+        ),
+        GatewayAdminRoute::KeyUnknown(_) => {
+            runtime_gateway_admin_key_response("", captured, shared, admin_auth, authorized_action)
+        }
+        GatewayAdminRoute::KeySecret { key_name } => match method.as_str() {
             "POST" => match authorized_action {
                 Some(base_action) => runtime_gateway_admin_update_key_response(
                     key_name,
@@ -564,11 +329,68 @@ pub(super) fn runtime_gateway_admin_response(
                 "method_not_allowed",
                 "gateway key secret endpoint requires POST",
             ),
-        });
+        },
+        GatewayAdminRoute::ScimUsers => match method.as_str() {
+            "GET" => runtime_gateway_admin_scim_list_users_response(shared, admin_auth),
+            "POST" => match authorized_action {
+                Some(base_action) => runtime_gateway_admin_scim_create_user_response(
+                    captured,
+                    shared,
+                    admin_auth,
+                    base_action,
+                ),
+                None => runtime_gateway_admin_missing_action_response(),
+            },
+            _ => build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway SCIM Users endpoint supports GET and POST",
+            ),
+        },
+        GatewayAdminRoute::ScimUser { user_id } => match method.as_str() {
+            "GET" => runtime_gateway_admin_scim_get_user_response(user_id, shared, admin_auth),
+            "PATCH" | "PUT" => match authorized_action {
+                Some(base_action) => runtime_gateway_admin_scim_update_user_response(
+                    user_id,
+                    captured,
+                    shared,
+                    admin_auth,
+                    base_action,
+                ),
+                None => runtime_gateway_admin_missing_action_response(),
+            },
+            "DELETE" => match authorized_action {
+                Some(base_action) => runtime_gateway_admin_scim_delete_user_response(
+                    user_id,
+                    captured,
+                    shared,
+                    admin_auth,
+                    base_action,
+                ),
+                None => runtime_gateway_admin_missing_action_response(),
+            },
+            _ => build_runtime_proxy_json_error_response(
+                405,
+                "method_not_allowed",
+                "gateway SCIM User endpoint supports GET, PATCH, PUT, and DELETE",
+            ),
+        },
+        GatewayAdminRoute::ScimUnknown(_) => build_runtime_proxy_json_error_response(
+            404,
+            "scim_user_not_found",
+            "gateway SCIM user was not found",
+        ),
     }
+}
 
-    let key_name = key_name.unwrap_or_default();
-    Some(match admin_method.as_str() {
+fn runtime_gateway_admin_key_response(
+    key_name: &str,
+    captured: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    authorized_action: Option<&prodex_control_plane::ControlPlaneActionPlan>,
+) -> tiny_http::ResponseBox {
+    match captured.method.to_ascii_uppercase().as_str() {
         "GET" => runtime_gateway_admin_get_key_response(key_name, shared, admin_auth),
         "PATCH" => match authorized_action {
             Some(base_action) => runtime_gateway_admin_update_key_response(
@@ -596,7 +418,7 @@ pub(super) fn runtime_gateway_admin_response(
             "method_not_allowed",
             "gateway key endpoint supports GET, PATCH, and DELETE",
         ),
-    })
+    }
 }
 
 fn runtime_gateway_admin_boundary_response(
