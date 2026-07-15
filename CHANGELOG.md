@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.294.0 - 2026-07-15
+
+### Runtime
+
+- Resume live goals across profiles (`724212c`)
+
 ## 0.293.0 - 2026-07-15
 
 - No grouped changes.
@@ -89,9 +95,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Stabilize startup hooks and TUI borders (`e67a15d`)
-
-## 0.282.0 - 2026-07-13
-
-### Misc
-
-- Add enterprise controls and Kiro parity (`fbc94c0`)
