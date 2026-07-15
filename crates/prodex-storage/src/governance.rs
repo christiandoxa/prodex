@@ -183,7 +183,7 @@ impl ApprovalVoteStableOutcome {
         match self {
             Self::Success(snapshot) => format!(
                 "v1|ok|{}|{}|{}|{}|{}|{}",
-                approval_state_storage_label(snapshot.state),
+                crate::governance_support::approval_state_label(snapshot.state),
                 snapshot.version,
                 snapshot.required_quorum,
                 snapshot.vote_count,
@@ -221,8 +221,7 @@ impl ApprovalVoteStableOutcome {
                 expires,
                 activated,
             ] => {
-                let state = approval_state_from_storage_label(state)
-                    .ok_or(GovernanceRepositoryError::InvalidInput)?;
+                let state = crate::governance_support::approval_state_from_label(state)?;
                 let required_quorum = quorum
                     .parse::<u8>()
                     .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
@@ -288,35 +287,6 @@ pub fn denied_approval_audit_outbox(
     command.audit.event_digest =
         compute_audit_chain_digest(command.audit.previous_digest.as_ref(), &command.audit.event);
     command
-}
-
-fn approval_state_storage_label(state: ApprovalState) -> &'static str {
-    match state {
-        ApprovalState::Draft => "draft",
-        ApprovalState::PendingApproval => "pending_approval",
-        ApprovalState::Approved => "approved",
-        ApprovalState::Rejected => "rejected",
-        ApprovalState::Expired => "expired",
-        ApprovalState::Cancelled => "cancelled",
-        ApprovalState::Active => "active",
-        ApprovalState::Superseded => "superseded",
-        ApprovalState::RolledBack => "rolled_back",
-    }
-}
-
-fn approval_state_from_storage_label(value: &str) -> Option<ApprovalState> {
-    match value {
-        "draft" => Some(ApprovalState::Draft),
-        "pending_approval" => Some(ApprovalState::PendingApproval),
-        "approved" => Some(ApprovalState::Approved),
-        "rejected" => Some(ApprovalState::Rejected),
-        "expired" => Some(ApprovalState::Expired),
-        "cancelled" => Some(ApprovalState::Cancelled),
-        "active" => Some(ApprovalState::Active),
-        "superseded" => Some(ApprovalState::Superseded),
-        "rolled_back" => Some(ApprovalState::RolledBack),
-        _ => None,
-    }
 }
 
 impl fmt::Debug for ApprovalVoteRequest {

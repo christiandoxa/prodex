@@ -278,5 +278,8 @@ fn kiro_degraded_details(
 }
 
 #[cfg(test)]
+#[path = "kiro/request_tests.rs"]
+mod request_tests;
+#[cfg(test)]
 #[path = "kiro/tests.rs"]
 mod tests;

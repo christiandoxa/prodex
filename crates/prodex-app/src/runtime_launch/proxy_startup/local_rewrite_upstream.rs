@@ -1,11 +1,6 @@
-use super::chat_compatible_rewrite::{
-    RuntimeDeepSeekRewriteOptions, runtime_provider_chat_compatible_request_body,
-};
-use super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
-use super::local_rewrite_application_data_plane::{
-    RuntimeGatewayApplicationProviderDispatch, runtime_gateway_application_provider_retry_precommit,
-};
+use super::local_rewrite_anthropic::send_runtime_anthropic_upstream_request;
+use super::local_rewrite_application_data_plane::RuntimeGatewayApplicationProviderDispatch;
 use super::local_rewrite_copilot::{
     RuntimeCopilotRequestContext, send_runtime_copilot_upstream_request,
 };
@@ -16,33 +11,20 @@ use super::local_rewrite_gemini::{
 use super::local_rewrite_kiro::send_runtime_kiro_upstream_request;
 use super::local_rewrite_model_memory::runtime_local_rewrite_model_selection;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
-use super::local_rewrite_search_fallback::{
-    RuntimeLocalRewritePreparedSendResult, RuntimeLocalRewriteSearchFallbackRequest,
-    send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
-};
 use super::local_rewrite_transport::{
-    RuntimeLocalRewritePreparedAuth, runtime_anthropic_messages_upstream_url,
-    runtime_local_rewrite_anthropic_auth_attempts, runtime_local_rewrite_api_key_attempts,
-    runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
-    send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_api_key_attempts,
+    runtime_local_rewrite_upstream_url, send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
     RuntimeHarnessProviderPolicyLog, RuntimeProviderBridgeKind,
-    runtime_harness_log_provider_policy, runtime_provider_error_class, runtime_provider_label,
-    runtime_provider_log_request_conformance, runtime_provider_model_fallback_chain,
-    runtime_provider_model_from_body, runtime_provider_request_body_with_model,
-    runtime_provider_request_conformance_result,
+    runtime_harness_log_provider_policy, runtime_provider_model_from_body,
 };
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeRouteKind,
     prepare_runtime_smart_context_http_body, runtime_proxy_log,
 };
 use anyhow::Result;
-use prodex_provider_core::{
-    ProviderEndpoint, ProviderId, ProviderTransformInput, harness_provider_policy,
-    provider_core_lossless_body, translate_openai_chat_request_to_anthropic_messages,
-};
-use prodex_provider_spi::ProviderRetryCause;
+use prodex_provider_core::{ProviderEndpoint, ProviderId};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -154,311 +136,9 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
             unreachable!("projected provider wrapper must be split before dispatch")
         }
         (ProviderId::Anthropic, RuntimeLocalRewriteProviderOptions::Anthropic { auth }) => {
-            let auth_attempts = runtime_local_rewrite_anthropic_auth_attempts(shared, auth);
-            if auth_attempts.is_empty() {
-                anyhow::bail!("Anthropic provider has no auth configured");
-            }
-            let auth_attempt_count = auth_attempts.len();
-            if endpoint == ProviderEndpoint::Responses {
-                let model_selection = runtime_local_rewrite_model_selection(
-                    shared,
-                    RuntimeProviderBridgeKind::Anthropic,
-                    request,
-                    &body,
-                    prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
-                );
-                let model_chain = runtime_provider_model_fallback_chain(
-                    RuntimeProviderBridgeKind::Anthropic,
-                    &model_selection.model,
-                );
-                let chat_upstream_url = runtime_openai_standard_provider_upstream_url(
-                    RuntimeProviderBridgeKind::Anthropic,
-                    &shared.upstream_base_url,
-                    &shared.mount_path,
-                    &request.path_and_query,
-                );
-                let messages_upstream_url = runtime_anthropic_messages_upstream_url(
-                    &shared.upstream_base_url,
-                    &shared.mount_path,
-                );
-                for (auth_index, selected_auth) in auth_attempts.into_iter().enumerate() {
-                    for (model_index, model) in model_chain.iter().enumerate() {
-                        let model_body =
-                            runtime_provider_request_body_with_model(&model_selection.body, model);
-                        let harness_policy = harness_provider_policy(
-                            shared.resolved_harness.effective,
-                            ProviderId::Anthropic,
-                            Some(model),
-                        );
-                        let native_messages =
-                            harness_policy.is_some_and(|policy| policy.native_anthropic_messages);
-                        let translated = runtime_provider_chat_compatible_request_body(
-                            &model_body,
-                            &shared.deepseek_conversations,
-                            RuntimeProviderBridgeKind::Anthropic,
-                            prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
-                            false,
-                            RuntimeDeepSeekRewriteOptions::default(),
-                        )?;
-                        let provider_core_result = if native_messages {
-                            let mut input = ProviderTransformInput::new(
-                                ProviderEndpoint::Responses,
-                                translated.body.clone(),
-                            );
-                            input.model = Some(model.clone());
-                            Some(translate_openai_chat_request_to_anthropic_messages(input))
-                        } else {
-                            runtime_provider_request_conformance_result(
-                                RuntimeProviderBridgeKind::Anthropic,
-                                request,
-                                &model_body,
-                            )
-                        };
-                        if let Some(result) = provider_core_result.as_ref() {
-                            runtime_provider_log_request_conformance(
-                                &shared.runtime_shared,
-                                request_id,
-                                RuntimeProviderBridgeKind::Anthropic,
-                                result,
-                            );
-                        }
-                        runtime_harness_log_provider_policy(
-                            &shared.runtime_shared,
-                            request_id,
-                            RuntimeHarnessProviderPolicyLog {
-                                provider: ProviderId::Anthropic,
-                                endpoint: ProviderEndpoint::Responses,
-                                model,
-                                phase: "request-translation",
-                                policy: harness_policy,
-                                applied: native_messages
-                                    && provider_core_lossless_body(provider_core_result.as_ref())
-                                        .is_some(),
-                            },
-                        );
-                        let upstream_body = match provider_core_lossless_body(
-                            provider_core_result.as_ref(),
-                        ) {
-                            Some(body) => body,
-                            None if !native_messages => translated.body.clone(),
-                            None => {
-                                return Ok(RuntimeLocalRewriteUpstreamResult {
-                                    response: RuntimeLocalRewriteUpstreamResponse::Buffered(
-                                        runtime_local_rewrite_json_parts(
-                                            400,
-                                            json!({
-                                                "error": {
-                                                    "message": "request is incompatible with evaluated Anthropic Messages translation",
-                                                    "type": "invalid_request_error",
-                                                    "code": "invalid_request",
-                                                }
-                                            }),
-                                        ),
-                                    ),
-                                    gemini_context: None,
-                                    copilot_context: None,
-                                });
-                            }
-                        };
-                        if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                            pending.insert(
-                                request_id,
-                                RuntimeDeepSeekPendingRequest {
-                                    messages: translated.messages,
-                                    response_metadata: translated.response_metadata,
-                                },
-                            );
-                        }
-                        let upstream_url = if native_messages {
-                            &messages_upstream_url
-                        } else {
-                            &chat_upstream_url
-                        };
-                        let send_result =
-                            send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
-                                RuntimeLocalRewriteSearchFallbackRequest {
-                                    request_id,
-                                    request,
-                                    shared,
-                                    upstream_url,
-                                    body: upstream_body,
-                                    provider_kind: RuntimeProviderBridgeKind::Anthropic,
-                                    auth_label: selected_auth.label.as_str(),
-                                    model,
-                                    auth_factory: || RuntimeLocalRewritePreparedAuth::Anthropic {
-                                        auth: &selected_auth.auth,
-                                        native_messages,
-                                    },
-                                },
-                            )?;
-                        let (status, parts, class) = match send_result {
-                            RuntimeLocalRewritePreparedSendResult::Live(response) => {
-                                return Ok(RuntimeLocalRewriteUpstreamResult {
-                                    response: RuntimeLocalRewriteUpstreamResponse::Live(
-                                        if native_messages {
-                                            RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
-                                        } else {
-                                            RuntimeLocalRewriteLiveResponse::new(response)
-                                        },
-                                    ),
-                                    gemini_context: None,
-                                    copilot_context: None,
-                                });
-                            }
-                            RuntimeLocalRewritePreparedSendResult::Error {
-                                status,
-                                parts,
-                                class,
-                            } => (status, parts, class),
-                        };
-                        if model_index + 1 < model_chain.len()
-                            && runtime_gateway_application_provider_retry_precommit(
-                                ProviderRetryCause::NextModel,
-                                class,
-                                model_index,
-                                model_chain.len(),
-                            )
-                        {
-                            runtime_proxy_log(
-                                &shared.runtime_shared,
-                                runtime_proxy_structured_log_message(
-                                    "local_rewrite_provider_model_fallback",
-                                    [
-                                        runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field(
-                                            "provider",
-                                            runtime_provider_label(
-                                                RuntimeProviderBridgeKind::Anthropic,
-                                            ),
-                                        ),
-                                        runtime_proxy_log_field(
-                                            "auth",
-                                            selected_auth.label.as_str(),
-                                        ),
-                                        runtime_proxy_log_field("from_model", model.as_str()),
-                                        runtime_proxy_log_field(
-                                            "to_model",
-                                            model_chain[model_index + 1].as_str(),
-                                        ),
-                                        runtime_proxy_log_field("status", status.to_string()),
-                                        runtime_proxy_log_field("class", format!("{class:?}")),
-                                    ],
-                                ),
-                            );
-                            continue;
-                        }
-                        if runtime_gateway_application_provider_retry_precommit(
-                            ProviderRetryCause::RotateCredential,
-                            class,
-                            auth_index,
-                            auth_attempt_count,
-                        ) {
-                            runtime_proxy_log(
-                                &shared.runtime_shared,
-                                runtime_proxy_structured_log_message(
-                                    "local_rewrite_provider_auth_rotate",
-                                    [
-                                        runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field(
-                                            "provider",
-                                            runtime_provider_label(
-                                                RuntimeProviderBridgeKind::Anthropic,
-                                            ),
-                                        ),
-                                        runtime_proxy_log_field(
-                                            "auth",
-                                            selected_auth.label.as_str(),
-                                        ),
-                                        runtime_proxy_log_field("status", status.to_string()),
-                                        runtime_proxy_log_field("class", format!("{class:?}")),
-                                    ],
-                                ),
-                            );
-                            break;
-                        }
-                        return Ok(RuntimeLocalRewriteUpstreamResult {
-                            response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                            gemini_context: None,
-                            copilot_context: None,
-                        });
-                    }
-                    if auth_index + 1 < auth_attempt_count {
-                        continue;
-                    }
-                }
-                anyhow::bail!("no Anthropic model attempts were available");
-            } else {
-                let upstream_url = runtime_local_rewrite_upstream_url(
-                    &shared.upstream_base_url,
-                    &shared.mount_path,
-                    &request.path_and_query,
-                );
-                for (auth_index, selected_auth) in auth_attempts.into_iter().enumerate() {
-                    let response = send_runtime_local_rewrite_prepared_request(
-                        request_id,
-                        request,
-                        shared,
-                        &upstream_url,
-                        body.clone(),
-                        RuntimeLocalRewritePreparedAuth::Anthropic {
-                            auth: &selected_auth.auth,
-                            native_messages: false,
-                        },
-                    )?;
-                    let status = response.status().as_u16();
-                    if status >= 400 {
-                        let parts =
-                            runtime_local_rewrite_buffered_response_from_response(response)?;
-                        let class = runtime_provider_error_class(
-                            RuntimeProviderBridgeKind::Anthropic,
-                            status,
-                            &parts.body,
-                        );
-                        if runtime_gateway_application_provider_retry_precommit(
-                            ProviderRetryCause::RotateCredential,
-                            class,
-                            auth_index,
-                            auth_attempt_count,
-                        ) {
-                            runtime_proxy_log(
-                                &shared.runtime_shared,
-                                runtime_proxy_structured_log_message(
-                                    "local_rewrite_provider_auth_rotate",
-                                    [
-                                        runtime_proxy_log_field("request", request_id.to_string()),
-                                        runtime_proxy_log_field(
-                                            "provider",
-                                            runtime_provider_label(
-                                                RuntimeProviderBridgeKind::Anthropic,
-                                            ),
-                                        ),
-                                        runtime_proxy_log_field(
-                                            "auth",
-                                            selected_auth.label.as_str(),
-                                        ),
-                                        runtime_proxy_log_field("status", status.to_string()),
-                                        runtime_proxy_log_field("class", format!("{class:?}")),
-                                    ],
-                                ),
-                            );
-                            continue;
-                        }
-                        return Ok(RuntimeLocalRewriteUpstreamResult {
-                            response: RuntimeLocalRewriteUpstreamResponse::Buffered(parts),
-                            gemini_context: None,
-                            copilot_context: None,
-                        });
-                    }
-                    return Ok(RuntimeLocalRewriteUpstreamResult {
-                        response: RuntimeLocalRewriteUpstreamResponse::Live(
-                            RuntimeLocalRewriteLiveResponse::new(response),
-                        ),
-                        gemini_context: None,
-                        copilot_context: None,
-                    });
-                }
-                anyhow::bail!("no Anthropic auth attempts were available")
-            }
+            send_runtime_anthropic_upstream_request(
+                request_id, request, shared, body, auth, endpoint,
+            )
         }
         (ProviderId::Copilot, RuntimeLocalRewriteProviderOptions::Copilot { auth }) => {
             send_runtime_copilot_upstream_request(request_id, request, shared, body, auth, endpoint)
@@ -837,7 +517,7 @@ fn runtime_local_embeddings_only_rejection_parts() -> RuntimeHeapTrimmedBuffered
     )
 }
 
-fn runtime_local_rewrite_json_parts(
+pub(super) fn runtime_local_rewrite_json_parts(
     status: u16,
     body: Value,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {

@@ -241,12 +241,7 @@ fn gateway_admin_token_tenant_scope_limits_admin_surfaces() {
         .expect("tenant-a metrics request should be sent");
     assert_eq!(tenant_a_metrics.status().as_u16(), 200);
     let tenant_a_metrics = tenant_a_metrics.text().expect("tenant-a metrics text");
-    assert_eq!(
-        tenant_a_metrics
-            .matches("prodex_gateway_virtual_key_requests_total{")
-            .count(),
-        1
-    );
+    assert!(tenant_a_metrics.contains("prodex_gateway_virtual_key_requests_total 1\n"));
     assert!(!tenant_a_metrics.contains("shared-main"));
     assert!(!tenant_a_metrics.contains("other-main"));
 }

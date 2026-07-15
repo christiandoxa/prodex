@@ -14,6 +14,7 @@ mod gemini_rewrite;
 mod gemini_sse;
 mod gemini_thought_signatures;
 mod local_rewrite;
+mod local_rewrite_anthropic;
 mod local_rewrite_application_boundary;
 mod local_rewrite_application_data_plane;
 mod local_rewrite_application_runtime;

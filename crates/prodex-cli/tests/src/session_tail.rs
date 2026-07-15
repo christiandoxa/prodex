@@ -226,3 +226,151 @@ fn s_session_tail_rejects_credential_bearing_urls_without_echoing_them() {
         assert!(!error.contains("secret-sentinel"), "{error}");
     }
 }
+
+#[test]
+fn s_session_tail_equals_forms_cover_value_options_and_aliases() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+        "--provider=anthropic",
+        "--harness=native",
+        "--api-key=test-key",
+        "--model=model-a",
+        "--local-model=model-b",
+        "--profile=tail",
+        "--base-url=https://example.test/backend-api",
+        "--url=http://127.0.0.1:8131/v1",
+        "--context-window=32000",
+        "--local-context-window=33000",
+        "--auto-compact-token-limit=24000",
+        "--local-auto-compact-token-limit=25000",
+        "--cli=agy",
+    ])
+    .unwrap();
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert_eq!(args.provider, Some(SuperExternalProvider::Anthropic));
+    assert_eq!(
+        args.harness,
+        Some(prodex_provider_core::HarnessMode::Native)
+    );
+    assert_eq!(args.api_key.as_deref(), Some("test-key"));
+    assert_eq!(args.local_model.as_deref(), Some("model-b"));
+    assert_eq!(args.profile.as_deref(), Some("tail"));
+    assert_eq!(
+        args.base_url.as_deref(),
+        Some("https://example.test/backend-api")
+    );
+    assert_eq!(args.url.as_deref(), Some("http://127.0.0.1:8131/v1"));
+    assert_eq!(args.local_context_window, Some(33_000));
+    assert_eq!(args.local_auto_compact_token_limit, Some(25_000));
+    assert_eq!(args.cli, Some(SuperCliAgent::Agy));
+    assert_eq!(
+        args.codex_args,
+        os_args(&["019ef8ae-c7cc-75c3-8575-a8d247ad291b"])
+    );
+}
+
+#[test]
+fn s_session_tail_missing_and_invalid_values_keep_exact_forward_order() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+        "--unknown-before",
+        "value",
+        "--provider",
+        "unknown",
+        "--context-window=many",
+        "--auto-compact-token-limit",
+        "many",
+        "--cli=unknown",
+        "--api-key",
+    ])
+    .unwrap();
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert_eq!(
+        args.codex_args,
+        os_args(&[
+            "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+            "--unknown-before",
+            "value",
+            "--provider",
+            "unknown",
+            "--context-window=many",
+            "--auto-compact-token-limit",
+            "many",
+            "--cli=unknown",
+            "--api-key",
+        ])
+    );
+}
+
+#[test]
+fn s_session_tail_boolean_pairs_use_last_value() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+        "--auto-rotate",
+        "--no-auto-rotate",
+        "--presidio",
+        "--no-presidio",
+        "--presidio",
+    ])
+    .unwrap();
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert!(!args.auto_rotate);
+    assert!(args.no_auto_rotate);
+    assert!(args.presidio);
+    assert!(!args.no_presidio);
+    assert_eq!(
+        args.codex_args,
+        os_args(&["019ef8ae-c7cc-75c3-8575-a8d247ad291b"])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn s_session_tail_preserves_non_utf8_arguments() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let non_utf8 = OsString::from_vec(vec![0xff, 0xfe]);
+    let command = parse_cli_command_from(vec![
+        OsString::from("prodex"),
+        OsString::from("s"),
+        OsString::from("019ef8ae-c7cc-75c3-8575-a8d247ad291b"),
+        non_utf8.clone(),
+        OsString::from("--provider=gemini"),
+    ])
+    .unwrap();
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert_eq!(args.provider, Some(SuperExternalProvider::Gemini));
+    assert_eq!(
+        args.codex_args,
+        vec![
+            OsString::from("019ef8ae-c7cc-75c3-8575-a8d247ad291b"),
+            non_utf8,
+        ]
+    );
+}

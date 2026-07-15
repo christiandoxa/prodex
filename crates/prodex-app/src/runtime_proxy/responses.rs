@@ -103,20 +103,14 @@ pub(crate) fn proxy_runtime_responses_request(
         request_session_id: request_session_id.as_deref(),
         explicit_request_session_id: explicit_request_session_id.as_ref(),
     })?;
-    let mut excluded_profiles = BTreeSet::new();
     let mut auto_redeemed_profiles = BTreeSet::new();
-    let mut last_failure: Option<(RuntimeUpstreamFailureResponse, bool)> = None;
-    let mut saw_inflight_saturation = false;
-    let mut selection_started_at = Instant::now();
-    let mut selection_attempts = 0usize;
+    let mut loop_state = RuntimePrecommitLoopState::<RuntimeUpstreamFailureResponse>::new();
 
     loop {
         let pressure_mode =
             runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Responses);
-        if runtime_proxy_precommit_budget_exhausted_for_route(
+        if loop_state.budget_exhausted(
             shared,
-            selection_started_at,
-            selection_attempts,
             affinity_state.has_continuation_priority(
                 previous_response_id.as_deref(),
                 request_turn_state.as_deref(),
@@ -126,8 +120,9 @@ pub(crate) fn proxy_runtime_responses_request(
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode}",
-                    selection_started_at.elapsed().as_millis()
+                    "request={request_id} transport=http precommit_budget_exhausted attempts={} elapsed_ms={} pressure_mode={pressure_mode}",
+                    loop_state.selection_attempts,
+                    loop_state.selection_started_at.elapsed().as_millis()
                 ),
             );
             if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
@@ -138,8 +133,8 @@ pub(crate) fn proxy_runtime_responses_request(
                     ),
                 );
                 return Ok(runtime_proxy_final_responses_failure_reply(
-                    last_failure,
-                    saw_inflight_saturation,
+                    loop_state.last_failure,
+                    loop_state.saw_inflight_saturation,
                 ));
             }
             if let Some(action) = try_runtime_responses_direct_current_profile_fallback(
@@ -154,11 +149,11 @@ pub(crate) fn proxy_runtime_responses_request(
                     request_session_id: request_session_id.as_deref(),
                     request_requires_previous_response_affinity,
                     previous_response_fresh_fallback_shape,
-                    saw_inflight_saturation,
+                    saw_inflight_saturation: loop_state.saw_inflight_saturation,
                 },
                 &mut affinity_state,
-                &mut excluded_profiles,
-                &mut last_failure,
+                &mut loop_state.excluded_profiles,
+                &mut loop_state.last_failure,
             )? {
                 match action {
                     RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
@@ -168,15 +163,15 @@ pub(crate) fn proxy_runtime_responses_request(
                 }
             }
             return Ok(runtime_proxy_final_responses_failure_reply(
-                last_failure,
-                saw_inflight_saturation,
+                loop_state.last_failure,
+                loop_state.saw_inflight_saturation,
             ));
         }
 
         let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
             shared,
             affinity_state.candidate_selection(
-                &excluded_profiles,
+                &loop_state.excluded_profiles,
                 previous_response_id.as_deref(),
                 prompt_cache_key.as_deref(),
             ),
@@ -188,7 +183,7 @@ pub(crate) fn proxy_runtime_responses_request(
                 shared,
                 format!(
                     "request={request_id} transport=http candidate_exhausted last_failure={}",
-                    match &last_failure {
+                    match &loop_state.last_failure {
                         Some((RuntimeUpstreamFailureResponse::Http(_), _)) => "http",
                         Some((RuntimeUpstreamFailureResponse::Websocket(_), _)) => "websocket",
                         None => "none",
@@ -200,9 +195,9 @@ pub(crate) fn proxy_runtime_responses_request(
                     request_id,
                     request: &request,
                     shared,
-                    excluded_profiles: &excluded_profiles,
+                    excluded_profiles: &loop_state.excluded_profiles,
                     route_kind: RuntimeRouteKind::Responses,
-                    selection_started_at,
+                    selection_started_at: loop_state.selection_started_at,
                     continuation: affinity_state.has_continuation_priority(
                         previous_response_id.as_deref(),
                         request_turn_state.as_deref(),
@@ -220,14 +215,14 @@ pub(crate) fn proxy_runtime_responses_request(
                     ),
                 );
                 return Ok(runtime_proxy_final_responses_failure_reply(
-                    last_failure,
-                    saw_inflight_saturation,
+                    loop_state.last_failure,
+                    loop_state.saw_inflight_saturation,
                 ));
             }
             let remaining_cold_start_profiles =
                 runtime_remaining_sync_probe_cold_start_profiles_for_route(
                     shared,
-                    &excluded_profiles,
+                    &loop_state.excluded_profiles,
                     RuntimeRouteKind::Responses,
                 )?;
             if remaining_cold_start_profiles > 0 {
@@ -252,11 +247,11 @@ pub(crate) fn proxy_runtime_responses_request(
                     request_session_id: request_session_id.as_deref(),
                     request_requires_previous_response_affinity,
                     previous_response_fresh_fallback_shape,
-                    saw_inflight_saturation,
+                    saw_inflight_saturation: loop_state.saw_inflight_saturation,
                 },
                 &mut affinity_state,
-                &mut excluded_profiles,
-                &mut last_failure,
+                &mut loop_state.excluded_profiles,
+                &mut loop_state.last_failure,
             )? {
                 match action {
                     RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
@@ -266,11 +261,11 @@ pub(crate) fn proxy_runtime_responses_request(
                 }
             }
             return Ok(runtime_proxy_final_responses_failure_reply(
-                last_failure,
-                saw_inflight_saturation,
+                loop_state.last_failure,
+                loop_state.saw_inflight_saturation,
             ));
         };
-        selection_attempts = selection_attempts.saturating_add(1);
+        loop_state.record_attempt();
         let turn_state_override =
             affinity_state.turn_state_override_for(&candidate_name, request_turn_state.as_deref());
         runtime_proxy_log(
@@ -281,7 +276,7 @@ pub(crate) fn proxy_runtime_responses_request(
                 affinity_state.pinned_profile(),
                 affinity_state.turn_state_profile(),
                 turn_state_override,
-                excluded_profiles.len()
+                loop_state.excluded_profiles.len()
             ),
         );
         if previous_response_id.is_none()
@@ -312,15 +307,15 @@ pub(crate) fn proxy_runtime_responses_request(
                     ],
                 ),
             );
-            saw_inflight_saturation = true;
+            loop_state.record_inflight_saturation();
             if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 RuntimeInflightReliefWait {
                     request_id,
                     request: &request,
                     shared,
-                    excluded_profiles: &excluded_profiles,
+                    excluded_profiles: &loop_state.excluded_profiles,
                     route_kind: RuntimeRouteKind::Responses,
-                    selection_started_at,
+                    selection_started_at: loop_state.selection_started_at,
                     continuation: affinity_state.has_continuation_priority(
                         previous_response_id.as_deref(),
                         request_turn_state.as_deref(),
@@ -330,7 +325,7 @@ pub(crate) fn proxy_runtime_responses_request(
             )? {
                 continue;
             }
-            excluded_profiles.insert(candidate_name);
+            loop_state.excluded_profiles.insert(candidate_name);
             continue;
         }
 
@@ -380,8 +375,8 @@ pub(crate) fn proxy_runtime_responses_request(
                         previous_response_fresh_fallback_shape,
                         affinity_state: &mut affinity_state,
                         auto_redeemed_profiles: &mut auto_redeemed_profiles,
-                        excluded_profiles: &mut excluded_profiles,
-                        last_failure: &mut last_failure,
+                        excluded_profiles: &mut loop_state.excluded_profiles,
+                        last_failure: &mut loop_state.last_failure,
                     })?
                 {
                     return Ok(response);
@@ -426,8 +421,9 @@ pub(crate) fn proxy_runtime_responses_request(
                         ),
                     );
                 }
-                excluded_profiles.insert(profile_name);
-                last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+                loop_state.excluded_profiles.insert(profile_name);
+                loop_state.last_failure =
+                    Some((RuntimeUpstreamFailureResponse::Http(response), true));
             }
             RuntimeResponsesAttempt::LocalSelectionBlocked {
                 profile_name,
@@ -445,7 +441,7 @@ pub(crate) fn proxy_runtime_responses_request(
                         request_requires_previous_response_affinity,
                         previous_response_fresh_fallback_shape,
                         affinity_state: &mut affinity_state,
-                        excluded_profiles: &mut excluded_profiles,
+                        excluded_profiles: &mut loop_state.excluded_profiles,
                     },
                 )? {
                     return Ok(response);
@@ -474,11 +470,12 @@ pub(crate) fn proxy_runtime_responses_request(
                             policy: RuntimePreviousResponseNotFoundPolicy::responses(true),
                         },
                     ),
-                    affinity_state.previous_response_not_found_state(&mut excluded_profiles, true),
+                    affinity_state
+                        .previous_response_not_found_state(&mut loop_state.excluded_profiles, true),
                 )? {
                     RuntimePreviousResponseNotFoundAction::RetryOwner
                     | RuntimePreviousResponseNotFoundAction::Rotate => {
-                        last_failure =
+                        loop_state.last_failure =
                             Some((RuntimeUpstreamFailureResponse::Http(response), false));
                     }
                     RuntimePreviousResponseNotFoundAction::StaleContinuation => {
@@ -487,6 +484,6 @@ pub(crate) fn proxy_runtime_responses_request(
                 }
             }
         }
-        selection_started_at = Instant::now();
+        loop_state.restart_elapsed_budget();
     }
 }

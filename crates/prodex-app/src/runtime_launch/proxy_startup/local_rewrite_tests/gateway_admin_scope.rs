@@ -266,12 +266,7 @@ fn gateway_admin_token_key_prefix_scope_limits_key_access() {
     let scoped_metrics = scoped_metrics
         .text()
         .expect("scoped metrics should be text");
-    assert_eq!(
-        scoped_metrics
-            .matches("prodex_gateway_virtual_key_requests_total{")
-            .count(),
-        2
-    );
+    assert!(scoped_metrics.contains("prodex_gateway_virtual_key_requests_total 1\n"));
     assert!(!scoped_metrics.contains("team-a-main"));
     assert!(!scoped_metrics.contains("team-a-new"));
     assert!(!scoped_metrics.contains("team-b-main"));
@@ -583,12 +578,7 @@ fn gateway_admin_token_governance_scope_limits_admin_surfaces() {
     let scoped_metrics = scoped_metrics
         .text()
         .expect("scoped metrics should be text");
-    assert_eq!(
-        scoped_metrics
-            .matches("prodex_gateway_virtual_key_requests_total{")
-            .count(),
-        2
-    );
+    assert!(scoped_metrics.contains("prodex_gateway_virtual_key_requests_total 2\n"));
     assert!(!scoped_metrics.contains("alpha-main"));
     assert!(!scoped_metrics.contains("gamma-main"));
     assert!(!scoped_metrics.contains("beta-main"));

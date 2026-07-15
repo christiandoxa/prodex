@@ -298,7 +298,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
             tenant_id: Some("tenant-a".to_string()),
             team_id: Some("team-a".to_string()),
             project_id: Some("project-a".to_string()),
-            user_id: Some("alice@example.com".to_string()),
+            user_id: Some("alice".to_string()),
             budget_id: Some("budget-a".to_string()),
             token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
             allowed_models: vec!["gpt-5.4".to_string()],
@@ -412,17 +412,17 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
         Some("nosniff")
     );
     let metrics = metrics.text().expect("metrics response should be text");
-    assert!(metrics.contains("prodex_gateway_virtual_key_requests_total"));
-    assert!(metrics.contains("key_hash=\""));
-    assert!(metrics.contains("source=\"policy\""));
-    assert!(metrics.contains("tenant_scoped=\"true\""));
-    assert!(metrics.contains("team_scoped=\"true\""));
-    assert!(metrics.contains("project_scoped=\"true\""));
-    assert!(metrics.contains("user_scoped=\"true\""));
-    assert!(metrics.contains("budget_scoped=\"true\""));
+    assert!(metrics.contains("prodex_gateway_virtual_key_requests_total 1\n"));
+    assert!(!metrics.contains("key_hash="));
+    assert!(!metrics.contains("source="));
+    assert!(!metrics.contains("tenant_scoped="));
+    assert!(!metrics.contains("team_scoped="));
+    assert!(!metrics.contains("project_scoped="));
+    assert!(!metrics.contains("user_scoped="));
+    assert!(!metrics.contains("budget_scoped="));
     assert!(!metrics.contains("key=\"team-a\""));
     assert!(!metrics.contains("tenant_id=\"tenant-a\""));
-    assert!(!metrics.contains("user_id=\"alice@example.com\""));
+    assert!(!metrics.contains("user_id="));
 
     let rejected = client
         .get(format!(
@@ -457,7 +457,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
     assert_eq!(ledger["records"][0]["tenant_id"], "tenant-a");
     assert_eq!(ledger["records"][0]["team_id"], "team-a");
     assert_eq!(ledger["records"][0]["project_id"], "project-a");
-    assert_eq!(ledger["records"][0]["user_id"], "alice@example.com");
+    assert_eq!(ledger["records"][0]["user_id"], "alice");
     assert_eq!(ledger["records"][0]["budget_id"], "budget-a");
     assert_eq!(ledger["records"][0]["model"], "gpt-5.4");
     assert_eq!(ledger["records"][0]["response_status"], 200);
@@ -484,9 +484,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
         "call_id,request_id,key_name,tenant_id,team_id,project_id,user_id,budget_id,model"
     ));
     assert!(ledger_csv.contains(&format!("{call_id},prodex-")));
-    assert!(
-        ledger_csv.contains("team-a,tenant-a,team-a,project-a,alice@example.com,budget-a,gpt-5.4")
-    );
+    assert!(ledger_csv.contains("team-a,tenant-a,team-a,project-a,alice,budget-a,gpt-5.4"));
     let summary = client
         .get(format!(
             "http://{}/v1/prodex/gateway/ledger/summary",
@@ -506,7 +504,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
     assert_eq!(summary["by_tenant"][0]["tenant_id"], "tenant-a");
     assert_eq!(summary["by_team"][0]["team_id"], "team-a");
     assert_eq!(summary["by_project"][0]["project_id"], "project-a");
-    assert_eq!(summary["by_user"][0]["user_id"], "alice@example.com");
+    assert_eq!(summary["by_user"][0]["user_id"], "alice");
     assert_eq!(summary["by_budget"][0]["budget_id"], "budget-a");
     let summary_csv = client
         .get(format!(
@@ -548,7 +546,7 @@ fn gateway_virtual_key_usage_is_persisted_and_visible_to_admin_endpoint() {
             tenant_id: Some("tenant-a".to_string()),
             team_id: Some("team-a".to_string()),
             project_id: Some("project-a".to_string()),
-            user_id: Some("alice@example.com".to_string()),
+            user_id: Some("alice".to_string()),
             budget_id: Some("budget-a".to_string()),
             token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
             allowed_models: vec!["gpt-5.4".to_string()],
@@ -729,7 +727,7 @@ fn gateway_usage_persistence_failure_logs_stable_error_without_path_or_token() {
             tenant_id: Some("tenant-a".to_string()),
             team_id: Some("team-a".to_string()),
             project_id: Some("project-a".to_string()),
-            user_id: Some("alice@example.com".to_string()),
+            user_id: Some("alice".to_string()),
             budget_id: Some("budget-a".to_string()),
             token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
             allowed_models: vec!["gpt-5.4".to_string()],
@@ -808,7 +806,7 @@ fn gateway_upstream_transport_failure_uses_stable_response_without_endpoint_deta
             tenant_id: Some("tenant-a".to_string()),
             team_id: Some("team-a".to_string()),
             project_id: Some("project-a".to_string()),
-            user_id: Some("alice@example.com".to_string()),
+            user_id: Some("alice".to_string()),
             budget_id: Some("budget-a".to_string()),
             token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token(virtual_token),
             allowed_models: vec!["gpt-5.4".to_string()],

@@ -30,6 +30,7 @@ pub use request_target::{
 };
 mod api_version;
 mod edge_security;
+mod gateway_admin_route;
 mod planning;
 mod preconditions;
 mod request;
@@ -38,6 +39,7 @@ mod upstream_headers;
 
 pub use api_version::*;
 pub use edge_security::*;
+pub use gateway_admin_route::*;
 pub use planning::*;
 pub use preconditions::*;
 pub use request::*;

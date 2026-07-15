@@ -45,6 +45,8 @@ const FILES = Object.freeze({
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs",
   providerSender:
     "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+  providerAnthropic:
+    "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_anthropic.rs",
   providerErrorPolicy:
     "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_error_policy.rs",
   providerCopilot:
@@ -361,7 +363,7 @@ export function validateProductionBoundary(sources) {
     `${FILES.dataPlaneAdapter}: provider retry decisions must enter the canonical application planner`,
   );
   for (const [source, file] of [
-    [sources.providerSender, FILES.providerSender],
+    [sources.providerAnthropic, FILES.providerAnthropic],
     [sources.providerCopilot, FILES.providerCopilot],
     [sources.providerDeepSeek, FILES.providerDeepSeek],
     [sources.providerGeminiOpenAi, FILES.providerGeminiOpenAi],
@@ -382,6 +384,7 @@ export function validateProductionBoundary(sources) {
     for (const [source, file] of [
       [sources.providerErrorPolicy, FILES.providerErrorPolicy],
       [sources.providerSender, FILES.providerSender],
+      [sources.providerAnthropic, FILES.providerAnthropic],
       [sources.providerCopilot, FILES.providerCopilot],
       [sources.providerDeepSeek, FILES.providerDeepSeek],
       [sources.providerGeminiOpenAi, FILES.providerGeminiOpenAi],
@@ -606,50 +609,50 @@ export function validateProductionBoundary(sources) {
     `${FILES.observability}: response accounting must not schedule duplicate durable settlement`,
   );
 
-  const admin = functionBody(sources.admin, "runtime_gateway_admin_response");
-  if (!admin) {
+  const adminEntry = functionBody(sources.admin, "runtime_gateway_admin_response");
+  if (!adminEntry) {
     errors.push(`${FILES.admin}: production admin handler is missing`);
   } else {
     requireBefore(
       errors,
-      admin,
+      adminEntry,
       "let Some(preauthorized) = preauthorized",
       "runtime_gateway_admin_boundary_response(",
       `${FILES.admin}: application preauthorization must be present before admin use cases run`,
     );
     requireText(
       errors,
-      admin,
+      sources.admin,
       "preauthorized.control_plane_action()",
       `${FILES.admin}: admin dispatch must consume the exact application authorization plan`,
     );
     requireText(
       errors,
-      admin,
+      sources.admin,
       "let authorized_action = preauthorized.control_plane_action();",
       `${FILES.admin}: admin dispatch must retain the preauthorized action before mutation execution`,
     );
     requireText(
       errors,
-      admin,
+      sources.admin,
       "runtime_gateway_admin_create_key_response(",
       `${FILES.admin}: admin key create must route through production key mutation handlers`,
     );
     requireText(
       errors,
-      admin,
+      sources.admin,
       "runtime_gateway_admin_update_key_response(",
       `${FILES.admin}: admin key update must route through production key mutation handlers`,
     );
     requireText(
       errors,
-      admin,
+      sources.admin,
       "runtime_gateway_admin_delete_key_response(",
       `${FILES.admin}: admin key delete must route through production key mutation handlers`,
     );
     requireText(
       errors,
-      admin,
+      sources.admin,
       "runtime_gateway_admin_scim_create_user_response(",
       `${FILES.admin}: admin SCIM mutations must execute through the application-identity mutation execution path`,
     );
@@ -1475,6 +1478,7 @@ function runSelfTest() {
       match (provider, &shared.provider) {}
     }`,
     providerErrorPolicy: "",
+    providerAnthropic: "runtime_gateway_application_provider_retry_precommit();",
     providerCopilot: "runtime_gateway_application_provider_retry_precommit();",
     providerDeepSeek: "runtime_gateway_application_provider_retry_precommit();",
     providerGeminiOpenAi: "runtime_gateway_application_provider_retry_precommit();",

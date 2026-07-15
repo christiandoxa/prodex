@@ -11,7 +11,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
   "clippy::too_many_arguments": 34,
-  "clippy::type_complexity": 3,
+  "clippy::type_complexity": 1,
 });
 
 export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 34;
@@ -70,14 +70,12 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_dispatch.rs|pub(super) fn respond_runtime_local_rewrite_live_response(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs|fn activate(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs|fn vote(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio.rs|pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio.rs|pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(",
-  "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/src/governance_repository.rs|fn store_pointer(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/websocket.rs|pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(",
+  "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/src/governance_repository/revisions.rs|pub(super) fn store_pointer(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn activation_request(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approval_for_existing(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approved_revision(",
-  "clippy::type_complexity|crates/prodex-app/src/app_server_broker_preview.rs|fn app_server_broker_write_stdio_live_validate_stream<R: BufRead, D: Write>(",
-  "clippy::type_complexity|crates/prodex-app/src/app_server_broker_preview.rs|fn app_server_broker_write_stdio_validate_diagnostic_stream<R: BufRead, W: Write>(",
   "clippy::type_complexity|crates/prodex-bench-support/src/lib.rs|pub fn run_runtime_proxy_hot_path_case_suite<",
 ]);
 

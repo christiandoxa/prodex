@@ -1,270 +1,258 @@
+use std::ffi::OsString;
+
 use super::{
     SuperArgs, SuperCliAgent, parse_runtime_base_url, parse_super_external_provider,
     parse_super_local_url,
 };
 
+struct ScannedValue<'a> {
+    value: Option<&'a str>,
+    consumed_count: usize,
+}
+
+enum SuperOverride {
+    Provider(super::SuperExternalProvider),
+    Harness(prodex_provider_core::HarnessMode),
+    ApiKey(String),
+    LocalModel(String),
+    Profile(String),
+    AutoRotate(bool),
+    AutoRedeem,
+    SkipQuotaCheck,
+    DryRun,
+    NoProxy,
+    Presidio(bool),
+    BaseUrl(String),
+    Url(String),
+    LocalContextWindow(usize),
+    LocalAutoCompactTokenLimit(usize),
+    Cli(SuperCliAgent),
+}
+
+enum ScanOutcome {
+    Apply {
+        value: SuperOverride,
+        consumed_count: usize,
+    },
+    Forward {
+        consumed_count: usize,
+    },
+    Unknown,
+}
+
 pub(super) fn extract_provider_overrides_from_codex_args(
     args: &mut SuperArgs,
 ) -> Result<(), String> {
-    let mut i = 0;
-    while i < args.codex_args.len() {
-        let Some(arg) = args.codex_args[i].to_str() else {
-            i += 1;
-            continue;
-        };
-        let (consumed, skip) = match arg {
-            "--provider" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => match parse_super_external_provider(val) {
-                    Ok(provider) => {
-                        args.provider = Some(provider);
-                        (2, true)
-                    }
-                    Err(_) => (2, false),
-                },
-                None => (1, false),
-            },
-            a if a.starts_with("--provider=") => {
-                if let Some(val) = a.strip_prefix("--provider=")
-                    && let Ok(provider) = parse_super_external_provider(val)
-                {
-                    args.provider = Some(provider);
-                    (1, true)
-                } else {
-                    (1, false)
-                }
+    let codex_args = std::mem::take(&mut args.codex_args);
+    let mut remaining = Vec::with_capacity(codex_args.len());
+    let mut index = 0;
+    while index < codex_args.len() {
+        match scan_override(&codex_args, index) {
+            Ok(ScanOutcome::Apply {
+                value,
+                consumed_count,
+            }) => {
+                apply_override(args, value);
+                index += consumed_count;
             }
-            "--harness" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(value) => match value.parse() {
-                    Ok(harness) => {
-                        args.harness = Some(harness);
-                        (2, true)
-                    }
-                    Err(err) => return Err(err.to_string()),
-                },
-                None => return Err("--harness requires auto, native, or minimal".to_string()),
-            },
-            value if value.starts_with("--harness=") => {
-                let harness = value
-                    .strip_prefix("--harness=")
-                    .expect("matched harness prefix")
-                    .parse()
-                    .map_err(|err: prodex_provider_core::ParseHarnessModeError| err.to_string())?;
-                args.harness = Some(harness);
-                (1, true)
+            Ok(ScanOutcome::Forward { consumed_count }) => {
+                remaining.extend(codex_args[index..index + consumed_count].iter().cloned());
+                index += consumed_count;
             }
-            "--api-key" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => {
-                    args.api_key = Some(val.to_string());
-                    (2, true)
-                }
-                None => (1, false),
-            },
-            a if a.starts_with("--api-key=") => {
-                args.api_key = a.strip_prefix("--api-key=").map(|v| v.to_string());
-                (1, true)
+            Ok(ScanOutcome::Unknown) => {
+                remaining.push(codex_args[index].clone());
+                index += 1;
             }
-            "--model" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => {
-                    args.local_model = Some(val.to_string());
-                    (2, true)
-                }
-                None => (1, false),
-            },
-            a if a.starts_with("--model=") => {
-                args.local_model = a.strip_prefix("--model=").map(|v| v.to_string());
-                (1, true)
+            Err(err) => {
+                remaining.extend(codex_args[index..].iter().cloned());
+                args.codex_args = remaining;
+                return Err(err);
             }
-            "--local-model" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => {
-                    args.local_model = Some(val.to_string());
-                    (2, true)
-                }
-                None => (1, false),
-            },
-            a if a.starts_with("--local-model=") => {
-                args.local_model = a.strip_prefix("--local-model=").map(|v| v.to_string());
-                (1, true)
-            }
-            "--profile" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => {
-                    if args.profile.is_none() {
-                        args.profile = Some(val.to_string());
-                    }
-                    (2, true)
-                }
-                None => (1, false),
-            },
-            a if a.starts_with("--profile=") => {
-                if args.profile.is_none() {
-                    args.profile = a.strip_prefix("--profile=").map(|v| v.to_string());
-                }
-                (1, true)
-            }
-            "--no-auto-rotate" => {
-                args.no_auto_rotate = true;
-                args.auto_rotate = false;
-                (1, true)
-            }
-            "--auto-rotate" => {
-                args.auto_rotate = true;
-                args.no_auto_rotate = false;
-                (1, true)
-            }
-            "--auto-redeem" => {
-                args.auto_redeem = true;
-                (1, true)
-            }
-            "--skip-quota-check" => {
-                args.skip_quota_check = true;
-                (1, true)
-            }
-            "--dry-run" => {
-                args.dry_run = true;
-                (1, true)
-            }
-            "--no-proxy" => {
-                args.no_proxy = true;
-                (1, true)
-            }
-            "--presidio" => {
-                args.presidio = true;
-                args.no_presidio = false;
-                (1, true)
-            }
-            "--no-presidio" => {
-                args.no_presidio = true;
-                args.presidio = false;
-                (1, true)
-            }
-            "--base-url" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => {
-                    args.base_url = Some(parse_runtime_base_url(val)?);
-                    (2, true)
-                }
-                None => (1, false),
-            },
-            a if a.starts_with("--base-url=") => {
-                args.base_url = a
-                    .strip_prefix("--base-url=")
-                    .map(parse_runtime_base_url)
-                    .transpose()?;
-                (1, true)
-            }
-            "--url" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => {
-                    args.url = Some(parse_super_local_url(val)?);
-                    (2, true)
-                }
-                None => (1, false),
-            },
-            a if a.starts_with("--url=") => {
-                args.url = a
-                    .strip_prefix("--url=")
-                    .map(parse_super_local_url)
-                    .transpose()?;
-                (1, true)
-            }
-            "--context-window" | "--local-context-window" => {
-                match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                    Some(val) => match val.parse::<usize>() {
-                        Ok(tokens) => {
-                            args.local_context_window = Some(tokens);
-                            (2, true)
-                        }
-                        Err(_) => (2, false),
-                    },
-                    None => (1, false),
-                }
-            }
-            a if a.starts_with("--context-window=") => {
-                if let Some(tokens) = a
-                    .strip_prefix("--context-window=")
-                    .and_then(|v| v.parse::<usize>().ok())
-                {
-                    args.local_context_window = Some(tokens);
-                    (1, true)
-                } else {
-                    (1, false)
-                }
-            }
-            a if a.starts_with("--local-context-window=") => {
-                if let Some(tokens) = a
-                    .strip_prefix("--local-context-window=")
-                    .and_then(|v| v.parse::<usize>().ok())
-                {
-                    args.local_context_window = Some(tokens);
-                    (1, true)
-                } else {
-                    (1, false)
-                }
-            }
-            "--auto-compact-token-limit" | "--local-auto-compact-token-limit" => {
-                match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                    Some(val) => match val.parse::<usize>() {
-                        Ok(tokens) => {
-                            args.local_auto_compact_token_limit = Some(tokens);
-                            (2, true)
-                        }
-                        Err(_) => (2, false),
-                    },
-                    None => (1, false),
-                }
-            }
-            a if a.starts_with("--auto-compact-token-limit=") => {
-                if let Some(tokens) = a
-                    .strip_prefix("--auto-compact-token-limit=")
-                    .and_then(|v| v.parse::<usize>().ok())
-                {
-                    args.local_auto_compact_token_limit = Some(tokens);
-                    (1, true)
-                } else {
-                    (1, false)
-                }
-            }
-            a if a.starts_with("--local-auto-compact-token-limit=") => {
-                if let Some(tokens) = a
-                    .strip_prefix("--local-auto-compact-token-limit=")
-                    .and_then(|v| v.parse::<usize>().ok())
-                {
-                    args.local_auto_compact_token_limit = Some(tokens);
-                    (1, true)
-                } else {
-                    (1, false)
-                }
-            }
-            "--cli" => match args.codex_args.get(i + 1).and_then(|v| v.to_str()) {
-                Some(val) => match parse_super_cli_agent(val) {
-                    Some(agent) => {
-                        args.cli = Some(agent);
-                        (2, true)
-                    }
-                    None => (2, false),
-                },
-                None => (1, false),
-            },
-            a if a.starts_with("--cli=") => {
-                if let Some(val) = a.strip_prefix("--cli=")
-                    && let Some(agent) = parse_super_cli_agent(val)
-                {
-                    args.cli = Some(agent);
-                    (1, true)
-                } else {
-                    (1, false)
-                }
-            }
-            _ => {
-                i += 1;
-                continue;
-            }
-        };
-        if skip {
-            let drain_end = (i + consumed).min(args.codex_args.len());
-            args.codex_args.drain(i..drain_end);
-        } else {
-            i += consumed;
         }
     }
+    args.codex_args = remaining;
     Ok(())
+}
+
+fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String> {
+    let Some(argument) = args[index].to_str() else {
+        return Ok(ScanOutcome::Unknown);
+    };
+    if let Some(scanned) = scan_value(args, index, &["--provider"]) {
+        return Ok(parse_optional(
+            scanned,
+            parse_super_external_provider,
+            SuperOverride::Provider,
+        ));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--harness"]) {
+        let value = scanned
+            .value
+            .ok_or_else(|| "--harness requires auto, native, or minimal".to_string())?
+            .parse()
+            .map_err(|err: prodex_provider_core::ParseHarnessModeError| err.to_string())?;
+        return Ok(apply(scanned.consumed_count, SuperOverride::Harness(value)));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--api-key"]) {
+        return Ok(parse_string(scanned, SuperOverride::ApiKey));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--model", "--local-model"]) {
+        return Ok(parse_string(scanned, SuperOverride::LocalModel));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--profile"]) {
+        return Ok(parse_string(scanned, SuperOverride::Profile));
+    }
+    let boolean = match argument {
+        "--no-auto-rotate" => Some(SuperOverride::AutoRotate(false)),
+        "--auto-rotate" => Some(SuperOverride::AutoRotate(true)),
+        "--auto-redeem" => Some(SuperOverride::AutoRedeem),
+        "--skip-quota-check" => Some(SuperOverride::SkipQuotaCheck),
+        "--dry-run" => Some(SuperOverride::DryRun),
+        "--no-proxy" => Some(SuperOverride::NoProxy),
+        "--presidio" => Some(SuperOverride::Presidio(true)),
+        "--no-presidio" => Some(SuperOverride::Presidio(false)),
+        _ => None,
+    };
+    if let Some(value) = boolean {
+        return Ok(apply(1, value));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--base-url"]) {
+        return scanned
+            .value
+            .map_or(Ok(forward(scanned.consumed_count)), |value| {
+                parse_runtime_base_url(value)
+                    .map(SuperOverride::BaseUrl)
+                    .map(|value| apply(scanned.consumed_count, value))
+            });
+    }
+    if let Some(scanned) = scan_value(args, index, &["--url"]) {
+        return scanned
+            .value
+            .map_or(Ok(forward(scanned.consumed_count)), |value| {
+                parse_super_local_url(value)
+                    .map(SuperOverride::Url)
+                    .map(|value| apply(scanned.consumed_count, value))
+            });
+    }
+    if let Some(scanned) = scan_value(args, index, &["--context-window", "--local-context-window"])
+    {
+        return Ok(parse_optional(
+            scanned,
+            str::parse::<usize>,
+            SuperOverride::LocalContextWindow,
+        ));
+    }
+    if let Some(scanned) = scan_value(
+        args,
+        index,
+        &[
+            "--auto-compact-token-limit",
+            "--local-auto-compact-token-limit",
+        ],
+    ) {
+        return Ok(parse_optional(
+            scanned,
+            str::parse::<usize>,
+            SuperOverride::LocalAutoCompactTokenLimit,
+        ));
+    }
+    if let Some(scanned) = scan_value(args, index, &["--cli"]) {
+        return Ok(parse_optional(
+            scanned,
+            |value| parse_super_cli_agent(value).ok_or(()),
+            SuperOverride::Cli,
+        ));
+    }
+    Ok(ScanOutcome::Unknown)
+}
+
+fn scan_value<'a>(args: &'a [OsString], index: usize, names: &[&str]) -> Option<ScannedValue<'a>> {
+    let argument = args[index].to_str()?;
+    if names.contains(&argument) {
+        let value = args.get(index + 1).and_then(|value| value.to_str());
+        return Some(ScannedValue {
+            value,
+            consumed_count: usize::from(value.is_some()) + 1,
+        });
+    }
+    let (name, value) = argument.split_once('=')?;
+    names.contains(&name).then_some(ScannedValue {
+        value: Some(value),
+        consumed_count: 1,
+    })
+}
+
+fn parse_optional<T, E>(
+    scanned: ScannedValue<'_>,
+    parse: impl FnOnce(&str) -> Result<T, E>,
+    wrap: impl FnOnce(T) -> SuperOverride,
+) -> ScanOutcome {
+    scanned
+        .value
+        .and_then(|value| parse(value).ok())
+        .map_or_else(
+            || forward(scanned.consumed_count),
+            |value| apply(scanned.consumed_count, wrap(value)),
+        )
+}
+
+fn parse_string(
+    scanned: ScannedValue<'_>,
+    wrap: impl FnOnce(String) -> SuperOverride,
+) -> ScanOutcome {
+    scanned.value.map_or_else(
+        || forward(scanned.consumed_count),
+        |value| apply(scanned.consumed_count, wrap(value.to_string())),
+    )
+}
+
+fn apply(consumed_count: usize, value: SuperOverride) -> ScanOutcome {
+    ScanOutcome::Apply {
+        value,
+        consumed_count,
+    }
+}
+
+fn forward(consumed_count: usize) -> ScanOutcome {
+    ScanOutcome::Forward { consumed_count }
+}
+
+fn apply_override(args: &mut SuperArgs, value: SuperOverride) {
+    match value {
+        SuperOverride::Provider(value) => args.provider = Some(value),
+        SuperOverride::Harness(value) => args.harness = Some(value),
+        SuperOverride::ApiKey(value) => args.api_key = Some(value),
+        SuperOverride::LocalModel(value) => args.local_model = Some(value),
+        SuperOverride::Profile(value) if args.profile.is_none() => args.profile = Some(value),
+        SuperOverride::Profile(_) => {}
+        SuperOverride::AutoRotate(true) => {
+            args.auto_rotate = true;
+            args.no_auto_rotate = false;
+        }
+        SuperOverride::AutoRotate(false) => {
+            args.no_auto_rotate = true;
+            args.auto_rotate = false;
+        }
+        SuperOverride::AutoRedeem => args.auto_redeem = true,
+        SuperOverride::SkipQuotaCheck => args.skip_quota_check = true,
+        SuperOverride::DryRun => args.dry_run = true,
+        SuperOverride::NoProxy => args.no_proxy = true,
+        SuperOverride::Presidio(true) => {
+            args.presidio = true;
+            args.no_presidio = false;
+        }
+        SuperOverride::Presidio(false) => {
+            args.no_presidio = true;
+            args.presidio = false;
+        }
+        SuperOverride::BaseUrl(value) => args.base_url = Some(value),
+        SuperOverride::Url(value) => args.url = Some(value),
+        SuperOverride::LocalContextWindow(value) => args.local_context_window = Some(value),
+        SuperOverride::LocalAutoCompactTokenLimit(value) => {
+            args.local_auto_compact_token_limit = Some(value);
+        }
+        SuperOverride::Cli(value) => args.cli = Some(value),
+    }
 }
 
 fn parse_super_cli_agent(value: &str) -> Option<SuperCliAgent> {
@@ -274,5 +262,28 @@ fn parse_super_cli_agent(value: &str) -> Option<SuperCliAgent> {
         "kiro" => Some(SuperCliAgent::Kiro),
         "agy" => Some(SuperCliAgent::Agy),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn value_scanner_reports_consumption_without_mutating_arguments() {
+        let args = vec![
+            OsString::from("--model"),
+            OsString::from("split"),
+            OsString::from("--local-model=equals"),
+        ];
+        let before = args.clone();
+
+        let split = scan_value(&args, 0, &["--model", "--local-model"]).unwrap();
+        assert_eq!(split.value, Some("split"));
+        assert_eq!(split.consumed_count, 2);
+        let equals = scan_value(&args, 2, &["--model", "--local-model"]).unwrap();
+        assert_eq!(equals.value, Some("equals"));
+        assert_eq!(equals.consumed_count, 1);
+        assert_eq!(args, before);
     }
 }

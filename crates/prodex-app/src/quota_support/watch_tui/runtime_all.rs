@@ -24,7 +24,7 @@ pub(crate) fn watch_all_quotas(
         ) {
             Ok(()) => return Ok(()),
             Err(err) if std::env::var_os("PRODEX_TUI_STRICT").is_none() => {
-                eprintln!("prodex quota TUI unavailable, falling back to plain watch: {err:#}");
+                eprintln!("{}", quota_watch_tui_fallback_message(&err));
             }
             Err(err) => return Err(err),
         }

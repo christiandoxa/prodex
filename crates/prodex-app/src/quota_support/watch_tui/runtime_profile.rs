@@ -62,7 +62,7 @@ pub(crate) fn watch_quota(
         match watch_profile_quota_tui(profile_name, provider, codex_home, base_url) {
             Ok(()) => return Ok(()),
             Err(err) if std::env::var_os("PRODEX_TUI_STRICT").is_none() => {
-                eprintln!("prodex quota TUI unavailable, falling back to plain watch: {err:#}");
+                eprintln!("{}", quota_watch_tui_fallback_message(&err));
             }
             Err(err) => return Err(err),
         }
@@ -77,12 +77,6 @@ pub(crate) fn watch_quota(
         print_quota_watch_plain_snapshot(&output)?;
         thread::sleep(Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS));
     }
-}
-
-pub(crate) fn quota_watch_available_report_lines(header: &str) -> Option<usize> {
-    let terminal_height = terminal_height_lines()?;
-    let reserved = header.lines().count().saturating_add(2);
-    Some(terminal_height.saturating_sub(reserved))
 }
 
 pub(super) fn print_quota_watch_plain_snapshot(output: &str) -> Result<()> {

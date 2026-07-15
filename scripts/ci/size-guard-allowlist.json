@@ -10,11 +10,6 @@
     "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after gateway backend startup moved to its focused module."
   },
   {
-    "file": "crates/prodex-app/src/app_server_broker_preview.rs",
-    "maxLines": 1406,
-    "reason": "App-server diagnostic, schema-validation, replay, and stdio preview handling remain capped while the protocol-aware broker is split into focused transport and validation modules."
-  },
-  {
     "file": "crates/prodex-app/src/dashboard.rs",
     "maxLines": 1205,
     "reason": "The local control-plane HTTP server, redacted JSON endpoints, provider/model catalog assembly, and dashboard tests remain capped while endpoint handlers are split from server orchestration."
@@ -36,23 +31,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 2266,
-    "reason": "The typed data-plane boundary now carries PIP attributes, execution approval, dynamic governed routing, eligible precommit fallback, audit context, dispatch, and reconciliation; capped until governance and provider planning move to focused sibling modules."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 892,
-    "reason": "Cross-provider upstream dispatch now includes the evaluated native Anthropic Messages precommit path; capped until provider-specific dispatch ownership is extracted without changing retry or affinity behavior."
-  },
-  {
-    "file": "crates/prodex-app/src/quota_support/watch.rs",
-    "maxLines": 1110,
-    "reason": "Live quota snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped after native TUI rendering helpers moved to a sibling module."
+    "maxLines": 1887,
+    "reason": "Data-plane authorization, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1992,
-    "reason": "Kiro local rewrite request/response translation remains capped while model and effort forwarding, single-invocation streaming, and tenant-scoped conversation persistence share the provider boundary."
+    "maxLines": 1169,
+    "reason": "Kiro ACP process lifecycle, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped after pure protocol shaping moved to provider-core."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
@@ -66,7 +51,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_usage.rs",
-    "maxLines": 1716,
+    "maxLines": 1714,
     "reason": "Gateway usage regressions now cover atomic budget admission, header-first virtual-key rejection, bounded persistence queues, and request-id cleanup; capped until admission and persistence fixtures are split."
   },
   {
@@ -290,11 +275,6 @@
     "reason": "Lifecycle HTTP coverage exercises four governed artifact kinds plus execution-approval quorum, denial audit, idempotent replay, and content-free responses through shared fixtures."
   },
   {
-    "file": "crates/prodex-app/src/runtime_proxy/presidio.rs",
-    "maxLines": 1520,
-    "reason": "The compatibility adapter shares bounded typed classification rules and explicit detector failure matrices across HTTP and WebSocket inspection while preserving transport behavior."
-  },
-  {
     "file": "crates/prodex-app/src/runtime_tuning/config.rs",
     "maxLines": 856,
     "reason": "Runtime tuning remains capped after adding immutable governance defaults to the complete configuration fixture."
@@ -321,13 +301,13 @@
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/governance.rs",
-    "maxLines": 2606,
-    "reason": "The PostgreSQL runtime adapter keeps four-kind lifecycle, idempotent approvals, revisioned sessions, revocation epochs, audit integrity, bounded export, and leased SIEM transactions under one tenant-scoped repository boundary."
+    "maxLines": 1613,
+    "reason": "The PostgreSQL governance facade retains tenant-scoped repository methods and transaction ordering after revision, approval, session, and audit/outbox helpers moved to focused backend modules."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/src/governance_repository.rs",
-    "maxLines": 2278,
-    "reason": "The isolated SQLite runtime adapter mirrors authoritative idempotent approvals, revisioned sessions, revocation epochs, audit integrity, and outbox contracts without leaking driver code into the SQL-plan crate."
+    "maxLines": 1257,
+    "reason": "The SQLite governance facade retains repository APIs and explicit transaction ordering after revision, approval, session, and audit/outbox helpers moved to focused backend modules."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
@@ -366,7 +346,7 @@
   },
   {
     "file": "crates/prodex-storage/src/governance.rs",
-    "maxLines": 936,
-    "reason": "The governance storage contract keeps revision lifecycle, idempotent approvals, boxed session outcomes, revocation epochs, audit integrity, and SIEM outbox types under one adapter-neutral boundary."
+    "maxLines": 906,
+    "reason": "The governance storage contract keeps public revision, approval, session, audit, and SIEM DTOs together while pure codecs, validation, and integrity helpers live in focused child modules."
   }
 ]
