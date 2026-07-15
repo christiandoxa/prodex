@@ -1,8 +1,8 @@
 //! Compact-route local admission pressure helpers.
 
 use super::super::super::{
-    build_runtime_proxy_json_error_response, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message,
+    build_runtime_proxy_json_error_response, runtime_profile_inflight_hard_limited_for_context,
+    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
 use super::logging::{RuntimeProxyCompactFinalFailureLog, log_runtime_proxy_compact_final_failure};
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
@@ -43,7 +43,7 @@ pub(super) fn build_runtime_fresh_compact_pressure_response(
     )
 }
 
-pub(super) fn log_runtime_compact_inflight_saturated(
+fn log_runtime_compact_inflight_saturated(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -65,6 +65,34 @@ pub(super) fn log_runtime_compact_inflight_saturated(
                         .to_string(),
                 ),
             ],
+        ),
+    );
+}
+
+pub(super) fn runtime_compact_candidate_inflight_saturated(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    hard_affinity: bool,
+) -> anyhow::Result<bool> {
+    if hard_affinity
+        || !runtime_profile_inflight_hard_limited_for_context(shared, profile_name, "compact_http")?
+    {
+        return Ok(false);
+    }
+    log_runtime_compact_inflight_saturated(request_id, shared, profile_name);
+    Ok(true)
+}
+
+pub(super) fn log_runtime_compact_local_selection_blocked(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+) {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http local_selection_blocked profile={profile_name} route=compact reason=quota_exhausted_before_send"
         ),
     );
 }

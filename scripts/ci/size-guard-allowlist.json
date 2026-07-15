@@ -85,11 +85,6 @@
     "reason": "HTTP continuation, tool-output, and compact regression coverage remains capped while compact-specific fixtures are split by route."
   },
   {
-    "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_selection_and_pressure/admission/compact.rs",
-    "maxLines": 921,
-    "reason": "Compact admission and quota/transport rotation regression coverage now carries the two explicit immutable RuntimeConfig fixture fields and remains capped while fixture setup is split from route-specific assertions."
-  },
-  {
     "file": "crates/prodex-app/tests/support/profile_commands_body/export.rs",
     "maxLines": 942,
     "reason": "Profile export regression fixtures include bounded v1/v2 migration and resource-exhaustion cases; capped until provider-specific scenarios split from shared helpers."

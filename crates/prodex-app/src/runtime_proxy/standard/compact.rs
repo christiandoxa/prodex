@@ -1,9 +1,7 @@
 use super::super::{
-    RuntimeResponseCandidateSelection, commit_runtime_proxy_profile_selection_with_notice,
-    release_runtime_auth_failed_affinity, release_runtime_compact_lineage,
-    runtime_compact_route_followup_bound_profile,
-    runtime_profile_inflight_hard_limited_for_context, runtime_proxy_current_profile,
-    runtime_proxy_log, runtime_proxy_precommit_budget_exhausted_for_route,
+    RuntimeResponseCandidateSelection, runtime_compact_route_followup_bound_profile,
+    runtime_proxy_current_profile, runtime_proxy_log,
+    runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_should_shed_fresh_compact_request,
     runtime_proxy_sync_probe_pressure_pause,
     runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_request_session_id,
@@ -20,26 +18,28 @@ use std::collections::BTreeSet;
 use std::time::Instant;
 mod admission;
 mod affinity;
+mod auth;
+mod commit;
 mod fallback;
+mod flow;
 mod logging;
 mod retryable;
 mod transport;
 use admission::{
-    build_runtime_fresh_compact_pressure_response, log_runtime_compact_inflight_saturated,
+    build_runtime_fresh_compact_pressure_response, log_runtime_compact_local_selection_blocked,
+    runtime_compact_candidate_inflight_saturated,
 };
-use affinity::runtime_compact_candidate_has_hard_affinity;
-use fallback::{
-    RuntimeProxyCompactSelectionExhausted, finish_runtime_proxy_compact_selection_exhausted,
-};
-use logging::{
-    RuntimeProxyCompactAttemptFailureLog, log_runtime_proxy_compact_attempt_final_failure,
-};
-use retryable::{
-    RuntimeProxyCompactRetryableFailure, handle_runtime_proxy_compact_retryable_failure,
-};
-use transport::{
-    RuntimeProxyCompactTransportFailure, finish_runtime_proxy_compact_transport_failure,
-};
+use affinity::runtime_compact_route_candidate_has_hard_affinity;
+use auth::{RuntimeProxyCompactAuthFailure, handle_runtime_proxy_compact_auth_failure};
+use commit::commit_runtime_proxy_compact_success;
+use fallback::RuntimeProxyCompactSelectionExhausted;
+use fallback::finish_runtime_proxy_compact_selection_exhausted;
+use flow::RuntimeCompactFailureFlow;
+use logging::log_runtime_proxy_compact_candidate;
+use retryable::RuntimeProxyCompactRetryableFailure;
+use retryable::handle_runtime_proxy_compact_retryable_failure;
+use transport::RuntimeProxyCompactTransportFailure;
+use transport::finish_runtime_proxy_compact_transport_failure;
 
 pub(super) fn proxy_runtime_compact_request(
     request_id: u64,
@@ -60,14 +60,11 @@ pub(super) fn proxy_runtime_compact_request(
         request_turn_state.as_deref(),
         request_session_id.as_deref(),
     )?;
-    if let Some((profile_name, source)) = compact_followup_profile.as_ref() {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http compact_followup_owner profile={profile_name} source={source}"
-            ),
-        );
-    }
+    logging::log_runtime_proxy_compact_followup_owner(
+        request_id,
+        shared,
+        compact_followup_profile.as_ref(),
+    );
     let initial_compact_affinity_profile = compact_followup_profile
         .as_ref()
         .map(|(profile_name, _)| profile_name.as_str())
@@ -207,25 +204,23 @@ pub(super) fn proxy_runtime_compact_request(
         if excluded_profiles.contains(&candidate_name) {
             continue;
         }
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http compact_candidate={} excluded_count={}",
-                candidate_name,
-                excluded_profiles.len()
-            ),
-        );
-        let session_affinity_candidate = compact_followup_profile
-            .as_ref()
-            .is_some_and(|(owner, _)| owner == &candidate_name)
-            || session_profile.as_deref() == Some(candidate_name.as_str());
-        if runtime_profile_inflight_hard_limited_for_context(
+        log_runtime_proxy_compact_candidate(
+            request_id,
             shared,
             &candidate_name,
-            "compact_http",
-        )? && !session_affinity_candidate
-        {
-            log_runtime_compact_inflight_saturated(request_id, shared, &candidate_name);
+            excluded_profiles.len(),
+        );
+        let candidate_has_hard_affinity = runtime_compact_route_candidate_has_hard_affinity(
+            &candidate_name,
+            &compact_followup_profile,
+            session_profile.as_deref(),
+        );
+        if runtime_compact_candidate_inflight_saturated(
+            request_id,
+            shared,
+            &candidate_name,
+            candidate_has_hard_affinity,
+        )? {
             excluded_profiles.insert(candidate_name);
             saw_inflight_saturation = true;
             continue;
@@ -236,30 +231,18 @@ pub(super) fn proxy_runtime_compact_request(
             request,
             shared,
             &candidate_name,
-            runtime_compact_candidate_has_hard_affinity(
-                &candidate_name,
-                compact_followup_profile
-                    .as_ref()
-                    .map(|(profile_name, _)| profile_name.as_str()),
-                session_profile.as_deref(),
-            ),
+            candidate_has_hard_affinity,
         )? {
             RuntimeStandardAttempt::Success {
                 profile_name,
                 response,
             } => {
-                commit_runtime_proxy_profile_selection_with_notice(
+                return commit_runtime_proxy_compact_success(
+                    request_id,
                     shared,
-                    &profile_name,
-                    RuntimeRouteKind::Compact,
-                )?;
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http compact_committed profile={profile_name}"
-                    ),
+                    profile_name,
+                    response,
                 );
-                return Ok(response);
             }
             RuntimeStandardAttempt::StaleContinuation { response } => return Ok(response),
             RuntimeStandardAttempt::TransportFailed {
@@ -267,16 +250,13 @@ pub(super) fn proxy_runtime_compact_request(
                 stage,
             } => {
                 saw_transport_failure = true;
-                if let Some(response) = finish_runtime_proxy_compact_transport_failure(
+                match finish_runtime_proxy_compact_transport_failure(
                     RuntimeProxyCompactTransportFailure {
                         request_id,
                         shared,
                         profile_name: &profile_name,
                         stage,
-                        strict_affinity_profile: compact_followup_profile
-                            .as_ref()
-                            .map(|(profile_name, _)| profile_name.as_str()),
-                        session_profile: session_profile.as_deref(),
+                        hard_affinity: candidate_has_hard_affinity,
                         selection_attempts,
                         selection_started_at,
                         pressure_mode,
@@ -285,16 +265,18 @@ pub(super) fn proxy_runtime_compact_request(
                         saw_transport_failure,
                     },
                 ) {
-                    return Ok(response);
+                    RuntimeCompactFailureFlow::Retry => {
+                        excluded_profiles.insert(profile_name);
+                    }
+                    RuntimeCompactFailureFlow::Return(response) => return Ok(response),
                 }
-                excluded_profiles.insert(profile_name);
             }
             RuntimeStandardAttempt::RetryableFailure {
                 profile_name,
                 response,
                 overload,
             } => {
-                if let Some(response) = handle_runtime_proxy_compact_retryable_failure(
+                match handle_runtime_proxy_compact_retryable_failure(
                     RuntimeProxyCompactRetryableFailure {
                         request_id,
                         shared,
@@ -317,92 +299,38 @@ pub(super) fn proxy_runtime_compact_request(
                         saw_transport_failure,
                     },
                 )? {
-                    return Ok(response);
+                    RuntimeCompactFailureFlow::Retry => {}
+                    RuntimeCompactFailureFlow::Return(response) => return Ok(response),
                 }
             }
             RuntimeStandardAttempt::AuthFailed {
                 profile_name,
                 response,
             } => {
-                runtime_proxy_log(
+                match handle_runtime_proxy_compact_auth_failure(RuntimeProxyCompactAuthFailure {
+                    request_id,
                     shared,
-                    format!(
-                        "request={request_id} transport=http compact_auth_failed profile={profile_name}"
-                    ),
-                );
-                if runtime_compact_candidate_has_hard_affinity(
-                    &profile_name,
-                    compact_followup_profile
-                        .as_ref()
-                        .map(|(profile_name, _)| profile_name.as_str()),
-                    session_profile.as_deref(),
-                ) {
-                    log_runtime_proxy_compact_attempt_final_failure(
-                        shared,
-                        RuntimeProxyCompactAttemptFailureLog {
-                            request_id,
-                            exit: "hard_affinity_auth_failure",
-                            reason: "auth",
-                            selection_attempts,
-                            selection_started_at,
-                            pressure_mode,
-                            last_failure: last_failure.as_ref(),
-                            saw_inflight_saturation,
-                            saw_transport_failure,
-                            profile_name: &profile_name,
-                        },
-                    );
-                    return Ok(response);
+                    profile_name,
+                    response,
+                    hard_affinity: candidate_has_hard_affinity,
+                    request_session_id: request_session_id.as_deref(),
+                    request_turn_state: request_turn_state.as_deref(),
+                    compact_followup_profile: &mut compact_followup_profile,
+                    session_profile: &mut session_profile,
+                    excluded_profiles: &mut excluded_profiles,
+                    last_failure: &mut last_failure,
+                    selection_attempts,
+                    selection_started_at,
+                    pressure_mode,
+                    saw_inflight_saturation,
+                    saw_transport_failure,
+                })? {
+                    RuntimeCompactFailureFlow::Retry => {}
+                    RuntimeCompactFailureFlow::Return(response) => return Ok(response),
                 }
-                let released_affinity = release_runtime_auth_failed_affinity(
-                    shared,
-                    &profile_name,
-                    None,
-                    None,
-                    request_session_id.as_deref(),
-                )?;
-                let released_compact_lineage = release_runtime_compact_lineage(
-                    shared,
-                    &profile_name,
-                    request_session_id.as_deref(),
-                    request_turn_state.as_deref(),
-                    "auth_failed",
-                )?;
-                if session_profile.as_deref() == Some(profile_name.as_str()) {
-                    session_profile = None;
-                }
-                if compact_followup_profile
-                    .as_ref()
-                    .is_some_and(|(owner, _)| owner == &profile_name)
-                {
-                    compact_followup_profile = None;
-                }
-                if released_affinity {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http auth_failed_affinity_released profile={profile_name} route=compact"
-                        ),
-                    );
-                }
-                if released_compact_lineage {
-                    runtime_proxy_log(
-                        shared,
-                        format!(
-                            "request={request_id} transport=http compact_lineage_released profile={profile_name} reason=auth_failed"
-                        ),
-                    );
-                }
-                excluded_profiles.insert(profile_name);
-                last_failure = Some((response, true));
             }
             RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http local_selection_blocked profile={profile_name} route=compact reason=quota_exhausted_before_send"
-                    ),
-                );
+                log_runtime_compact_local_selection_blocked(request_id, shared, &profile_name);
                 excluded_profiles.insert(profile_name);
             }
         }
