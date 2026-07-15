@@ -102,11 +102,7 @@ pub(super) fn proxy_runtime_noncompact_request(
         .unwrap_or_else(|| current_profile.clone());
     let pressure_mode =
         runtime_proxy_pressure_mode_active_for_route(shared, RuntimeRouteKind::Standard);
-    let mut selection_started_at = Instant::now();
-    let mut selection_attempts = 0usize;
-    let mut excluded_profiles = BTreeSet::new();
-    let mut last_failure: Option<(tiny_http::ResponseBox, bool)> = None;
-    let mut saw_inflight_saturation = false;
+    let mut loop_state = RuntimePrecommitLoopState::<tiny_http::ResponseBox>::new();
     let (quota_summary, quota_source) = runtime_profile_quota_summary_for_route(
         shared,
         &preferred_profile,
@@ -154,27 +150,24 @@ pub(super) fn proxy_runtime_noncompact_request(
                 runtime_quota_summary_log_fields(quota_summary),
             ),
         );
-        excluded_profiles.insert(preferred_profile.clone());
+        loop_state
+            .excluded_profiles
+            .insert(preferred_profile.clone());
     }
 
     loop {
-        if runtime_proxy_precommit_budget_exhausted_for_route(
-            shared,
-            selection_started_at,
-            selection_attempts,
-            session_profile.is_some(),
-            pressure_mode,
-        )? {
+        if loop_state.budget_exhausted(shared, session_profile.is_some(), pressure_mode)? {
             runtime_proxy_log(
                 shared,
                 format!(
-                    "request={request_id} transport=http standard_precommit_budget_exhausted attempts={selection_attempts} elapsed_ms={} pressure_mode={pressure_mode}",
-                    selection_started_at.elapsed().as_millis()
+                    "request={request_id} transport=http standard_precommit_budget_exhausted attempts={} elapsed_ms={} pressure_mode={pressure_mode}",
+                    loop_state.selection_attempts,
+                    loop_state.selection_started_at.elapsed().as_millis()
                 ),
             );
             return Ok(runtime_proxy_final_retryable_http_failure_response(
-                last_failure,
-                saw_inflight_saturation,
+                loop_state.last_failure,
+                loop_state.saw_inflight_saturation,
                 false,
             )
             .unwrap_or_else(|| {
@@ -185,7 +178,7 @@ pub(super) fn proxy_runtime_noncompact_request(
             }));
         }
 
-        let candidate_name = if excluded_profiles.is_empty() {
+        let action = if loop_state.excluded_profiles.is_empty() {
             runtime_selection_trace_log_direct(
                 shared,
                 request_id,
@@ -203,24 +196,24 @@ pub(super) fn proxy_runtime_noncompact_request(
                     hard_affinity: false,
                 },
             );
-            preferred_profile.clone()
+            RuntimePrecommitLoopAction::Attempt(preferred_profile.clone())
         } else if let Some(candidate_name) =
             select_runtime_response_candidate_for_route_with_request(
                 shared,
                 RuntimeResponseCandidateSelection::fresh(
-                    &excluded_profiles,
+                    &loop_state.excluded_profiles,
                     RuntimeRouteKind::Standard,
                 ),
                 Some(request_id),
                 request_model_name.as_deref(),
             )?
         {
-            candidate_name
+            RuntimePrecommitLoopAction::Attempt(candidate_name)
         } else {
             let remaining_cold_start_profiles =
                 runtime_remaining_sync_probe_cold_start_profiles_for_route(
                     shared,
-                    &excluded_profiles,
+                    &loop_state.excluded_profiles,
                     RuntimeRouteKind::Standard,
                 )?;
             if remaining_cold_start_profiles > 0 && session_profile.is_none() {
@@ -231,21 +224,29 @@ pub(super) fn proxy_runtime_noncompact_request(
                     ),
                 );
                 runtime_proxy_sync_probe_pressure_pause(shared, RuntimeRouteKind::Standard);
-                continue;
-            }
-            return Ok(runtime_proxy_final_retryable_http_failure_response(
-                last_failure,
-                saw_inflight_saturation,
-                false,
-            )
-            .unwrap_or_else(|| {
-                build_runtime_proxy_text_response(
-                    503,
-                    runtime_proxy_local_selection_failure_message(),
+                RuntimePrecommitLoopAction::Continue
+            } else {
+                RuntimePrecommitLoopAction::Return(
+                    runtime_proxy_final_retryable_http_failure_response(
+                        loop_state.last_failure.take(),
+                        loop_state.saw_inflight_saturation,
+                        false,
+                    )
+                    .unwrap_or_else(|| {
+                        build_runtime_proxy_text_response(
+                            503,
+                            runtime_proxy_local_selection_failure_message(),
+                        )
+                    }),
                 )
-            }));
+            }
         };
-        selection_attempts = selection_attempts.saturating_add(1);
+        let candidate_name = match action {
+            RuntimePrecommitLoopAction::Continue => continue,
+            RuntimePrecommitLoopAction::Attempt(candidate_name) => candidate_name,
+            RuntimePrecommitLoopAction::Return(response) => return Ok(response),
+        };
+        loop_state.record_attempt();
 
         if runtime_profile_inflight_hard_limited_for_context(
             shared,
@@ -271,22 +272,22 @@ pub(super) fn proxy_runtime_noncompact_request(
                     ],
                 ),
             );
-            saw_inflight_saturation = true;
+            loop_state.record_inflight_saturation();
             if runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 RuntimeInflightReliefWait {
                     request_id,
                     request,
                     shared,
-                    excluded_profiles: &excluded_profiles,
+                    excluded_profiles: &loop_state.excluded_profiles,
                     route_kind: RuntimeRouteKind::Standard,
-                    selection_started_at,
+                    selection_started_at: loop_state.selection_started_at,
                     continuation: session_profile.is_some(),
                     wait_affinity_owner: session_profile.as_deref(),
                 },
             )? {
                 continue;
             }
-            excluded_profiles.insert(candidate_name);
+            loop_state.excluded_profiles.insert(candidate_name);
             continue;
         }
 
@@ -339,8 +340,8 @@ pub(super) fn proxy_runtime_noncompact_request(
                 )? {
                     return Ok(response);
                 }
-                excluded_profiles.insert(profile_name);
-                last_failure = Some((response, true));
+                loop_state.excluded_profiles.insert(profile_name);
+                loop_state.last_failure = Some((response, true));
             }
             RuntimeStandardAttempt::AuthFailed {
                 profile_name,
@@ -370,8 +371,8 @@ pub(super) fn proxy_runtime_noncompact_request(
                         ),
                     );
                 }
-                excluded_profiles.insert(profile_name);
-                last_failure = Some((response, true));
+                loop_state.excluded_profiles.insert(profile_name);
+                loop_state.last_failure = Some((response, true));
             }
             RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
                 runtime_proxy_log(
@@ -383,7 +384,7 @@ pub(super) fn proxy_runtime_noncompact_request(
                 if session_profile.as_deref() == Some(profile_name.as_str()) {
                     session_profile = None;
                 }
-                excluded_profiles.insert(profile_name);
+                loop_state.excluded_profiles.insert(profile_name);
             }
             RuntimeStandardAttempt::TransportFailed {
                 profile_name,
@@ -401,9 +402,9 @@ pub(super) fn proxy_runtime_noncompact_request(
                         runtime_proxy_local_selection_failure_message(),
                     ));
                 }
-                excluded_profiles.insert(profile_name);
+                loop_state.excluded_profiles.insert(profile_name);
             }
         }
-        selection_started_at = Instant::now();
+        loop_state.restart_elapsed_budget();
     }
 }

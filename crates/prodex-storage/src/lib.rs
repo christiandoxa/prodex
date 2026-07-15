@@ -21,6 +21,9 @@ use prodex_domain::{
 mod accounting;
 mod audit;
 mod governance;
+#[path = "governance/support.rs"]
+#[doc(hidden)]
+pub mod governance_support;
 mod idempotency;
 mod identity;
 mod policy;

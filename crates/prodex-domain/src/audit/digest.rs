@@ -33,6 +33,11 @@ pub fn compute_audit_chain_digest(
         .expect("canonical SHA-256 audit digest is valid")
 }
 
+/// Computes the canonical lowercase SHA-256 checksum used by persisted artifacts.
+pub fn sha256_checksum(value: &[u8]) -> String {
+    format!("sha256:{}", hex_lower(&Sha256::digest(value)))
+}
+
 fn frame(hasher: &mut Sha256, value: &[u8]) {
     hasher.update(
         u64::try_from(value.len())

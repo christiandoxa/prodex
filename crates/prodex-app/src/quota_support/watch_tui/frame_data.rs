@@ -1,3 +1,4 @@
+use super::frame::AllQuotaWatchTuiRow;
 use super::*;
 
 pub(super) fn build_all_quota_watch_tui_row(
