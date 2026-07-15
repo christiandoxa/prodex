@@ -5,9 +5,8 @@ use super::gemini_sse::RuntimeGeminiGenerateSseReader;
 use super::local_rewrite_copilot::{
     RuntimeCopilotBindingRecorder, RuntimeCopilotResponsesSseBindingReader,
 };
-use super::provider_bridge::{
-    RuntimeProviderBridgeKind, RuntimeProviderWireFormat, runtime_provider_openai_contract,
-};
+use super::provider_bridge::RuntimeProviderBridgeKind;
+use prodex_provider_core::{ProviderAdapterContract, ProviderWireFormat, provider_adapter};
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 
@@ -156,20 +155,20 @@ fn copilot_adapter_streams_openai_responses_events_and_records_bindings() {
 
 #[test]
 fn anthropic_adapter_declares_openai_responses_client_contract() {
-    let contract = runtime_provider_openai_contract(RuntimeProviderBridgeKind::Anthropic);
+    let contract = provider_adapter(RuntimeProviderBridgeKind::Anthropic.provider_id());
 
     assert_eq!(
-        contract.client_request_format,
-        RuntimeProviderWireFormat::OpenAiResponses
+        contract.client_request_format(),
+        ProviderWireFormat::OpenAiResponses
     );
     assert_eq!(
-        contract.upstream_request_format,
-        RuntimeProviderWireFormat::OpenAiChatCompletions
+        contract.upstream_request_format(),
+        ProviderWireFormat::OpenAiChatCompletions
     );
     assert_eq!(
-        contract.response_format,
-        RuntimeProviderWireFormat::OpenAiResponses
+        contract.response_format(),
+        ProviderWireFormat::OpenAiResponses
     );
-    assert_eq!(contract.canonical_client_endpoint, "/v1/responses");
-    assert!(contract.supports_streaming);
+    assert_eq!(contract.canonical_client_endpoint(), "/v1/responses");
+    assert!(contract.supports_streaming());
 }

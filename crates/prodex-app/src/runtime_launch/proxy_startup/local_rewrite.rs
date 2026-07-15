@@ -57,7 +57,7 @@ pub(super) use super::local_rewrite_upstream::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult,
 };
-use super::provider_bridge::{runtime_provider_label, runtime_provider_openai_contract};
+use super::provider_bridge::runtime_provider_label;
 use crate::presidio_runtime::runtime_governed_presidio_redaction_config;
 use crate::proxy_config::{
     build_runtime_upstream_async_http_client, runtime_upstream_proxy_mode_label,
@@ -80,6 +80,7 @@ use crate::runtime_state_shared::{
 use crate::{RuntimeRotationProxy, runtime_proxy_log, runtime_proxy_request_sequence_seed};
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
+use prodex_provider_core::{ProviderAdapterContract, provider_adapter};
 use prodex_runtime_state::{RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits};
 use runtime_proxy_crate::{
     RuntimeProxyRequest, runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -92,7 +93,6 @@ use std::thread;
 use std::time::Duration;
 use tiny_http::Server as TinyServer;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
-
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
 pub(super) const RUNTIME_LOCAL_REWRITE_PROFILE: &str = "local";
 pub(super) const RUNTIME_GATEWAY_REDIS_KEY_STORE_KEY: &str = "prodex:gateway:virtual_keys";
@@ -494,7 +494,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             ],
         ),
     );
-    let openai_contract = runtime_provider_openai_contract(bridge_kind);
+    let openai_contract = provider_adapter(bridge_kind.provider_id());
     let gateway_virtual_key_store_path = gateway_state_store.key_store_path().to_path_buf();
     let gateway_virtual_key_usage_path = gateway_state_store.usage_path().to_path_buf();
     let gateway_virtual_key_entries = runtime_gateway_virtual_key_entries_from_sources(
@@ -515,10 +515,10 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             listen_addr.map_or_else(|| "-".to_string(), |addr| addr.to_string()),
             runtime_upstream_proxy_mode_label(true),
             super::provider_bridge::runtime_provider_label(bridge_kind),
-            openai_contract.client_request_format.label(),
-            openai_contract.upstream_request_format.label(),
-            openai_contract.response_format.label(),
-            openai_contract.canonical_client_endpoint,
+            openai_contract.client_request_format().label(),
+            openai_contract.upstream_request_format().label(),
+            openai_contract.response_format().label(),
+            openai_contract.canonical_client_endpoint(),
             gateway_auth_required,
             gateway_virtual_key_entries.len(),
             gateway_route_aliases.len(),
