@@ -362,6 +362,10 @@ mod runtime_request_id_tests {
 }
 
 pub fn main_entry() {
+    if app_commands::runtime_launch::goal_resume::handle_runtime_goal_session_notify_if_requested()
+    {
+        return;
+    }
     if let Err(err) = run() {
         eprintln!("Error: {}", main_entry_error_message(&err));
         std::process::exit(main_entry_exit_code(&err));

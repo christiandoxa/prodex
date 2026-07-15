@@ -27,11 +27,21 @@ pub(super) use self::providers_profiles::{
     runtime_kiro_gateway_profile_auth, runtime_kiro_profile_for_provider,
 };
 use crate::{
-    AppState, ProfileProvider, RuntimeAnthropicProviderAuth, RuntimeCopilotProviderAuth,
-    RuntimeGeminiModelResolution, RuntimeGeminiProviderAuth, RuntimeLocalRewriteProviderOptions,
+    AppState, ChildProcessPlan, ProfileProvider, RuntimeAnthropicProviderAuth,
+    RuntimeCopilotProviderAuth, RuntimeGeminiModelResolution, RuntimeGeminiProviderAuth,
+    RuntimeLocalRewriteProviderOptions, SuperExternalProvider, remove_provider_secret_env,
 };
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
+
+pub(super) fn isolate_auto_external_provider_child_env(
+    provider: Option<SuperExternalProvider>,
+    child: &mut ChildProcessPlan,
+) {
+    if provider.is_some() {
+        remove_provider_secret_env(child);
+    }
+}
 
 pub(super) fn runtime_launch_should_use_profileless_gemini(
     state: &AppState,

@@ -1,10 +1,27 @@
 use super::*;
 
+pub(super) fn maintain_shared_codex_sessions_after_child_exit() {
+    let Ok(paths) = AppPaths::discover() else {
+        return;
+    };
+    let _ = maintain_managed_codex_sessions(&paths);
+    let _ =
+        prodex_shared_codex_fs::persist_codex_session_image_attachments(&paths.shared_codex_root);
+}
+
 pub(super) fn clear_codex_session_binding(session_id: &str) -> Result<()> {
     let paths = AppPaths::discover()?;
     let _lock = acquire_state_file_lock(&paths)?;
     let mut state = AppState::load(&paths)?;
     let compact_key = prodex_runtime_store::runtime_compact_session_lineage_key(session_id);
+    let now = chrono::Local::now().timestamp();
+    clear_codex_session_continuation_sidecars(
+        &paths,
+        &state.profiles,
+        session_id,
+        &compact_key,
+        now,
+    )?;
     let removed_session = state.session_profile_bindings.remove(session_id).is_some();
     let removed_compact = state
         .session_profile_bindings
@@ -16,6 +33,60 @@ pub(super) fn clear_codex_session_binding(session_id: &str) -> Result<()> {
         write_state_json_atomic(&paths, &json)?;
     }
     Ok(())
+}
+
+fn clear_codex_session_continuation_sidecars(
+    paths: &AppPaths,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    session_id: &str,
+    compact_key: &str,
+    now: i64,
+) -> Result<()> {
+    let continuations_exist = runtime_continuations_file_path(paths).exists()
+        || runtime_continuations_last_good_file_path(paths).exists();
+    if continuations_exist {
+        let mut continuations = load_runtime_continuations_with_recovery(paths, profiles)?.value;
+        clear_codex_session_continuations(&mut continuations, session_id, compact_key, now);
+        save_runtime_continuations_for_profiles(paths, &continuations, profiles)?;
+    }
+
+    let journal_exists = runtime_continuation_journal_file_path(paths).exists()
+        || runtime_continuation_journal_last_good_file_path(paths).exists();
+    if journal_exists {
+        let mut journal = load_runtime_continuation_journal_with_recovery(paths, profiles)?.value;
+        clear_codex_session_continuations(&mut journal.continuations, session_id, compact_key, now);
+        save_runtime_continuation_journal_for_profiles(
+            paths,
+            &journal.continuations,
+            profiles,
+            now.max(journal.saved_at),
+        )?;
+    }
+    Ok(())
+}
+
+fn clear_codex_session_continuations(
+    continuations: &mut RuntimeContinuationStore,
+    session_id: &str,
+    compact_key: &str,
+    now: i64,
+) {
+    continuations.session_profile_bindings.remove(session_id);
+    continuations.session_profile_bindings.remove(compact_key);
+    continuations.session_id_bindings.remove(session_id);
+    continuations.session_id_bindings.remove(compact_key);
+    runtime_mark_continuation_status_dead(
+        &mut continuations.statuses,
+        RuntimeContinuationBindingKind::SessionId,
+        session_id,
+        now,
+    );
+    runtime_mark_continuation_status_dead(
+        &mut continuations.statuses,
+        RuntimeContinuationBindingKind::SessionId,
+        compact_key,
+        now,
+    );
 }
 
 pub(super) fn resolve_codex_delete_session_id(codex_args: &[OsString]) -> Result<Option<String>> {

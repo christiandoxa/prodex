@@ -8,7 +8,9 @@ use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 use terminal_ui::{
     tui_border_style, tui_connected_header_block, tui_primary_style, tui_secondary_style,
     tui_title_style,
@@ -60,6 +62,22 @@ pub(crate) fn run_child_plan(
     plan: &ChildProcessPlan,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
 ) -> Result<ExitStatus> {
+    run_child_plan_inner(plan, runtime_proxy, None)
+}
+
+pub(crate) fn run_child_plan_with_monitor(
+    plan: &ChildProcessPlan,
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    monitor: &mut dyn FnMut() -> bool,
+) -> Result<ExitStatus> {
+    run_child_plan_inner(plan, runtime_proxy, Some(monitor))
+}
+
+fn run_child_plan_inner(
+    plan: &ChildProcessPlan,
+    runtime_proxy: Option<&RuntimeProxyEndpoint>,
+    mut monitor: Option<&mut dyn FnMut() -> bool>,
+) -> Result<ExitStatus> {
     cleanup_codex_arg0_temp_dirs_best_effort(&plan.codex_home);
     let _session_lock = prodex_shared_codex_fs::lock_codex_sessions_for_child(&plan.codex_home)?;
     let mut command = Command::new(&plan.binary);
@@ -84,10 +102,73 @@ pub(crate) fn run_child_plan(
         },
         None => None,
     };
-    let status = child
-        .wait()
-        .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
+    let status = match monitor.as_mut() {
+        Some(monitor) => wait_for_monitored_child(&mut child, monitor),
+        None => child.wait(),
+    }
+    .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
     Ok(status)
+}
+
+fn wait_for_monitored_child(
+    child: &mut Child,
+    monitor: &mut dyn FnMut() -> bool,
+) -> io::Result<ExitStatus> {
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if monitor() {
+            terminate_child_gracefully(child)?;
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    return Ok(status);
+                }
+                if Instant::now() >= deadline {
+                    child.kill()?;
+                    return child.wait();
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[cfg(unix)]
+fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
+    let status = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if status.success() || child.try_wait()?.is_some() {
+        Ok(())
+    } else {
+        child.kill()
+    }
+}
+
+#[cfg(windows)]
+fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if status.success() || child.try_wait()?.is_some() {
+        Ok(())
+    } else {
+        child.kill()
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn terminate_child_gracefully(child: &mut Child) -> io::Result<()> {
+    child.kill()
 }
 
 pub(crate) fn cleanup_codex_arg0_temp_dirs_best_effort(codex_home: &Path) {

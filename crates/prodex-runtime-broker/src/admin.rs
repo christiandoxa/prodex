@@ -23,6 +23,11 @@ pub struct RuntimeBrokerActivationSuccess {
     pub current_profile: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RuntimeBrokerSessionAffinityReleaseSuccess {
+    pub ok: bool,
+}
+
 pub fn runtime_broker_admin_not_enabled_error() -> RuntimeBrokerAdminError {
     RuntimeBrokerAdminError::new(
         404,
@@ -64,6 +69,36 @@ pub fn runtime_broker_validate_activation_method(
     }
 }
 
+pub fn runtime_broker_validate_session_affinity_release_method(
+    method: &str,
+) -> Result<(), RuntimeBrokerAdminError> {
+    if method == "POST" {
+        Ok(())
+    } else {
+        Err(RuntimeBrokerAdminError::new(
+            405,
+            "method_not_allowed",
+            "runtime broker session affinity release requires POST",
+        ))
+    }
+}
+
+pub fn runtime_broker_validate_session_affinity_release_id(
+    session_id: Option<&str>,
+) -> Result<String, RuntimeBrokerAdminError> {
+    session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            RuntimeBrokerAdminError::new(
+                400,
+                "invalid_request",
+                "runtime broker session affinity release requires a valid session_id",
+            )
+        })
+}
+
 pub fn runtime_broker_validate_activation_profile(
     current_profile: Option<&str>,
 ) -> Result<String, RuntimeBrokerAdminError> {
@@ -89,6 +124,11 @@ pub fn runtime_broker_activation_success(
     }
 }
 
+pub fn runtime_broker_session_affinity_release_success()
+-> RuntimeBrokerSessionAffinityReleaseSuccess {
+    RuntimeBrokerSessionAffinityReleaseSuccess { ok: true }
+}
+
 pub fn runtime_broker_activation_profile_from_json(
     body: &[u8],
 ) -> Result<String, RuntimeBrokerAdminError> {
@@ -101,4 +141,18 @@ pub fn runtime_broker_activation_profile_from_json(
                 .map(str::to_string)
         });
     runtime_broker_validate_activation_profile(current_profile.as_deref())
+}
+
+pub fn runtime_broker_session_affinity_release_id_from_json(
+    body: &[u8],
+) -> Result<String, RuntimeBrokerAdminError> {
+    let session_id = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("session_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        });
+    runtime_broker_validate_session_affinity_release_id(session_id.as_deref())
 }

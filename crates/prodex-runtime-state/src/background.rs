@@ -193,6 +193,7 @@ pub fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> 
         "response_ids:",
         "turn_state:",
         "session_id:",
+        "session_affinity_release:",
         "compact_lineage:",
         "compact_lineage_release:",
     ]
@@ -216,6 +217,7 @@ pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveS
         "turn_state_touch:",
         "session_id:",
         "session_touch:",
+        "session_affinity_release:",
         "compact_lineage:",
         "compact_lineage_release:",
         "compact_session_touch:",

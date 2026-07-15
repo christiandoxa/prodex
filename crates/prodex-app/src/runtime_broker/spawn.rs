@@ -324,7 +324,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             &existing,
             current_profile,
         )?;
-        return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
+        return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing, &broker_client);
     }
 
     if let Some(existing) = load_runtime_broker_registry(paths, &broker_key)? {
@@ -357,7 +357,12 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
                             &existing,
                             current_profile,
                         )?;
-                        return runtime_proxy_endpoint_from_registry(paths, &broker_key, &existing);
+                        return runtime_proxy_endpoint_from_registry(
+                            paths,
+                            &broker_key,
+                            &existing,
+                            &broker_client,
+                        );
                     }
                 }
                 RuntimeBrokerVersionGuardOutcome::Replaced
@@ -384,7 +389,12 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
             &existing,
             current_profile,
         )?;
-        return runtime_proxy_endpoint_from_registry(paths, &existing_broker_key, &existing);
+        return runtime_proxy_endpoint_from_registry(
+            paths,
+            &existing_broker_key,
+            &existing,
+            &broker_client,
+        );
     }
 
     let instance_id = runtime_random_token("broker")?;
@@ -420,7 +430,7 @@ pub(crate) fn ensure_runtime_rotation_proxy_endpoint(
         &registry,
         current_profile,
     )?;
-    runtime_proxy_endpoint_from_registry(paths, &broker_key, &registry)
+    runtime_proxy_endpoint_from_registry(paths, &broker_key, &registry, &broker_client)
 }
 
 #[cfg(test)]

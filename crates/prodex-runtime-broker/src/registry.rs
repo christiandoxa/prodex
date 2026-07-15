@@ -56,6 +56,10 @@ impl RuntimeBrokerRegistry {
         self.admin_url(RuntimeBrokerAdminRoute::Activate)
     }
 
+    pub fn release_session_affinity_url(&self) -> String {
+        self.admin_url(RuntimeBrokerAdminRoute::ReleaseSessionAffinity)
+    }
+
     pub fn matches_launch_config(
         &self,
         upstream_base_url: &str,
@@ -124,6 +128,7 @@ pub enum RuntimeBrokerAdminRoute {
     Metrics,
     MetricsPrometheus,
     Activate,
+    ReleaseSessionAffinity,
 }
 
 impl RuntimeBrokerAdminRoute {
@@ -133,6 +138,7 @@ impl RuntimeBrokerAdminRoute {
             Self::Metrics => RUNTIME_BROKER_METRICS_PATH,
             Self::MetricsPrometheus => RUNTIME_BROKER_METRICS_PROMETHEUS_PATH,
             Self::Activate => RUNTIME_BROKER_ACTIVATE_PATH,
+            Self::ReleaseSessionAffinity => RUNTIME_BROKER_RELEASE_SESSION_AFFINITY_PATH,
         }
     }
 
@@ -142,6 +148,7 @@ impl RuntimeBrokerAdminRoute {
             RUNTIME_BROKER_METRICS_PATH => Some(Self::Metrics),
             RUNTIME_BROKER_METRICS_PROMETHEUS_PATH => Some(Self::MetricsPrometheus),
             RUNTIME_BROKER_ACTIVATE_PATH => Some(Self::Activate),
+            RUNTIME_BROKER_RELEASE_SESSION_AFFINITY_PATH => Some(Self::ReleaseSessionAffinity),
             _ => None,
         }
     }
@@ -165,6 +172,10 @@ pub fn runtime_broker_metrics_prometheus_url(registry: &RuntimeBrokerRegistry) -
 
 pub fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> String {
     registry.activate_url()
+}
+
+pub fn runtime_broker_release_session_affinity_url(registry: &RuntimeBrokerRegistry) -> String {
+    registry.release_session_affinity_url()
 }
 
 pub fn runtime_broker_registry_openai_mount_path(
