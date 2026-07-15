@@ -55,11 +55,6 @@
     "reason": "Gateway usage regressions now cover atomic budget admission, header-first virtual-key rejection, bounded persistence queues, and request-id cleanup; capped until admission and persistence fixtures are split."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge/tests.rs",
-    "maxLines": 1570,
-    "reason": "Provider bridge regressions include the fail-closed route-normalization matrix alongside compact routing, accounting, and continuation parity; capped until tests split by provider."
-  },
-  {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch.rs",
     "maxLines": 2250,
     "reason": "Runtime launch command tests remain capped after secure credential fixtures and post-exit session maintenance moved into focused sibling modules."
