@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.295.0 - 2026-07-15
+
+- No grouped changes.
+
 ## 0.294.0 - 2026-07-15
 
 ### Runtime
@@ -89,9 +93,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add live monitoring dashboard (`82ca042`)
-
-## 0.283.0 - 2026-07-13
-
-### Misc
-
-- Stabilize startup hooks and TUI borders (`e67a15d`)
