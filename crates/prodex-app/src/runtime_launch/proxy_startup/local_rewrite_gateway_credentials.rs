@@ -105,16 +105,7 @@ pub(super) fn runtime_gateway_pin_request_credentials(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewriteProxyShared {
     let snapshot = shared.gateway_credentials.current.load_full();
-    let mut pinned = shared.clone();
-    pinned.provider = snapshot.provider.clone();
-    pinned.provider_credential = snapshot.provider_credential.clone();
-    pinned.gateway_auth_token_hash = snapshot.auth_token_hash.clone();
-    pinned.gateway_admin_tokens = snapshot.admin_tokens.clone();
-    pinned.gateway_sso = snapshot.sso.clone();
-    pinned.gateway_virtual_keys = Arc::clone(&snapshot.virtual_keys);
-    pinned.gateway_guardrail_webhook = snapshot.guardrail_webhook.clone();
-    pinned.gateway_observability = snapshot.observability.clone();
-    pinned
+    shared.with_request_credentials(&snapshot)
 }
 
 pub(super) fn runtime_gateway_spawn_secret_refresh(
@@ -339,6 +330,21 @@ mod tests {
     }
 
     #[test]
+    fn request_credentials_are_loaded_once_before_pinning() {
+        let source = include_str!("local_rewrite_gateway_credentials.rs");
+        let function = source
+            .split("fn runtime_gateway_pin_request_credentials")
+            .nth(1)
+            .unwrap()
+            .split("\n}\n")
+            .next()
+            .unwrap();
+
+        assert_eq!(function.matches("current.load_full()").count(), 1);
+        assert_eq!(function.matches("with_request_credentials").count(), 1);
+    }
+
+    #[test]
     fn refresh_swaps_one_snapshot_and_pins_existing_requests() {
         let state = state(candidate(1, "old-secret"), Vec::new());
         let pinned = state.current.load_full();
@@ -353,6 +359,7 @@ mod tests {
         );
 
         let current = state.current.load_full();
+        assert!(!Arc::ptr_eq(&pinned, &current));
         assert_eq!(provider_api_key(&pinned), "old-secret");
         assert!(pinned.observability.http_bearer_token.is_some());
         assert!(!format!("{:?}", pinned.observability).contains("old-secret"));
