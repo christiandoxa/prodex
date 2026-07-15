@@ -120,17 +120,28 @@ fn persisted_weekly_only_snapshot_does_not_block_launch_preflight() {
 }
 
 #[test]
-fn prepare_runtime_launch_uses_persisted_exhausted_quota_snapshot_before_network_preflight() {
+fn prepare_runtime_launch_rechecks_persisted_exhausted_quota_snapshot() {
     let root = temp_dir("launch-preflight-persisted-exhausted-snapshot");
     let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
     let main_home = root.join("main-home");
     fs::create_dir_all(&main_home).unwrap();
+    write_runtime_launch_auth(
+        main_home.join("auth.json"),
+        serde_json::json!({
+            "tokens": {
+                "access_token": "main-token",
+                "account_id": "main-account"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
     let state = AppState {
         active_profile: Some("main".to_string()),
         profiles: BTreeMap::from([(
             "main".to_string(),
             ProfileEntry {
-                codex_home: main_home,
+                codex_home: main_home.clone(),
                 managed: false,
                 email: None,
                 provider: ProfileProvider::Openai,
@@ -147,24 +158,55 @@ fn prepare_runtime_launch_uses_persisted_exhausted_quota_snapshot_before_network
             "main".to_string(),
             RuntimeProfileUsageSnapshot {
                 checked_at: now,
-                five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                five_hour_status: RuntimeQuotaWindowStatus::Unknown,
                 five_hour_remaining_percent: 0,
-                five_hour_reset_at: now + 300,
-                weekly_status: RuntimeQuotaWindowStatus::Ready,
-                weekly_remaining_percent: 80,
-                weekly_reset_at: now + 604_800,
+                five_hour_reset_at: i64::MAX,
+                weekly_status: RuntimeQuotaWindowStatus::Exhausted,
+                weekly_remaining_percent: 0,
+                weekly_reset_at: now + 432_000,
             },
         )]),
         &state.profiles,
     )
     .unwrap();
 
-    let err = match prepare_runtime_launch(RuntimeLaunchRequest {
+    let server = TinyServer::http("127.0.0.1:0").expect("quota test server should bind");
+    let addr = server.server_addr().to_ip().unwrap();
+    let handle = thread::spawn(move || {
+        let request = server
+            .recv_timeout(Duration::from_secs(5))
+            .expect("quota request should be readable")
+            .expect("exhausted snapshot should trigger a live quota request");
+        assert_eq!(request.url(), "/backend-api/wham/usage");
+        request
+            .respond(
+                TinyResponse::from_string(
+                    serde_json::json!({
+                        "email": "member@example.com",
+                        "plan_type": "team",
+                        "rate_limit": {
+                            "primary_window": null,
+                            "secondary_window": {
+                                "used_percent": 0,
+                                "reset_at": now + 604_800,
+                                "limit_window_seconds": 604_800
+                            }
+                        }
+                    })
+                    .to_string(),
+                )
+                .with_header(TinyHeader::from_bytes("Content-Type", "application/json").unwrap()),
+            )
+            .expect("quota response should send");
+    });
+    let base_url = format!("http://{addr}/backend-api");
+
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
         profile: None,
         allow_auto_rotate: false,
         auto_redeem: false,
         skip_quota_check: false,
-        base_url: Some("http://127.0.0.1:9"),
+        base_url: Some(&base_url),
         upstream_no_proxy: true,
         include_code_review: false,
         smart_context_enabled: false,
@@ -176,19 +218,11 @@ fn prepare_runtime_launch_uses_persisted_exhausted_quota_snapshot_before_network
         profile_v2_name: None,
         external_provider: None,
         external_provider_api_key: None,
-    }) {
-        Ok(_) => panic!("fresh exhausted runtime snapshot should block launch preflight"),
-        Err(err) => err,
-    };
+    })
+    .expect("live ready quota should override an exhausted persisted snapshot");
+    handle.join().expect("quota test server should finish");
 
-    let message = format!("{err:#}");
-    assert!(message.contains("quota preflight blocked profile 'main'"));
-    assert_eq!(
-        err.downcast_ref::<crate::command_dispatch::ProdexCommandExit>()
-            .expect("blocked snapshot should carry an explicit exit code")
-            .code(),
-        2
-    );
+    assert_eq!(prepared.codex_home, main_home);
 }
 
 #[test]
