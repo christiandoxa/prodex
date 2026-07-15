@@ -125,6 +125,7 @@ pub(in super::super) struct RuntimeGeminiSelectedAuth {
 #[derive(Clone)]
 pub(in super::super) struct RuntimeGeminiRequestContext {
     pub(in super::super) profile_name: String,
+    pub(in super::super) model: String,
     pub(in super::super) conversation_messages: Vec<serde_json::Value>,
     pub(in super::super) binding_recorder: Option<RuntimeGeminiBindingRecorder>,
 }

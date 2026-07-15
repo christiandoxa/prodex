@@ -140,6 +140,9 @@ On Windows, run this from PowerShell or Command Prompt:
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/christiandoxa/prodex/releases/latest/download/install.ps1 | iex"
 ```
 
+<details>
+<summary>Installer verification, alternate source, and legacy migration</summary>
+
 The installers download the matching release asset and verify it against `SHA256SUMS`. The macOS/Linux target is `~/.local/bin`; Windows uses `%LOCALAPPDATA%\Programs\Prodex\bin`. Their auditable sources are also available directly from the repository:
 
 ```bash
@@ -153,6 +156,8 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/chr
 Set `PRODEX_INSTALL_DIR` to choose another binary directory. Standalone installs use the `codex` command on `PATH`; install Codex first if it is not already available.
 
 npm and Cargo installations are no longer supported. Existing copies from either legacy channel should run `prodex update` once to migrate to the standalone installer. Contributors should use normal workspace development commands such as `cargo build` instead of treating a source build as a supported installation channel.
+
+</details>
 
 ## Optional tools
 
@@ -756,29 +761,42 @@ prodex claude --profile second -- -p --output-format json "show the latest diff"
 
 ## Harness modes
 
-A harness mode is model-facing request policy for a local provider bridge; it is separate from the
-upstream provider and from the account profile used for credentials, quota rotation, and
-continuation affinity. Harness selection never creates a second agent runtime: Codex still owns its
-agent loop, tools, sandbox, approvals, skills, hooks, reconnect behavior, and TUI.
-
-Version 1 supports `auto`, `native`, and `minimal`. The default `auto` resolves conservatively to
-`native`, and Native preserves existing request bytes, headers, responses, and stream behavior.
-Minimal is opt-in and only prepends a versioned Prodex instruction to ordinary canonical
-`/v1/responses` inference requests. It preserves model, input, tools and schemas, tool choice,
-reasoning, metadata, streaming controls, continuation IDs, and unknown fields. It does not apply to
-compact, non-inference, admin, websocket, response, or stream-event paths.
+A harness mode is model-facing request policy for a local provider bridge. Prodex supports `auto`,
+`native`, `minimal`, and the explicit evaluation-backed `evaluated` mode. The default `auto` still
+resolves conservatively to `native`, so existing launches remain unchanged.
 
 ```bash
 prodex s --provider anthropic --harness native
+prodex s --provider anthropic --model claude-sonnet-4-6 --harness evaluated
 prodex s deepseek --harness minimal
+prodex s gemini --model gemini-3.1-pro-preview --harness evaluated
 prodex super --url http://127.0.0.1:8131 --harness minimal
 prodex gateway --provider gemini --harness native
 ```
 
+<details>
+<summary>Exact mode behavior and Evaluated policy boundaries</summary>
+
+Native preserves existing request bytes, headers, responses, and streams. Minimal only prepends a
+versioned Prodex instruction to eligible canonical `/v1/responses` inference requests. Evaluated
+matches the already-selected provider/model against a versioned catalog; it never chooses or
+reroutes a provider/model, and unknown pairs are no-ops at the harness layer.
+
+Current Evaluated policies translate supported Anthropic Responses traffic through native
+`/v1/messages` and reversibly map Gemini's canonical `exec_command` tool to
+`run_shell_command`, restoring the canonical name in typed buffered and SSE tool calls. Ambiguous
+tool aliases and unsupported/lossy Anthropic shapes fail closed instead of silently changing
+semantics.
+
 The harness is fixed for the bridge or gateway lifetime. It does not change account affinity,
-pre-commit rotation, retries, approvals, tools, or streaming semantics. See
-[docs/harness-modes.md](./docs/harness-modes.md) for exact scope, diagnostics, non-goals, and the
-unimplemented phase-2 design note.
+pre-commit rotation, retries, approvals, tools, or streaming commit semantics. Harness selection
+never creates a second agent runtime: Codex still owns its agent loop, tools, sandbox, approvals,
+skills, hooks, reconnect behavior, and TUI.
+
+</details>
+
+See [docs/harness-modes.md](./docs/harness-modes.md) for exact scope, diagnostics, evaluation
+catalog behavior, and non-goals.
 
 ## Profiles
 
@@ -1001,7 +1019,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - [docs/state-model.md](./docs/state-model.md) — state ownership and persistence model
 - [docs/runtime-policy.md](./docs/runtime-policy.md) — runtime policy keys, environment overrides, and runtime log path resolution
 - [docs/deployment.md](./docs/deployment.md) — Docker Compose scaffold for the standalone gateway
-- [docs/harness-modes.md](./docs/harness-modes.md) — Harness Mode semantics, scope, diagnostics, and future design note
+- [docs/harness-modes.md](./docs/harness-modes.md) — Harness Mode semantics, evaluated policies, scope, and diagnostics
 - [docs/testing.md](./docs/testing.md) — contributor testing guidance
 
 ## Support

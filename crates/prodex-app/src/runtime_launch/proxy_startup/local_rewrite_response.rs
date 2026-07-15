@@ -23,6 +23,8 @@ use std::path::Path;
 
 #[path = "local_rewrite_response_dispatch.rs"]
 mod dispatch;
+#[path = "local_rewrite_response_anthropic_messages.rs"]
+mod local_rewrite_response_anthropic_messages;
 #[path = "local_rewrite_response_chat_compatible.rs"]
 mod local_rewrite_response_chat_compatible;
 #[path = "local_rewrite_response_copilot.rs"]

@@ -1,5 +1,6 @@
 use super::*;
 
+mod anthropic_messages_sse_reader;
 mod anthropic_rewrite;
 mod chat_compatible_request;
 mod chat_compatible_rewrite;

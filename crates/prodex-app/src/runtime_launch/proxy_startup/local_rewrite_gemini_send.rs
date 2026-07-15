@@ -525,6 +525,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
                 );
                 let gemini_context = responses_route.then(|| RuntimeGeminiRequestContext {
                     profile_name: selected.profile_name.clone(),
+                    model: translated.model.clone(),
                     conversation_messages: translated.messages,
                     binding_recorder,
                 });

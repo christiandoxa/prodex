@@ -8,8 +8,20 @@ use crate::translators::openai_chat_compat::{
 };
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
 
+#[path = "anthropic/messages.rs"]
+mod messages;
+
 #[derive(Clone, Copy)]
 pub struct AnthropicTranslator;
+
+#[derive(Clone, Copy)]
+pub struct AnthropicMessagesTranslator;
+
+pub fn translate_openai_chat_request_to_anthropic_messages(
+    input: ProviderTransformInput,
+) -> ProviderTransformResult {
+    messages::translate_chat_request_to_anthropic(input)
+}
 
 impl ProviderTranslator for AnthropicTranslator {
     fn provider(&self) -> ProviderId {
@@ -86,5 +98,48 @@ impl ProviderTranslator for AnthropicTranslator {
                 input.body,
             )
         }
+    }
+}
+
+impl ProviderTranslator for AnthropicMessagesTranslator {
+    fn provider(&self) -> ProviderId {
+        ProviderId::Anthropic
+    }
+
+    fn client_wire_format(&self) -> ProviderWireFormat {
+        ProviderWireFormat::OpenAiResponses
+    }
+
+    fn upstream_wire_format(&self) -> ProviderWireFormat {
+        ProviderWireFormat::AnthropicMessages
+    }
+
+    fn supported_params(&self, endpoint: ProviderEndpoint, _model: &str) -> ProviderParamSupport {
+        if endpoint == ProviderEndpoint::Responses {
+            return responses_chat_compat_supported_params(self.provider());
+        }
+        ProviderParamSupport {
+            supported: false,
+            unsupported: vec![ProviderUnsupportedReason {
+                field: endpoint.label().to_string(),
+                reason: format!(
+                    "{} native Messages translator does not expose {}",
+                    self.provider().label(),
+                    endpoint.label()
+                ),
+            }],
+        }
+    }
+
+    fn transform_request(&self, input: ProviderTransformInput) -> ProviderTransformResult {
+        messages::translate_responses_request_to_anthropic(input)
+    }
+
+    fn transform_response(&self, input: ProviderTransformInput) -> ProviderTransformResult {
+        messages::translate_anthropic_response_to_responses(input)
+    }
+
+    fn transform_stream_event(&self, input: ProviderTransformInput) -> ProviderTransformResult {
+        messages::translate_anthropic_stream_event_to_responses(input)
     }
 }
