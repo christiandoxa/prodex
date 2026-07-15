@@ -7,7 +7,7 @@ use super::super::super::{
     runtime_proxy_log,
 };
 use super::{
-    affinity::runtime_compact_candidate_has_hard_affinity,
+    flow::RuntimeCompactFailureFlow,
     logging::{
         RuntimeProxyCompactAttemptFailureLog, log_runtime_proxy_compact_attempt_final_failure,
     },
@@ -19,8 +19,7 @@ pub(super) struct RuntimeProxyCompactTransportFailure<'a> {
     pub(super) shared: &'a RuntimeRotationProxyShared,
     pub(super) profile_name: &'a str,
     pub(super) stage: &'static str,
-    pub(super) strict_affinity_profile: Option<&'a str>,
-    pub(super) session_profile: Option<&'a str>,
+    pub(super) hard_affinity: bool,
     pub(super) selection_attempts: usize,
     pub(super) selection_started_at: Instant,
     pub(super) pressure_mode: bool,
@@ -31,7 +30,7 @@ pub(super) struct RuntimeProxyCompactTransportFailure<'a> {
 
 pub(super) fn finish_runtime_proxy_compact_transport_failure(
     failure: RuntimeProxyCompactTransportFailure<'_>,
-) -> Option<tiny_http::ResponseBox> {
+) -> RuntimeCompactFailureFlow {
     runtime_proxy_log(
         failure.shared,
         format!(
@@ -39,12 +38,8 @@ pub(super) fn finish_runtime_proxy_compact_transport_failure(
             failure.request_id, failure.profile_name, failure.stage
         ),
     );
-    if !runtime_compact_candidate_has_hard_affinity(
-        failure.profile_name,
-        failure.strict_affinity_profile,
-        failure.session_profile,
-    ) {
-        return None;
+    if !failure.hard_affinity {
+        return RuntimeCompactFailureFlow::Retry;
     }
 
     log_runtime_proxy_compact_attempt_final_failure(
@@ -62,7 +57,7 @@ pub(super) fn finish_runtime_proxy_compact_transport_failure(
             profile_name: failure.profile_name,
         },
     );
-    Some(build_runtime_proxy_json_error_response(
+    RuntimeCompactFailureFlow::Return(build_runtime_proxy_json_error_response(
         503,
         "service_unavailable",
         runtime_proxy_local_selection_failure_message(),
