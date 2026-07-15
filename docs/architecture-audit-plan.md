@@ -588,7 +588,7 @@ Current large files from the checked worktree include:
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs` (~3153; tests, not runtime hot path)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs` (~2390; tests, not runtime hot path)
 - `crates/prodex-provider-core/src/gemini_bridge/tests.rs` (~2048; characterization tests, not runtime hot path)
-- `crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_tests.rs` (~1377; tests, not runtime hot path)
+- `crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge/tests/` (split characterization tests, not runtime hot path)
 - `crates/prodex-provider-core/src/deepseek_bridge/tests.rs` (~1163; characterization tests, not runtime hot path)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_oauth_pool.rs` (~415; OAuth auth selection orchestration)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_provider_tool_tests.rs` (~707; tests, not runtime hot path)
