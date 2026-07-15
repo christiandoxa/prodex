@@ -277,8 +277,7 @@ fn try_runtime_launch_snapshot_preflight(
         return Ok(true);
     }
 
-    handle_blocked_selected_runtime_profile(paths, state, request, selection, &current_blocked)?;
-    Ok(true)
+    Ok(false)
 }
 
 fn try_runtime_launch_auto_snapshot_preflight(
