@@ -5,14 +5,14 @@ use super::local_rewrite_transport_copilot::{
     runtime_copilot_initiator_header, runtime_copilot_request_has_vision_input,
 };
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, RuntimeProviderWireFormat,
-    runtime_provider_gateway_cost_for_request, runtime_provider_gateway_spend_event,
-    runtime_provider_label, runtime_provider_model_from_body, runtime_provider_openai_contract,
+    RuntimeProviderBridgeKind, runtime_provider_gateway_cost_for_request,
+    runtime_provider_gateway_spend_event, runtime_provider_label, runtime_provider_model_from_body,
     runtime_provider_request_ledger_message,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
 use prodex_domain::RequestId;
+use prodex_provider_core::{ProviderAdapterContract, ProviderWireFormat, provider_adapter};
 use runtime_proxy_crate::{
     local_bridge_authorization_bearer_token, path_without_query, runtime_proxy_log_field,
     runtime_proxy_structured_log_message,
@@ -504,12 +504,12 @@ pub(super) fn runtime_openai_standard_provider_upstream_url(
     mount_path: &str,
     path_and_query: &str,
 ) -> String {
-    let contract = runtime_provider_openai_contract(provider_kind);
+    let adapter = provider_adapter(provider_kind.provider_id());
     let path = path_without_query(path_and_query);
     if path.ends_with("/responses")
         && matches!(
-            contract.upstream_request_format,
-            RuntimeProviderWireFormat::OpenAiChatCompletions
+            adapter.upstream_request_format(),
+            ProviderWireFormat::OpenAiChatCompletions
         )
     {
         return runtime_local_rewrite_upstream_url(base_url, mount_path, "/chat/completions");

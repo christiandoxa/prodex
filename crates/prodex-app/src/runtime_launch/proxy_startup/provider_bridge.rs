@@ -5,11 +5,9 @@ mod provider_bridge_error_policy;
 #[path = "provider_bridge_routing.rs"]
 mod provider_bridge_routing;
 pub(super) use prodex_provider_core::ProviderErrorClass as RuntimeProviderErrorClass;
+use prodex_provider_core::ProviderId;
 #[cfg(test)]
 use prodex_provider_core::ProviderTransformLoss;
-use prodex_provider_core::{
-    ProviderAdapterContract, ProviderId, ProviderWireFormat, provider_adapter,
-};
 
 pub(super) use self::provider_bridge_conformance::{
     RuntimeHarnessProviderPolicyLog, runtime_harness_log_provider_policy,
@@ -94,71 +92,8 @@ impl RuntimeProviderBridgeKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RuntimeProviderWireFormat {
-    OpenAiResponses,
-    OpenAiChatCompletions,
-    AnthropicMessages,
-    GeminiGenerateContent,
-}
-
-impl RuntimeProviderWireFormat {
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::OpenAiResponses => "openai-responses",
-            Self::OpenAiChatCompletions => "openai-chat-completions",
-            Self::AnthropicMessages => "anthropic-messages",
-            Self::GeminiGenerateContent => "gemini-generate-content",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct RuntimeProviderOpenAiContract {
-    pub(super) client_request_format: RuntimeProviderWireFormat,
-    pub(super) upstream_request_format: RuntimeProviderWireFormat,
-    pub(super) response_format: RuntimeProviderWireFormat,
-    pub(super) canonical_client_endpoint: &'static str,
-    pub(super) model_list_endpoint: &'static str,
-    pub(super) supports_streaming: bool,
-    pub(super) supports_model_fallback: bool,
-}
-
 pub(super) fn runtime_provider_label(kind: RuntimeProviderBridgeKind) -> &'static str {
     kind.provider_id().label()
-}
-
-pub(super) fn runtime_provider_openai_contract(
-    kind: RuntimeProviderBridgeKind,
-) -> RuntimeProviderOpenAiContract {
-    let adapter = provider_adapter(kind.provider_id());
-    RuntimeProviderOpenAiContract {
-        client_request_format: runtime_provider_wire_format_from_core(
-            adapter.client_request_format(),
-        ),
-        upstream_request_format: runtime_provider_wire_format_from_core(
-            adapter.upstream_request_format(),
-        ),
-        response_format: runtime_provider_wire_format_from_core(adapter.response_format()),
-        canonical_client_endpoint: adapter.canonical_client_endpoint(),
-        model_list_endpoint: adapter.model_list_endpoint(),
-        supports_streaming: adapter.supports_streaming(),
-        supports_model_fallback: adapter.supports_model_fallback(),
-    }
-}
-
-fn runtime_provider_wire_format_from_core(format: ProviderWireFormat) -> RuntimeProviderWireFormat {
-    match format {
-        ProviderWireFormat::OpenAiResponses => RuntimeProviderWireFormat::OpenAiResponses,
-        ProviderWireFormat::OpenAiChatCompletions => {
-            RuntimeProviderWireFormat::OpenAiChatCompletions
-        }
-        ProviderWireFormat::GeminiGenerateContent => {
-            RuntimeProviderWireFormat::GeminiGenerateContent
-        }
-        ProviderWireFormat::AnthropicMessages => RuntimeProviderWireFormat::AnthropicMessages,
-        ProviderWireFormat::Passthrough => RuntimeProviderWireFormat::OpenAiResponses,
-    }
 }
 
 pub(super) fn runtime_provider_model_from_body(body: &[u8]) -> Option<String> {

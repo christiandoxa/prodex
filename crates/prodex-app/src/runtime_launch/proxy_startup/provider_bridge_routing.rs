@@ -1,7 +1,7 @@
 use super::super::provider_models::{
     runtime_provider_model_catalog_json, runtime_provider_model_json_for,
 };
-use super::{RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_openai_contract};
+use super::{RuntimeProviderBridgeKind, runtime_provider_label};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use prodex_gateway_http::{GatewayHttpRouteKind, classify_route};
 use prodex_provider_core::{
@@ -167,7 +167,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_ledger_
     elapsed_ms: u128,
     body_bytes: usize,
 ) -> String {
-    let contract = runtime_provider_openai_contract(kind);
+    let adapter = provider_adapter(kind.provider_id());
     runtime_proxy_structured_log_message(
         "local_rewrite_request_detail",
         [
@@ -188,9 +188,9 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_ledger_
                 "native_passthrough",
                 runtime_provider_native_passthrough(kind, path_and_query).to_string(),
             ),
-            runtime_proxy_log_field("client_format", contract.client_request_format.label()),
-            runtime_proxy_log_field("upstream_format", contract.upstream_request_format.label()),
-            runtime_proxy_log_field("response_format", contract.response_format.label()),
+            runtime_proxy_log_field("client_format", adapter.client_request_format().label()),
+            runtime_proxy_log_field("upstream_format", adapter.upstream_request_format().label()),
+            runtime_proxy_log_field("response_format", adapter.response_format().label()),
         ],
     )
 }
