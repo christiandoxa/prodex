@@ -6,8 +6,6 @@ mod provider_bridge_error_policy;
 mod provider_bridge_routing;
 pub(super) use prodex_provider_core::ProviderErrorClass as RuntimeProviderErrorClass;
 use prodex_provider_core::ProviderId;
-#[cfg(test)]
-use prodex_provider_core::ProviderTransformLoss;
 
 pub(super) use self::provider_bridge_conformance::{
     RuntimeHarnessProviderPolicyLog, runtime_harness_log_provider_policy,
