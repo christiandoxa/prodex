@@ -1,4 +1,11 @@
-use super::*;
+use super::session::emit_mandatory_governance_audit;
+use super::{
+    ApplicationGovernancePlan, AuditOutcome, GovernanceDecisionContext, GovernedRoutingError,
+    GovernedRoutingPlan, GovernedRoutingRequest, MAX_GOVERNED_ROUTING_FALLBACKS, PolicyEffect,
+    RuntimeGatewayApplicationDataPlaneError, RuntimeLocalRewriteProxyShared,
+    plan_governed_provider_route, runtime_gateway_governance_error_code,
+    runtime_gateway_provider_endpoint, runtime_gateway_provider_runtime_snapshot,
+};
 
 pub(super) fn plan_provider_route(
     shared: &RuntimeLocalRewriteProxyShared,
