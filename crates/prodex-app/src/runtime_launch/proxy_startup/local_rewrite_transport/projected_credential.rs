@@ -93,7 +93,14 @@ pub(super) fn runtime_local_rewrite_apply_projected_header(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        GATEWAY_OUTBOUND_SECRET_RESOLUTION_FAILED, runtime_gateway_with_outbound_secret,
+        runtime_local_rewrite_with_projected_provider_secret,
+    };
+    use crate::runtime_launch::proxy_startup::local_rewrite_options::{
+        RuntimeGatewaySecret, RuntimeProjectedProviderCredential,
+    };
+    use prodex_domain::SecretPurpose;
 
     fn projected_gateway_secret(
         root: &std::path::Path,

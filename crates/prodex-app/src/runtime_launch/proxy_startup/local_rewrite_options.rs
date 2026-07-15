@@ -1,12 +1,16 @@
+use super::anthropic_rewrite::RuntimeAnthropicProviderAuth;
 use super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
+use super::gemini_rewrite::RuntimeGeminiProviderAuth;
+use super::local_rewrite_copilot::RuntimeCopilotProviderAuth;
 use super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
 };
 use super::local_rewrite_kiro::RuntimeKiroProfileAuth;
 use super::provider_bridge::RuntimeProviderBridgeKind;
-use super::*;
+use prodex_core::AppPaths;
 use prodex_domain::{SecretMaterial, SecretPurpose, SecretRef};
+use prodex_state::AppState;
 use secret_store::ProjectedSecretProvider;
 use std::{fmt, sync::Arc};
 
@@ -221,7 +225,9 @@ pub(crate) struct RuntimeLocalRewriteProxyStartOptions<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{RuntimeGatewaySecret, RuntimeProjectedProviderCredential};
+    use prodex_domain::{SecretMaterial, SecretPurpose, SecretRef};
+    use secret_store::ProjectedSecretProvider;
 
     fn projected_secret(
         root: &std::path::Path,
