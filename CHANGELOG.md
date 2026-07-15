@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.291.0 - 2026-07-15
+
+### Misc
+
+- Implement evaluated provider policies (`f04ad0e`)
+
 ## 0.290.0 - 2026-07-14
 
 ### Misc
@@ -101,13 +107,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Merge pull request #27 (`b78df11`)
 - Bump uuid in the cargo group across 1 directory (`7362012`)
-
-## 0.279.0 - 2026-07-13
-
-### CLI
-
-- Allow missing rate limit windows (`686b462`)
-
-### Docs
-
-- Allow configured commit identity (`9da7f01`)
