@@ -77,9 +77,7 @@ pub fn harness_provider_policy(
         return None;
     }
     let model = model?.trim();
-    if provider_model_spec(provider, model).is_none() {
-        return None;
-    }
+    provider_model_spec(provider, model)?;
     HARNESS_PROVIDER_POLICY_CATALOG.iter().find(|policy| {
         policy.provider == provider
             && (policy.model == "*" || policy.model.eq_ignore_ascii_case(model))
@@ -296,10 +294,10 @@ fn reject_tool_alias_collisions(
         .iter()
         .filter_map(tool_declaration_name)
         .collect::<Vec<_>>();
-    if aliases.iter().any(|alias| {
-        names.iter().any(|name| *name == alias.canonical)
-            && names.iter().any(|name| *name == alias.provider_native)
-    }) {
+    if aliases
+        .iter()
+        .any(|alias| names.contains(&alias.canonical) && names.contains(&alias.provider_native))
+    {
         return Err(HarnessProviderTransformError::ToolAliasCollision);
     }
     Ok(())

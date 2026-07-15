@@ -1,6 +1,7 @@
 use super::super::super::gemini_rewrite::RuntimeGeminiTranslatedRequest;
 use super::super::super::gemini_sse::{
-    RuntimeGeminiGenerateSseReader, runtime_gemini_forced_command_output,
+    RuntimeGeminiGenerateSseReader, RuntimeGeminiSseReaderConfig,
+    runtime_gemini_forced_command_output,
 };
 use super::super::super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
@@ -39,10 +40,12 @@ pub(super) fn runtime_gemini_exact_output_short_circuit(
         translated.messages.clone(),
         shared.gemini_conversations.clone(),
         binding_recorder,
-        None,
-        shared.resolved_harness.effective,
-        Some(translated.model.clone()),
-        shared.runtime_shared.runtime_config.gemini.clone(),
+        RuntimeGeminiSseReaderConfig {
+            observer: None,
+            harness_mode: shared.resolved_harness.effective,
+            harness_model: Some(translated.model.clone()),
+            gemini: shared.runtime_shared.runtime_config.gemini.clone(),
+        },
     );
     let mut body = String::new();
     reader

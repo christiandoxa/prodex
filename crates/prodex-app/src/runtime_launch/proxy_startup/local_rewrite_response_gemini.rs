@@ -1,5 +1,7 @@
-use super::super::gemini_rewrite::runtime_gemini_generate_buffered_response_parts;
-use super::super::gemini_sse::RuntimeGeminiGenerateSseReader;
+use super::super::gemini_rewrite::{
+    RuntimeGeminiBufferedResponseContext, runtime_gemini_generate_buffered_response_parts,
+};
+use super::super::gemini_sse::{RuntimeGeminiGenerateSseReader, RuntimeGeminiSseReaderConfig};
 use super::super::local_rewrite::{RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared};
 use super::super::local_rewrite_gemini::{
     RuntimeGeminiRequestContext, runtime_gemini_remember_bindings_from_responses_body,
@@ -108,10 +110,12 @@ pub(super) fn respond_runtime_gemini_rewrite(
             conversation_messages,
             shared.gemini_conversations.clone(),
             binding_recorder,
-            Some(observer),
-            shared.resolved_harness.effective,
-            (!model.is_empty()).then_some(model.clone()),
-            shared.runtime_shared.runtime_config.gemini.clone(),
+            RuntimeGeminiSseReaderConfig {
+                observer: Some(observer),
+                harness_mode: shared.resolved_harness.effective,
+                harness_model: (!model.is_empty()).then_some(model.clone()),
+                gemini: shared.runtime_shared.runtime_config.gemini.clone(),
+            },
         ));
         let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
         let streaming = RuntimeStreamingResponse {
@@ -134,10 +138,12 @@ pub(super) fn respond_runtime_gemini_rewrite(
         response,
         request_id,
         conversation_messages,
-        &shared.gemini_conversations,
-        &shared.runtime_shared,
-        shared.resolved_harness.effective,
-        (!model.is_empty()).then_some(model.as_str()),
+        RuntimeGeminiBufferedResponseContext {
+            conversations: &shared.gemini_conversations,
+            runtime_shared: &shared.runtime_shared,
+            harness_mode: shared.resolved_harness.effective,
+            harness_model: (!model.is_empty()).then_some(model.as_str()),
+        },
     )
     .map(|mut parts| {
         runtime_gemini_remember_bindings_from_responses_body(
