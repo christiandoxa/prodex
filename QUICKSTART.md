@@ -51,7 +51,7 @@ prodex --version
 prodex update
 ```
 
-The current local version in this repo is `0.294.0`:
+The current local version in this repo is `0.295.0`:
 
 Dependency status in this repo:
 
