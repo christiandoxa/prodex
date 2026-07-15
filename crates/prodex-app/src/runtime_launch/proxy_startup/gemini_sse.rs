@@ -35,6 +35,8 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
             conversations,
             binding_recorder,
             None,
+            prodex_provider_core::EffectiveHarnessMode::Native,
+            None,
             config.gemini,
         )
     }
@@ -46,6 +48,8 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
         observer: Option<RuntimeProviderSseObserver>,
+        harness_mode: prodex_provider_core::EffectiveHarnessMode,
+        harness_model: Option<String>,
         gemini_config: crate::RuntimeGeminiConfig,
     ) -> Self {
         Self {
@@ -56,6 +60,8 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
                     conversation_messages,
                     conversations,
                     binding_recorder,
+                    harness_mode,
+                    harness_model,
                     gemini_config,
                 ),
                 observer,
@@ -75,15 +81,18 @@ impl RuntimeProviderSseJsonState for RuntimeGeminiSseState {
 
     fn observe_value(&mut self, value: &serde_json::Value) -> Vec<String> {
         let value = gemini_provider_core_normalized_response_value(value);
-        self.observe_generate_chunk(&value)
+        let events = self.observe_generate_chunk(&value);
+        self.postprocess_harness_events(events)
     }
 
     fn complete_event(&mut self) -> Option<String> {
         RuntimeGeminiSseState::complete_event(self)
+            .map(|event| self.postprocess_harness_event(event))
     }
 
     fn failed_event(&mut self, code: &str, message: &str) -> Option<String> {
         RuntimeGeminiSseState::failed_event(self, code, message)
+            .map(|event| self.postprocess_harness_event(event))
     }
 }
 

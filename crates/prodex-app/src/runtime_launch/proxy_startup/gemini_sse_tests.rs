@@ -55,6 +55,31 @@ fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
 }
 
 #[test]
+fn evaluated_gemini_sse_restores_native_shell_alias_in_every_tool_call_event() {
+    let stream = concat!(
+        "data: {\"responseId\":\"resp_alias\",\"modelVersion\":\"gemini-3.1-pro-preview\",\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"run_shell_command\",\"args\":{\"cmd\":\"pwd\"}}}]},\"finishReason\":\"STOP\"}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let config = crate::RuntimeConfig::compatibility_current();
+    let mut reader = RuntimeGeminiGenerateSseReader::new_with_config(
+        std::io::Cursor::new(stream.as_bytes()),
+        10,
+        Vec::new(),
+        conversation_store(),
+        None,
+        None,
+        prodex_provider_core::EffectiveHarnessMode::Evaluated,
+        Some("gemini-3.1-pro-preview".to_string()),
+        config.gemini,
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    assert!(output.contains("\"name\":\"exec_command\""));
+    assert!(!output.contains("\"name\":\"run_shell_command\""));
+}
+
+#[test]
 fn gemini_sse_missing_response_id_fallback_uses_request_id_uuidv7() {
     let stream = concat!(
         "data: {\"modelVersion\":\"gemini-2.5-pro\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":\"STOP\"}]}\n\n",

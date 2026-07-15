@@ -28,6 +28,16 @@ fn harness_parses_only_for_local_super_bridges_and_gateway() {
         Some(prodex_provider_core::HarnessMode::Native)
     );
 
+    let Commands::Gateway(args) =
+        parse_cli_command_from(["prodex", "gateway", "--harness=evaluated"]).unwrap()
+    else {
+        panic!("expected gateway command");
+    };
+    assert_eq!(
+        args.harness,
+        Some(prodex_provider_core::HarnessMode::Evaluated)
+    );
+
     assert!(parse_cli_command_from(["prodex", "s", "--harness", "minimal"]).is_err());
     assert!(parse_cli_command_from(["prodex", "gateway", "--harness", "unsupported"]).is_err());
 }
@@ -55,12 +65,18 @@ fn harness_is_rejected_for_native_external_agent_clis() {
 }
 
 #[test]
-fn harness_help_lists_the_v1_modes() {
+fn harness_help_lists_all_modes() {
     let error = parse_cli_command_from(["prodex", "s", "--help"]).unwrap_err();
     let help = error.to_string();
-    assert!(help.contains("--harness <auto|native|minimal>"), "{help}");
+    assert!(
+        help.contains("--harness <auto|native|minimal|evaluated>"),
+        "{help}"
+    );
 
     let error = parse_cli_command_from(["prodex", "gateway", "--help"]).unwrap_err();
     let help = error.to_string();
-    assert!(help.contains("--harness <auto|native|minimal>"), "{help}");
+    assert!(
+        help.contains("--harness <auto|native|minimal|evaluated>"),
+        "{help}"
+    );
 }

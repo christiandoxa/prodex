@@ -21,13 +21,15 @@ use super::local_rewrite_search_fallback::{
     send_runtime_local_rewrite_prepared_request_with_chat_search_fallback,
 };
 use super::local_rewrite_transport::{
-    RuntimeLocalRewritePreparedAuth, runtime_local_rewrite_anthropic_auth_attempts,
-    runtime_local_rewrite_api_key_attempts, runtime_local_rewrite_upstream_url,
-    runtime_openai_standard_provider_upstream_url, send_runtime_local_rewrite_prepared_request,
+    RuntimeLocalRewritePreparedAuth, runtime_anthropic_messages_upstream_url,
+    runtime_local_rewrite_anthropic_auth_attempts, runtime_local_rewrite_api_key_attempts,
+    runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
+    send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_error_class, runtime_provider_label,
-    runtime_provider_log_request_conformance, runtime_provider_model_fallback_chain,
+    RuntimeProviderBridgeKind, runtime_harness_log_provider_policy, runtime_provider_error_class,
+    runtime_provider_label, runtime_provider_log_request_conformance,
+    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
     runtime_provider_request_body_with_model, runtime_provider_request_conformance_result,
 };
 use crate::{
@@ -35,7 +37,10 @@ use crate::{
     prepare_runtime_smart_context_http_body, runtime_proxy_log,
 };
 use anyhow::Result;
-use prodex_provider_core::{ProviderEndpoint, ProviderId, provider_core_lossless_body};
+use prodex_provider_core::{
+    ProviderEndpoint, ProviderId, ProviderTransformInput, harness_provider_policy,
+    provider_core_lossless_body, translate_openai_chat_request_to_anthropic_messages,
+};
 use prodex_provider_spi::ProviderRetryCause;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::{Value, json};
@@ -58,6 +63,7 @@ pub(super) enum RuntimeLocalRewriteUpstreamResponse {
 pub(super) struct RuntimeLocalRewriteLiveResponse {
     pub(super) response: reqwest::blocking::Response,
     pub(super) prefix: Vec<u8>,
+    pub(super) native_anthropic_messages: bool,
 }
 
 pub(super) struct RuntimeLocalRewriteStreamingResponse {
@@ -72,11 +78,24 @@ impl RuntimeLocalRewriteLiveResponse {
         Self {
             response,
             prefix: Vec::new(),
+            native_anthropic_messages: false,
         }
     }
 
     pub(super) fn with_prefix(response: reqwest::blocking::Response, prefix: Vec<u8>) -> Self {
-        Self { response, prefix }
+        Self {
+            response,
+            prefix,
+            native_anthropic_messages: false,
+        }
+    }
+
+    pub(super) fn with_native_anthropic_messages(response: reqwest::blocking::Response) -> Self {
+        Self {
+            response,
+            prefix: Vec::new(),
+            native_anthropic_messages: true,
+        }
     }
 }
 
@@ -151,29 +170,27 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                     RuntimeProviderBridgeKind::Anthropic,
                     &model_selection.model,
                 );
-                let upstream_url = runtime_openai_standard_provider_upstream_url(
+                let chat_upstream_url = runtime_openai_standard_provider_upstream_url(
                     RuntimeProviderBridgeKind::Anthropic,
                     &shared.upstream_base_url,
                     &shared.mount_path,
                     &request.path_and_query,
                 );
+                let messages_upstream_url = runtime_anthropic_messages_upstream_url(
+                    &shared.upstream_base_url,
+                    &shared.mount_path,
+                );
                 for (auth_index, selected_auth) in auth_attempts.into_iter().enumerate() {
                     for (model_index, model) in model_chain.iter().enumerate() {
                         let model_body =
                             runtime_provider_request_body_with_model(&model_selection.body, model);
-                        let provider_core_result = runtime_provider_request_conformance_result(
-                            RuntimeProviderBridgeKind::Anthropic,
-                            request,
-                            &model_body,
+                        let harness_policy = harness_provider_policy(
+                            shared.resolved_harness.effective,
+                            ProviderId::Anthropic,
+                            Some(model),
                         );
-                        if let Some(result) = provider_core_result.as_ref() {
-                            runtime_provider_log_request_conformance(
-                                &shared.runtime_shared,
-                                request_id,
-                                RuntimeProviderBridgeKind::Anthropic,
-                                result,
-                            );
-                        }
+                        let native_messages =
+                            harness_policy.is_some_and(|policy| policy.native_anthropic_messages);
                         let translated = runtime_provider_chat_compatible_request_body(
                             &model_body,
                             &shared.deepseek_conversations,
@@ -182,6 +199,64 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             false,
                             RuntimeDeepSeekRewriteOptions::default(),
                         )?;
+                        let provider_core_result = if native_messages {
+                            let mut input = ProviderTransformInput::new(
+                                ProviderEndpoint::Responses,
+                                translated.body.clone(),
+                            );
+                            input.model = Some(model.clone());
+                            Some(translate_openai_chat_request_to_anthropic_messages(input))
+                        } else {
+                            runtime_provider_request_conformance_result(
+                                RuntimeProviderBridgeKind::Anthropic,
+                                request,
+                                &model_body,
+                            )
+                        };
+                        if let Some(result) = provider_core_result.as_ref() {
+                            runtime_provider_log_request_conformance(
+                                &shared.runtime_shared,
+                                request_id,
+                                RuntimeProviderBridgeKind::Anthropic,
+                                result,
+                            );
+                        }
+                        runtime_harness_log_provider_policy(
+                            &shared.runtime_shared,
+                            request_id,
+                            ProviderId::Anthropic,
+                            ProviderEndpoint::Responses,
+                            model,
+                            "request-translation",
+                            harness_policy,
+                            native_messages
+                                && provider_core_lossless_body(provider_core_result.as_ref())
+                                    .is_some(),
+                        );
+                        let upstream_body = match provider_core_lossless_body(
+                            provider_core_result.as_ref(),
+                        ) {
+                            Some(body) => body,
+                            None if !native_messages => translated.body.clone(),
+                            None => {
+                                return Ok(RuntimeLocalRewriteUpstreamResult {
+                                    response: RuntimeLocalRewriteUpstreamResponse::Buffered(
+                                        runtime_local_rewrite_json_parts(
+                                            400,
+                                            json!({
+                                                "error": {
+                                                    "message": "request is incompatible with evaluated Anthropic Messages translation",
+                                                    "type": "invalid_request_error",
+                                                    "code": "invalid_request",
+                                                }
+                                            }),
+                                        ),
+                                    ),
+                                    gemini_context: None,
+                                    copilot_context: None,
+                                });
+                            }
+                        };
                         if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
                             pending.insert(
                                 request_id,
@@ -191,22 +266,25 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                                 },
                             );
                         }
-                        let upstream_body =
-                            provider_core_lossless_body(provider_core_result.as_ref())
-                                .unwrap_or_else(|| translated.body.clone());
+                        let upstream_url = if native_messages {
+                            &messages_upstream_url
+                        } else {
+                            &chat_upstream_url
+                        };
                         let send_result =
                             send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                                 RuntimeLocalRewriteSearchFallbackRequest {
                                     request_id,
                                     request,
                                     shared,
-                                    upstream_url: &upstream_url,
+                                    upstream_url,
                                     body: upstream_body,
                                     provider_kind: RuntimeProviderBridgeKind::Anthropic,
                                     auth_label: selected_auth.label.as_str(),
                                     model,
                                     auth_factory: || RuntimeLocalRewritePreparedAuth::Anthropic {
                                         auth: &selected_auth.auth,
+                                        native_messages,
                                     },
                                 },
                             )?;
@@ -214,7 +292,11 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                             RuntimeLocalRewritePreparedSendResult::Live(response) => {
                                 return Ok(RuntimeLocalRewriteUpstreamResult {
                                     response: RuntimeLocalRewriteUpstreamResponse::Live(
-                                        RuntimeLocalRewriteLiveResponse::new(response),
+                                        if native_messages {
+                                            RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
+                                        } else {
+                                            RuntimeLocalRewriteLiveResponse::new(response)
+                                        },
                                     ),
                                     gemini_context: None,
                                     copilot_context: None,
@@ -317,6 +399,7 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                         body.clone(),
                         RuntimeLocalRewritePreparedAuth::Anthropic {
                             auth: &selected_auth.auth,
+                            native_messages: false,
                         },
                     )?;
                     let status = response.status().as_u16();
@@ -482,9 +565,7 @@ fn runtime_harness_shape_request(
     endpoint: ProviderEndpoint,
     body: Vec<u8>,
 ) -> std::result::Result<Vec<u8>, RuntimeHeapTrimmedBufferedResponseParts> {
-    if shared.resolved_harness.effective != prodex_provider_core::EffectiveHarnessMode::Minimal
-        || endpoint != ProviderEndpoint::Responses
-    {
+    if endpoint != ProviderEndpoint::Responses {
         runtime_harness_log_request_shape(
             request_id,
             shared,
@@ -495,47 +576,22 @@ fn runtime_harness_shape_request(
         );
         return Ok(body);
     }
-    match prodex_provider_core::shape_harness_request(
+    let shaped = match prodex_provider_core::shape_harness_request(
         shared.resolved_harness.effective,
         endpoint,
         &body,
         &request.headers,
     ) {
-        Ok(shaped) => {
-            runtime_harness_log_request_shape(
+        Ok(shaped) => shaped,
+        Err(error) => {
+            runtime_harness_log_request_rejection(
                 request_id,
                 shared,
                 provider,
                 endpoint,
-                shaped.applied,
-                "accepted",
+                error.code(),
             );
-            Ok(shaped.body.into_owned())
-        }
-        Err(error) => {
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "harness_request_shape",
-                    [
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field("provider", provider.label()),
-                        runtime_proxy_log_field("route", endpoint.label()),
-                        runtime_proxy_log_field(
-                            "requested",
-                            shared.resolved_harness.requested.to_string(),
-                        ),
-                        runtime_proxy_log_field(
-                            "resolved",
-                            shared.resolved_harness.effective.to_string(),
-                        ),
-                        runtime_proxy_log_field("applied", "false"),
-                        runtime_proxy_log_field("outcome", "rejected"),
-                        runtime_proxy_log_field("reason", error.code()),
-                    ],
-                ),
-            );
-            Err(runtime_local_rewrite_json_parts(
+            return Err(runtime_local_rewrite_json_parts(
                 400,
                 json!({
                     "error": {
@@ -544,9 +600,88 @@ fn runtime_harness_shape_request(
                         "code": "invalid_request",
                     }
                 }),
+            ));
+        }
+    };
+    let instruction_applied = shaped.applied;
+    let body = shaped.body.into_owned();
+    let model = runtime_provider_model_from_body(&body).or_else(|| {
+        (provider == ProviderId::Gemini)
+            .then(|| prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL.to_string())
+    });
+    match prodex_provider_core::shape_harness_provider_request(
+        shared.resolved_harness.effective,
+        provider,
+        model.as_deref(),
+        endpoint,
+        &body,
+    ) {
+        Ok(shaped) => {
+            runtime_harness_log_provider_policy(
+                &shared.runtime_shared,
+                request_id,
+                provider,
+                endpoint,
+                model.as_deref().unwrap_or_default(),
+                "request",
+                shaped.policy,
+                shaped.applied,
+            );
+            runtime_harness_log_request_shape(
+                request_id,
+                shared,
+                provider,
+                endpoint,
+                instruction_applied || shaped.applied,
+                "accepted",
+            );
+            Ok(shaped.body.into_owned())
+        }
+        Err(error) => {
+            runtime_harness_log_request_rejection(
+                request_id,
+                shared,
+                provider,
+                endpoint,
+                error.code(),
+            );
+            Err(runtime_local_rewrite_json_parts(
+                400,
+                json!({
+                    "error": {
+                        "message": "request is incompatible with the selected evaluated harness",
+                        "type": "invalid_request_error",
+                        "code": "invalid_request",
+                    }
+                }),
             ))
         }
     }
+}
+
+fn runtime_harness_log_request_rejection(
+    request_id: u64,
+    shared: &RuntimeLocalRewriteProxyShared,
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    reason: &'static str,
+) {
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_structured_log_message(
+            "harness_request_shape",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", provider.label()),
+                runtime_proxy_log_field("route", endpoint.label()),
+                runtime_proxy_log_field("requested", shared.resolved_harness.requested.to_string()),
+                runtime_proxy_log_field("resolved", shared.resolved_harness.effective.to_string()),
+                runtime_proxy_log_field("applied", "false"),
+                runtime_proxy_log_field("outcome", "rejected"),
+                runtime_proxy_log_field("reason", reason),
+            ],
+        ),
+    );
 }
 
 fn runtime_harness_log_request_shape(

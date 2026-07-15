@@ -10,7 +10,10 @@ mod tool_args;
 use crate::ProviderId;
 use crate::translator::{ProviderConformanceCase, ProviderTranslator};
 
-pub use anthropic::AnthropicTranslator;
+pub use anthropic::{
+    AnthropicMessagesTranslator, AnthropicTranslator,
+    translate_openai_chat_request_to_anthropic_messages,
+};
 pub use copilot::{
     CopilotTranslator, copilot_provider_core_request_body_with_canonical_model,
     copilot_provider_core_request_body_without_encrypted_content,
@@ -146,6 +149,7 @@ pub(crate) use tool_args::chat_compatible_rtk_wrapped_tool_arguments;
 
 static OPENAI_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::OpenAi);
 static ANTHROPIC_TRANSLATOR: AnthropicTranslator = AnthropicTranslator;
+static ANTHROPIC_MESSAGES_TRANSLATOR: AnthropicMessagesTranslator = AnthropicMessagesTranslator;
 static COPILOT_TRANSLATOR: CopilotTranslator = CopilotTranslator;
 static DEEPSEEK_TRANSLATOR: DeepSeekTranslator = DeepSeekTranslator;
 static GEMINI_TRANSLATOR: GeminiTranslator = GeminiTranslator;
@@ -162,6 +166,10 @@ pub fn provider_translator(provider: ProviderId) -> &'static dyn ProviderTransla
         ProviderId::Kiro => &KIRO_TRANSLATOR,
         ProviderId::Local => &LOCAL_TRANSLATOR,
     }
+}
+
+pub fn anthropic_messages_translator() -> &'static dyn ProviderTranslator {
+    &ANTHROPIC_MESSAGES_TRANSLATOR
 }
 
 pub fn provider_conformance_cases() -> &'static [ProviderConformanceCase] {

@@ -5,6 +5,9 @@ use super::super::local_rewrite_copilot::RuntimeCopilotRequestContext;
 use super::super::local_rewrite_gemini::RuntimeGeminiRequestContext;
 use super::super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::super::local_rewrite_upstream::RuntimeLocalRewriteLiveResponse;
+use super::local_rewrite_response_anthropic_messages::{
+    RuntimeAnthropicMessagesRewriteContext, respond_runtime_anthropic_messages_rewrite,
+};
 use super::local_rewrite_response_chat_compatible::{
     RuntimeChatCompatibleRewriteContext, respond_runtime_chat_compatible_rewrite,
 };
@@ -30,7 +33,11 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
     shared: &RuntimeLocalRewriteProxyShared,
     response_governance: RuntimeGatewayResponseGovernance,
 ) {
-    let RuntimeLocalRewriteLiveResponse { prefix, response } = live_response;
+    let RuntimeLocalRewriteLiveResponse {
+        prefix,
+        response,
+        native_anthropic_messages,
+    } = live_response;
     let status = response.status().as_u16();
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
         response
@@ -81,6 +88,21 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         RuntimeProviderBridgeKind::Anthropic,
     ) && (200..300).contains(&status)
     {
+        if native_anthropic_messages {
+            respond_runtime_anthropic_messages_rewrite(
+                request_id,
+                request,
+                response,
+                RuntimeAnthropicMessagesRewriteContext {
+                    status,
+                    content_type: &content_type,
+                    shared,
+                    captured,
+                    response_governance,
+                },
+            );
+            return;
+        }
         respond_runtime_chat_compatible_rewrite(
             request_id,
             request,

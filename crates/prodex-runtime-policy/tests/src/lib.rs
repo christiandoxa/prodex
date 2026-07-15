@@ -648,6 +648,23 @@ webhook_fail_closed = true
 }
 
 #[test]
+fn load_runtime_policy_accepts_evaluated_gateway_harness() {
+    let root = temp_root("gateway-harness-evaluated");
+    fs::write(
+        runtime_policy_path(&root),
+        "version = 1\n[gateway]\nharness = \"evaluated\"\n",
+    )
+    .unwrap();
+
+    let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
+    assert_eq!(
+        loaded.gateway.harness,
+        Some(prodex_provider_core::HarnessMode::Evaluated)
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn load_runtime_policy_rejects_unknown_gateway_harness() {
     let root = temp_root("gateway-harness-unknown");
     fs::write(

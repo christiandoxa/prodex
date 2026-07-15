@@ -3,8 +3,8 @@ use super::{
     runtime_provider_model_from_body, runtime_provider_route_kind,
 };
 use prodex_provider_core::{
-    ProviderEndpoint, ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult,
-    provider_translator,
+    HarnessProviderPolicySpec, ProviderEndpoint, ProviderId, ProviderTransformInput,
+    ProviderTransformLoss, ProviderTransformResult, provider_translator,
 };
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -79,6 +79,41 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_log_response_co
         kind,
         result,
         "local_rewrite_provider_conformance_response",
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::runtime_launch::proxy_startup) fn runtime_harness_log_provider_policy(
+    shared: &crate::RuntimeRotationProxyShared,
+    request_id: u64,
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    model: &str,
+    phase: &'static str,
+    policy: Option<&HarnessProviderPolicySpec>,
+    applied: bool,
+) {
+    let Some(policy) = policy else {
+        return;
+    };
+    crate::runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "harness_provider_policy",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("provider", provider.label()),
+                runtime_proxy_log_field("route", endpoint.label()),
+                runtime_proxy_log_field("model", model),
+                runtime_proxy_log_field("phase", phase),
+                runtime_proxy_log_field("evaluation_id", policy.evaluation_id),
+                runtime_proxy_log_field(
+                    "evaluation_version",
+                    policy.evaluation_version.to_string(),
+                ),
+                runtime_proxy_log_field("applied", applied.to_string()),
+            ],
+        ),
     );
 }
 

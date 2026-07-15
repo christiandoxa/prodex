@@ -233,7 +233,7 @@ pub struct SuperArgs {
     /// Model-facing harness policy for local --provider or --url bridges. Defaults to auto.
     #[arg(
         long,
-        value_name = "auto|native|minimal",
+        value_name = "auto|native|minimal|evaluated",
         value_parser = parse_harness_mode,
         requires = "provider_or_url"
     )]
@@ -434,7 +434,7 @@ pub struct GatewayArgs {
     /// Model-facing harness policy. Defaults to policy.toml or auto.
     #[arg(
         long,
-        value_name = "auto|native|minimal",
+        value_name = "auto|native|minimal|evaluated",
         value_parser = parse_harness_mode
     )]
     pub harness: Option<prodex_provider_core::HarnessMode>,

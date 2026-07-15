@@ -132,6 +132,7 @@ mod tests {
             );
         }
     }
+
     #[test]
     fn gemini_openai_compatible_url_uses_documented_chat_completions_endpoint() {
         assert_eq!(

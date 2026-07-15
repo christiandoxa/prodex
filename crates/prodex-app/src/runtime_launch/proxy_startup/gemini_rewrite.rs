@@ -4,8 +4,8 @@ use super::deepseek_rewrite::{
 #[cfg(test)]
 use super::gemini_thought_signatures::runtime_gemini_harden_tool_call_thought_signatures;
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_log_response_conformance,
-    runtime_provider_response_conformance_result,
+    RuntimeProviderBridgeKind, runtime_harness_log_provider_policy,
+    runtime_provider_log_response_conformance, runtime_provider_response_conformance_result,
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
@@ -128,6 +128,8 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
     conversation_messages: Vec<serde_json::Value>,
     conversations: &RuntimeDeepSeekConversationStore,
     runtime_shared: &crate::RuntimeRotationProxyShared,
+    harness_mode: prodex_provider_core::EffectiveHarnessMode,
+    harness_model: Option<&str>,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let mut body = Vec::new();
     response
@@ -179,6 +181,25 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
         );
     }
     let body = serde_json::to_vec(&response).context("failed to serialize Responses JSON")?;
+    let postprocessed = prodex_provider_core::postprocess_harness_provider_response(
+        harness_mode,
+        prodex_provider_core::ProviderId::Gemini,
+        harness_model,
+        prodex_provider_core::ProviderEndpoint::Responses,
+        &body,
+    )
+    .context("failed to postprocess Gemini Responses JSON")?;
+    runtime_harness_log_provider_policy(
+        runtime_shared,
+        request_id,
+        prodex_provider_core::ProviderId::Gemini,
+        prodex_provider_core::ProviderEndpoint::Responses,
+        harness_model.unwrap_or_default(),
+        "response",
+        postprocessed.policy,
+        postprocessed.applied,
+    );
+    let body = postprocessed.body.into_owned();
     Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers: vec![(

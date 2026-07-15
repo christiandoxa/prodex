@@ -13,6 +13,7 @@ pub enum HarnessMode {
     Auto,
     Native,
     Minimal,
+    Evaluated,
 }
 
 impl HarnessMode {
@@ -21,6 +22,7 @@ impl HarnessMode {
             Self::Auto => "auto",
             Self::Native => "native",
             Self::Minimal => "minimal",
+            Self::Evaluated => "evaluated",
         }
     }
 }
@@ -50,6 +52,7 @@ impl FromStr for HarnessMode {
             "auto" => Ok(Self::Auto),
             "native" => Ok(Self::Native),
             "minimal" => Ok(Self::Minimal),
+            "evaluated" => Ok(Self::Evaluated),
             _ => Err(ParseHarnessModeError(value.to_string())),
         }
     }
@@ -60,6 +63,7 @@ impl FromStr for HarnessMode {
 pub enum EffectiveHarnessMode {
     Native,
     Minimal,
+    Evaluated,
 }
 
 impl EffectiveHarnessMode {
@@ -67,6 +71,7 @@ impl EffectiveHarnessMode {
         match self {
             Self::Native => "native",
             Self::Minimal => "minimal",
+            Self::Evaluated => "evaluated",
         }
     }
 }
@@ -113,7 +118,9 @@ impl ResolvedHarnessMode {
     pub const fn reason_code(&self) -> &'static str {
         match self.requested {
             HarnessMode::Auto => "v1-conservative-auto-default",
-            HarnessMode::Native | HarnessMode::Minimal => "explicit-selection",
+            HarnessMode::Native | HarnessMode::Minimal | HarnessMode::Evaluated => {
+                "explicit-selection"
+            }
         }
     }
 }
@@ -140,6 +147,7 @@ pub fn resolve_harness_mode(
     let effective = match requested {
         HarnessMode::Auto | HarnessMode::Native => EffectiveHarnessMode::Native,
         HarnessMode::Minimal => EffectiveHarnessMode::Minimal,
+        HarnessMode::Evaluated => EffectiveHarnessMode::Evaluated,
     };
     let reason = if requested == HarnessMode::Auto && source != HarnessResolutionSource::Default {
         format!("{selection_reason}; v1 conservative auto default")
@@ -205,6 +213,18 @@ pub const HARNESS_MODE_CATALOG: &[HarnessModeSpec] = &[
         response_shaping: false,
         stream_shaping: false,
     },
+    HarnessModeSpec {
+        mode: HarnessMode::Evaluated,
+        id: "evaluated",
+        display_label: "Evaluated",
+        description: "Applies only provider/model policies backed by the versioned evaluation catalog.",
+        selectable: true,
+        default_effective_mode: EffectiveHarnessMode::Evaluated,
+        supported_canonical_request_routes: RESPONSES_ROUTE,
+        request_shaping: true,
+        response_shaping: true,
+        stream_shaping: true,
+    },
 ];
 
 pub const fn harness_mode_catalog() -> &'static [HarnessModeSpec] {
@@ -255,7 +275,7 @@ pub fn shape_harness_request<'a>(
     body: &'a [u8],
     headers: &'a [(String, String)],
 ) -> Result<HarnessShapedRequest<'a>, HarnessRequestShapeError> {
-    if mode == EffectiveHarnessMode::Native || endpoint != ProviderEndpoint::Responses {
+    if mode != EffectiveHarnessMode::Minimal || endpoint != ProviderEndpoint::Responses {
         return Ok(HarnessShapedRequest {
             body: Cow::Borrowed(body),
             headers: Cow::Borrowed(headers),
@@ -317,6 +337,7 @@ mod tests {
             ("auto", HarnessMode::Auto),
             ("native", HarnessMode::Native),
             ("minimal", HarnessMode::Minimal),
+            ("evaluated", HarnessMode::Evaluated),
         ] {
             assert_eq!(text.parse::<HarnessMode>().unwrap(), mode);
             assert_eq!(mode.to_string(), text);
@@ -341,6 +362,8 @@ mod tests {
         let minimal = resolve_harness_mode(None, Some(HarnessMode::Minimal));
         assert_eq!(minimal.effective, EffectiveHarnessMode::Minimal);
         assert_eq!(minimal.source, HarnessResolutionSource::Config);
+        let evaluated = resolve_harness_mode(Some(HarnessMode::Evaluated), None);
+        assert_eq!(evaluated.effective, EffectiveHarnessMode::Evaluated);
         let auto = resolve_harness_mode(None, None);
         assert_eq!(auto.requested, HarnessMode::Auto);
         assert_eq!(auto.effective, EffectiveHarnessMode::Native);
@@ -449,19 +472,27 @@ mod tests {
     }
 
     #[test]
-    fn catalog_is_stable_complete_and_has_no_response_shaping() {
+    fn catalog_exposes_v1_and_opt_in_evaluated_modes() {
         assert_eq!(
             harness_mode_catalog()
                 .iter()
                 .map(|spec| spec.id)
                 .collect::<Vec<_>>(),
-            ["auto", "native", "minimal"]
+            ["auto", "native", "minimal", "evaluated"]
         );
         assert!(harness_mode_catalog().iter().all(|spec| spec.selectable));
         assert!(
             harness_mode_catalog()
                 .iter()
+                .filter(|spec| spec.mode != HarnessMode::Evaluated)
                 .all(|spec| !spec.response_shaping && !spec.stream_shaping)
         );
+        let evaluated = harness_mode_catalog()
+            .iter()
+            .find(|spec| spec.mode == HarnessMode::Evaluated)
+            .unwrap();
+        assert!(evaluated.request_shaping);
+        assert!(evaluated.response_shaping);
+        assert!(evaluated.stream_shaping);
     }
 }

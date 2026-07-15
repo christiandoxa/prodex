@@ -60,6 +60,8 @@ use gemini_sse_tool_calls::RuntimeGeminiToolCall;
 
 pub(super) struct RuntimeGeminiSseState {
     pub(super) gemini_config: crate::RuntimeGeminiConfig,
+    harness_mode: prodex_provider_core::EffectiveHarnessMode,
+    harness_model: Option<String>,
     request_id: u64,
     response_id: String,
     created_at: u64,
@@ -102,6 +104,8 @@ impl RuntimeGeminiSseState {
         conversation_messages: Vec<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
+        harness_mode: prodex_provider_core::EffectiveHarnessMode,
+        harness_model: Option<String>,
         gemini_config: crate::RuntimeGeminiConfig,
     ) -> Self {
         let command_output_only =
@@ -113,6 +117,8 @@ impl RuntimeGeminiSseState {
         let request_id = (response_id.as_uuid().as_u128() >> 64) as u64;
         Self {
             gemini_config,
+            harness_mode,
+            harness_model,
             request_id,
             response_id: format!("resp_gemini_{response_id}"),
             created_at: provider_core_chat_compatible_created_at(),
@@ -148,6 +154,27 @@ impl RuntimeGeminiSseState {
             command_output_only,
             forced_output_text,
         }
+    }
+
+    pub(super) fn postprocess_harness_events(&self, events: Vec<String>) -> Vec<String> {
+        events
+            .into_iter()
+            .map(|event| self.postprocess_harness_event(event))
+            .collect()
+    }
+
+    pub(super) fn postprocess_harness_event(&self, event: String) -> String {
+        prodex_provider_core::postprocess_harness_provider_stream_event(
+            self.harness_mode,
+            prodex_provider_core::ProviderId::Gemini,
+            self.harness_model.as_deref(),
+            prodex_provider_core::ProviderEndpoint::Responses,
+            event.as_bytes(),
+        )
+        .map(|transform| transform.body.into_owned())
+        .ok()
+        .and_then(|body| String::from_utf8(body).ok())
+        .unwrap_or(event)
     }
 
     pub(super) fn observe_generate_chunk(&mut self, value: &serde_json::Value) -> Vec<String> {
