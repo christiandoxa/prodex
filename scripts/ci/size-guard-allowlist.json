@@ -31,7 +31,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1887,
+    "maxLines": 1811,
     "reason": "Data-plane authorization, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
@@ -256,7 +256,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1434,
+    "maxLines": 1406,
     "reason": "Gateway launch composes governed snapshot authorities, durable audit/session workers, immutable harness diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {

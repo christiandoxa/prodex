@@ -1,5 +1,10 @@
 use super::super::copilot_instructions::runtime_copilot_init_current_workspace_custom_instructions;
-use super::deepseek_rewrite::*;
+use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
+mod context;
+pub(super) use self::context::{
+    RuntimeLocalRewriteProcessServices, RuntimeLocalRewriteProxyShared,
+    RuntimeLocalRewriteRequestContext,
+};
 #[cfg(test)]
 pub(crate) use super::local_rewrite_constraints::start_runtime_gateway_rewrite_proxy;
 #[cfg(test)]
@@ -8,12 +13,8 @@ pub(crate) use super::local_rewrite_constraints::{
     start_runtime_gateway_rewrite_proxy_with_runtime_config,
     start_runtime_local_rewrite_proxy_with_harness,
 };
-use super::local_rewrite_copilot::{
-    RuntimeCopilotOAuthPool, runtime_copilot_oauth_pool_from_provider,
-};
-use super::local_rewrite_gateway_admin_auth::{
-    RuntimeGatewayOidcJwksSnapshot, runtime_gateway_run_oidc_background_refresh_loop,
-};
+use super::local_rewrite_copilot::runtime_copilot_oauth_pool_from_provider;
+use super::local_rewrite_gateway_admin_auth::runtime_gateway_run_oidc_background_refresh_loop;
 pub(crate) use super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig,
@@ -32,7 +33,6 @@ pub(super) use super::local_rewrite_gateway_keys::{
 };
 pub(super) use super::local_rewrite_gateway_ledger::runtime_gateway_billing_ledger_load;
 pub(super) use super::local_rewrite_gateway_reconciliation_worker::schedule_runtime_gateway_billing_ledger_reconcile;
-use super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 #[cfg(test)]
 pub(super) use super::local_rewrite_gateway_usage::runtime_gateway_virtual_key_usage_apply_deltas;
 pub(super) use super::local_rewrite_gateway_usage::{
@@ -40,9 +40,7 @@ pub(super) use super::local_rewrite_gateway_usage::{
 };
 pub(super) use super::local_rewrite_gateway_usage_backend::RuntimeGatewayVirtualKeyUsageDelta;
 pub(super) use super::local_rewrite_gateway_util::runtime_gateway_generate_virtual_key_token;
-use super::local_rewrite_gemini::{
-    RuntimeGeminiOAuthPool, runtime_gemini_oauth_pool_from_provider,
-};
+use super::local_rewrite_gemini::runtime_gemini_oauth_pool_from_provider;
 use super::local_rewrite_gemini_live::spawn_runtime_gemini_live_sidecar;
 pub(super) use super::local_rewrite_model_memory::{
     RuntimeLocalRewriteModelMemoryState, runtime_local_rewrite_model_selection,
@@ -60,10 +58,40 @@ pub(super) use super::local_rewrite_upstream::{
     RuntimeLocalRewriteUpstreamResult,
 };
 use super::provider_bridge::{runtime_provider_label, runtime_provider_openai_contract};
-use super::*;
-use anyhow::Context;
-use arc_swap::{ArcSwap, ArcSwapOption};
+use crate::presidio_runtime::runtime_governed_presidio_redaction_config;
+use crate::proxy_config::{
+    build_runtime_upstream_async_http_client, runtime_upstream_proxy_mode_label,
+};
+use crate::quota_support::validate_credential_free_http_url;
+use crate::runtime_background::{
+    initialize_runtime_probe_refresh_queue, register_runtime_proxy_persistence_mode,
+};
+use crate::runtime_config::RuntimeConfig;
+use crate::runtime_core_shared::{
+    initialize_runtime_proxy_log_path_from_config, runtime_proxy_log_to_path,
+};
+use crate::runtime_proxy::{
+    build_runtime_proxy_json_error_response, register_runtime_presidio_redaction_proxy_state,
+    register_runtime_smart_context_proxy_state,
+};
+use crate::runtime_state_shared::{
+    RuntimeContinuationStatuses, RuntimeRotationProxyShared, RuntimeRotationState,
+};
+use crate::{RuntimeRotationProxy, runtime_proxy_log, runtime_proxy_request_sequence_seed};
+use anyhow::{Context, Result};
+use arc_swap::ArcSwap;
+use prodex_runtime_state::{RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits};
+use runtime_proxy_crate::{
+    RuntimeProxyRequest, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+use tiny_http::Server as TinyServer;
+use tokio::runtime::Builder as TokioRuntimeBuilder;
 
 pub(crate) const RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH: &str = "/v1";
 pub(super) const RUNTIME_LOCAL_REWRITE_PROFILE: &str = "local";
@@ -80,67 +108,6 @@ pub(super) const RUNTIME_GATEWAY_SCIM_PRODEX_SCHEMA: &str =
     "urn:prodex:params:scim:schemas:gateway:2.0:User";
 
 #[derive(Clone)]
-pub(super) struct RuntimeLocalRewriteProxyShared {
-    pub(super) runtime_shared: RuntimeRotationProxyShared,
-    pub(super) upstream_base_url: String,
-    pub(super) mount_path: String,
-    pub(super) provider: RuntimeLocalRewriteProviderOptions,
-    pub(super) provider_credential: Option<RuntimeProjectedProviderCredential>,
-    pub(super) resolved_harness: prodex_provider_core::ResolvedHarnessMode,
-    pub(super) deepseek_conversations: RuntimeDeepSeekConversationStore,
-    pub(super) deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
-    pub(super) gemini_conversations: RuntimeDeepSeekConversationStore,
-    pub(super) gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,
-    pub(super) copilot_oauth_pool: Option<RuntimeCopilotOAuthPool>,
-    pub(super) model_memory: RuntimeLocalRewriteModelMemory,
-    pub(super) governance_sessions:
-        super::local_rewrite_governance_session::RuntimeGatewayGovernanceSessionStore,
-    pub(super) governance_audit_writer:
-        super::local_rewrite_governance_audit::RuntimeGovernanceAuditWriter,
-    pub(super) governed_provider_registry: Arc<
-        ArcSwap<super::local_rewrite_provider_registry::RuntimeGatewayProviderRegistrySnapshotSet>,
-    >,
-    pub(super) governed_routing_scores: Arc<
-        ArcSwap<super::local_rewrite_provider_registry::RuntimeGatewayRoutingScoresSnapshotSet>,
-    >,
-    pub(super) classification_rules: Arc<
-        ArcSwap<super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet>,
-    >,
-    pub(super) governance_snapshot:
-        Arc<ArcSwap<crate::runtime_governance::RuntimeGovernanceAuthoritySnapshotSet>>,
-    pub(super) governance_authority: Option<RuntimeGovernanceAuthority>,
-    pub(super) api_key_cursor: Arc<AtomicUsize>,
-    pub(super) client: reqwest::blocking::Client,
-    pub(super) gateway_oidc_http_cache:
-        Arc<Mutex<BTreeMap<String, RuntimeGatewayOidcHttpCacheEntry>>>,
-    pub(super) gateway_oidc_jwks_snapshot: Arc<ArcSwapOption<RuntimeGatewayOidcJwksSnapshot>>,
-    pub(super) gateway_credentials: RuntimeGatewayCredentialState,
-    pub(super) gateway_auth_token_hash: Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
-    pub(super) gateway_admin_tokens: Vec<RuntimeGatewayAdminToken>,
-    pub(super) gateway_sso: RuntimeGatewaySsoConfig,
-    pub(super) gateway_state_store: RuntimeGatewayStateStore,
-    pub(super) gateway_postgres_repository:
-        Option<prodex_storage_postgres_runtime::PostgresRepository>,
-    pub(super) gateway_redis_rate_limit_executor:
-        Option<prodex_storage_redis_runtime::RedisRateLimitExecutor>,
-    pub(super) gateway_policy_version: Option<u32>,
-    pub(super) gateway_virtual_keys: Arc<Mutex<Vec<RuntimeGatewayVirtualKeyEntry>>>,
-    pub(super) gateway_virtual_key_store_path: PathBuf,
-    pub(super) gateway_usage: RuntimeGatewayVirtualKeyUsageState,
-    pub(super) gateway_route_aliases: Vec<runtime_proxy_crate::RuntimeGatewayRouteAlias>,
-    pub(super) gateway_request_constraints: prodex_provider_core::ProviderRequestConstraintPolicy,
-    pub(super) gateway_route_load: RuntimeGatewayRouteLoadState,
-    pub(super) gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig,
-    pub(super) gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig,
-    pub(super) gateway_call_id_header: Option<String>,
-    pub(super) gateway_observability: RuntimeGatewayObservabilityConfig,
-    pub(super) gateway_observability_slots: Arc<tokio::sync::Semaphore>,
-    pub(super) gateway_background_task_count: Arc<AtomicUsize>,
-    pub(super) allow_local_file_access: bool,
-    pub(super) gateway_draining: Arc<AtomicBool>,
-}
-
-#[derive(Clone)]
 pub(super) enum RuntimeGovernanceAuthority {
     Sqlite {
         path: PathBuf,
@@ -154,7 +121,7 @@ pub(super) enum RuntimeGovernanceAuthority {
 }
 
 #[allow(dead_code)]
-impl RuntimeLocalRewriteProxyShared {
+impl RuntimeLocalRewriteRequestContext {
     pub(super) fn swap_committed_governance_artifact(
         &self,
         tenant_id: prodex_domain::TenantId,
@@ -593,12 +560,9 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             },
             Arc::clone(&gateway_virtual_keys),
         ));
-    let shared = RuntimeLocalRewriteProxyShared {
+    let process = Arc::new(RuntimeLocalRewriteProcessServices {
         runtime_shared: runtime_shared.clone(),
-        upstream_base_url,
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
-        provider,
-        provider_credential,
         resolved_harness,
         deepseek_conversations: RuntimeDeepSeekConversationStore::default(),
         deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
@@ -616,11 +580,8 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         api_key_cursor: Arc::new(AtomicUsize::new(0)),
         client: build_runtime_local_rewrite_http_client(&runtime_config)?,
         gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
-        gateway_oidc_jwks_snapshot: Arc::new(ArcSwapOption::empty()),
+        gateway_oidc_jwks_snapshot: Arc::new(arc_swap::ArcSwapOption::empty()),
         gateway_credentials,
-        gateway_auth_token_hash,
-        gateway_admin_tokens,
-        gateway_sso,
         gateway_state_store,
         gateway_postgres_repository,
         gateway_redis_rate_limit_executor,
@@ -628,7 +589,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             .ok()
             .flatten()
             .map(|summary| summary.version),
-        gateway_virtual_keys,
         gateway_virtual_key_store_path,
         gateway_usage: runtime_local_rewrite_usage_state(
             gateway_virtual_key_usage,
@@ -638,15 +598,25 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         gateway_request_constraints,
         gateway_route_load: Arc::new(Mutex::new(BTreeMap::new())),
         gateway_guardrails,
-        gateway_guardrail_webhook,
         gateway_call_id_header,
-        gateway_observability,
         gateway_observability_slots: Arc::new(tokio::sync::Semaphore::new(
             RUNTIME_GATEWAY_BACKGROUND_TASK_LIMIT,
         )),
         gateway_background_task_count: Arc::new(AtomicUsize::new(0)),
         allow_local_file_access,
         gateway_draining: Arc::clone(&shutdown),
+    });
+    let shared = RuntimeLocalRewriteRequestContext {
+        process,
+        upstream_base_url,
+        provider,
+        provider_credential,
+        gateway_auth_token_hash,
+        gateway_admin_tokens,
+        gateway_sso,
+        gateway_virtual_keys,
+        gateway_guardrail_webhook,
+        gateway_observability,
     };
     Ok(RuntimeLocalRewritePrepared {
         runtime_config,
@@ -1407,7 +1377,9 @@ fn handle_runtime_local_rewrite_proxy_request(
 #[cfg(test)]
 mod request_guard_tests {
     use super::super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
-    use super::*;
+    use super::runtime_gateway_try_reserve_background_task;
+    use std::collections::BTreeSet;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn gateway_usage_request_guard_releases_request_id() {
