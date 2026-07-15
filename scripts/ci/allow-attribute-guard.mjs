@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 8,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 34,
+  "clippy::too_many_arguments": 30,
   "clippy::type_complexity": 1,
 });
 
@@ -47,12 +47,8 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_stream_tool_call(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_streaming_reader(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs|fn runtime_kiro_streaming_worker(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/events.rs|fn runtime_kiro_stream_tool_call(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/events.rs|pub(super) fn runtime_kiro_stream_notification(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/streaming.rs|fn runtime_kiro_streaming_worker(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_copilot.rs|pub(super) fn respond_runtime_copilot_rewrite(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_passthrough.rs|pub(super) fn respond_runtime_passthrough_rewrite(",
-  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_shared_builder.rs|pub(super) fn build_runtime_local_rewrite_proxy_shared(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event_from_tokens(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_response_spend_event(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_spend.rs|pub(super) fn runtime_provider_gateway_spend_event(",

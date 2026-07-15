@@ -1165,5 +1165,4 @@ impl Read for RuntimeKiroStreamingReader {
 }
 
 #[cfg(test)]
-#[path = "local_rewrite_kiro/tests.rs"]
 mod tests;
