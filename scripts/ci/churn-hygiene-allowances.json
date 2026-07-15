@@ -1,5 +1,18 @@
 [
   {
+    "id": "live-goal-quota-recovery-0.294.0",
+    "requiredSubjects": [
+      "fix(runtime): resume live goals across profiles"
+    ],
+    "caps": {
+      "maxFiles": 46,
+      "maxBehaviorFiles": 31,
+      "maxLines": 2250,
+      "maxFileLines": 459
+    },
+    "reason": "Reviewed live Codex goal usage-limit detection, graceful exact-session relaunch, quota-ready profile selection, broker and persisted affinity release, focused lifecycle and merge-safe regression tests, full all-features Rust suite, runtime proxy matrix, strict Clippy, complete preflight, optimized locked build, and tracked-diff identifier scan before the 0.294.0 release."
+  },
+  {
     "id": "runtime-ownership-refactor-0.293.0",
     "requiredSubjects": [
       "refactor: modularize runtime ownership boundaries"

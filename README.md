@@ -398,7 +398,7 @@ prodex exec "review this repo"
 prodex delete 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 ```
 
-Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` stay upstream Codex behavior. Prodex preserves their request metadata through the proxy and does not add a competing command surface. The CLI form `prodex delete <session>` passes through to Codex and, after a successful delete, prunes matching Prodex session affinity metadata.
+Codex-owned TUI commands such as `/usage`, `/goal`, `/import`, and `/delete` stay upstream Codex behavior. Prodex preserves their request metadata through the proxy and does not add a competing command surface. If an active goal reaches Codex's `usage_limited` state while the TUI remains open, Prodex waits for another quota-ready OpenAI profile, gracefully relaunches the same session, releases its old affinity, and invokes `/goal resume`; `--no-auto-rotate` disables this recovery. The CLI form `prodex delete <session>` passes through to Codex and, after a successful delete, prunes matching Prodex session affinity metadata.
 
 </details>
 

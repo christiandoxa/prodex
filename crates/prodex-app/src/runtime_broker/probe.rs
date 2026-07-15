@@ -55,6 +55,12 @@ pub(crate) fn runtime_broker_activate_url(registry: &RuntimeBrokerRegistry) -> S
     prodex_runtime_broker::runtime_broker_activate_url(registry)
 }
 
+pub(crate) fn runtime_broker_release_session_affinity_url(
+    registry: &RuntimeBrokerRegistry,
+) -> String {
+    prodex_runtime_broker::runtime_broker_release_session_affinity_url(registry)
+}
+
 pub(crate) fn probe_runtime_broker_health(
     client: &Client,
     paths: &AppPaths,
@@ -202,6 +208,46 @@ pub(crate) fn activate_runtime_broker_profile(
         .unwrap_or_default();
         bail!(
             "runtime broker activation failed with HTTP {}{}",
+            status,
+            if body.is_empty() {
+                String::new()
+            } else {
+                format!(": {body}")
+            }
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn release_runtime_broker_session_affinity(
+    client: &Client,
+    paths: &AppPaths,
+    broker_key: &str,
+    registry: &RuntimeBrokerRegistry,
+    session_id: &str,
+) -> Result<()> {
+    let capability = load_runtime_broker_capability(paths, broker_key, &registry.instance_id)?;
+    let response = client
+        .post(runtime_broker_release_session_affinity_url(registry))
+        .header(
+            prodex_runtime_broker::RUNTIME_BROKER_ADMIN_TOKEN_HEADER,
+            runtime_broker_admin_header(&capability)?,
+        )
+        .json(&serde_json::json!({
+            "session_id": session_id,
+        }))
+        .send()
+        .context("failed to send runtime broker session affinity release request")?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = read_blocking_response_text_with_limit(
+            response,
+            RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+            "failed to read runtime broker session affinity release response",
+        )
+        .unwrap_or_default();
+        bail!(
+            "runtime broker session affinity release failed with HTTP {}{}",
             status,
             if body.is_empty() {
                 String::new()

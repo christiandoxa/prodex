@@ -351,6 +351,28 @@ fn codex_resume_session_id_extracts_target_before_prompt() {
 }
 
 #[test]
+fn retarget_codex_tui_resume_args_preserves_global_options_and_replaces_prompt() {
+    let args = retarget_codex_tui_resume_args(
+        &[
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("initial prompt"),
+        ],
+        "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
+    );
+
+    assert_eq!(
+        args,
+        [
+            OsString::from("--model"),
+            OsString::from("gpt-5.6"),
+            OsString::from("resume"),
+            OsString::from("019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9"),
+        ]
+    );
+}
+
+#[test]
 fn codex_resume_session_id_ignores_resume_without_target() {
     assert_eq!(
         codex_resume_session_id(&[OsString::from("resume"), OsString::from("--last")]),

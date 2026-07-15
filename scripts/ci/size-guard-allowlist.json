@@ -6,8 +6,8 @@
   },
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 985,
-    "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after gateway backend startup moved to its focused module."
+    "maxLines": 864,
+    "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after live goal recovery moved to its focused module."
   },
   {
     "file": "crates/prodex-app/src/dashboard.rs",
@@ -66,8 +66,8 @@
   },
   {
     "file": "crates/prodex-app/tests/src/app_commands/runtime_launch/run_command_strategy.rs",
-    "maxLines": 1249,
-    "reason": "Runtime launch run-command strategy regression coverage remains capped while matrix cases are split by CLI/runtime family."
+    "maxLines": 1074,
+    "reason": "Runtime launch run-command strategy regression coverage remains capped after live goal recovery cases moved to their focused module."
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal_body/app_server_broker.rs",

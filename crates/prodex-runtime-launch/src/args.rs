@@ -71,6 +71,17 @@ pub fn codex_resume_session_id(codex_args: &[OsString]) -> Option<&str> {
     resume_args.get(target_index)?.to_str()
 }
 
+pub fn retarget_codex_tui_resume_args(codex_args: &[OsString], session_id: &str) -> Vec<OsString> {
+    let command_index = first_codex_positional_arg_index(codex_args).unwrap_or(codex_args.len());
+    let mut args = codex_args[..command_index].to_vec();
+    if args.last().is_some_and(|arg| arg == "--") {
+        args.pop();
+    }
+    args.push(OsString::from("resume"));
+    args.push(OsString::from(session_id));
+    args
+}
+
 fn codex_resume_command_index(codex_args: &[OsString]) -> Option<usize> {
     let command_index = first_codex_positional_arg_index(codex_args)?;
     match codex_args.get(command_index)?.to_str()? {
