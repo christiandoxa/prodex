@@ -1,5 +1,6 @@
-use super::*;
+use super::RuntimeProxyBackendHttpResponse;
 use std::collections::VecDeque;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RuntimeProxyBackendFaultRoute {
@@ -23,6 +24,19 @@ pub(crate) struct RuntimeProxyBackendFaultStep {
 }
 
 impl RuntimeProxyBackendFaultStep {
+    pub(crate) fn unauthorized(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 401 Unauthorized",
+            content_type: "application/json",
+            body: serde_json::json!({ "error": "unauthorized" }).to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn sse_quota(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,

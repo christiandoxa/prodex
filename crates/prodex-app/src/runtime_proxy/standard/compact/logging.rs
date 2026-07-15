@@ -1,6 +1,35 @@
 use std::time::Instant;
 
+pub(super) fn log_runtime_proxy_compact_candidate(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    candidate_name: &str,
+    excluded_count: usize,
+) {
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http compact_candidate={candidate_name} excluded_count={excluded_count}"
+        ),
+    );
+}
+
 use super::{RuntimeRotationProxyShared, runtime_proxy_log};
+
+pub(super) fn log_runtime_proxy_compact_followup_owner(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    compact_followup_profile: Option<&(String, &'static str)>,
+) {
+    if let Some((profile_name, source)) = compact_followup_profile {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_followup_owner profile={profile_name} source={source}"
+            ),
+        );
+    }
+}
 
 pub(super) fn runtime_proxy_compact_last_failure_kind(
     last_failure: Option<&(tiny_http::ResponseBox, bool)>,

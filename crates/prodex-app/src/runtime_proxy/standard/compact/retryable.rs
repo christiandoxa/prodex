@@ -12,6 +12,7 @@ use super::super::super::{
 };
 use super::{
     affinity::runtime_compact_candidate_has_hard_affinity,
+    flow::RuntimeCompactFailureFlow,
     logging::{
         RuntimeProxyCompactAttemptFailureLog, log_runtime_proxy_compact_attempt_final_failure,
     },
@@ -46,7 +47,7 @@ pub(super) struct RuntimeProxyCompactRetryableFailure<'a> {
 
 pub(super) fn handle_runtime_proxy_compact_retryable_failure(
     failure: RuntimeProxyCompactRetryableFailure<'_>,
-) -> Result<Option<tiny_http::ResponseBox>> {
+) -> Result<RuntimeCompactFailureFlow> {
     let RuntimeProxyCompactRetryableFailure {
         request_id,
         shared,
@@ -85,7 +86,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
                 "request={request_id} transport=http quota_blocked_auto_redeemed_retry route=compact"
             ),
         );
-        return Ok(None);
+        return Ok(RuntimeCompactFailureFlow::Retry);
     }
 
     let mut released_affinity = false;
@@ -132,7 +133,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             ),
         );
         *last_failure = Some((response, false));
-        return Ok(None);
+        return Ok(RuntimeCompactFailureFlow::Retry);
     }
 
     runtime_proxy_log(
@@ -168,7 +169,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
                 profile_name: &profile_name,
             },
         );
-        return Ok(Some(response));
+        return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
     if released_affinity {
@@ -226,10 +227,10 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
                 profile_name: &profile_name,
             },
         );
-        return Ok(Some(response));
+        return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
     excluded_profiles.insert(profile_name);
     *last_failure = Some((response, !overload));
-    Ok(None)
+    Ok(RuntimeCompactFailureFlow::Retry)
 }
