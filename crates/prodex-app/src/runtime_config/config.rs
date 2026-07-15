@@ -1,41 +1,29 @@
-use super::*;
-
-#[path = "config/gateway_helpers.rs"]
 mod gateway_helpers;
-use gateway_helpers::*;
+use super as runtime_config;
+use crate::{core_constants, runtime_proxy};
+use gateway_helpers::{
+    ParsedWebsocketTuning, RuntimeGatewayConfigInput, nonzero, runtime_gateway_launch_environment,
+};
+use prodex_cli::GatewayArgs;
+use prodex_core::AppPaths;
+use prodex_runtime_policy::RuntimeLogFormat;
+use prodex_runtime_state::RuntimeProxyLaneLimits;
+use std::collections::BTreeSet;
+use std::env;
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::thread;
+use std::time::Duration;
 
-struct RuntimeGatewayConfigInput<'a> {
-    service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
-    provider_override: Option<SuperExternalProvider>,
-    base_url_override: Option<&'a str>,
-}
-
-impl<'a> RuntimeGatewayConfigInput<'a> {
-    fn new(
-        service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
-        args: &'a GatewayArgs,
-    ) -> Self {
-        Self {
-            service_mode,
-            provider_override: args.provider,
-            base_url_override: args.base_url.as_deref(),
-        }
-    }
-}
-
-impl RuntimeConfig {
-    pub(crate) fn from_env_policy_and_cli(paths: &AppPaths) -> Result<Self, ConfigErrors> {
-        let environment = RuntimeConfigEnvironment::read_process();
-        Self::from_environment(paths, environment)
-    }
-
+impl runtime_config::RuntimeConfig {
     pub(crate) fn from_gateway_env_policy_and_cli(
         paths: &AppPaths,
         service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
         args: &GatewayArgs,
-    ) -> Result<Self, ConfigErrors> {
+    ) -> Result<Self, runtime_config::ConfigErrors> {
         let data_plane = service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway;
-        let environment = RuntimeConfigEnvironment::read_gateway_process(data_plane);
+        let environment =
+            runtime_config::RuntimeConfigEnvironment::read_gateway_process(data_plane);
         Self::from_environment_with_gateway(
             paths,
             environment,
@@ -45,18 +33,18 @@ impl RuntimeConfig {
 
     pub(super) fn from_environment(
         paths: &AppPaths,
-        environment: RuntimeConfigEnvironment,
-    ) -> Result<Self, ConfigErrors> {
+        environment: runtime_config::RuntimeConfigEnvironment,
+    ) -> Result<Self, runtime_config::ConfigErrors> {
         Self::from_environment_with_gateway(paths, environment, None)
     }
 
     #[cfg(test)]
     pub(super) fn from_gateway_environment(
         paths: &AppPaths,
-        environment: RuntimeConfigEnvironment,
+        environment: runtime_config::RuntimeConfigEnvironment,
         service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
         args: &GatewayArgs,
-    ) -> Result<Self, ConfigErrors> {
+    ) -> Result<Self, runtime_config::ConfigErrors> {
         Self::from_environment_with_gateway(
             paths,
             environment,
@@ -66,14 +54,14 @@ impl RuntimeConfig {
 
     fn from_environment_with_gateway(
         paths: &AppPaths,
-        environment: RuntimeConfigEnvironment,
+        environment: runtime_config::RuntimeConfigEnvironment,
         gateway_input: Option<RuntimeGatewayConfigInput<'_>>,
-    ) -> Result<Self, ConfigErrors> {
-        let mut parser = RuntimeConfigParser::new(environment);
+    ) -> Result<Self, runtime_config::ConfigErrors> {
+        let mut parser = runtime_config::RuntimeConfigParser::new(environment);
         let loaded_policy = match prodex_runtime_policy::load_runtime_policy_cached(&paths.root) {
             Ok(policy) => policy,
             Err(_) => {
-                parser.errors.push(ConfigError {
+                parser.errors.push(runtime_config::ConfigError {
                     key: "runtime.policy",
                     message: "could not be loaded".to_string(),
                 });
@@ -105,7 +93,7 @@ impl RuntimeConfig {
             &config.governance_policy.inspection_patterns,
         ) {
             Ok(patterns) => config.tenant_detector_patterns = patterns,
-            Err(_) => parser.errors.push(ConfigError {
+            Err(_) => parser.errors.push(runtime_config::ConfigError {
                 key: "runtime.policy.governance.inspection_patterns",
                 message: "contains an invalid bounded tenant detector pattern".to_string(),
             }),
@@ -117,13 +105,13 @@ impl RuntimeConfig {
         if crate::runtime_governance::compile_runtime_governance_settings(&config.governance_policy)
             .is_err()
         {
-            parser.errors.push(ConfigError {
+            parser.errors.push(runtime_config::ConfigError {
                 key: "runtime.policy.governance",
                 message: "contains an invalid immutable governance snapshot".to_string(),
             });
         }
         if let Some(input) = gateway_input {
-            config.gateway.launch = Self::parse_gateway_launch(
+            config.gateway.launch = runtime_gateway_launch_environment(
                 &mut parser,
                 loaded_policy.as_ref(),
                 input,
@@ -131,112 +119,22 @@ impl RuntimeConfig {
             );
         }
         if parser.errors.is_empty() {
-            let config = RuntimeConfig {
+            let config = runtime_config::RuntimeConfig {
                 compatibility_defaults: parser.compatibility_defaults,
                 ..config
             };
-            RUNTIME_RESPONSES_QUOTA_CRITICAL_FLOOR_PERCENT.store(
+            runtime_config::RUNTIME_RESPONSES_QUOTA_CRITICAL_FLOOR_PERCENT.store(
                 config.responses_quota_critical_floor_percent,
                 Ordering::Relaxed,
             );
             Ok(config)
         } else {
-            Err(ConfigErrors(parser.errors))
+            Err(runtime_config::ConfigErrors(parser.errors))
         }
-    }
-
-    fn parse_gateway_launch(
-        parser: &mut RuntimeConfigParser,
-        policy: Option<&prodex_runtime_policy::RuntimePolicyConfig>,
-        input: RuntimeGatewayConfigInput<'_>,
-        gemini: &RuntimeGeminiConfig,
-    ) -> RuntimeGatewayLaunchEnvironment {
-        if input.service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::ControlPlane {
-            return RuntimeGatewayLaunchEnvironment::ControlPlane;
-        }
-        let gateway = policy.map(|policy| &policy.gateway);
-        let provider = input.provider_override.or_else(|| {
-            gateway
-                .and_then(|gateway| gateway.provider.as_deref())
-                .and_then(runtime_gateway_policy_provider)
-        });
-        let upstream_base_url = runtime_gateway_upstream_base_url(
-            parser,
-            input.base_url_override,
-            gateway.and_then(|gateway| gateway.base_url.as_deref()),
-            provider,
-        );
-        let deepseek = (provider == Some(SuperExternalProvider::DeepSeek)).then(|| {
-            let strict_environment = parser
-                .environment
-                .get("PRODEX_DEEPSEEK_STRICT_TOOLS")
-                .cloned();
-            let beta_environment = parser
-                .environment
-                .get("PRODEX_DEEPSEEK_BETA_BASE_URL")
-                .cloned();
-            let search_environment = parser
-                .environment
-                .get("PRODEX_DEEPSEEK_WEB_SEARCH_MODE")
-                .cloned();
-            let strict_tools = runtime_gateway_capture(
-                parser,
-                "PRODEX_DEEPSEEK_STRICT_TOOLS",
-                crate::runtime_deepseek_gateway_strict_tools(
-                    Path::new(""),
-                    strict_environment.as_deref(),
-                ),
-                false,
-            );
-            let beta_base_url = runtime_gateway_capture(
-                parser,
-                "PRODEX_DEEPSEEK_BETA_BASE_URL",
-                crate::runtime_deepseek_gateway_beta_base_url(
-                    Path::new(""),
-                    beta_environment.as_deref(),
-                ),
-                "https://api.deepseek.com/beta".to_string(),
-            );
-            let web_search_mode = runtime_gateway_capture(
-                parser,
-                "PRODEX_DEEPSEEK_WEB_SEARCH_MODE",
-                crate::runtime_deepseek_gateway_web_search_mode(
-                    Path::new(""),
-                    search_environment.as_deref(),
-                ),
-                RuntimeDeepSeekWebSearchMode::default(),
-            );
-            RuntimeGatewayDeepSeekConfig {
-                strict_tools,
-                beta_base_url,
-                web_search_mode,
-            }
-        });
-        let gemini_model_resolution = (provider == Some(SuperExternalProvider::Gemini))
-            .then(|| RuntimeGeminiModelResolution::from_runtime_config(gemini));
-        let production = policy.is_some_and(|policy| policy.secrets.production);
-        let present_secret_env = if production {
-            BTreeSet::new()
-        } else {
-            parser.environment.present_gateway_secret_env()
-        };
-        RuntimeGatewayLaunchEnvironment::DataPlane {
-            upstream_base_url,
-            deepseek,
-            gemini_model_resolution,
-            present_secret_env,
-        }
-    }
-
-    #[cfg(any(test, feature = "bench-support"))]
-    pub(crate) fn compatibility_current() -> Self {
-        let paths = AppPaths::discover()
-            .unwrap_or_else(|error| panic!("failed to discover runtime configuration: {error}"));
-        Self::from_env_policy_and_cli(&paths).unwrap_or_else(|errors| panic!("{errors}"))
     }
 
     fn parse(
-        parser: &mut RuntimeConfigParser,
+        parser: &mut runtime_config::RuntimeConfigParser,
         runtime_policy: Option<&prodex_runtime_policy::RuntimePolicyRuntimeSettings>,
         policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
     ) -> Self {
@@ -247,42 +145,47 @@ impl RuntimeConfig {
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_WORKER_COUNT",
                 policy.worker_count,
-                runtime_proxy_worker_count_default(parallelism),
+                runtime_config::runtime_proxy_worker_count_default(parallelism),
             )
             .clamp(1, 64);
         let long_lived_worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_LONG_LIVED_WORKER_COUNT",
                 policy.long_lived_worker_count,
-                runtime_proxy_long_lived_worker_count_default(parallelism),
+                runtime_config::runtime_proxy_long_lived_worker_count_default(parallelism),
             )
             .clamp(1, 256);
         let async_worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_ASYNC_WORKER_COUNT",
                 policy.async_worker_count,
-                runtime_proxy_async_worker_count_default(parallelism),
+                runtime_config::runtime_proxy_async_worker_count_default(parallelism),
             )
             .clamp(2, 8);
         let probe_refresh_worker_count = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROBE_REFRESH_WORKER_COUNT",
                 policy.probe_refresh_worker_count,
-                runtime_probe_refresh_worker_count_default(parallelism),
+                runtime_config::runtime_probe_refresh_worker_count_default(parallelism),
             )
             .clamp(1, 8);
         let long_lived_queue_capacity = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_CAPACITY",
                 policy.long_lived_queue_capacity,
-                runtime_proxy_long_lived_queue_capacity_default(long_lived_worker_count),
+                runtime_config::runtime_proxy_long_lived_queue_capacity_default(
+                    long_lived_worker_count,
+                ),
             )
             .max(1);
         let active_request_limit = parser
             .positive_usize(
                 "PRODEX_RUNTIME_PROXY_ACTIVE_REQUEST_LIMIT",
                 policy.active_request_limit,
-                runtime_proxy_active_request_limit_default(worker_count, long_lived_worker_count),
+                runtime_config::runtime_proxy_active_request_limit_default(
+                    worker_count,
+                    long_lived_worker_count,
+                ),
             )
             .max(1);
         let lane_limits = Self::parse_lane_limits(
@@ -294,69 +197,69 @@ impl RuntimeConfig {
         );
         let websocket = Self::parse_websocket_tuning(parser, policy, parallelism);
         let (precommit, pressure_precommit, continuation_precommit) = (
-            runtime_proxy_precommit_budget(false, false),
-            runtime_proxy_precommit_budget(false, true),
-            runtime_proxy_precommit_budget(true, false),
+            runtime_proxy::runtime_proxy_precommit_budget(false, false),
+            runtime_proxy::runtime_proxy_precommit_budget(false, true),
+            runtime_proxy::runtime_proxy_precommit_budget(true, false),
         );
-        let tuning = RuntimeTuningSnapshotInput {
+        let tuning = runtime_config::RuntimeTuningSnapshotInput {
             worker_count,
             long_lived_worker_count,
             async_worker_count,
             probe_refresh_worker_count,
             long_lived_queue_capacity,
             active_request_limit,
-            lane_limits: RuntimeTuningLaneLimits {
+            lane_limits: runtime_config::RuntimeTuningLaneLimits {
                 responses: lane_limits.responses,
                 compact: lane_limits.compact,
                 websocket: lane_limits.websocket,
                 standard: lane_limits.standard,
             },
-            precommit: RuntimeTuningPrecommitBudget {
+            precommit: runtime_config::RuntimeTuningPrecommitBudget {
                 attempt_limit: precommit.0,
                 budget: precommit.1,
             },
-            pressure_precommit: RuntimeTuningPrecommitBudget {
+            pressure_precommit: runtime_config::RuntimeTuningPrecommitBudget {
                 attempt_limit: pressure_precommit.0,
                 budget: pressure_precommit.1,
             },
-            continuation_precommit: RuntimeTuningPrecommitBudget {
+            continuation_precommit: runtime_config::RuntimeTuningPrecommitBudget {
                 attempt_limit: continuation_precommit.0,
                 budget: continuation_precommit.1,
             },
             admission_wait_budget_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS",
                 policy.admission_wait_budget_ms,
-                RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS,
+                core_constants::RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS,
             ),
             pressure_admission_wait_budget_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS",
                 policy.pressure_admission_wait_budget_ms,
-                RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS,
+                core_constants::RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS,
             ),
             long_lived_queue_wait_budget_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
                 policy.long_lived_queue_wait_budget_ms,
-                RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
+                core_constants::RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
             ),
             pressure_long_lived_queue_wait_budget_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS",
                 policy.pressure_long_lived_queue_wait_budget_ms,
-                RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
+                core_constants::RUNTIME_PROXY_PRESSURE_LONG_LIVED_QUEUE_WAIT_BUDGET_MS,
             ),
             http_connect_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS",
                 policy.http_connect_timeout_ms,
-                RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS,
+                core_constants::RUNTIME_PROXY_HTTP_CONNECT_TIMEOUT_MS,
             ),
             stream_idle_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS",
                 policy.stream_idle_timeout_ms,
-                RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
+                core_constants::RUNTIME_PROXY_STREAM_IDLE_TIMEOUT_MS,
             ),
             sse_lookahead_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS",
                 policy.sse_lookahead_timeout_ms,
-                RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
+                core_constants::RUNTIME_PROXY_SSE_LOOKAHEAD_TIMEOUT_MS,
             ),
             websocket_connect_timeout_ms: websocket.connect_timeout_ms,
             websocket_happy_eyeballs_delay_ms: websocket.happy_eyeballs_delay_ms,
@@ -369,9 +272,9 @@ impl RuntimeConfig {
             websocket_dns_overflow_capacity: websocket.dns_overflow_capacity,
             websocket_previous_response_reuse_stale_ms: parser.compatibility_u64(
                 "PRODEX_RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS",
-                policy
-                    .websocket_previous_response_reuse_stale_ms
-                    .unwrap_or(RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS),
+                policy.websocket_previous_response_reuse_stale_ms.unwrap_or(
+                    core_constants::RUNTIME_PROXY_WEBSOCKET_PREVIOUS_RESPONSE_REUSE_STALE_MS,
+                ),
                 false,
                 true,
                 u64::MAX,
@@ -379,12 +282,12 @@ impl RuntimeConfig {
             profile_inflight_soft_limit: parser.positive_usize(
                 "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_SOFT_LIMIT",
                 policy.profile_inflight_soft_limit,
-                RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
+                core_constants::RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
             ),
             profile_inflight_hard_limit: parser.positive_usize(
                 "PRODEX_RUNTIME_PROXY_PROFILE_INFLIGHT_HARD_LIMIT",
                 policy.profile_inflight_hard_limit,
-                RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
+                core_constants::RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT,
             ),
         }
         .into_snapshot();
@@ -392,13 +295,13 @@ impl RuntimeConfig {
     }
 
     fn parse_lane_limits(
-        parser: &mut RuntimeConfigParser,
+        parser: &mut runtime_config::RuntimeConfigParser,
         policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
         global_limit: usize,
         worker_count: usize,
         long_lived_worker_count: usize,
     ) -> RuntimeProxyLaneLimits {
-        let overrides = RuntimeProxyLaneLimitOverrides {
+        let overrides = runtime_config::RuntimeProxyLaneLimitOverrides {
             responses: nonzero(parser.positive_usize(
                 "PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT",
                 policy.responses_active_limit,
@@ -420,11 +323,11 @@ impl RuntimeConfig {
                 1,
             )),
         };
-        let configured = runtime_proxy_lane_limits_from_overrides(
+        let configured = runtime_config::runtime_proxy_lane_limits_from_overrides(
             global_limit,
             worker_count,
             long_lived_worker_count,
-            RuntimeProxyLaneLimitOverrides {
+            runtime_config::RuntimeProxyLaneLimitOverrides {
                 responses: if parser
                     .environment
                     .get("PRODEX_RUNTIME_PROXY_RESPONSES_ACTIVE_LIMIT")
@@ -476,7 +379,7 @@ impl RuntimeConfig {
     }
 
     fn parse_websocket_tuning(
-        parser: &mut RuntimeConfigParser,
+        parser: &mut runtime_config::RuntimeConfigParser,
         policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
         parallelism: usize,
     ) -> ParsedWebsocketTuning {
@@ -484,14 +387,16 @@ impl RuntimeConfig {
             .positive_usize(
                 "PRODEX_RUNTIME_WEBSOCKET_CONNECT_WORKER_COUNT",
                 policy.websocket_connect_worker_count,
-                runtime_websocket_tcp_connect_worker_count_default(parallelism),
+                runtime_config::runtime_websocket_tcp_connect_worker_count_default(parallelism),
             )
             .max(1);
         let connect_queue_capacity = parser
             .positive_usize(
                 "PRODEX_RUNTIME_WEBSOCKET_CONNECT_QUEUE_CAPACITY",
                 policy.websocket_connect_queue_capacity,
-                runtime_websocket_tcp_connect_queue_capacity_default(connect_worker_count),
+                runtime_config::runtime_websocket_tcp_connect_queue_capacity_default(
+                    connect_worker_count,
+                ),
             )
             .max(connect_worker_count)
             .max(1);
@@ -499,14 +404,16 @@ impl RuntimeConfig {
             .positive_usize(
                 "PRODEX_RUNTIME_WEBSOCKET_DNS_WORKER_COUNT",
                 policy.websocket_dns_worker_count,
-                runtime_websocket_dns_resolve_worker_count_default(parallelism),
+                runtime_config::runtime_websocket_dns_resolve_worker_count_default(parallelism),
             )
             .max(1);
         let dns_queue_capacity = parser
             .positive_usize(
                 "PRODEX_RUNTIME_WEBSOCKET_DNS_QUEUE_CAPACITY",
                 policy.websocket_dns_queue_capacity,
-                runtime_websocket_dns_resolve_queue_capacity_default(dns_worker_count),
+                runtime_config::runtime_websocket_dns_resolve_queue_capacity_default(
+                    dns_worker_count,
+                ),
             )
             .max(dns_worker_count)
             .max(1);
@@ -514,24 +421,24 @@ impl RuntimeConfig {
             connect_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS",
                 policy.websocket_connect_timeout_ms,
-                RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS,
+                core_constants::RUNTIME_PROXY_WEBSOCKET_CONNECT_TIMEOUT_MS,
             ),
             happy_eyeballs_delay_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS",
                 policy.websocket_happy_eyeballs_delay_ms,
-                RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS,
+                core_constants::RUNTIME_PROXY_WEBSOCKET_HAPPY_EYEBALLS_DELAY_MS,
             ),
             precommit_progress_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS",
                 policy.websocket_precommit_progress_timeout_ms,
-                RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS,
+                core_constants::RUNTIME_PROXY_WEBSOCKET_PRECOMMIT_PROGRESS_TIMEOUT_MS,
             ),
             connect_worker_count,
             connect_queue_capacity,
             connect_overflow_capacity: parser.usize_allow_zero(
                 "PRODEX_RUNTIME_WEBSOCKET_CONNECT_OVERFLOW_CAPACITY",
                 policy.websocket_connect_overflow_capacity,
-                runtime_websocket_tcp_connect_overflow_capacity_default(
+                runtime_config::runtime_websocket_tcp_connect_overflow_capacity_default(
                     connect_worker_count,
                     connect_queue_capacity,
                 ),
@@ -541,7 +448,7 @@ impl RuntimeConfig {
             dns_overflow_capacity: parser.usize_allow_zero(
                 "PRODEX_RUNTIME_WEBSOCKET_DNS_OVERFLOW_CAPACITY",
                 policy.websocket_dns_overflow_capacity,
-                runtime_websocket_dns_resolve_overflow_capacity_default(
+                runtime_config::runtime_websocket_dns_resolve_overflow_capacity_default(
                     dns_worker_count,
                     dns_queue_capacity,
                 ),
@@ -550,10 +457,10 @@ impl RuntimeConfig {
     }
 
     fn parse_remaining(
-        parser: &mut RuntimeConfigParser,
+        parser: &mut runtime_config::RuntimeConfigParser,
         runtime_policy: Option<&prodex_runtime_policy::RuntimePolicyRuntimeSettings>,
         policy: &prodex_runtime_policy::RuntimePolicyProxySettings,
-        tuning: RuntimeTuningSnapshot,
+        tuning: runtime_config::RuntimeTuningSnapshot,
     ) -> Self {
         let log_format = parser
             .environment
@@ -605,11 +512,11 @@ impl RuntimeConfig {
             .filter_map(|key| parser.environment.get(key))
             .map(|value| value.to_string_lossy().into_owned())
             .collect();
-        let gateway = RuntimeGatewayConfig {
+        let gateway = runtime_config::RuntimeGatewayConfig {
             replica_count: parser.positive_u16("PRODEX_GATEWAY_REPLICA_COUNT", 1),
             require_multi_replica_accounting_checks: parser
                 .strict_bool("PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS", false),
-            launch: RuntimeGatewayLaunchEnvironment::default(),
+            launch: runtime_config::RuntimeGatewayLaunchEnvironment::default(),
         };
         let gemini = Self::parse_gemini(parser);
         Self {
@@ -617,27 +524,27 @@ impl RuntimeConfig {
             compact_request_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS",
                 policy.compact_request_timeout_ms,
-                RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS,
+                core_constants::RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS,
             ),
             prefetch_backpressure_retry_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS",
                 policy.prefetch_backpressure_retry_ms,
-                RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS,
+                core_constants::RUNTIME_PROXY_PREFETCH_BACKPRESSURE_RETRY_MS,
             ),
             prefetch_backpressure_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS",
                 policy.prefetch_backpressure_timeout_ms,
-                RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS,
+                core_constants::RUNTIME_PROXY_PREFETCH_BACKPRESSURE_TIMEOUT_MS,
             ),
             prefetch_max_buffered_bytes: parser.positive_usize(
                 "PRODEX_RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES",
                 policy.prefetch_max_buffered_bytes,
-                RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES,
+                core_constants::RUNTIME_PROXY_PREFETCH_MAX_BUFFERED_BYTES,
             ),
             sync_probe_pressure_pause_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS",
                 policy.sync_probe_pressure_pause_ms,
-                RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS,
+                core_constants::RUNTIME_PROXY_SYNC_PROBE_PRESSURE_PAUSE_MS,
             ),
             responses_quota_critical_floor_percent: parser
                 .positive_i64(
@@ -650,28 +557,28 @@ impl RuntimeConfig {
                 .positive_usize(
                     "PRODEX_RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT",
                     policy.startup_sync_probe_warm_limit,
-                    RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT,
+                    core_constants::RUNTIME_STARTUP_SYNC_PROBE_WARM_LIMIT,
                 )
-                .min(RUNTIME_STARTUP_PROBE_WARM_LIMIT),
+                .min(core_constants::RUNTIME_STARTUP_PROBE_WARM_LIMIT),
             broker_ready_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_BROKER_READY_TIMEOUT_MS",
                 policy.broker_ready_timeout_ms,
-                RUNTIME_BROKER_READY_TIMEOUT_MS,
+                core_constants::RUNTIME_BROKER_READY_TIMEOUT_MS,
             ),
             broker_health_connect_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS",
                 policy.broker_health_connect_timeout_ms,
-                RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS,
+                core_constants::RUNTIME_BROKER_HEALTH_CONNECT_TIMEOUT_MS,
             ),
             broker_health_read_timeout_ms: parser.positive_u64(
                 "PRODEX_RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS",
                 policy.broker_health_read_timeout_ms,
-                RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS,
+                core_constants::RUNTIME_BROKER_HEALTH_READ_TIMEOUT_MS,
             ),
             max_request_body_bytes: parser.positive_u64(
                 "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES",
                 None,
-                RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES,
+                runtime_config::RUNTIME_PROXY_DEFAULT_MAX_REQUEST_BODY_BYTES,
             ),
             debug_anthropic_compat: parser
                 .environment
@@ -707,35 +614,35 @@ impl RuntimeConfig {
             ),
             log_dir,
             log_format,
-            websocket_environment: RuntimeWebsocketEnvironment {
+            websocket_environment: runtime_config::RuntimeWebsocketEnvironment {
                 https_proxy,
                 http_proxy,
                 no_proxy,
             },
-            oidc: RuntimeOidcTimingConfig {
+            oidc: runtime_config::RuntimeOidcTimingConfig {
                 prefetch_timeout: Duration::from_millis(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS",
-                    DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
+                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
                     false,
-                    MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
+                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_PREFETCH_TIMEOUT_MS,
                 )),
                 http_cache_ttl: Duration::from_secs(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS",
-                    DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
+                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
                     true,
-                    MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
+                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS,
                 )),
                 refresh_failure_backoff: Duration::from_millis(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS",
-                    DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
+                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
                     false,
-                    MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
+                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS,
                 )),
                 last_known_good_window: Duration::from_secs(parser.bounded_u64(
                     "PRODEX_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS",
-                    DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
+                    runtime_config::DEFAULT_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
                     true,
-                    MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
+                    runtime_config::MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS,
                 )),
             },
             gateway,
@@ -748,7 +655,9 @@ impl RuntimeConfig {
         }
     }
 
-    fn parse_gemini(parser: &mut RuntimeConfigParser) -> RuntimeGeminiConfig {
+    fn parse_gemini(
+        parser: &mut runtime_config::RuntimeConfigParser,
+    ) -> runtime_config::RuntimeGeminiConfig {
         let home_dir = parser.environment.nonempty_path("HOME");
         let config_dir = parser
             .environment
@@ -801,12 +710,14 @@ impl RuntimeConfig {
                         })
                         .collect::<BTreeSet<_>>()
                 }) {
-                None => RuntimeGeminiExtensionSelection::All,
-                Some(names) if names.is_empty() => RuntimeGeminiExtensionSelection::All,
-                Some(names) if names.len() == 1 && names.contains("none") => {
-                    RuntimeGeminiExtensionSelection::None
+                None => runtime_config::RuntimeGeminiExtensionSelection::All,
+                Some(names) if names.is_empty() => {
+                    runtime_config::RuntimeGeminiExtensionSelection::All
                 }
-                Some(names) => RuntimeGeminiExtensionSelection::Names(names),
+                Some(names) if names.len() == 1 && names.contains("none") => {
+                    runtime_config::RuntimeGeminiExtensionSelection::None
+                }
+                Some(names) => runtime_config::RuntimeGeminiExtensionSelection::Names(names),
             };
         let memory_files_disabled =
             parser.compatibility_optional_bool("PRODEX_GEMINI_DISABLE_MEMORY") == Some(true)
@@ -828,7 +739,7 @@ impl RuntimeConfig {
                     "0" | "false" | "off" | "no"
                 )
             });
-        RuntimeGeminiConfig {
+        runtime_config::RuntimeGeminiConfig {
             home_dir,
             config_dir,
             system_settings_path,
@@ -839,7 +750,7 @@ impl RuntimeConfig {
             import_paths,
             tool_output_mask_threshold: parser.compatibility_u64(
                 "PRODEX_GEMINI_TOOL_OUTPUT_MASK_THRESHOLD",
-                RuntimeGeminiConfig::DEFAULT_TOOL_OUTPUT_MASK_THRESHOLD as u64,
+                runtime_config::RuntimeGeminiConfig::DEFAULT_TOOL_OUTPUT_MASK_THRESHOLD as u64,
                 false,
                 true,
                 usize::MAX as u64,

@@ -456,15 +456,12 @@ Move or finish moving from app/runtime into provider core:
 - shared OpenAI-chat-compatible request/response fallback logic still owned by app runtime:
   - `runtime_launch/proxy_startup/chat_compatible_request.rs`
   - `runtime_launch/proxy_startup/local_rewrite_response_chat_compatible.rs`
-- Kiro protocol/body rewrite logic that does not depend on transport/session state still lives in:
+- Kiro protocol/body rewrite logic that does not depend on transport/session state lives in:
   - `crates/prodex-provider-core/src/translators/kiro.rs`
   - `crates/prodex-provider-core/src/translators/kiro/request.rs`
   - `crates/prodex-provider-core/src/translators/kiro/response.rs`
   - `crates/prodex-provider-core/src/translators/kiro/compact.rs`
-  - app runtime compatibility wrappers remain in:
-  - `runtime_launch/proxy_startup/local_rewrite_kiro/request_rewrite.rs`
-  - `runtime_launch/proxy_startup/local_rewrite_kiro/chat_compat.rs`
-  - `runtime_launch/proxy_startup/local_rewrite_kiro/messages.rs`
+  - app runtime transport and session state remain in `runtime_launch/proxy_startup/local_rewrite_kiro.rs`
 
 Do **not** move further into provider core unless the code is pure and state-free:
 
@@ -633,9 +630,7 @@ Recent split or verified-below-threshold files:
 - `crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/completion.rs` (~290; completion/output assembly)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse/tool_calls.rs` (~272; streamed tool-call accumulation)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport.rs` (~257; send path after split)
-- `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/auth.rs` (~142; auth attempts/header filtering)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/observability.rs` (~167; gateway spend sinks)
-- `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_transport/upstream_url.rs` (~148; upstream URL mapping)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs` (~572; shared provider dispatch/upstream send orchestration)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_anthropic.rs` (~632; Anthropic auth/model attempt state machine and response construction)
 - `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream_embeddings.rs` (~146; deterministic local embeddings fallback)

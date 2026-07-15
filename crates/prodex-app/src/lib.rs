@@ -67,7 +67,6 @@ mod runtime_capabilities;
 mod runtime_caveman;
 mod runtime_claude;
 mod runtime_claude_auth;
-#[path = "runtime_tuning.rs"]
 mod runtime_config;
 mod runtime_core_shared;
 mod runtime_deepseek_config;

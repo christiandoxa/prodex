@@ -1,5 +1,4 @@
-use super::*;
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 #[cfg(any(test, feature = "bench-support"))]
 pub(super) use prodex_runtime_tuning::usize_override_with_policy;
@@ -28,17 +27,34 @@ const MAX_RUNTIME_GATEWAY_OIDC_HTTP_CACHE_TTL_SECONDS: u64 = 86_400;
 const MAX_RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_MS: u64 = 3_600_000;
 const MAX_RUNTIME_GATEWAY_OIDC_LAST_KNOWN_GOOD_SECONDS: u64 = 604_800;
 
-#[path = "runtime_tuning/config.rs"]
 mod config;
-#[path = "runtime_config/environment.rs"]
 mod environment;
-#[path = "runtime_config/types.rs"]
 mod types;
 use environment::{RuntimeConfigEnvironment, RuntimeConfigParser};
-pub(crate) use types::*;
+pub(crate) use types::{
+    ConfigError, ConfigErrors, RuntimeConfig, RuntimeGatewayConfig, RuntimeGatewayDeepSeekConfig,
+    RuntimeGatewayLaunchEnvironment, RuntimeGeminiConfig, RuntimeGeminiExtensionSelection,
+    RuntimeOidcTimingConfig, RuntimeWebsocketEnvironment,
+};
 
 pub(crate) fn collect_runtime_tuning_snapshot(config: &RuntimeConfig) -> RuntimeTuningSnapshot {
     config.tuning
+}
+
+impl RuntimeConfig {
+    pub(crate) fn from_env_policy_and_cli(
+        paths: &prodex_core::AppPaths,
+    ) -> Result<Self, ConfigErrors> {
+        let environment = RuntimeConfigEnvironment::read_process();
+        Self::from_environment(paths, environment)
+    }
+
+    #[cfg(any(test, feature = "bench-support"))]
+    pub(crate) fn compatibility_current() -> Self {
+        let paths = prodex_core::AppPaths::discover()
+            .unwrap_or_else(|error| panic!("failed to discover runtime configuration: {error}"));
+        Self::from_env_policy_and_cli(&paths).unwrap_or_else(|errors| panic!("{errors}"))
+    }
 }
 
 pub(super) fn runtime_proxy_responses_quota_critical_floor_percent() -> i64 {
@@ -59,11 +75,13 @@ pub(super) fn runtime_proxy_responses_quota_critical_floor_percent() -> i64 {
 static RUNTIME_RESPONSES_QUOTA_CRITICAL_FLOOR_PERCENT: AtomicI64 = AtomicI64::new(0);
 
 #[cfg(test)]
-#[path = "runtime_config/test_compat.rs"]
 mod test_compat;
 #[cfg(test)]
-pub(crate) use test_compat::*;
+pub(crate) use test_compat::{
+    runtime_proxy_profile_inflight_hard_limit, runtime_proxy_profile_inflight_soft_limit,
+    runtime_proxy_stream_idle_timeout_ms, runtime_proxy_websocket_precommit_progress_timeout_ms,
+};
 
 #[cfg(test)]
-#[path = "../tests/src/runtime_tuning.rs"]
+#[path = "../tests/src/runtime_config.rs"]
 mod tests;
