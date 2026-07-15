@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::local_rewrite::RuntimeLocalRewriteProviderOptions;
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_gateway_admin_router::runtime_gateway_http_request_meta;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
@@ -46,8 +44,6 @@ use prodex_provider_core::{
     ProviderAdapterContract, ProviderCapabilityStatus, ProviderEndpoint, ProviderErrorClass,
     ProviderId, provider_adapter, provider_catalog_entries_for,
 };
-#[cfg(test)]
-use prodex_provider_spi::GovernedRoutingWeights;
 use prodex_provider_spi::{
     GovernedRoutingError, GovernedRoutingPlan, GovernedRoutingRequest,
     MAX_GOVERNED_ROUTING_FALLBACKS, ProviderInvocation, ProviderRetryCause, ProviderRetryDecision,
@@ -1089,98 +1085,7 @@ pub(super) fn runtime_gateway_provider_credential_ref(
 }
 
 #[cfg(test)]
-mod provider_credential_tests {
-    use super::*;
-
-    #[test]
-    fn configured_provider_reference_reaches_application_invocation() {
-        let configured = SecretRef::new("external", "provider-key", Some("v2"));
-
-        let selected =
-            runtime_gateway_provider_credential_ref(Some(&configured), ProviderId::OpenAi);
-
-        assert_eq!(selected, configured);
-        assert_ne!(selected.provider(), "runtime-provider");
-    }
-}
-
-#[cfg(test)]
-mod provider_dispatch_tests {
-    use super::*;
-
-    fn captured(stream: bool) -> RuntimeProxyRequest {
-        RuntimeProxyRequest {
-            method: "POST".to_string(),
-            path_and_query: "/v1/responses".to_string(),
-            headers: Vec::new(),
-            body: serde_json::to_vec(&serde_json::json!({ "stream": stream })).unwrap(),
-        }
-    }
-
-    #[test]
-    fn anonymous_compatibility_owns_typed_provider_dispatch() {
-        let invocation = runtime_gateway_compatibility_provider_invocation(
-            ProviderId::Gemini,
-            GatewayHttpRouteKind::DataPlaneResponses,
-            &captured(true),
-        )
-        .unwrap();
-        assert_eq!(invocation.provider, ProviderId::Gemini);
-        assert_eq!(invocation.endpoint, ProviderEndpoint::Responses);
-        assert_eq!(invocation.stream_mode, ProviderStreamMode::Streaming);
-
-        assert!(
-            runtime_gateway_compatibility_provider_invocation(
-                ProviderId::Gemini,
-                GatewayHttpRouteKind::Unknown,
-                &captured(false),
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn only_personal_mode_allows_anonymous_provider_dispatch() {
-        for (mode, requires_identity) in [
-            (prodex_config::GovernanceMode::Personal, false),
-            (prodex_config::GovernanceMode::EnterpriseObserve, true),
-            (prodex_config::GovernanceMode::EnterpriseEnforce, true),
-            (prodex_config::GovernanceMode::BankEnforce, true),
-        ] {
-            assert_eq!(!mode.allows_anonymous_compatibility(), requires_identity);
-        }
-    }
-
-    #[test]
-    fn application_retry_uses_nonzero_bounded_candidate_counts() {
-        for (attempt_index, candidate_count, expected) in [
-            (0, 0, false),
-            (0, 1, false),
-            (0, 2, true),
-            (1, 2, false),
-            (2, 2, false),
-            (254, 257, true),
-            (255, 257, false),
-        ] {
-            assert_eq!(
-                runtime_gateway_application_provider_retry_precommit(
-                    ProviderRetryCause::NextModel,
-                    ProviderErrorClass::Transient,
-                    attempt_index,
-                    candidate_count,
-                ),
-                expected,
-                "attempt_index={attempt_index} candidate_count={candidate_count}",
-            );
-        }
-        assert!(!runtime_gateway_application_provider_retry_precommit(
-            ProviderRetryCause::RotateCredential,
-            ProviderErrorClass::NotFound,
-            0,
-            2,
-        ));
-    }
-}
+mod provider_tests;
 
 fn runtime_gateway_provider_endpoint(route: GatewayHttpRouteKind) -> Option<ProviderEndpoint> {
     match route {
@@ -1293,11 +1198,11 @@ impl RuntimeGatewayApplicationProviderDispatch<'_> {
         let Some(execution) = self.execution.as_ref() else {
             return shared.clone();
         };
-        let mut selected = shared.clone();
-        selected.provider = execution.provider.clone();
-        selected.provider_credential = Some(execution.credential.clone());
-        selected.upstream_base_url = execution.upstream_base_url.clone();
-        selected
+        shared.with_selected_upstream(
+            execution.provider.clone(),
+            execution.credential.clone(),
+            execution.upstream_base_url.clone(),
+        )
     }
 }
 
@@ -1572,10 +1477,29 @@ pub(super) fn runtime_gateway_application_usage_reconciliation(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use prodex_domain::{
-        CallId, ReservationId, ReservationReconciliationReason, ReservationRequest,
+    use super::super::local_rewrite::RuntimeLocalRewriteProviderOptions;
+    use super::super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
+    use super::super::provider_bridge::RuntimeProviderGatewaySpendEvent;
+    use super::{
+        MAX_RUNTIME_GATEWAY_REQUESTED_TOOLS, RuntimeGatewayApplicationReconciliationInput,
+        runtime_gateway_application_provider_stage_is_committed,
+        runtime_gateway_application_reconciliation_execution,
+        runtime_gateway_application_usage_reconciliation, runtime_gateway_provider_endpoint,
+        runtime_gateway_provider_executable_capabilities, runtime_gateway_requested_modalities,
+        runtime_gateway_requested_tools,
     };
+    use prodex_domain::{
+        CallId, CapabilitySet, DataClassification, DataModality, ModelCapability, PolicyEffect,
+        RequestId, ReservationId, ReservationReconciliationReason, ReservationRecord,
+        ReservationRequest, TenantContext, TenantId, UsageAmount,
+    };
+    use prodex_gateway_http::GatewayHttpRouteKind;
+    use prodex_provider_core::{ProviderEndpoint, ProviderId};
+    use prodex_provider_spi::{
+        GovernedRoutingError, GovernedRoutingRequest, GovernedRoutingWeights, ProviderRetryStage,
+        plan_governed_provider_route,
+    };
+    use prodex_storage::TenantStorageKey;
 
     #[test]
     fn provider_retry_boundary_marks_irreversible_stages_committed() {
