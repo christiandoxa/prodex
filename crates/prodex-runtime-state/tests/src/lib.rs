@@ -158,6 +158,15 @@ fn schedule_plan_combines_sections_debounce_and_journal_need() {
         Duration::from_millis(150),
     );
     assert_eq!(journal_plan.ready_in(), Duration::ZERO);
+
+    let release = runtime_state_save_enqueue_plan(
+        "session_affinity_release:goal_resume",
+        queued_at,
+        Duration::from_millis(150),
+    );
+    assert!(release.schedule.sections.continuations);
+    assert!(release.schedule.requires_continuation_journal);
+    assert_eq!(release.schedule.debounce, Duration::ZERO);
 }
 
 #[test]

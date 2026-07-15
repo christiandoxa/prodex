@@ -17,6 +17,14 @@ fn registry_builds_admin_urls_and_matches_launch_config() {
         registry.metrics_prometheus_url(),
         "http://127.0.0.1:4567/__prodex/runtime/metrics/prometheus"
     );
+    assert_eq!(
+        registry.release_session_affinity_url(),
+        "http://127.0.0.1:4567/__prodex/runtime/session-affinity/release"
+    );
+    assert_eq!(
+        RuntimeBrokerAdminRoute::from_path("/__prodex/runtime/session-affinity/release"),
+        Some(RuntimeBrokerAdminRoute::ReleaseSessionAffinity)
+    );
     assert!(registry.matches_launch_config("https://upstream.example", true, false, false));
     assert!(!registry.matches_launch_config("https://other.example", true, false, false));
     assert!(!registry.matches_launch_config("https://upstream.example", true, false, true));
@@ -112,6 +120,29 @@ fn admin_helpers_plan_errors_and_activation_success() {
             ok: true,
             current_profile: "work".to_string(),
         }
+    );
+}
+
+#[test]
+fn admin_helpers_validate_session_affinity_release() {
+    assert_eq!(
+        runtime_broker_validate_session_affinity_release_method("GET"),
+        Err(RuntimeBrokerAdminError::new(
+            405,
+            "method_not_allowed",
+            "runtime broker session affinity release requires POST",
+        ))
+    );
+    assert_eq!(
+        runtime_broker_session_affinity_release_id_from_json(
+            br#"{"session_id":" 019f6465-a781-7ea0-95b8-83f5ed79d79c "}"#,
+        ),
+        Ok("019f6465-a781-7ea0-95b8-83f5ed79d79c".to_string())
+    );
+    assert!(runtime_broker_session_affinity_release_id_from_json(br#"{"session_id":""}"#).is_err());
+    assert_eq!(
+        runtime_broker_session_affinity_release_success(),
+        RuntimeBrokerSessionAffinityReleaseSuccess { ok: true }
     );
 }
 

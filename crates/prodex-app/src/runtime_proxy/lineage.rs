@@ -17,7 +17,7 @@ pub(crate) use release::clear_runtime_stale_previous_response_binding;
 pub(crate) use release::{
     clear_runtime_dead_response_bindings, release_runtime_auth_failed_affinity,
     release_runtime_compact_lineage, release_runtime_previous_response_affinity,
-    release_runtime_quota_blocked_affinity,
+    release_runtime_quota_blocked_affinity, release_runtime_session_affinity,
 };
 #[cfg(test)]
 pub(crate) use remember::remember_runtime_response_ids;

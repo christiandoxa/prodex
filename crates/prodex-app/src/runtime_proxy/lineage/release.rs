@@ -314,6 +314,62 @@ pub(super) fn release_runtime_affinity_bindings(
     changed
 }
 
+pub(crate) fn release_runtime_session_affinity(
+    shared: &RuntimeRotationProxyShared,
+    session_id: &str,
+    reason: &str,
+) -> Result<bool> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Ok(false);
+    }
+    let compact_key = runtime_compact_session_lineage_key(session_id);
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let now = Local::now().timestamp();
+    let mut changed = runtime.session_id_bindings.remove(session_id).is_some();
+    changed = runtime.session_id_bindings.remove(&compact_key).is_some() || changed;
+    changed = runtime
+        .state
+        .session_profile_bindings
+        .remove(session_id)
+        .is_some()
+        || changed;
+    changed = runtime
+        .state
+        .session_profile_bindings
+        .remove(&compact_key)
+        .is_some()
+        || changed;
+    changed = runtime_mark_continuation_status_dead(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::SessionId,
+        session_id,
+        now,
+    ) || changed;
+    changed = runtime_mark_continuation_status_dead(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::SessionId,
+        &compact_key,
+        now,
+    ) || changed;
+    if changed {
+        schedule_runtime_state_save_from_runtime(
+            shared,
+            &runtime,
+            &format!("session_affinity_release:{reason}"),
+        );
+        drop(runtime);
+        runtime_proxy_log(
+            shared,
+            format!("session_affinity_released reason={reason} session_id={session_id}"),
+        );
+    }
+    Ok(changed)
+}
+
 pub(crate) fn release_runtime_quota_blocked_affinity(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,

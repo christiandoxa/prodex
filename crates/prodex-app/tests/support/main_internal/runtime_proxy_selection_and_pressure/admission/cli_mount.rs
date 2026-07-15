@@ -140,6 +140,7 @@ fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: temp_dir.path.join("leases"),
+        broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
     };

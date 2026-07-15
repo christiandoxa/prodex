@@ -1,5 +1,7 @@
-use crate::RuntimeRotationProxy;
-use crate::runtime_broker::create_runtime_broker_lease_in_dir_for_pid;
+use crate::runtime_broker::{
+    create_runtime_broker_lease_in_dir_for_pid, release_runtime_broker_session_affinity,
+};
+use crate::{AppPaths, RuntimeRotationProxy};
 use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
@@ -49,6 +51,7 @@ pub(super) struct RuntimeProxyEndpoint {
     pub(super) realtime_ws_base_url: Option<String>,
     pub(super) realtime_ws_model: Option<String>,
     pub(super) lease_dir: PathBuf,
+    pub(super) broker_session_affinity_control: Option<RuntimeBrokerSessionAffinityControl>,
     pub(super) _lease: Option<RuntimeBrokerLease>,
     pub(super) _direct_proxy: Option<RuntimeRotationProxy>,
 }
@@ -62,10 +65,21 @@ impl std::fmt::Debug for RuntimeProxyEndpoint {
             .field("realtime_ws_base_url", &self.realtime_ws_base_url)
             .field("realtime_ws_model", &self.realtime_ws_model)
             .field("lease_dir", &self.lease_dir)
+            .field(
+                "has_broker_session_affinity_control",
+                &self.broker_session_affinity_control.is_some(),
+            )
             .field("has_lease", &self._lease.is_some())
             .field("has_direct_proxy", &self._direct_proxy.is_some())
             .finish()
     }
+}
+
+pub(super) struct RuntimeBrokerSessionAffinityControl {
+    pub(super) client: reqwest::blocking::Client,
+    pub(super) paths: AppPaths,
+    pub(super) broker_key: String,
+    pub(super) registry: RuntimeBrokerRegistry,
 }
 
 impl Drop for RuntimeBrokerLease {
@@ -77,5 +91,18 @@ impl Drop for RuntimeBrokerLease {
 impl RuntimeProxyEndpoint {
     pub(super) fn create_child_lease(&self, pid: u32) -> Result<RuntimeBrokerLease> {
         create_runtime_broker_lease_in_dir_for_pid(&self.lease_dir, pid)
+    }
+
+    pub(super) fn release_session_affinity(&self, session_id: &str) -> Result<()> {
+        let Some(control) = self.broker_session_affinity_control.as_ref() else {
+            return Ok(());
+        };
+        release_runtime_broker_session_affinity(
+            &control.client,
+            &control.paths,
+            &control.broker_key,
+            &control.registry,
+            session_id,
+        )
     }
 }

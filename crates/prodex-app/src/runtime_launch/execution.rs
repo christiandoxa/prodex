@@ -1,6 +1,6 @@
 use super::{
     PreparedRuntimeLaunch, RuntimeLaunchPlan, RuntimeLaunchRequest, RuntimeProxyEndpoint,
-    cleanup_runtime_launch_plan, exit_with_status, run_child_plan,
+    cleanup_runtime_launch_plan, exit_with_status, run_child_plan, run_child_plan_with_monitor,
 };
 use crate::print_launch_status;
 use anyhow::Result;
@@ -16,6 +16,15 @@ pub(crate) trait RuntimeLaunchStrategy {
         prepared: &PreparedRuntimeLaunch,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<RuntimeLaunchPlan>;
+    fn child_exit_requested(&mut self) -> bool {
+        false
+    }
+    fn monitors_child_exit(&self) -> bool {
+        false
+    }
+    fn session_affinity_release(&self) -> Option<&str> {
+        None
+    }
     fn relaunch_after_child_exit(&mut self, _status: &ExitStatus) -> Result<bool> {
         Ok(false)
     }
@@ -95,7 +104,11 @@ where
 {
     loop {
         let execution = build_runtime_launch_execution(&strategy)?;
-        let completed = run_runtime_launch_execution(execution)?;
+        let completed = if strategy.monitors_child_exit() {
+            run_runtime_launch_execution(execution, Some(&mut || strategy.child_exit_requested()))?
+        } else {
+            run_runtime_launch_execution(execution, None)?
+        };
         let relaunch = strategy.relaunch_after_child_exit(&completed.status)?;
         let after_result = strategy.after_child_exit(&completed.status);
         cleanup_runtime_launch_plan(&completed.plan);
@@ -116,6 +129,12 @@ where
     let resolved_harness =
         prodex_provider_core::resolve_harness_mode(strategy.harness_mode(), None);
     let prepared = super::prepare_runtime_launch_with_harness(request, resolved_harness)?;
+    if let (Some(runtime_proxy), Some(session_id)) = (
+        prepared.runtime_proxy.as_ref(),
+        strategy.session_affinity_release(),
+    ) {
+        runtime_proxy.release_session_affinity(session_id)?;
+    }
     RuntimeLaunchExecutionBuilder::new(prepared, strategy).build()
 }
 
@@ -134,13 +153,17 @@ fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
 
 fn run_runtime_launch_execution(
     execution: RuntimeLaunchExecution,
+    child_exit_requested: Option<&mut dyn FnMut() -> bool>,
 ) -> Result<RuntimeLaunchCompleted> {
     let RuntimeLaunchExecution {
         plan,
         runtime_proxy,
     } = execution;
     print_launch_status("starting child process...");
-    let status = run_child_plan(&plan.child, runtime_proxy.as_ref());
+    let status = match child_exit_requested {
+        Some(monitor) => run_child_plan_with_monitor(&plan.child, runtime_proxy.as_ref(), monitor),
+        None => run_child_plan(&plan.child, runtime_proxy.as_ref()),
+    };
     drop(runtime_proxy);
     match status {
         Ok(status) => Ok(RuntimeLaunchCompleted { status, plan }),
@@ -178,10 +201,13 @@ mod tests {
         )
         .with_cleanup_path(cleanup_path.clone());
 
-        let completed = run_runtime_launch_execution(RuntimeLaunchExecution {
-            plan,
-            runtime_proxy: None,
-        })
+        let completed = run_runtime_launch_execution(
+            RuntimeLaunchExecution {
+                plan,
+                runtime_proxy: None,
+            },
+            None,
+        )
         .expect("child should run");
 
         assert!(completed.status.success());
@@ -195,6 +221,45 @@ mod tests {
             !cleanup_path.exists(),
             "cleanup path should be removable after after_child_exit work"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_runtime_launch_execution_stops_a_live_child_when_requested() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-runtime-execution-monitor-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let plan = RuntimeLaunchPlan::new(
+            ChildProcessPlan::new(OsString::from("/bin/sh"), root.join("codex-home")).with_args(
+                vec![
+                    OsString::from("-c"),
+                    OsString::from("trap 'exit 42' TERM; while :; do sleep 1; done"),
+                ],
+            ),
+        );
+        let mut polls = 0;
+
+        let completed = run_runtime_launch_execution(
+            RuntimeLaunchExecution {
+                plan,
+                runtime_proxy: None,
+            },
+            Some(&mut || {
+                polls += 1;
+                polls >= 3
+            }),
+        )
+        .expect("monitored child should stop");
+
+        assert!(!completed.status.success());
+        assert!(polls >= 3);
+        cleanup_runtime_launch_plan(&completed.plan);
         let _ = fs::remove_dir_all(root);
     }
 }

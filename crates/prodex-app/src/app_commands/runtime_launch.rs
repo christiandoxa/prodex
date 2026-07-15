@@ -5,6 +5,7 @@ mod gateway_shutdown;
 #[path = "runtime_launch/gateway_startup.rs"]
 mod gateway_startup;
 mod gateway_status;
+pub(crate) mod goal_resume;
 mod preflight;
 mod provider_names;
 mod providers;
@@ -25,18 +26,17 @@ use gateway_config::{resolve_gateway_launch_config, resolve_gateway_launch_confi
 use gateway_startup::start_gateway_backend;
 pub(crate) use gateway_startup::start_policy_gateway_backend as start_policy_gateway_backend_inner;
 use gateway_status::print_gateway_status;
+use goal_resume::*;
 use resume_provider::runtime_resume_external_provider_from_codex_args;
-use rusqlite::OptionalExtension;
 use selection::RuntimeLaunchSelection;
 pub(crate) use selection::resolve_runtime_launch_profile_name;
 use session_delete::{
     cleanup_codex_deleted_session_binding, clear_codex_session_binding,
-    resolve_codex_delete_session_id,
+    maintain_shared_codex_sessions_after_child_exit, resolve_codex_delete_session_id,
 };
 use std::borrow::Cow;
-use std::collections::{BTreeSet, VecDeque};
-use std::io::{BufRead, BufReader};
-use std::{fs::File, path::Path};
+use std::collections::BTreeSet;
+use std::path::Path;
 use {preflight::*, provider_names::*, providers::*, resume_repair::*};
 
 struct RunCommandStrategy {
@@ -52,6 +52,9 @@ struct RunCommandStrategy {
     auto_external_provider_base_url: Option<String>,
     delete_session_id: Option<String>,
     auto_goal_resume_attempted_profiles: BTreeSet<String>,
+    goal_usage_limit_monitor: Option<GoalUsageLimitMonitor>,
+    pending_goal_resume_plan: Option<GoalResumeRelaunchPlan>,
+    goal_resume_session_affinity_release: Option<String>,
 }
 
 impl RunCommandStrategy {
@@ -107,6 +110,8 @@ impl RunCommandStrategy {
         } else {
             resolve_codex_delete_session_id(&codex_args)?
         };
+        let goal_usage_limit_monitor =
+            prepare_goal_usage_limit_monitor(&codex_args, dry_run || args.no_auto_rotate);
         Ok(Self {
             args,
             codex_args,
@@ -120,172 +125,11 @@ impl RunCommandStrategy {
             auto_external_provider_base_url,
             delete_session_id,
             auto_goal_resume_attempted_profiles: BTreeSet::new(),
+            goal_usage_limit_monitor,
+            pending_goal_resume_plan: None,
+            goal_resume_session_affinity_release: None,
         })
     }
-
-    fn resume_session_id(&self) -> Option<&str> {
-        prodex_runtime_launch::codex_resume_session_id(&self.codex_args)
-    }
-
-    fn plan_goal_resume_relaunch(
-        &self,
-        status: &std::process::ExitStatus,
-    ) -> Result<Option<GoalResumeRelaunchPlan>> {
-        if status.success() || self.args.no_auto_rotate {
-            return Ok(None);
-        }
-        let Some(session_id) = self.resume_session_id() else {
-            return Ok(None);
-        };
-        let paths = AppPaths::discover()?;
-        let state = AppState::load_and_repair(&paths)?;
-        let report = match prodex_session_store::resolve_session_report_by_id_in_store(
-            &paths.shared_codex_root,
-            &state,
-            session_id,
-        ) {
-            Ok(report) => report,
-            Err(_) => return Ok(None),
-        };
-        let analysis = analyze_goal_resume_session(Path::new(&report.path))?;
-        if !analysis.saw_usage_limit {
-            return Ok(None);
-        }
-        let Some(thread_id) = analysis.thread_id else {
-            return Ok(None);
-        };
-        if !shared_goal_needs_resume(&paths.shared_codex_root, &thread_id)? {
-            return Ok(None);
-        }
-        let failed_profile = state
-            .session_profile_bindings
-            .get(session_id)
-            .map(|binding| binding.profile_name.clone())
-            .or_else(|| self.args.profile.clone())
-            .or_else(|| state.active_profile.clone())
-            .unwrap_or_default();
-        let next_profile = active_profile_selection_order(&state, &failed_profile)
-            .into_iter()
-            .filter(|candidate| candidate != &failed_profile)
-            .filter(|candidate| !self.auto_goal_resume_attempted_profiles.contains(candidate))
-            .find(|candidate| {
-                state.profiles.get(candidate).is_some_and(|profile| {
-                    profile.provider.supports_codex_runtime()
-                        && profile
-                            .provider
-                            .auth_summary(&profile.codex_home)
-                            .quota_compatible
-                })
-            });
-        Ok(next_profile.map(|profile_name| GoalResumeRelaunchPlan {
-            session_id: session_id.to_string(),
-            profile_name,
-        }))
-    }
-
-    fn apply_goal_resume_relaunch(&mut self, plan: GoalResumeRelaunchPlan) -> Result<()> {
-        clear_codex_session_binding(&plan.session_id)?;
-        self.auto_goal_resume_attempted_profiles
-            .insert(plan.profile_name.clone());
-        self.args.profile = Some(plan.profile_name);
-        if !codex_args_include_goal_resume(&self.codex_args) {
-            self.codex_args.push(OsString::from("/goal"));
-            self.codex_args.push(OsString::from("resume"));
-        }
-        Ok(())
-    }
-
-    fn isolate_auto_external_provider_child_env(&self, child: &mut ChildProcessPlan) {
-        if self.auto_external_provider.is_some() {
-            remove_provider_secret_env(child);
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GoalResumeRelaunchPlan {
-    session_id: String,
-    profile_name: String,
-}
-
-#[derive(Debug, Default)]
-struct GoalResumeSessionAnalysis {
-    thread_id: Option<String>,
-    saw_usage_limit: bool,
-}
-
-fn codex_args_include_goal_resume(codex_args: &[OsString]) -> bool {
-    codex_args.windows(2).any(|window| {
-        window[0] == "/goal"
-            && window[1]
-                .to_string_lossy()
-                .trim()
-                .eq_ignore_ascii_case("resume")
-    })
-}
-
-fn analyze_goal_resume_session(path: &Path) -> Result<GoalResumeSessionAnalysis> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(GoalResumeSessionAnalysis::default());
-        }
-        Err(err) => return Err(err).with_context(|| format!("failed to read {}", path.display())),
-    };
-    let mut analysis = GoalResumeSessionAnalysis::default();
-    let mut tail = VecDeque::with_capacity(200);
-    for line in BufReader::new(file).lines() {
-        let line = line.with_context(|| format!("failed to read {}", path.display()))?;
-        if analysis.thread_id.is_none()
-            && let Ok(value) = serde_json::from_str::<serde_json::Value>(&line)
-        {
-            analysis.thread_id = prodex_app_reports::first_string_value(
-                &value,
-                &[&["payload", "thread_id"], &["thread_id"], &["threadId"]],
-            );
-        }
-        if tail.len() == 200 {
-            tail.pop_front();
-        }
-        tail.push_back(line);
-    }
-    analysis.saw_usage_limit = tail
-        .iter()
-        .any(|line| goal_resume_line_has_usage_limit(line));
-    Ok(analysis)
-}
-
-fn shared_goal_needs_resume(shared_codex_root: &Path, thread_id: &str) -> Result<bool> {
-    let db_path = shared_codex_root.join("goals_1.sqlite");
-    if !db_path.is_file() {
-        return Ok(false);
-    }
-    let conn = rusqlite::Connection::open_with_flags(
-        &db_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .with_context(|| format!("failed to open {}", db_path.display()))?;
-    let has_thread_goals = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_goals'",
-            [],
-            |_| Ok(()),
-        )
-        .is_ok();
-    if !has_thread_goals {
-        return Ok(false);
-    }
-    let status = conn
-        .query_row(
-            "SELECT status FROM thread_goals WHERE thread_id = ? ORDER BY updated_at_ms DESC LIMIT 1",
-            [thread_id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    Ok(status.is_some_and(|status| {
-        let normalized = status.trim().to_ascii_lowercase();
-        !matches!(normalized.as_str(), "complete" | "completed")
-    }))
 }
 
 impl RuntimeLaunchStrategy for RunCommandStrategy {
@@ -325,18 +169,58 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         let codex_args =
             runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args);
         let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
-        let codex_args = prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
+        let mut codex_args =
+            prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
+        if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
+            add_runtime_goal_session_notify(
+                &prepared.codex_home,
+                self.profile_v2_name.as_deref(),
+                &mut codex_args,
+                &monitor.marker_path,
+            );
+        }
         let runtime_args = runtime_proxy_codex_passthrough_args(runtime_proxy, &codex_args);
         let mut child = codex_child_plan(prepared.codex_home.clone(), runtime_args);
-        self.isolate_auto_external_provider_child_env(&mut child);
+        isolate_auto_external_provider_child_env(self.auto_external_provider, &mut child);
         if self.args.no_proxy && runtime_proxy.is_none() {
             remove_upstream_proxy_env(&mut child);
         }
         Ok(RuntimeLaunchPlan::new(child))
     }
 
+    fn child_exit_requested(&mut self) -> bool {
+        let Some(session_id) = self
+            .goal_usage_limit_monitor
+            .as_mut()
+            .and_then(GoalUsageLimitMonitor::take_usage_limit_signal)
+        else {
+            return false;
+        };
+        let Some(plan) = self
+            .plan_live_goal_resume_relaunch(&session_id)
+            .ok()
+            .flatten()
+        else {
+            return false;
+        };
+        self.pending_goal_resume_plan = Some(plan);
+        true
+    }
+
+    fn monitors_child_exit(&self) -> bool {
+        self.goal_usage_limit_monitor.is_some()
+    }
+
+    fn session_affinity_release(&self) -> Option<&str> {
+        self.goal_resume_session_affinity_release.as_deref()
+    }
+
     fn relaunch_after_child_exit(&mut self, status: &std::process::ExitStatus) -> Result<bool> {
-        let Some(plan) = self.plan_goal_resume_relaunch(status)? else {
+        let plan = match self.pending_goal_resume_plan.take() {
+            Some(plan) => Some(plan),
+            None => self.plan_goal_resume_relaunch(status)?,
+        };
+        let Some(plan) = plan else {
             return Ok(false);
         };
         self.apply_goal_resume_relaunch(plan)?;
@@ -350,15 +234,6 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         }
         Ok(())
     }
-}
-
-fn maintain_shared_codex_sessions_after_child_exit() {
-    let Ok(paths) = AppPaths::discover() else {
-        return;
-    };
-    let _ = maintain_managed_codex_sessions(&paths);
-    let _ =
-        prodex_shared_codex_fs::persist_codex_session_image_attachments(&paths.shared_codex_root);
 }
 
 pub(super) fn handle_run(args: RunArgs) -> Result<()> {
@@ -773,6 +648,7 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-broker-dry-run-leases"),
+        broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
     })
@@ -816,6 +692,7 @@ fn runtime_local_rewrite_proxy_dry_run_endpoint(
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: paths.root.join("runtime-local-proxy-dry-run-leases"),
+        broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
     })
@@ -856,6 +733,7 @@ fn start_runtime_proxy_endpoint(
         } else {
             "runtime-dedicated-proxy-leases"
         }),
+        broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: Some(proxy),
     })
@@ -906,6 +784,7 @@ fn start_local_rewrite_proxy_endpoint(
             .map(|addr| format!("http://{addr}")),
         realtime_ws_model: proxy.gemini_live_sidecar_model.clone(),
         lease_dir: paths.root.join("runtime-local-proxy-leases"),
+        broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: Some(proxy),
     })

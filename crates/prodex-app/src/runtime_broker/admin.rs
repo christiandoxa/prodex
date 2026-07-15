@@ -1,6 +1,6 @@
 use super::{
     RuntimeRotationProxyShared, audit_log_event_best_effort,
-    build_runtime_proxy_json_error_response, path_without_query,
+    build_runtime_proxy_json_error_response, path_without_query, release_runtime_session_affinity,
     runtime_broker_metadata_by_log_path, runtime_broker_metadata_for_log_path,
     runtime_broker_metrics_snapshot, runtime_proxy_log, runtime_proxy_persistence_enabled,
 };
@@ -231,6 +231,59 @@ fn runtime_broker_activation_response(
     ))
 }
 
+fn runtime_broker_session_affinity_release_id(
+    request: &mut tiny_http::Request,
+) -> std::result::Result<String, tiny_http::ResponseBox> {
+    if let Err(error) =
+        prodex_runtime_broker::runtime_broker_validate_session_affinity_release_method(
+            request.method().as_str(),
+        )
+    {
+        return Err(runtime_broker_admin_error_response(error));
+    }
+    let body = read_runtime_broker_activation_body_limited(
+        request.as_reader(),
+        RUNTIME_BROKER_ACTIVATION_MAX_BODY_BYTES,
+    )
+    .map_err(runtime_broker_activation_body_error_response)?;
+    prodex_runtime_broker::runtime_broker_session_affinity_release_id_from_json(&body)
+        .map_err(runtime_broker_admin_error_response)
+}
+
+fn runtime_broker_session_affinity_release_response(
+    request: &mut tiny_http::Request,
+    shared: &RuntimeRotationProxyShared,
+    metadata: RuntimeBrokerMetadata,
+) -> Option<tiny_http::ResponseBox> {
+    let session_id = match runtime_broker_session_affinity_release_id(request) {
+        Ok(session_id) => session_id,
+        Err(response) => return Some(response),
+    };
+    if let Err(err) = release_runtime_session_affinity(shared, &session_id, "goal_resume") {
+        return Some(build_runtime_proxy_json_error_response(
+            500,
+            "internal_error",
+            &err.to_string(),
+        ));
+    }
+    audit_log_event_best_effort(
+        "runtime_broker",
+        "release_session_affinity",
+        "success",
+        serde_json::json!({
+            "broker_key": metadata.broker_key,
+            "listen_addr": metadata.listen_addr,
+        }),
+    );
+    Some(build_runtime_proxy_json_response(
+        200,
+        serde_json::to_string(
+            &prodex_runtime_broker::runtime_broker_session_affinity_release_success(),
+        )
+        .unwrap_or_else(|_| "{\"ok\":true}".to_string()),
+    ))
+}
+
 pub(crate) fn handle_runtime_proxy_admin_request(
     request: &mut tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
@@ -262,6 +315,9 @@ pub(crate) fn handle_runtime_proxy_admin_request(
         }
         prodex_runtime_broker::RuntimeBrokerAdminRoute::Activate => {
             runtime_broker_activation_response(request, shared, metadata)
+        }
+        prodex_runtime_broker::RuntimeBrokerAdminRoute::ReleaseSessionAffinity => {
+            runtime_broker_session_affinity_release_response(request, shared, metadata)
         }
     }
 }

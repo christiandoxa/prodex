@@ -10,6 +10,8 @@ mod startup_selection;
 mod websocket_policy;
 #[path = "continuation_cleanup/optimistic_current.rs"]
 mod optimistic_current;
+#[path = "continuation_cleanup/session_affinity.rs"]
+mod session_affinity;
 
 fn runtime_shared_for_dead_response_binding_cleanup(
     temp_dir: &TestDir,
