@@ -1,14 +1,33 @@
-use super::*;
+use super::{
+    ApplicationAuthorizedRequestContext, ApplicationExecutionApprovalDecision,
+    ApplicationGovernancePlan, ApplicationGovernanceRequest, ApplicationGovernanceSnapshot,
+    ApplicationInspectionPlan, ApplicationObligationDisposition,
+    ApplicationObligationExecutionPlan, AtomicReservationCommand, AuditOutcome, CanonicalRoute,
+    CapabilitySet, Channel, CredentialScope, DataClassification, EnvironmentContext,
+    GatewayHttpRouteKind, GovernedRoutingError, GovernedRoutingPlan, GovernedRoutingRequest,
+    MAX_GOVERNED_ROUTING_FALLBACKS, ModelCapability, NetworkZone, PolicyEffect, Principal,
+    PrincipalPolicyAttributes, QuotaContext, RequestId, RequestPolicyAttributes, RequestRisk,
+    RuntimeGatewayApplicationDataPlaneError, RuntimeGatewayGovernanceDecision,
+    RuntimeLocalRewriteProxyShared, RuntimeProxyRequest, TenantContext,
+    plan_application_governance, plan_governed_provider_route, runtime_gateway_execution_approval,
+    runtime_gateway_governance_error_code, runtime_gateway_governance_route,
+    runtime_gateway_governed_action, runtime_gateway_mandatory_governance_audit,
+    runtime_gateway_obligation_execution, runtime_gateway_provider_endpoint,
+    runtime_gateway_provider_runtime_snapshot, runtime_gateway_requested_capabilities,
+    runtime_gateway_requested_modalities, runtime_gateway_requested_tools,
+    runtime_gateway_unix_epoch_millis, runtime_provider_model_from_body, runtime_proxy_log,
+    runtime_proxy_log_field, runtime_proxy_structured_log_message,
+};
 
 mod context;
 mod policy;
 mod routing;
 mod session;
 
-use context::*;
-use policy::*;
-use routing::*;
-use session::*;
+use context::{build_governance_context, evaluate_policy};
+use policy::{enforce_session_admission, resolve_execution_approval};
+use routing::{enforce_provider_revision, plan_provider_route};
+use session::{emit_mandatory_governance_audit, persist_governance_session};
 
 struct GovernanceDecisionContext<'a> {
     tenant: TenantContext,

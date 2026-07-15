@@ -1,4 +1,12 @@
-use super::*;
+use super::session::emit_mandatory_governance_audit;
+use super::{
+    ApplicationExecutionApprovalDecision, ApplicationGovernancePlan, ApplicationInspectionPlan,
+    ApplicationObligationDisposition, AuditOutcome, GovernanceDecisionContext,
+    GovernancePolicyExecution, RuntimeGatewayApplicationDataPlaneError,
+    RuntimeLocalRewriteProxyShared, RuntimeProxyRequest, runtime_gateway_execution_approval,
+    runtime_gateway_obligation_execution, runtime_gateway_unix_epoch_millis, runtime_proxy_log,
+    runtime_proxy_log_field, runtime_proxy_structured_log_message,
+};
 
 pub(super) fn enforce_session_admission(
     shared: &RuntimeLocalRewriteProxyShared,
