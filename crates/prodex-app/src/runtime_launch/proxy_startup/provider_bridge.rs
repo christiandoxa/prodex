@@ -12,10 +12,10 @@ use prodex_provider_core::{
 };
 
 pub(super) use self::provider_bridge_conformance::{
-    runtime_harness_log_provider_policy, runtime_provider_log_request_conformance,
-    runtime_provider_log_response_conformance, runtime_provider_log_stream_conformance,
-    runtime_provider_request_conformance_result, runtime_provider_response_conformance_result,
-    runtime_provider_stream_event_conformance_result,
+    RuntimeHarnessProviderPolicyLog, runtime_harness_log_provider_policy,
+    runtime_provider_log_request_conformance, runtime_provider_log_response_conformance,
+    runtime_provider_log_stream_conformance, runtime_provider_request_conformance_result,
+    runtime_provider_response_conformance_result, runtime_provider_stream_event_conformance_result,
     runtime_provider_stream_function_call_arguments_delta_event,
     runtime_provider_stream_reasoning_summary_text_delta_event,
     runtime_provider_stream_text_delta_event,

@@ -4,8 +4,9 @@ use super::deepseek_rewrite::{
 #[cfg(test)]
 use super::gemini_thought_signatures::runtime_gemini_harden_tool_call_thought_signatures;
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_harness_log_provider_policy,
-    runtime_provider_log_response_conformance, runtime_provider_response_conformance_result,
+    RuntimeHarnessProviderPolicyLog, RuntimeProviderBridgeKind,
+    runtime_harness_log_provider_policy, runtime_provider_log_response_conformance,
+    runtime_provider_response_conformance_result,
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use anyhow::{Context, Result};
@@ -202,12 +203,14 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
     runtime_harness_log_provider_policy(
         runtime_shared,
         request_id,
-        prodex_provider_core::ProviderId::Gemini,
-        prodex_provider_core::ProviderEndpoint::Responses,
-        harness_model.unwrap_or_default(),
-        "response",
-        postprocessed.policy,
-        postprocessed.applied,
+        RuntimeHarnessProviderPolicyLog {
+            provider: prodex_provider_core::ProviderId::Gemini,
+            endpoint: prodex_provider_core::ProviderEndpoint::Responses,
+            model: harness_model.unwrap_or_default(),
+            phase: "response",
+            policy: postprocessed.policy,
+            applied: postprocessed.applied,
+        },
     );
     let body = postprocessed.body.into_owned();
     Ok(RuntimeHeapTrimmedBufferedResponseParts {
