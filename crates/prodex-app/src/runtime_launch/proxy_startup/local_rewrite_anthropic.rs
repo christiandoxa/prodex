@@ -408,7 +408,7 @@ fn send_passthrough_attempts(
 ) -> Result<RuntimeLocalRewriteUpstreamResult> {
     let auth_count = auth_attempts.len();
     for (auth_index, selected_auth) in auth_attempts.iter().enumerate() {
-        let response = match send_runtime_local_rewrite_prepared_request(
+        let response = send_runtime_local_rewrite_prepared_request(
             request_id,
             request,
             shared,
@@ -418,10 +418,7 @@ fn send_passthrough_attempts(
                 auth: &selected_auth.auth,
                 native_messages: false,
             },
-        ) {
-            Ok(response) => response,
-            Err(error) => return Err(error),
-        };
+        )?;
         let status = response.status().as_u16();
         if status < 400 {
             return Ok(live(response, false));
