@@ -55,7 +55,7 @@
     "reason": "Gateway usage regressions now cover atomic budget admission, header-first virtual-key rejection, bounded persistence queues, and request-id cleanup; capped until admission and persistence fixtures are split."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_tests.rs",
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge/tests.rs",
     "maxLines": 1570,
     "reason": "Provider bridge regressions include the fail-closed route-normalization matrix alongside compact routing, accounting, and continuation parity; capped until tests split by provider."
   },

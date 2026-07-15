@@ -101,5 +101,4 @@ pub(super) fn runtime_provider_model_from_body(body: &[u8]) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "provider_bridge_tests.rs"]
-mod provider_bridge_tests;
+mod tests;
