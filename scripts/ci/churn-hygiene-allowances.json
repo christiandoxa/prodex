@@ -1,5 +1,18 @@
 [
   {
+    "id": "runtime-ownership-refactor-0.293.0",
+    "requiredSubjects": [
+      "refactor: modularize runtime ownership boundaries"
+    ],
+    "caps": {
+      "maxFiles": 92,
+      "maxBehaviorFiles": 79,
+      "maxLines": 18972,
+      "maxFileLines": 1529
+    },
+    "reason": "Reviewed the behavior-preserving quota, provider, gateway, governance, pre-commit, storage, broker-preview, Presidio, doctor, and CLI ownership extractions with multi-agent implementation, exact route and protocol characterization, the locked all-features full suite, serial runtime proxy matrix, boundary/size/secret guards, optimized release build, and tracked-diff credential scan before the 0.293.0 release."
+  },
+  {
     "id": "enterprise-governance-hardening-0.290.0",
     "requiredSubjects": [
       "feat(governance): harden enterprise gateway controls"
