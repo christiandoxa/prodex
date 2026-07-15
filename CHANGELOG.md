@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.292.0 - 2026-07-15
+
+### CLI
+
+- Recheck exhausted launch snapshots (`da65756`)
+
 ## 0.291.0 - 2026-07-15
 
 ### Misc
@@ -89,21 +95,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.281.0 - 2026-07-13
 
 - No grouped changes.
-
-## 0.280.0 - 2026-07-13
-
-### Runtime
-
-- Preserve weekly-only websocket sessions (`319b415`)
-- Normalize partial runtime windows (`b96e335`)
-
-### CLI
-
-- Allow weekly-only quota snapshots (`5568e50`)
-- Render partial quota windows accurately (`a201051`)
-- Support partial Spark windows (`a63c138`)
-
-### Deps
-
-- Merge pull request #27 (`b78df11`)
-- Bump uuid in the cargo group across 1 directory (`7362012`)
