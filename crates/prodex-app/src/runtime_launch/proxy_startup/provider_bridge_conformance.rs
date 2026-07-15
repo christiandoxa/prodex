@@ -82,17 +82,28 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_log_response_co
     );
 }
 
-#[allow(clippy::too_many_arguments)]
+pub(in crate::runtime_launch::proxy_startup) struct RuntimeHarnessProviderPolicyLog<'a> {
+    pub(in crate::runtime_launch::proxy_startup) provider: ProviderId,
+    pub(in crate::runtime_launch::proxy_startup) endpoint: ProviderEndpoint,
+    pub(in crate::runtime_launch::proxy_startup) model: &'a str,
+    pub(in crate::runtime_launch::proxy_startup) phase: &'static str,
+    pub(in crate::runtime_launch::proxy_startup) policy: Option<&'static HarnessProviderPolicySpec>,
+    pub(in crate::runtime_launch::proxy_startup) applied: bool,
+}
+
 pub(in crate::runtime_launch::proxy_startup) fn runtime_harness_log_provider_policy(
     shared: &crate::RuntimeRotationProxyShared,
     request_id: u64,
-    provider: ProviderId,
-    endpoint: ProviderEndpoint,
-    model: &str,
-    phase: &'static str,
-    policy: Option<&HarnessProviderPolicySpec>,
-    applied: bool,
+    event: RuntimeHarnessProviderPolicyLog<'_>,
 ) {
+    let RuntimeHarnessProviderPolicyLog {
+        provider,
+        endpoint,
+        model,
+        phase,
+        policy,
+        applied,
+    } = event;
     let Some(policy) = policy else {
         return;
     };

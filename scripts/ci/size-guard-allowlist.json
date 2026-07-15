@@ -40,6 +40,11 @@
     "reason": "The typed data-plane boundary now carries PIP attributes, execution approval, dynamic governed routing, eligible precommit fallback, audit context, dispatch, and reconciliation; capped until governance and provider planning move to focused sibling modules."
   },
   {
+    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+    "maxLines": 892,
+    "reason": "Cross-provider upstream dispatch now includes the evaluated native Anthropic Messages precommit path; capped until provider-specific dispatch ownership is extracted without changing retry or affinity behavior."
+  },
+  {
     "file": "crates/prodex-app/src/quota_support/watch.rs",
     "maxLines": 1110,
     "reason": "Live quota snapshot retention, terminal sizing, adaptive refresh policy, and fetch orchestration remain capped after native TUI rendering helpers moved to a sibling module."
@@ -186,7 +191,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
-    "maxLines": 1942,
+    "maxLines": 1959,
     "reason": "Runtime policy compatibility coverage includes typed gateway harness validation and remains capped while versioned policy, cache, and gateway settings tests are split."
   },
   {

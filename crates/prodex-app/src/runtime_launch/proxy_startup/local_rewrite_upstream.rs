@@ -27,10 +27,11 @@ use super::local_rewrite_transport::{
     send_runtime_local_rewrite_prepared_request,
 };
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_harness_log_provider_policy, runtime_provider_error_class,
-    runtime_provider_label, runtime_provider_log_request_conformance,
-    runtime_provider_model_fallback_chain, runtime_provider_model_from_body,
-    runtime_provider_request_body_with_model, runtime_provider_request_conformance_result,
+    RuntimeHarnessProviderPolicyLog, RuntimeProviderBridgeKind,
+    runtime_harness_log_provider_policy, runtime_provider_error_class, runtime_provider_label,
+    runtime_provider_log_request_conformance, runtime_provider_model_fallback_chain,
+    runtime_provider_model_from_body, runtime_provider_request_body_with_model,
+    runtime_provider_request_conformance_result,
 };
 use crate::{
     RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeRouteKind,
@@ -224,14 +225,16 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                         runtime_harness_log_provider_policy(
                             &shared.runtime_shared,
                             request_id,
-                            ProviderId::Anthropic,
-                            ProviderEndpoint::Responses,
-                            model,
-                            "request-translation",
-                            harness_policy,
-                            native_messages
-                                && provider_core_lossless_body(provider_core_result.as_ref())
-                                    .is_some(),
+                            RuntimeHarnessProviderPolicyLog {
+                                provider: ProviderId::Anthropic,
+                                endpoint: ProviderEndpoint::Responses,
+                                model,
+                                phase: "request-translation",
+                                policy: harness_policy,
+                                applied: native_messages
+                                    && provider_core_lossless_body(provider_core_result.as_ref())
+                                        .is_some(),
+                            },
                         );
                         let upstream_body = match provider_core_lossless_body(
                             provider_core_result.as_ref(),
@@ -620,12 +623,14 @@ fn runtime_harness_shape_request(
             runtime_harness_log_provider_policy(
                 &shared.runtime_shared,
                 request_id,
-                provider,
-                endpoint,
-                model.as_deref().unwrap_or_default(),
-                "request",
-                shaped.policy,
-                shaped.applied,
+                RuntimeHarnessProviderPolicyLog {
+                    provider,
+                    endpoint,
+                    model: model.as_deref().unwrap_or_default(),
+                    phase: "request",
+                    policy: shaped.policy,
+                    applied: shaped.applied,
+                },
             );
             runtime_harness_log_request_shape(
                 request_id,
