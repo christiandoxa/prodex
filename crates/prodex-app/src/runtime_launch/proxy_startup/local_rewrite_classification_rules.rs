@@ -586,7 +586,8 @@ mod tests {
     #[test]
     fn authenticated_http_and_gemini_paths_use_tenant_authority() {
         let http = include_str!("local_rewrite_pipeline_governance.rs");
-        let data_plane = include_str!("local_rewrite_application_data_plane.rs");
+        let data_plane =
+            include_str!("local_rewrite_application_data_plane/governance_decision.rs");
         let gemini = include_str!("local_rewrite_gemini_live.rs");
         let gemini_session = include_str!("local_rewrite_gemini_live/session.rs");
 

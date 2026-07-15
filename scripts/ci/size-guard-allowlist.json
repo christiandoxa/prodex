@@ -36,7 +36,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1169,
+    "maxLines": 1168,
     "reason": "Kiro ACP process lifecycle, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped after pure protocol shaping moved to provider-core."
   },
   {
@@ -273,11 +273,6 @@
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs",
     "maxLines": 1219,
     "reason": "Lifecycle HTTP coverage exercises four governed artifact kinds plus execution-approval quorum, denial audit, idempotent replay, and content-free responses through shared fixtures."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_tuning/config.rs",
-    "maxLines": 856,
-    "reason": "Runtime tuning remains capped after adding immutable governance defaults to the complete configuration fixture."
   },
   {
     "file": "crates/prodex-config/src/lib.rs",
