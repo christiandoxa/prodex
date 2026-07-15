@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use prodex_provider_core::ProviderModelCost;
+use prodex_provider_core::{ProviderAdapterContract, ProviderWireFormat, provider_adapter};
 
 #[test]
 fn gemini_models_endpoint_exposes_catalog_from_gemini_cli() {
@@ -133,27 +133,27 @@ fn every_provider_bridge_exposes_openai_client_contract() {
         RuntimeProviderBridgeKind::DeepSeek,
         RuntimeProviderBridgeKind::Gemini,
     ] {
-        let contract = runtime_provider_openai_contract(kind);
+        let contract = provider_adapter(kind.provider_id());
         assert_eq!(
-            contract.client_request_format,
-            RuntimeProviderWireFormat::OpenAiResponses
+            contract.client_request_format(),
+            ProviderWireFormat::OpenAiResponses
         );
         assert_eq!(
-            contract.response_format,
-            RuntimeProviderWireFormat::OpenAiResponses
+            contract.response_format(),
+            ProviderWireFormat::OpenAiResponses
         );
-        assert_eq!(contract.canonical_client_endpoint, "/v1/responses");
-        assert_eq!(contract.model_list_endpoint, "/v1/models");
-        assert!(contract.supports_streaming);
+        assert_eq!(contract.canonical_client_endpoint(), "/v1/responses");
+        assert_eq!(contract.model_list_endpoint(), "/v1/models");
+        assert!(contract.supports_streaming());
     }
 }
 
 #[test]
 fn provider_bridge_contract_records_translation_boundary() {
     assert_eq!(
-        runtime_provider_openai_contract(RuntimeProviderBridgeKind::OpenAiResponses)
-            .upstream_request_format,
-        RuntimeProviderWireFormat::OpenAiResponses
+        provider_adapter(RuntimeProviderBridgeKind::OpenAiResponses.provider_id())
+            .upstream_request_format(),
+        ProviderWireFormat::OpenAiResponses
     );
     for kind in [
         RuntimeProviderBridgeKind::Anthropic,
@@ -161,14 +161,14 @@ fn provider_bridge_contract_records_translation_boundary() {
         RuntimeProviderBridgeKind::DeepSeek,
     ] {
         assert_eq!(
-            runtime_provider_openai_contract(kind).upstream_request_format,
-            RuntimeProviderWireFormat::OpenAiChatCompletions
+            provider_adapter(kind.provider_id()).upstream_request_format(),
+            ProviderWireFormat::OpenAiChatCompletions
         );
-        assert!(runtime_provider_openai_contract(kind).supports_model_fallback);
+        assert!(provider_adapter(kind.provider_id()).supports_model_fallback());
     }
     assert_eq!(
-        runtime_provider_openai_contract(RuntimeProviderBridgeKind::Gemini).upstream_request_format,
-        RuntimeProviderWireFormat::GeminiGenerateContent
+        provider_adapter(RuntimeProviderBridgeKind::Gemini.provider_id()).upstream_request_format(),
+        ProviderWireFormat::GeminiGenerateContent
     );
 }
 
@@ -470,7 +470,7 @@ fn gateway_spend_message_includes_stable_call_fields() {
         123,
         456,
         br#"{"model":"prodex-fast","input":"hello from prodex"}"#,
-        ProviderModelCost::default(),
+        prodex_provider_core::ProviderModelCost::default(),
     );
     let message = event.log_message();
 
@@ -559,7 +559,7 @@ fn gateway_request_spend_uses_reserved_output_estimate_for_cost() {
         123,
         456,
         br#"{"model":"gpt-5.4","input":"hello","max_output_tokens":17}"#,
-        ProviderModelCost {
+        prodex_provider_core::ProviderModelCost {
             input_cost_per_million_microusd: Some(1_000_000),
             output_cost_per_million_microusd: Some(2_000_000),
         },
@@ -583,7 +583,7 @@ fn gateway_response_spend_uses_response_usage_and_total_cost() {
         12,
         br#"{"model":"gpt-5.4","input":"hello"}"#,
         response_body,
-        ProviderModelCost {
+        prodex_provider_core::ProviderModelCost {
             input_cost_per_million_microusd: Some(1_000_000),
             output_cost_per_million_microusd: Some(2_000_000),
         },
@@ -1536,7 +1536,7 @@ fn gateway_spend_events_reuse_admission_request_and_call_ids() {
         1,
         2,
         b"{}",
-        ProviderModelCost::default(),
+        prodex_provider_core::ProviderModelCost::default(),
     );
     let mut response_event = runtime_provider_gateway_response_spend_event(
         42,
@@ -1547,7 +1547,7 @@ fn gateway_spend_events_reuse_admission_request_and_call_ids() {
         1,
         b"{}",
         b"{}",
-        ProviderModelCost::default(),
+        prodex_provider_core::ProviderModelCost::default(),
     );
 
     runtime_provider_gateway_spend_apply_admission_ids(
