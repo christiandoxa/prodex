@@ -6,7 +6,7 @@ import { repoRoot } from "../npm/common.mjs";
 
 const SCAN_ROOT = "crates/prodex-app/src";
 const SUPER_WILDCARD_LINE = "use super::*;";
-const SUPER_WILDCARD_CAP = 179;
+const SUPER_WILDCARD_CAP = 178;
 
 function parseArgs(argv) {
   const args = { json: false };
