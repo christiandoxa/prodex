@@ -18,6 +18,13 @@ pub(super) struct RuntimeGeminiGenerateSseReader<R: Read> {
     inner: RuntimeProviderSseJsonReader<R, RuntimeGeminiSseState>,
 }
 
+pub(super) struct RuntimeGeminiSseReaderConfig {
+    pub(super) observer: Option<RuntimeProviderSseObserver>,
+    pub(super) harness_mode: prodex_provider_core::EffectiveHarnessMode,
+    pub(super) harness_model: Option<String>,
+    pub(super) gemini: crate::RuntimeGeminiConfig,
+}
+
 impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
     #[cfg(test)]
     pub(super) fn new(
@@ -34,10 +41,12 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
             conversation_messages,
             conversations,
             binding_recorder,
-            None,
-            prodex_provider_core::EffectiveHarnessMode::Native,
-            None,
-            config.gemini,
+            RuntimeGeminiSseReaderConfig {
+                observer: None,
+                harness_mode: prodex_provider_core::EffectiveHarnessMode::Native,
+                harness_model: None,
+                gemini: config.gemini,
+            },
         )
     }
 
@@ -47,11 +56,14 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
         conversation_messages: Vec<serde_json::Value>,
         conversations: RuntimeDeepSeekConversationStore,
         binding_recorder: Option<RuntimeGeminiBindingRecorder>,
-        observer: Option<RuntimeProviderSseObserver>,
-        harness_mode: prodex_provider_core::EffectiveHarnessMode,
-        harness_model: Option<String>,
-        gemini_config: crate::RuntimeGeminiConfig,
+        config: RuntimeGeminiSseReaderConfig,
     ) -> Self {
+        let RuntimeGeminiSseReaderConfig {
+            observer,
+            harness_mode,
+            harness_model,
+            gemini,
+        } = config;
         Self {
             inner: RuntimeProviderSseJsonReader::new_with_observer(
                 reader,
@@ -62,7 +74,7 @@ impl<R: Read> RuntimeGeminiGenerateSseReader<R> {
                     binding_recorder,
                     harness_mode,
                     harness_model,
-                    gemini_config,
+                    gemini,
                 ),
                 observer,
             ),

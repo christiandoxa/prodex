@@ -1,5 +1,6 @@
 use super::{
     RuntimeDeepSeekConversationStore, RuntimeGeminiBindingRecorder, RuntimeGeminiGenerateSseReader,
+    RuntimeGeminiSseReaderConfig,
 };
 use std::collections::BTreeSet;
 use std::io::Read;
@@ -67,10 +68,12 @@ fn evaluated_gemini_sse_restores_native_shell_alias_in_every_tool_call_event() {
         Vec::new(),
         conversation_store(),
         None,
-        None,
-        prodex_provider_core::EffectiveHarnessMode::Evaluated,
-        Some("gemini-3.1-pro-preview".to_string()),
-        config.gemini,
+        RuntimeGeminiSseReaderConfig {
+            observer: None,
+            harness_mode: prodex_provider_core::EffectiveHarnessMode::Evaluated,
+            harness_model: Some("gemini-3.1-pro-preview".to_string()),
+            gemini: config.gemini,
+        },
     );
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();

@@ -121,16 +121,26 @@ pub(super) struct RuntimeGeminiTranslatedRequest {
     pub(super) stream: bool,
 }
 
+pub(super) struct RuntimeGeminiBufferedResponseContext<'a> {
+    pub(super) conversations: &'a RuntimeDeepSeekConversationStore,
+    pub(super) runtime_shared: &'a crate::RuntimeRotationProxyShared,
+    pub(super) harness_mode: prodex_provider_core::EffectiveHarnessMode,
+    pub(super) harness_model: Option<&'a str>,
+}
+
 pub(super) fn runtime_gemini_generate_buffered_response_parts(
     status: u16,
     mut response: reqwest::blocking::Response,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
-    conversations: &RuntimeDeepSeekConversationStore,
-    runtime_shared: &crate::RuntimeRotationProxyShared,
-    harness_mode: prodex_provider_core::EffectiveHarnessMode,
-    harness_model: Option<&str>,
+    context: RuntimeGeminiBufferedResponseContext<'_>,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
+    let RuntimeGeminiBufferedResponseContext {
+        conversations,
+        runtime_shared,
+        harness_mode,
+        harness_model,
+    } = context;
     let mut body = Vec::new();
     response
         .read_to_end(&mut body)
