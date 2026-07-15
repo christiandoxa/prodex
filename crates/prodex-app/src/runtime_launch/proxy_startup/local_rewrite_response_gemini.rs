@@ -53,10 +53,12 @@ pub(super) fn respond_runtime_gemini_rewrite(
     } = context;
     let RuntimeGeminiRequestContext {
         profile_name,
+        model,
         conversation_messages,
         binding_recorder,
     } = gemini_context.unwrap_or_else(|| RuntimeGeminiRequestContext {
         profile_name: RUNTIME_LOCAL_REWRITE_PROFILE.to_string(),
+        model: String::new(),
         conversation_messages: Vec::new(),
         binding_recorder: None,
     });
@@ -107,6 +109,8 @@ pub(super) fn respond_runtime_gemini_rewrite(
             shared.gemini_conversations.clone(),
             binding_recorder,
             Some(observer),
+            shared.resolved_harness.effective,
+            (!model.is_empty()).then_some(model.clone()),
             shared.runtime_shared.runtime_config.gemini.clone(),
         ));
         let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
@@ -132,6 +136,8 @@ pub(super) fn respond_runtime_gemini_rewrite(
         conversation_messages,
         &shared.gemini_conversations,
         &shared.runtime_shared,
+        shared.resolved_harness.effective,
+        (!model.is_empty()).then_some(model.as_str()),
     )
     .map(|mut parts| {
         runtime_gemini_remember_bindings_from_responses_body(

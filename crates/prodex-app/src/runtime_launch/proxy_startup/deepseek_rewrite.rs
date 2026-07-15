@@ -20,7 +20,6 @@ pub(super) use self::request_validation::{
 };
 #[cfg(test)]
 pub(in crate::runtime_launch::proxy_startup) use self::response::runtime_deepseek_chat_assistant_messages_from_response_value;
-#[cfg(test)]
 pub(in crate::runtime_launch::proxy_startup) use self::response::runtime_deepseek_merge_response_metadata;
 pub(in crate::runtime_launch::proxy_startup) use self::response::{
     runtime_deepseek_chat_buffered_response_parts, runtime_deepseek_store_conversation,

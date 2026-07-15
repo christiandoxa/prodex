@@ -20,6 +20,8 @@ use runtime_proxy_crate::{
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
+const ANTHROPIC_API_VERSION: &str = "2023-06-01";
+
 mod observability;
 #[path = "local_rewrite_transport/projected_credential.rs"]
 mod projected_credential;
@@ -33,13 +35,26 @@ use projected_credential::{
 };
 
 pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
-    Anthropic { auth: &'a RuntimeAnthropicAuth },
-    Copilot { api_key: Option<&'a str> },
-    OpenAiResponses { api_key: Option<&'a str> },
+    Anthropic {
+        auth: &'a RuntimeAnthropicAuth,
+        native_messages: bool,
+    },
+    Copilot {
+        api_key: Option<&'a str>,
+    },
+    OpenAiResponses {
+        api_key: Option<&'a str>,
+    },
     OpenAiProjected,
-    DeepSeek { api_key: Option<&'a str> },
-    Gemini { auth: &'a RuntimeGeminiAuth },
-    GeminiOpenAi { api_key: Option<&'a str> },
+    DeepSeek {
+        api_key: Option<&'a str>,
+    },
+    Gemini {
+        auth: &'a RuntimeGeminiAuth,
+    },
+    GeminiOpenAi {
+        api_key: Option<&'a str>,
+    },
 }
 
 pub(super) struct RuntimeLocalRewriteSelectedAnthropicAuth {
@@ -89,7 +104,10 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     let request_body_for_spend = body.clone();
     let mut upstream_request = shared.client.request(method, upstream_url);
     match auth {
-        RuntimeLocalRewritePreparedAuth::Anthropic { auth } => {
+        RuntimeLocalRewritePreparedAuth::Anthropic {
+            auth,
+            native_messages,
+        } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .header(reqwest::header::ACCEPT_ENCODING, "identity")
@@ -97,18 +115,29 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
                     reqwest::header::ACCEPT,
                     "text/event-stream, application/json",
                 );
+            if native_messages {
+                upstream_request =
+                    upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
+            }
             match auth {
-                RuntimeAnthropicAuth::ApiKey { api_key } => {
-                    upstream_request = upstream_request.bearer_auth(api_key);
-                }
-                RuntimeAnthropicAuth::OAuth { access_token } => {
-                    upstream_request = upstream_request
-                        .bearer_auth(access_token)
-                        .header("anthropic-beta", "oauth-2025-04-20");
-                }
                 RuntimeAnthropicAuth::Projected => {
-                    upstream_request =
-                        runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?;
+                    upstream_request = if native_messages {
+                        runtime_local_rewrite_apply_projected_header(
+                            shared,
+                            upstream_request,
+                            "x-api-key",
+                        )?
+                    } else {
+                        runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?
+                    };
+                }
+                _ => {
+                    upstream_request = runtime_local_rewrite_apply_direct_anthropic_auth(
+                        upstream_request,
+                        auth,
+                        native_messages,
+                    )
+                    .expect("non-projected Anthropic auth builds request");
                 }
             }
             if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
@@ -300,6 +329,86 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
     Ok(response)
 }
 
+fn runtime_local_rewrite_apply_direct_anthropic_auth(
+    request: reqwest::blocking::RequestBuilder,
+    auth: &RuntimeAnthropicAuth,
+    native_messages: bool,
+) -> Option<reqwest::blocking::RequestBuilder> {
+    match auth {
+        RuntimeAnthropicAuth::ApiKey { api_key } if native_messages => {
+            Some(request.header("x-api-key", api_key))
+        }
+        RuntimeAnthropicAuth::ApiKey { api_key } => Some(request.bearer_auth(api_key)),
+        RuntimeAnthropicAuth::OAuth { access_token } => Some(
+            request
+                .bearer_auth(access_token)
+                .header("anthropic-beta", "oauth-2025-04-20"),
+        ),
+        RuntimeAnthropicAuth::Projected => None,
+    }
+}
+
+#[cfg(test)]
+mod anthropic_native_transport_tests {
+    use super::*;
+
+    #[test]
+    fn native_anthropic_api_key_uses_required_headers_without_bearer() {
+        let auth = RuntimeAnthropicAuth::ApiKey {
+            api_key: "fixture-anthropic-key".to_string(),
+        };
+        let request = runtime_local_rewrite_apply_direct_anthropic_auth(
+            reqwest::blocking::Client::new()
+                .post("https://api.anthropic.com/v1/messages")
+                .header("anthropic-version", ANTHROPIC_API_VERSION),
+            &auth,
+            true,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request.headers()["anthropic-version"],
+            ANTHROPIC_API_VERSION
+        );
+        assert_eq!(request.headers()["x-api-key"], "fixture-anthropic-key");
+        assert!(
+            !request
+                .headers()
+                .contains_key(reqwest::header::AUTHORIZATION)
+        );
+    }
+
+    #[test]
+    fn native_anthropic_oauth_preserves_bearer_and_beta_headers() {
+        let auth = RuntimeAnthropicAuth::OAuth {
+            access_token: "fixture-oauth-token".to_string(),
+        };
+        let request = runtime_local_rewrite_apply_direct_anthropic_auth(
+            reqwest::blocking::Client::new()
+                .post("https://api.anthropic.com/v1/messages")
+                .header("anthropic-version", ANTHROPIC_API_VERSION),
+            &auth,
+            true,
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request.headers()[reqwest::header::AUTHORIZATION],
+            "Bearer fixture-oauth-token"
+        );
+        assert_eq!(request.headers()["anthropic-beta"], "oauth-2025-04-20");
+        assert_eq!(
+            request.headers()["anthropic-version"],
+            ANTHROPIC_API_VERSION
+        );
+        assert!(!request.headers().contains_key("x-api-key"));
+    }
+}
+
 fn runtime_local_rewrite_copy_openai_headers(
     request: &RuntimeProxyRequest,
     mut upstream_request: reqwest::blocking::RequestBuilder,
@@ -406,6 +515,10 @@ pub(super) fn runtime_openai_standard_provider_upstream_url(
         return runtime_local_rewrite_upstream_url(base_url, mount_path, "/chat/completions");
     }
     runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
+}
+
+pub(super) fn runtime_anthropic_messages_upstream_url(base_url: &str, mount_path: &str) -> String {
+    runtime_local_rewrite_upstream_url(base_url, mount_path, "/messages")
 }
 
 pub(super) fn runtime_gemini_openai_compatible_upstream_url(base_url: &str) -> String {
@@ -614,6 +727,14 @@ mod tests {
                 format!("https://upstream.test{path}")
             );
         }
+    }
+
+    #[test]
+    fn anthropic_messages_upstream_url_uses_native_endpoint() {
+        assert_eq!(
+            runtime_anthropic_messages_upstream_url("https://api.anthropic.com/v1", "/v1"),
+            "https://api.anthropic.com/v1/messages"
+        );
     }
 
     #[test]

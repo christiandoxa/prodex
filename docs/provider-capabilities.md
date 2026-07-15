@@ -25,6 +25,7 @@ Default requested mode: `auto`. V1 default resolution: `native`.
 | auto | Auto | true | native | responses, responses/compact, chat-completions, messages, models, embeddings, images, audio, batches, rerank, a2a | false | false | false | Conservative automatic selection; resolves to Native in v1. |
 | native | Native | true | native | responses, responses/compact, chat-completions, messages, models, embeddings, images, audio, batches, rerank, a2a | false | false | false | Preserves existing bridge behavior without harness shaping. |
 | minimal | Minimal | true | minimal | responses | true | false | false | Prepends the minimal/v1 instruction block to canonical Responses requests. |
+| evaluated | Evaluated | true | evaluated | responses | true | true | true | Applies only provider/model policies backed by the versioned evaluation catalog. |
 
 ## Declared Responses parameter limitations
 

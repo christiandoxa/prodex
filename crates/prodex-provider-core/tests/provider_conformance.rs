@@ -174,7 +174,7 @@ fn public_contract_catalog_exposes_typed_harness_metadata() {
     let catalog = provider_contract_catalog(EffectiveHarnessMode::Minimal);
     assert_eq!(
         catalog.supported_harness_modes,
-        ["auto", "native", "minimal"]
+        ["auto", "native", "minimal", "evaluated"]
     );
     assert_eq!(catalog.default_harness_mode, "auto");
     assert_eq!(catalog.resolved_harness_mode, "minimal");
@@ -191,6 +191,7 @@ fn public_contract_catalog_exposes_typed_harness_metadata() {
         catalog
             .harness_modes
             .iter()
+            .filter(|mode| mode.mode != prodex_provider_core::HarnessMode::Evaluated)
             .all(|mode| !mode.response_shaping && !mode.stream_shaping)
     );
 

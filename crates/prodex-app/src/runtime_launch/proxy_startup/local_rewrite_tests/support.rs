@@ -92,6 +92,13 @@ impl TestUpstream {
         Self::start_n_with_response(1, "application/json", response_body)
     }
 
+    pub(super) fn start_n_with_response_body(
+        request_count: usize,
+        response_body: &'static str,
+    ) -> Self {
+        Self::start_n_with_response(request_count, "application/json", response_body)
+    }
+
     pub(super) fn start_with_response(
         content_type: &'static str,
         response_body: &'static str,

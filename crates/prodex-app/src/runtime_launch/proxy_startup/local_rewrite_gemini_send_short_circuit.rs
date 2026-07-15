@@ -40,6 +40,8 @@ pub(super) fn runtime_gemini_exact_output_short_circuit(
         shared.gemini_conversations.clone(),
         binding_recorder,
         None,
+        shared.resolved_harness.effective,
+        Some(translated.model.clone()),
         shared.runtime_shared.runtime_config.gemini.clone(),
     );
     let mut body = String::new();

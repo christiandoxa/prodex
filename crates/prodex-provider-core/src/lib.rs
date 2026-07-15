@@ -11,6 +11,7 @@ mod errors;
 mod fallback;
 mod gemini_bridge;
 mod harness;
+mod harness_provider_policy;
 mod models;
 mod replay_cases;
 mod surface;
@@ -236,6 +237,13 @@ pub use harness::{
     MINIMAL_HARNESS_INSTRUCTIONS, ParseHarnessModeError, ResolvedHarnessMode, harness_mode_catalog,
     resolve_harness_mode, shape_harness_request,
 };
+pub use harness_provider_policy::{
+    HARNESS_PROVIDER_POLICY_CATALOG, HarnessBodyTransform, HarnessProviderPolicySpec,
+    HarnessProviderTransformError, HarnessResponsePolicy, HarnessToolAlias,
+    harness_canonical_tool_name, harness_provider_native_tool_name, harness_provider_policy,
+    harness_provider_policy_catalog, postprocess_harness_provider_response,
+    postprocess_harness_provider_stream_event, shape_harness_provider_request,
+};
 pub use models::{provider_model_catalog, provider_model_cost, provider_model_spec};
 use replay_cases::provider_replay_case_count;
 pub use replay_cases::{ProviderReplayCase, provider_replay_cases};
@@ -254,7 +262,8 @@ pub use translators::{
     DeepSeekProviderCoreStreamChoiceMetadata, DeepSeekProviderCoreStreamChunkMetadata,
     DeepSeekProviderCoreStreamToolCallDelta, GeminiProviderCoreStreamChunkMetadata,
     GeminiProviderCoreStreamFunctionCallDelta, GeminiProviderCoreStreamToolCall,
-    KiroProviderCoreRequestError, copilot_provider_core_request_body_with_canonical_model,
+    KiroProviderCoreRequestError, anthropic_messages_translator,
+    copilot_provider_core_request_body_with_canonical_model,
     copilot_provider_core_request_body_without_encrypted_content,
     copilot_provider_core_request_has_agent_input, copilot_provider_core_request_has_vision_input,
     copilot_provider_core_response_id_from_value, deepseek_provider_core_chat_stream_error,
@@ -341,7 +350,7 @@ pub use translators::{
     kiro_provider_core_tool_choice_from_legacy_chat_function_call,
     kiro_provider_core_tool_from_legacy_chat_function,
     kiro_provider_core_unsupported_path_error_value, provider_conformance_cases,
-    provider_translator,
+    provider_translator, translate_openai_chat_request_to_anthropic_messages,
 };
 pub use usage::{
     ProviderTokenUsage, calculate_cost_microusd, estimate_request_input_tokens,
