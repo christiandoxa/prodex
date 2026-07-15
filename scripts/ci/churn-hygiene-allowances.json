@@ -379,5 +379,18 @@
       "maxFileLines": 350
     },
     "reason": "Reviewed Gemini provider tool-response, retry, live-smoke, and Caveman startup fixes with local full, preflight, schema, and release smoke gates."
+  },
+  {
+    "id": "evaluated-harness-policies-0.291.0",
+    "requiredSubjects": [
+      "feat(harness): implement evaluated provider policies"
+    ],
+    "caps": {
+      "maxFiles": 35,
+      "maxBehaviorFiles": 32,
+      "maxLines": 3100,
+      "maxFileLines": 900
+    },
+    "reason": "Reviewed the atomic evaluated-harness catalog, native Anthropic Messages round trip, reversible Gemini tool aliases, runtime diagnostics, continuity coverage, and documentation with the full local all-features suite, focused provider/proxy tests, formatting, docs checks, and secret scan."
   }
 ]
