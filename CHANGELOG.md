@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.293.0 - 2026-07-15
+
+- No grouped changes.
+
 ## 0.292.0 - 2026-07-15
 
 ### CLI
@@ -91,7 +95,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add enterprise controls and Kiro parity (`fbc94c0`)
-
-## 0.281.0 - 2026-07-13
-
-- No grouped changes.
