@@ -555,8 +555,8 @@ fn cleanup_stale_lock(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseErro
         return Ok(());
     }
     let file = opened.into_file();
-    match file.try_lock() {
-        Ok(()) => match secure_file::delete_private_verified(path, &file) {
+    match try_lock_refresh_lease(&file) {
+        Ok(true) => match secure_file::delete_private_verified(path, &file) {
             Ok(()) => Ok(()),
             Err(error)
                 if matches!(
@@ -568,8 +568,47 @@ fn cleanup_stale_lock(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseErro
             }
             Err(error) => Err(RefreshLeaseError::io(path, error)),
         },
-        Err(fs::TryLockError::WouldBlock) => Ok(()),
-        Err(error) => Err(RefreshLeaseError::io(path, io::Error::other(error))),
+        Ok(false) => Ok(()),
+        Err(error) => Err(RefreshLeaseError::io(path, error)),
+    }
+}
+
+fn try_lock_refresh_lease(file: &File) -> io::Result<bool> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
+        use windows_sys::Win32::Storage::FileSystem::LockFile;
+
+        // Keep the record readable while reserving one byte beyond any bounded read.
+        let offset = REFRESH_LEASE_LOCK_MAX_BYTES + 1;
+        // SAFETY: `file` owns a live handle and the locked one-byte range is valid
+        // even beyond EOF. Windows releases the range when the handle closes.
+        let locked = unsafe {
+            LockFile(
+                file.as_raw_handle().cast(),
+                offset as u32,
+                (offset >> 32) as u32,
+                1,
+                0,
+            )
+        };
+        if locked != 0 {
+            return Ok(true);
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32) {
+            Ok(false)
+        } else {
+            Err(error)
+        }
+    }
+
+    #[cfg(not(windows))]
+    match file.try_lock() {
+        Ok(()) => Ok(true),
+        Err(fs::TryLockError::WouldBlock) => Ok(false),
+        Err(error) => Err(io::Error::other(error)),
     }
 }
 
