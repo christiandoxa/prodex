@@ -2,9 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.298.0 - 2026-07-16
+
+### Runtime
+
+- Rotate past weekly-exhausted profiles (`3490f5d`)
+
 ## 0.297.0 - 2026-07-16
 
-- No grouped changes.
+### CLI
+
+- Keep refresh lease records readable on Windows (`246a62b`)
+
+### Deps
+
+- Classify test-only dependencies (`54e3865`)
 
 ## 0.296.0 - 2026-07-16
 
@@ -61,18 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.287.0 - 2026-07-14
 
 - No grouped changes.
-
-## 0.286.0 - 2026-07-14
-
-### Runtime
-
-- Retry quota-ready websocket profiles (`6e27fa4`)
-- Apply resolved harness modes (`0902e4f`)
-
-### CLI
-
-- Expose harness selection (`fb434bf`)
-
-### Misc
-
-- Add harness policy core (`f4e73cd`)
