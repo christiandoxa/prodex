@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.300.0 - 2026-07-16
+
+- No grouped changes.
+
 ## 0.299.0 - 2026-07-16
 
 ### Runtime
@@ -69,9 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden Windows checksum verification (`8ca79a6`)
-
-## 0.288.0 - 2026-07-14
-
-### Misc
-
-- Add verified standalone installer (`04730d3`)
