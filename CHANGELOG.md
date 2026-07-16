@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.297.0 - 2026-07-16
+
+- No grouped changes.
+
 ## 0.296.0 - 2026-07-16
 
 - No grouped changes.
@@ -72,18 +76,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add harness policy core (`f4e73cd`)
-
-## 0.285.0 - 2026-07-14
-
-### Runtime
-
-- Restore retries and large session resumes (`29eb66d`)
-
-### CLI
-
-- Keep partial usage profiles available (`8740c4b`)
-
-### Misc
-
-- Scan secrets inside quoted text (`4ebe905`)
-- Add enterprise governance platform (`e07e2cc`)
