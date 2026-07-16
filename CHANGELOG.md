@@ -2,6 +2,16 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.301.0 - 2026-07-16
+
+### Runtime
+
+- Resume quota-rejected goals across profiles (`7657089`)
+
+### Misc
+
+- Avoid unauthenticated GitHub API requests (`c1caf4d`)
+
 ## 0.300.0 - 2026-07-16
 
 - No grouped changes.
@@ -63,13 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Harden enterprise gateway controls (`fa0447c`)
-
-## 0.289.0 - 2026-07-14
-
-### Runtime
-
-- Translate compact requests for local providers (`968b8d6`)
-
-### Misc
-
-- Harden Windows checksum verification (`8ca79a6`)
