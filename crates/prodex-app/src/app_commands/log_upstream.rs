@@ -71,7 +71,7 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
 }
 
 fn stream_upstream_payload_events_tui() -> Result<()> {
-    let mut tui = LogTuiTerminal::new("upstream payload")?;
+    let mut tui = LogTuiTerminal::stdout("upstream payload TUI")?;
     let mut view = LogTuiState::default();
     let mut events = VecDeque::<UpstreamPayloadEvent>::new();
     if let Some(event) = latest_upstream_payload_event() {

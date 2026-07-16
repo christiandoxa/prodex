@@ -137,6 +137,7 @@ fn codex_openai_auth_headers_include_configured_residency() {
         reqwest::blocking::Client::new().get("http://127.0.0.1/"),
         &root,
     )
+    .unwrap()
     .build()
     .unwrap();
 

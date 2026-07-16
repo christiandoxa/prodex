@@ -64,12 +64,18 @@ fn load_runtime_route_selection_catalog(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> Result<RuntimeRouteSelectionCatalog> {
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let mut runtime = shared
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     prune_runtime_profile_selection_backoff(&mut runtime, now);
-    Ok(runtime_route_selection_catalog(&runtime, route_kind, now))
+    Ok(runtime_route_selection_catalog(
+        &runtime,
+        &profile_inflight,
+        route_kind,
+        now,
+    ))
 }
 
 fn schedule_runtime_response_stale_probes(

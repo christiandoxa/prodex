@@ -409,7 +409,7 @@ pub(super) fn analyze_goal_resume_session(path: &Path) -> Result<GoalResumeSessi
         if analysis.thread_id.is_none()
             && let Ok(value) = serde_json::from_str::<serde_json::Value>(&line)
         {
-            analysis.thread_id = prodex_app_reports::first_string_value(
+            analysis.thread_id = prodex_session_store::first_string_value(
                 &value,
                 &[&["payload", "thread_id"], &["thread_id"], &["threadId"]],
             );

@@ -65,7 +65,7 @@ fn handle_capability_list(args: CapabilityListArgs) -> Result<()> {
             .collect::<Vec<_>>();
         print_stdout_line(
             &serde_json::to_string_pretty(&rows).context("failed to serialize capability list")?,
-        );
+        )?;
         return Ok(());
     }
 
@@ -201,7 +201,7 @@ fn handle_super_doctor(args: SuperDoctorArgs) -> Result<()> {
         print_stdout_line(
             &serde_json::to_string_pretty(&value)
                 .context("failed to serialize Super doctor report")?,
-        );
+        )?;
     } else {
         let fields = statuses
             .iter()
@@ -250,7 +250,7 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
         });
         print_stdout_line(
             &serde_json::to_string_pretty(&value).context("failed to serialize setup report")?,
-        );
+        )?;
         return Ok(());
     }
 
@@ -296,7 +296,7 @@ fn print_capability_panels(panels: &[CapabilityPanel]) -> Result<()> {
     let height = capability_tui_height(panels);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         for panel in panels {
-            print_panel(&panel.title, &panel.fields);
+            print_panel(&panel.title, &panel.fields)?;
         }
         return Ok(());
     };

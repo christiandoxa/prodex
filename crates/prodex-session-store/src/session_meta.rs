@@ -1,5 +1,5 @@
+use crate::first_string_value;
 use chrono::{SecondsFormat, Utc};
-use prodex_app_reports::first_string_value;
 use std::path::Path;
 
 pub(crate) fn line_starts_codex_rollout_metadata(line: &str) -> bool {

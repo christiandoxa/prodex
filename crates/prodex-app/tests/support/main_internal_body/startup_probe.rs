@@ -16,6 +16,58 @@ fn main_entry_exit_code_defaults_to_one_for_generic_errors() {
 }
 
 #[test]
+fn main_entry_treats_nested_broken_pipe_as_success() {
+    let error = anyhow::Error::new(io::Error::new(io::ErrorKind::BrokenPipe, "closed pipe"))
+        .context("failed to print command output");
+
+    assert!(main_entry_error_is_broken_pipe(&error));
+}
+
+#[test]
+fn main_entry_does_not_hide_other_io_errors() {
+    let error = anyhow::Error::new(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
+
+    assert!(!main_entry_error_is_broken_pipe(&error));
+}
+
+#[test]
+fn invalid_runtime_policy_does_not_block_doctor_or_profile_recovery() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-command-preflight-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("policy.toml"), "version = [invalid").unwrap();
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", &root.to_string_lossy());
+    let shared_codex_home = root.join("shared-codex");
+    let _shared_home = TestEnvVarGuard::set(
+        "PRODEX_SHARED_CODEX_HOME",
+        &shared_codex_home.to_string_lossy(),
+    );
+    clear_runtime_policy_cache();
+
+    let doctor =
+        parse_cli_command_from(["prodex", "doctor", "--runtime", "--json"]).unwrap();
+    let profiles = parse_cli_command_from(["prodex", "profile", "list"]).unwrap();
+    let runtime = parse_cli_command_from(["prodex", "run"]).unwrap();
+
+    assert!(validate_command_runtime_policy(&doctor).is_ok());
+    assert!(validate_command_runtime_policy(&profiles).is_ok());
+    assert!(validate_command_runtime_policy(&runtime).is_err());
+    doctor.execute().expect("doctor should diagnose invalid policy");
+    profiles
+        .execute()
+        .expect("profile recovery should ignore invalid policy");
+
+    clear_runtime_policy_cache();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn main_entry_error_message_redacts_secret_like_chain() {
     let err = anyhow::anyhow!("failed: Authorization: Bearer main-entry-token")
         .context("command failed");

@@ -62,13 +62,13 @@ fn turn_state_affinity_prefers_bound_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -168,10 +168,6 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([(
-            "second".to_string(),
-            RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT + 1,
-        )]),
         profile_health: BTreeMap::from([(
             "second".to_string(),
             RuntimeProfileHealth {
@@ -184,6 +180,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -203,6 +200,9 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
+    shared
+        .lane_admission
+        .set_profile_inflight("second", RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT + 1);
     let turn_state_profile = runtime_turn_state_bound_profile(&shared, "turn-second")
         .expect("turn-state lookup should succeed");
 

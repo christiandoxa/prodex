@@ -13,6 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 prodex_core = { workspace = true }
 prodex_state = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

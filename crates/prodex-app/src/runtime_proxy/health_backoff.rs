@@ -9,7 +9,7 @@ use super::{
 };
 use anyhow::Result;
 use chrono::Local;
-use prodex_runtime_state::RuntimeRouteKind;
+use prodex_runtime_state::{RuntimeRouteKind, RuntimeStateMutation};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::collections::BTreeMap;
 
@@ -103,7 +103,7 @@ pub(crate) fn mark_runtime_profile_retry_backoff(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!("profile_retry_backoff:{profile_name}"),
+        RuntimeStateMutation::ProfileRetryBackoff(profile_name.to_string()),
     );
     drop(runtime);
     runtime_proxy_log(
@@ -158,10 +158,10 @@ pub(crate) fn mark_runtime_profile_transport_backoff(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!(
-            "profile_transport_backoff:{profile_name}:{}",
+        RuntimeStateMutation::ProfileTransportBackoff(format!(
+            "{profile_name}:{}",
             runtime_route_kind_label(route_kind)
-        ),
+        )),
     );
     drop(runtime);
     runtime_proxy_log(

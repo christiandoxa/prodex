@@ -20,11 +20,14 @@ pub(crate) struct RuntimeStateSaveRequest {
     usage_snapshots: BTreeMap<String, RuntimeProfileUsageSnapshot>,
     backoffs: RuntimeProfileBackoffs,
     paths: AppPaths,
-    reason: String,
+    mutation: RuntimeStateMutation,
 }
 
 impl RuntimeStateSaveRequest {
-    pub(crate) fn from_snapshot(snapshot: RuntimeStateSaveSnapshot, reason: &str) -> Self {
+    pub(crate) fn from_snapshot(
+        snapshot: RuntimeStateSaveSnapshot,
+        mutation: RuntimeStateMutation,
+    ) -> Self {
         Self {
             state: snapshot.state,
             continuations: snapshot.continuations,
@@ -32,7 +35,7 @@ impl RuntimeStateSaveRequest {
             usage_snapshots: snapshot.usage_snapshots,
             backoffs: snapshot.backoffs,
             paths: snapshot.paths,
-            reason: reason.to_string(),
+            mutation,
         }
     }
 }
@@ -41,7 +44,7 @@ pub(crate) fn schedule_runtime_state_save_request(
     shared: &RuntimeRotationProxyShared,
     request: RuntimeStateSaveRequest,
 ) {
-    let reason = request.reason.clone();
+    let reason = request.mutation.reason();
     let reason = reason.as_str();
     if !runtime_proxy_persistence_enabled(shared) {
         runtime_proxy_log(
@@ -58,7 +61,7 @@ pub(crate) fn schedule_runtime_state_save_request(
         return;
     }
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
-    let enqueue_plan = runtime_state_save_enqueue_plan(reason, Instant::now());
+    let enqueue_plan = runtime_state_save_enqueue_plan(&request.mutation, Instant::now());
     let plan = enqueue_plan.schedule;
     let queued_at = enqueue_plan.queue.queued_at;
     let ready_at = enqueue_plan.queue.ready_at;
@@ -133,7 +136,7 @@ pub(crate) fn schedule_runtime_state_save_request(
                 continuations,
                 request.state.profiles.clone(),
                 request.paths,
-                reason,
+                &request.mutation,
             );
         }
         return;
@@ -150,7 +153,7 @@ pub(crate) fn schedule_runtime_state_save_request(
             backoffs: request.backoffs,
         }),
         revision,
-        &request.reason,
+        reason,
         queued_at,
         ready_at,
     );
@@ -189,7 +192,7 @@ pub(crate) fn schedule_runtime_state_save_request(
             continuations,
             state_profiles,
             request.paths,
-            reason,
+            &request.mutation,
         );
     }
 }
@@ -251,7 +254,7 @@ pub(crate) fn runtime_state_save_selected_snapshot_from_shared(
 pub(crate) fn schedule_runtime_state_save_from_runtime(
     shared: &RuntimeRotationProxyShared,
     runtime: &RuntimeRotationState,
-    reason: &str,
+    mutation: RuntimeStateMutation,
 ) {
     if !runtime_proxy_persistence_enabled(shared) {
         return;
@@ -261,13 +264,14 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
             shared,
             RuntimeStateSaveRequest::from_snapshot(
                 runtime_state_save_snapshot_from_runtime(runtime),
-                reason,
+                mutation,
             ),
         );
         return;
     }
     let revision = shared.state_save_revision.fetch_add(1, Ordering::SeqCst) + 1;
-    let enqueue_plan = runtime_state_save_enqueue_plan(reason, Instant::now());
+    let reason = mutation.reason();
+    let enqueue_plan = runtime_state_save_enqueue_plan(&mutation, Instant::now());
     let plan = enqueue_plan.schedule;
     let queued_at = enqueue_plan.queue.queued_at;
     let ready_at = enqueue_plan.queue.ready_at;
@@ -279,7 +283,7 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
             sections: plan.sections,
         },
         revision,
-        reason,
+        &reason,
         queued_at,
         ready_at,
     );
@@ -290,7 +294,7 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
             "state_save_queued",
             [
                 runtime_proxy_log_field("revision", revision.to_string()),
-                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("reason", &reason),
                 runtime_proxy_log_field("backlog", backlog.to_string()),
                 runtime_proxy_log_field(
                     "ready_in_ms",
@@ -306,14 +310,14 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
                 "state_save_queue_backpressure",
                 [
                     runtime_proxy_log_field("revision", revision.to_string()),
-                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("reason", &reason),
                     runtime_proxy_log_field("backlog", backlog.to_string()),
                 ],
             ),
         );
     }
     if plan.requires_continuation_journal {
-        schedule_runtime_continuation_journal_save_from_runtime(shared, runtime, reason);
+        schedule_runtime_continuation_journal_save_from_runtime(shared, runtime, &mutation);
     }
 }
 
@@ -353,40 +357,44 @@ fn enqueue_runtime_state_save_job(
 }
 
 fn runtime_state_save_enqueue_plan(
-    reason: &str,
+    mutation: &RuntimeStateMutation,
     queued_at: Instant,
 ) -> prodex_runtime_state::RuntimeStateSaveEnqueuePlan {
     prodex_runtime_state::runtime_state_save_enqueue_plan(
-        reason,
+        mutation,
         queued_at,
         Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {
-    prodex_runtime_state::runtime_state_save_reason_requires_continuation_journal(reason)
+#[cfg(test)]
+pub(crate) fn runtime_state_save_requires_continuation_journal(
+    mutation: &RuntimeStateMutation,
+) -> bool {
+    prodex_runtime_state::runtime_state_save_requires_continuation_journal(mutation)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveSections {
-    prodex_runtime_state::runtime_state_save_sections_for_reason(reason)
+#[cfg(test)]
+pub(crate) fn runtime_state_save_sections(
+    mutation: &RuntimeStateMutation,
+) -> RuntimeStateSaveSections {
+    prodex_runtime_state::runtime_state_save_sections(mutation)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn runtime_state_save_debounce(reason: &str) -> Duration {
+#[cfg(test)]
+pub(crate) fn runtime_state_save_debounce(mutation: &RuntimeStateMutation) -> Duration {
     prodex_runtime_state::runtime_state_save_debounce(
-        reason,
+        mutation,
         Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
     )
 }
 
 fn runtime_continuation_journal_save_enqueue_plan(
-    reason: &str,
+    mutation: &RuntimeStateMutation,
     queued_at: Instant,
 ) -> prodex_runtime_state::RuntimeScheduledSaveEnqueuePlan {
     prodex_runtime_state::runtime_continuation_journal_save_enqueue_plan(
-        reason,
+        mutation,
         queued_at,
         Duration::from_millis(RUNTIME_STATE_SAVE_DEBOUNCE_MS),
     )

@@ -2,7 +2,7 @@ use super::*;
 use prodex_quota::AuthSummary;
 use prodex_quota::UsageResponse;
 use prodex_quota::{UsageWindow, WindowPair};
-use prodex_state::ProfileProvider;
+use prodex_shared_types::RuntimeProfileProbeCacheEntry;
 use std::path::PathBuf;
 
 #[derive(Clone, Copy)]
@@ -354,7 +354,7 @@ fn explain_runtime_route_catalog_adds_catalog_specific_reasons() {
             profile: RuntimeSelectionProfileEntry {
                 name: "alpha".to_string(),
                 codex_home: PathBuf::from("/tmp/prodex-alpha"),
-                provider: ProfileProvider::Openai,
+                provider: Default::default(),
                 last_run_selected_at: None,
             },
             cached_auth_summary: Some(quota_auth()),

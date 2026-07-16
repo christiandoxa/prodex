@@ -11,12 +11,10 @@ mod request_timeline;
 mod route_profile;
 mod selection;
 
+pub(crate) use log_line::RuntimeDoctorParsedLogLine;
 #[cfg(test)]
 use log_line::runtime_doctor_parse_message_fields;
-use log_line::{
-    runtime_doctor_chain_event_summary, runtime_doctor_line_timestamp, runtime_doctor_marker_name,
-    runtime_doctor_parse_fields, runtime_doctor_truncate_line,
-};
+use log_line::{runtime_doctor_chain_event_summary, runtime_doctor_truncate_line};
 use request_timeline::{
     RuntimeDoctorRequestTimelineBuilder, runtime_doctor_record_request_timeline_event,
     runtime_doctor_set_latest_request_timeline,
@@ -102,18 +100,19 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
     let mut marker_context: BTreeMap<&'static str, RuntimeDoctorMarkerContextSummary> =
         BTreeMap::new();
     for (line_index, line) in text.lines().enumerate() {
+        let parsed_line = RuntimeDoctorParsedLogLine::new(line);
         summary.line_count += 1;
-        let line_timestamp = runtime_doctor_line_timestamp(line);
+        let line_timestamp = parsed_line.timestamp();
         if let Some(timestamp) = line_timestamp.clone() {
             if summary.first_timestamp.is_none() {
                 summary.first_timestamp = Some(timestamp.clone());
             }
             summary.last_timestamp = Some(timestamp);
         }
-        if let Some(marker) = runtime_doctor_marker_name(line) {
+        if let Some(marker) = parsed_line.marker_name() {
             *summary.marker_counts.entry(marker).or_insert(0) += 1;
             summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
-            let fields = runtime_doctor_parse_fields(line);
+            let fields = parsed_line.fields();
             if matches!(
                 marker,
                 "chain_retried_owner" | "chain_dead_upstream_confirmed" | "stale_continuation"

@@ -1,6 +1,8 @@
 use std::ffi::{OsStr, OsString};
 
 const REDACTED: &str = "<redacted>";
+const REDACTION_FAILED_GATEWAY_BODY: &[u8] = b"{}";
+const AUTHORIZATION_SCHEMES: &[&str] = &["Bearer", "Basic", "Token"];
 const API_KEY_PREFIXES: &[&str] = &[
     "sk-proj-", "sk-ant-", "sk-live-", "sk_test_", "sk_live_", "sk-", "sk_",
 ];
@@ -36,7 +38,7 @@ pub fn redaction_redact_gateway_body(body: &[u8]) -> Option<Vec<u8>> {
     match serde_json::from_slice::<serde_json::Value>(body) {
         Ok(mut value) => {
             let changed = redaction_redact_gateway_json_value(&mut value);
-            changed.then(|| serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec()))
+            changed.then(|| redaction_gateway_json_bytes(serde_json::to_vec(&value)))
         }
         Err(_) => {
             let text = String::from_utf8_lossy(body);
@@ -135,7 +137,8 @@ pub fn redaction_key_looks_sensitive(name: &str) -> bool {
             | "credentials"
             | "accountid"
             | "chatgptaccountid"
-    ) || normalized.ends_with("token")
+    ) || normalized == "proxyauthorization"
+        || normalized.ends_with("token")
         || normalized.contains("apikey")
         || normalized.contains("secret")
         || normalized.contains("password")
@@ -166,10 +169,16 @@ fn redaction_redact_json_value(value: &mut serde_json::Value) {
     }
 }
 
+pub fn redaction_redact_json(value: &mut serde_json::Value) {
+    redaction_redact_json_value(value);
+}
+
 fn redaction_redact_sensitive_header_value(name: &str, value: &str) -> String {
-    if name.eq_ignore_ascii_case("authorization") {
+    if name.eq_ignore_ascii_case("authorization")
+        || name.eq_ignore_ascii_case("proxy-authorization")
+    {
         let trimmed = value.trim_start();
-        for scheme in ["Bearer", "Basic", "Token"] {
+        for scheme in AUTHORIZATION_SCHEMES {
             if trimmed.len() > scheme.len()
                 && redaction_starts_with_ignore_ascii_case(trimmed.as_bytes(), 0, scheme.as_bytes())
                 && trimmed.as_bytes()[scheme.len()].is_ascii_whitespace()
@@ -183,8 +192,12 @@ fn redaction_redact_sensitive_header_value(name: &str, value: &str) -> String {
 
 pub fn redaction_redact_secret_like_text(value: &str) -> String {
     let value = redaction_redact_sensitive_key_value_text(value);
-    let value = redaction_redact_bearer_like_values(&value);
+    let value = redaction_redact_authorization_like_values(&value);
     redaction_redact_prefixed_api_key_tokens(&value)
+}
+
+fn redaction_gateway_json_bytes(result: serde_json::Result<Vec<u8>>) -> Vec<u8> {
+    result.unwrap_or_else(|_| REDACTION_FAILED_GATEWAY_BODY.to_vec())
 }
 
 fn redaction_redact_gateway_json_value(value: &mut serde_json::Value) -> bool {
@@ -393,7 +406,7 @@ fn redaction_redacted_field_value(value: &str, value_start: usize) -> (usize, St
         );
     }
 
-    for scheme in ["Bearer", "Basic", "Token"] {
+    for scheme in AUTHORIZATION_SCHEMES {
         let scheme_end = value_start + scheme.len();
         if redaction_starts_with_ignore_ascii_case(bytes, value_start, scheme.as_bytes())
             && scheme_end < bytes.len()
@@ -421,26 +434,32 @@ fn redaction_redacted_field_value(value: &str, value_start: usize) -> (usize, St
     (cursor, REDACTED.to_string())
 }
 
-fn redaction_redact_bearer_like_values(value: &str) -> String {
+fn redaction_redact_authorization_like_values(value: &str) -> String {
     let mut redacted = String::with_capacity(value.len());
     let bytes = value.as_bytes();
     let mut index = 0usize;
 
     while index < bytes.len() {
-        if redaction_starts_with_ignore_ascii_case(bytes, index, b"bearer")
-            && redaction_ascii_boundary_before(bytes, index)
-            && redaction_ascii_boundary_after(bytes, index + b"bearer".len())
-        {
-            let whitespace = redaction_skip_ascii_whitespace(bytes, index + b"bearer".len());
-            if whitespace > index + b"bearer".len() {
-                let token_end = redaction_secret_token_end(bytes, whitespace);
-                if token_end > whitespace {
-                    redacted.push_str(&value[index..whitespace]);
-                    redacted.push_str(REDACTED);
-                    index = token_end;
-                    continue;
+        for scheme in AUTHORIZATION_SCHEMES {
+            if redaction_starts_with_ignore_ascii_case(bytes, index, scheme.as_bytes())
+                && redaction_ascii_boundary_before(bytes, index)
+                && redaction_ascii_boundary_after(bytes, index + scheme.len())
+            {
+                let whitespace = redaction_skip_ascii_whitespace(bytes, index + scheme.len());
+                if whitespace > index + scheme.len() {
+                    let token_end = redaction_secret_token_end(bytes, whitespace);
+                    if token_end > whitespace {
+                        redacted.push_str(&value[index..whitespace]);
+                        redacted.push_str(REDACTED);
+                        index = token_end;
+                        break;
+                    }
                 }
             }
+        }
+
+        if index >= bytes.len() {
+            break;
         }
 
         let Some(ch) = value[index..].chars().next() else {

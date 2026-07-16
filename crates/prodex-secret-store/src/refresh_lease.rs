@@ -1,19 +1,37 @@
 use crate::secure_file::{self, FileSecurity, SecureDirectory};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{OnceLock, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use zeroize::Zeroizing;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
+
+mod record;
+use record::{create_lock, digest_key, lock_record_matches, read_fresh_result, write_result};
 
 const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
 const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_RESULT_TTL: Duration = Duration::from_secs(300);
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const REFRESH_LEASE_RESULT_MAX_BYTES: u64 = 1024 * 1024;
+const REFRESH_LEASE_RECORD_MAX_BYTES: u64 = REFRESH_LEASE_RESULT_MAX_BYTES + 512;
+const REFRESH_LEASE_LOCK_MAX_BYTES: u64 = 4096;
+const REFRESH_LEASE_LOCK_RECORD_VERSION: u32 = 1;
+const REFRESH_LEASE_RESULT_RECORD_VERSION: u32 = 1;
+const MIN_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1);
+const MAX_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+const LOCK_RECORD_MAGIC: &str = "prodex-refresh-lease";
+const RESULT_RECORD_MAGIC: &str = "prodex-refresh-result";
+static FENCE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static HEARTBEAT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static HEARTBEAT_COMMANDS: OnceLock<Result<mpsc::Sender<HeartbeatCommand>, io::ErrorKind>> =
+    OnceLock::new();
 
 #[derive(Clone)]
 pub struct RefreshLeaseCoordinator {
@@ -89,13 +107,14 @@ impl RefreshLeaseCoordinator {
             cleanup_stale_lock(&paths.lock_path, self.lease_ttl)?;
 
             match create_lock(&paths.lock_path) {
-                Ok(lock_file) => {
-                    let mut owner = RefreshLeaseOwner {
-                        lock_path: paths.lock_path,
+                Ok((lock_file, fence_token)) => {
+                    let mut owner = RefreshLeaseOwner::new(
+                        paths.lock_path,
                         lock_file,
-                        result_path: paths.result_path,
-                        released: false,
-                    };
+                        paths.result_path,
+                        fence_token,
+                        heartbeat_interval(self.lease_ttl),
+                    )?;
                     if let Some(result_json) =
                         read_fresh_result(&owner.result_path, self.result_ttl)?
                     {
@@ -212,12 +231,40 @@ pub struct RefreshLeaseOwner {
     lock_path: PathBuf,
     lock_file: File,
     result_path: PathBuf,
+    fence_token: String,
+    heartbeat: Option<RefreshLeaseHeartbeat>,
     released: bool,
 }
 
 impl RefreshLeaseOwner {
+    fn new(
+        lock_path: PathBuf,
+        lock_file: File,
+        result_path: PathBuf,
+        fence_token: String,
+        heartbeat_interval: Duration,
+    ) -> Result<Self, RefreshLeaseError> {
+        let heartbeat = match RefreshLeaseHeartbeat::start(&lock_file, heartbeat_interval) {
+            Ok(heartbeat) => heartbeat,
+            Err(error) => {
+                let _ = secure_file::delete_private_verified(&lock_path, &lock_file);
+                return Err(RefreshLeaseError::io(&lock_path, error));
+            }
+        };
+        Ok(Self {
+            lock_path,
+            lock_file,
+            result_path,
+            fence_token,
+            heartbeat: Some(heartbeat),
+            released: false,
+        })
+    }
+
     pub fn commit_result(mut self, result_json: impl AsRef<str>) -> Result<(), RefreshLeaseError> {
-        write_result(&self.result_path, result_json.as_ref())?;
+        self.stop_heartbeat();
+        self.verify_ownership()?;
+        write_result(&self.result_path, &self.fence_token, result_json.as_ref())?;
         self.release()?;
         Ok(())
     }
@@ -227,12 +274,13 @@ impl RefreshLeaseOwner {
             return Ok(());
         }
 
+        self.stop_heartbeat();
         match secure_file::delete_private_verified(&self.lock_path, &self.lock_file) {
             Ok(()) => {
                 self.released = true;
                 Ok(())
             }
-            Err(err) => Err(RefreshLeaseError::io(&self.lock_path, err)),
+            Err(err) => Err(RefreshLeaseError::ownership(&self.lock_path, err)),
         }
     }
 
@@ -243,6 +291,22 @@ impl RefreshLeaseOwner {
     pub fn result_path(&self) -> &Path {
         &self.result_path
     }
+
+    fn verify_ownership(&self) -> Result<(), RefreshLeaseError> {
+        secure_file::verify_private_file(&self.lock_path, &self.lock_file)
+            .map_err(|error| RefreshLeaseError::ownership(&self.lock_path, error))?;
+        if lock_record_matches(&self.lock_path, &self.fence_token)? {
+            Ok(())
+        } else {
+            Err(RefreshLeaseError::OwnershipLost)
+        }
+    }
+
+    fn stop_heartbeat(&mut self) {
+        if let Some(heartbeat) = self.heartbeat.take() {
+            heartbeat.stop();
+        }
+    }
 }
 
 impl fmt::Debug for RefreshLeaseOwner {
@@ -250,6 +314,7 @@ impl fmt::Debug for RefreshLeaseOwner {
         f.debug_struct("RefreshLeaseOwner")
             .field("lock_path", &"<redacted>")
             .field("result_path", &"<redacted>")
+            .field("fence_token", &"<redacted>")
             .field("released", &self.released)
             .finish()
     }
@@ -261,28 +326,171 @@ impl Drop for RefreshLeaseOwner {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub enum RefreshLeaseError {
-    Io { path: PathBuf, reason: String },
+struct RefreshLeaseHeartbeat {
+    id: u64,
+    commands: mpsc::Sender<HeartbeatCommand>,
 }
 
-impl RefreshLeaseError {
-    fn io(path: impl Into<PathBuf>, error: io::Error) -> Self {
-        Self::Io {
-            path: path.into(),
-            reason: error.to_string(),
+impl RefreshLeaseHeartbeat {
+    fn start(lock_file: &File, interval: Duration) -> io::Result<Self> {
+        let lock_file = lock_file.try_clone()?;
+        let id = HEARTBEAT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let commands = heartbeat_commands()?.clone();
+        commands
+            .send(HeartbeatCommand::Add {
+                id,
+                lock_file,
+                interval,
+            })
+            .map_err(|_| io::Error::other("refresh lease heartbeat worker stopped"))?;
+        Ok(Self { id, commands })
+    }
+
+    fn stop(self) {
+        let (stopped, wait) = mpsc::channel();
+        if self
+            .commands
+            .send(HeartbeatCommand::Remove {
+                id: self.id,
+                stopped,
+            })
+            .is_ok()
+        {
+            let _ = wait.recv();
         }
+    }
+}
+
+enum HeartbeatCommand {
+    Add {
+        id: u64,
+        lock_file: File,
+        interval: Duration,
+    },
+    Remove {
+        id: u64,
+        stopped: mpsc::Sender<()>,
+    },
+}
+
+struct ActiveHeartbeat {
+    lock_file: File,
+    interval: Duration,
+    next: Instant,
+}
+
+fn heartbeat_commands() -> io::Result<&'static mpsc::Sender<HeartbeatCommand>> {
+    HEARTBEAT_COMMANDS
+        .get_or_init(|| {
+            let (commands, received) = mpsc::channel();
+            thread::Builder::new()
+                .name("prodex-refresh-lease-heartbeat".to_string())
+                .spawn(move || heartbeat_worker(received))
+                .map(|_| commands)
+                .map_err(|error| error.kind())
+        })
+        .as_ref()
+        .map_err(|kind| io::Error::new(*kind, "failed to start refresh lease heartbeat worker"))
+}
+
+fn heartbeat_worker(commands: mpsc::Receiver<HeartbeatCommand>) {
+    let mut active = HashMap::<u64, ActiveHeartbeat>::new();
+    loop {
+        let now = Instant::now();
+        let timeout = active
+            .values()
+            .map(|heartbeat| heartbeat.next.saturating_duration_since(now))
+            .min()
+            .unwrap_or(MAX_HEARTBEAT_INTERVAL);
+        match commands.recv_timeout(timeout) {
+            Ok(HeartbeatCommand::Add {
+                id,
+                lock_file,
+                interval,
+            }) => {
+                active.insert(
+                    id,
+                    ActiveHeartbeat {
+                        lock_file,
+                        interval,
+                        next: Instant::now() + interval,
+                    },
+                );
+            }
+            Ok(HeartbeatCommand::Remove { id, stopped }) => {
+                active.remove(&id);
+                let _ = stopped.send(());
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        let now = Instant::now();
+        active.retain(|_, heartbeat| {
+            if heartbeat.next > now {
+                return true;
+            }
+            let times = fs::FileTimes::new().set_modified(SystemTime::now());
+            if heartbeat.lock_file.set_times(times).is_err() {
+                return false;
+            }
+            heartbeat.next = now + heartbeat.interval;
+            true
+        });
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshLeaseIoKind {
+    Generic,
+    ResultTooLarge,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum RefreshLeaseError {
+    Io {
+        kind: RefreshLeaseIoKind,
+        reason: Zeroizing<String>,
+    },
+    OwnershipLost,
+}
+
+impl ZeroizeOnDrop for RefreshLeaseError {}
+
+impl RefreshLeaseError {
+    pub fn io(_path: impl Into<PathBuf>, error: io::Error) -> Self {
+        let reason = Zeroizing::new(error.to_string());
+        let kind = if error.kind() == io::ErrorKind::InvalidData
+            && reason.contains("exceeds safe size limit")
+        {
+            RefreshLeaseIoKind::ResultTooLarge
+        } else {
+            RefreshLeaseIoKind::Generic
+        };
+        Self::Io { kind, reason }
+    }
+
+    fn ownership(path: impl Into<PathBuf>, error: io::Error) -> Self {
+        if matches!(
+            error.kind(),
+            io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+        ) {
+            Self::OwnershipLost
+        } else {
+            Self::io(path, error)
+        }
+    }
+
+    pub fn is_ownership_lost(&self) -> bool {
+        matches!(self, Self::OwnershipLost)
     }
 }
 
 impl fmt::Debug for RefreshLeaseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { .. } => f
-                .debug_struct("Io")
-                .field("path", &"<redacted>")
-                .field("reason", &"<redacted>")
-                .finish(),
+            Self::Io { .. } => f.debug_struct("Io").field("reason", &"<redacted>").finish(),
+            Self::OwnershipLost => f.write_str("OwnershipLost"),
         }
     }
 }
@@ -290,10 +498,14 @@ impl fmt::Debug for RefreshLeaseError {
 impl fmt::Display for RefreshLeaseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { reason, .. } if reason.contains("exceeds safe size limit") => {
+            Self::Io {
+                kind: RefreshLeaseIoKind::ResultTooLarge,
+                ..
+            } => {
                 write!(f, "refresh lease result exceeds safe size limit")
             }
             Self::Io { .. } => write!(f, "refresh lease I/O error"),
+            Self::OwnershipLost => write!(f, "refresh lease ownership was lost"),
         }
     }
 }
@@ -322,76 +534,6 @@ pub fn plan_refresh_lease_error_response(
     }
 }
 
-fn digest_key(namespace: &str, sensitive_key: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(namespace.as_bytes());
-    hasher.update([0]);
-    hasher.update(sensitive_key);
-    hex_lower(&hasher.finalize())
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
-fn create_lock(path: &Path) -> io::Result<File> {
-    let content = format!(
-        "pid={}\ncreated_unix_ms={}\n",
-        std::process::id(),
-        unix_millis(SystemTime::now())
-    );
-    secure_file::create_private(path, content.as_bytes())
-}
-
-fn write_result(path: &Path, result_json: &str) -> Result<(), RefreshLeaseError> {
-    if result_json.len() as u64 > REFRESH_LEASE_RESULT_MAX_BYTES {
-        return Err(refresh_result_size_error(path));
-    }
-
-    secure_file::write_private_atomic(path, result_json.as_bytes())
-        .map_err(|error| RefreshLeaseError::io(path, error))
-}
-
-fn read_fresh_result(
-    path: &Path,
-    ttl: Duration,
-) -> Result<Option<Zeroizing<String>>, RefreshLeaseError> {
-    let opened = match secure_file::open_file(path, FileSecurity::Private) {
-        Ok(Some(opened)) => opened,
-        Ok(None) => return Ok(None),
-        Err(error) if unsafe_entry_error(&error) => {
-            remove_entry(path)?;
-            return Ok(None);
-        }
-        Err(error) => return Err(RefreshLeaseError::io(path, error)),
-    };
-    if metadata_is_stale(opened.metadata(), ttl)
-        || opened.metadata().len() > REFRESH_LEASE_RESULT_MAX_BYTES
-    {
-        remove_entry(path)?;
-        return Ok(None);
-    }
-    let mut bytes = Zeroizing::new(
-        opened
-            .read_bounded(REFRESH_LEASE_RESULT_MAX_BYTES)
-            .map_err(|error| RefreshLeaseError::io(path, error))?,
-    );
-    match String::from_utf8(std::mem::take(&mut *bytes)) {
-        Ok(value) => Ok(Some(Zeroizing::new(value))),
-        Err(error) => {
-            drop(Zeroizing::new(error.into_bytes()));
-            remove_entry(path)?;
-            Ok(None)
-        }
-    }
-}
-
 fn remove_stale_result(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseError> {
     if is_path_stale(path, ttl)? {
         remove_entry(path)?;
@@ -400,10 +542,35 @@ fn remove_stale_result(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseErr
 }
 
 fn cleanup_stale_lock(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseError> {
-    if is_path_stale(path, ttl)? {
-        remove_entry(path)?;
+    let opened = match secure_file::open_file(path, FileSecurity::Private) {
+        Ok(Some(opened)) => opened,
+        Ok(None) => return Ok(()),
+        Err(error) if unsafe_entry_error(&error) => {
+            remove_entry(path)?;
+            return Ok(());
+        }
+        Err(error) => return Err(RefreshLeaseError::io(path, error)),
+    };
+    if !metadata_is_stale(opened.metadata(), ttl) {
+        return Ok(());
     }
-    Ok(())
+    let file = opened.into_file();
+    match file.try_lock() {
+        Ok(()) => match secure_file::delete_private_verified(path, &file) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                ) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(RefreshLeaseError::io(path, error)),
+        },
+        Err(fs::TryLockError::WouldBlock) => Ok(()),
+        Err(error) => Err(RefreshLeaseError::io(path, io::Error::other(error))),
+    }
 }
 
 fn is_path_stale(path: &Path, ttl: Duration) -> Result<bool, RefreshLeaseError> {
@@ -460,6 +627,10 @@ fn next_sleep(poll_interval: Duration, wait_timeout: Duration, started: Instant)
         return Duration::ZERO;
     }
     poll_interval.min(remaining)
+}
+
+fn heartbeat_interval(lease_ttl: Duration) -> Duration {
+    (lease_ttl / 3).clamp(MIN_HEARTBEAT_INTERVAL, MAX_HEARTBEAT_INTERVAL)
 }
 
 fn unix_millis(time: SystemTime) -> u128 {

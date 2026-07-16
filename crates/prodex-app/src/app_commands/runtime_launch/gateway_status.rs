@@ -4,7 +4,7 @@ pub(super) fn print_gateway_status(
     listen_addr: std::net::SocketAddr,
     provider_name: &str,
     auth_required: bool,
-) {
+) -> std::io::Result<()> {
     let fields = vec![
         ("URL".to_string(), format!("http://{listen_addr}")),
         ("Provider".to_string(), provider_name.to_string()),
@@ -16,5 +16,5 @@ pub(super) fn print_gateway_status(
         ("Models".to_string(), "/v1/models".to_string()),
     ];
 
-    print_panel("Gateway", &fields);
+    print_panel("Gateway", &fields)
 }

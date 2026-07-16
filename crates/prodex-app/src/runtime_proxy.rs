@@ -58,11 +58,13 @@ pub(crate) use self::responses::attempt_runtime_responses_request;
 pub(crate) use self::responses::proxy_runtime_responses_request;
 pub(crate) use self::selection::*;
 pub(crate) use self::selection_plan::*;
+#[cfg(test)]
+pub(crate) use self::smart_context::runtime_smart_context_proxy_state_registered;
 use self::smart_context::*;
 pub(crate) use self::smart_context::{
     observe_runtime_smart_context_token_usage_for_bucket, prepare_runtime_smart_context_http_body,
     prepare_runtime_smart_context_http_body_for_profile,
-    register_runtime_smart_context_proxy_state,
+    register_runtime_smart_context_proxy_state, unregister_runtime_smart_context_proxy_state,
 };
 pub(crate) use self::standard::*;
 pub(super) use self::transport_failure::*;

@@ -3,10 +3,8 @@ use prodex_domain::{
     SecretResolutionRequest,
 };
 use secret_store::{DEVELOPMENT_SECRET_PROVIDER_NAME, DevelopmentSecretProvider, SecretError};
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -43,43 +41,19 @@ fn write_private(path: &Path, bytes: &[u8]) {
     }
 }
 
-struct EnvGuard {
-    _lock: MutexGuard<'static, ()>,
-    name: String,
-    previous: Option<OsString>,
-}
-
-static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
-
-impl EnvGuard {
-    fn set(name: &str, value: &str) -> Self {
-        let lock = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let previous = std::env::var_os(name);
-        unsafe { std::env::set_var(name, value) };
-        Self {
-            _lock: lock,
-            name: name.to_string(),
-            previous,
-        }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(value) => unsafe { std::env::set_var(&self.name, value) },
-            None => unsafe { std::env::remove_var(&self.name) },
-        }
+fn development_environment(name: &str) -> Result<String, std::env::VarError> {
+    match name {
+        "PRODEX_TEST_DEVELOPMENT_SECRET" => Ok("development-token".to_string()),
+        _ => Err(std::env::VarError::NotPresent),
     }
 }
 
 #[test]
 fn development_provider_resolves_environment_reference_with_exact_provider_name() {
     let root = temp_dir("environment");
-    let _environment = EnvGuard::set("PRODEX_TEST_DEVELOPMENT_SECRET", "development-token");
-    let provider = DevelopmentSecretProvider::for_development(&root).unwrap();
+    let provider = DevelopmentSecretProvider::for_development(&root)
+        .unwrap()
+        .with_environment_reader(development_environment);
 
     assert_eq!(provider.provider_name(), DEVELOPMENT_SECRET_PROVIDER_NAME);
     assert_eq!(
@@ -149,7 +123,9 @@ fn development_provider_resolves_private_file_below_root() {
 #[test]
 fn development_provider_rejects_unknown_reference_schemes_and_missing_environment() {
     let root = temp_dir("references");
-    let provider = DevelopmentSecretProvider::for_development(&root).unwrap();
+    let provider = DevelopmentSecretProvider::for_development(&root)
+        .unwrap()
+        .with_environment_reader(development_environment);
 
     for name in [
         "env:PRODEX_TEST_DEVELOPMENT_SECRET_MISSING",
@@ -223,7 +199,9 @@ fn development_provider_constructor_and_errors_are_redacted() {
     assert!(!error.to_string().contains(sensitive_name));
     assert!(!error.to_string().contains("provider name"));
 
-    let provider = DevelopmentSecretProvider::new(&root, sensitive_name).unwrap();
+    let provider = DevelopmentSecretProvider::new(&root, sensitive_name)
+        .unwrap()
+        .with_environment_reader(development_environment);
     let rendered = format!("{provider:?}");
     assert!(!rendered.contains(sensitive_name));
     assert!(!rendered.contains(&root.display().to_string()));

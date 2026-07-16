@@ -223,15 +223,16 @@ fn panel_lines_with_layout(
     lines
 }
 
-pub fn print_panel(title: &str, fields: &[(String, String)]) {
+pub fn print_panel(title: &str, fields: &[(String, String)]) -> io::Result<()> {
     let total_width = current_cli_width();
     let lines = panel_lines_with_layout(title, fields, total_width);
     if print_panel_tui_stdout(title, &lines).is_ok() {
-        return;
+        return Ok(());
     }
     for line in lines {
-        print_stdout_line(&line);
+        print_stdout_line(&line)?;
     }
+    Ok(())
 }
 
 pub fn render_panel(title: &str, fields: &[(String, String)]) -> String {
@@ -244,25 +245,27 @@ pub fn render_text_panel(title: &str, body: &str) -> String {
     lines.join("\n")
 }
 
-pub fn print_text_panel(title: &str, body: &str) {
+pub fn print_text_panel(title: &str, body: &str) -> io::Result<()> {
     let body_lines = body.lines().map(str::to_string).collect::<Vec<_>>();
     if print_panel_tui_stdout(title, &body_lines).is_ok() {
-        return;
+        return Ok(());
     }
-    print_stdout_line(&section_header(title));
+    print_stdout_line(&section_header(title))?;
     for line in body.lines() {
-        print_stdout_line(line);
+        print_stdout_line(line)?;
     }
+    Ok(())
 }
 
-pub fn print_stderr_panel(title: &str, messages: &[String]) {
+pub fn print_stderr_panel(title: &str, messages: &[String]) -> io::Result<()> {
     if print_panel_tui_stderr(title, messages).is_ok() {
-        return;
+        return Ok(());
     }
-    print_wrapped_stderr(&section_header(title));
+    print_wrapped_stderr(&section_header(title))?;
     for message in messages {
-        print_wrapped_stderr(message);
+        print_wrapped_stderr(message)?;
     }
+    Ok(())
 }
 
 fn print_panel_tui_stdout(title: &str, lines: &[String]) -> anyhow::Result<()> {

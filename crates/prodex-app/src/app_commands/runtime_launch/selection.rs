@@ -24,7 +24,7 @@ impl RuntimeLaunchSelection {
             &paths.shared_codex_root,
             model_provider_override,
             profile_v2_name,
-        );
+        )?;
         let gemini_external_provider = external_provider.is_some_and(|provider| {
             provider.eq_ignore_ascii_case("gemini") || provider.eq_ignore_ascii_case("gemini-oauth")
         });
@@ -85,7 +85,7 @@ impl RuntimeLaunchSelection {
             &codex_home,
             model_provider_override,
             profile_v2_name,
-        );
+        )?;
         let non_openai_model_provider = match non_openai_model_provider {
             Some(provider) => Some(provider),
             None => profile_openai_compatible_model_provider_for_launch(
@@ -117,7 +117,7 @@ impl RuntimeLaunchSelection {
             &self.codex_home,
             model_provider_override,
             profile_v2_name,
-        );
+        )?;
         if self.non_openai_model_provider.is_none() {
             self.non_openai_model_provider = profile_openai_compatible_model_provider_for_launch(
                 &self.codex_home,

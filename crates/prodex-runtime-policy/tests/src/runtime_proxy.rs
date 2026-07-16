@@ -50,7 +50,6 @@ preset = " many-terminals "
 
 #[test]
 fn runtime_policy_proxy_applies_preset_values_and_explicit_overrides() {
-    let _lock = env_lock().lock().unwrap();
     clear_runtime_policy_cache();
     let root = temp_root("preset-values");
     let path = runtime_policy_path(&root);
@@ -65,10 +64,7 @@ active_request_limit = 99
 "#,
     )
     .unwrap();
-    let _home = EnvGuard::set("PRODEX_HOME", root.to_str().unwrap());
-    let _preset = EnvGuard::unset("PRODEX_RUNTIME_PROXY_PRESET");
-
-    let loaded = runtime_policy_proxy().unwrap();
+    let loaded = runtime_policy_proxy_from_root(&root, None).unwrap();
     assert_eq!(
         loaded.preset().map(|preset| preset.as_str()),
         Some("many-terminals")
@@ -87,13 +83,11 @@ active_request_limit = 99
 
 #[test]
 fn runtime_policy_proxy_uses_env_preset_without_policy_file() {
-    let _lock = env_lock().lock().unwrap();
     clear_runtime_policy_cache();
     let root = temp_root("preset-env-no-file");
-    let _home = EnvGuard::set("PRODEX_HOME", root.to_str().unwrap());
-    let _preset = EnvGuard::set("PRODEX_RUNTIME_PROXY_PRESET", "low");
 
-    let loaded = runtime_policy_proxy().unwrap();
+    let loaded =
+        runtime_policy_proxy_from_root(&root, RuntimePolicyProxyPreset::parse("low")).unwrap();
     assert_eq!(loaded.preset().map(|preset| preset.as_str()), Some("low"));
     assert_eq!(loaded.worker_count, Some(4));
     assert_eq!(loaded.active_request_limit, Some(48));
@@ -105,7 +99,6 @@ fn runtime_policy_proxy_uses_env_preset_without_policy_file() {
 
 #[test]
 fn runtime_policy_proxy_default_preset_keeps_tuning_values_unset() {
-    let _lock = env_lock().lock().unwrap();
     clear_runtime_policy_cache();
     let root = temp_root("preset-default");
     let path = runtime_policy_path(&root);
@@ -119,10 +112,7 @@ preset = "default"
 "#,
     )
     .unwrap();
-    let _home = EnvGuard::set("PRODEX_HOME", root.to_str().unwrap());
-    let _preset = EnvGuard::unset("PRODEX_RUNTIME_PROXY_PRESET");
-
-    let loaded = runtime_policy_proxy().unwrap();
+    let loaded = runtime_policy_proxy_from_root(&root, None).unwrap();
     assert_eq!(
         loaded.preset().map(|preset| preset.as_str()),
         Some("default")
@@ -138,7 +128,6 @@ preset = "default"
 
 #[test]
 fn runtime_policy_proxy_env_preset_overrides_configured_preset() {
-    let _lock = env_lock().lock().unwrap();
     clear_runtime_policy_cache();
     let root = temp_root("preset-env-override");
     let path = runtime_policy_path(&root);
@@ -152,10 +141,9 @@ preset = "low"
 "#,
     )
     .unwrap();
-    let _home = EnvGuard::set("PRODEX_HOME", root.to_str().unwrap());
-    let _preset = EnvGuard::set("PRODEX_RUNTIME_PROXY_PRESET", "aggressive");
-
-    let loaded = runtime_policy_proxy().unwrap();
+    let loaded =
+        runtime_policy_proxy_from_root(&root, RuntimePolicyProxyPreset::parse("aggressive"))
+            .unwrap();
     assert_eq!(
         loaded.preset().map(|preset| preset.as_str()),
         Some("aggressive")
@@ -193,7 +181,6 @@ preset = "huge"
 
 #[test]
 fn runtime_policy_proxy_ignores_unknown_env_preset_and_falls_back_to_config() {
-    let _lock = env_lock().lock().unwrap();
     clear_runtime_policy_cache();
     let root = temp_root("preset-env-unknown");
     let path = runtime_policy_path(&root);
@@ -207,10 +194,8 @@ preset = "low"
 "#,
     )
     .unwrap();
-    let _home = EnvGuard::set("PRODEX_HOME", root.to_str().unwrap());
-    let _preset = EnvGuard::set("PRODEX_RUNTIME_PROXY_PRESET", "huge");
-
-    let loaded = runtime_policy_proxy().unwrap();
+    let loaded =
+        runtime_policy_proxy_from_root(&root, RuntimePolicyProxyPreset::parse("huge")).unwrap();
     assert_eq!(loaded.preset().map(|preset| preset.as_str()), Some("low"));
     assert_eq!(loaded.worker_count, Some(4));
     assert_eq!(loaded.active_request_limit, Some(48));

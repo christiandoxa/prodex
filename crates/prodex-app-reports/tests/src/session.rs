@@ -1,27 +1,10 @@
 use super::*;
 
 #[test]
-fn parses_session_metadata_from_jsonl_values() {
-    let mut report = SessionReport::from_path(Path::new("/tmp/session-a.jsonl"), 0);
-    apply_session_json_line(
-        &mut report,
-        r#"{"timestamp":"2026-04-29T12:00:00Z","type":"session_meta","payload":{"id":"sess-a","thread_name":"Issue triage","cwd":"/tmp/workspace"}}"#,
-    );
+fn renders_session_reports_from_store_model() {
+    let report = SessionReport::from_path(std::path::Path::new("/tmp/session-a.jsonl"), 0);
 
-    assert_eq!(report.id, "sess-a");
-    assert_eq!(report.thread_name.as_deref(), Some("Issue triage"));
-    assert_eq!(report.cwd.as_deref(), Some("/tmp/workspace"));
-    assert_eq!(report.updated_at.as_deref(), Some("2026-04-29T12:00:00Z"));
-}
+    let rendered = render_session_reports_text(&[report]);
 
-#[test]
-fn parses_subagent_parent_thread_id() {
-    let mut report = SessionReport::from_path(Path::new("/tmp/child.jsonl"), 0);
-    apply_session_json_line(
-        &mut report,
-        r#"{"timestamp":"2026-04-29T12:00:00Z","type":"session_meta","payload":{"id":"child","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent"}}}}}"#,
-    );
-
-    assert!(report.is_subagent());
-    assert_eq!(report.parent_thread_id.as_deref(), Some("parent"));
+    assert!(rendered.contains("session-a"));
 }

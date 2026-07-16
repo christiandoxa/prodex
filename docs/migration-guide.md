@@ -2,10 +2,9 @@
 
 ## Purpose
 
-This guide describes the incremental path from the current single-binary runtime
-proxy implementation to the enterprise target: a modular monolith with separate
-data-plane gateway and control-plane boundaries, durable tenant-scoped storage,
-external migrations, secure authentication/authorization, and production
+This guide records the incremental path from the original single-binary runtime proxy to the
+current modular workspace with separate data-plane gateway and control-plane boundaries, durable
+tenant-scoped storage, external migrations, secure authentication/authorization, and production
 observability.
 
 This is not a big-bang rewrite plan. Each phase must be reversible, tested, and

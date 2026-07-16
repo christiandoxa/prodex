@@ -37,14 +37,8 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
         .expect("responses inflight guard should succeed");
 
     assert_eq!(
-        shared
-            .runtime
-            .lock()
-            .expect("runtime should lock")
-            .profile_inflight
-            .get("main")
-            .copied(),
-        Some(3),
+        shared.lane_admission.profile_inflight_count("main"),
+        3,
         "weighted inflight should count long-lived routes heavier than unary routes"
     );
 
@@ -52,12 +46,7 @@ fn acquire_runtime_profile_inflight_guard_uses_weighted_units() {
     drop(standard);
 
     assert!(
-        !shared
-            .runtime
-            .lock()
-            .expect("runtime should lock")
-            .profile_inflight
-            .contains_key("main"),
+        shared.lane_admission.profile_inflight_count("main") == 0,
         "weighted inflight release should fully drain the profile count"
     );
 }

@@ -90,3 +90,6 @@ mod search_log;
 
 #[path = "lib/critical_blob.rs"]
 mod critical_blob;
+
+#[path = "lib/context_fs.rs"]
+mod context_fs;

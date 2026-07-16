@@ -167,6 +167,27 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
             *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
             Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
         }
+        RuntimeResponsesAttempt::Overloaded {
+            profile_name,
+            response,
+        } => {
+            if let Some(response) =
+                handle_runtime_responses_overloaded(RuntimeResponsesOverloaded {
+                    request_id: fallback.request_id,
+                    shared: fallback.shared,
+                    profile_name,
+                    response,
+                    affinity_state,
+                    excluded_profiles,
+                    last_failure,
+                })?
+            {
+                return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
+                    Box::new(response),
+                )));
+            }
+            Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
+        }
         RuntimeResponsesAttempt::AuthFailed {
             profile_name,
             response,

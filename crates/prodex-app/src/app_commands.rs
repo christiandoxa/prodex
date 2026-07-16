@@ -1,11 +1,5 @@
 use super::*;
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -163,42 +157,10 @@ where
     ))
 }
 
-struct SuperPromptTui {
-    terminal: Terminal<CrosstermBackend<io::Stderr>>,
-}
-
-impl SuperPromptTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable super prompt TUI raw mode")?;
-        let mut stderr = io::stderr();
-        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter super prompt TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stderr);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stderr = io::stderr();
-                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize super prompt TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for SuperPromptTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+type SuperPromptTui = terminal_ui::AlternateScreenTerminal<io::Stderr>;
 
 fn prompt_super_opt_in_tui(title: &str, question: &str, detail: &str) -> Result<bool> {
-    let mut tui = SuperPromptTui::new()?;
+    let mut tui = SuperPromptTui::stderr("super prompt TUI")?;
     loop {
         tui.terminal.draw(|frame| {
             let chunks = Layout::default()

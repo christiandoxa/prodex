@@ -56,7 +56,6 @@ fn optimistic_current_candidate_requires_quota_evidence_when_alternatives_exist(
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -142,7 +141,6 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             "main".to_string(),
             RuntimeProfileHealth {
@@ -155,6 +153,7 @@ fn optimistic_current_candidate_skips_recently_unhealthy_profile() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -225,16 +224,13 @@ fn optimistic_current_candidate_skips_busy_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([(
-            "main".to_string(),
-            RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
-        )]),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -254,6 +250,9 @@ fn optimistic_current_candidate_skips_busy_profile() {
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
+    shared
+        .lane_admission
+        .set_profile_inflight("main", RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT);
 
     assert_eq!(
         runtime_proxy_optimistic_current_candidate(&shared, &BTreeSet::new())
@@ -316,13 +315,13 @@ fn optimistic_current_candidate_skips_thin_long_lived_quota() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -403,13 +402,13 @@ fn optimistic_current_candidate_skips_cached_usage_exhausted_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -484,10 +483,6 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
             now + 60,
         )]),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([(
-            "main".to_string(),
-            RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT,
-        )]),
         profile_health: BTreeMap::from([(
             runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
             RuntimeProfileHealth {
@@ -500,6 +495,7 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -519,6 +515,9 @@ fn direct_current_fallback_profile_bypasses_local_selection_penalties() {
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
+    shared
+        .lane_admission
+        .set_profile_inflight("main", RUNTIME_PROFILE_INFLIGHT_SOFT_LIMIT);
 
     assert_eq!(
         runtime_proxy_direct_current_fallback_profile(
@@ -574,16 +573,13 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::from([(
-            "main".to_string(),
-            RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT.saturating_sub(1),
-        )]),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -603,6 +599,10 @@ fn direct_current_fallback_profile_is_route_aware_for_heavy_routes() {
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
     };
+    shared.lane_admission.set_profile_inflight(
+        "main",
+        RUNTIME_PROFILE_INFLIGHT_HARD_LIMIT.saturating_sub(1),
+    );
 
     assert_eq!(
         runtime_proxy_direct_current_fallback_profile(

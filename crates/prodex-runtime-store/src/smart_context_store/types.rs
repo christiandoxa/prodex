@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +16,7 @@ impl Default for RuntimeSmartContextArtifactStorePolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuntimeSmartContextArtifact {
     pub key: String,
     pub content_hash: String,

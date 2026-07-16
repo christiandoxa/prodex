@@ -18,7 +18,11 @@ prodex_core = { workspace = true }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+semver = { workspace = true }
 terminal_ui = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 [lints]
 workspace = true

@@ -69,7 +69,7 @@ pub(super) fn handle_expose(args: ExposeArgs) -> Result<()> {
         &tunnel_status,
         tunnel_url.as_deref(),
         tunnel_requested,
-    );
+    )?;
     drop(bootstrap);
 
     while shared.pty.running.load(Ordering::SeqCst) && !shared.shutdown.load(Ordering::SeqCst) {
@@ -90,7 +90,7 @@ pub(super) fn print_expose_status(
     tunnel_status: &str,
     tunnel_url: Option<&str>,
     tunnel_requested: bool,
-) {
+) -> Result<()> {
     print_panel(
         "Expose",
         &expose_status_fields(
@@ -100,7 +100,8 @@ pub(super) fn print_expose_status(
             tunnel_url,
             tunnel_requested,
         ),
-    );
+    )?;
+    Ok(())
 }
 
 pub(super) fn expose_status_fields(

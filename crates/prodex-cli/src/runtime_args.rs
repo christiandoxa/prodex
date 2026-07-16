@@ -1,5 +1,6 @@
 use crate::CodexRuntimeFeatureArgs;
 use clap::{ArgGroup, Args, Subcommand};
+use prodex_provider_core::{ProviderId, ProviderRuntimeMetadata, provider_runtime_metadata};
 use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
@@ -673,41 +674,31 @@ pub fn caveman_args_with_optimizer_prefix(mut args: CavemanArgs, prefix: &str) -
     args
 }
 
-pub const SUPER_LOCAL_PROVIDER_ID: &str = "prodex-local";
-const SUPER_LOCAL_PROVIDER_NAME: &str = "Prodex Local";
-pub const SUPER_DEFAULT_LOCAL_MODEL: &str = "unsloth/qwen3.5-35b-a3b";
-pub const SUPER_DEFAULT_CONTEXT_WINDOW: usize = 16_384;
-pub const SUPER_DEFAULT_AUTO_COMPACT_LIMIT: usize = 14_000;
-pub const SUPER_DEEPSEEK_PROVIDER_ID: &str = "prodex-deepseek";
-const SUPER_DEEPSEEK_PROVIDER_NAME: &str = "DeepSeek";
-pub const SUPER_DEEPSEEK_DEFAULT_MODEL: &str = "deepseek-v4-pro";
-const SUPER_DEEPSEEK_DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
-pub const SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
-pub const SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
-pub const SUPER_GEMINI_PROVIDER_ID: &str = "prodex-gemini";
-const SUPER_GEMINI_PROVIDER_NAME: &str = "Google Gemini";
-pub const SUPER_GEMINI_DEFAULT_MODEL: &str = prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
-pub const SUPER_GEMINI_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
-pub const SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW: usize =
-    prodex_runtime_gemini::GEMINI_DEFAULT_CONTEXT_WINDOW;
-pub const SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize =
-    prodex_runtime_gemini::GEMINI_DEFAULT_AUTO_COMPACT_LIMIT;
-pub const SUPER_ANTHROPIC_PROVIDER_ID: &str = "prodex-anthropic";
-const SUPER_ANTHROPIC_PROVIDER_NAME: &str = "Anthropic Claude";
-pub const SUPER_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-4-6";
-const SUPER_ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
-pub const SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
-pub const SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
-pub const SUPER_COPILOT_PROVIDER_ID: &str = "prodex-copilot";
-const SUPER_COPILOT_PROVIDER_NAME: &str = "GitHub Copilot";
-pub const SUPER_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
-const SUPER_COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";
-pub const SUPER_KIRO_PROVIDER_ID: &str = "prodex-kiro";
-const SUPER_KIRO_PROVIDER_NAME: &str = "Kiro";
-pub const SUPER_KIRO_DEFAULT_MODEL: &str = "auto";
-const SUPER_KIRO_DEFAULT_BASE_URL: &str = "https://kiro.dev";
-pub const SUPER_KIRO_DEFAULT_CONTEXT_WINDOW: usize = 1_000_000;
-pub const SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT: usize = 950_000;
+pub use prodex_provider_core::{
+    PRODEX_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT as SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT,
+    PRODEX_ANTHROPIC_DEFAULT_CONTEXT_WINDOW as SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
+    PRODEX_ANTHROPIC_DEFAULT_MODEL as SUPER_ANTHROPIC_DEFAULT_MODEL,
+    PRODEX_ANTHROPIC_PROVIDER_ID as SUPER_ANTHROPIC_PROVIDER_ID,
+    PRODEX_COPILOT_DEFAULT_MODEL as SUPER_COPILOT_DEFAULT_MODEL,
+    PRODEX_COPILOT_PROVIDER_ID as SUPER_COPILOT_PROVIDER_ID,
+    PRODEX_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT as SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
+    PRODEX_DEEPSEEK_DEFAULT_CONTEXT_WINDOW as SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
+    PRODEX_DEEPSEEK_DEFAULT_MODEL as SUPER_DEEPSEEK_DEFAULT_MODEL,
+    PRODEX_DEEPSEEK_PROVIDER_ID as SUPER_DEEPSEEK_PROVIDER_ID,
+    PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
+    PRODEX_GEMINI_DEFAULT_BASE_URL as SUPER_GEMINI_DEFAULT_BASE_URL,
+    PRODEX_GEMINI_DEFAULT_CONTEXT_WINDOW as SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW,
+    PRODEX_GEMINI_DEFAULT_MODEL as SUPER_GEMINI_DEFAULT_MODEL,
+    PRODEX_GEMINI_PROVIDER_ID as SUPER_GEMINI_PROVIDER_ID,
+    PRODEX_KIRO_DEFAULT_AUTO_COMPACT_LIMIT as SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
+    PRODEX_KIRO_DEFAULT_CONTEXT_WINDOW as SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
+    PRODEX_KIRO_DEFAULT_MODEL as SUPER_KIRO_DEFAULT_MODEL,
+    PRODEX_KIRO_PROVIDER_ID as SUPER_KIRO_PROVIDER_ID,
+    PRODEX_LOCAL_DEFAULT_AUTO_COMPACT_LIMIT as SUPER_DEFAULT_AUTO_COMPACT_LIMIT,
+    PRODEX_LOCAL_DEFAULT_CONTEXT_WINDOW as SUPER_DEFAULT_CONTEXT_WINDOW,
+    PRODEX_LOCAL_DEFAULT_MODEL as SUPER_DEFAULT_LOCAL_MODEL,
+    PRODEX_LOCAL_PROVIDER_ID as SUPER_LOCAL_PROVIDER_ID,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExternalProvider {
@@ -720,93 +711,56 @@ pub enum SuperExternalProvider {
 
 impl SuperExternalProvider {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Anthropic => "anthropic",
-            Self::Copilot => "copilot",
-            Self::DeepSeek => "deepseek",
-            Self::Gemini => "gemini",
-            Self::Kiro => "kiro",
-        }
+        self.provider_id().label()
     }
 
     pub fn model_provider_id(self) -> &'static str {
+        self.metadata().model_provider_id
+    }
+
+    fn provider_id(self) -> ProviderId {
         match self {
-            Self::Anthropic => SUPER_ANTHROPIC_PROVIDER_ID,
-            Self::Copilot => SUPER_COPILOT_PROVIDER_ID,
-            Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_ID,
-            Self::Gemini => SUPER_GEMINI_PROVIDER_ID,
-            Self::Kiro => SUPER_KIRO_PROVIDER_ID,
+            Self::Anthropic => ProviderId::Anthropic,
+            Self::Copilot => ProviderId::Copilot,
+            Self::DeepSeek => ProviderId::DeepSeek,
+            Self::Gemini => ProviderId::Gemini,
+            Self::Kiro => ProviderId::Kiro,
         }
     }
 
-    fn display_name(self) -> &'static str {
-        match self {
-            Self::Anthropic => SUPER_ANTHROPIC_PROVIDER_NAME,
-            Self::Copilot => SUPER_COPILOT_PROVIDER_NAME,
-            Self::DeepSeek => SUPER_DEEPSEEK_PROVIDER_NAME,
-            Self::Gemini => SUPER_GEMINI_PROVIDER_NAME,
-            Self::Kiro => SUPER_KIRO_PROVIDER_NAME,
-        }
+    fn metadata(self) -> &'static ProviderRuntimeMetadata {
+        provider_runtime_metadata(self.provider_id())
+            .expect("external provider runtime metadata should exist")
     }
 
     fn codex_provider_name(self) -> &'static str {
-        match self {
-            // Codex currently exposes no configurable remote-compaction capability flag.
-            // It enables /responses/compact only for provider names OpenAI or Azure.
-            Self::Gemini | Self::Kiro => "Azure",
-            Self::Copilot => "OpenAI",
-            _ => self.display_name(),
-        }
+        self.metadata().codex_provider_name
     }
 
     fn default_model(self) -> &'static str {
-        match self {
-            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_MODEL,
-            Self::Copilot => SUPER_COPILOT_DEFAULT_MODEL,
-            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_MODEL,
-            Self::Gemini => SUPER_GEMINI_DEFAULT_MODEL,
-            Self::Kiro => SUPER_KIRO_DEFAULT_MODEL,
-        }
+        self.metadata().default_model
     }
 
     pub fn default_base_url(self) -> &'static str {
-        match self {
-            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_BASE_URL,
-            Self::Copilot => SUPER_COPILOT_DEFAULT_BASE_URL,
-            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_BASE_URL,
-            Self::Gemini => SUPER_GEMINI_DEFAULT_BASE_URL,
-            Self::Kiro => SUPER_KIRO_DEFAULT_BASE_URL,
-        }
+        self.metadata()
+            .default_base_url
+            .expect("external provider default base URL should exist")
     }
 
     fn default_context_window(self) -> usize {
-        match self {
-            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
-            Self::Copilot => crate::SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
-            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
-            Self::Gemini => SUPER_GEMINI_DEFAULT_CONTEXT_WINDOW,
-            Self::Kiro => SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
-        }
+        self.metadata().default_context_window
     }
 
     fn default_auto_compact_token_limit(self) -> usize {
-        match self {
-            Self::Anthropic => SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT,
-            Self::Copilot => crate::SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
-            Self::DeepSeek => SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT,
-            Self::Gemini => SUPER_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
-            Self::Kiro => SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
-        }
+        self.metadata().default_auto_compact_token_limit
     }
 
     fn web_search_mode(self) -> &'static str {
-        match self {
-            Self::Anthropic | Self::Copilot | Self::DeepSeek | Self::Gemini | Self::Kiro => "live",
-        }
+        self.metadata().web_search_mode
     }
 
     fn image_generation_enabled(self) -> bool {
-        matches!(self, Self::Gemini)
+        self.metadata().image_generation_enabled
     }
 }
 
@@ -850,7 +804,7 @@ fn super_local_provider_codex_args(
         format!("model={}", toml_string_literal(model)),
         format!(
             "model_providers.{SUPER_LOCAL_PROVIDER_ID}.name={}",
-            toml_string_literal(SUPER_LOCAL_PROVIDER_NAME)
+            toml_string_literal(prodex_provider_core::PRODEX_LOCAL_PROVIDER_NAME)
         ),
         format!(
             "model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url={}",
@@ -932,7 +886,7 @@ pub fn super_external_provider_codex_args(
 }
 
 fn super_local_provider_base_url(url: &str) -> String {
-    if let Ok(mut parsed) = reqwest::Url::parse(url) {
+    if let Ok(mut parsed) = url::Url::parse(url) {
         let path = parsed.path().trim_end_matches('/');
         if path.is_empty() || path == "/" {
             parsed.set_path("/v1");
@@ -959,14 +913,14 @@ fn parse_runtime_base_url(url: &str) -> std::result::Result<String, String> {
 fn parse_credential_free_http_url(
     url: &str,
     option: &str,
-) -> std::result::Result<reqwest::Url, String> {
+) -> std::result::Result<url::Url, String> {
     let invalid = || {
         format!(
             "invalid {option}: expected an absolute http(s) URL with host and no credentials, \
          query, or fragment"
         )
     };
-    let parsed = reqwest::Url::parse(url).map_err(|_| invalid())?;
+    let parsed = url::Url::parse(url).map_err(|_| invalid())?;
     if url.starts_with("http:///")
         || url.starts_with("https:///")
         || !matches!(parsed.scheme(), "http" | "https")

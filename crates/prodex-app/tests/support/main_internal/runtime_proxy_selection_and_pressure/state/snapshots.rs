@@ -145,6 +145,7 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -177,7 +178,6 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };
@@ -197,20 +197,20 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 state: first_state.clone(),
                 continuations: runtime_continuation_store_from_app_state(&first_state),
                 profile_scores: BTreeMap::from([(
-            runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
-            RuntimeProfileHealth {
-                score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
-                updated_at: now - 20,
-            },
-        )]),
+                    runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+                    RuntimeProfileHealth {
+                        score: RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
+                        updated_at: now - 20,
+                    },
+                )]),
                 usage_snapshots: BTreeMap::new(),
                 backoffs: RuntimeProfileBackoffs {
-            retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
-            transport_backoff_until: BTreeMap::new(),
-            route_circuit_open_until: BTreeMap::new(),
-        },
+                    retry_backoff_until: BTreeMap::from([("main".to_string(), now + 60)]),
+                    transport_backoff_until: BTreeMap::new(),
+                    route_circuit_open_until: BTreeMap::new(),
+                },
             },
-            "first",
+            RuntimeStateMutation::FullState,
         ),
     );
     let second_state = AppState {
@@ -240,23 +240,26 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
                 state: second_state.clone(),
                 continuations: runtime_continuation_store_from_app_state(&second_state),
                 profile_scores: BTreeMap::from([(
-            runtime_profile_route_health_key("second", RuntimeRouteKind::Compact),
-            RuntimeProfileHealth {
-                score: RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
-                updated_at: now - 10,
-            },
-        )]),
+                    runtime_profile_route_health_key("second", RuntimeRouteKind::Compact),
+                    RuntimeProfileHealth {
+                        score: RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                        updated_at: now - 10,
+                    },
+                )]),
                 usage_snapshots: BTreeMap::new(),
                 backoffs: RuntimeProfileBackoffs {
-            retry_backoff_until: BTreeMap::new(),
-            transport_backoff_until: BTreeMap::from([(
-                runtime_profile_transport_backoff_key("second", RuntimeRouteKind::Responses),
-                now + 120,
-            )]),
-            route_circuit_open_until: BTreeMap::new(),
-        },
+                    retry_backoff_until: BTreeMap::new(),
+                    transport_backoff_until: BTreeMap::from([(
+                        runtime_profile_transport_backoff_key(
+                            "second",
+                            RuntimeRouteKind::Responses,
+                        ),
+                        now + 120,
+                    )]),
+                    route_circuit_open_until: BTreeMap::new(),
+                },
             },
-            "second",
+            RuntimeStateMutation::FullState,
         ),
     );
 
@@ -306,9 +309,9 @@ fn runtime_state_save_scheduler_persists_latest_snapshot() {
 }
 
 #[test]
-fn runtime_state_save_sections_follow_dirty_reason_scope() {
+fn runtime_state_save_sections_follow_typed_mutation_scope() {
     assert_eq!(
-        runtime_state_save_sections_for_reason("usage_snapshot:main"),
+        runtime_state_save_sections(&RuntimeStateMutation::UsageSnapshot("main".into())),
         RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::None,
             continuations: false,
@@ -318,7 +321,7 @@ fn runtime_state_save_sections_follow_dirty_reason_scope() {
         }
     );
     assert_eq!(
-        runtime_state_save_sections_for_reason("response_ids:main"),
+        runtime_state_save_sections(&RuntimeStateMutation::ResponseIds("main".into())),
         RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::Core,
             continuations: true,
@@ -328,7 +331,7 @@ fn runtime_state_save_sections_follow_dirty_reason_scope() {
         }
     );
     assert_eq!(
-        runtime_state_save_sections_for_reason("profile_commit:second"),
+        runtime_state_save_sections(&RuntimeStateMutation::ProfileCommit("second".into())),
         RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::Core,
             continuations: false,
@@ -338,7 +341,7 @@ fn runtime_state_save_sections_follow_dirty_reason_scope() {
         }
     );
     assert_eq!(
-        runtime_state_save_sections_for_reason("startup_audit"),
+        runtime_state_save_sections(&RuntimeStateMutation::StartupAudit),
         RuntimeStateSaveSections::full()
     );
 }

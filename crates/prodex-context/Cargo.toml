@@ -16,5 +16,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 terminal_ui = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [lints]
 workspace = true

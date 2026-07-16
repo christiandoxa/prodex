@@ -161,9 +161,21 @@ The safest first extractions are support domains that are not on the hot path:
 
 These modules reduce `main.rs` size and make it easier to reason about the runtime path without weakening behavior.
 
-## Admin And Observability Gaps
+## Product Surfaces
 
-`prodex` is still not a centralized control plane.
+The workspace has three composition roots with distinct ownership:
+
+- `prodex`: local profile management and continuity-preserving Codex runtime proxy
+- `prodex-gateway`: dedicated enterprise data-plane gateway
+- `prodex-control-plane`: dedicated enterprise control-plane planning and publication surface
+
+The root `src/lib.rs` is only a compatibility facade. Pure enterprise rules live in
+`prodex-domain`; use cases and ports live in `prodex-application`; HTTP/server adaptation lives in
+the gateway crates; backend-neutral persistence contracts live in `prodex-storage`; concrete
+repositories live in the backend runtime crates. Dependencies should point inward through these
+boundaries, not back into CLI or composition-root modules.
+
+## Admin And Observability Status
 
 What is already in place:
 
@@ -173,12 +185,13 @@ What is already in place:
 - local structured audit logging for profile, rotation, and admin operations, modeled as an append-only concern alongside runtime state rather than as part of transport handling, with logs following the resolved runtime log directory by default and `PRODEX_AUDIT_LOG_DIR` as the override
 - `prodex audit` as a local, read-only CLI surface for browsing recent append-only audit events
 
-Planned next steps are:
+Remaining operational gaps are:
 
-- admin-grade controls such as RBAC, SSO, and central policy distribution
+- completing production integrations around the existing RBAC, identity, governed policy, and
+  configuration-publication contracts
 - continued modularization of runtime-store responsibilities into smaller runtime-focused units; the `runtime_store` split is already in progress, but the boundary is still internal
 - extraction of state ownership, audit/event persistence, and export helpers out of the proxy hot path
-- a real non-file secret backend implementation and a backend-neutral revision signal for runtime auth invalidation
+- deployment-specific non-file secret backend implementations
 
 What remains intentionally local:
 

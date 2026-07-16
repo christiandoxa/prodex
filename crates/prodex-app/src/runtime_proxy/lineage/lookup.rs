@@ -32,7 +32,7 @@ pub(crate) fn runtime_response_bound_profile(
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
-            &format!("continuation_stale:{previous_response_id}"),
+            RuntimeStateMutation::ContinuationStale(previous_response_id.to_string()),
         );
     }
     let dead_shadowed_by_binding = runtime_dead_continuation_status_shadowed_by_live_binding(
@@ -130,7 +130,7 @@ pub(crate) fn runtime_response_bound_profile(
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
-            &format!("response_touch:{previous_response_id}"),
+            RuntimeStateMutation::ResponseTouch(previous_response_id.to_string()),
         );
     }
     Ok(profile_name)
@@ -166,7 +166,7 @@ pub(crate) fn runtime_turn_state_bound_profile(
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
-            &format!("continuation_stale:{turn_state}"),
+            RuntimeStateMutation::ContinuationStale(turn_state.to_string()),
         );
         return Ok(None);
     }
@@ -239,7 +239,7 @@ pub(crate) fn runtime_turn_state_bound_profile(
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
-            &format!("turn_state_touch:{turn_state}"),
+            RuntimeStateMutation::TurnStateTouch(turn_state.to_string()),
         );
     }
     Ok(profile_name)
@@ -275,7 +275,7 @@ pub(crate) fn runtime_session_bound_profile(
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
-            &format!("continuation_stale:{session_id}"),
+            RuntimeStateMutation::ContinuationStale(session_id.to_string()),
         );
         return Ok(None);
     }
@@ -359,7 +359,7 @@ pub(crate) fn runtime_session_bound_profile(
         schedule_runtime_binding_touch_save(
             shared,
             &runtime,
-            &format!("session_touch:{session_id}"),
+            RuntimeStateMutation::SessionTouch(session_id.to_string()),
         );
     }
     Ok(profile_name)

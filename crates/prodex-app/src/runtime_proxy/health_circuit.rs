@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Local;
 use std::collections::BTreeMap;
 
-use crate::RuntimeProfileHealth;
+use crate::{RuntimeProfileHealth, RuntimeStateMutation};
 
 use super::{
     RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind,
@@ -124,7 +124,7 @@ pub(crate) fn reserve_runtime_profile_route_circuit_half_open_probe(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("profile_circuit_clear:{profile_name}:{route_label}"),
+            RuntimeStateMutation::ProfileCircuitClear(format!("{profile_name}:{route_label}")),
         );
         return Ok(true);
     }
@@ -137,7 +137,7 @@ pub(crate) fn reserve_runtime_profile_route_circuit_half_open_probe(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!("profile_circuit_half_open_probe:{profile_name}:{route_label}"),
+        RuntimeStateMutation::ProfileCircuitHalfOpenProbe(format!("{profile_name}:{route_label}")),
     );
     drop(runtime);
     runtime_proxy_log(

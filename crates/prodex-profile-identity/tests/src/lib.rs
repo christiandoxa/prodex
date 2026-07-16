@@ -139,6 +139,18 @@ fn rejects_invalid_jwt_shape() {
     let err = parse_email_from_id_token("not-a-jwt").unwrap_err();
 
     assert!(format!("{err:#}").contains("invalid JWT format"));
+
+    let token = jwt_with_payload(serde_json::json!({"email": "user@example.com"}));
+    assert!(parse_email_from_id_token(&format!("{token}.extra")).is_err());
+}
+
+#[test]
+fn rejects_noncanonical_jwt_payload_encoding() {
+    let payload =
+        base64::engine::general_purpose::URL_SAFE.encode(br#"{"email":"user@example.com"}"#);
+    let error = parse_email_from_id_token(&format!("header.{payload}.signature")).unwrap_err();
+
+    assert!(format!("{error:#}").contains("failed to decode JWT payload"));
 }
 
 #[test]
@@ -165,6 +177,27 @@ fn normalizes_email_and_account_id() {
         Some("acct-two")
     );
     assert_eq!(normalize_optional_account_id("   "), None);
+}
+
+#[test]
+fn canonical_identity_key_combines_normalized_account_and_email() {
+    assert_eq!(
+        canonical_profile_identity_key(Some(" acct "), Some("User@Example.COM")),
+        Some("account:acct|email:user@example.com".to_string())
+    );
+    assert_eq!(
+        canonical_profile_identity_key(Some(" acct "), None),
+        Some("account:acct".to_string())
+    );
+    assert_eq!(
+        canonical_profile_identity_key(None, Some(" User@Example.COM ")),
+        Some("email:user@example.com".to_string())
+    );
+    assert_ne!(
+        canonical_profile_identity_key(Some("acct"), Some("first@example.com")),
+        canonical_profile_identity_key(Some("acct"), Some("second@example.com"))
+    );
+    assert_eq!(canonical_profile_identity_key(Some(" "), Some(" ")), None);
 }
 
 #[test]

@@ -23,22 +23,24 @@ pub(super) fn codex_openai_auth_headers(
 pub(super) fn codex_openai_auth_headers_for_home(
     request: reqwest::blocking::RequestBuilder,
     codex_home: &Path,
-) -> reqwest::blocking::RequestBuilder {
+) -> codex_config::CodexConfigResult<reqwest::blocking::RequestBuilder> {
     let request = codex_openai_auth_headers(request);
-    match codex_openai_auth_residency(codex_home) {
+    Ok(match codex_openai_auth_residency(codex_home)? {
         Some(residency) => request.header(CODEX_OPENAI_AUTH_RESIDENCY_HEADER, residency),
         None => request,
-    }
+    })
 }
 
-fn codex_openai_auth_residency(codex_home: &Path) -> Option<&'static str> {
-    codex_config_value(codex_home, "enforce_residency")
+fn codex_openai_auth_residency(
+    codex_home: &Path,
+) -> codex_config::CodexConfigResult<Option<&'static str>> {
+    Ok(codex_config_value(codex_home, "enforce_residency")?
         .is_some_and(|value| {
             value
                 .trim()
                 .eq_ignore_ascii_case(CODEX_OPENAI_AUTH_RESIDENCY_US)
         })
-        .then_some(CODEX_OPENAI_AUTH_RESIDENCY_US)
+        .then_some(CODEX_OPENAI_AUTH_RESIDENCY_US))
 }
 
 pub(super) fn codex_openai_auth_originator() -> String {

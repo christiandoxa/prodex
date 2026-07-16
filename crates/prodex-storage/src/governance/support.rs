@@ -14,5 +14,6 @@ pub use codec::{
 pub use integrity::{activation_etag, artifact_checksum};
 pub use validation::{
     approval_transition_error, from_i64, require_control_plane_admin, to_i64,
+    validate_governance_activation_request, validate_governance_revision_id,
     validate_governance_session_revoke, validate_governance_session_upsert,
 };

@@ -11,13 +11,12 @@ use runtime_proxy_crate::{
 };
 
 pub(crate) use runtime_proxy_crate::{
-    extract_runtime_proxy_overload_message,
     extract_runtime_proxy_overload_message_from_websocket_payload,
     extract_runtime_proxy_previous_response_message, extract_runtime_proxy_quota_message,
     extract_runtime_proxy_quota_message_from_websocket_payload,
     extract_runtime_response_ids_from_body_bytes, extract_runtime_token_usage_from_body_bytes,
     extract_runtime_turn_state_from_body_bytes, inspect_runtime_sse_buffer,
-    runtime_proxy_body_snippet,
+    runtime_proxy_body_snippet, runtime_websocket_workspace_credit_exhausted,
 };
 
 #[cfg(test)]
@@ -32,20 +31,6 @@ pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
         RuntimeResponsesReply::Buffered(parts) => extract_runtime_proxy_quota_message(&parts.body),
         RuntimeResponsesReply::Streaming(_) => None,
     }
-}
-
-pub(crate) fn runtime_proxy_precommit_error_rotates_profile(status: u16, body: &[u8]) -> bool {
-    let policy = runtime_proxy_crate::runtime_http_error_policy(
-        status,
-        body,
-        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
-    );
-    policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
-        && matches!(
-            policy.class,
-            runtime_proxy_crate::RuntimeHttpErrorClass::Quota
-                | runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable
-        )
 }
 
 pub(crate) fn runtime_proxy_redacted_body_snippet(body: &[u8], max_chars: usize) -> String {

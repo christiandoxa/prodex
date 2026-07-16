@@ -1,46 +1,8 @@
 use super::*;
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use std::io::IsTerminal;
 
-pub(super) struct QuotaWatchTui {
-    pub(super) terminal: Terminal<CrosstermBackend<io::Stdout>>,
-}
-
-impl QuotaWatchTui {
-    pub(super) fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable quota TUI raw mode")?;
-        let mut stdout = io::stdout();
-        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter quota TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stdout = io::stdout();
-                let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize quota TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for QuotaWatchTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+pub(super) type QuotaWatchTui = terminal_ui::AlternateScreenTerminal<io::Stdout>;
 
 pub(crate) fn quota_watch_enabled(args: &QuotaArgs) -> bool {
     !args.raw && !args.once
@@ -93,7 +55,7 @@ fn watch_profile_quota_tui(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<()> {
-    let mut tui = QuotaWatchTui::new()?;
+    let mut tui = QuotaWatchTui::stdout("quota TUI")?;
     loop {
         let updated = quota_watch_updated_at();
         let frame = build_profile_quota_watch_tui_frame(

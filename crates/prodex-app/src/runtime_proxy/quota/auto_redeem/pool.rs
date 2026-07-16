@@ -49,6 +49,7 @@ pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let jobs = {
         let mut runtime = shared
             .runtime
@@ -82,7 +83,7 @@ pub(super) fn refresh_runtime_auto_redeem_pool_missing_quota(
                 ) {
                     return None;
                 }
-                if runtime_profile_inflight_sort_key(&name, &runtime.profile_inflight)
+                if runtime_profile_inflight_sort_key(&name, &profile_inflight)
                     >= inflight_soft_limit
                 {
                     return None;
@@ -123,6 +124,7 @@ pub(super) fn runtime_auto_redeem_pool_has_weekly_remaining_profile(
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let runtime = shared
         .runtime
         .lock()
@@ -159,8 +161,7 @@ pub(super) fn runtime_auto_redeem_pool_has_weekly_remaining_profile(
                 {
                     return false;
                 }
-                if runtime_profile_inflight_sort_key(name, &runtime.profile_inflight)
-                    >= inflight_soft_limit
+                if runtime_profile_inflight_sort_key(name, &profile_inflight) >= inflight_soft_limit
                 {
                     return false;
                 }
@@ -189,6 +190,7 @@ pub(crate) fn runtime_best_auto_redeem_profile_name(
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let runtime = shared
         .runtime
         .lock()
@@ -224,8 +226,7 @@ pub(crate) fn runtime_best_auto_redeem_profile_name(
             {
                 return None;
             }
-            let inflight_count =
-                runtime_profile_inflight_sort_key(&name, &runtime.profile_inflight);
+            let inflight_count = runtime_profile_inflight_sort_key(&name, &profile_inflight);
             if inflight_count >= inflight_soft_limit {
                 return None;
             }

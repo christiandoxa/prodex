@@ -380,7 +380,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         if self.request_requires_previous_response_affinity
             || self.request_turn_state.is_some()
             || self.turn_state_profile.is_some()
-            || !runtime_websocket_workspace_credit_depleted_payload(payload)
+            || !runtime_websocket_workspace_credit_exhausted(payload)
             || !runtime_has_route_eligible_quota_fallback(
                 self.shared,
                 profile_name,
@@ -489,22 +489,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         self.excluded_profiles.insert(profile_name);
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
-}
-
-fn runtime_websocket_workspace_credit_depleted_payload(
-    payload: &RuntimeWebsocketErrorPayload,
-) -> bool {
-    let text = match payload {
-        RuntimeWebsocketErrorPayload::Text(text) => text.as_str().into(),
-        RuntimeWebsocketErrorPayload::Binary(bytes) => String::from_utf8_lossy(bytes),
-        RuntimeWebsocketErrorPayload::Empty => return false,
-    };
-    let lower = text.to_ascii_lowercase();
-    lower.contains("workspace_member_credits_depleted")
-        || lower.contains("workspace is out of credits")
-        || (lower.contains("out of credits")
-            && lower.contains("workspace owner")
-            && lower.contains("refill"))
 }
 
 #[cfg(test)]

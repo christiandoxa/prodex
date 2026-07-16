@@ -1,53 +1,13 @@
 use super::{
-    RuntimeLogFormat, clear_runtime_policy_cache, load_runtime_policy_cached,
-    load_runtime_policy_from_root, plan_runtime_policy_cache_invalidation,
-    reload_runtime_policy_cached_with_invalidation, resolve_runtime_policy_path,
-    runtime_policy_path, runtime_policy_proxy,
+    RuntimeLogFormat, RuntimePolicyProxyPreset, clear_runtime_policy_cache,
+    load_runtime_policy_cached, load_runtime_policy_from_root,
+    plan_runtime_policy_cache_invalidation, reload_runtime_policy_cached_with_invalidation,
+    resolve_runtime_policy_path, runtime_policy_path, runtime_policy_proxy_from_root,
 };
 use secret_store::SecretBackendKind;
-use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct EnvGuard {
-    key: &'static str,
-    previous: Option<OsString>,
-}
-
-impl EnvGuard {
-    fn set(key: &'static str, value: &str) -> Self {
-        let previous = std::env::var_os(key);
-        // SAFETY: tests using this helper hold env_lock.
-        unsafe { std::env::set_var(key, value) };
-        Self { key, previous }
-    }
-
-    fn unset(key: &'static str) -> Self {
-        let previous = std::env::var_os(key);
-        // SAFETY: tests using this helper hold env_lock.
-        unsafe { std::env::remove_var(key) };
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        if let Some(previous) = self.previous.as_ref() {
-            // SAFETY: tests using this helper hold env_lock.
-            unsafe { std::env::set_var(self.key, previous) };
-        } else {
-            // SAFETY: tests using this helper hold env_lock.
-            unsafe { std::env::remove_var(self.key) };
-        }
-    }
-}
 
 fn temp_root(name: &str) -> PathBuf {
     let nanos = SystemTime::now()

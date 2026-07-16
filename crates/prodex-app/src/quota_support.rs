@@ -121,8 +121,9 @@ impl QuotaProviderFilter {
         if self.matches(provider) {
             return true;
         }
-        let Some(model_provider) = codex_non_openai_model_provider(codex_home, None) else {
-            return false;
+        let model_provider = match codex_non_openai_model_provider(codex_home, None) {
+            Ok(Some(provider)) => provider,
+            Ok(None) | Err(_) => return false,
         };
         match self {
             Self::DeepSeek => model_provider
@@ -493,7 +494,7 @@ pub(crate) fn fetch_profile_quota(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<ProviderQuotaSnapshot> {
-    if let Some(info) = custom_model_provider_quota_info(provider, codex_home) {
+    if let Some(info) = custom_model_provider_quota_info(provider, codex_home)? {
         return Ok(ProviderQuotaSnapshot::External(info));
     }
     match provider {
@@ -528,7 +529,7 @@ pub(crate) fn fetch_profile_quota_json(
     codex_home: &Path,
     base_url: Option<&str>,
 ) -> Result<serde_json::Value> {
-    if let Some(info) = custom_model_provider_quota_info(provider, codex_home) {
+    if let Some(info) = custom_model_provider_quota_info(provider, codex_home)? {
         return serde_json::to_value(info).context("failed to render provider quota JSON");
     }
     match provider {

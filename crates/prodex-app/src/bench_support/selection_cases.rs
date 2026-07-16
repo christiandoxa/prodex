@@ -47,12 +47,15 @@ impl RuntimeProxyQuotaFallbackBenchCase {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight,
             profile_health: BTreeMap::new(),
         };
+        let shared = bench_runtime_shared("quota-fallback", state, 32);
+        for (name, count) in profile_inflight {
+            shared.lane_admission.set_profile_inflight(name, count);
+        }
 
         Self {
-            shared: bench_runtime_shared("quota-fallback", state, 32),
+            shared,
             excluded_profiles: BTreeSet::new(),
             profile_name,
         }
@@ -136,7 +139,6 @@ impl RuntimeProxyPreviousResponseBenchCase {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health,
         };
 
@@ -255,12 +257,15 @@ impl RuntimeProxyMixedPoolSelectionBenchCase {
             profile_retry_backoff_until: retry_backoff_until,
             profile_transport_backoff_until: transport_backoff_until,
             profile_route_circuit_open_until: route_circuit_open_until,
-            profile_inflight,
             profile_health,
         };
+        let shared = bench_runtime_shared("mixed-pool-selection", state, 64);
+        for (name, count) in profile_inflight {
+            shared.lane_admission.set_profile_inflight(name, count);
+        }
 
         Self {
-            shared: bench_runtime_shared("mixed-pool-selection", state, 64),
+            shared,
             excluded_profiles,
         }
     }
@@ -342,12 +347,15 @@ impl RuntimeProxyCompactSessionSelectionBenchCase {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight,
             profile_health: BTreeMap::new(),
         };
+        let shared = bench_runtime_shared("compact-session-selection", state, 32);
+        for (name, count) in profile_inflight {
+            shared.lane_admission.set_profile_inflight(name, count);
+        }
 
         Self {
-            shared: bench_runtime_shared("compact-session-selection", state, 32),
+            shared,
             excluded_profiles: BTreeSet::new(),
             session_id,
         }
@@ -432,7 +440,6 @@ impl RuntimeProxyWebsocketStaleReuseBenchCase {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
 

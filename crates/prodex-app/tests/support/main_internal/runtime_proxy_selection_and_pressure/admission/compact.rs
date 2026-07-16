@@ -1,5 +1,5 @@
-use super::*;
 use super::helpers::*;
+use super::*;
 mod failures;
 
 #[test]
@@ -59,7 +59,6 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let pressure_until = Local::now().timestamp().saturating_add(60).max(0) as u64;
@@ -67,6 +66,7 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -120,14 +120,13 @@ fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
 fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
     let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
     let backend = RuntimeProxyBackend::start();
-    let harness =
-        RuntimeProxyProfileHarnessBuilder::single_openai_profile(
-            "main",
-            "main-account",
-            "main@example.com",
-        )
-        .upstream_base_url(backend.base_url())
-        .build();
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .upstream_base_url(backend.base_url())
+    .build();
     let shared = harness.shared();
     register_runtime_smart_context_proxy_state(&shared.log_path, true, Some(32_000), None);
     let body = serde_json::json!({
@@ -163,7 +162,10 @@ fn compact_smart_context_prepare_fallback_passes_original_body_to_upstream() {
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
 
     assert_eq!(status, 200, "unexpected compact response: {response_body}");
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
     assert_eq!(backend.responses_bodies(), vec![body]);
     assert!(
         log.contains("smart_context_prepare_fallback")
@@ -233,7 +235,6 @@ fn compact_final_failure_logs_overload_terminal_reason() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -254,11 +255,9 @@ fn compact_final_failure_logs_overload_terminal_reason() {
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
 
     assert_eq!(status, 500);
-    let overload_terminal_marker =
-        log.contains("compact_final_failure exit=candidate_exhausted reason=overload")
-            || log.contains(
-                "compact_final_failure exit=precommit_budget_exhausted reason=overload",
-            );
+    let overload_terminal_marker = log
+        .contains("compact_final_failure exit=candidate_exhausted reason=overload")
+        || log.contains("compact_final_failure exit=precommit_budget_exhausted reason=overload");
     assert!(
         overload_terminal_marker,
         "compact overload terminal marker should identify overload exhaustion: {log}"
@@ -319,7 +318,6 @@ fn compact_final_failure_logs_quota_terminal_reason() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -414,7 +412,6 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -513,7 +510,6 @@ fn compact_workspace_credits_error_rotates_to_ready_profile() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -605,7 +601,6 @@ fn compact_final_failure_logs_local_selection_terminal_reason() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -722,14 +717,16 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::from([
-                ("main".to_string(), hard_limit),
-                ("second".to_string(), hard_limit),
-            ]),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
     );
+    shared
+        .lane_admission
+        .set_profile_inflight("main", hard_limit);
+    shared
+        .lane_admission
+        .set_profile_inflight("second", hard_limit);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses/compact".to_string(),

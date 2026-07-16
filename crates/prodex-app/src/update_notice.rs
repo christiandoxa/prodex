@@ -43,7 +43,7 @@ pub(crate) fn show_update_notice_if_available(command: &Commands) -> Result<()> 
         if let Some(warning) = install_warning {
             lines.push(format!("WARNING: {warning}"));
         }
-        print_stderr_panel("Update Available", &lines);
+        print_stderr_panel("Update Available", &lines)?;
     }
     Ok(())
 }

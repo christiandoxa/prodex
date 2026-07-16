@@ -10,7 +10,7 @@ where
     Ok(value.unwrap_or_default())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RuntimeQuotaWindowStatus {
     Ready,
     Thin,
@@ -29,7 +29,7 @@ pub struct RuntimeProfileBackoffs {
     pub route_circuit_open_until: BTreeMap<String, i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RuntimeProfileUsageSnapshot<W = RuntimeQuotaWindowStatus> {
     pub checked_at: i64,
     pub five_hour_status: W,
@@ -40,7 +40,7 @@ pub struct RuntimeProfileUsageSnapshot<W = RuntimeQuotaWindowStatus> {
     pub weekly_reset_at: i64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeProfileHealth {
     pub score: u32,
     pub updated_at: i64,

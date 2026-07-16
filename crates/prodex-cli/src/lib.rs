@@ -55,20 +55,13 @@ pub enum Commands {
     UseProfile(ProfileSelector),
     #[command(about = "Show the active profile and its CODEX_HOME details.")]
     Current,
-    #[command(
-        name = "info",
-        about = "Summarize version status, running processes, quota pool, and runway."
-    )]
+    #[command(about = "Summarize version status, running processes, quota pool, and runway.")]
     Info(InfoArgs),
     #[command(
-        name = "status",
         about = "Monitor profiles, quota resets, token efficiency, and Prodex resource usage."
     )]
     Status(StatusArgs),
-    #[command(
-        name = "log",
-        about = "Show the latest transcript text and token counts or stream them live."
-    )]
+    #[command(about = "Show the latest transcript text and token counts or stream them live.")]
     Log(LogArgs),
     #[command(
         subcommand,
@@ -161,7 +154,6 @@ pub enum Commands {
     )]
     Rtk(CavemanArgs),
     #[command(
-        name = "ponytail",
         trailing_var_arg = true,
         about = "Shortcut for `prodex caveman ponytail`.",
         after_help = CLI_CAVEMAN_AFTER_HELP
@@ -176,10 +168,7 @@ pub enum Commands {
     Super(SuperArgs),
     #[command(about = "Expose a protected browser terminal through a Cloudflare quick tunnel.")]
     Expose(ExposeArgs),
-    #[command(
-        name = "app-server-broker",
-        about = "Inspect the experimental JSON-RPC app-server broker contract."
-    )]
+    #[command(about = "Inspect the experimental JSON-RPC app-server broker contract.")]
     AppServerBroker(AppServerBrokerArgs),
     #[command(
         about = "Run a standalone OpenAI-compatible gateway backed by Prodex provider routing."
@@ -198,9 +187,6 @@ pub enum Commands {
     #[command(name = "__mcp-jsonl-bridge", hide = true)]
     McpJsonlBridge(McpJsonlBridgeArgs),
 }
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CurrentCommand;
 
 pub fn parse_cli_command_from<I, T>(args: I) -> std::result::Result<Commands, clap::Error>
 where

@@ -62,6 +62,25 @@ impl ProdexCleanupSummary {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProdexCleanupFailureKind {
+    OutsideRoot,
+    Io(io::ErrorKind),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProdexCleanupFailure {
+    pub path: PathBuf,
+    pub kind: ProdexCleanupFailureKind,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ProdexCleanupReport {
+    pub removed: usize,
+    pub missing: usize,
+    pub failures: Vec<ProdexCleanupFailure>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProdexRepairSeverity {
     Info,
@@ -73,6 +92,7 @@ pub enum ProdexRepairSeverity {
 pub enum ProdexRepairActionKind {
     MissingStateFile,
     UnreadableStateFile,
+    InvalidStateFile,
     RestoreLastGoodState,
     RemoveStaleRootTempFile,
     CreateMissingProfileHome,
@@ -131,8 +151,9 @@ fn path_label(paths: &AppPaths, path: &Path, redact_paths: bool) -> String {
 
 fn state_file_recoverable(path: &Path) -> bool {
     fs::read_to_string(path)
-        .map(|content| !content.trim().is_empty())
-        .unwrap_or(false)
+        .ok()
+        .and_then(|content| serde_json::from_str::<AppState>(&content).ok())
+        .is_some()
 }
 
 fn push_state_issue(
@@ -143,10 +164,10 @@ fn push_state_issue(
 ) {
     let last_good = last_good_file_path(&paths.state_file);
     if state_file_recoverable(&last_good) {
-        let prefix = if kind == ProdexRepairActionKind::UnreadableStateFile {
-            "would restore unreadable"
-        } else {
-            "would restore"
+        let prefix = match kind {
+            ProdexRepairActionKind::UnreadableStateFile => "would restore unreadable",
+            ProdexRepairActionKind::InvalidStateFile => "would restore invalid",
+            _ => "would restore",
         };
         actions.push(ProdexRepairPlanAction {
             kind: ProdexRepairActionKind::RestoreLastGoodState,
@@ -166,6 +187,7 @@ fn push_state_issue(
     let label = match kind {
         ProdexRepairActionKind::MissingStateFile => "missing",
         ProdexRepairActionKind::UnreadableStateFile => "unreadable",
+        ProdexRepairActionKind::InvalidStateFile => "invalid",
         _ => "invalid",
     };
     actions.push(ProdexRepairPlanAction {
@@ -187,7 +209,13 @@ fn plan_state_file_repair(
     redact_paths: bool,
 ) {
     match fs::read_to_string(&paths.state_file) {
-        Ok(_) => {}
+        Ok(content) if serde_json::from_str::<AppState>(&content).is_ok() => {}
+        Ok(_) => push_state_issue(
+            actions,
+            paths,
+            ProdexRepairActionKind::InvalidStateFile,
+            redact_paths,
+        ),
         Err(err) if err.kind() == io::ErrorKind::NotFound => push_state_issue(
             actions,
             paths,
@@ -339,6 +367,7 @@ impl ProdexRepairPlanAction {
         match self.kind {
             ProdexRepairActionKind::MissingStateFile => "missing_state_file",
             ProdexRepairActionKind::UnreadableStateFile => "unreadable_state_file",
+            ProdexRepairActionKind::InvalidStateFile => "invalid_state_file",
             ProdexRepairActionKind::RestoreLastGoodState => "restore_last_good_state",
             ProdexRepairActionKind::RemoveStaleRootTempFile => "remove_stale_root_temp_file",
             ProdexRepairActionKind::CreateMissingProfileHome => "create_missing_profile_home",
@@ -365,6 +394,55 @@ where
         .into_iter()
         .filter(|path| remove_file_if_exists(path))
         .count()
+}
+
+pub fn cleanup_existing_files_under<I>(root: &Path, paths: I) -> ProdexCleanupReport
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let mut report = ProdexCleanupReport::default();
+    for path in paths {
+        if !path_is_contained_without_symlink_parents(root, &path) {
+            report.failures.push(ProdexCleanupFailure {
+                path,
+                kind: ProdexCleanupFailureKind::OutsideRoot,
+            });
+            continue;
+        }
+        match fs::remove_file(&path) {
+            Ok(()) => report.removed += 1,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => report.missing += 1,
+            Err(error) => report.failures.push(ProdexCleanupFailure {
+                path,
+                kind: ProdexCleanupFailureKind::Io(error.kind()),
+            }),
+        }
+    }
+    report
+}
+
+fn path_is_contained_without_symlink_parents(root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
+    let mut current = root.to_path_buf();
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let std::path::Component::Normal(component) = component else {
+            return false;
+        };
+        if components.peek().is_none() {
+            return true;
+        }
+        current.push(component);
+        let Ok(metadata) = fs::symlink_metadata(&current) else {
+            return false;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return false;
+        }
+    }
+    false
 }
 
 pub fn cleanup_prodex_stale_root_temp_files_at(

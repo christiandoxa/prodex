@@ -110,7 +110,8 @@ fn smart_context_window_uses_active_model_cache_metadata() {
     };
 
     assert_eq!(
-        runtime_launch_effective_model_context_window_tokens(&request, &selection),
+        runtime_launch_effective_model_context_window_tokens(&request, &selection.codex_home)
+            .unwrap(),
         Some(272_000)
     );
 }
@@ -153,7 +154,8 @@ fn smart_context_window_keeps_explicit_context_override() {
     };
 
     assert_eq!(
-        runtime_launch_effective_model_context_window_tokens(&request, &selection),
+        runtime_launch_effective_model_context_window_tokens(&request, &selection.codex_home)
+            .unwrap(),
         Some(123_456)
     );
 }

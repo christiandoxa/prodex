@@ -3,7 +3,7 @@ use super::*;
 pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
     shared: &RuntimeRotationProxyShared,
     runtime: &RuntimeRotationState,
-    reason: &str,
+    mutation: &RuntimeStateMutation,
 ) {
     if !runtime_proxy_persistence_enabled(shared) {
         return;
@@ -14,13 +14,14 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
             runtime_continuation_store_snapshot(runtime),
             runtime.state.profiles.clone(),
             runtime.paths.clone(),
-            reason,
+            mutation,
         );
         return;
     }
     let queue = runtime_continuation_journal_save_queue();
     let journal_path = runtime_continuation_journal_file_path(&runtime.paths);
-    let enqueue_plan = runtime_continuation_journal_save_enqueue_plan(reason, Instant::now());
+    let reason = mutation.reason();
+    let enqueue_plan = runtime_continuation_journal_save_enqueue_plan(mutation, Instant::now());
     let queued_at = enqueue_plan.queued_at;
     let ready_at = enqueue_plan.ready_at;
     let mut pending = queue
@@ -32,7 +33,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
         RuntimeContinuationJournalSaveJob {
             payload: RuntimeContinuationJournalSavePayload::Live(shared.clone()),
             log_path: shared.log_path.clone(),
-            reason: reason.to_string(),
+            reason: reason.clone(),
             saved_at: Local::now().timestamp(),
             queued_at,
             ready_at,
@@ -50,7 +51,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
         runtime_proxy_structured_log_message(
             "continuation_journal_save_queued",
             [
-                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("reason", &reason),
                 runtime_proxy_log_field("backlog", backlog.to_string()),
                 runtime_proxy_log_field("ready_in_ms", enqueue_plan.ready_in_ms().to_string()),
             ],
@@ -62,7 +63,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save_from_runtime(
             runtime_proxy_structured_log_message(
                 "continuation_journal_queue_backpressure",
                 [
-                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("reason", &reason),
                     runtime_proxy_log_field("backlog", backlog.to_string()),
                 ],
             ),
@@ -75,8 +76,9 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
     continuations: RuntimeContinuationStore,
     profiles: BTreeMap<String, ProfileEntry>,
     paths: AppPaths,
-    reason: &str,
+    mutation: &RuntimeStateMutation,
 ) {
+    let reason = mutation.reason();
     if !runtime_proxy_persistence_enabled(shared) {
         runtime_proxy_log(
             shared,
@@ -84,7 +86,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
                 "continuation_journal_save_suppressed",
                 [
                     runtime_proxy_log_field("role", "follower"),
-                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("reason", &reason),
                     runtime_proxy_log_field(
                         "path",
                         runtime_continuation_journal_file_path(&paths)
@@ -102,7 +104,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
             runtime_proxy_structured_log_message(
                 "continuation_journal_save_inline",
                 [
-                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("reason", &reason),
                     runtime_proxy_log_field("backlog", "0"),
                 ],
             ),
@@ -120,7 +122,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
                     "continuation_journal_save_ok",
                     [
                         runtime_proxy_log_field("saved_at", saved_at.to_string()),
-                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("reason", &reason),
                         runtime_proxy_log_field("lag_ms", "0"),
                     ],
                 ),
@@ -131,7 +133,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
                     "continuation_journal_save_error",
                     [
                         runtime_proxy_log_field("saved_at", saved_at.to_string()),
-                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("reason", &reason),
                         runtime_proxy_log_field("lag_ms", "0"),
                         runtime_proxy_log_field("stage", "write"),
                         runtime_proxy_log_field("error", runtime_scheduled_save_error(&err)),
@@ -143,7 +145,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
     }
     let queue = runtime_continuation_journal_save_queue();
     let journal_path = runtime_continuation_journal_file_path(&paths);
-    let enqueue_plan = runtime_continuation_journal_save_enqueue_plan(reason, Instant::now());
+    let enqueue_plan = runtime_continuation_journal_save_enqueue_plan(mutation, Instant::now());
     let queued_at = enqueue_plan.queued_at;
     let ready_at = enqueue_plan.ready_at;
     let mut pending = queue
@@ -161,7 +163,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
                 },
             ),
             log_path: shared.log_path.clone(),
-            reason: reason.to_string(),
+            reason: reason.clone(),
             saved_at: Local::now().timestamp(),
             queued_at,
             ready_at,
@@ -179,7 +181,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
         runtime_proxy_structured_log_message(
             "continuation_journal_save_queued",
             [
-                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("reason", &reason),
                 runtime_proxy_log_field("backlog", backlog.to_string()),
                 runtime_proxy_log_field("ready_in_ms", enqueue_plan.ready_in_ms().to_string()),
             ],
@@ -191,7 +193,7 @@ pub(crate) fn schedule_runtime_continuation_journal_save(
             runtime_proxy_structured_log_message(
                 "continuation_journal_queue_backpressure",
                 [
-                    runtime_proxy_log_field("reason", reason),
+                    runtime_proxy_log_field("reason", &reason),
                     runtime_proxy_log_field("backlog", backlog.to_string()),
                 ],
             ),

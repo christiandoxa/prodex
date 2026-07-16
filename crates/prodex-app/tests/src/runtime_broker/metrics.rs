@@ -54,7 +54,6 @@ fn test_runtime_broker_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
 
@@ -62,6 +61,7 @@ fn test_runtime_broker_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder()
             .build()
             .expect("test async client"),
@@ -85,6 +85,64 @@ fn test_runtime_broker_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
     }
 }
 
+fn test_runtime_broker_metadata() -> RuntimeBrokerMetadata {
+    RuntimeBrokerMetadata {
+        broker_key: "broker".to_string(),
+        listen_addr: "127.0.0.1:12345".to_string(),
+        started_at: Local::now().timestamp(),
+        current_profile: "main".to_string(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        instance_id: "instance".to_string(),
+        admin_token: runtime_broker_test_secret("secret"),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
+    }
+}
+
+#[test]
+fn runtime_broker_metrics_reads_log_before_waiting_for_runtime_state_lock() {
+    let _guard = acquire_test_runtime_lock();
+    clear_runtime_broker_continuity_failure_reason_cache();
+    clear_all_runtime_proxy_continuity_failure_reason_metrics();
+    let log_path = temp_log_path("log-before-runtime-lock");
+    fs::write(&log_path, "stale_continuation reason=test\n").expect("test log should write");
+    let shared = test_runtime_broker_shared(log_path.clone());
+    let runtime_guard = shared
+        .lock_runtime_state()
+        .expect("runtime state should not be poisoned");
+    let worker_shared = shared.clone();
+    let worker = std::thread::spawn(move || {
+        runtime_broker_metrics_snapshot(&worker_shared, &test_runtime_broker_metadata())
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let log_read_finished = loop {
+        let stats =
+            prodex_runtime_broker_log::runtime_broker_continuity_failure_reason_cache_stats_for_test();
+        if stats.full_rebuilds > 0 {
+            break true;
+        }
+        if std::time::Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+
+    drop(runtime_guard);
+    worker
+        .join()
+        .expect("metrics worker should join")
+        .expect("metrics snapshot should succeed");
+    assert!(
+        log_read_finished,
+        "runtime log read should finish while runtime state lock is held elsewhere"
+    );
+    clear_runtime_proxy_continuity_failure_reason_metrics(&log_path);
+    fs::remove_file(&log_path).expect("test log should clean up");
+}
+
 #[test]
 fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_counters() {
     let _guard = acquire_test_runtime_lock();
@@ -101,11 +159,11 @@ fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_cou
     let shared = test_runtime_broker_shared(log_path.clone());
     shared
         .lane_admission
-        .admission_wait_metrics
+        .admission_wait_metric_counters()
         .record_wait(Duration::from_nanos(21));
     shared
         .lane_admission
-        .long_lived_queue_wait_metrics
+        .long_lived_queue_wait_metric_counters()
         .record_wait(Duration::from_nanos(34));
     runtime_proxy_record_continuity_failure_reason(
         &shared,
@@ -118,23 +176,8 @@ fn runtime_broker_metrics_snapshot_merges_live_and_parsed_continuity_failure_cou
         "websocket_reuse_watchdog_locked_affinity",
     );
 
-    let metrics = runtime_broker_metrics_snapshot(
-        &shared,
-        &RuntimeBrokerMetadata {
-            broker_key: "broker".to_string(),
-            listen_addr: "127.0.0.1:12345".to_string(),
-            started_at: Local::now().timestamp(),
-            current_profile: "main".to_string(),
-            include_code_review: false,
-            upstream_no_proxy: false,
-            instance_id: "instance".to_string(),
-            admin_token: runtime_broker_test_secret("secret"),
-            prodex_version: None,
-            executable_path: None,
-            executable_sha256: None,
-        },
-    )
-    .expect("broker metrics snapshot should succeed");
+    let metrics = runtime_broker_metrics_snapshot(&shared, &test_runtime_broker_metadata())
+        .expect("broker metrics snapshot should succeed");
 
     assert_eq!(
         metrics
@@ -182,23 +225,8 @@ fn runtime_broker_metrics_snapshot_counts_pending_live_reasons_once() {
         "previous_response_not_found",
     );
 
-    let metrics = runtime_broker_metrics_snapshot(
-        &shared,
-        &RuntimeBrokerMetadata {
-            broker_key: "broker".to_string(),
-            listen_addr: "127.0.0.1:12345".to_string(),
-            started_at: Local::now().timestamp(),
-            current_profile: "main".to_string(),
-            include_code_review: false,
-            upstream_no_proxy: false,
-            instance_id: "instance".to_string(),
-            admin_token: runtime_broker_test_secret("secret"),
-            prodex_version: None,
-            executable_path: None,
-            executable_sha256: None,
-        },
-    )
-    .expect("broker metrics snapshot should succeed");
+    let metrics = runtime_broker_metrics_snapshot(&shared, &test_runtime_broker_metadata())
+        .expect("broker metrics snapshot should succeed");
 
     assert_eq!(
         metrics.continuity_failure_reasons.stale_continuation,

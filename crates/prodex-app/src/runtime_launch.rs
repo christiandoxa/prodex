@@ -54,27 +54,29 @@ const OPENAI_CODEX_DEFAULT_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
 pub(super) fn runtime_launch_openai_spark_context_codex_args(
     codex_home: &Path,
     args: &[OsString],
-) -> Vec<OsString> {
-    if !runtime_launch_openai_provider_for_args(codex_home, args) {
-        return args.to_vec();
+) -> Result<Vec<OsString>> {
+    if !runtime_launch_openai_provider_for_args(codex_home, args)? {
+        return Ok(args.to_vec());
     }
-    let Some(model) = runtime_launch_openai_model(codex_home, args) else {
-        return args.to_vec();
+    let Some(model) = runtime_launch_openai_model(codex_home, args)? else {
+        return Ok(args.to_vec());
     };
     if !runtime_launch_openai_model_uses_large_context(&model) {
-        return args.to_vec();
+        return Ok(args.to_vec());
     }
 
     let profile_v2_name = codex_cli_profile_v2_name(args);
-    let explicit_context_window =
-        runtime_launch_cli_model_context_window_tokens(args).or_else(|| {
-            runtime_launch_config_model_context_window_tokens_with_profile_v2(
-                codex_home,
-                profile_v2_name.as_deref(),
-            )
-        });
+    let explicit_context_window = match runtime_launch_cli_model_context_window_tokens(args) {
+        Some(value) => Some(value),
+        None => runtime_launch_config_model_context_window_tokens_with_profile_v2(
+            codex_home,
+            profile_v2_name.as_deref(),
+        )?,
+    };
     let context_window = explicit_context_window
-        .or_else(|| runtime_launch_openai_model_context_from_models_cache(codex_home, &model))
+        .or(runtime_launch_openai_model_context_from_models_cache(
+            codex_home, &model,
+        ))
         .unwrap_or(OPENAI_CODEX_DEFAULT_CONTEXT_WINDOW_TOKENS);
     let mut overrides = Vec::new();
     if explicit_context_window.is_none() {
@@ -95,7 +97,7 @@ pub(super) fn runtime_launch_openai_spark_context_codex_args(
         ));
     }
     if overrides.is_empty() {
-        return args.to_vec();
+        return Ok(args.to_vec());
     }
 
     let mut next_args = Vec::with_capacity(args.len() + overrides.len() * 2);
@@ -104,7 +106,7 @@ pub(super) fn runtime_launch_openai_spark_context_codex_args(
         next_args.push(OsString::from(override_entry));
     }
     next_args.extend(args.iter().cloned());
-    next_args
+    Ok(next_args)
 }
 
 pub(super) fn runtime_launch_cli_model_context_window_tokens(args: &[OsString]) -> Option<u64> {
@@ -138,32 +140,55 @@ pub(super) fn runtime_launch_config_gemini_thinking_budget_tokens(
 pub(super) fn runtime_launch_config_model_context_window_tokens_with_profile_v2(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
-) -> Option<u64> {
-    profile_v2_name
+) -> Result<Option<u64>> {
+    let explicit = profile_v2_name
         .and_then(|profile_v2_name| codex_profile_v2_config_path(codex_home, profile_v2_name))
         .and_then(|config_path| {
             runtime_launch_config_file_model_context_window_tokens(&config_path)
         })
-        .or_else(|| runtime_launch_config_model_context_window_tokens(codex_home))
-        .or_else(|| {
-            runtime_launch_config_model_cache_context_window_tokens_with_profile_v2(
-                codex_home,
-                profile_v2_name,
-            )
-        })
+        .or_else(|| runtime_launch_config_model_context_window_tokens(codex_home));
+    if explicit.is_some() {
+        return Ok(explicit);
+    }
+    runtime_launch_config_model_cache_context_window_tokens_with_profile_v2(
+        codex_home,
+        profile_v2_name,
+    )
 }
 
 pub(super) fn runtime_launch_config_model_cache_context_window_tokens_with_profile_v2(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
-) -> Option<u64> {
+) -> Result<Option<u64>> {
     let provider =
-        codex_config_value_with_profile_v2(codex_home, "model_provider", profile_v2_name);
+        codex_config_value_with_profile_v2(codex_home, "model_provider", profile_v2_name)?;
     if provider.is_some_and(|provider| !provider.trim().eq_ignore_ascii_case("openai")) {
-        return None;
+        return Ok(None);
     }
-    let model = codex_config_value_with_profile_v2(codex_home, "model", profile_v2_name)?;
-    runtime_launch_openai_model_context_from_models_cache(codex_home, &model)
+    let Some(model) = codex_config_value_with_profile_v2(codex_home, "model", profile_v2_name)?
+    else {
+        return Ok(None);
+    };
+    Ok(runtime_launch_openai_model_context_from_models_cache(
+        codex_home, &model,
+    ))
+}
+
+pub(super) fn runtime_launch_effective_model_context_window_tokens(
+    request: &RuntimeLaunchRequest<'_>,
+    codex_home: &Path,
+) -> Result<Option<u64>> {
+    match (
+        request.smart_context_enabled,
+        request.model_context_window_tokens,
+    ) {
+        (false, _) => Ok(None),
+        (_, Some(value)) => Ok(Some(value)),
+        _ => runtime_launch_config_model_context_window_tokens_with_profile_v2(
+            codex_home,
+            request.profile_v2_name,
+        ),
+    }
 }
 
 pub(super) fn runtime_launch_config_gemini_thinking_budget_tokens_with_profile_v2(
@@ -236,16 +261,21 @@ fn runtime_launch_parse_gemini_thinking_budget_tokens(value: &str) -> Option<u64
     value.trim().parse::<u64>().ok()
 }
 
-fn runtime_launch_openai_provider_for_args(codex_home: &Path, args: &[OsString]) -> bool {
-    codex_cli_config_override_value(args, "model_provider")
-        .or_else(|| codex_config_value_for_args(codex_home, args, "model_provider"))
-        .is_none_or(|provider| provider.trim().eq_ignore_ascii_case("openai"))
+fn runtime_launch_openai_provider_for_args(codex_home: &Path, args: &[OsString]) -> Result<bool> {
+    let provider = match codex_cli_config_override_value(args, "model_provider") {
+        Some(provider) => Some(provider),
+        None => codex_config_value_for_args(codex_home, args, "model_provider")?,
+    };
+    Ok(provider.is_none_or(|provider| provider.trim().eq_ignore_ascii_case("openai")))
 }
 
-fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Option<String> {
-    runtime_launch_cli_model(args)
-        .or_else(|| codex_cli_config_override_value(args, "model"))
-        .or_else(|| codex_config_value_for_args(codex_home, args, "model"))
+fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Result<Option<String>> {
+    if let Some(model) =
+        runtime_launch_cli_model(args).or_else(|| codex_cli_config_override_value(args, "model"))
+    {
+        return Ok(Some(model));
+    }
+    Ok(codex_config_value_for_args(codex_home, args, "model")?)
 }
 
 fn runtime_launch_openai_model_uses_large_context(model: &str) -> bool {

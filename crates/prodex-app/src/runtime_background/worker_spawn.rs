@@ -1,12 +1,15 @@
 use crate::runtime_panic::{catch_runtime_unwind_silently, runtime_panic_payload_label};
 use redaction::redaction_redact_secret_like_text;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
-#[cfg(test)]
-use std::fs;
 use std::io;
 use std::panic;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use super::{runtime_proxy_latest_log_path_from_pointer, runtime_proxy_log_to_path};
 
@@ -40,6 +43,48 @@ pub(crate) fn try_spawn_runtime_background_worker(
                 &panic_message,
             );
             panic::resume_unwind(payload);
+        }
+    })
+}
+
+pub(crate) fn try_spawn_runtime_supervised_worker(
+    name: impl Into<String>,
+    log_path: PathBuf,
+    shutdown: Arc<AtomicBool>,
+    worker: impl Fn() + Send + Sync + 'static,
+) -> io::Result<JoinHandle<()>> {
+    let name = name.into();
+    let worker_name = name.clone();
+    thread::Builder::new().name(name).spawn(move || {
+        while !shutdown.load(Ordering::SeqCst) {
+            let started_at = std::time::Instant::now();
+            let result = catch_runtime_unwind_silently(&worker);
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+            let (reason, error) = match result {
+                Ok(()) => ("returned", None),
+                Err(payload) => (
+                    "panic",
+                    Some(runtime_background_worker_error_log_value(
+                        runtime_panic_payload_label(payload.as_ref()).as_str(),
+                    )),
+                ),
+            };
+            let mut fields = vec![
+                runtime_proxy_log_field("worker", &worker_name),
+                runtime_proxy_log_field("reason", reason),
+                runtime_proxy_log_field("restart", "true"),
+                runtime_proxy_log_field("uptime_ms", started_at.elapsed().as_millis().to_string()),
+            ];
+            if let Some(error) = error {
+                fields.push(runtime_proxy_log_field("error", error));
+            }
+            runtime_proxy_log_to_path(
+                &log_path,
+                &runtime_proxy_structured_log_message("runtime_worker_restart", fields),
+            );
+            thread::sleep(Duration::from_millis(100));
         }
     })
 }
@@ -104,8 +149,14 @@ fn runtime_background_latest_log_path() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::mpsc;
+    use super::{
+        runtime_background_worker_error_log_value, try_spawn_runtime_background_worker,
+        try_spawn_runtime_supervised_worker,
+    };
+    use std::fs;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
+    use std::thread;
     use std::time::Duration;
 
     #[test]
@@ -163,5 +214,44 @@ mod tests {
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("worker-token"));
         assert!(!message.contains("worker-key"));
+    }
+
+    #[test]
+    fn supervised_worker_restarts_after_panic_until_shutdown() {
+        let log_path = std::env::temp_dir().join(format!(
+            "prodex-supervised-worker-{}-{}.log",
+            std::process::id(),
+            thread::current().name().unwrap_or("unnamed")
+        ));
+        let _ = fs::remove_file(&log_path);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = Arc::clone(&calls);
+
+        let handle = try_spawn_runtime_supervised_worker(
+            "prodex-supervised-test-worker",
+            log_path.clone(),
+            Arc::clone(&shutdown),
+            move || {
+                if worker_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    panic!("simulated supervised worker panic");
+                }
+                worker_shutdown.store(true, Ordering::SeqCst);
+            },
+        )
+        .expect("supervised worker should spawn");
+
+        handle
+            .join()
+            .expect("supervisor should contain worker panic");
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let log = fs::read_to_string(&log_path).expect("restart log should be written");
+        assert!(log.contains("runtime_worker_restart"));
+        assert!(log.contains("worker=prodex-supervised-test-worker"));
+        assert!(log.contains("reason=panic"));
+        assert!(log.contains("restart=true"));
+        let _ = fs::remove_file(log_path);
     }
 }

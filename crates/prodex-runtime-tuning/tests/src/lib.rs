@@ -1,75 +1,25 @@
 use crate::{
     RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
-    RuntimeTuningSnapshotInput, percent_override_with_policy,
+    RuntimeTuningSnapshotInput, percent_override_with_policy_value,
     runtime_probe_refresh_worker_count_default, runtime_proxy_active_request_limit_default,
     runtime_proxy_async_worker_count_default, runtime_proxy_lane_limits_from_overrides,
     runtime_proxy_log_queue_capacity_default, runtime_proxy_long_lived_queue_capacity_default,
     runtime_proxy_long_lived_worker_count_default, runtime_proxy_worker_count_default,
-    runtime_take_fault_injection, runtime_take_fault_injection_budget,
-    runtime_tuning_snapshot_from_input, runtime_websocket_dns_resolve_overflow_capacity_default,
+    runtime_take_fault_injection_budget, runtime_tuning_snapshot_from_input,
+    runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
     runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
     runtime_websocket_tcp_connect_queue_capacity_default,
-    runtime_websocket_tcp_connect_worker_count_default, timeout_override_ms_with_policy,
-    usize_override_with_policy, usize_override_with_policy_allow_zero,
+    runtime_websocket_tcp_connect_worker_count_default, timeout_override_ms_with_policy_value,
+    usize_override_with_policy_value,
 };
-use std::env;
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct EnvGuard {
-    key: String,
-    previous: Option<std::ffi::OsString>,
-}
-
-impl EnvGuard {
-    fn set(key: &str, value: &str) -> Self {
-        let previous = env::var_os(key);
-        unsafe {
-            env::set_var(key, value);
-        }
-        Self {
-            key: key.to_string(),
-            previous,
-        }
-    }
-
-    fn unset(key: &str) -> Self {
-        let previous = env::var_os(key);
-        unsafe {
-            env::remove_var(key);
-        }
-        Self {
-            key: key.to_string(),
-            previous,
-        }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        unsafe {
-            if let Some(previous) = &self.previous {
-                env::set_var(&self.key, previous);
-            } else {
-                env::remove_var(&self.key);
-            }
-        }
-    }
-}
 
 #[test]
 fn usize_override_prefers_positive_env() {
-    let _lock = env_lock().lock().unwrap();
-    let _guard = EnvGuard::set("PRODEX_TEST_TUNING_USIZE", "11");
     assert_eq!(
-        usize_override_with_policy("PRODEX_TEST_TUNING_USIZE", Some(7), 3),
+        usize_override_with_policy_value("PRODEX_TEST_TUNING_USIZE", Some("11"), Some(7), 3, false,),
         11
     );
 }
@@ -89,7 +39,6 @@ fn assert_panics_with(message: &str, f: impl FnOnce() + std::panic::UnwindSafe) 
 
 #[test]
 fn runtime_tuning_positive_env_overrides_fail_closed_on_invalid_values() {
-    let _lock = env_lock().lock().unwrap();
     for (value, message) in [
         ("", "PRODEX_TEST_TUNING_USIZE cannot be empty"),
         (
@@ -102,74 +51,72 @@ fn runtime_tuning_positive_env_overrides_fail_closed_on_invalid_values() {
         ),
         ("0", "PRODEX_TEST_TUNING_USIZE must be greater than zero"),
     ] {
-        let _guard = EnvGuard::set("PRODEX_TEST_TUNING_USIZE", value);
         assert_panics_with(message, || {
-            let _ = usize_override_with_policy("PRODEX_TEST_TUNING_USIZE", Some(7), 3);
+            let _ = usize_override_with_policy_value(
+                "PRODEX_TEST_TUNING_USIZE",
+                Some(value),
+                Some(7),
+                3,
+                false,
+            );
         });
     }
 }
 
 #[test]
 fn runtime_tuning_allow_zero_env_overrides_still_reject_malformed_values() {
-    let _lock = env_lock().lock().unwrap();
-    {
-        let _guard = EnvGuard::set("PRODEX_TEST_TUNING_ALLOW_ZERO", "0");
-        assert_eq!(
-            usize_override_with_policy_allow_zero("PRODEX_TEST_TUNING_ALLOW_ZERO", Some(7), 3),
-            0
-        );
-    }
-    {
-        let _guard = EnvGuard::set("PRODEX_TEST_TUNING_ALLOW_ZERO", " 0 ");
-        assert_panics_with(
-            "PRODEX_TEST_TUNING_ALLOW_ZERO must not contain whitespace",
-            || {
-                let _ = usize_override_with_policy_allow_zero(
-                    "PRODEX_TEST_TUNING_ALLOW_ZERO",
-                    Some(7),
-                    3,
-                );
-            },
-        );
-    }
+    assert_eq!(
+        usize_override_with_policy_value(
+            "PRODEX_TEST_TUNING_ALLOW_ZERO",
+            Some("0"),
+            Some(7),
+            3,
+            true,
+        ),
+        0
+    );
+    assert_panics_with(
+        "PRODEX_TEST_TUNING_ALLOW_ZERO must not contain whitespace",
+        || {
+            let _ = usize_override_with_policy_value(
+                "PRODEX_TEST_TUNING_ALLOW_ZERO",
+                Some(" 0 "),
+                Some(7),
+                3,
+                true,
+            );
+        },
+    );
 }
 
 #[test]
 fn runtime_tuning_timeout_env_overrides_fail_closed_on_invalid_values() {
-    let _lock = env_lock().lock().unwrap();
-    let _guard = EnvGuard::set("PRODEX_TEST_TUNING_TIMEOUT_MS", "0");
     assert_panics_with(
         "PRODEX_TEST_TUNING_TIMEOUT_MS must be greater than zero",
         || {
-            let _ = timeout_override_ms_with_policy("PRODEX_TEST_TUNING_TIMEOUT_MS", Some(7), 3);
+            let _ = timeout_override_ms_with_policy_value(
+                "PRODEX_TEST_TUNING_TIMEOUT_MS",
+                Some("0"),
+                Some(7),
+                3,
+            );
         },
     );
 }
 
 #[test]
 fn runtime_tuning_percent_env_overrides_fail_closed_on_invalid_values() {
-    let _lock = env_lock().lock().unwrap();
-    let _guard = EnvGuard::set("PRODEX_TEST_TUNING_PERCENT", "-1");
     assert_panics_with(
         "PRODEX_TEST_TUNING_PERCENT must be greater than zero",
         || {
-            let _ = percent_override_with_policy("PRODEX_TEST_TUNING_PERCENT", Some(7), 3);
+            let _ = percent_override_with_policy_value(
+                "PRODEX_TEST_TUNING_PERCENT",
+                Some("-1"),
+                Some(7),
+                3,
+            );
         },
     );
-}
-
-#[test]
-fn fault_injection_budget_resets_when_env_changes() {
-    let _lock = env_lock().lock().unwrap();
-    let _unset = EnvGuard::unset("PRODEX_TEST_TUNING_FAULT");
-    let _guard = EnvGuard::set("PRODEX_TEST_TUNING_FAULT", "2");
-    assert!(runtime_take_fault_injection("PRODEX_TEST_TUNING_FAULT"));
-    assert!(runtime_take_fault_injection("PRODEX_TEST_TUNING_FAULT"));
-    assert!(!runtime_take_fault_injection("PRODEX_TEST_TUNING_FAULT"));
-
-    let _guard = EnvGuard::set("PRODEX_TEST_TUNING_FAULT", "1");
-    assert!(runtime_take_fault_injection("PRODEX_TEST_TUNING_FAULT"));
-    assert!(!runtime_take_fault_injection("PRODEX_TEST_TUNING_FAULT"));
 }
 
 #[test]

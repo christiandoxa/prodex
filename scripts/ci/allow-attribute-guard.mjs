@@ -14,7 +14,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "clippy::type_complexity": 1,
 });
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 34;
+export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 31;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "dead_code|crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_error_message_from_parts(",
@@ -83,9 +83,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(",
   "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_request_for_anthropic_server_tool_followup(",
   "crates/prodex-app/src/runtime_background/probe_refresh/worker.rs|pub(crate) fn runtime_probe_refresh_take_next_job(",
-  "crates/prodex-app/src/runtime_background/scheduled_save.rs|pub(crate) fn runtime_state_save_debounce(reason: &str) -> Duration {",
-  "crates/prodex-app/src/runtime_background/scheduled_save.rs|pub(crate) fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {",
-  "crates/prodex-app/src/runtime_background/scheduled_save.rs|pub(crate) fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveSections {",
   "crates/prodex-app/src/runtime_persistence/continuation_store.rs|pub(crate) fn save_runtime_continuation_journal(",
   "crates/prodex-app/src/runtime_proxy/lineage/release.rs|pub(crate) fn clear_runtime_stale_previous_response_binding(",
   "crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) fn runtime_candidate_no_rotate_affinity(",

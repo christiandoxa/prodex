@@ -1,8 +1,9 @@
 use super::json_utils::{runtime_json_find, runtime_proxy_utf8_text};
 use crate::{
-    RuntimeHttpErrorClass, RuntimeHttpErrorPhase, runtime_error_signal_message_from_text,
-    runtime_error_signal_message_from_value, runtime_http_error_policy,
-    runtime_overload_text_message, runtime_usage_limit_text_message,
+    RuntimeHttpErrorClass, RuntimeHttpErrorPhase, RuntimeHttpErrorPolicy,
+    runtime_error_signal_message_from_text, runtime_error_signal_message_from_value,
+    runtime_http_error_policy, runtime_overload_text_message, runtime_stream_error_policy,
+    runtime_usage_limit_text_message, runtime_workspace_credit_exhausted_text_message,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,37 +23,44 @@ pub fn extract_runtime_proxy_quota_message(body: &[u8]) -> Option<String> {
 pub fn extract_runtime_proxy_quota_message_from_websocket_payload(
     payload: &RuntimeWebsocketErrorPayload,
 ) -> Option<String> {
-    match payload {
-        RuntimeWebsocketErrorPayload::Text(text) => {
-            extract_runtime_proxy_quota_message_from_text(text)
-        }
-        RuntimeWebsocketErrorPayload::Binary(bytes) => extract_runtime_proxy_quota_message(bytes),
-        RuntimeWebsocketErrorPayload::Empty => None,
-    }
+    let policy = runtime_websocket_error_policy(payload, RuntimeHttpErrorPhase::PreCommit);
+    (policy.class == RuntimeHttpErrorClass::Quota)
+        .then_some(policy.message)
+        .flatten()
 }
 
 pub fn extract_runtime_proxy_overload_message_from_websocket_payload(
     payload: &RuntimeWebsocketErrorPayload,
 ) -> Option<String> {
+    let policy = runtime_websocket_error_policy(payload, RuntimeHttpErrorPhase::PreCommit);
+    (policy.class == RuntimeHttpErrorClass::Overload)
+        .then_some(policy.message)
+        .flatten()
+}
+
+pub fn runtime_websocket_error_policy(
+    payload: &RuntimeWebsocketErrorPayload,
+    phase: RuntimeHttpErrorPhase,
+) -> RuntimeHttpErrorPolicy {
     match payload {
         RuntimeWebsocketErrorPayload::Text(text) => {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
-                && let Some(message) = extract_runtime_proxy_overload_message_from_value(&value)
-            {
-                return Some(message);
-            }
-            extract_runtime_proxy_overload_message_from_text(text)
+            runtime_stream_error_policy(text.as_bytes(), phase)
         }
-        RuntimeWebsocketErrorPayload::Binary(bytes) => {
-            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes)
-                && let Some(message) = extract_runtime_proxy_overload_message_from_value(&value)
-            {
-                return Some(message);
-            }
-            runtime_proxy_utf8_text(bytes)
-                .and_then(extract_runtime_proxy_overload_message_from_text)
+        RuntimeWebsocketErrorPayload::Binary(bytes) => runtime_stream_error_policy(bytes, phase),
+        RuntimeWebsocketErrorPayload::Empty => RuntimeHttpErrorPolicy::pass_through(),
+    }
+}
+
+pub fn runtime_websocket_workspace_credit_exhausted(
+    payload: &RuntimeWebsocketErrorPayload,
+) -> bool {
+    match payload {
+        RuntimeWebsocketErrorPayload::Text(text) => {
+            runtime_workspace_credit_exhausted_text_message(text)
         }
-        RuntimeWebsocketErrorPayload::Empty => None,
+        RuntimeWebsocketErrorPayload::Binary(bytes) => runtime_proxy_utf8_text(bytes)
+            .is_some_and(runtime_workspace_credit_exhausted_text_message),
+        RuntimeWebsocketErrorPayload::Empty => false,
     }
 }
 

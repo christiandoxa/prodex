@@ -86,6 +86,24 @@ const RUNTIME_HTTP_ERROR_RULES: &[RuntimeHttpErrorRule] = &[
     },
 ];
 
+const RUNTIME_STREAM_ERROR_RULES: &[(RuntimeHttpErrorClass, RuntimeHttpErrorAction, &str)] = &[
+    (
+        RuntimeHttpErrorClass::ProfileUnavailable,
+        RuntimeHttpErrorAction::RotateProfile,
+        "profile_unavailable",
+    ),
+    (
+        RuntimeHttpErrorClass::Overload,
+        RuntimeHttpErrorAction::RetryProfile,
+        "explicit_overload",
+    ),
+    (
+        RuntimeHttpErrorClass::Quota,
+        RuntimeHttpErrorAction::RotateProfile,
+        "explicit_quota",
+    ),
+];
+
 #[derive(Clone, Copy)]
 struct RuntimePayloadCodeRule {
     code: &'static str,
@@ -107,6 +125,10 @@ const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
     },
     RuntimePayloadCodeRule {
         code: "usage_not_included",
+        signal: RuntimeHttpErrorSignal::ExplicitQuota,
+    },
+    RuntimePayloadCodeRule {
+        code: "workspace_member_credits_depleted",
         signal: RuntimeHttpErrorSignal::ExplicitQuota,
     },
     RuntimePayloadCodeRule {
@@ -183,6 +205,24 @@ impl RuntimeHttpErrorPolicy {
     }
 }
 
+fn runtime_error_policy_match(
+    class: RuntimeHttpErrorClass,
+    precommit_action: RuntimeHttpErrorAction,
+    rule: &'static str,
+    message: String,
+    phase: RuntimeHttpErrorPhase,
+) -> RuntimeHttpErrorPolicy {
+    RuntimeHttpErrorPolicy {
+        class,
+        action: match phase {
+            RuntimeHttpErrorPhase::PreCommit => precommit_action,
+            RuntimeHttpErrorPhase::Committed => RuntimeHttpErrorAction::PassThrough,
+        },
+        rule: Some(rule),
+        message: Some(message),
+    }
+}
+
 pub fn runtime_http_error_policy(
     status: u16,
     body: &[u8],
@@ -193,15 +233,58 @@ pub fn runtime_http_error_policy(
             continue;
         };
 
-        return RuntimeHttpErrorPolicy {
-            class: rule.class,
-            action: match phase {
-                RuntimeHttpErrorPhase::PreCommit => rule.precommit_action,
-                RuntimeHttpErrorPhase::Committed => RuntimeHttpErrorAction::PassThrough,
-            },
-            rule: Some(rule.name),
-            message: Some(message),
-        };
+        return runtime_error_policy_match(
+            rule.class,
+            rule.precommit_action,
+            rule.name,
+            message,
+            phase,
+        );
+    }
+
+    RuntimeHttpErrorPolicy::pass_through()
+}
+
+/// Classifies an upstream error carried inside a streaming payload.
+///
+/// Unlike HTTP failures, streaming failures have no reliable transport status.
+/// Only payload signals are considered, so a retry cannot be synthesized from
+/// a transport status that the stream never supplied.
+pub fn runtime_stream_error_policy(
+    body: &[u8],
+    phase: RuntimeHttpErrorPhase,
+) -> RuntimeHttpErrorPolicy {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        return runtime_stream_error_policy_from_value(&value, phase);
+    }
+
+    let Some(text) = runtime_utf8_text(body) else {
+        return RuntimeHttpErrorPolicy::pass_through();
+    };
+    runtime_stream_error_policy_from_text(text, phase)
+}
+
+pub fn runtime_stream_error_policy_from_value(
+    value: &serde_json::Value,
+    phase: RuntimeHttpErrorPhase,
+) -> RuntimeHttpErrorPolicy {
+    for &(class, action, rule) in RUNTIME_STREAM_ERROR_RULES {
+        if let Some(message) = runtime_error_signal_message_from_value(value, class) {
+            return runtime_error_policy_match(class, action, rule, message, phase);
+        }
+    }
+
+    RuntimeHttpErrorPolicy::pass_through()
+}
+
+fn runtime_stream_error_policy_from_text(
+    text: &str,
+    phase: RuntimeHttpErrorPhase,
+) -> RuntimeHttpErrorPolicy {
+    for &(class, action, rule) in RUNTIME_STREAM_ERROR_RULES {
+        if let Some(message) = runtime_error_signal_message_from_text(text, class) {
+            return runtime_error_policy_match(class, action, rule, message, phase);
+        }
     }
 
     RuntimeHttpErrorPolicy::pass_through()
@@ -417,9 +500,10 @@ fn runtime_text_has_payload_code(text: &str, signal: RuntimeHttpErrorSignal) -> 
         .any(|rule| rule.signal == signal && lower.contains(rule.code))
 }
 
-fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
+pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
-    lower.contains("workspace is out of credits")
+    lower.contains("workspace_member_credits_depleted")
+        || lower.contains("workspace is out of credits")
         || (lower.contains("out of credits")
             && lower.contains("workspace owner")
             && lower.contains("refill"))

@@ -44,6 +44,94 @@ pub struct RuntimeStateSaveSections {
     pub backoffs: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeStateMutation {
+    FullState,
+    StartupAudit,
+    StartupContinuationMigration,
+    StartupBackoffSoften,
+    ResponseIds(String),
+    PreviousResponseOwner(String),
+    PreviousResponseNegativeCache(String),
+    PreviousResponseRelease(String),
+    PreviousResponseBindingClear(String),
+    ResponseTouch(String),
+    TurnState(String),
+    TurnStateTouch(String),
+    SessionId(String),
+    SessionTouch(String),
+    SessionAffinityRelease(String),
+    CompactLineage(String),
+    CompactLineageRelease(String),
+    CompactSessionTouch(String),
+    CompactTurnStateTouch(String),
+    DeadResponseBindingClear(String),
+    QuotaRelease(String),
+    AuthFailedRelease(String),
+    ContinuationStale(String),
+    ProfileCommit(String),
+    UsageSnapshot(String),
+    ProfileRetryBackoff(String),
+    ProfileTransportBackoff(String),
+    ProfileCircuitHalfOpenProbe(String),
+    ProfileHealth(String),
+    ProfileCircuitClear(String),
+    ProfileBadPairing(String),
+    ProfileAuthBackoff(String),
+    ProfileAuthBackoffCleared(String),
+}
+
+impl RuntimeStateMutation {
+    pub fn reason(&self) -> String {
+        let with_value = |prefix: &str, value: &str| format!("{prefix}:{value}");
+        match self {
+            Self::FullState => "full_state".to_string(),
+            Self::StartupAudit => "startup_audit".to_string(),
+            Self::StartupContinuationMigration => "startup_continuation_migration".to_string(),
+            Self::StartupBackoffSoften => "startup_backoff_soften".to_string(),
+            Self::ResponseIds(value) => with_value("response_ids", value),
+            Self::PreviousResponseOwner(value) => with_value("previous_response_owner", value),
+            Self::PreviousResponseNegativeCache(value) => {
+                with_value("previous_response_negative_cache", value)
+            }
+            Self::PreviousResponseRelease(value) => with_value("previous_response_release", value),
+            Self::PreviousResponseBindingClear(value) => {
+                with_value("previous_response_binding_clear", value)
+            }
+            Self::ResponseTouch(value) => with_value("response_touch", value),
+            Self::TurnState(value) => with_value("turn_state", value),
+            Self::TurnStateTouch(value) => with_value("turn_state_touch", value),
+            Self::SessionId(value) => with_value("session_id", value),
+            Self::SessionTouch(value) => with_value("session_touch", value),
+            Self::SessionAffinityRelease(value) => with_value("session_affinity_release", value),
+            Self::CompactLineage(value) => with_value("compact_lineage", value),
+            Self::CompactLineageRelease(value) => with_value("compact_lineage_release", value),
+            Self::CompactSessionTouch(value) => with_value("compact_session_touch", value),
+            Self::CompactTurnStateTouch(value) => with_value("compact_turn_state_touch", value),
+            Self::DeadResponseBindingClear(value) => {
+                with_value("dead_response_binding_clear", value)
+            }
+            Self::QuotaRelease(value) => with_value("quota_release", value),
+            Self::AuthFailedRelease(value) => with_value("auth_failed_release", value),
+            Self::ContinuationStale(value) => with_value("continuation_stale", value),
+            Self::ProfileCommit(value) => with_value("profile_commit", value),
+            Self::UsageSnapshot(value) => with_value("usage_snapshot", value),
+            Self::ProfileRetryBackoff(value) => with_value("profile_retry_backoff", value),
+            Self::ProfileTransportBackoff(value) => with_value("profile_transport_backoff", value),
+            Self::ProfileCircuitHalfOpenProbe(value) => {
+                with_value("profile_circuit_half_open_probe", value)
+            }
+            Self::ProfileHealth(value) => with_value("profile_health", value),
+            Self::ProfileCircuitClear(value) => with_value("profile_circuit_clear", value),
+            Self::ProfileBadPairing(value) => with_value("profile_bad_pairing", value),
+            Self::ProfileAuthBackoff(value) => with_value("profile_auth_backoff", value),
+            Self::ProfileAuthBackoffCleared(value) => {
+                with_value("profile_auth_backoff_cleared", value)
+            }
+        }
+    }
+}
+
 impl RuntimeStateSaveSections {
     pub fn full() -> Self {
         Self {
@@ -153,24 +241,22 @@ pub fn runtime_scheduled_save_enqueue_plan(
 }
 
 pub fn runtime_state_save_schedule_plan(
-    reason: &str,
+    mutation: &RuntimeStateMutation,
     debounce: Duration,
 ) -> RuntimeStateSaveSchedulePlan {
     RuntimeStateSaveSchedulePlan {
-        sections: runtime_state_save_sections_for_reason(reason),
-        debounce: runtime_state_save_debounce(reason, debounce),
-        requires_continuation_journal: runtime_state_save_reason_requires_continuation_journal(
-            reason,
-        ),
+        sections: runtime_state_save_sections(mutation),
+        debounce: runtime_state_save_debounce(mutation, debounce),
+        requires_continuation_journal: runtime_state_save_requires_continuation_journal(mutation),
     }
 }
 
 pub fn runtime_state_save_enqueue_plan(
-    reason: &str,
+    mutation: &RuntimeStateMutation,
     queued_at: Instant,
     debounce: Duration,
 ) -> RuntimeStateSaveEnqueuePlan {
-    let schedule = runtime_state_save_schedule_plan(reason, debounce);
+    let schedule = runtime_state_save_schedule_plan(mutation, debounce);
     RuntimeStateSaveEnqueuePlan {
         schedule,
         queue: runtime_scheduled_save_enqueue_plan(queued_at, schedule.debounce),
@@ -178,65 +264,67 @@ pub fn runtime_state_save_enqueue_plan(
 }
 
 pub fn runtime_continuation_journal_save_enqueue_plan(
-    reason: &str,
+    mutation: &RuntimeStateMutation,
     queued_at: Instant,
     debounce: Duration,
 ) -> RuntimeScheduledSaveEnqueuePlan {
     runtime_scheduled_save_enqueue_plan(
         queued_at,
-        runtime_continuation_journal_save_debounce(reason, debounce),
+        runtime_continuation_journal_save_debounce(mutation, debounce),
     )
 }
 
-pub fn runtime_state_save_reason_requires_continuation_journal(reason: &str) -> bool {
-    [
-        "response_ids:",
-        "turn_state:",
-        "session_id:",
-        "session_affinity_release:",
-        "compact_lineage:",
-        "compact_lineage_release:",
-    ]
-    .into_iter()
-    .any(|prefix| reason.starts_with(prefix))
+pub fn runtime_state_save_requires_continuation_journal(mutation: &RuntimeStateMutation) -> bool {
+    matches!(
+        mutation,
+        RuntimeStateMutation::ResponseIds(_)
+            | RuntimeStateMutation::TurnState(_)
+            | RuntimeStateMutation::SessionId(_)
+            | RuntimeStateMutation::SessionAffinityRelease(_)
+            | RuntimeStateMutation::CompactLineage(_)
+            | RuntimeStateMutation::CompactLineageRelease(_)
+    )
 }
 
-pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveSections {
-    if matches!(reason, "startup_audit" | "startup_continuation_migration") {
+pub fn runtime_state_save_sections(mutation: &RuntimeStateMutation) -> RuntimeStateSaveSections {
+    if matches!(
+        mutation,
+        RuntimeStateMutation::FullState
+            | RuntimeStateMutation::StartupAudit
+            | RuntimeStateMutation::StartupContinuationMigration
+            | RuntimeStateMutation::AuthFailedRelease(_)
+    ) {
         return RuntimeStateSaveSections::full();
     }
 
-    let touches_continuations = [
-        "response_ids:",
-        "previous_response_owner:",
-        "previous_response_negative_cache:",
-        "previous_response_release:",
-        "previous_response_binding_clear:",
-        "response_touch:",
-        "turn_state:",
-        "turn_state_touch:",
-        "session_id:",
-        "session_touch:",
-        "session_affinity_release:",
-        "compact_lineage:",
-        "compact_lineage_release:",
-        "compact_session_touch:",
-        "compact_turn_state_touch:",
-        "dead_response_binding_clear:",
-        "quota_release:",
-        "continuation_stale:",
-    ]
-    .into_iter()
-    .any(|prefix| reason.starts_with(prefix));
-    if touches_continuations {
-        let profile_scores = [
-            "response_ids:",
-            "previous_response_owner:",
-            "previous_response_negative_cache:",
-            "previous_response_release:",
-        ]
-        .into_iter()
-        .any(|prefix| reason.starts_with(prefix));
+    if matches!(
+        mutation,
+        RuntimeStateMutation::ResponseIds(_)
+            | RuntimeStateMutation::PreviousResponseOwner(_)
+            | RuntimeStateMutation::PreviousResponseNegativeCache(_)
+            | RuntimeStateMutation::PreviousResponseRelease(_)
+            | RuntimeStateMutation::PreviousResponseBindingClear(_)
+            | RuntimeStateMutation::ResponseTouch(_)
+            | RuntimeStateMutation::TurnState(_)
+            | RuntimeStateMutation::TurnStateTouch(_)
+            | RuntimeStateMutation::SessionId(_)
+            | RuntimeStateMutation::SessionTouch(_)
+            | RuntimeStateMutation::SessionAffinityRelease(_)
+            | RuntimeStateMutation::CompactLineage(_)
+            | RuntimeStateMutation::CompactLineageRelease(_)
+            | RuntimeStateMutation::CompactSessionTouch(_)
+            | RuntimeStateMutation::CompactTurnStateTouch(_)
+            | RuntimeStateMutation::DeadResponseBindingClear(_)
+            | RuntimeStateMutation::QuotaRelease(_)
+            | RuntimeStateMutation::ContinuationStale(_)
+    ) {
+        let profile_scores = matches!(
+            mutation,
+            RuntimeStateMutation::ResponseIds(_)
+                | RuntimeStateMutation::PreviousResponseOwner(_)
+                | RuntimeStateMutation::PreviousResponseNegativeCache(_)
+                | RuntimeStateMutation::PreviousResponseRelease(_)
+        );
         return RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::Core,
             continuations: true,
@@ -246,7 +334,7 @@ pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveS
         };
     }
 
-    if reason.starts_with("profile_commit:") {
+    if matches!(mutation, RuntimeStateMutation::ProfileCommit(_)) {
         return RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::Core,
             continuations: false,
@@ -256,7 +344,10 @@ pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveS
         };
     }
 
-    if reason.starts_with("usage_snapshot:") || reason.starts_with("profile_retry_backoff:") {
+    if matches!(
+        mutation,
+        RuntimeStateMutation::UsageSnapshot(_) | RuntimeStateMutation::ProfileRetryBackoff(_)
+    ) {
         return RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::None,
             continuations: false,
@@ -266,10 +357,12 @@ pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveS
         };
     }
 
-    if reason.starts_with("profile_transport_backoff:")
-        || reason.starts_with("profile_circuit_half_open_probe:")
-        || reason == "startup_backoff_soften"
-    {
+    if matches!(
+        mutation,
+        RuntimeStateMutation::ProfileTransportBackoff(_)
+            | RuntimeStateMutation::ProfileCircuitHalfOpenProbe(_)
+            | RuntimeStateMutation::StartupBackoffSoften
+    ) {
         return RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::None,
             continuations: false,
@@ -279,7 +372,10 @@ pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveS
         };
     }
 
-    if reason.starts_with("profile_health:") || reason.starts_with("profile_circuit_clear:") {
+    if matches!(
+        mutation,
+        RuntimeStateMutation::ProfileHealth(_) | RuntimeStateMutation::ProfileCircuitClear(_)
+    ) {
         return RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::None,
             continuations: false,
@@ -289,10 +385,12 @@ pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveS
         };
     }
 
-    if reason.starts_with("profile_bad_pairing:")
-        || reason.starts_with("profile_auth_backoff:")
-        || reason.starts_with("profile_auth_backoff_cleared:")
-    {
+    if matches!(
+        mutation,
+        RuntimeStateMutation::ProfileBadPairing(_)
+            | RuntimeStateMutation::ProfileAuthBackoff(_)
+            | RuntimeStateMutation::ProfileAuthBackoffCleared(_)
+    ) {
         return RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::None,
             continuations: false,
@@ -305,34 +403,39 @@ pub fn runtime_state_save_sections_for_reason(reason: &str) -> RuntimeStateSaveS
     RuntimeStateSaveSections::full()
 }
 
-pub fn runtime_hot_continuation_state_reason(reason: &str) -> bool {
-    [
-        "response_ids:",
-        "previous_response_owner:",
-        "response_touch:",
-        "turn_state:",
-        "turn_state_touch:",
-        "session_id:",
-        "session_touch:",
-        "compact_lineage:",
-        "compact_lineage_release:",
-        "compact_session_touch:",
-        "compact_turn_state_touch:",
-    ]
-    .into_iter()
-    .any(|prefix| reason.starts_with(prefix))
+pub fn runtime_hot_continuation_state_mutation(mutation: &RuntimeStateMutation) -> bool {
+    matches!(
+        mutation,
+        RuntimeStateMutation::ResponseIds(_)
+            | RuntimeStateMutation::PreviousResponseOwner(_)
+            | RuntimeStateMutation::ResponseTouch(_)
+            | RuntimeStateMutation::TurnState(_)
+            | RuntimeStateMutation::TurnStateTouch(_)
+            | RuntimeStateMutation::SessionId(_)
+            | RuntimeStateMutation::SessionTouch(_)
+            | RuntimeStateMutation::CompactLineage(_)
+            | RuntimeStateMutation::CompactLineageRelease(_)
+            | RuntimeStateMutation::CompactSessionTouch(_)
+            | RuntimeStateMutation::CompactTurnStateTouch(_)
+    )
 }
 
-pub fn runtime_state_save_debounce(reason: &str, debounce: Duration) -> Duration {
-    if runtime_hot_continuation_state_reason(reason) {
+pub fn runtime_state_save_debounce(
+    mutation: &RuntimeStateMutation,
+    debounce: Duration,
+) -> Duration {
+    if runtime_hot_continuation_state_mutation(mutation) {
         debounce
     } else {
         Duration::ZERO
     }
 }
 
-pub fn runtime_continuation_journal_save_debounce(reason: &str, debounce: Duration) -> Duration {
-    if runtime_hot_continuation_state_reason(reason) {
+pub fn runtime_continuation_journal_save_debounce(
+    mutation: &RuntimeStateMutation,
+    debounce: Duration,
+) -> Duration {
+    if runtime_hot_continuation_state_mutation(mutation) {
         debounce
     } else {
         Duration::ZERO

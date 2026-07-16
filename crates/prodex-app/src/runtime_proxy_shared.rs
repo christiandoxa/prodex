@@ -9,6 +9,10 @@ pub(super) enum RuntimeResponsesAttempt {
         profile_name: String,
         response: RuntimeResponsesReply,
     },
+    Overloaded {
+        profile_name: String,
+        response: RuntimeResponsesReply,
+    },
     AuthFailed {
         profile_name: String,
         response: RuntimeResponsesReply,
@@ -58,6 +62,7 @@ pub(super) enum RuntimeSseInspection {
         turn_state: Option<String>,
     },
     QuotaBlocked(Vec<u8>),
+    Overloaded(Vec<u8>),
     PreviousResponseNotFound(Vec<u8>),
 }
 
@@ -93,27 +98,7 @@ pub(super) struct RuntimeProfileInFlightGuard {
     pub(super) weight: usize,
 }
 
-pub(super) struct RuntimeProxyActiveRequestGuard {
-    pub(super) active_request_count: Arc<AtomicUsize>,
-    pub(super) lane_active_count: Arc<AtomicUsize>,
-    pub(super) lane_releases_total: Arc<AtomicU64>,
-    pub(super) active_request_release_underflows_total: Arc<AtomicU64>,
-    pub(super) lane_release_underflows_total: Arc<AtomicU64>,
-    pub(super) wait: Arc<(Mutex<()>, Condvar)>,
-}
-
-impl Drop for RuntimeProxyActiveRequestGuard {
-    fn drop(&mut self) {
-        let _ = release_runtime_proxy_active_request_guard(
-            &self.active_request_count,
-            &self.lane_active_count,
-            &self.lane_releases_total,
-            &self.active_request_release_underflows_total,
-            &self.lane_release_underflows_total,
-            &self.wait,
-        );
-    }
-}
+pub(super) type RuntimeProxyActiveRequestGuard = prodex_runtime_state::RuntimeProxyAdmissionPermit;
 
 impl Drop for RuntimeProfileInFlightGuard {
     fn drop(&mut self) {

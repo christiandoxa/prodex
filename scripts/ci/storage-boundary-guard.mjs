@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseDependencySections } from "./boundary-guard-utils.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
@@ -123,49 +124,6 @@ const OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST = Object.freeze({
     "--test-threads=1",
   ],
 });
-
-function stripComment(line) {
-  let inString = false;
-  let escaped = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (char === "#" && !inString) {
-      return line.slice(0, index).trim();
-    }
-  }
-  return line.trim();
-}
-
-export function parseDependencySections(tomlText) {
-  const sections = new Map();
-  let currentSection = null;
-  for (const rawLine of tomlText.split(/\r?\n/u)) {
-    const line = stripComment(rawLine);
-    if (!line) continue;
-    const sectionMatch = line.match(/^\[([^\]]+)\]$/u);
-    if (sectionMatch) {
-      currentSection = sectionMatch[1];
-      if (!sections.has(currentSection)) sections.set(currentSection, new Set());
-      continue;
-    }
-    if (!currentSection) continue;
-    const depMatch = line.match(/^([A-Za-z0-9_-]+)\s*=/u);
-    if (depMatch) sections.get(currentSection).add(depMatch[1]);
-  }
-  return sections;
-}
 
 function sorted(values) {
   return [...values].sort((left, right) => left.localeCompare(right));

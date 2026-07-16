@@ -153,7 +153,11 @@ fn websocket_precommit_previous_response_plain_text_translation_uses_proxy_error
 
 #[test]
 fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
-    for code in ["insufficient_quota", "usage_not_included"] {
+    for code in [
+        "insufficient_quota",
+        "usage_not_included",
+        "workspace_member_credits_depleted",
+    ] {
         let payload = serde_json::json!({
             "type": "response.failed",
             "error": {
@@ -179,6 +183,37 @@ fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
         assert_eq!(inspected.response_ids, vec!["resp_1".to_string()]);
         assert_eq!(inspected.turn_state.as_deref(), Some("turn-1"));
         assert!(inspected.terminal_event);
+    }
+}
+
+#[test]
+fn websocket_text_frame_inspection_never_retries_after_commit() {
+    for (code, action) in [
+        ("insufficient_quota", RuntimeHttpErrorAction::RotateProfile),
+        ("server_is_overloaded", RuntimeHttpErrorAction::RetryProfile),
+    ] {
+        let payload = serde_json::json!({
+            "type": "response.failed",
+            "status": 429,
+            "error": {
+                "code": code,
+                "message": "upstream failure",
+            }
+        })
+        .to_string();
+
+        let precommit = crate::runtime_stream_error_policy(
+            payload.as_bytes(),
+            RuntimeHttpErrorPhase::PreCommit,
+        );
+        assert_eq!(precommit.action, action, "{code}");
+
+        let committed = inspect_runtime_websocket_text_frame_with_phase(
+            &payload,
+            RuntimeHttpErrorPhase::Committed,
+        );
+        assert_eq!(committed.retry_kind, None, "{code}");
+        assert!(committed.terminal_event, "{code}");
     }
 }
 

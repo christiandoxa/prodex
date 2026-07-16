@@ -4,69 +4,82 @@ use anyhow::{Context, Result};
 
 pub const COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER: u64 = 4;
 
-pub fn runtime_upstream_no_proxy(explicit_no_proxy: bool) -> bool {
-    explicit_no_proxy
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamProxyMode {
+    System,
+    Disabled,
 }
 
-pub fn runtime_upstream_proxy_mode_label(explicit_no_proxy: bool) -> &'static str {
-    if runtime_upstream_no_proxy(explicit_no_proxy) {
-        "disabled"
-    } else {
-        "system"
+impl UpstreamProxyMode {
+    pub fn from_explicit_no_proxy(explicit_no_proxy: bool) -> Self {
+        if explicit_no_proxy {
+            Self::Disabled
+        } else {
+            Self::System
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Disabled => "disabled",
+        }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsyncResponseTimeout {
+    ReadIdle(Duration),
+    Request(Duration),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AsyncUpstreamClientConfig {
+    pub proxy_mode: UpstreamProxyMode,
+    pub connect_timeout: Duration,
+    pub response_timeout: AsyncResponseTimeout,
+}
+
 pub fn build_runtime_upstream_async_http_client(
-    explicit_no_proxy: bool,
-    connect_timeout_ms: u64,
-    stream_idle_timeout_ms: u64,
+    config: AsyncUpstreamClientConfig,
 ) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(connect_timeout_ms))
-        .read_timeout(Duration::from_millis(stream_idle_timeout_ms));
-    if runtime_upstream_no_proxy(explicit_no_proxy) {
+    let mut builder = reqwest::Client::builder().connect_timeout(config.connect_timeout);
+    builder = match config.response_timeout {
+        AsyncResponseTimeout::ReadIdle(timeout) => builder.read_timeout(timeout),
+        AsyncResponseTimeout::Request(timeout) => builder.timeout(timeout),
+    };
+    if config.proxy_mode == UpstreamProxyMode::Disabled {
         builder = builder.no_proxy();
     }
     builder
         .build()
-        .context("failed to build runtime auto-rotate async HTTP client")
+        .context("failed to build runtime upstream async HTTP client")
 }
 
 pub fn runtime_compact_request_timeout_ms(stream_idle_timeout_ms: u64) -> u64 {
     stream_idle_timeout_ms.saturating_mul(COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER)
 }
 
-pub fn build_runtime_upstream_async_http_compact_client(
-    explicit_no_proxy: bool,
-    connect_timeout_ms: u64,
-    compact_request_timeout_ms: u64,
-) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_millis(connect_timeout_ms))
-        .timeout(Duration::from_millis(compact_request_timeout_ms));
-    if runtime_upstream_no_proxy(explicit_no_proxy) {
-        builder = builder.no_proxy();
-    }
-    builder
-        .build()
-        .context("failed to build runtime auto-rotate compact async HTTP client")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockingUpstreamClientConfig {
+    pub context_label: &'static str,
+    pub proxy_mode: UpstreamProxyMode,
+    pub connect_timeout: Duration,
+    pub request_timeout: Duration,
 }
 
 pub fn build_upstream_blocking_http_client(
-    context_label: &'static str,
-    explicit_no_proxy: bool,
-    connect_timeout_ms: u64,
-    read_timeout_ms: u64,
+    config: BlockingUpstreamClientConfig,
 ) -> Result<reqwest::blocking::Client> {
     let mut builder = reqwest::blocking::Client::builder()
-        .connect_timeout(Duration::from_millis(connect_timeout_ms))
-        .timeout(Duration::from_millis(read_timeout_ms));
-    if runtime_upstream_no_proxy(explicit_no_proxy) {
+        .connect_timeout(config.connect_timeout)
+        .timeout(config.request_timeout);
+    if config.proxy_mode == UpstreamProxyMode::Disabled {
         builder = builder.no_proxy();
     }
     builder
         .build()
-        .with_context(|| format!("failed to build {context_label} client"))
+        .with_context(|| format!("failed to build {} client", config.context_label))
 }
 
 #[cfg(test)]
@@ -90,8 +103,14 @@ mod tests {
     fn streaming_async_client_keeps_read_idle_timeout() {
         let idle_timeout_ms = 200;
         let url = spawn_delayed_response_server(Duration::from_millis(450));
-        let client = build_runtime_upstream_async_http_client(true, 500, idle_timeout_ms)
-            .expect("streaming client should build");
+        let client = build_runtime_upstream_async_http_client(AsyncUpstreamClientConfig {
+            proxy_mode: UpstreamProxyMode::Disabled,
+            connect_timeout: Duration::from_millis(500),
+            response_timeout: AsyncResponseTimeout::ReadIdle(Duration::from_millis(
+                idle_timeout_ms,
+            )),
+        })
+        .expect("streaming client should build");
         let runtime = test_tokio_runtime();
 
         let result = runtime.block_on(async { client.post(url).body("{}").send().await });
@@ -110,9 +129,14 @@ mod tests {
         let idle_timeout_ms = 200;
         let url = spawn_delayed_response_server(Duration::from_millis(450));
         let compact_timeout_ms = runtime_compact_request_timeout_ms(idle_timeout_ms);
-        let client =
-            build_runtime_upstream_async_http_compact_client(true, 500, compact_timeout_ms)
-                .expect("compact client should build");
+        let client = build_runtime_upstream_async_http_client(AsyncUpstreamClientConfig {
+            proxy_mode: UpstreamProxyMode::Disabled,
+            connect_timeout: Duration::from_millis(500),
+            response_timeout: AsyncResponseTimeout::Request(Duration::from_millis(
+                compact_timeout_ms,
+            )),
+        })
+        .expect("compact client should build");
         let runtime = test_tokio_runtime();
 
         let response = runtime
@@ -126,8 +150,12 @@ mod tests {
     #[test]
     fn compact_async_client_uses_explicit_request_timeout() {
         let url = spawn_delayed_response_server(Duration::from_millis(450));
-        let client = build_runtime_upstream_async_http_compact_client(true, 500, 200)
-            .expect("compact client should build");
+        let client = build_runtime_upstream_async_http_client(AsyncUpstreamClientConfig {
+            proxy_mode: UpstreamProxyMode::Disabled,
+            connect_timeout: Duration::from_millis(500),
+            response_timeout: AsyncResponseTimeout::Request(Duration::from_millis(200)),
+        })
+        .expect("compact client should build");
         let runtime = test_tokio_runtime();
 
         let result = runtime.block_on(async { client.post(url).body("{}").send().await });

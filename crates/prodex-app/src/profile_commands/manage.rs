@@ -1,11 +1,6 @@
 use anyhow::{Context, Result, bail};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use crossterm::terminal;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -388,7 +383,7 @@ fn print_profile_panels(panels: &[ProfilePanel]) -> Result<()> {
     let height = profile_tui_height(panels);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         for panel in panels {
-            print_panel(&panel.title, &panel.fields);
+            print_panel(&panel.title, &panel.fields)?;
         }
         return Ok(());
     };
@@ -418,42 +413,10 @@ fn print_profile_panels(panels: &[ProfilePanel]) -> Result<()> {
     Ok(())
 }
 
-struct ProfilePanelsTui {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
-}
-
-impl ProfilePanelsTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable profile list raw mode")?;
-        let mut stdout = io::stdout();
-        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter profile list alternate screen");
-        }
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stdout = io::stdout();
-                let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize profile list TUI");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for ProfilePanelsTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+type ProfilePanelsTui = terminal_ui::AlternateScreenTerminal<io::Stdout>;
 
 fn print_profile_panels_scrollable(panels: &[ProfilePanel]) -> Result<()> {
-    let mut tui = ProfilePanelsTui::new()?;
+    let mut tui = ProfilePanelsTui::stdout("profile list")?;
     let mut scroll_offset = 0usize;
     loop {
         let total_lines = profile_tui_lines(panels).len();

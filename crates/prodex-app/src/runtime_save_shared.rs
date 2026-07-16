@@ -12,7 +12,7 @@ pub(crate) use prodex_runtime_state::{
     runtime_take_due_scheduled_jobs,
 };
 pub(crate) use prodex_runtime_state::{
-    RuntimeStateSaveSections, runtime_run_scheduled_save_worker_loop,
+    RuntimeStateMutation, RuntimeStateSaveSections, runtime_run_scheduled_save_worker_loop,
 };
 
 pub(crate) type RuntimeStateSaveQueue =

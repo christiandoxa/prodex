@@ -13,10 +13,10 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
-prodex_app_reports = { workspace = true }
 prodex_core = { workspace = true }
 prodex_state = { workspace = true }
 rusqlite = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

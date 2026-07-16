@@ -212,6 +212,28 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                 }),
             });
         }
+        RuntimeSseInspection::Overloaded(prelude) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} transport=http sse_overloaded profile={profile_name} prelude_bytes={}",
+                    prelude.len()
+                ),
+            );
+            return Ok(RuntimeResponsesAttempt::Overloaded {
+                profile_name: profile_name.to_string(),
+                response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
+                    status,
+                    headers: headers.clone(),
+                    body: Box::new(prefetch.into_reader(prelude)?),
+                    request_id,
+                    profile_name: profile_name.to_string(),
+                    log_path: shared.log_path.clone(),
+                    shared: shared.clone(),
+                    _inflight_guard: Some(inflight_guard),
+                }),
+            });
+        }
         RuntimeSseInspection::PreviousResponseNotFound(prelude) => {
             runtime_proxy_log(
                 shared,
