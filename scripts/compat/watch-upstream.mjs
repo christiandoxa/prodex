@@ -62,6 +62,9 @@ function printHelp() {
       "Usage: node scripts/compat/watch-upstream.mjs [--baseline <path>] [--report <path>] [--write-baseline] [--json]",
       "",
       "Checks Codex and Claude Code upstream state against a saved compatibility baseline.",
+      "",
+      "Environment:",
+      "  GITHUB_TOKEN  Required for GitHub API requests.",
     ].join("\n") + "\n",
   );
 }
@@ -73,9 +76,12 @@ function delay(ms) {
 }
 
 function githubApiAuthHeaders(url) {
-  const token = process.env.GITHUB_TOKEN?.trim();
-  if (!token || !url.startsWith(GITHUB_API_ROOT)) {
+  if (!url.startsWith(GITHUB_API_ROOT)) {
     return {};
+  }
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (!token) {
+    throw new Error("GITHUB_TOKEN is required for GitHub API requests");
   }
   return { Authorization: `Bearer ${token}` };
 }

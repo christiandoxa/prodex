@@ -17,7 +17,6 @@ pub const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 5 } else { 21_60
 pub const UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 300 };
 const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
 const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
-const UPDATE_CHECK_RESPONSE_MAX_BYTES: u64 = 16 * 1024;
 const UPDATE_CHECK_CACHE_MAX_BYTES: u64 = 64 * 1024;
 static UPDATE_CHECK_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -42,11 +41,6 @@ pub enum ProdexInstallChannel {
     Standalone,
     Npm,
     Cargo,
-}
-
-#[derive(Debug, Deserialize)]
-struct GitHubLatestReleaseResponse {
-    tag_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -399,41 +393,27 @@ fn fetch_latest_prodex_github_version() -> Result<String> {
         .timeout(Duration::from_millis(UPDATE_CHECK_HTTP_READ_TIMEOUT_MS))
         .build()
         .context("failed to build update-check HTTP client")?;
-    let mut response = client
-        .get("https://api.github.com/repos/christiandoxa/prodex/releases/latest")
-        .header("Accept", "application/vnd.github+json")
+    let response = client
+        .head("https://github.com/christiandoxa/prodex/releases/latest")
         .header(
             "User-Agent",
             format!("prodex/{}", env!("CARGO_PKG_VERSION")),
         )
         .send()
-        .context("failed to request GitHub release metadata")?;
+        .context("failed to request latest GitHub release")?;
     let status = response.status();
     if !status.is_success() {
-        bail!("GitHub API returned HTTP {}", status.as_u16());
+        bail!("GitHub releases returned HTTP {}", status.as_u16());
     }
-    if response
-        .content_length()
-        .is_some_and(|size| size > UPDATE_CHECK_RESPONSE_MAX_BYTES)
-    {
-        bail!("GitHub release metadata exceeds read limit");
-    }
-    let mut body = Vec::new();
-    response
-        .by_ref()
-        .take(UPDATE_CHECK_RESPONSE_MAX_BYTES + 1)
-        .read_to_end(&mut body)
-        .context("failed to read GitHub release metadata")?;
-    if body.len() as u64 > UPDATE_CHECK_RESPONSE_MAX_BYTES {
-        bail!("GitHub release metadata exceeds read limit");
-    }
-    let payload: GitHubLatestReleaseResponse =
-        serde_json::from_slice(&body).context("failed to parse GitHub release metadata")?;
-    let version = payload
-        .tag_name
-        .trim()
-        .strip_prefix('v')
-        .unwrap_or(payload.tag_name.trim());
+    latest_release_version_from_url(response.url())
+}
+
+fn latest_release_version_from_url(url: &reqwest::Url) -> Result<String> {
+    let tag = url
+        .path()
+        .strip_prefix("/christiandoxa/prodex/releases/tag/")
+        .context("GitHub latest release redirect did not contain a version")?;
+    let version = tag.strip_prefix('v').unwrap_or(tag);
     parse_release_version(version).context("invalid GitHub release version")?;
     Ok(version.to_string())
 }
@@ -522,6 +502,22 @@ mod tests {
         assert!(!version_is_newer("1.0.0-rc.1", "1.0.0"));
         assert!(!version_is_newer("1.invalid.0", "1.0.0"));
         assert!(!version_is_newer("1.0.0", "invalid"));
+    }
+
+    #[test]
+    fn latest_release_version_comes_from_redirect_url() {
+        let url =
+            reqwest::Url::parse("https://github.com/christiandoxa/prodex/releases/tag/v0.300.0")
+                .unwrap();
+
+        assert_eq!(latest_release_version_from_url(&url).unwrap(), "0.300.0");
+        assert!(
+            latest_release_version_from_url(
+                &reqwest::Url::parse("https://github.com/christiandoxa/prodex/releases/latest")
+                    .unwrap()
+            )
+            .is_err()
+        );
     }
 
     #[test]
