@@ -6,6 +6,9 @@ description = "State models and merge helpers for prodex"
 license.workspace = true
 repository.workspace = true
 
+[package.metadata.cargo-machete]
+ignored = ["serde_json"]
+
 [lib]
 name = "prodex_state"
 path = "src/lib.rs"
