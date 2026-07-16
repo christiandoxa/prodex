@@ -3,7 +3,8 @@
     "id": "whole-repo-maintainability-refactor-0.302.0",
     "requiredSubjects": [
       "refactor: consolidate shared runtime and gateway paths",
-      "chore(release): release 0.302.0"
+      "chore(release): release 0.302.0",
+      "chore(ci): allow reviewed 0.302.0 refactor range"
     ],
     "caps": {
       "maxFiles": 60,
