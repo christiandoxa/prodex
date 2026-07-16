@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.299.0 - 2026-07-16
+
+### Runtime
+
+- Retry quota-ready transport fallback (`e45240e`)
+
 ## 0.298.0 - 2026-07-16
 
 ### Runtime
@@ -69,7 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add verified standalone installer (`04730d3`)
-
-## 0.287.0 - 2026-07-14
-
-- No grouped changes.
