@@ -633,21 +633,8 @@ fn runtime_local_rewrite_trace_context_headers(
 }
 
 fn should_skip_runtime_local_rewrite_request_header(name: &str) -> bool {
-    let lower = name.trim().to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "connection"
-            | "content-length"
-            | "host"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    ) || lower.starts_with("sec-websocket-")
-        || lower.starts_with("x-prodex-internal-")
+    runtime_proxy_crate::is_runtime_transport_local_request_header(name)
+        || runtime_proxy_crate::is_prodex_internal_request_header(name)
 }
 
 fn runtime_local_rewrite_authorization_is_gateway_credential(

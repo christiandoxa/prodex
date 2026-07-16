@@ -329,24 +329,38 @@ fn control_plane_operation_for_path(
     if let Some(scim_path) = strip_control_plane_mount(path, "/scim")
         .or_else(|| strip_control_plane_mount(path, "/v1/scim"))
     {
-        return match normalized_segments(scim_path).as_slice() {
-            ["v2", "Users"] if method == GatewayHttpMethod::Get => {
-                Some(GatewayControlPlaneOperation::ScimUserRead)
-            }
-            ["v2", "Users"] => Some(GatewayControlPlaneOperation::ScimUserCreate),
-            ["v2", "Users", ..] if method == GatewayHttpMethod::Get => {
-                Some(GatewayControlPlaneOperation::ScimUserRead)
-            }
-            ["v2", "Users", ..] if method == GatewayHttpMethod::Delete => {
-                Some(GatewayControlPlaneOperation::ScimUserDelete)
-            }
-            ["v2", "Users", ..] => Some(GatewayControlPlaneOperation::ScimUserUpdate),
-            _ => None,
-        };
+        return scim_operation_for_path(scim_path, method);
     }
     let admin_path = strip_control_plane_mount(path, "/admin")
         .or_else(|| strip_control_plane_mount(path, "/v1/admin"))?;
-    match normalized_segments(admin_path).as_slice() {
+    admin_operation_for_path(admin_path, method)
+}
+
+fn scim_operation_for_path(
+    path: &str,
+    method: GatewayHttpMethod,
+) -> Option<GatewayControlPlaneOperation> {
+    match normalized_segments(path).as_slice() {
+        ["v2", "Users"] if method == GatewayHttpMethod::Get => {
+            Some(GatewayControlPlaneOperation::ScimUserRead)
+        }
+        ["v2", "Users"] => Some(GatewayControlPlaneOperation::ScimUserCreate),
+        ["v2", "Users", ..] if method == GatewayHttpMethod::Get => {
+            Some(GatewayControlPlaneOperation::ScimUserRead)
+        }
+        ["v2", "Users", ..] if method == GatewayHttpMethod::Delete => {
+            Some(GatewayControlPlaneOperation::ScimUserDelete)
+        }
+        ["v2", "Users", ..] => Some(GatewayControlPlaneOperation::ScimUserUpdate),
+        _ => None,
+    }
+}
+
+fn admin_operation_for_path(
+    path: &str,
+    method: GatewayHttpMethod,
+) -> Option<GatewayControlPlaneOperation> {
+    match normalized_segments(path).as_slice() {
         []
         | ["openapi.json"]
         | ["metrics"]
@@ -606,20 +620,10 @@ pub(super) fn trace_propagation_metrics_from_headers(
 pub(super) fn validate_singleton_credential_headers(
     headers: &[GatewayHttpHeader],
 ) -> Result<(), GatewayHttpPlanError> {
-    let authorization_count = headers
-        .iter()
-        .filter(|header| header.normalized_name() == "authorization")
-        .take(2)
-        .count();
-    if authorization_count > 1 {
+    if has_duplicate_header(headers, "authorization") {
         return Err(GatewayHttpPlanError::DuplicateAuthorization);
     }
-    let account_count = headers
-        .iter()
-        .filter(|header| header.normalized_name() == "chatgpt-account-id")
-        .take(2)
-        .count();
-    if account_count > 1 {
+    if has_duplicate_header(headers, "chatgpt-account-id") {
         return Err(GatewayHttpPlanError::DuplicateChatGptAccountId);
     }
 
@@ -629,21 +633,11 @@ pub(super) fn validate_singleton_credential_headers(
 pub(super) fn validate_singleton_affinity_headers(
     headers: &[GatewayHttpHeader],
 ) -> Result<(), GatewayHttpPlanError> {
-    let session_count = headers
-        .iter()
-        .filter(|header| header.normalized_name() == "session_id")
-        .take(2)
-        .count();
-    if session_count > 1 {
+    if has_duplicate_header(headers, "session_id") {
         return Err(GatewayHttpPlanError::DuplicateSessionId);
     }
 
-    let turn_state_count = headers
-        .iter()
-        .filter(|header| header.normalized_name() == "x-codex-turn-state")
-        .take(2)
-        .count();
-    if turn_state_count > 1 {
+    if has_duplicate_header(headers, "x-codex-turn-state") {
         return Err(GatewayHttpPlanError::DuplicateCodexTurnState);
     }
 
@@ -658,14 +652,17 @@ pub(super) fn validate_singleton_codex_metadata_headers(
         "x-codex-turn-metadata",
         "x-codex-beta-features",
     ] {
-        let count = headers
-            .iter()
-            .filter(|header| header.normalized_name() == name)
-            .take(2)
-            .count();
-        if count > 1 {
+        if has_duplicate_header(headers, name) {
             return Err(GatewayHttpPlanError::DuplicateCodexMetadata);
         }
     }
     Ok(())
+}
+
+fn has_duplicate_header(headers: &[GatewayHttpHeader], name: &str) -> bool {
+    headers
+        .iter()
+        .filter(|header| header.normalized_name() == name)
+        .nth(1)
+        .is_some()
 }

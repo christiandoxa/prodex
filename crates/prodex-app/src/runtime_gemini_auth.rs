@@ -2,6 +2,7 @@ mod code_assist;
 mod oauth;
 mod quota;
 
+use crate::secret_store_support::secret_file_read_error;
 use crate::{create_codex_home_if_missing, print_wrapped_stderr};
 use anyhow::{Context, Result};
 use code_assist::{GeminiCodeAssistSetupMode, resolve_gemini_code_assist_project_with_endpoint};
@@ -81,16 +82,6 @@ pub(crate) fn read_gemini_oauth_secret(codex_home: &Path) -> Result<GeminiOAuthS
         .with_context(|| format!("failed to read {}", path.display()))?
         .with_context(|| format!("failed to read {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))
-}
-
-fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = error.is_unsafe_file();
-    let error = anyhow::Error::new(error);
-    if is_non_regular_file {
-        error.context("not a regular secret file")
-    } else {
-        error
-    }
 }
 
 pub(crate) fn write_gemini_oauth_secret(

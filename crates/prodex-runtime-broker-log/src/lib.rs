@@ -13,14 +13,14 @@ use std::time::{Duration, UNIX_EPOCH};
 pub const DEFAULT_RUNTIME_BROKER_CONTINUITY_FAILURE_REASON_CACHE_LIMIT: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeBrokerContinuityFailureReasonCacheFingerprint {
+struct RuntimeLogFingerprint {
     len: u64,
     modified_at: Duration,
 }
 
 #[derive(Debug, Clone)]
 struct RuntimeBrokerContinuityFailureReasonCacheEntry {
-    fingerprint: RuntimeBrokerContinuityFailureReasonCacheFingerprint,
+    fingerprint: RuntimeLogFingerprint,
     metrics: RuntimeBrokerContinuityFailureReasonMetrics,
     last_used_at: u64,
 }
@@ -59,7 +59,7 @@ impl RuntimeBrokerContinuityFailureReasonCache {
     fn get(
         &mut self,
         log_path: &Path,
-        fingerprint: &RuntimeBrokerContinuityFailureReasonCacheFingerprint,
+        fingerprint: &RuntimeLogFingerprint,
     ) -> Option<RuntimeBrokerContinuityFailureReasonMetrics> {
         let touched_at = self.touch();
         let cached = self
@@ -81,7 +81,7 @@ impl RuntimeBrokerContinuityFailureReasonCache {
     fn store(
         &mut self,
         log_path: &Path,
-        fingerprint: RuntimeBrokerContinuityFailureReasonCacheFingerprint,
+        fingerprint: RuntimeLogFingerprint,
         metrics: RuntimeBrokerContinuityFailureReasonMetrics,
     ) {
         let touched_at = self.touch();
@@ -149,11 +149,9 @@ fn runtime_broker_continuity_failure_reason_cache()
         .get_or_init(|| Mutex::new(RuntimeBrokerContinuityFailureReasonCache::default()))
 }
 
-fn runtime_broker_continuity_failure_reason_cache_fingerprint(
-    metadata: &fs::Metadata,
-) -> Option<RuntimeBrokerContinuityFailureReasonCacheFingerprint> {
+fn runtime_log_fingerprint(metadata: &fs::Metadata) -> Option<RuntimeLogFingerprint> {
     let modified_at = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(RuntimeBrokerContinuityFailureReasonCacheFingerprint {
+    Some(RuntimeLogFingerprint {
         len: metadata.len(),
         modified_at,
     })
@@ -188,7 +186,7 @@ pub fn runtime_broker_cached_continuity_failure_reason_metrics(
             .remove(log_path);
         return RuntimeBrokerContinuityFailureReasonMetrics::default();
     };
-    let fingerprint = runtime_broker_continuity_failure_reason_cache_fingerprint(&metadata);
+    let fingerprint = runtime_log_fingerprint(&metadata);
 
     let append_base = if let Some(fingerprint) = fingerprint.as_ref() {
         let mut cache = runtime_broker_continuity_failure_reason_cache()
@@ -260,17 +258,11 @@ pub fn runtime_broker_continuity_failure_reason_cache_stats_for_test()
 
 pub const DEFAULT_RUNTIME_PROXY_CONTINUITY_FAILURE_REASON_METRICS_STORE_LIMIT: usize = 16;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RuntimeProxyContinuityFailureReasonMetricsFingerprint {
-    len: u64,
-    modified_at: Duration,
-}
-
 #[derive(Debug, Clone)]
 struct RuntimeProxyContinuityFailureReasonMetricsEntry {
     baseline_metrics: RuntimeBrokerContinuityFailureReasonMetrics,
     live_metrics: RuntimeBrokerContinuityFailureReasonMetrics,
-    last_observed_fingerprint: Option<RuntimeProxyContinuityFailureReasonMetricsFingerprint>,
+    last_observed_fingerprint: Option<RuntimeLogFingerprint>,
     last_used_at: u64,
 }
 
@@ -329,27 +321,15 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         self.next_touch
     }
 
-    fn fingerprint_from_metadata(
-        metadata: &fs::Metadata,
-    ) -> Option<RuntimeProxyContinuityFailureReasonMetricsFingerprint> {
-        let modified_at = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-        Some(RuntimeProxyContinuityFailureReasonMetricsFingerprint {
-            len: metadata.len(),
-            modified_at,
-        })
-    }
-
-    fn current_fingerprint(
-        log_path: &Path,
-    ) -> Option<RuntimeProxyContinuityFailureReasonMetricsFingerprint> {
+    fn current_fingerprint(log_path: &Path) -> Option<RuntimeLogFingerprint> {
         fs::metadata(log_path)
             .ok()
-            .and_then(|metadata| Self::fingerprint_from_metadata(&metadata))
+            .and_then(|metadata| runtime_log_fingerprint(&metadata))
     }
 
     fn log_rotated(
-        current: Option<&RuntimeProxyContinuityFailureReasonMetricsFingerprint>,
-        previous: Option<&RuntimeProxyContinuityFailureReasonMetricsFingerprint>,
+        current: Option<&RuntimeLogFingerprint>,
+        previous: Option<&RuntimeLogFingerprint>,
     ) -> bool {
         match (current, previous) {
             (Some(current), Some(previous)) => {
@@ -361,7 +341,7 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
 
     fn new_entry(
         log_path: &Path,
-        fingerprint: Option<RuntimeProxyContinuityFailureReasonMetricsFingerprint>,
+        fingerprint: Option<RuntimeLogFingerprint>,
         touched_at: u64,
     ) -> RuntimeProxyContinuityFailureReasonMetricsEntry {
         RuntimeProxyContinuityFailureReasonMetricsEntry {

@@ -64,6 +64,7 @@ mod runtime_background;
 mod runtime_broker;
 mod runtime_broker_shared;
 mod runtime_capabilities;
+mod runtime_catalog_config;
 mod runtime_caveman;
 mod runtime_claude;
 mod runtime_claude_auth;
@@ -90,6 +91,7 @@ mod runtime_proxy_shared;
 mod runtime_save_shared;
 mod runtime_state_shared;
 mod runtime_store;
+mod secret_store_support;
 mod shared_codex_fs;
 mod shared_types;
 #[cfg(test)]

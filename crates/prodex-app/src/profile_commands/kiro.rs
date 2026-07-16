@@ -14,6 +14,7 @@ use super::write_secret_text_file;
 use crate::runtime_kiro_acp::{
     runtime_kiro_acp_bootstrap_with_command, runtime_kiro_acp_model_catalog,
 };
+use crate::secret_store_support::secret_file_read_error;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     audit_log_event_best_effort, create_codex_home_if_missing, ensure_path_is_unique, kiro_bin,
@@ -289,8 +290,7 @@ fn default_kiro_profile_name(
         })
         .unwrap_or_else(|| "kiro".to_string());
     prodex_profile_identity::unique_profile_name_from_base(&base, "kiro", |candidate| {
-        !state.profiles.contains_key(candidate)
-            && !paths.managed_profiles_root.join(candidate).exists()
+        crate::profile_name_is_available(paths, state, candidate)
     })
 }
 
@@ -532,16 +532,6 @@ fn read_kiro_auth_secret_text(path: &Path) -> Result<String> {
         .read_text(&secret_store::SecretLocation::file(path))
         .map_err(secret_file_read_error)?
         .with_context(|| format!("failed to read {}", path.display()))
-}
-
-fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = error.is_unsafe_file();
-    let error = anyhow::Error::new(error);
-    if is_non_regular_file {
-        error.context("not a regular secret file")
-    } else {
-        error
-    }
 }
 
 pub(crate) fn write_kiro_cli_data_dir(data_dir: &Path, secret: &KiroAuthSecret) -> Result<()> {

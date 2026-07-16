@@ -131,6 +131,32 @@ fn request_header_skip_list_replaces_auth_and_transport_headers() {
 }
 
 #[test]
+fn transport_header_classifier_keeps_auth_and_codex_metadata_separate() {
+    for header in [" Connection ", "TRANSFER-ENCODING", "Sec-WebSocket-Key"] {
+        assert!(
+            is_runtime_transport_local_request_header(header),
+            "{header}"
+        );
+    }
+    for header in [
+        "Authorization",
+        "ChatGPT-Account-Id",
+        "session_id",
+        "x-codex-turn-state",
+        "User-Agent",
+    ] {
+        assert!(
+            !is_runtime_transport_local_request_header(header),
+            "{header} is not transport-local"
+        );
+    }
+    assert!(is_prodex_internal_request_header(
+        "X-Prodex-Internal-Request-Origin"
+    ));
+    assert!(!is_prodex_internal_request_header("x-codex-turn-state"));
+}
+
+#[test]
 fn request_header_forwarding_strips_connection_named_headers() {
     let headers = runtime_forward_request_headers([
         ("Connection", "keep-alive, X-Local-Hop"),

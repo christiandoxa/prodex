@@ -614,14 +614,8 @@ pub fn plan_config_publication_event_error_response(
     error: &ConfigPublicationEventError,
 ) -> ConfigPublicationEventErrorResponsePlan {
     match error {
-        ConfigPublicationEventError::MissingGatewayCacheRefreshTarget => {
-            ConfigPublicationEventErrorResponsePlan {
-                status: ConfigPublicationEventErrorStatus::InvalidConfiguration,
-                code: "configuration_publication_event_incomplete",
-                message: "configuration publication event is incomplete",
-            }
-        }
-        ConfigPublicationEventError::MissingRuntimePolicyReloadTarget => {
+        ConfigPublicationEventError::MissingGatewayCacheRefreshTarget
+        | ConfigPublicationEventError::MissingRuntimePolicyReloadTarget => {
             ConfigPublicationEventErrorResponsePlan {
                 status: ConfigPublicationEventErrorStatus::InvalidConfiguration,
                 code: "configuration_publication_event_incomplete",

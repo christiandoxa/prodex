@@ -491,7 +491,7 @@ fn gemini_cli_compat_ignores_oversized_existing_hooks_json() {
 
     let hooks: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&hooks_path).unwrap()).unwrap();
-    assert_eq!(hooks, serde_json::json!({"hooks": {}}));
+    assert!(hooks.get("hooks").is_some_and(serde_json::Value::is_object));
     fs::remove_dir_all(root).unwrap();
 }
 

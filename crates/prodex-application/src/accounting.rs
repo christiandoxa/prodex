@@ -57,43 +57,24 @@ pub struct ApplicationAtomicReservationErrorResponsePlan {
 pub fn plan_application_atomic_reservation_error_response(
     error: &ApplicationAtomicReservationError,
 ) -> ApplicationAtomicReservationErrorResponsePlan {
-    match error {
+    let status = match error {
         ApplicationAtomicReservationError::Postgres(error) => {
-            application_atomic_reservation_response_from_postgres(
-                plan_postgres_storage_error_response(error),
-            )
+            match plan_postgres_storage_error_response(error).status {
+                PostgresStorageErrorStatus::ServiceUnavailable => {
+                    ApplicationAtomicReservationErrorStatus::ServiceUnavailable
+                }
+            }
         }
         ApplicationAtomicReservationError::Sqlite(error) => {
-            application_atomic_reservation_response_from_sqlite(plan_sqlite_storage_error_response(
-                error,
-            ))
+            match plan_sqlite_storage_error_response(error).status {
+                SqliteStorageErrorStatus::ServiceUnavailable => {
+                    ApplicationAtomicReservationErrorStatus::ServiceUnavailable
+                }
+            }
         }
-    }
-}
-
-fn application_atomic_reservation_response_from_postgres(
-    response: PostgresStorageErrorResponsePlan,
-) -> ApplicationAtomicReservationErrorResponsePlan {
+    };
     ApplicationAtomicReservationErrorResponsePlan {
-        status: match response.status {
-            PostgresStorageErrorStatus::ServiceUnavailable => {
-                ApplicationAtomicReservationErrorStatus::ServiceUnavailable
-            }
-        },
-        code: "atomic_reservation_storage_unavailable",
-        message: "atomic reservation storage is temporarily unavailable",
-    }
-}
-
-fn application_atomic_reservation_response_from_sqlite(
-    response: SqliteStorageErrorResponsePlan,
-) -> ApplicationAtomicReservationErrorResponsePlan {
-    ApplicationAtomicReservationErrorResponsePlan {
-        status: match response.status {
-            SqliteStorageErrorStatus::ServiceUnavailable => {
-                ApplicationAtomicReservationErrorStatus::ServiceUnavailable
-            }
-        },
+        status,
         code: "atomic_reservation_storage_unavailable",
         message: "atomic reservation storage is temporarily unavailable",
     }

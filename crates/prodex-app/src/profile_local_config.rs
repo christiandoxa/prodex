@@ -1,3 +1,4 @@
+use crate::runtime_catalog_config::toml_string_literal;
 use crate::validate_credential_free_http_url;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -111,10 +112,6 @@ pub(crate) fn profile_openai_compatible_codex_args(
     }
     args.extend(user_args.iter().cloned());
     Ok(args)
-}
-
-fn toml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]

@@ -186,6 +186,22 @@ fn resolve_data_plane_boundary(
         .ok_or(GatewayAuthorizationBoundaryError::Unavailable)
 }
 
+fn gateway_stage_span(
+    kind: GatewaySpanKind,
+    name: &'static str,
+    correlation: CorrelationContext,
+    trace_context: TraceContext,
+    stage: &'static str,
+) -> Result<SpanPlan, SpanPlanError> {
+    plan_gateway_span(
+        kind,
+        name,
+        correlation,
+        Some(trace_context),
+        vec![TelemetryAttribute::metric_label("gateway_stage", stage)],
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GatewayAuthorizationBoundaryError {
     Unavailable,
@@ -239,37 +255,28 @@ where
             .with_trace_id(request.trace_context.trace_id.clone())
             .with_tenant_id(tenant.tenant_id);
     let spans = vec![
-        plan_gateway_span(
+        gateway_stage_span(
             GatewaySpanKind::Authorization,
             "prodex.gateway.authorization",
             correlation.clone(),
-            Some(request.trace_context.clone()),
-            vec![prodex_domain::TelemetryAttribute::metric_label(
-                "gateway_stage",
-                "authorization",
-            )],
+            request.trace_context.clone(),
+            "authorization",
         )
         .map_err(GatewayAdmissionError::Span)?,
-        plan_gateway_span(
+        gateway_stage_span(
             GatewaySpanKind::BudgetReservation,
             "prodex.gateway.budget_reservation",
             correlation.clone(),
-            Some(request.trace_context.clone()),
-            vec![prodex_domain::TelemetryAttribute::metric_label(
-                "gateway_stage",
-                "reservation",
-            )],
+            request.trace_context.clone(),
+            "reservation",
         )
         .map_err(GatewayAdmissionError::Span)?,
-        plan_gateway_span(
+        gateway_stage_span(
             GatewaySpanKind::ProviderRequest,
             "prodex.gateway.provider_request",
             correlation,
-            Some(request.trace_context),
-            vec![prodex_domain::TelemetryAttribute::metric_label(
-                "gateway_stage",
-                "provider",
-            )],
+            request.trace_context,
+            "provider",
         )
         .map_err(GatewayAdmissionError::Span)?,
     ];
@@ -414,15 +421,12 @@ where
         .with_trace_id(request.trace_context.trace_id.clone())
         .with_tenant_id(tenant.tenant_id);
     let spans = vec![
-        plan_gateway_span(
+        gateway_stage_span(
             GatewaySpanKind::Authorization,
             "prodex.gateway.quota_authorization",
             correlation,
-            Some(request.trace_context),
-            vec![TelemetryAttribute::metric_label(
-                "gateway_stage",
-                "quota_authorization",
-            )],
+            request.trace_context,
+            "quota_authorization",
         )
         .map_err(GatewayQuotaReadAuthorizationError::Span)?,
     ];
@@ -548,15 +552,12 @@ pub fn plan_gateway_usage_reconciliation(
     let reconciliation = plan_usage_reconciliation(request.reconciliation)
         .map_err(GatewayUsageReconciliationError::Reconciliation)?;
     let spans = vec![
-        plan_gateway_span(
+        gateway_stage_span(
             GatewaySpanKind::Reconciliation,
             "prodex.gateway.usage_reconciliation",
             correlation,
-            Some(request.trace_context),
-            vec![TelemetryAttribute::metric_label(
-                "gateway_stage",
-                "reconciliation",
-            )],
+            request.trace_context,
+            "reconciliation",
         )
         .map_err(GatewayUsageReconciliationError::Span)?,
     ];
@@ -683,15 +684,12 @@ pub fn plan_gateway_expired_reservation_recovery(
     let recovery = plan_expired_reservation_recovery(request.recovery)
         .map_err(GatewayExpiredReservationRecoveryError::Recovery)?;
     let spans = vec![
-        plan_gateway_span(
+        gateway_stage_span(
             GatewaySpanKind::Reconciliation,
             "prodex.gateway.expired_reservation_recovery",
             correlation,
-            Some(request.trace_context),
-            vec![TelemetryAttribute::metric_label(
-                "gateway_stage",
-                "expired_reservation_recovery",
-            )],
+            request.trace_context,
+            "expired_reservation_recovery",
         )
         .map_err(GatewayExpiredReservationRecoveryError::Span)?,
     ];

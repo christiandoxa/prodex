@@ -630,6 +630,20 @@ fn inspect_sse_buffer_handles_comments_crlf_and_partial_tail() {
 }
 
 #[test]
+fn inspect_sse_buffer_drops_invalid_utf8_event_and_recovers() {
+    let body = &b"data: {\"type\":\"response.created\",\"response_id\":\"resp-\xff\"}\n\n\
+data: {\"type\":\"response.completed\",\"response_id\":\"resp-2\"}\n\n"[..];
+
+    assert_eq!(
+        inspect_runtime_sse_buffer(body),
+        RuntimeSseInspectionProgress::Commit {
+            response_ids: vec!["resp-2".to_string()],
+            turn_state: None,
+        }
+    );
+}
+
+#[test]
 fn inspect_sse_buffer_detects_previous_response_not_found_from_partial_event() {
     let progress = inspect_runtime_sse_buffer(
             b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"previous_response_not_found\",\"message\":\"missing\"}}}",

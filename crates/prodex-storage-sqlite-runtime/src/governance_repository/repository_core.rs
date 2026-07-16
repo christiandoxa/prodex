@@ -469,21 +469,7 @@ impl GovernanceSqliteRepository {
             )
             .map_err(database_error)?;
         let records = statement
-            .query_map([tenant_id.to_string()], |row| {
-                Ok(GovernanceAuditExportRecord {
-                    audit_event_id: row.get(0)?,
-                    occurred_at_unix_ms: from_i64(row.get(1)?)
-                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, i64::MAX))?,
-                    principal_id: row.get(2)?,
-                    action: row.get(3)?,
-                    resource_kind: row.get(4)?,
-                    resource_id: row.get(5)?,
-                    outcome: row.get(6)?,
-                    reason_code: row.get(7)?,
-                    previous_digest: row.get(8)?,
-                    event_digest: row.get(9)?,
-                })
-            })
+            .query_map([tenant_id.to_string()], governance_audit_export_record)
             .map_err(database_error)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(database_error)?;
@@ -509,23 +495,30 @@ impl GovernanceSqliteRepository {
             )
             .map_err(database_error)?;
         statement
-            .query_map(params![tenant_id.to_string(), i64::from(limit)], |row| {
-                Ok(GovernanceAuditExportRecord {
-                    audit_event_id: row.get(0)?,
-                    occurred_at_unix_ms: from_i64(row.get(1)?)
-                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, i64::MAX))?,
-                    principal_id: row.get(2)?,
-                    action: row.get(3)?,
-                    resource_kind: row.get(4)?,
-                    resource_id: row.get(5)?,
-                    outcome: row.get(6)?,
-                    reason_code: row.get(7)?,
-                    previous_digest: row.get(8)?,
-                    event_digest: row.get(9)?,
-                })
-            })
+            .query_map(
+                params![tenant_id.to_string(), i64::from(limit)],
+                governance_audit_export_record,
+            )
             .map_err(database_error)?
             .map(|row| row.map_err(database_error))
             .collect()
     }
+}
+
+fn governance_audit_export_record(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<GovernanceAuditExportRecord> {
+    Ok(GovernanceAuditExportRecord {
+        audit_event_id: row.get(0)?,
+        occurred_at_unix_ms: from_i64(row.get(1)?)
+            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, i64::MAX))?,
+        principal_id: row.get(2)?,
+        action: row.get(3)?,
+        resource_kind: row.get(4)?,
+        resource_id: row.get(5)?,
+        outcome: row.get(6)?,
+        reason_code: row.get(7)?,
+        previous_digest: row.get(8)?,
+        event_digest: row.get(9)?,
+    })
 }

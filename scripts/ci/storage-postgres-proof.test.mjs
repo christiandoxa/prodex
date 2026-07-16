@@ -17,12 +17,13 @@ test("selectProofMode uses explicit Postgres URL first", () => {
   );
 });
 
-test("selectProofMode uses managed mode when docker and psql are available", () => {
+test("selectProofMode uses managed mode when docker, psql, and openssl are available", () => {
   assert.equal(
     selectProofMode({
       postgresUrl: "",
       dockerAvailable: true,
       psqlAvailable: true,
+      opensslAvailable: true,
     }),
     "managed",
   );

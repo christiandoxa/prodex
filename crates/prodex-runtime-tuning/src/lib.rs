@@ -94,13 +94,7 @@ pub fn usize_override_with_policy_allow_zero(
 }
 
 fn positive_u64(env_key: &str, value: Option<&str>) -> Option<u64> {
-    let value = value?;
-    if value.is_empty() {
-        panic!("{env_key} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        panic!("{env_key} must not contain whitespace");
-    }
+    let value = validated_number_value(env_key, value)?;
     let parsed = value
         .parse::<u64>()
         .unwrap_or_else(|_| panic!("{env_key} must be an unsigned integer"));
@@ -111,13 +105,7 @@ fn positive_u64(env_key: &str, value: Option<&str>) -> Option<u64> {
 }
 
 fn positive_i64(env_key: &str, value: Option<&str>) -> Option<i64> {
-    let value = value?;
-    if value.is_empty() {
-        panic!("{env_key} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        panic!("{env_key} must not contain whitespace");
-    }
+    let value = validated_number_value(env_key, value)?;
     let parsed = value
         .parse::<i64>()
         .unwrap_or_else(|_| panic!("{env_key} must be a positive integer"));
@@ -128,13 +116,7 @@ fn positive_i64(env_key: &str, value: Option<&str>) -> Option<i64> {
 }
 
 fn parse_usize(env_key: &str, value: Option<&str>, allow_zero: bool) -> Option<usize> {
-    let value = value?;
-    if value.is_empty() {
-        panic!("{env_key} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        panic!("{env_key} must not contain whitespace");
-    }
+    let value = validated_number_value(env_key, value)?;
     let parsed = value
         .parse::<usize>()
         .unwrap_or_else(|_| panic!("{env_key} must be an unsigned integer"));
@@ -142,6 +124,17 @@ fn parse_usize(env_key: &str, value: Option<&str>, allow_zero: bool) -> Option<u
         panic!("{env_key} must be greater than zero");
     }
     Some(parsed)
+}
+
+fn validated_number_value<'a>(env_key: &str, value: Option<&'a str>) -> Option<&'a str> {
+    let value = value?;
+    if value.is_empty() {
+        panic!("{env_key} cannot be empty");
+    }
+    if value.chars().any(char::is_whitespace) {
+        panic!("{env_key} must not contain whitespace");
+    }
+    Some(value)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

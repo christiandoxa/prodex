@@ -52,53 +52,26 @@ pub struct ApplicationAuditRetentionPurgeErrorResponsePlan {
 pub fn plan_application_audit_retention_purge_error_response(
     error: &ApplicationAuditRetentionPurgeError,
 ) -> ApplicationAuditRetentionPurgeErrorResponsePlan {
-    match error {
+    let status = match error {
         ApplicationAuditRetentionPurgeError::Postgres(error) => {
-            application_audit_retention_purge_response_from_postgres(
-                plan_postgres_storage_error_response(error),
-                "audit_retention_purge_storage_unavailable",
-                "audit retention purge storage is temporarily unavailable",
-            )
+            match plan_postgres_storage_error_response(error).status {
+                PostgresStorageErrorStatus::ServiceUnavailable => {
+                    ApplicationAuditRetentionPurgeErrorStatus::ServiceUnavailable
+                }
+            }
         }
         ApplicationAuditRetentionPurgeError::Sqlite(error) => {
-            application_audit_retention_purge_response_from_sqlite(
-                plan_sqlite_storage_error_response(error),
-                "audit_retention_purge_storage_unavailable",
-                "audit retention purge storage is temporarily unavailable",
-            )
+            match plan_sqlite_storage_error_response(error).status {
+                SqliteStorageErrorStatus::ServiceUnavailable => {
+                    ApplicationAuditRetentionPurgeErrorStatus::ServiceUnavailable
+                }
+            }
         }
-    }
-}
-
-fn application_audit_retention_purge_response_from_postgres(
-    response: PostgresStorageErrorResponsePlan,
-    code: &'static str,
-    message: &'static str,
-) -> ApplicationAuditRetentionPurgeErrorResponsePlan {
+    };
     ApplicationAuditRetentionPurgeErrorResponsePlan {
-        status: match response.status {
-            PostgresStorageErrorStatus::ServiceUnavailable => {
-                ApplicationAuditRetentionPurgeErrorStatus::ServiceUnavailable
-            }
-        },
-        code,
-        message,
-    }
-}
-
-fn application_audit_retention_purge_response_from_sqlite(
-    response: SqliteStorageErrorResponsePlan,
-    code: &'static str,
-    message: &'static str,
-) -> ApplicationAuditRetentionPurgeErrorResponsePlan {
-    ApplicationAuditRetentionPurgeErrorResponsePlan {
-        status: match response.status {
-            SqliteStorageErrorStatus::ServiceUnavailable => {
-                ApplicationAuditRetentionPurgeErrorStatus::ServiceUnavailable
-            }
-        },
-        code,
-        message,
+        status,
+        code: "audit_retention_purge_storage_unavailable",
+        message: "audit retention purge storage is temporarily unavailable",
     }
 }
 

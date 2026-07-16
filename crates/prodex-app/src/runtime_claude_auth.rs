@@ -1,3 +1,4 @@
+use crate::secret_store_support::secret_file_read_error;
 use crate::{create_codex_home_if_missing, print_wrapped_stderr};
 use anyhow::{Context, Result, bail};
 use dirs::home_dir;
@@ -154,16 +155,6 @@ fn read_claude_credentials_text(path: &Path) -> Result<String> {
         .map_err(secret_file_read_error)
         .with_context(|| format!("failed to read {}", path.display()))?
         .with_context(|| format!("failed to read {}", path.display()))
-}
-
-fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = error.is_unsafe_file();
-    let error = anyhow::Error::new(error);
-    if is_non_regular_file {
-        error.context("not a regular secret file")
-    } else {
-        error
-    }
 }
 
 pub(crate) fn login_with_claude_oauth(

@@ -188,11 +188,15 @@ pub(crate) fn unique_profile_name_for_email(
 ) -> String {
     prodex_profile_identity::unique_profile_name_for_email(email, |candidate| {
         reclaim_stale_managed_profile_path(paths, state, candidate);
-        is_available_profile_name(paths, state, candidate)
+        profile_name_is_available(paths, state, candidate)
     })
 }
 
-fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
+pub(crate) fn profile_name_is_available(
+    paths: &AppPaths,
+    state: &AppState,
+    candidate: &str,
+) -> bool {
     !state.profiles.contains_key(candidate) && !paths.managed_profiles_root.join(candidate).exists()
 }
 
