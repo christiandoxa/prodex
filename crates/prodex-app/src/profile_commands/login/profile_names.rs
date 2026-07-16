@@ -15,20 +15,16 @@ pub(super) fn unique_profile_name_for_slug(
     slug: &str,
 ) -> String {
     let base = sanitize_profile_slug(slug);
-    if profile_slug_is_available(paths, state, &base) {
+    if crate::profile_name_is_available(paths, state, &base) {
         return base;
     }
     for suffix in 2.. {
         let candidate = format!("{base}-{suffix}");
-        if profile_slug_is_available(paths, state, &candidate) {
+        if crate::profile_name_is_available(paths, state, &candidate) {
             return candidate;
         }
     }
     unreachable!("unbounded profile suffix search should always return")
-}
-
-fn profile_slug_is_available(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
-    !state.profiles.contains_key(candidate) && !paths.managed_profiles_root.join(candidate).exists()
 }
 
 pub(super) fn sanitize_profile_slug(value: &str) -> String {

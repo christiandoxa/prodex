@@ -666,20 +666,7 @@ impl PostgresRepository {
             .map_err(database_error)?;
         let records = rows
             .into_iter()
-            .map(|row| {
-                Ok(GovernanceAuditExportRecord {
-                    audit_event_id: row.get::<_, Uuid>(0).to_string(),
-                    occurred_at_unix_ms: from_i64(row.get(1))?,
-                    principal_id: row.get::<_, Uuid>(2).to_string(),
-                    action: row.get(3),
-                    resource_kind: row.get(4),
-                    resource_id: row.get(5),
-                    outcome: row.get(6),
-                    reason_code: row.get(7),
-                    previous_digest: row.get(8),
-                    event_digest: row.get(9),
-                })
-            })
+            .map(|row| governance_audit_export_record(&row))
             .collect::<Result<Vec<_>, GovernanceRepositoryError>>()?;
         let health = verify_governance_audit_integrity(tenant_id, &records);
         transaction.commit().await.map_err(database_error)?;
@@ -721,22 +708,26 @@ impl PostgresRepository {
             .map_err(database_error)?;
         let records = rows
             .into_iter()
-            .map(|row| {
-                Ok(GovernanceAuditExportRecord {
-                    audit_event_id: row.get::<_, Uuid>(0).to_string(),
-                    occurred_at_unix_ms: from_i64(row.get(1))?,
-                    principal_id: row.get::<_, Uuid>(2).to_string(),
-                    action: row.get(3),
-                    resource_kind: row.get(4),
-                    resource_id: row.get(5),
-                    outcome: row.get(6),
-                    reason_code: row.get(7),
-                    previous_digest: row.get(8),
-                    event_digest: row.get(9),
-                })
-            })
+            .map(|row| governance_audit_export_record(&row))
             .collect::<Result<Vec<_>, GovernanceRepositoryError>>()?;
         transaction.commit().await.map_err(database_error)?;
         Ok(records)
     }
+}
+
+fn governance_audit_export_record(
+    row: &Row,
+) -> Result<GovernanceAuditExportRecord, GovernanceRepositoryError> {
+    Ok(GovernanceAuditExportRecord {
+        audit_event_id: row.get::<_, Uuid>(0).to_string(),
+        occurred_at_unix_ms: from_i64(row.get(1))?,
+        principal_id: row.get::<_, Uuid>(2).to_string(),
+        action: row.get(3),
+        resource_kind: row.get(4),
+        resource_id: row.get(5),
+        outcome: row.get(6),
+        reason_code: row.get(7),
+        previous_digest: row.get(8),
+        event_digest: row.get(9),
+    })
 }

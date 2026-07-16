@@ -1,3 +1,4 @@
+use crate::runtime_catalog_config::{parse_catalog_u64, toml_string_literal};
 use crate::{
     RuntimeDeepSeekWebSearchMode, codex_cli_config_override_value, codex_config_value,
     codex_effective_config_exact_value, codex_effective_config_value,
@@ -272,23 +273,7 @@ fn deepseek_u64_config_for_launch(
     let Some(value) = codex_effective_config_exact_value(codex_home, user_args, key)? else {
         return Ok(default_value);
     };
-    runtime_catalog_u64_config_value("DeepSeek", key, &value)
-}
-
-fn runtime_catalog_u64_config_value(provider: &str, key: &str, value: &str) -> Result<u64> {
-    if value.is_empty() {
-        anyhow::bail!("{provider} {key} cannot be empty");
-    }
-    if value.chars().any(char::is_whitespace) {
-        anyhow::bail!("{provider} {key} must not contain whitespace");
-    }
-    let parsed = value
-        .parse::<u64>()
-        .with_context(|| format!("{provider} {key} must be an unsigned integer"))?;
-    if parsed <= 1 {
-        anyhow::bail!("{provider} {key} must be greater than 1");
-    }
-    Ok(parsed)
+    parse_catalog_u64("DeepSeek", key, &value)
 }
 
 fn write_deepseek_model_catalog(
@@ -414,10 +399,6 @@ fn deepseek_catalog_model(
         "input_modalities": ["text"],
         "supports_search_tool": false
     })
-}
-
-fn toml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]

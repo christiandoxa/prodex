@@ -3,7 +3,7 @@ use runtime_proxy_crate::{
     PRODEX_INTERNAL_REQUEST_ORIGIN_ANTHROPIC_MESSAGES, RuntimeProxyRequest,
     is_runtime_anthropic_messages_path, is_runtime_compact_path, is_runtime_responses_path,
     runtime_proxy_request_header_value, runtime_proxy_request_origin,
-    runtime_request_previous_response_id_from_bytes,
+    runtime_request_previous_response_id, runtime_request_session_id, runtime_request_turn_state,
 };
 use std::collections::BTreeSet;
 
@@ -247,64 +247,6 @@ fn runtime_capability_collect_tool_surface_from_responses(
     }
 }
 
-fn runtime_request_previous_response_id(request: &RuntimeProxyRequest) -> Option<String> {
-    runtime_request_previous_response_id_from_bytes(&request.body)
-}
-
-fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<String> {
-    request.headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("x-codex-turn-state")
-            .then(|| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-    })
-}
-
-fn runtime_request_session_id_from_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .get("client_metadata")
-                .and_then(|metadata| metadata.get("session_id"))
-                .and_then(serde_json::Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn runtime_request_session_id_from_turn_metadata(request: &RuntimeProxyRequest) -> Option<String> {
-    request
-        .headers
-        .iter()
-        .find_map(|(name, value)| {
-            name.eq_ignore_ascii_case("x-codex-turn-metadata")
-                .then_some(value.as_str())
-        })
-        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-        .and_then(|value| runtime_request_session_id_from_value(&value))
-}
-
-fn runtime_request_explicit_session_id(request: &RuntimeProxyRequest) -> Option<String> {
-    runtime_proxy_request_header_value(&request.headers, "session_id")
-        .or_else(|| runtime_proxy_request_header_value(&request.headers, "session-id"))
-        .or_else(|| runtime_proxy_request_header_value(&request.headers, "x-session-id"))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<String> {
-    runtime_request_explicit_session_id(request)
-        .or_else(|| runtime_request_session_id_from_turn_metadata(request))
-        .or_else(|| {
-            serde_json::from_slice::<serde_json::Value>(&request.body)
-                .ok()
-                .and_then(|value| runtime_request_session_id_from_value(&value))
-        })
-}
-
 fn runtime_capability_continuation_label(request: &RuntimeProxyRequest) -> String {
     let mut flags = BTreeSet::new();
     if runtime_request_previous_response_id(request).is_some() {
@@ -450,7 +392,7 @@ mod tests {
         };
 
         assert_eq!(
-            runtime_request_explicit_session_id(&request).as_deref(),
+            runtime_proxy_crate::runtime_request_explicit_session_id(&request).as_deref(),
             Some("legacy-session")
         );
     }

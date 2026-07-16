@@ -117,7 +117,6 @@ impl ValidatedOidcIssuer {
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ValidatedOidcEndpoint {
-    url: Url,
     canonical: String,
     origin: OidcOrigin,
 }
@@ -135,11 +134,7 @@ impl ValidatedOidcEndpoint {
         let url = parse_oidc_https_url(value)?;
         let canonical = url.as_str().to_string();
         let origin = OidcOrigin::from_url(&url)?;
-        Ok(Self {
-            url,
-            canonical,
-            origin,
-        })
+        Ok(Self { canonical, origin })
     }
 
     pub fn as_str(&self) -> &str {
@@ -147,15 +142,11 @@ impl ValidatedOidcEndpoint {
     }
 
     pub fn host(&self) -> &str {
-        self.url
-            .host_str()
-            .expect("validated OIDC endpoint always has a host")
+        &self.origin.host
     }
 
     pub fn port(&self) -> u16 {
-        self.url
-            .port_or_known_default()
-            .expect("validated HTTPS endpoint always has a port")
+        self.origin.port
     }
 }
 
@@ -275,7 +266,6 @@ impl OidcEndpointPolicy {
         url.set_path(&path);
         let canonical = url.as_str().to_string();
         ValidatedOidcEndpoint {
-            url,
             canonical,
             origin: self.issuer.origin.clone(),
         }
@@ -598,7 +588,7 @@ fn plan_oidc_refresh_source(
         Some(_) => OidcRefreshSource::Jwks {
             url: endpoints
                 .configured_jwks()
-                .expect("configured JWKS endpoint was validated")
+                .ok_or(AuthenticationError::InvalidJwksUrl)?
                 .as_str()
                 .to_string(),
         },

@@ -16,12 +16,12 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/copilot.rs",
-    "maxLines": 989,
+    "maxLines": 985,
     "reason": "Copilot profile import, direct runtime API auth, model catalog refresh, legacy token fallback, and bounded HTTP response reads remain capped while auth refresh is split from profile import ownership."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 1119,
+    "maxLines": 1109,
     "reason": "Kiro profile import now discovers the native CLI model catalog with an ACP fallback while preserving private credential staging; capped until catalog discovery splits from command orchestration."
   },
   {
@@ -171,13 +171,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_external_provider_config.rs",
-    "maxLines": 1003,
+    "maxLines": 984,
     "reason": "External provider catalog generation now imports Kiro model metadata alongside Copilot while preserving exact secret/config validation; capped until provider-specific catalog loading splits out."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request.rs",
-    "maxLines": 859,
-    "reason": "Gemini request translation remains capped while multimodal and tool request fixtures are split by protocol concern."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",
@@ -221,7 +216,7 @@
   },
   {
     "file": "crates/prodex-config/src/lib.rs",
-    "maxLines": 898,
+    "maxLines": 892,
     "reason": "Typed deployment configuration validates governance mode floors, anonymous compatibility, and enterprise topology contracts."
   },
   {

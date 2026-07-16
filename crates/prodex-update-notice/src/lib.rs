@@ -171,31 +171,13 @@ pub fn format_info_prodex_version(paths: &AppPaths) -> Result<String> {
 
 fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
     let source = current_prodex_release_source();
-    if let Some(cached) = load_update_check_cache(paths).ok().flatten()
-        && should_use_cached_update_version(
-            cached.source,
-            &cached.latest_version,
-            cached.checked_at,
-            source,
-            current_prodex_version(),
-            Local::now().timestamp(),
-        )
-    {
-        return Ok(Some(cached.latest_version));
+    if let Some(latest_version) = cached_latest_prodex_version(paths, source) {
+        return Ok(Some(latest_version));
     }
 
     let _lock = acquire_update_check_lock(paths);
-    if let Some(cached) = load_update_check_cache(paths).ok().flatten()
-        && should_use_cached_update_version(
-            cached.source,
-            &cached.latest_version,
-            cached.checked_at,
-            source,
-            current_prodex_version(),
-            Local::now().timestamp(),
-        )
-    {
-        return Ok(Some(cached.latest_version));
+    if let Some(latest_version) = cached_latest_prodex_version(paths, source) {
+        return Ok(Some(latest_version));
     }
 
     let latest_version = match fetch_latest_prodex_version(source) {
@@ -211,6 +193,19 @@ fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
         },
     );
     Ok(Some(latest_version))
+}
+
+fn cached_latest_prodex_version(paths: &AppPaths, source: ProdexReleaseSource) -> Option<String> {
+    let cached = load_update_check_cache(paths).ok().flatten()?;
+    should_use_cached_update_version(
+        cached.source,
+        &cached.latest_version,
+        cached.checked_at,
+        source,
+        current_prodex_version(),
+        Local::now().timestamp(),
+    )
+    .then_some(cached.latest_version)
 }
 
 pub fn should_use_cached_update_version(

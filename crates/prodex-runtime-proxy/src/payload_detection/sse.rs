@@ -68,8 +68,13 @@ fn runtime_sse_split_field(line: &[u8]) -> (&[u8], Option<&[u8]>) {
     (&line[..separator], Some(value))
 }
 
-fn runtime_sse_emit_event<F>(data_lines: &mut Vec<String>, on_event: &mut F)
-where
+type RuntimeSseEventParser = fn(&[String]) -> RuntimeParsedSseEvent;
+
+fn runtime_sse_emit_event<F>(
+    data_lines: &mut Vec<String>,
+    parse_event: RuntimeSseEventParser,
+    on_event: &mut F,
+) where
     F: FnMut(RuntimeParsedSseEvent),
 {
     if data_lines.is_empty() {
@@ -79,17 +84,21 @@ where
         data_lines.clear();
         return;
     }
-    on_event(parse_runtime_sse_event(data_lines));
+    on_event(parse_event(data_lines));
     data_lines.clear();
 }
 
-fn runtime_sse_finish_line<F>(line: &mut Vec<u8>, data_lines: &mut Vec<String>, on_event: &mut F)
-where
+fn runtime_sse_finish_line<F>(
+    line: &mut Vec<u8>,
+    data_lines: &mut Vec<String>,
+    parse_event: RuntimeSseEventParser,
+    on_event: &mut F,
+) where
     F: FnMut(RuntimeParsedSseEvent),
 {
     let trimmed = runtime_sse_trimmed_line_bytes(line);
     if trimmed.is_empty() {
-        runtime_sse_emit_event(data_lines, on_event);
+        runtime_sse_emit_event(data_lines, parse_event, on_event);
         line.clear();
         return;
     }
@@ -131,7 +140,7 @@ pub fn runtime_sse_consume_chunk<F>(
     for byte in chunk {
         line.push(*byte);
         if *byte == b'\n' {
-            runtime_sse_finish_line(line, data_lines, &mut on_event);
+            runtime_sse_finish_line(line, data_lines, parse_runtime_sse_event, &mut on_event);
         }
     }
 }
@@ -144,64 +153,9 @@ pub fn runtime_sse_finish_pending<F>(
     F: FnMut(RuntimeParsedSseEvent),
 {
     if !line.is_empty() {
-        runtime_sse_finish_line(line, data_lines, &mut on_event);
+        runtime_sse_finish_line(line, data_lines, parse_runtime_sse_event, &mut on_event);
     }
-    runtime_sse_emit_event(data_lines, &mut on_event);
-}
-
-fn runtime_sse_emit_inspection_event<F>(data_lines: &mut Vec<String>, on_event: &mut F)
-where
-    F: FnMut(RuntimeParsedSseEvent),
-{
-    if data_lines.is_empty() {
-        return;
-    }
-    if runtime_sse_event_marked_invalid(data_lines) {
-        data_lines.clear();
-        return;
-    }
-    on_event(runtime_sse_inspection_event(data_lines));
-    data_lines.clear();
-}
-
-fn runtime_sse_finish_inspection_line<F>(
-    line: &mut Vec<u8>,
-    data_lines: &mut Vec<String>,
-    on_event: &mut F,
-) where
-    F: FnMut(RuntimeParsedSseEvent),
-{
-    let trimmed = runtime_sse_trimmed_line_bytes(line);
-    if trimmed.is_empty() {
-        runtime_sse_emit_inspection_event(data_lines, on_event);
-        line.clear();
-        return;
-    }
-
-    if trimmed.starts_with(b":") {
-        line.clear();
-        return;
-    }
-
-    let (field, value) = runtime_sse_split_field(trimmed);
-    if field == b"data" {
-        match value {
-            Some(bytes) => match std::str::from_utf8(bytes) {
-                Ok(text) => {
-                    if !runtime_sse_event_marked_invalid(data_lines) {
-                        data_lines.push(text.to_owned());
-                    }
-                }
-                Err(_) => runtime_sse_mark_invalid(data_lines),
-            },
-            None => {
-                if !runtime_sse_event_marked_invalid(data_lines) {
-                    data_lines.push(String::new());
-                }
-            }
-        }
-    }
-    line.clear();
+    runtime_sse_emit_event(data_lines, parse_runtime_sse_event, &mut on_event);
 }
 
 fn runtime_sse_consume_inspection_buffer<F>(
@@ -215,13 +169,23 @@ fn runtime_sse_consume_inspection_buffer<F>(
     for byte in chunk {
         line.push(*byte);
         if *byte == b'\n' {
-            runtime_sse_finish_inspection_line(line, data_lines, &mut on_event);
+            runtime_sse_finish_line(
+                line,
+                data_lines,
+                runtime_sse_inspection_event,
+                &mut on_event,
+            );
         }
     }
     if !line.is_empty() {
-        runtime_sse_finish_inspection_line(line, data_lines, &mut on_event);
+        runtime_sse_finish_line(
+            line,
+            data_lines,
+            runtime_sse_inspection_event,
+            &mut on_event,
+        );
     }
-    runtime_sse_emit_inspection_event(data_lines, &mut on_event);
+    runtime_sse_emit_event(data_lines, runtime_sse_inspection_event, &mut on_event);
 }
 
 pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgress {

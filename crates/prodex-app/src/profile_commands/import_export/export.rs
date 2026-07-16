@@ -2,6 +2,7 @@ use super::super::kiro::{KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE};
 use super::super::manage::print_profile_panel;
 use super::passwords::{resolve_export_password, resolve_export_password_mode};
 use super::*;
+use crate::secret_store_support::secret_file_read_error;
 use zeroize::Zeroizing;
 
 pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
@@ -156,16 +157,6 @@ fn read_exported_secret_file(
         path: file_name.to_string(),
         text,
     })
-}
-
-fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = error.is_unsafe_file();
-    let error = anyhow::Error::new(error);
-    if is_non_regular_file {
-        error.context("not a regular secret file")
-    } else {
-        error
-    }
 }
 
 fn default_profile_export_path() -> PathBuf {

@@ -1,5 +1,19 @@
 [
   {
+    "id": "whole-repo-maintainability-refactor-0.302.0",
+    "requiredSubjects": [
+      "refactor: consolidate shared runtime and gateway paths",
+      "chore(release): release 0.302.0"
+    ],
+    "caps": {
+      "maxFiles": 60,
+      "maxBehaviorFiles": 45,
+      "maxLines": 1800,
+      "maxFileLines": 200
+    },
+    "reason": "Reviewed the whole-repository maintainability refactor across application configuration, profile identity, runtime proxy transport and payload parsing, gateway routing and authentication, enterprise application/storage boundaries, and support crates with parallel implementation and an independent final review; verified by the locked all-features full suite, 526 focused runtime proxy tests, repeated six-job preflight, strict workspace Clippy, optimized release build, size/hot-path/secret/security/supply-chain guards, and tracked-diff credential and identifier scans before the 0.302.0 release."
+  },
+  {
     "id": "whole-repo-maintainability-refactor-0.297.0",
     "requiredSubjects": [
       "refactor: simplify runtime and persistence boundaries",
