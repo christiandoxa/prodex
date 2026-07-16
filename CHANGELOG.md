@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.302.0 - 2026-07-16
+
+- No grouped changes.
+
 ## 0.301.0 - 2026-07-16
 
 ### Runtime
@@ -67,9 +71,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Implement evaluated provider policies (`f04ad0e`)
-
-## 0.290.0 - 2026-07-14
-
-### Misc
-
-- Harden enterprise gateway controls (`fa0447c`)
