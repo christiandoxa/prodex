@@ -118,7 +118,7 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
 
     for candidate in candidate_plan.fallback_candidates {
         if candidate.fallback_skip_reason().is_some()
-            || !matches!(candidate.backoff_sort_key.0, 0 | 1)
+            || !matches!(candidate.backoff_sort_key.0, 0 | 1 | 2 | 4)
             || runtime_profile_inflight_hard_limited_for_context(
                 shared,
                 &candidate.name,
