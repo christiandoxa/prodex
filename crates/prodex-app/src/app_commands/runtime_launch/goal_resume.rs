@@ -4,20 +4,27 @@ use super::{
 };
 use crate::app_state::{AppStateIoExt, ProfileProviderExt};
 use crate::{
-    AppPaths, AppState, codex_cli_config_override_exact_value, codex_profile_v2_config_path,
+    AppPaths, AppState, codex_cli_config_override_exact_value, codex_cli_config_override_value,
+    codex_profile_v2_config_path,
 };
 use anyhow::{Context, Result, bail};
 use rusqlite::OptionalExtension;
+use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) const RUNTIME_GOAL_SESSION_NOTIFY_COMMAND: &str = "__runtime-goal-session-notify";
+const RUNTIME_GOAL_SESSION_HOOK_TIMEOUT_SECS: u64 = 5;
+#[cfg(not(windows))]
+const RUNTIME_GOAL_SESSION_HOOK_KEY: &str = "/<session-flags>/config.toml:session_start:0:0";
+#[cfg(windows)]
+const RUNTIME_GOAL_SESSION_HOOK_KEY: &str = r"C:\<session-flags>\config.toml:session_start:0:0";
 const GOAL_USAGE_LIMIT_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 static RUNTIME_GOAL_MONITOR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -308,7 +315,7 @@ pub(super) fn prepare_goal_usage_limit_monitor(
     ))
 }
 
-fn runtime_goal_monitor_dir(paths: &AppPaths) -> PathBuf {
+pub(super) fn runtime_goal_monitor_dir(paths: &AppPaths) -> PathBuf {
     paths.root.join("runtime-goal-monitors")
 }
 
@@ -332,28 +339,82 @@ fn codex_notify_is_configured(
         || config_has_notify(&codex_home.join("config.toml"))
 }
 
-pub(super) fn add_runtime_goal_session_notify(
+pub(super) fn add_runtime_goal_session_tracking(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
     codex_args: &mut Vec<OsString>,
     marker_path: &Path,
 ) {
-    if codex_notify_is_configured(codex_home, profile_v2_name, codex_args) {
-        return;
-    }
     let Ok(current_exe) = env::current_exe() else {
         return;
     };
-    let command = [
+    let command_argv = [
         current_exe.to_string_lossy().into_owned(),
         RUNTIME_GOAL_SESSION_NOTIFY_COMMAND.to_string(),
         marker_path.to_string_lossy().into_owned(),
     ];
-    let Ok(command) = serde_json::to_string(&command) else {
-        return;
-    };
-    codex_args.insert(0, OsString::from(format!("notify={command}")));
-    codex_args.insert(0, OsString::from("-c"));
+    let mut injected = Vec::new();
+
+    if codex_cli_config_override_value(codex_args, "hooks.SessionStart").is_none() {
+        let command = runtime_goal_session_hook_command(&command_argv);
+        let command_literal = serde_json::to_string(&command).expect("string serialization");
+        let hook_hash = runtime_goal_session_hook_hash(&command);
+        let hook_key_literal =
+            serde_json::to_string(RUNTIME_GOAL_SESSION_HOOK_KEY).expect("string serialization");
+        let hook_hash_literal = serde_json::to_string(&hook_hash).expect("string serialization");
+        injected.extend([
+            OsString::from("-c"),
+            OsString::from(format!(
+                "hooks.SessionStart=[{{hooks=[{{type=\"command\",command={command_literal},timeout={RUNTIME_GOAL_SESSION_HOOK_TIMEOUT_SECS}}}]}}]"
+            )),
+            OsString::from("-c"),
+            OsString::from(format!(
+                "hooks.state={{{hook_key_literal}={{trusted_hash={hook_hash_literal}}}}}"
+            )),
+        ]);
+    }
+
+    if !codex_notify_is_configured(codex_home, profile_v2_name, codex_args)
+        && let Ok(command) = serde_json::to_string(&command_argv)
+    {
+        injected.extend([
+            OsString::from("-c"),
+            OsString::from(format!("notify={command}")),
+        ]);
+    }
+
+    codex_args.splice(0..0, injected);
+}
+
+fn runtime_goal_session_hook_command(argv: &[String]) -> String {
+    #[cfg(not(windows))]
+    {
+        argv.iter()
+            .map(|arg| format!("'{}'", arg.replace('\'', "'\"'\"'")))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    #[cfg(windows)]
+    {
+        argv.iter()
+            .map(|arg| format!(r#""{}""#, arg.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+pub(super) fn runtime_goal_session_hook_hash(command: &str) -> String {
+    // Match Codex's normalized unmanaged-hook identity so only this generated hook is trusted.
+    let command = serde_json::to_string(command).expect("string serialization");
+    let identity = format!(
+        "{{\"event_name\":\"session_start\",\"hooks\":[{{\"async\":false,\"command\":{command},\"timeout\":{RUNTIME_GOAL_SESSION_HOOK_TIMEOUT_SECS},\"type\":\"command\"}}]}}"
+    );
+    let digest = Sha256::digest(identity.as_bytes());
+    let hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("sha256:{hex}")
 }
 
 pub(crate) fn handle_runtime_goal_session_notify_if_requested() -> bool {
@@ -362,11 +423,20 @@ pub(crate) fn handle_runtime_goal_session_notify_if_requested() -> bool {
         return false;
     }
     let marker_path = args.next().map(PathBuf::from);
-    let payload = args.next();
+    let payload_arg = args.next();
     if args.next().is_none()
-        && let (Some(marker_path), Some(payload)) = (marker_path, payload)
+        && let Some(marker_path) = marker_path
     {
-        let _ = write_runtime_goal_session_marker(&marker_path, &payload);
+        let payload = payload_arg.or_else(|| {
+            let mut payload = String::new();
+            std::io::stdin()
+                .read_to_string(&mut payload)
+                .ok()
+                .map(|_| OsString::from(payload))
+        });
+        if let Some(payload) = payload {
+            let _ = write_runtime_goal_session_marker(&marker_path, &payload);
+        }
     }
     true
 }
@@ -379,9 +449,10 @@ pub(super) fn write_runtime_goal_session_marker(marker_path: &Path, payload: &Os
     let payload: serde_json::Value = serde_json::from_str(&payload.to_string_lossy())?;
     let session_id = payload
         .get("thread-id")
+        .or_else(|| payload.get("session_id"))
         .and_then(serde_json::Value::as_str)
-        .context("runtime goal notification is missing thread-id")?;
-    uuid::Uuid::parse_str(session_id).context("invalid runtime goal thread-id")?;
+        .context("runtime goal session payload is missing a session id")?;
+    uuid::Uuid::parse_str(session_id).context("invalid runtime goal session id")?;
     fs::write(marker_path, format!("{session_id}\n"))?;
     Ok(())
 }

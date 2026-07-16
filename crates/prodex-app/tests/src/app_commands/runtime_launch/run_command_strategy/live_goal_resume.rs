@@ -158,12 +158,21 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
     )
     .unwrap();
     let mut notify_args = Vec::new();
-    add_runtime_goal_session_notify(&main_home, None, &mut notify_args, &marker_path);
+    add_runtime_goal_session_tracking(&main_home, None, &mut notify_args, &marker_path);
     assert_eq!(notify_args.first(), Some(&OsString::from("-c")));
-    assert!(notify_args.get(1).is_some_and(|arg| {
-        arg.to_string_lossy()
-            .contains(RUNTIME_GOAL_SESSION_NOTIFY_COMMAND)
+    assert!(notify_args.iter().any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg.starts_with("hooks.SessionStart=") && arg.contains(RUNTIME_GOAL_SESSION_NOTIFY_COMMAND)
     }));
+    assert!(notify_args.iter().any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg.starts_with("hooks.state=") && arg.contains(":session_start:0:0")
+    }));
+    assert!(
+        notify_args
+            .iter()
+            .any(|arg| arg.to_string_lossy().starts_with("notify="))
+    );
     conn.execute(
         "UPDATE thread_goals SET status = 'active', updated_at_ms = 2 WHERE thread_id = ?1",
         [session_id],
@@ -196,4 +205,70 @@ fn run_strategy_plans_goal_resume_relaunch_after_usage_limit_with_active_goal() 
         fresh_strategy.codex_args.last(),
         Some(&OsString::from("/goal resume"))
     );
+}
+
+#[test]
+fn runtime_goal_session_tracking_uses_session_start_before_first_completed_turn() {
+    let root = temp_dir("goal-session-start-tracking");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let main_home = root.join("profiles").join("main");
+    fs::create_dir_all(&main_home).unwrap();
+    fs::write(
+        main_home.join("config.toml"),
+        r#"notify = ["user-notifier"]
+"#,
+    )
+    .unwrap();
+    let paths = AppPaths::discover().unwrap();
+    let marker_dir = runtime_goal_monitor_dir(&paths);
+    fs::create_dir_all(&marker_dir).unwrap();
+    let marker_path = marker_dir.join("session-test.id");
+    let session_id = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+
+    write_runtime_goal_session_marker(
+        &marker_path,
+        std::ffi::OsStr::new(&format!(r#"{{"session_id":"{session_id}"}}"#)),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(&marker_path).unwrap(),
+        format!("{session_id}\n")
+    );
+
+    let mut args = Vec::new();
+    add_runtime_goal_session_tracking(&main_home, None, &mut args, &marker_path);
+    assert!(args.iter().any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg.starts_with("hooks.SessionStart=") && arg.contains(RUNTIME_GOAL_SESSION_NOTIFY_COMMAND)
+    }));
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg.to_string_lossy().starts_with("notify="))
+    );
+    assert_eq!(
+        runtime_goal_session_hook_hash("/bin/true"),
+        "sha256:1c771808593cd55aa6c3bed0e61aef482e8cd46a135d83e92db209cce5845e95"
+    );
+}
+
+#[test]
+fn runtime_goal_session_tracking_preserves_explicit_session_start_hooks() {
+    let root = temp_dir("goal-session-start-user-override");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let main_home = root.join("profiles").join("main");
+    fs::create_dir_all(&main_home).unwrap();
+    let marker_path = root.join("runtime-goal-monitors").join("session-test.id");
+    let user_hook = "hooks.SessionStart=[{hooks=[{type=\"command\",command=\"user-hook\"}]}]";
+    let mut args = vec![OsString::from("-c"), OsString::from(user_hook)];
+
+    add_runtime_goal_session_tracking(&main_home, None, &mut args, &marker_path);
+
+    assert_eq!(
+        args.iter()
+            .filter(|arg| arg.to_string_lossy().starts_with("hooks.SessionStart="))
+            .count(),
+        1
+    );
+    assert!(args.iter().any(|arg| arg == user_hook));
 }
