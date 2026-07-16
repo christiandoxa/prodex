@@ -18,10 +18,7 @@ pub(super) fn print_profile_import_progress(message: &str) -> Result<()> {
         let mut state = state.borrow_mut();
         match state.render(message) {
             Ok(()) => Ok(()),
-            Err(_) => {
-                print_stderr_line(message);
-                Ok(())
-            }
+            Err(_) => print_stderr_line(message).map_err(Into::into),
         }
     })
 }

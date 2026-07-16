@@ -54,6 +54,3 @@ pub struct CleanupArgs {
     #[arg(long, value_name = "AGE", conflicts_with = "aggressive")]
     pub older_than: Option<CleanupOlderThan>,
 }
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ListProfilesCommand;

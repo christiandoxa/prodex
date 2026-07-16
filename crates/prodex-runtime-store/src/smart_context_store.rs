@@ -2,7 +2,6 @@ use std::sync::atomic::AtomicU64;
 
 mod artifact;
 mod file_store;
-mod json;
 mod stale;
 mod types;
 

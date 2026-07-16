@@ -190,6 +190,108 @@ pub enum RuntimeOptimisticCurrentCandidateSkipReason {
     PromptCacheAffinity,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RuntimeOptimisticCurrentCandidatePredicate {
+    Availability,
+    QuotaEvidence,
+    QuotaBand,
+    Load,
+    Compatibility,
+    PromptCacheAffinity,
+}
+
+const RUNTIME_OPTIMISTIC_CURRENT_CANDIDATE_PREDICATES:
+    [RuntimeOptimisticCurrentCandidatePredicate; 6] = [
+    RuntimeOptimisticCurrentCandidatePredicate::Availability,
+    RuntimeOptimisticCurrentCandidatePredicate::QuotaEvidence,
+    RuntimeOptimisticCurrentCandidatePredicate::QuotaBand,
+    RuntimeOptimisticCurrentCandidatePredicate::Load,
+    RuntimeOptimisticCurrentCandidatePredicate::Compatibility,
+    RuntimeOptimisticCurrentCandidatePredicate::PromptCacheAffinity,
+];
+
+impl RuntimeOptimisticCurrentCandidatePredicate {
+    fn reject(
+        self,
+        input: RuntimeOptimisticCurrentCandidateInput<'_>,
+    ) -> Option<RuntimeOptimisticCurrentCandidateSkipReason> {
+        match self {
+            Self::Availability => {
+                if input.auth_failure_active {
+                    Some(RuntimeOptimisticCurrentCandidateSkipReason::AuthFailureBackoff)
+                } else if input.in_selection_backoff {
+                    Some(RuntimeOptimisticCurrentCandidateSkipReason::SelectionBackoff)
+                } else if input.circuit_open {
+                    Some(RuntimeOptimisticCurrentCandidateSkipReason::RouteCircuitOpen)
+                } else if input.health_score > 0 {
+                    Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfileHealth)
+                } else if input.performance_score > 0 {
+                    Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfilePerformance)
+                } else {
+                    None
+                }
+            }
+            Self::QuotaEvidence => {
+                let missing =
+                    input.has_alternative_quota_compatible_profile && input.quota_source.is_none();
+                let stale = input.has_alternative_quota_compatible_profile
+                    && matches!(
+                        input.route_kind,
+                        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+                    )
+                    && !matches!(
+                        input.quota_source,
+                        Some(RuntimeSelectionQuotaSource::LiveProbe)
+                    );
+                if missing {
+                    Some(RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable)
+                } else if stale {
+                    Some(
+                        if matches!(
+                            input.quota_source,
+                            Some(RuntimeSelectionQuotaSource::PersistedSnapshot)
+                        ) {
+                            RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota
+                        } else {
+                            RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable
+                        },
+                    )
+                } else {
+                    None
+                }
+            }
+            Self::QuotaBand => {
+                let unknown_allowed = input.quota_summary.route_band
+                    == RuntimeSelectionQuotaPressureBand::Unknown
+                    && !input.has_alternative_quota_compatible_profile;
+                (input.quota_summary.route_band > RuntimeSelectionQuotaPressureBand::Healthy
+                    && !unknown_allowed)
+                    .then_some(
+                        RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
+                            input.quota_summary.route_band,
+                        ),
+                    )
+            }
+            Self::Load => (input.inflight_count >= input.inflight_soft_limit)
+                .then_some(RuntimeOptimisticCurrentCandidateSkipReason::ProfileInflightSoftLimit),
+            Self::Compatibility => (!input.current_profile_quota_compatible)
+                .then_some(RuntimeOptimisticCurrentCandidateSkipReason::AuthNotQuotaCompatible),
+            Self::PromptCacheAffinity => (prompt_cache_key_present(input.prompt_cache_key)
+                && matches!(
+                    input.route_kind,
+                    RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+                )
+                && input.has_alternative_quota_compatible_profile
+                && input
+                    .prompt_cache_owner_profile
+                    .map(str::trim)
+                    .filter(|owner| !owner.is_empty())
+                    != Some(input.current_profile))
+            .then_some(RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity),
+        }
+    }
+}
+
 impl RuntimeOptimisticCurrentCandidateSkipReason {
     pub fn reason_label(self) -> &'static str {
         match self {
@@ -225,88 +327,12 @@ impl RuntimeOptimisticCurrentCandidateSkipReason {
 pub fn runtime_optimistic_current_candidate_decision(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
 ) -> RuntimeOptimisticCurrentCandidateDecision {
-    let quota_evidence_required =
-        input.has_alternative_quota_compatible_profile && input.quota_source.is_none();
-    let live_quota_probe_required = input.has_alternative_quota_compatible_profile
-        && matches!(
-            input.route_kind,
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-        )
-        && !matches!(
-            input.quota_source,
-            Some(RuntimeSelectionQuotaSource::LiveProbe)
-        );
-    let unknown_quota_allowed = input.quota_summary.route_band
-        == RuntimeSelectionQuotaPressureBand::Unknown
-        && !input.has_alternative_quota_compatible_profile;
-    let quota_band_blocks_current = input.quota_summary.route_band
-        > RuntimeSelectionQuotaPressureBand::Healthy
-        && !unknown_quota_allowed;
-
-    let reason = if input.auth_failure_active {
-        Some(RuntimeOptimisticCurrentCandidateSkipReason::AuthFailureBackoff)
-    } else if input.in_selection_backoff {
-        Some(RuntimeOptimisticCurrentCandidateSkipReason::SelectionBackoff)
-    } else if input.circuit_open {
-        Some(RuntimeOptimisticCurrentCandidateSkipReason::RouteCircuitOpen)
-    } else if input.health_score > 0 {
-        Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfileHealth)
-    } else if input.performance_score > 0 {
-        Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfilePerformance)
-    } else if quota_evidence_required {
-        Some(RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable)
-    } else if live_quota_probe_required {
-        Some(
-            if matches!(
-                input.quota_source,
-                Some(RuntimeSelectionQuotaSource::PersistedSnapshot)
-            ) {
-                RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota
-            } else {
-                RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable
-            },
-        )
-    } else if quota_band_blocks_current {
-        Some(
-            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
-                input.quota_summary.route_band,
-            ),
-        )
-    } else if input.inflight_count >= input.inflight_soft_limit {
-        Some(RuntimeOptimisticCurrentCandidateSkipReason::ProfileInflightSoftLimit)
-    } else {
-        None
-    };
+    let reason = RUNTIME_OPTIMISTIC_CURRENT_CANDIDATE_PREDICATES
+        .into_iter()
+        .find_map(|predicate| predicate.reject(input));
     if let Some(reason) = reason {
         return RuntimeOptimisticCurrentCandidateDecision::Skip(
             RuntimeOptimisticCurrentCandidateSkip { reason },
-        );
-    }
-
-    if !input.current_profile_quota_compatible {
-        return RuntimeOptimisticCurrentCandidateDecision::Skip(
-            RuntimeOptimisticCurrentCandidateSkip {
-                reason: RuntimeOptimisticCurrentCandidateSkipReason::AuthNotQuotaCompatible,
-            },
-        );
-    }
-
-    if prompt_cache_key_present(input.prompt_cache_key)
-        && matches!(
-            input.route_kind,
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-        )
-        && input.has_alternative_quota_compatible_profile
-        && input
-            .prompt_cache_owner_profile
-            .map(str::trim)
-            .filter(|owner| !owner.is_empty())
-            != Some(input.current_profile)
-    {
-        return RuntimeOptimisticCurrentCandidateDecision::Skip(
-            RuntimeOptimisticCurrentCandidateSkip {
-                reason: RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity,
-            },
         );
     }
 

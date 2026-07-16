@@ -1,8 +1,7 @@
 use super::gemini_request::RUNTIME_GEMINI_TOOL_OUTPUT_PREVIEW_CHARS;
 use crate::RuntimeGeminiConfig;
 use std::env;
-use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(super) fn runtime_gemini_mask_tool_response_for_history(
     tool_name: &str,
@@ -53,7 +52,6 @@ fn runtime_gemini_save_masked_tool_output(
     let directory = configured_directory
         .map(PathBuf::from)
         .unwrap_or_else(|| env::temp_dir().join("prodex-gemini-tool-outputs"));
-    fs::create_dir_all(&directory).ok()?;
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
@@ -66,8 +64,12 @@ fn runtime_gemini_save_masked_tool_output(
         tool,
         call
     ));
-    fs::write(&path, output).ok()?;
+    runtime_gemini_write_masked_tool_output(&path, output).ok()?;
     Some(path)
+}
+
+fn runtime_gemini_write_masked_tool_output(path: &Path, output: &str) -> std::io::Result<()> {
+    secret_store::write_private_file_atomic(path, output.as_bytes())
 }
 
 fn runtime_gemini_sanitize_file_component(value: &str) -> String {
@@ -89,3 +91,7 @@ fn runtime_gemini_sanitize_file_component(value: &str) -> String {
     }
     sanitized
 }
+
+#[cfg(all(test, unix))]
+#[path = "../../../tests/src/runtime_launch/proxy_startup/gemini_request_tool_output.rs"]
+mod tests;

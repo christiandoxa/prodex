@@ -1,8 +1,7 @@
 use super::*;
 
 pub(crate) use runtime_proxy_crate::{
-    RuntimeProfileInFlightReleaseSnapshot, RuntimeProxyGuardReleaseSnapshot,
-    RuntimeProxyQueueRejection,
+    RuntimeProfileInFlightReleaseSnapshot, RuntimeProxyQueueRejection,
 };
 
 fn runtime_route_kind_to_proxy(
@@ -109,24 +108,6 @@ pub(crate) fn mark_runtime_proxy_local_overload(shared: &RuntimeRotationProxySha
     );
 }
 
-pub(crate) fn release_runtime_proxy_active_request_guard(
-    active_request_count: &AtomicUsize,
-    lane_active_count: &AtomicUsize,
-    lane_releases_total: &AtomicU64,
-    active_request_release_underflows_total: &AtomicU64,
-    lane_release_underflows_total: &AtomicU64,
-    wait: &(Mutex<()>, Condvar),
-) -> RuntimeProxyGuardReleaseSnapshot {
-    runtime_proxy_crate::release_runtime_proxy_active_request_guard(
-        active_request_count,
-        lane_active_count,
-        lane_releases_total,
-        active_request_release_underflows_total,
-        lane_release_underflows_total,
-        wait,
-    )
-}
-
 pub(crate) fn record_runtime_profile_inflight_acquire(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
@@ -134,10 +115,6 @@ pub(crate) fn record_runtime_profile_inflight_acquire(
     weight: usize,
     context: &'static str,
 ) {
-    shared
-        .lane_admission
-        .profile_inflight_admissions_total
-        .fetch_add(1, Ordering::Relaxed);
     runtime_proxy_log(
         shared,
         runtime_proxy_structured_log_message(
@@ -159,34 +136,10 @@ pub(crate) fn release_runtime_profile_inflight_guard(
     context: &'static str,
     weight: usize,
 ) -> Option<RuntimeProfileInFlightReleaseSnapshot> {
-    let Ok(mut runtime) = shared.runtime.lock() else {
-        return None;
-    };
-
-    let (remaining, count_before, underflow, remove_profile) =
-        if let Some(count) = runtime.profile_inflight.get_mut(profile_name) {
-            let count_before = *count;
-            let underflow = count_before < weight;
-            *count = count.saturating_sub(weight);
-            let remaining = *count;
-            (remaining, count_before, underflow, remaining == 0)
-        } else {
-            (0, 0, true, false)
-        };
-    if remove_profile {
-        runtime.profile_inflight.remove(profile_name);
-    }
-    drop(runtime);
-
-    shared
+    let (remaining, count_before, underflow) = shared
         .lane_admission
-        .profile_inflight_releases_total
-        .fetch_add(1, Ordering::Relaxed);
+        .release_profile_inflight(profile_name, weight);
     if underflow {
-        shared
-            .lane_admission
-            .profile_inflight_release_underflows_total
-            .fetch_add(1, Ordering::Relaxed);
         runtime_proxy_log(
             shared,
             runtime_proxy_structured_log_message(
@@ -213,15 +166,6 @@ pub(crate) fn release_runtime_profile_inflight_guard(
             ],
         ),
     );
-    shared
-        .lane_admission
-        .inflight_release_revision
-        .fetch_add(1, Ordering::SeqCst);
-    let (mutex, condvar) = &*shared.lane_admission.wait;
-    let _guard = mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    condvar.notify_all();
     Some(RuntimeProfileInFlightReleaseSnapshot {
         remaining,
         underflow,

@@ -64,13 +64,12 @@ async fn send_runtime_proxy_upstream_request_with_events(
     events: RuntimeProxyUpstreamRequestEvents,
 ) -> Result<reqwest::Response> {
     let started_at = Instant::now();
-    let runtime = shared
-        .runtime
-        .lock()
+    let upstream_base_url = shared
+        .lock_runtime_state()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+        .upstream_base_url
         .clone();
-    let upstream_url =
-        runtime_proxy_upstream_url(&runtime.upstream_base_url, &request.path_and_query);
+    let upstream_url = runtime_proxy_upstream_url(&upstream_base_url, &request.path_and_query);
     let log_url = runtime_proxy_log_url(&upstream_url);
     let method = reqwest::Method::from_bytes(request.method.as_bytes()).with_context(|| {
         format!(
@@ -80,10 +79,7 @@ async fn send_runtime_proxy_upstream_request_with_events(
     })?;
 
     let upstream_client = if events.route_kind == RuntimeRouteKind::Compact {
-        build_runtime_upstream_async_http_compact_client(
-            shared.upstream_no_proxy,
-            &shared.runtime_config,
-        )?
+        shared.compact_client.clone()
     } else {
         shared.async_client.clone()
     };

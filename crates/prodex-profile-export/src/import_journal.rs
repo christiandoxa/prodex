@@ -1,8 +1,8 @@
 use std::fs;
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use zeroize::Zeroizing;
 
 use crate::{
     IMPORT_AUTH_UPDATE_JOURNAL_DIR, IMPORT_AUTH_UPDATE_JOURNAL_VERSION,
@@ -56,12 +56,32 @@ pub fn read_profile_import_auth_update_journal(
     path: impl AsRef<Path>,
 ) -> Result<ImportedExistingProfileAuthUpdateJournal> {
     let path = path.as_ref();
-    let text = read_profile_import_auth_update_journal_text(path)?;
-    let journal: ImportedExistingProfileAuthUpdateJournal = serde_json::from_str(&text)
+    let bytes = read_profile_import_auth_update_journal_bytes(path)?;
+    let journal: ImportedExistingProfileAuthUpdateJournal = serde_json::from_slice(&bytes)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     validate_import_auth_update_journal_version(journal.version)
         .with_context(|| format!("in {}", path.display()))?;
     Ok(journal)
+}
+
+pub fn write_profile_import_auth_update_journal(
+    path: impl AsRef<Path>,
+    journal: &ImportedExistingProfileAuthUpdateJournal,
+) -> Result<()> {
+    let path = path.as_ref();
+    let bytes = Zeroizing::new(
+        serde_json::to_vec_pretty(journal)
+            .context("failed to serialize profile import auth update journal")?,
+    );
+    if bytes.len() as u64 > IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES {
+        bail!(
+            "profile import auth update journal {} exceeds safe size limit ({} bytes)",
+            path.display(),
+            IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES
+        );
+    }
+    secret_store::write_private_file_atomic(path, &bytes)
+        .with_context(|| format!("failed to replace {}", path.display()))
 }
 
 pub fn ensure_profile_import_auth_update_journal_root(
@@ -108,58 +128,36 @@ fn ensure_import_auth_update_journal_root_is_directory(
     Ok(true)
 }
 
-fn read_profile_import_auth_update_journal_text(path: &Path) -> Result<String> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect {}", path.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        bail!(
-            "profile import auth update journal {} is not a regular file",
-            path.display()
-        );
+fn read_profile_import_auth_update_journal_bytes(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
+    match secret_store::read_private_file_bounded(path, IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES) {
+        Ok(Some(bytes)) => Ok(bytes),
+        Ok(None) => bail!("failed to read {}", path.display()),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::InvalidData
+                && error.to_string().contains("safe size limit") =>
+        {
+            bail!(
+                "profile import auth update journal {} exceeds safe size limit ({} bytes)",
+                path.display(),
+                IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES
+            )
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::InvalidInput
+                    | std::io::ErrorKind::InvalidData
+                    | std::io::ErrorKind::NotADirectory
+                    | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            bail!(
+                "profile import auth update journal {} is not a regular file",
+                path.display()
+            )
+        }
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
     }
-    if metadata.len() > IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES {
-        bail!(
-            "profile import auth update journal {} exceeds safe size limit ({} bytes)",
-            path.display(),
-            IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES
-        );
-    }
-
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let opened_metadata = file
-        .metadata()
-        .with_context(|| format!("failed to inspect {}", path.display()))?;
-    if !same_import_auth_update_journal_metadata(&metadata, &opened_metadata) {
-        bail!(
-            "profile import auth update journal {} changed while reading",
-            path.display()
-        );
-    }
-
-    let mut text = String::new();
-    file.take(IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES.saturating_add(1))
-        .read_to_string(&mut text)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    if text.len() as u64 > IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES {
-        bail!(
-            "profile import auth update journal {} exceeds safe size limit ({} bytes)",
-            path.display(),
-            IMPORT_AUTH_UPDATE_JOURNAL_MAX_BYTES
-        );
-    }
-    Ok(text)
-}
-
-#[cfg(unix)]
-fn same_import_auth_update_journal_metadata(before: &fs::Metadata, after: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    before.dev() == after.dev() && before.ino() == after.ino()
-}
-
-#[cfg(not(unix))]
-fn same_import_auth_update_journal_metadata(_before: &fs::Metadata, _after: &fs::Metadata) -> bool {
-    true
 }
 
 pub fn unique_profile_import_auth_update_journal_path(

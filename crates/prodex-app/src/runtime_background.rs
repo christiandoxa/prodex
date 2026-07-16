@@ -10,4 +10,6 @@ pub(super) use probe_refresh::*;
 pub(super) use registry::*;
 pub(super) use scheduled_save::*;
 pub(crate) use token_calibration_save::*;
-pub(crate) use worker_spawn::try_spawn_runtime_background_worker;
+pub(crate) use worker_spawn::{
+    try_spawn_runtime_background_worker, try_spawn_runtime_supervised_worker,
+};

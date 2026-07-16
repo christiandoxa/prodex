@@ -5,7 +5,10 @@ use super::super::provider_bridge::{
 use super::{
     RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages, RuntimeDeepSeekPendingRequest,
 };
-use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    read_blocking_response_body_with_limit,
+};
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
 use prodex_domain::{CallId, RequestId};
@@ -16,13 +19,12 @@ use prodex_provider_core::{
     provider_core_chat_compatible_responses_value_from_chat_value_with_fallback_ids,
     provider_core_rewritten_json_value,
 };
-use std::io::Read;
 
 #[allow(clippy::too_many_arguments)]
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_response_parts(
     provider_kind: RuntimeProviderBridgeKind,
     status: u16,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
     response_metadata: Option<serde_json::Value>,
@@ -30,10 +32,11 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_chat_buffered_r
     runtime_shared: &crate::RuntimeRotationProxyShared,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
     let provider_label = provider_kind.chat_compatible_adapter_label();
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .with_context(|| format!("failed to read {provider_label} chat response body"))?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        &format!("failed to read {provider_label} chat response body"),
+    )?;
     let value: serde_json::Value = serde_json::from_slice(&body)
         .with_context(|| format!("failed to parse {provider_label} chat response JSON"))?;
     let translated = runtime_provider_response_conformance_result(provider_kind, status, &body);

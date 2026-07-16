@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod provider_capabilities;
 pub use provider_capabilities::{ProviderCapabilities, ProviderQuotaShape, RuntimeRoutePolicy};
+mod app_state;
+pub use app_state::{APP_STATE_SCHEMA_VERSION, AppState};
 
 pub const SESSION_ID_PROFILE_BINDING_LIMIT: usize = if cfg!(test) { 64 } else { 2_048 };
 pub const APP_STATE_LAST_RUN_RETENTION_SECONDS: i64 =
@@ -33,19 +35,6 @@ impl Default for AppStateCompactionPolicy {
             session_binding_limit: SESSION_ID_PROFILE_BINDING_LIMIT,
         }
     }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AppState {
-    pub active_profile: Option<String>,
-    #[serde(default)]
-    pub profiles: BTreeMap<String, ProfileEntry>,
-    #[serde(default)]
-    pub last_run_selected_at: BTreeMap<String, i64>,
-    #[serde(default)]
-    pub response_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
-    #[serde(default)]
-    pub session_profile_bindings: BTreeMap<String, ResponseProfileBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -386,9 +375,12 @@ pub fn merge_profile_governance_policies(
 ) -> BTreeMap<String, ProfileGovernancePolicy> {
     let mut merged = existing.clone();
     for (profile_name, policy) in incoming {
-        let should_replace = merged
-            .get(profile_name)
-            .is_none_or(|current| current.updated_at <= policy.updated_at);
+        let should_replace = merged.get(profile_name).is_none_or(|current| {
+            policy.updated_at > current.updated_at
+                || (policy.updated_at == current.updated_at
+                    && profile_governance_policy_rank(policy)
+                        > profile_governance_policy_rank(current))
+        });
         if should_replace {
             merged.insert(
                 profile_name.clone(),
@@ -398,6 +390,18 @@ pub fn merge_profile_governance_policies(
     }
     prune_profile_governance_policies(&mut merged, profiles);
     merged
+}
+
+fn profile_governance_policy_rank(
+    policy: &ProfileGovernancePolicy,
+) -> (&[String], i64, bool, bool, Option<&str>) {
+    (
+        &policy.tags,
+        policy.weight,
+        policy.paused,
+        policy.drained,
+        policy.note.as_deref(),
+    )
 }
 
 pub fn profile_selection_eligibility_reason(
@@ -468,9 +472,11 @@ pub fn merge_profile_bindings(
 ) -> BTreeMap<String, ResponseProfileBinding> {
     let mut merged = existing.clone();
     for (response_id, binding) in incoming {
-        let should_replace = merged
-            .get(response_id)
-            .is_none_or(|current| current.bound_at <= binding.bound_at);
+        let should_replace = merged.get(response_id).is_none_or(|current| {
+            binding.bound_at > current.bound_at
+                || (binding.bound_at == current.bound_at
+                    && binding.profile_name > current.profile_name)
+        });
         if should_replace {
             merged.insert(response_id.clone(), binding.clone());
         }
@@ -491,26 +497,6 @@ pub fn remap_profile_binding_targets(
         if binding.profile_name == from_profile {
             binding.profile_name = to_profile.to_string();
         }
-    }
-}
-
-pub fn duplicate_profile_identity_key(
-    account_id: Option<&str>,
-    email: Option<&str>,
-) -> Option<String> {
-    let account_id = account_id
-        .map(str::trim)
-        .filter(|account_id| !account_id.is_empty());
-    let email = email
-        .map(str::trim)
-        .filter(|email| !email.is_empty())
-        .map(str::to_ascii_lowercase);
-
-    match (account_id, email) {
-        (Some(account_id), Some(email)) => Some(format!("account:{account_id}|email:{email}")),
-        (Some(account_id), None) => Some(format!("account:{account_id}")),
-        (None, Some(email)) => Some(format!("email:{email}")),
-        (None, None) => None,
     }
 }
 

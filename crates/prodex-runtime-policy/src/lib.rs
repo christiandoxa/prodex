@@ -107,8 +107,14 @@ pub fn runtime_policy_proxy() -> Option<RuntimePolicyProxySettings> {
         return None;
     }
     let paths = AppPaths::discover().ok()?;
-    let env_preset = runtime_proxy_preset_from_env();
-    let loaded = load_runtime_policy_cached(&paths.root).ok().flatten();
+    runtime_policy_proxy_from_root(&paths.root, runtime_proxy_preset_from_env())
+}
+
+fn runtime_policy_proxy_from_root(
+    root: &std::path::Path,
+    env_preset: Option<RuntimePolicyProxyPreset>,
+) -> Option<RuntimePolicyProxySettings> {
+    let loaded = load_runtime_policy_cached(root).ok().flatten();
     if let Some(config) = loaded {
         return Some(config.runtime_proxy.with_effective_preset(env_preset));
     }

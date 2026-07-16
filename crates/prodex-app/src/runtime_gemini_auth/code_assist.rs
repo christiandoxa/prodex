@@ -4,13 +4,7 @@ use super::{
 };
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_text_with_limit};
 use anyhow::{Context, Result, bail};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -517,43 +511,11 @@ pub(super) fn handle_gemini_validation(
     Ok(())
 }
 
-struct GeminiValidationTui {
-    terminal: Terminal<CrosstermBackend<io::Stderr>>,
-}
-
-impl GeminiValidationTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable Gemini validation TUI raw mode")?;
-        let mut stderr = io::stderr();
-        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter Gemini validation TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stderr);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stderr = io::stderr();
-                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize Gemini validation TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for GeminiValidationTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+type GeminiValidationTui = terminal_ui::AlternateScreenTerminal<io::Stderr>;
 
 fn prompt_gemini_validation_tui(validation: &GeminiCodeAssistValidation) -> Result<()> {
     let message = gemini_validation_error_message(validation);
-    let mut tui = GeminiValidationTui::new()?;
+    let mut tui = GeminiValidationTui::stderr("Gemini validation TUI")?;
     loop {
         tui.terminal.draw(|frame| {
             let chunks = Layout::default()

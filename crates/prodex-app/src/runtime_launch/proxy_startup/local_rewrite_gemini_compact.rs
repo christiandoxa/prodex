@@ -7,7 +7,10 @@ use super::local_rewrite_gemini::send_runtime_gemini_upstream_request;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 use super::local_rewrite_response::runtime_local_rewrite_response_with_call_id;
 use super::*;
-use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    read_blocking_response_body_with_limit,
+};
 use anyhow::{Context, Result, bail};
 #[cfg(test)]
 use prodex_provider_core::GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX;
@@ -19,7 +22,6 @@ use prodex_provider_core::{
     gemini_provider_core_semantic_compact_summary,
 };
 use prodex_provider_spi::ProviderStreamMode;
-use std::io::Read;
 
 #[cfg(test)]
 const GEMINI_LOCAL_COMPACT_MAX_SUMMARY_BYTES: usize = 24 * 1024;
@@ -138,14 +140,15 @@ pub(super) fn respond_runtime_gemini_compact_request(
 
 pub(super) fn runtime_gemini_semantic_compact_response_parts(
     status: u16,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
     request_id: u64,
     compact_request_body: &[u8],
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read Gemini semantic compact response")?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read Gemini semantic compact response",
+    )?;
     let value: serde_json::Value = serde_json::from_slice(&body)
         .context("failed to parse Gemini semantic compact response")?;
     runtime_gemini_semantic_compact_response_parts_from_value(

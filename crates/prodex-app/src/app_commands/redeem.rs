@@ -1,15 +1,9 @@
 use std::io::{self, IsTerminal};
 
 use anyhow::{Context, Result, bail};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
 use prodex_domain::RequestId;
 use prodex_quota::{UsageResponse, UsageWindow, format_precise_reset_time};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -63,7 +57,7 @@ pub(crate) fn handle_redeem(args: RedeemArgs) -> Result<()> {
         &args.profile,
         manual_redeem_outcome_label(response.outcome),
         &redeem_request_id,
-    );
+    )?;
     Ok(())
 }
 
@@ -151,7 +145,7 @@ fn prompt_manual_redeem_confirmation(
     print_stderr_line(&format!(
         "Profile '{}' has a {} reset near at {}.",
         profile_name, reset_label, reset_time
-    ));
+    ))?;
     let mut input = String::new();
     loop {
         print_stderr_prompt("Redeem one reset credit anyway? [y/N]: ")?;
@@ -161,17 +155,17 @@ fn prompt_manual_redeem_confirmation(
             .context("failed to read redeem confirmation")?;
         match parse_manual_redeem_confirmation(&input) {
             Some(confirmed) => return Ok(confirmed),
-            None => print_stderr_line("Please answer yes or no."),
+            None => print_stderr_line("Please answer yes or no.")?,
         }
     }
 }
 
-fn print_redeem_result(profile_name: &str, outcome: &str, request_id: &str) {
+fn print_redeem_result(profile_name: &str, outcome: &str, request_id: &str) -> Result<()> {
     if !io::stdout().is_terminal() {
         print_stdout_line(&format!(
             "profile={profile_name} outcome={outcome} request_id={request_id}"
-        ));
-        return;
+        ))?;
+        return Ok(());
     }
 
     let fields = vec![
@@ -180,8 +174,9 @@ fn print_redeem_result(profile_name: &str, outcome: &str, request_id: &str) {
         ("Request".to_string(), request_id.to_string()),
     ];
     if print_redeem_result_tui(&fields).is_err() {
-        print_panel("Redeem", &fields);
+        print_panel("Redeem", &fields)?;
     }
+    Ok(())
 }
 
 fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
@@ -230,46 +225,14 @@ fn print_redeem_result_tui(fields: &[(String, String)]) -> Result<()> {
     Ok(())
 }
 
-struct RedeemPromptTui {
-    terminal: Terminal<CrosstermBackend<io::Stderr>>,
-}
-
-impl RedeemPromptTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable redeem prompt TUI raw mode")?;
-        let mut stderr = io::stderr();
-        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter redeem prompt TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stderr);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stderr = io::stderr();
-                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize redeem prompt TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for RedeemPromptTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+type RedeemPromptTui = terminal_ui::AlternateScreenTerminal<io::Stderr>;
 
 fn prompt_manual_redeem_confirmation_tui(
     profile_name: &str,
     reset_label: &str,
     reset_time: &str,
 ) -> Result<bool> {
-    let mut tui = RedeemPromptTui::new()?;
+    let mut tui = RedeemPromptTui::stderr("redeem prompt TUI")?;
     loop {
         tui.terminal.draw(|frame| {
             let chunks = Layout::default()

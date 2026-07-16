@@ -70,7 +70,7 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
                 .draw(|frame| render_all_quota_reports_once_tui(frame, &reports, args.detail))?;
             let _ = terminal.show_cursor();
         } else {
-            print_stdout_text(&render_quota_reports(&reports, args.detail));
+            print_stdout_text(&render_quota_reports(&reports, args.detail))?;
         }
         return Ok(());
     }
@@ -86,7 +86,7 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
         let usage =
             fetch_profile_quota_json(&profile.provider, &codex_home, args.base_url.as_deref())?;
         let json = serde_json::to_string_pretty(&usage).context("failed to render usage JSON")?;
-        print_stdout_line(&json);
+        print_stdout_line(&json)?;
         return Ok(());
     }
 
@@ -105,7 +105,7 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
             .draw(|frame| render_profile_quota_once_tui(frame, &profile_name, quota.clone()))?;
         let _ = terminal.show_cursor();
     } else {
-        print_stdout_text(&render_profile_quota_snapshot(&profile_name, &quota));
+        print_stdout_text(&render_profile_quota_snapshot(&profile_name, &quota))?;
     }
     Ok(())
 }

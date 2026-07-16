@@ -192,6 +192,15 @@ impl Directory {
         fs::remove_file(path)
     }
 
+    pub(super) fn verify(&self, name: &OsStr, file: &File) -> io::Result<()> {
+        self.require_path_identity()?;
+        let current = open_regular(&self.path.join(name), false)?;
+        if file_identity(file)? != file_identity(&current)? {
+            return Err(permission_denied("secret file changed during verification"));
+        }
+        Ok(())
+    }
+
     pub(super) fn remove_entry(&self, name: &OsStr) -> io::Result<()> {
         self.require_path_identity()?;
         match fs::remove_file(self.path.join(name)) {

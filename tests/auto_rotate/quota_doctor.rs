@@ -24,6 +24,12 @@ fn doctor_warns_and_repairs_orphan_profile_import_auth_journals() {
     let journal_root = fixture.prodex_home.join("profile-import-auth-journal");
     let journal_path = journal_root.join("main-test.json");
     fs::create_dir_all(&journal_root).expect("failed to create journal root");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&journal_root, fs::Permissions::from_mode(0o700))
+            .expect("failed to secure journal root");
+    }
 
     let previous_auth = json!({
         "tokens": {
@@ -43,17 +49,19 @@ fn doctor_warns_and_repairs_orphan_profile_import_auth_journals() {
     let mut state = read_state(&fixture.prodex_home);
     state["profiles"]["main"]["email"] = json!("imported@example.com");
     write_json(&fixture.prodex_home.join("state.json"), &state);
-    write_json(
+    let journal = json!({
+        "version": 1,
+        "profile_name": "main",
+        "codex_home": fixture.main_home.display().to_string(),
+        "previous_email": "main@example.com",
+        "previous_auth_json": previous_auth.to_string(),
+        "created_at": "2026-04-28T00:00:00+00:00"
+    });
+    secret_store::write_private_file_atomic(
         &journal_path,
-        &json!({
-            "version": 1,
-            "profile_name": "main",
-            "codex_home": fixture.main_home.display().to_string(),
-            "previous_email": "main@example.com",
-            "previous_auth_json": previous_auth.to_string(),
-            "created_at": "2026-04-28T00:00:00+00:00"
-        }),
-    );
+        &serde_json::to_vec_pretty(&journal).expect("failed to encode import auth journal"),
+    )
+    .expect("failed to write import auth journal");
 
     let output = run_prodex(&fixture, &["doctor"]);
 

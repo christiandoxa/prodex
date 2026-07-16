@@ -167,10 +167,10 @@ pub(crate) fn bump_runtime_profile_bad_pairing_score(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!(
-            "profile_bad_pairing:{profile_name}:{}",
+        RuntimeStateMutation::ProfileBadPairing(format!(
+            "{profile_name}:{}",
             runtime_route_kind_label(route_kind)
-        ),
+        )),
     );
     drop(runtime);
     runtime_proxy_log(
@@ -262,10 +262,10 @@ pub(crate) fn bump_runtime_profile_health_score(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!(
-            "profile_health:{profile_name}:{}",
+        RuntimeStateMutation::ProfileHealth(format!(
+            "{profile_name}:{}",
             runtime_route_kind_label(route_kind)
-        ),
+        )),
     );
     drop(runtime);
     runtime_proxy_log(

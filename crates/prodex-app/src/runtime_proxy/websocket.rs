@@ -17,8 +17,9 @@ pub(super) use self::unauthorized_recovery::{
     runtime_try_recover_profile_auth_from_unauthorized_steps,
 };
 use runtime_proxy_crate::{
-    RuntimeWebsocketTarget, inspect_runtime_websocket_text_frame, runtime_interleave_socket_addrs,
-    runtime_proxy_websocket_error_payload_text, runtime_realtime_websocket_terminal_event_kind,
+    RuntimeWebsocketTarget, inspect_runtime_websocket_text_frame_with_phase,
+    runtime_interleave_socket_addrs, runtime_proxy_websocket_error_payload_text,
+    runtime_realtime_websocket_terminal_event_kind,
     runtime_translate_precommit_previous_response_websocket_text_frame,
     runtime_translate_previous_response_websocket_text_frame, runtime_websocket_authority,
     runtime_websocket_error_payload_from_http_body, runtime_websocket_http_connect_request,
@@ -131,13 +132,13 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
     profile_name: &str,
     turn_state_override: Option<&str>,
 ) -> Result<RuntimeWebsocketConnectResult> {
-    let runtime = shared
-        .runtime
-        .lock()
+    let upstream_base_url = shared
+        .lock_runtime_state()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+        .upstream_base_url
         .clone();
     let upstream_url = runtime_proxy_upstream_websocket_url(
-        &runtime.upstream_base_url,
+        &upstream_base_url,
         &handshake_request.path_and_query,
     )?;
     let log_url = runtime_proxy_log_url(&upstream_url);
@@ -310,8 +311,15 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                 {
                     continue;
                 }
+                let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+                    status,
+                    &body,
+                    runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+                );
                 if (matches!(status, 401 | 403)
-                    && (status == 401 || extract_runtime_proxy_quota_message(&body).is_none()))
+                    && (status == 401
+                        || error_policy.action
+                            != runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile))
                     || runtime_proxy_body_indicates_token_invalidated(&body)
                 {
                     note_runtime_profile_auth_failure(
@@ -334,14 +342,14 @@ pub(super) fn connect_runtime_proxy_upstream_websocket(
                         ],
                     ),
                 );
-                if matches!(status, 402 | 403 | 429)
-                    && extract_runtime_proxy_quota_message(&body).is_some()
+                if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
                 {
                     return Ok(RuntimeWebsocketConnectResult::QuotaBlocked(
                         runtime_websocket_error_payload_from_http_body(&body),
                     ));
                 }
-                if extract_runtime_proxy_overload_message(status, &body).is_some() {
+                if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
+                {
                     return Ok(RuntimeWebsocketConnectResult::Overloaded(
                         runtime_websocket_error_payload_from_http_body(&body),
                     ));

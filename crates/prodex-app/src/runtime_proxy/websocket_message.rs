@@ -17,6 +17,7 @@ use super::{
     runtime_quota_last_chance_profile_for_route, runtime_smart_context_model_name_from_body,
     runtime_websocket_previous_response_reuse_is_nonreplayable,
     runtime_websocket_previous_response_reuse_is_stale,
+    runtime_websocket_workspace_credit_exhausted,
     send_runtime_proxy_stale_continuation_websocket_error, send_runtime_proxy_websocket_error,
 };
 use anyhow::Result;
@@ -236,6 +237,7 @@ pub(super) mod test_support {
             runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
             upstream_no_proxy: false,
             auto_redeem_enabled: false,
+            compact_client: reqwest::Client::new(),
             async_client: reqwest::Client::new(),
             async_runtime: Arc::new(
                 TokioRuntimeBuilder::new_current_thread()
@@ -258,7 +260,6 @@ pub(super) mod test_support {
                 profile_retry_backoff_until: BTreeMap::new(),
                 profile_transport_backoff_until: BTreeMap::new(),
                 profile_route_circuit_open_until: BTreeMap::new(),
-                profile_inflight: BTreeMap::new(),
                 profile_health: BTreeMap::new(),
             })),
             log_path: env::temp_dir().join(format!(

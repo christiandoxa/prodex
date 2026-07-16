@@ -11,7 +11,9 @@ use std::process::Command;
 
 use super::manage::print_profile_panel;
 use super::write_secret_text_file;
-use crate::runtime_kiro_acp::{runtime_kiro_acp_bootstrap, runtime_kiro_acp_model_catalog};
+use crate::runtime_kiro_acp::{
+    runtime_kiro_acp_bootstrap_with_command, runtime_kiro_acp_model_catalog,
+};
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     audit_log_event_best_effort, create_codex_home_if_missing, ensure_path_is_unique, kiro_bin,
@@ -533,11 +535,7 @@ fn read_kiro_auth_secret_text(path: &Path) -> Result<String> {
 }
 
 fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = matches!(
-        &error,
-        secret_store::SecretError::InvalidLocation { reason }
-            if reason.ends_with(" is not a regular secret file")
-    );
+    let is_non_regular_file = error.is_unsafe_file();
     let error = anyhow::Error::new(error);
     if is_non_regular_file {
         error.context("not a regular secret file")
@@ -643,6 +641,14 @@ pub(crate) fn write_kiro_model_catalog_snapshot(
     codex_home: &Path,
     secret: &KiroAuthSecret,
 ) -> Result<()> {
+    write_kiro_model_catalog_snapshot_with_command(codex_home, secret, &kiro_bin())
+}
+
+fn write_kiro_model_catalog_snapshot_with_command(
+    codex_home: &Path,
+    secret: &KiroAuthSecret,
+    command: &std::ffi::OsStr,
+) -> Result<()> {
     let overlay_root = create_private_kiro_temp_root("catalog")?;
     let result = (|| {
         let data_dir = overlay_root.join("kiro-data");
@@ -657,8 +663,8 @@ pub(crate) fn write_kiro_model_catalog_snapshot(
             extra_env.push((OsString::from("AWS_REGION"), OsString::from(region)));
         }
         let cwd = env::current_dir().unwrap_or_else(|_| codex_home.to_path_buf());
-        let models = native_kiro_model_catalog(&cwd, &extra_env).or_else(|_| {
-            let bootstrap = runtime_kiro_acp_bootstrap(&cwd, &extra_env)?;
+        let models = native_kiro_model_catalog(command, &cwd, &extra_env).or_else(|_| {
+            let bootstrap = runtime_kiro_acp_bootstrap_with_command(command, &cwd, &extra_env)?;
             Ok::<_, anyhow::Error>(runtime_kiro_acp_model_catalog(&bootstrap.session))
         })?;
         let path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
@@ -676,8 +682,12 @@ pub(crate) fn write_kiro_model_catalog_snapshot(
     result
 }
 
-fn native_kiro_model_catalog(cwd: &Path, extra_env: &[(OsString, OsString)]) -> Result<Vec<Value>> {
-    let output = Command::new(kiro_bin())
+fn native_kiro_model_catalog(
+    command: &std::ffi::OsStr,
+    cwd: &Path,
+    extra_env: &[(OsString, OsString)],
+) -> Result<Vec<Value>> {
+    let output = Command::new(command)
         .args(["chat", "--list-models", "--format", "json"])
         .current_dir(cwd)
         .envs(extra_env.iter().cloned())
@@ -833,7 +843,6 @@ fn write_kiro_state_entry(connection: &Connection, key: &str, value: Option<&str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TestEnvLockGuard, acquire_test_env_lock};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -903,32 +912,6 @@ mod tests {
             "unexpected error: {err:#}"
         );
         let _ = fs::remove_dir_all(root);
-    }
-
-    struct EnvGuard {
-        _lock: TestEnvLockGuard,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set_kiro_bin(value: &Path) -> Self {
-            let lock = acquire_test_env_lock();
-            let previous = env::var_os("PRODEX_KIRO_BIN");
-            unsafe { env::set_var("PRODEX_KIRO_BIN", value) };
-            Self {
-                _lock: lock,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.previous.take() {
-                Some(value) => unsafe { env::set_var("PRODEX_KIRO_BIN", value) },
-                None => unsafe { env::remove_var("PRODEX_KIRO_BIN") },
-            }
-        }
     }
 
     #[test]
@@ -1105,7 +1088,6 @@ sys.exit(1)
         let codex_home = root.join("codex-home");
         create_codex_home_if_missing(&codex_home).expect("codex home should exist");
         let fake_kiro = write_fake_kiro_binary(&root);
-        let _guard = EnvGuard::set_kiro_bin(&fake_kiro);
 
         let secret = KiroAuthSecret {
             auth_key: "codewhisperer:odic:token".to_string(),
@@ -1124,7 +1106,7 @@ sys.exit(1)
             region: Some("us-east-1".to_string()),
         };
 
-        write_kiro_model_catalog_snapshot(&codex_home, &secret)
+        write_kiro_model_catalog_snapshot_with_command(&codex_home, &secret, fake_kiro.as_os_str())
             .expect("model catalog snapshot should be written");
         let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
         let catalog_text = fs::read_to_string(&catalog_path).expect("catalog should exist");

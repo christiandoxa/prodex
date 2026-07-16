@@ -8,10 +8,10 @@ use super::{
 };
 use anyhow::{Context, Result};
 use prodex_core::{AppPaths, path_is_strictly_under_root, same_path};
+use prodex_profile_identity::canonical_profile_identity_key;
 use prodex_state::{
-    duplicate_profile_identity_key, ensure_active_profile_after_duplicate_cleanup,
-    remap_profile_binding_targets, remove_duplicate_profile_from_state,
-    select_canonical_duplicate_profile,
+    ensure_active_profile_after_duplicate_cleanup, remap_profile_binding_targets,
+    remove_duplicate_profile_from_state, select_canonical_duplicate_profile,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -44,7 +44,7 @@ fn remap_runtime_continuation_store_profiles(
 }
 
 fn cleanup_duplicate_identity_key(identity: &ProfileIdentity) -> Option<String> {
-    duplicate_profile_identity_key(identity.account_id.as_deref(), identity.email.as_deref())
+    canonical_profile_identity_key(identity.account_id.as_deref(), identity.email.as_deref())
 }
 
 fn resolve_cleanup_profile_identities(state: &mut AppState) -> Vec<(String, ProfileIdentity)> {

@@ -60,6 +60,16 @@ async fn inspect_runtime_sse_lookahead(
                         );
                         return Ok(RuntimeSseInspection::QuotaBlocked(buffered));
                     }
+                    RuntimeSseInspectionProgress::Overloaded => {
+                        runtime_proxy_log_to_path(
+                            log_path,
+                            &format!(
+                                "request={request_id} transport=http lookahead_retryable_overload bytes={}",
+                                buffered.len()
+                            ),
+                        );
+                        return Ok(RuntimeSseInspection::Overloaded(buffered));
+                    }
                     RuntimeSseInspectionProgress::PreviousResponseNotFound => {
                         runtime_proxy_log_to_path(
                             log_path,
@@ -138,6 +148,7 @@ async fn inspect_runtime_sse_lookahead(
         RuntimeSseInspectionProgress::QuotaBlocked => {
             Ok(RuntimeSseInspection::QuotaBlocked(buffered))
         }
+        RuntimeSseInspectionProgress::Overloaded => Ok(RuntimeSseInspection::Overloaded(buffered)),
         RuntimeSseInspectionProgress::PreviousResponseNotFound => {
             Ok(RuntimeSseInspection::PreviousResponseNotFound(buffered))
         }

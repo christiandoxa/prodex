@@ -38,18 +38,22 @@ pub fn runtime_proxy_claude_launch_args(
     args
 }
 
-pub fn runtime_proxy_claude_launch_model(codex_home: &Path) -> String {
-    runtime_anthropic_crate::runtime_proxy_claude_model_override()
-        .or_else(|| runtime_proxy_claude_config_value(codex_home, "model"))
-        .unwrap_or_else(|| runtime_anthropic_crate::DEFAULT_PRODEX_CLAUDE_MODEL.to_string())
+pub fn runtime_proxy_claude_launch_model(
+    codex_home: &Path,
+) -> codex_config::CodexConfigResult<String> {
+    if let Some(model) = runtime_anthropic_crate::runtime_proxy_claude_model_override() {
+        return Ok(model);
+    }
+    Ok(runtime_proxy_claude_config_value(codex_home, "model")?
+        .unwrap_or_else(|| runtime_anthropic_crate::DEFAULT_PRODEX_CLAUDE_MODEL.to_string()))
 }
 
 pub fn runtime_proxy_claude_launch_env(
     listen_addr: SocketAddr,
     config_dir: &Path,
     codex_home: &Path,
-) -> Vec<(&'static str, OsString)> {
-    let target_model = runtime_proxy_claude_launch_model(codex_home);
+) -> codex_config::CodexConfigResult<Vec<(&'static str, OsString)>> {
+    let target_model = runtime_proxy_claude_launch_model(codex_home)?;
     let base_url = format!("http://{listen_addr}");
     let mut env = vec![
         ("CLAUDE_CONFIG_DIR", OsString::from(config_dir.as_os_str())),
@@ -78,7 +82,7 @@ pub fn runtime_proxy_claude_launch_env(
     env.extend(
         runtime_anthropic_crate::runtime_proxy_claude_custom_model_option_env(&target_model),
     );
-    env
+    Ok(env)
 }
 
 pub fn runtime_proxy_claude_removed_env() -> &'static [&'static str] {

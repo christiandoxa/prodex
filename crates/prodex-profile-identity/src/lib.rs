@@ -261,21 +261,24 @@ where
     T: serde::de::DeserializeOwned,
 {
     let mut parts = raw_jwt.split('.');
-    let (_header_b64, payload_b64, _sig_b64) = match (parts.next(), parts.next(), parts.next()) {
-        (Some(header), Some(payload), Some(signature))
-            if !header.is_empty() && !payload.is_empty() && !signature.is_empty() =>
-        {
-            (header, payload, signature)
-        }
-        _ => bail!("invalid JWT format"),
-    };
+    let (_header_b64, payload_b64, _sig_b64) =
+        match (parts.next(), parts.next(), parts.next(), parts.next()) {
+            (Some(header), Some(payload), Some(signature), None)
+                if !header.is_empty() && !payload.is_empty() && !signature.is_empty() =>
+            {
+                (header, payload, signature)
+            }
+            _ => bail!("invalid JWT format"),
+        };
 
     let payload_bytes = Zeroizing::new(
         base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(payload_b64)
-            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
             .context("failed to decode JWT payload")?,
     );
+    if base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&*payload_bytes) != payload_b64 {
+        bail!("non-canonical JWT payload encoding");
+    }
     serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")
 }
 
@@ -295,6 +298,20 @@ pub fn normalize_optional_account_id(account_id: impl AsRef<str>) -> Option<Stri
 
 pub fn normalize_account_id(account_id: &str) -> String {
     account_id.trim().to_string()
+}
+
+pub fn canonical_profile_identity_key(
+    account_id: Option<&str>,
+    email: Option<&str>,
+) -> Option<String> {
+    let account_id = account_id.and_then(normalize_optional_account_id);
+    let email = email.map(normalize_email).filter(|email| !email.is_empty());
+    match (account_id, email) {
+        (Some(account_id), Some(email)) => Some(format!("account:{account_id}|email:{email}")),
+        (Some(account_id), None) => Some(format!("account:{account_id}")),
+        (None, Some(email)) => Some(format!("email:{email}")),
+        (None, None) => None,
+    }
 }
 
 pub fn profile_name_from_email(email: &str) -> String {

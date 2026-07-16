@@ -183,7 +183,6 @@ fn runtime_proxy_waits_for_anthropic_inflight_relief_then_succeeds() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -309,7 +308,6 @@ fn runtime_proxy_waits_for_responses_inflight_relief_then_succeeds() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -393,17 +391,13 @@ fn runtime_profile_inflight_relief_wait_returns_immediately_after_prior_release(
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
     );
 
     let observed_revision = runtime_profile_inflight_release_revision(&shared);
-    shared
-        .lane_admission
-        .inflight_release_revision
-        .fetch_add(1, Ordering::SeqCst);
+    shared.lane_admission.record_inflight_release();
 
     let started_at = Instant::now();
     assert!(wait_for_runtime_profile_inflight_relief_since(
@@ -443,7 +437,6 @@ fn runtime_profile_inflight_relief_wait_ignores_active_request_release_notify() 
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -507,7 +500,6 @@ fn runtime_probe_refresh_wait_returns_immediately_after_progress_is_observed() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -553,7 +545,6 @@ fn runtime_probe_refresh_wait_ignores_lane_release_notify() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,

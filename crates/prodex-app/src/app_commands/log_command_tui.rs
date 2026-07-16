@@ -144,7 +144,7 @@ fn stream_token_usage_events(json: bool) -> Result<()> {
 }
 
 fn stream_token_usage_events_tui() -> Result<()> {
-    let mut tui = LogTuiTerminal::new("log stream")?;
+    let mut tui = LogTuiTerminal::stdout("log stream TUI")?;
     let mut view = LogTuiState::default();
     let mut items = VecDeque::<LogStreamItem>::new();
     if let Some(event) = latest_transcript_event()? {

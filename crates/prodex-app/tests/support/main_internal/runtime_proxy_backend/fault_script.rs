@@ -131,6 +131,25 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn overloaded_503(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 503 Service Unavailable",
+            content_type: "application/json",
+            body: serde_json::json!({
+                "error": {
+                    "code": "server_is_overloaded",
+                    "message": "Server is overloaded"
+                }
+            })
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn stalled_json(
         route: RuntimeProxyBackendFaultRoute,
         account_id: &str,
@@ -185,7 +204,9 @@ impl RuntimeProxyBackendFaultScript {
             .steps
             .iter()
             .position(|step| step.matches(route, account_id))?;
-        self.steps.remove(index).map(RuntimeProxyBackendFaultStep::into_response)
+        self.steps
+            .remove(index)
+            .map(RuntimeProxyBackendFaultStep::into_response)
     }
 }
 

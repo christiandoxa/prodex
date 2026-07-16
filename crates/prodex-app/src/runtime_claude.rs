@@ -85,7 +85,7 @@ impl RuntimeLaunchStrategy for ClaudeLaunchStrategy {
             runtime_proxy.listen_addr,
             &claude_config_dir,
             &prepared.codex_home,
-        );
+        )?;
         Ok(RuntimeLaunchPlan::new(
             ChildProcessPlan::new(claude_bin, prepared.codex_home.clone())
                 .with_args(launch_args)

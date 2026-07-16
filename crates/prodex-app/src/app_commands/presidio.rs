@@ -316,7 +316,7 @@ fn print_presidio_panel(title: &str, fields: Vec<(String, String)>) -> Result<()
     };
     let height = presidio_tui_height(&panel);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        print_panel(&panel.title, &panel.fields);
+        print_panel(&panel.title, &panel.fields)?;
         return Ok(());
     };
     terminal.draw(|frame| {

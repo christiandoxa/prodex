@@ -10,7 +10,7 @@ use super::{
 use anyhow::{Context, Result};
 use chrono::Local;
 use prodex_quota::{UsageAuth, UsageAuthSyncOutcome, UsageAuthSyncSource};
-use prodex_runtime_state::RuntimeRouteKind;
+use prodex_runtime_state::{RuntimeRouteKind, RuntimeStateMutation};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -368,7 +368,7 @@ pub(crate) fn clear_runtime_profile_auth_failure(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!("profile_auth_backoff_cleared:{profile_name}"),
+        RuntimeStateMutation::ProfileAuthBackoffCleared(profile_name.to_string()),
     );
 }
 
@@ -410,6 +410,6 @@ pub(crate) fn note_runtime_profile_auth_failure(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!("profile_auth_backoff:{profile_name}"),
+        RuntimeStateMutation::ProfileAuthBackoff(profile_name.to_string()),
     );
 }

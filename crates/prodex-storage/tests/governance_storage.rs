@@ -1,15 +1,18 @@
 use prodex_domain::{
     ApprovalAction, ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalRecord, ApprovalScope,
-    ApprovalTransitionRequest, CredentialScope, Principal, PrincipalId, PrincipalKind, Role,
-    TenantId, transition_approval,
+    ApprovalTransitionRequest, AuditAction, AuditEvent, AuditEventId, AuditOutcome, AuditResource,
+    CredentialScope, IdempotencyKey, Principal, PrincipalId, PrincipalKind, Role, TenantContext,
+    TenantId, compute_audit_chain_digest, transition_approval,
 };
 use prodex_storage::{
-    GovernanceActivationCommand, GovernanceArtifactKind, GovernanceRevisionWriteCommand,
-    GovernanceStorageError, SiemOutboxDeliveryDecision, SiemOutboxRetryPolicy, TenantStorageKey,
-    plan_governance_activation, plan_governance_revision_write, plan_siem_outbox_delivery,
+    AppendOnlyAuditCommand, AuditOutboxWriteCommand, GovernanceActivationAction,
+    GovernanceActivationCurrent, GovernanceActivationRequest, GovernanceArtifactKind,
+    GovernanceRevisionWriteCommand, GovernanceStorageError, SiemOutboxDeliveryDecision,
+    SiemOutboxRetryPolicy, TenantStorageKey, plan_governance_activation,
+    plan_governance_revision_write, plan_siem_outbox_delivery,
 };
 
-fn approved(tenant_id: TenantId, fingerprint: ApprovalFingerprint) -> ApprovalRecord {
+fn approved(tenant_id: TenantId, fingerprint: ApprovalFingerprint) -> (ApprovalRecord, Principal) {
     let maker = PrincipalId::new();
     let pending = ApprovalRecord::pending(
         ApprovalId::new("approval-1").unwrap(),
@@ -29,7 +32,7 @@ fn approved(tenant_id: TenantId, fingerprint: ApprovalFingerprint) -> ApprovalRe
         Role::Admin,
         CredentialScope::ControlPlane,
     );
-    transition_approval(ApprovalTransitionRequest {
+    let approval = transition_approval(ApprovalTransitionRequest {
         record: &pending,
         actor: &checker,
         action: ApprovalAction::Approve,
@@ -38,7 +41,29 @@ fn approved(tenant_id: TenantId, fingerprint: ApprovalFingerprint) -> ApprovalRe
         reason: None,
     })
     .unwrap()
-    .record
+    .record;
+    (approval, checker)
+}
+
+fn audit(tenant_id: TenantId, actor: &Principal) -> AuditOutboxWriteCommand {
+    let event = AuditEvent::new(
+        200,
+        TenantContext { tenant_id },
+        actor,
+        AuditAction::try_new("governance.activate").unwrap(),
+        AuditResource::new("policy", None::<String>, Some(tenant_id)),
+        AuditOutcome::Success,
+        None::<String>,
+    );
+    AuditOutboxWriteCommand {
+        outbox_event_id: AuditEventId::new(),
+        audit: AppendOnlyAuditCommand {
+            storage_key: TenantStorageKey::tenant(tenant_id),
+            event_digest: compute_audit_chain_digest(None, &event),
+            event,
+            previous_digest: None,
+        },
+    }
 }
 
 #[test]
@@ -78,27 +103,38 @@ fn governance_revision_is_tenant_bound_bounded_and_content_free_in_debug() {
 fn governance_activation_requires_exact_approved_fingerprint_and_preserves_lkg() {
     let tenant_id = TenantId::new();
     let fingerprint = ApprovalFingerprint::new("sha256:fixture").unwrap();
-    let plan = plan_governance_activation(GovernanceActivationCommand {
-        storage_key: TenantStorageKey::tenant(tenant_id),
+    let (approval, actor) = approved(tenant_id, fingerprint.clone());
+    let request = GovernanceActivationRequest {
         tenant_id,
         kind: GovernanceArtifactKind::Policy,
-        revision_id: "policy-v2".to_string(),
-        fingerprint: fingerprint.clone(),
-        approval: approved(tenant_id, fingerprint),
-        expected_etag: "etag-v1".to_string(),
-        current_active_revision_id: Some("policy-v1".to_string()),
-        current_last_known_good_revision_id: None,
+        revision_id: prodex_domain::PolicyRevisionId::new().to_string(),
+        approval_id: approval.id.clone(),
+        actor: actor.clone(),
+        action: GovernanceActivationAction::Activate,
+        expected_etag: Some("etag-v1".to_string()),
+        idempotency_key: IdempotencyKey::new("activate-v2").unwrap(),
+        request_fingerprint: "request-v2".to_string(),
+        audit_outbox: audit(tenant_id, &actor),
         activated_at_unix_ms: 200,
-    })
+    };
+    let plan = plan_governance_activation(
+        &request,
+        GovernanceActivationCurrent {
+            revision_checksum: fingerprint.as_str(),
+            approval: &approval,
+            active_revision_id: Some("policy-v1"),
+            last_known_good_revision_id: None,
+            etag: Some("etag-v1"),
+        },
+    )
     .unwrap();
 
-    assert_eq!(plan.activated_revision_id, "policy-v2");
+    assert_eq!(plan.last_known_good_revision_id, "policy-v1");
+    assert_eq!(plan.previous_revision_state, Some("superseded"));
     assert_eq!(
-        plan.last_known_good_revision_id.as_deref(),
-        Some("policy-v1")
+        plan.activated_approval.state,
+        prodex_domain::ApprovalState::Active
     );
-    assert!(plan.transactional_audit_required);
-    assert!(plan.invalidation_required);
 }
 
 #[test]

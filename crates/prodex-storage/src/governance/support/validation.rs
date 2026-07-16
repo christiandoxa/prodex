@@ -1,7 +1,31 @@
 use crate::{
-    GovernanceRepositoryError, GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
+    GovernanceActivationRequest, GovernanceArtifactKind, GovernanceRepositoryError,
+    GovernanceSessionRevokeCommand, GovernanceSessionUpsertCommand,
 };
-use prodex_domain::{ApprovalError, CredentialScope, Principal, Role, TenantId};
+use prodex_domain::{ApprovalError, CredentialScope, PolicyRevisionId, Principal, Role, TenantId};
+
+pub fn validate_governance_revision_id(
+    kind: GovernanceArtifactKind,
+    revision_id: &str,
+) -> Result<(), GovernanceRepositoryError> {
+    if kind == GovernanceArtifactKind::Policy {
+        revision_id
+            .parse::<PolicyRevisionId>()
+            .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+    }
+    Ok(())
+}
+
+pub fn validate_governance_activation_request(
+    request: &GovernanceActivationRequest,
+) -> Result<i64, GovernanceRepositoryError> {
+    require_control_plane_admin(request.tenant_id, &request.actor)?;
+    validate_governance_revision_id(request.kind, &request.revision_id)?;
+    if request.request_fingerprint.is_empty() || request.request_fingerprint.len() > 256 {
+        return Err(GovernanceRepositoryError::InvalidInput);
+    }
+    to_i64(request.activated_at_unix_ms)
+}
 
 pub fn validate_governance_session_upsert(
     command: &GovernanceSessionUpsertCommand,

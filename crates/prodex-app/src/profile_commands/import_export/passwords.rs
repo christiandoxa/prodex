@@ -2,13 +2,7 @@ use std::io::IsTerminal;
 
 use crate::{ExportProfileArgs, ProfileExportPayload, print_stderr_line, print_stderr_prompt};
 use anyhow::{Context, Result, bail};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -104,7 +98,7 @@ pub(super) fn resolve_import_password() -> Result<String> {
 }
 
 fn prompt_profile_export_password_tui(title: &str, label: &str, detail: &str) -> Result<String> {
-    let mut tui = ExportPromptTui::new()?;
+    let mut tui = ExportPromptTui::stderr("profile export prompt TUI")?;
     let mut input = Zeroizing::new(String::new());
     loop {
         tui.terminal.draw(|frame| {
@@ -190,48 +184,16 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
             "y" | "yes" => return Ok(true),
             "n" | "no" => return Ok(false),
             _ => {
-                print_stderr_line("Please answer yes or no.");
+                print_stderr_line("Please answer yes or no.")?;
             }
         }
     }
 }
 
-struct ExportPromptTui {
-    terminal: Terminal<CrosstermBackend<io::Stderr>>,
-}
-
-impl ExportPromptTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable profile export prompt TUI raw mode")?;
-        let mut stderr = io::stderr();
-        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter profile export prompt TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stderr);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stderr = io::stderr();
-                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize profile export prompt TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for ExportPromptTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+type ExportPromptTui = terminal_ui::AlternateScreenTerminal<io::Stderr>;
 
 fn prompt_export_password_mode_tui() -> Result<bool> {
-    let mut tui = ExportPromptTui::new()?;
+    let mut tui = ExportPromptTui::stderr("profile export prompt TUI")?;
     loop {
         tui.terminal.draw(|frame| {
             let chunks = Layout::default()

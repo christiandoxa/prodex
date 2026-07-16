@@ -45,6 +45,55 @@ fn cleanup_summary_total_and_merge_count_all_fields() {
     assert_eq!(merged.stale_login_dirs_removed, 4);
 }
 
+#[test]
+fn cleanup_report_preserves_missing_and_failure_details() {
+    let paths = test_paths("cleanup-report");
+    fs::create_dir_all(&paths.root).unwrap();
+    let removed = paths.root.join("removed");
+    let missing = paths.root.join("missing");
+    let outside = paths.root.with_extension("outside");
+    fs::write(&removed, "remove").unwrap();
+    fs::write(&outside, "keep").unwrap();
+
+    let report =
+        cleanup_existing_files_under(&paths.root, [removed.clone(), missing, outside.clone()]);
+
+    assert_eq!(report.removed, 1);
+    assert_eq!(report.missing, 1);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].path, outside);
+    assert_eq!(
+        report.failures[0].kind,
+        ProdexCleanupFailureKind::OutsideRoot
+    );
+    assert!(!removed.exists());
+    assert!(report.failures[0].path.exists());
+    let _ = fs::remove_dir_all(paths.root);
+    let _ = fs::remove_file(report.failures[0].path.clone());
+}
+
+#[cfg(unix)]
+#[test]
+fn cleanup_report_rejects_symlink_parent_escape() {
+    let paths = test_paths("cleanup-report-symlink-parent");
+    let outside = paths.root.with_extension("outside");
+    fs::create_dir_all(&paths.root).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret"), "keep").unwrap();
+    std::os::unix::fs::symlink(&outside, paths.root.join("linked")).unwrap();
+
+    let report = cleanup_existing_files_under(&paths.root, [paths.root.join("linked/secret")]);
+
+    assert_eq!(report.removed, 0);
+    assert_eq!(
+        report.failures[0].kind,
+        ProdexCleanupFailureKind::OutsideRoot
+    );
+    assert!(outside.join("secret").exists());
+    let _ = fs::remove_dir_all(paths.root);
+    let _ = fs::remove_dir_all(outside);
+}
+
 #[cfg(unix)]
 #[test]
 fn runtime_log_discovery_skips_symlink_log_files() {
@@ -171,6 +220,54 @@ fn repair_plan_reports_unreadable_state_without_last_good() {
     assert_eq!(actions.len(), 1);
     assert_eq!(actions[0].kind, ProdexRepairActionKind::UnreadableStateFile);
     assert_eq!(actions[0].severity, ProdexRepairSeverity::Critical);
+    fs::remove_dir_all(&paths.root).expect("test root should clean up");
+}
+
+#[test]
+fn repair_plan_rejects_invalid_state_and_invalid_last_good() {
+    let paths = test_paths("repair-invalid-state");
+    fs::create_dir_all(&paths.root).expect("root should exist");
+    fs::write(&paths.state_file, "not-json").expect("invalid state should write");
+    fs::write(last_good_file_path(&paths.state_file), "also-not-json")
+        .expect("invalid last-good should write");
+
+    let actions = plan_prodex_state_repairs_at(
+        &paths,
+        None,
+        SystemTime::now(),
+        ProdexRepairPlanOptions::default(),
+        |_| false,
+    );
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].kind, ProdexRepairActionKind::InvalidStateFile);
+    assert_eq!(actions[0].severity, ProdexRepairSeverity::Critical);
+    assert!(actions[0].secondary_path.is_none());
+    fs::remove_dir_all(&paths.root).expect("test root should clean up");
+}
+
+#[test]
+fn repair_plan_restores_valid_last_good_for_invalid_state() {
+    let paths = test_paths("repair-invalid-state-last-good");
+    fs::create_dir_all(&paths.root).expect("root should exist");
+    fs::write(&paths.state_file, "not-json").expect("invalid state should write");
+    fs::write(last_good_file_path(&paths.state_file), r#"{"profiles":{}}"#)
+        .expect("valid last-good should write");
+
+    let actions = plan_prodex_state_repairs_at(
+        &paths,
+        None,
+        SystemTime::now(),
+        ProdexRepairPlanOptions::default(),
+        |_| false,
+    );
+
+    assert_eq!(actions.len(), 1);
+    assert_eq!(
+        actions[0].kind,
+        ProdexRepairActionKind::RestoreLastGoodState
+    );
+    assert!(actions[0].dry_run_text.contains("restore invalid"));
     fs::remove_dir_all(&paths.root).expect("test root should clean up");
 }
 

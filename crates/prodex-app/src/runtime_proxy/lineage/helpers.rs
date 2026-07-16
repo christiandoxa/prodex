@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ResponseProfileBinding;
+use crate::{ResponseProfileBinding, RuntimeStateMutation};
 
 use super::{
     RuntimeRotationProxyShared, RuntimeRotationState, schedule_runtime_state_save_from_runtime,
@@ -9,9 +9,9 @@ use super::{
 pub(crate) fn schedule_runtime_binding_touch_save(
     shared: &RuntimeRotationProxyShared,
     runtime: &RuntimeRotationState,
-    reason: &str,
+    mutation: RuntimeStateMutation,
 ) {
-    schedule_runtime_state_save_from_runtime(shared, runtime, reason);
+    schedule_runtime_state_save_from_runtime(shared, runtime, mutation);
 }
 pub(crate) fn runtime_previous_response_turn_state(
     shared: &RuntimeRotationProxyShared,

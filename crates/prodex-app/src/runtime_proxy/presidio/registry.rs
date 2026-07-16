@@ -71,6 +71,10 @@ pub(crate) fn register_runtime_presidio_redaction_proxy_state(
     Ok(())
 }
 
+pub(crate) fn unregister_runtime_presidio_redaction_proxy_state(log_path: &Path) {
+    let _ = register_runtime_presidio_redaction_proxy_state(log_path, None);
+}
+
 pub(super) fn validate_runtime_presidio_registry_insert(
     entry_count: usize,
     replacing: bool,

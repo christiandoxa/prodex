@@ -1,9 +1,5 @@
 use super::*;
 
-mod routed_command;
-
-use routed_command::{CommandAction, RoutedCommand};
-
 #[derive(Debug)]
 pub(crate) struct ProdexCommandExit {
     code: i32,
@@ -33,12 +29,28 @@ pub(crate) fn command_exit_error(code: i32, message: impl Into<String>) -> anyho
 
 pub(crate) trait CommandDispatchExt {
     fn execute(self) -> Result<()>;
+    fn requires_valid_runtime_policy(&self) -> bool;
     fn should_show_update_notice(&self) -> bool;
 }
 
 impl CommandDispatchExt for Commands {
     fn execute(self) -> Result<()> {
-        command_into_routed_command(self).execute()
+        execute_command(self)
+    }
+
+    fn requires_valid_runtime_policy(&self) -> bool {
+        matches!(
+            self,
+            Commands::Run(_)
+                | Commands::Caveman(_)
+                | Commands::Rtk(_)
+                | Commands::Ponytail(_)
+                | Commands::Super(_)
+                | Commands::Expose(_)
+                | Commands::Gateway(_)
+                | Commands::Claude(_)
+                | Commands::RuntimeBroker(_)
+        )
     }
 
     fn should_show_update_notice(&self) -> bool {
@@ -52,307 +64,88 @@ impl CommandDispatchExt for Commands {
     }
 }
 
-trait CommandExecute {
-    fn execute(self) -> Result<()>;
-}
-
-impl<T> CommandAction for T
-where
-    T: CommandExecute + 'static,
-{
-    fn run(self: Box<Self>) -> Result<()> {
-        (*self).execute()
-    }
-}
-
-impl CommandExecute for AddProfileArgs {
-    fn execute(self) -> Result<()> {
-        handle_add_profile(self)
-    }
-}
-
-impl CommandExecute for AuditArgs {
-    fn execute(self) -> Result<()> {
-        handle_audit(self)
-    }
-}
-
-impl CommandExecute for AppServerBrokerArgs {
-    fn execute(self) -> Result<()> {
-        handle_app_server_broker(self)
-    }
-}
-
-impl CommandExecute for CavemanArgs {
-    fn execute(self) -> Result<()> {
-        if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
-            return handle_caveman_dry_run(self);
-        }
-        handle_caveman(self)
-    }
-}
-
-impl CommandExecute for ClaudeArgs {
-    fn execute(self) -> Result<()> {
-        handle_claude(self)
-    }
-}
-
-impl CommandExecute for CleanupArgs {
-    fn execute(self) -> Result<()> {
-        handle_cleanup(self)
-    }
-}
-
-impl CommandExecute for CapabilityCommands {
-    fn execute(self) -> Result<()> {
-        handle_capability(self)
-    }
-}
-
-impl CommandExecute for CodexPassthroughArgs {
-    fn execute(self) -> Result<()> {
-        handle_codex_login(self)
-    }
-}
-
-impl CommandExecute for ProdexUpdateArgs {
-    fn execute(self) -> Result<()> {
-        handle_prodex_update(self)
-    }
-}
-
-impl CommandExecute for ContextCommands {
-    fn execute(self) -> Result<()> {
-        match self {
-            Self::Audit(args) => handle_context_audit(args),
-            Self::Export(args) => handle_context_export(args),
-            Self::Compress(args) => handle_context_compress(args),
-            Self::ReplayReport(args) => handle_context_replay_report(args),
-            Self::CompactOutput(args) => handle_context_compact_output(args),
-        }
-    }
-}
-
-impl CommandExecute for CurrentCommand {
-    fn execute(self) -> Result<()> {
-        handle_current_profile()
-    }
-}
-
-impl CommandExecute for DashboardArgs {
-    fn execute(self) -> Result<()> {
-        handle_dashboard(self)
-    }
-}
-
-impl CommandExecute for DoctorArgs {
-    fn execute(self) -> Result<()> {
-        handle_doctor(self)
-    }
-}
-
-impl CommandExecute for ExportProfileArgs {
-    fn execute(self) -> Result<()> {
-        handle_export_profiles(self)
-    }
-}
-
-impl CommandExecute for ExposeArgs {
-    fn execute(self) -> Result<()> {
-        handle_expose(self)
-    }
-}
-
-impl CommandExecute for GeminiCompatRefreshArgs {
-    fn execute(self) -> Result<()> {
-        handle_gemini_compat_refresh(self)
-    }
-}
-
-impl CommandExecute for GatewayArgs {
-    fn execute(self) -> Result<()> {
-        handle_gateway(self)
-    }
-}
-
-impl CommandExecute for ImportCurrentArgs {
-    fn execute(self) -> Result<()> {
-        handle_import_current_profile(self)
-    }
-}
-
-impl CommandExecute for ImportProfileArgs {
-    fn execute(self) -> Result<()> {
-        handle_import_profiles(self)
-    }
-}
-
-impl CommandExecute for InfoArgs {
-    fn execute(self) -> Result<()> {
-        handle_info(self)
-    }
-}
-
-impl CommandExecute for StatusArgs {
-    fn execute(self) -> Result<()> {
-        handle_status(self)
-    }
-}
-
-impl CommandExecute for LogArgs {
-    fn execute(self) -> Result<()> {
-        handle_log(self)
-    }
-}
-
-impl CommandExecute for PresidioCommands {
-    fn execute(self) -> Result<()> {
-        handle_presidio(self)
-    }
-}
-
-impl CommandExecute for PingCommands {
-    fn execute(self) -> Result<()> {
-        handle_ping(self)
-    }
-}
-
-impl CommandExecute for ListProfilesCommand {
-    fn execute(self) -> Result<()> {
-        handle_list_profiles()
-    }
-}
-
-impl CommandExecute for LogoutArgs {
-    fn execute(self) -> Result<()> {
-        handle_codex_logout(self)
-    }
-}
-
-impl CommandExecute for ProfileSelector {
-    fn execute(self) -> Result<()> {
-        handle_set_active_profile(self)
-    }
-}
-
-impl CommandExecute for QuotaArgs {
-    fn execute(self) -> Result<()> {
-        handle_quota(self)
-    }
-}
-
-impl CommandExecute for RedeemArgs {
-    fn execute(self) -> Result<()> {
-        handle_redeem(self)
-    }
-}
-
-impl CommandExecute for RemoveProfileArgs {
-    fn execute(self) -> Result<()> {
-        handle_remove_profile(self)
-    }
-}
-
-impl CommandExecute for RunArgs {
-    fn execute(self) -> Result<()> {
-        handle_run(self)
-    }
-}
-
-impl CommandExecute for RuntimeBrokerArgs {
-    fn execute(self) -> Result<()> {
-        handle_runtime_broker(self)
-    }
-}
-
-impl CommandExecute for SessionCommands {
-    fn execute(self) -> Result<()> {
-        handle_session(self)
-    }
-}
-
-impl CommandExecute for McpJsonlBridgeArgs {
-    fn execute(self) -> Result<()> {
-        handle_mcp_jsonl_bridge(self)
-    }
-}
-
-impl CommandExecute for SetupArgs {
-    fn execute(self) -> Result<()> {
-        handle_setup(self)
-    }
-}
-
-impl CommandExecute for SuperArgs {
-    fn execute(mut self) -> Result<()> {
-        self.extract_provider_overrides_from_codex_args()
-            .map_err(anyhow::Error::msg)?;
-        self.validate_urls().map_err(anyhow::Error::msg)?;
-        if self.dry_run || prodex_dry_run_requested(&self.codex_args) {
-            if matches!(
-                self.cli,
-                Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
-            ) {
-                bail!("--dry-run is not supported with native external agent CLIs")
-            }
-            let use_presidio = self.presidio_preference().unwrap_or(false);
-            return handle_caveman_dry_run(self.into_caveman_args_with_presidio(use_presidio));
-        }
-        handle_super(self)
-    }
-}
-
-fn command_into_routed_command(command: Commands) -> RoutedCommand {
+fn execute_command(command: Commands) -> Result<()> {
     match command {
-        Commands::Profile(command) => profile_command_into_routed_command(command),
-        Commands::UseProfile(command) => RoutedCommand::new(command),
-        Commands::Current => RoutedCommand::new(CurrentCommand),
-        Commands::Info(command) => RoutedCommand::new(command),
-        Commands::Status(command) => RoutedCommand::new(command),
-        Commands::Log(command) => RoutedCommand::new(command),
-        Commands::Session(command) => RoutedCommand::new(command),
-        Commands::Doctor(command) => RoutedCommand::new(command),
-        Commands::Setup(command) => RoutedCommand::new(command),
-        Commands::Capability(command) => RoutedCommand::new(command),
-        Commands::Audit(command) => RoutedCommand::new(command),
-        Commands::AppServerBroker(command) => RoutedCommand::new(command),
-        Commands::Context(command) => RoutedCommand::new(command),
-        Commands::Cleanup(command) => RoutedCommand::new(command),
-        Commands::Presidio(command) => RoutedCommand::new(command),
-        Commands::Login(command) => RoutedCommand::new(command),
-        Commands::Logout(command) => RoutedCommand::new(command),
-        Commands::Update(command) => RoutedCommand::new(command),
-        Commands::Quota(command) => RoutedCommand::new(command),
-        Commands::Redeem(command) => RoutedCommand::new(command),
-        Commands::Ping(command) => RoutedCommand::new(command),
-        Commands::Dashboard(command) => RoutedCommand::new(command),
-        Commands::Run(command) => RoutedCommand::new(command),
-        Commands::Caveman(command) => RoutedCommand::new(command),
-        Commands::Rtk(command) => {
-            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "rtk"))
+        Commands::Profile(command) => execute_profile_command(command),
+        Commands::UseProfile(args) => handle_set_active_profile(args),
+        Commands::Current => handle_current_profile(),
+        Commands::Info(args) => handle_info(args),
+        Commands::Status(args) => handle_status(args),
+        Commands::Log(args) => handle_log(args),
+        Commands::Session(command) => handle_session(command),
+        Commands::Doctor(args) => handle_doctor(args),
+        Commands::Setup(args) => handle_setup(args),
+        Commands::Capability(command) => handle_capability(command),
+        Commands::Audit(args) => handle_audit(args),
+        Commands::AppServerBroker(args) => handle_app_server_broker(args),
+        Commands::Context(command) => execute_context_command(command),
+        Commands::Cleanup(args) => handle_cleanup(args),
+        Commands::Presidio(command) => handle_presidio(command),
+        Commands::Login(args) => handle_codex_login(args),
+        Commands::Logout(args) => handle_codex_logout(args),
+        Commands::Update(args) => handle_prodex_update(args),
+        Commands::Quota(args) => handle_quota(args),
+        Commands::Redeem(args) => handle_redeem(args),
+        Commands::Ping(command) => handle_ping(command),
+        Commands::Dashboard(args) => handle_dashboard(args),
+        Commands::Run(args) => handle_run(args),
+        Commands::Caveman(args) => execute_caveman(args),
+        Commands::Rtk(args) => execute_caveman(caveman_args_with_optimizer_prefix(args, "rtk")),
+        Commands::Ponytail(args) => {
+            execute_caveman(caveman_args_with_optimizer_prefix(args, "ponytail"))
         }
-        Commands::Ponytail(command) => {
-            RoutedCommand::new(caveman_args_with_optimizer_prefix(command, "ponytail"))
-        }
-        Commands::Super(command) => RoutedCommand::new(command),
-        Commands::Expose(command) => RoutedCommand::new(command),
-        Commands::Gateway(command) => RoutedCommand::new(command),
-        Commands::Claude(command) => RoutedCommand::new(command),
-        Commands::RuntimeBroker(command) => RoutedCommand::new(command),
-        Commands::GeminiCompatRefresh(command) => RoutedCommand::new(command),
-        Commands::McpJsonlBridge(command) => RoutedCommand::new(command),
+        Commands::Super(args) => execute_super(args),
+        Commands::Expose(args) => handle_expose(args),
+        Commands::Gateway(args) => handle_gateway(args),
+        Commands::Claude(args) => handle_claude(args),
+        Commands::RuntimeBroker(args) => handle_runtime_broker(args),
+        Commands::GeminiCompatRefresh(args) => handle_gemini_compat_refresh(args),
+        Commands::McpJsonlBridge(args) => handle_mcp_jsonl_bridge(args),
     }
 }
 
-fn profile_command_into_routed_command(command: ProfileCommands) -> RoutedCommand {
+fn execute_profile_command(command: ProfileCommands) -> Result<()> {
     match command {
-        ProfileCommands::Add(command) => RoutedCommand::new(command),
-        ProfileCommands::Export(command) => RoutedCommand::new(command),
-        ProfileCommands::Import(command) => RoutedCommand::new(command),
-        ProfileCommands::ImportCurrent(command) => RoutedCommand::new(command),
-        ProfileCommands::List => RoutedCommand::new(ListProfilesCommand),
-        ProfileCommands::Remove(command) => RoutedCommand::new(command),
-        ProfileCommands::Use(command) => RoutedCommand::new(command),
+        ProfileCommands::Add(args) => handle_add_profile(args),
+        ProfileCommands::Export(args) => handle_export_profiles(args),
+        ProfileCommands::Import(args) => handle_import_profiles(args),
+        ProfileCommands::ImportCurrent(args) => handle_import_current_profile(args),
+        ProfileCommands::List => handle_list_profiles(),
+        ProfileCommands::Remove(args) => handle_remove_profile(args),
+        ProfileCommands::Use(args) => handle_set_active_profile(args),
     }
+}
+
+fn execute_context_command(command: ContextCommands) -> Result<()> {
+    match command {
+        ContextCommands::Audit(args) => handle_context_audit(args),
+        ContextCommands::Export(args) => handle_context_export(args),
+        ContextCommands::Compress(args) => handle_context_compress(args),
+        ContextCommands::ReplayReport(args) => handle_context_replay_report(args),
+        ContextCommands::CompactOutput(args) => handle_context_compact_output(args),
+    }
+}
+
+fn execute_caveman(args: CavemanArgs) -> Result<()> {
+    if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
+        return handle_caveman_dry_run(args);
+    }
+    handle_caveman(args)
+}
+
+fn execute_super(mut args: SuperArgs) -> Result<()> {
+    args.extract_provider_overrides_from_codex_args()
+        .map_err(anyhow::Error::msg)?;
+    args.validate_urls().map_err(anyhow::Error::msg)?;
+    if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
+        if matches!(
+            args.cli,
+            Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+        ) {
+            bail!("--dry-run is not supported with native external agent CLIs")
+        }
+        let use_presidio = args.presidio_preference().unwrap_or(false);
+        return handle_caveman_dry_run(args.into_caveman_args_with_presidio(use_presidio));
+    }
+    handle_super(args)
 }

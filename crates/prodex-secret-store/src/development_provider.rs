@@ -14,6 +14,10 @@ pub const DEVELOPMENT_SECRET_PROVIDER_NAME: &str = "development";
 const ENV_REFERENCE_PREFIX: &str = "env:";
 const FILE_REFERENCE_PREFIX: &str = "file:";
 
+fn process_environment(name: &str) -> Result<String, env::VarError> {
+    env::var(name)
+}
+
 /// A local-only secret provider for development configuration.
 ///
 /// References use `env:NAME` for an environment variable or
@@ -21,6 +25,7 @@ const FILE_REFERENCE_PREFIX: &str = "file:";
 #[derive(Clone)]
 pub struct DevelopmentSecretProvider {
     projected: ProjectedSecretProvider,
+    environment_reader: fn(&str) -> Result<String, env::VarError>,
 }
 
 impl DevelopmentSecretProvider {
@@ -30,7 +35,20 @@ impl DevelopmentSecretProvider {
     ) -> Result<Self, SecretError> {
         Ok(Self {
             projected: ProjectedSecretProvider::new(root, provider_name)?,
+            environment_reader: process_environment,
         })
+    }
+
+    /// Replaces environment access with a deterministic reader.
+    ///
+    /// This keeps callers and tests from mutating process-global environment
+    /// state while preserving the same validation and size limits.
+    pub fn with_environment_reader(
+        mut self,
+        reader: fn(&str) -> Result<String, env::VarError>,
+    ) -> Self {
+        self.environment_reader = reader;
+        self
     }
 
     pub fn for_development(root: impl AsRef<Path>) -> Result<Self, SecretError> {
@@ -68,7 +86,7 @@ impl SecretProvider for DevelopmentSecretProvider {
 
         let bytes = if let Some(name) = request.reference.name().strip_prefix(ENV_REFERENCE_PREFIX)
         {
-            read_environment(name)?
+            read_environment(name, self.environment_reader)?
         } else if let Some(name) = request.reference.name().strip_prefix(FILE_REFERENCE_PREFIX) {
             self.projected
                 .read_projected_file(name, PROJECTED_SECRET_MAX_BYTES)?
@@ -83,12 +101,15 @@ impl SecretProvider for DevelopmentSecretProvider {
     }
 }
 
-fn read_environment(name: &str) -> Result<Vec<u8>, SecretResolutionError> {
+fn read_environment(
+    name: &str,
+    reader: fn(&str) -> Result<String, env::VarError>,
+) -> Result<Vec<u8>, SecretResolutionError> {
     if !valid_environment_name(name) {
         return Err(SecretResolutionError::PermissionDenied);
     }
 
-    let mut value = match env::var(name) {
+    let mut value = match reader(name) {
         Ok(value) => Zeroizing::new(value),
         Err(env::VarError::NotPresent) => return Err(SecretResolutionError::NotFound),
         Err(env::VarError::NotUnicode(_)) => {

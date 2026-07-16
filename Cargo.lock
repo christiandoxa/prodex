@@ -2348,6 +2348,7 @@ version = "0.296.0"
 dependencies = [
  "arc-swap",
  "base64",
+ "clap",
  "criterion",
  "libc",
  "prodex-app",
@@ -2472,10 +2473,10 @@ version = "0.296.0"
 dependencies = [
  "chrono",
  "prodex-quota",
- "prodex-runtime-state",
+ "prodex-runtime-quota",
  "prodex-runtime-tuning",
+ "prodex-session-store",
  "prodex-shared-types",
- "prodex-state",
  "prodex-terminal-ui",
  "serde",
  "serde_json",
@@ -2507,8 +2508,11 @@ version = "0.296.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "libc",
+ "prodex-redaction",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -2547,9 +2551,8 @@ version = "0.296.0"
 dependencies = [
  "clap",
  "prodex-provider-core",
- "prodex-runtime-gemini",
- "reqwest",
  "serde",
+ "url",
 ]
 
 [[package]]
@@ -2571,6 +2574,7 @@ name = "prodex-context"
 version = "0.296.0"
 dependencies = [
  "anyhow",
+ "libc",
  "prodex-terminal-ui",
  "serde",
  "serde_json",
@@ -2645,6 +2649,7 @@ version = "0.296.0"
 dependencies = [
  "prodex-core",
  "prodex-state",
+ "serde_json",
 ]
 
 [[package]]
@@ -2736,6 +2741,8 @@ dependencies = [
  "anyhow",
  "base64",
  "chrono",
+ "prodex-profile-identity",
+ "prodex-runtime-state",
  "prodex-terminal-ui",
  "serde",
  "serde_json",
@@ -2908,6 +2915,7 @@ dependencies = [
  "prodex-runtime-proxy",
  "prodex-runtime-state",
  "prodex-shared-types",
+ "prodex-state",
 ]
 
 [[package]]
@@ -2923,6 +2931,8 @@ version = "0.296.0"
 dependencies = [
  "prodex-runtime-state",
  "prodex-state",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2946,10 +2956,10 @@ version = "0.296.0"
 dependencies = [
  "anyhow",
  "chrono",
- "prodex-app-reports",
  "prodex-core",
  "prodex-state",
  "rusqlite",
+ "serde",
  "serde_json",
 ]
 
@@ -2982,6 +2992,7 @@ name = "prodex-state"
 version = "0.296.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3063,6 +3074,7 @@ name = "prodex-terminal-ui"
 version = "0.296.0"
 dependencies = [
  "anyhow",
+ "crossterm",
  "ratatui",
  "unicode-width",
 ]
@@ -3073,10 +3085,12 @@ version = "0.296.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "libc",
  "prodex-cli",
  "prodex-core",
  "prodex-terminal-ui",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
 ]

@@ -184,7 +184,7 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
     shared: &RuntimeRotationProxyShared,
     runtime: &mut RuntimeRotationState,
     key: &str,
-    reason: &str,
+    mutation: RuntimeStateMutation,
     session_binding: bool,
 ) -> Option<String> {
     let now = Local::now().timestamp();
@@ -210,7 +210,11 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
                 }
             ),
         );
-        schedule_runtime_binding_touch_save(shared, runtime, &format!("continuation_stale:{key}"));
+        schedule_runtime_binding_touch_save(
+            shared,
+            runtime,
+            RuntimeStateMutation::ContinuationStale(key.to_string()),
+        );
         return None;
     }
     if runtime_continuation_status_recently_suspect(
@@ -298,7 +302,7 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
         );
     }
     if persist_touch {
-        schedule_runtime_binding_touch_save(shared, runtime, reason);
+        schedule_runtime_binding_touch_save(shared, runtime, mutation);
     }
     profile_name
 }
@@ -318,7 +322,7 @@ fn runtime_compact_followup_bound_profile_raw(
             shared,
             &mut runtime,
             &key,
-            &format!("compact_turn_state_touch:{turn_state}"),
+            RuntimeStateMutation::CompactTurnStateTouch(turn_state.to_string()),
             false,
         ) {
             return Ok(Some((profile_name, "turn_state")));
@@ -330,7 +334,7 @@ fn runtime_compact_followup_bound_profile_raw(
             shared,
             &mut runtime,
             &key,
-            &format!("compact_session_touch:{session_id}"),
+            RuntimeStateMutation::CompactSessionTouch(session_id.to_string()),
             true,
         ) {
             return Ok(Some((profile_name, "session_id")));
@@ -465,10 +469,10 @@ pub(crate) fn note_runtime_previous_response_not_found(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!(
-            "previous_response_negative_cache:{profile_name}:{}",
+        RuntimeStateMutation::PreviousResponseNegativeCache(format!(
+            "{profile_name}:{}",
             runtime_route_kind_label(route_kind)
-        ),
+        )),
     );
     drop(runtime);
     if next_failures >= RUNTIME_PREVIOUS_RESPONSE_NEGATIVE_CACHE_FAILURE_THRESHOLD {

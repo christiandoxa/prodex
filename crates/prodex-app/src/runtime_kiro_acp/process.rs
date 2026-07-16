@@ -24,13 +24,6 @@ pub(crate) struct RuntimeKiroAcpPromptTurnResult {
     pub(crate) notifications: Vec<RuntimeKiroAcpEnvelope>,
 }
 
-pub(crate) fn runtime_kiro_acp_bootstrap(
-    cwd: &Path,
-    extra_env: &[(OsString, OsString)],
-) -> Result<RuntimeKiroAcpBootstrapResult> {
-    runtime_kiro_acp_bootstrap_with_command(crate::kiro_bin().as_os_str(), cwd, extra_env)
-}
-
 pub(crate) fn runtime_kiro_acp_bootstrap_with_command(
     command: &OsStr,
     cwd: &Path,

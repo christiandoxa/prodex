@@ -111,10 +111,6 @@ pub(crate) fn runtime_broker_metrics_snapshot(
 ) -> Result<RuntimeBrokerMetrics> {
     let now = Local::now().timestamp();
     let now_u64 = now.max(0) as u64;
-    let runtime = shared
-        .lock_runtime_state()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-
     let parsed_continuity_failure_reasons =
         runtime_broker_continuity_failure_reason_metrics(&shared.log_path);
     let continuity_failure_reasons = runtime_broker_live_continuity_failure_reason_metrics(
@@ -122,6 +118,10 @@ pub(crate) fn runtime_broker_metrics_snapshot(
         &parsed_continuity_failure_reasons,
     )
     .unwrap_or(parsed_continuity_failure_reasons);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
+    let runtime = shared
+        .lock_runtime_state()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
 
     Ok(
         prodex_runtime_broker::runtime_broker_metrics_from_snapshot_input(
@@ -136,10 +136,13 @@ pub(crate) fn runtime_broker_metrics_snapshot(
                     .load(Ordering::SeqCst)
                     .saturating_sub(now_u64),
                 runtime_state_lock_wait: shared.runtime_state_lock_wait_metrics(),
-                admission_wait: shared.lane_admission.admission_wait_metrics.snapshot(),
+                admission_wait: shared
+                    .lane_admission
+                    .admission_wait_metric_counters()
+                    .snapshot(),
                 long_lived_queue_wait: shared
                     .lane_admission
-                    .long_lived_queue_wait_metrics
+                    .long_lived_queue_wait_metric_counters()
                     .snapshot(),
                 allocation: runtime_broker_allocation_metrics(),
                 traffic: RuntimeBrokerTrafficMetrics {
@@ -154,7 +157,7 @@ pub(crate) fn runtime_broker_metrics_snapshot(
                     ),
                     standard: runtime_broker_live_lane_metrics(shared, RuntimeRouteKind::Standard),
                 },
-                profile_inflight: &runtime.profile_inflight,
+                profile_inflight: &profile_inflight,
                 profile_retry_backoff_until: &runtime.profile_retry_backoff_until,
                 profile_transport_backoff_until: &runtime.profile_transport_backoff_until,
                 profile_route_circuit_open_until: &runtime.profile_route_circuit_open_until,
@@ -171,20 +174,16 @@ pub(crate) fn runtime_broker_metrics_snapshot(
         .with_guard_counters(prodex_runtime_broker::RuntimeBrokerMetricsGuardCounters {
             active_request_release_underflows_total: shared
                 .lane_admission
-                .active_request_release_underflows_total
-                .load(Ordering::Relaxed),
+                .active_request_release_underflows_total(),
             profile_inflight_admissions_total: shared
                 .lane_admission
-                .profile_inflight_admissions_total
-                .load(Ordering::Relaxed),
+                .profile_inflight_admissions_total(),
             profile_inflight_releases_total: shared
                 .lane_admission
-                .profile_inflight_releases_total
-                .load(Ordering::Relaxed),
+                .profile_inflight_releases_total(),
             profile_inflight_release_underflows_total: shared
                 .lane_admission
-                .profile_inflight_release_underflows_total
-                .load(Ordering::Relaxed),
+                .profile_inflight_release_underflows_total(),
         }),
     )
 }

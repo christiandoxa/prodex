@@ -1,6 +1,8 @@
 # Prodex Architecture Map
 
-This repository is a Rust workspace with 39 focused crates under `crates/` plus the root `prodex` package. The root binary is intentionally thin: `src/main.rs` calls `prodex::main_entry()`, and `src/lib.rs` re-exports `prodex_app` as a compatibility shim.
+This repository is a Rust workspace with focused crates under `crates/` plus the root `prodex`
+package. Its three thin composition roots are `src/main.rs`, `src/bin/prodex-gateway.rs`, and
+`src/bin/prodex-control-plane.rs`; `src/lib.rs` is their shared compatibility facade.
 
 ## Command Path
 
@@ -14,6 +16,10 @@ argv
   -> focused helper crates
   -> prodex-app-reports / prodex-terminal-ui for human output
 ```
+
+Dedicated enterprise flows enter through `prodex-gateway` or `prodex-control-plane`, then cross
+the gateway/control-plane adapter crates into `prodex-application` and backend-neutral
+`prodex-storage` contracts. Pure policy and identity decisions remain in `prodex-domain`.
 
 Key crates and files:
 

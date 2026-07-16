@@ -458,14 +458,7 @@ pub struct MainWindowSnapshot {
     pub pressure_score: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RuntimeQuotaWindowStatus {
-    Ready,
-    Thin,
-    Critical,
-    Exhausted,
-    Unknown,
-}
+pub use prodex_runtime_state::RuntimeQuotaWindowStatus;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeQuotaWindowSummary {

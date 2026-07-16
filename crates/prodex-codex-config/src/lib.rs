@@ -1,5 +1,7 @@
 use std::ffi::OsString;
+use std::fmt;
 use std::fs;
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
@@ -30,85 +32,119 @@ pub struct CodexModelProviderSetting {
     pub source: CodexModelProviderSource,
 }
 
+#[derive(Debug)]
+pub enum CodexConfigError {
+    Read {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Parse {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
+}
+
+impl fmt::Display for CodexConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, source } => {
+                write!(formatter, "failed to read {}: {source}", path.display())
+            }
+            Self::Parse { path, source } => {
+                write!(formatter, "failed to parse {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for CodexConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } => Some(source),
+            Self::Parse { source, .. } => Some(source),
+        }
+    }
+}
+
+pub type CodexConfigResult<T> = Result<T, CodexConfigError>;
+const CODEX_CONFIG_MAX_BYTES: u64 = 1024 * 1024;
+
 impl CodexModelProviderSetting {
     pub fn is_openai(&self) -> bool {
         self.provider_id.eq_ignore_ascii_case("openai")
     }
 }
 
-pub fn parse_toml_string_assignment(contents: &str, key: &str) -> Option<String> {
-    for raw_line in contents.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some(rest) = line.strip_prefix(key) else {
-            continue;
-        };
-        let rest = rest.trim_start();
-        let Some(rest) = rest.strip_prefix('=') else {
-            continue;
-        };
-        let rest = rest.trim_start();
-        let quote = match rest.chars().next()? {
-            '"' | '\'' => rest.chars().next()?,
-            _ => continue,
-        };
-        let mut value = String::new();
-        let mut escaped = false;
-        for ch in rest[quote.len_utf8()..].chars() {
-            if quote == '"' && escaped {
-                value.push(match ch {
-                    'n' => '\n',
-                    'r' => '\r',
-                    't' => '\t',
-                    '"' => '"',
-                    '\\' => '\\',
-                    other => other,
-                });
-                escaped = false;
-                continue;
-            }
-            match ch {
-                '\\' if quote == '"' => escaped = true,
-                ch if ch == quote => return Some(value),
-                other => value.push(other),
-            }
-        }
-    }
-    None
-}
-
-fn parse_toml_document_string_value(contents: &str, key: &str) -> Option<String> {
-    let value = toml::from_str::<toml::Value>(contents).ok()?;
+fn parse_toml_document_string_value(
+    contents: &str,
+    key: &str,
+) -> Result<Option<String>, toml::de::Error> {
+    let value = toml::from_str::<toml::Value>(contents)?;
     let mut current = &value;
     for part in key.split('.') {
-        current = current.get(part)?;
+        let Some(value) = current.get(part) else {
+            return Ok(None);
+        };
+        current = value;
     }
-    match current {
+    Ok(match current {
         toml::Value::String(value) => Some(value.clone()),
         _ => None,
+    })
+}
+
+fn codex_config_file_exact_value(
+    config_path: &Path,
+    key: &str,
+) -> CodexConfigResult<Option<String>> {
+    let Some(contents) = read_codex_config_file(config_path)? else {
+        return Ok(None);
+    };
+    parse_toml_document_string_value(&contents, key).map_err(|source| CodexConfigError::Parse {
+        path: config_path.to_path_buf(),
+        source,
+    })
+}
+
+fn read_codex_config_file(config_path: &Path) -> CodexConfigResult<Option<String>> {
+    let file = match fs::File::open(config_path) {
+        Ok(file) => file,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(CodexConfigError::Read {
+                path: config_path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let mut contents = String::new();
+    file.take(CODEX_CONFIG_MAX_BYTES.saturating_add(1))
+        .read_to_string(&mut contents)
+        .map_err(|source| CodexConfigError::Read {
+            path: config_path.to_path_buf(),
+            source,
+        })?;
+    if contents.len() as u64 > CODEX_CONFIG_MAX_BYTES {
+        return Err(CodexConfigError::Read {
+            path: config_path.to_path_buf(),
+            source: io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("config exceeds safe size limit ({CODEX_CONFIG_MAX_BYTES} bytes)"),
+            ),
+        });
     }
+    Ok(Some(contents))
 }
 
-fn codex_config_file_value(config_path: &Path, key: &str) -> Option<String> {
-    let contents = fs::read_to_string(config_path).ok()?;
-    parse_toml_document_string_value(&contents, key)
-        .or_else(|| parse_toml_string_assignment(&contents, key))
-        .filter(|value| !value.trim().is_empty())
+fn codex_config_file_value(config_path: &Path, key: &str) -> CodexConfigResult<Option<String>> {
+    Ok(codex_config_file_exact_value(config_path, key)?.filter(|value| !value.trim().is_empty()))
 }
 
-pub fn codex_config_value(codex_home: &Path, key: &str) -> Option<String> {
+pub fn codex_config_value(codex_home: &Path, key: &str) -> CodexConfigResult<Option<String>> {
     codex_config_file_value(&codex_home.join("config.toml"), key)
 }
 
-fn codex_config_file_exact_value(config_path: &Path, key: &str) -> Option<String> {
-    let contents = fs::read_to_string(config_path).ok()?;
-    parse_toml_document_string_value(&contents, key)
-        .or_else(|| parse_toml_string_assignment(&contents, key))
-}
-
-pub fn codex_config_exact_value(codex_home: &Path, key: &str) -> Option<String> {
+pub fn codex_config_exact_value(codex_home: &Path, key: &str) -> CodexConfigResult<Option<String>> {
     codex_config_file_exact_value(&codex_home.join("config.toml"), key)
 }
 
@@ -152,37 +188,42 @@ pub fn codex_config_value_with_profile_v2(
     codex_home: &Path,
     key: &str,
     profile_v2_name: Option<&str>,
-) -> Option<String> {
-    profile_v2_name
+) -> CodexConfigResult<Option<String>> {
+    if let Some(value) = profile_v2_name
         .and_then(|profile_v2_name| codex_profile_v2_config_path(codex_home, profile_v2_name))
-        .and_then(|config_path| codex_config_file_value(&config_path, key))
-        .or_else(|| codex_config_value(codex_home, key))
+        .map(|config_path| codex_config_file_value(&config_path, key))
+        .transpose()?
+        .flatten()
+    {
+        return Ok(Some(value));
+    }
+    codex_config_value(codex_home, key)
 }
 
 pub fn codex_config_value_for_args(
     codex_home: &Path,
     args: &[OsString],
     key: &str,
-) -> Option<String> {
+) -> CodexConfigResult<Option<String>> {
     let profile_v2_name = codex_cli_profile_v2_name(args);
     codex_config_value_with_profile_v2(codex_home, key, profile_v2_name.as_deref())
 }
 
-pub fn codex_configured_model_provider(codex_home: &Path) -> Option<String> {
+pub fn codex_configured_model_provider(codex_home: &Path) -> CodexConfigResult<Option<String>> {
     codex_config_value(codex_home, "model_provider")
 }
 
 pub fn codex_configured_model_provider_with_profile_v2(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
-) -> Option<String> {
+) -> CodexConfigResult<Option<String>> {
     codex_config_value_with_profile_v2(codex_home, "model_provider", profile_v2_name)
 }
 
 pub fn codex_configured_model_provider_for_args(
     codex_home: &Path,
     args: &[OsString],
-) -> Option<String> {
+) -> CodexConfigResult<Option<String>> {
     codex_config_value_for_args(codex_home, args, "model_provider")
 }
 
@@ -238,10 +279,32 @@ pub fn codex_cli_config_override_exact_value(args: &[OsString], key: &str) -> Op
     None
 }
 
+pub fn codex_effective_config_value(
+    codex_home: &Path,
+    args: &[OsString],
+    key: &str,
+) -> CodexConfigResult<Option<String>> {
+    match codex_cli_config_override_value(args, key) {
+        Some(value) => Ok(Some(value)),
+        None => codex_config_value(codex_home, key),
+    }
+}
+
+pub fn codex_effective_config_exact_value(
+    codex_home: &Path,
+    args: &[OsString],
+    key: &str,
+) -> CodexConfigResult<Option<String>> {
+    match codex_cli_config_override_exact_value(args, key) {
+        Some(value) => Ok(Some(value)),
+        None => codex_config_exact_value(codex_home, key),
+    }
+}
+
 pub fn codex_non_openai_model_provider(
     codex_home: &Path,
     model_provider_override: Option<&str>,
-) -> Option<CodexModelProviderSetting> {
+) -> CodexConfigResult<Option<CodexModelProviderSetting>> {
     codex_non_openai_model_provider_with_profile_v2(codex_home, model_provider_override, None)
 }
 
@@ -249,8 +312,8 @@ pub fn codex_non_openai_model_provider_with_profile_v2(
     codex_home: &Path,
     model_provider_override: Option<&str>,
     profile_v2_name: Option<&str>,
-) -> Option<CodexModelProviderSetting> {
-    let provider = model_provider_override
+) -> CodexConfigResult<Option<CodexModelProviderSetting>> {
+    let Some(provider) = model_provider_override
         .and_then(|provider_id| {
             normalize_model_provider_value(provider_id).map(|provider_id| {
                 CodexModelProviderSetting {
@@ -259,34 +322,45 @@ pub fn codex_non_openai_model_provider_with_profile_v2(
                 }
             })
         })
-        .or_else(|| codex_model_provider_setting_from_config(codex_home, profile_v2_name))?;
-    (!provider.is_openai()).then_some(provider)
+        .map(Some)
+        .unwrap_or(codex_model_provider_setting_from_config(
+            codex_home,
+            profile_v2_name,
+        )?)
+    else {
+        return Ok(None);
+    };
+    Ok((!provider.is_openai()).then_some(provider))
 }
 
 fn codex_model_provider_setting_from_config(
     codex_home: &Path,
     profile_v2_name: Option<&str>,
-) -> Option<CodexModelProviderSetting> {
+) -> CodexConfigResult<Option<CodexModelProviderSetting>> {
     if let Some(provider_id) = profile_v2_name
         .and_then(|profile_v2_name| codex_profile_v2_config_path(codex_home, profile_v2_name))
-        .and_then(|config_path| codex_config_file_value(&config_path, "model_provider"))
+        .map(|config_path| codex_config_file_value(&config_path, "model_provider"))
+        .transpose()?
+        .flatten()
     {
-        return Some(CodexModelProviderSetting {
+        return Ok(Some(CodexModelProviderSetting {
             provider_id,
             source: CodexModelProviderSource::ProfileV2ConfigFile,
-        });
+        }));
     }
 
-    codex_configured_model_provider(codex_home).map(|provider_id| CodexModelProviderSetting {
-        provider_id,
-        source: CodexModelProviderSource::ConfigFile,
-    })
+    Ok(
+        codex_configured_model_provider(codex_home)?.map(|provider_id| CodexModelProviderSetting {
+            provider_id,
+            source: CodexModelProviderSource::ConfigFile,
+        }),
+    )
 }
 
 pub fn codex_non_openai_model_provider_for_args(
     codex_home: &Path,
     args: &[OsString],
-) -> Option<CodexModelProviderSetting> {
+) -> CodexConfigResult<Option<CodexModelProviderSetting>> {
     let model_provider_override = codex_cli_config_override_value(args, "model_provider");
     let profile_v2_name = codex_cli_profile_v2_name(args);
     codex_non_openai_model_provider_with_profile_v2(
@@ -310,10 +384,9 @@ fn parse_config_override_exact_string(assignment: &str, expected_key: &str) -> O
         return None;
     }
     let raw_value = raw_value.trim();
-    Some(
-        parse_toml_string_assignment(&format!("{expected_key} = {raw_value}"), expected_key)
-            .unwrap_or_else(|| raw_value.to_string()),
-    )
+    parse_toml_document_string_value(&format!("{expected_key} = {raw_value}"), expected_key)
+        .ok()
+        .flatten()
 }
 
 fn normalize_model_provider_value(raw_value: &str) -> Option<String> {

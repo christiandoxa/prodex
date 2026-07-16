@@ -45,7 +45,6 @@ fn duplicate_previous_response_owner_verifies_do_not_requeue_persistence() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -153,7 +152,6 @@ fn duplicate_response_ids_do_not_requeue_persistence() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -305,7 +303,6 @@ fn runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);

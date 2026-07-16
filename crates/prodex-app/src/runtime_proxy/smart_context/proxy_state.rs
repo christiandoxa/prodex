@@ -112,6 +112,24 @@ pub(crate) fn register_runtime_smart_context_proxy_state(
     );
 }
 
+pub(crate) fn unregister_runtime_smart_context_proxy_state(log_path: &Path) {
+    let Some(states) = RUNTIME_SMART_CONTEXT_PROXY_STATES.get() else {
+        return;
+    };
+    let Ok(mut states) = states.lock() else {
+        return;
+    };
+    states.remove(log_path);
+}
+
+#[cfg(test)]
+pub(crate) fn runtime_smart_context_proxy_state_registered(log_path: &Path) -> bool {
+    RUNTIME_SMART_CONTEXT_PROXY_STATES
+        .get()
+        .and_then(|states| states.lock().ok())
+        .is_some_and(|states| states.contains_key(log_path))
+}
+
 #[cfg(test)]
 pub(crate) fn observe_runtime_smart_context_token_usage(
     shared: &RuntimeRotationProxyShared,

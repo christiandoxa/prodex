@@ -73,18 +73,9 @@ pub(crate) fn acquire_runtime_profile_inflight_guard(
     context: &'static str,
 ) -> Result<RuntimeProfileInFlightGuard> {
     let weight = runtime_profile_inflight_weight(context);
-    let count = {
-        let mut runtime = shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        let count = runtime
-            .profile_inflight
-            .entry(profile_name.to_string())
-            .or_insert(0);
-        *count = count.saturating_add(weight);
-        *count
-    };
+    let count = shared
+        .lane_admission
+        .acquire_profile_inflight(profile_name, weight);
     record_runtime_profile_inflight_acquire(shared, profile_name, count, weight, context);
     Ok(RuntimeProfileInFlightGuard {
         shared: shared.clone(),

@@ -1063,12 +1063,12 @@ fn runtime_launch_reads_profile_v2_model_context_window_overlay() {
         runtime_launch_config_model_context_window_tokens(&root),
         Some(8192)
     );
-    assert_eq!(
-        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("local")),
-        Some(65_536)
-    );
-    assert_eq!(
-        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("missing")),
-        Some(8192)
-    );
+    let local_context =
+        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("local"))
+            .unwrap();
+    let fallback_context =
+        runtime_launch_config_model_context_window_tokens_with_profile_v2(&root, Some("missing"))
+            .unwrap();
+    assert_eq!(local_context, Some(65_536));
+    assert_eq!(fallback_context, Some(8192));
 }

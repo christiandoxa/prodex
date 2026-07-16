@@ -93,31 +93,73 @@ impl fmt::Debug for SecretValue {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretInvalidLocationKind {
+    Generic,
+    UnsafeFile,
+    SizeLimitExceeded,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum SecretError {
-    UnsupportedLocation { location: String },
-    InvalidLocation { reason: String },
-    Io { path: PathBuf, reason: String },
+    UnsupportedLocation {
+        location: Zeroizing<String>,
+    },
+    InvalidLocation {
+        kind: SecretInvalidLocationKind,
+        reason: Zeroizing<String>,
+    },
+    Io {
+        reason: Zeroizing<String>,
+    },
 }
+
+impl ZeroizeOnDrop for SecretError {}
 
 impl SecretError {
     pub fn unsupported(location: impl Into<String>) -> Self {
         Self::UnsupportedLocation {
-            location: location.into(),
+            location: Zeroizing::new(location.into()),
         }
     }
 
     pub fn invalid_location(reason: impl Into<String>) -> Self {
+        Self::invalid_location_with_kind(SecretInvalidLocationKind::Generic, reason)
+    }
+
+    pub(crate) fn unsafe_file(reason: impl Into<String>) -> Self {
+        Self::invalid_location_with_kind(SecretInvalidLocationKind::UnsafeFile, reason)
+    }
+
+    pub(crate) fn size_limit_exceeded(reason: impl Into<String>) -> Self {
+        Self::invalid_location_with_kind(SecretInvalidLocationKind::SizeLimitExceeded, reason)
+    }
+
+    fn invalid_location_with_kind(
+        kind: SecretInvalidLocationKind,
+        reason: impl Into<String>,
+    ) -> Self {
         Self::InvalidLocation {
-            reason: reason.into(),
+            kind,
+            reason: Zeroizing::new(reason.into()),
         }
     }
 
-    pub fn io(path: impl Into<PathBuf>, error: io::Error) -> Self {
+    pub fn io(_path: impl Into<PathBuf>, error: io::Error) -> Self {
         Self::Io {
-            path: path.into(),
-            reason: error.to_string(),
+            reason: Zeroizing::new(error.to_string()),
         }
+    }
+
+    pub fn invalid_location_kind(&self) -> Option<SecretInvalidLocationKind> {
+        match self {
+            Self::InvalidLocation { kind, .. } => Some(*kind),
+            Self::UnsupportedLocation { .. } | Self::Io { .. } => None,
+        }
+    }
+
+    pub fn is_unsafe_file(&self) -> bool {
+        self.invalid_location_kind() == Some(SecretInvalidLocationKind::UnsafeFile)
     }
 }
 
@@ -132,11 +174,7 @@ impl fmt::Debug for SecretError {
                 .debug_struct("InvalidLocation")
                 .field("reason", &"<redacted>")
                 .finish(),
-            Self::Io { .. } => f
-                .debug_struct("Io")
-                .field("path", &"<redacted>")
-                .field("reason", &"<redacted>")
-                .finish(),
+            Self::Io { .. } => f.debug_struct("Io").field("reason", &"<redacted>").finish(),
         }
     }
 }
@@ -145,7 +183,10 @@ impl fmt::Display for SecretError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedLocation { .. } => write!(f, "unsupported secret location"),
-            Self::InvalidLocation { reason } if reason.contains("exceeds safe size limit") => {
+            Self::InvalidLocation {
+                kind: SecretInvalidLocationKind::SizeLimitExceeded,
+                ..
+            } => {
                 write!(f, "secret exceeds safe size limit")
             }
             Self::InvalidLocation { .. } => write!(f, "invalid secret location"),

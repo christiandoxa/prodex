@@ -129,6 +129,11 @@ impl Directory {
         unlinkat_file(self.file.as_raw_fd(), &name)
     }
 
+    pub(super) fn verify(&self, name: &OsStr, file: &File) -> io::Result<()> {
+        let name = c_name(name)?;
+        require_name_identity(self.file.as_raw_fd(), &name, &file.metadata()?)
+    }
+
     pub(super) fn remove_entry(&self, name: &OsStr) -> io::Result<()> {
         let name = c_name(name)?;
         unlinkat_file(self.file.as_raw_fd(), &name)

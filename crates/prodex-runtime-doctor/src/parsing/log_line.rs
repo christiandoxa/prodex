@@ -15,76 +15,97 @@ impl RuntimeDoctorParsedLogMessage {
     }
 }
 
-pub(super) fn runtime_doctor_line_timestamp(line: &str) -> Option<String> {
-    if let Some(value) = runtime_doctor_json_line_value(line) {
-        return value
-            .get("timestamp")
-            .or_else(|| value.get("ts"))
+pub(crate) struct RuntimeDoctorParsedLogLine<'a> {
+    line: &'a str,
+    json: Option<serde_json::Value>,
+}
+
+impl<'a> RuntimeDoctorParsedLogLine<'a> {
+    pub(crate) fn new(line: &'a str) -> Self {
+        let trimmed = line.trim();
+        Self {
+            line,
+            json: if trimmed.starts_with('{') {
+                serde_json::from_str(trimmed).ok()
+            } else {
+                None
+            },
+        }
+    }
+
+    pub(crate) fn json(&self) -> Option<&serde_json::Value> {
+        self.json.as_ref()
+    }
+
+    pub(crate) fn timestamp(&self) -> Option<String> {
+        if let Some(value) = self.json() {
+            return value
+                .get("timestamp")
+                .or_else(|| value.get("ts"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string);
+        }
+        let end = self.line.find("] ")?;
+        self.line
+            .strip_prefix('[')
+            .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
+            .map(ToString::to_string)
+    }
+
+    pub(crate) fn message(&self) -> Cow<'_, str> {
+        if let Some(message) = self
+            .json()
+            .and_then(|value| value.get("message"))
             .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string);
-    }
-    let end = line.find("] ")?;
-    line.strip_prefix('[')
-        .and_then(|trimmed| trimmed.get(..end.saturating_sub(1)))
-        .map(ToString::to_string)
-}
-
-fn runtime_doctor_json_line_value(line: &str) -> Option<serde_json::Value> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with('{') {
-        return None;
-    }
-    serde_json::from_str(trimmed).ok()
-}
-
-fn runtime_doctor_line_message<'a>(line: &'a str) -> Cow<'a, str> {
-    if let Some(value) = runtime_doctor_json_line_value(line)
-        && let Some(message) = value.get("message").and_then(serde_json::Value::as_str)
-    {
-        return Cow::Owned(message.to_string());
-    }
-    Cow::Borrowed(
-        line.split_once("] ")
-            .map(|(_, message)| message)
-            .unwrap_or(line)
-            .trim(),
-    )
-}
-
-pub(super) fn runtime_doctor_parse_fields(line: &str) -> BTreeMap<String, String> {
-    let message = runtime_doctor_line_message(line);
-    let mut fields = runtime_doctor_parse_message_fields(&message);
-    if let Some(value) = runtime_doctor_json_line_value(line)
-        && let Some(json_fields) = value.get("fields").and_then(serde_json::Value::as_object)
-    {
-        fields.extend(runtime_doctor_json_fields_map(json_fields));
+        {
+            return Cow::Borrowed(message);
+        }
+        Cow::Borrowed(
+            self.line
+                .split_once("] ")
+                .map(|(_, message)| message)
+                .unwrap_or(self.line)
+                .trim(),
+        )
     }
 
-    fields
+    pub(crate) fn fields(&self) -> BTreeMap<String, String> {
+        let mut fields = runtime_doctor_parse_message_fields(&self.message());
+        if let Some(json_fields) = self
+            .json()
+            .and_then(|value| value.get("fields"))
+            .and_then(serde_json::Value::as_object)
+        {
+            fields.extend(runtime_doctor_json_fields_map(json_fields));
+        }
+        fields
+    }
+
+    pub(crate) fn marker_name(&self) -> Option<&'static str> {
+        if let Some(event) = self
+            .json()
+            .and_then(|value| value.get("event"))
+            .and_then(serde_json::Value::as_str)
+            && let Some(marker) = runtime_doctor_known_marker(event)
+        {
+            return Some(marker);
+        }
+
+        let message = self.message();
+        if let Some(event) = runtime_doctor_parse_log_message(&message).event
+            && let Some(marker) = runtime_doctor_known_marker(&event)
+        {
+            return Some(marker);
+        }
+        RUNTIME_DOCTOR_MARKERS
+            .iter()
+            .copied()
+            .find(|marker| message.contains(marker))
+    }
 }
 
 pub(super) fn runtime_doctor_parse_message_fields(message: &str) -> BTreeMap<String, String> {
     runtime_doctor_parse_log_message(message).fields_map()
-}
-
-pub(super) fn runtime_doctor_marker_name(line: &str) -> Option<&'static str> {
-    if let Some(value) = runtime_doctor_json_line_value(line)
-        && let Some(event) = value.get("event").and_then(serde_json::Value::as_str)
-        && let Some(marker) = runtime_doctor_known_marker(event)
-    {
-        return Some(marker);
-    }
-
-    let message = runtime_doctor_line_message(line);
-    if let Some(event) = runtime_doctor_parse_log_message(&message).event
-        && let Some(marker) = runtime_doctor_known_marker(&event)
-    {
-        return Some(marker);
-    }
-    RUNTIME_DOCTOR_MARKERS
-        .iter()
-        .copied()
-        .find(|marker| message.contains(marker))
 }
 
 fn runtime_doctor_known_marker(event: &str) -> Option<&'static str> {

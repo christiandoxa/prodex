@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::log_fields::{
@@ -6,6 +5,7 @@ use crate::log_fields::{
     runtime_doctor_parse_usize_field, runtime_doctor_split_reason_field,
     runtime_doctor_string_field, runtime_proxy_log_fields,
 };
+use crate::parsing::RuntimeDoctorParsedLogLine;
 #[cfg(test)]
 use crate::summarize_runtime_log_tail;
 
@@ -69,13 +69,14 @@ pub fn runtime_doctor_estimate_smart_context_tokens_saved(saved_bytes: usize) ->
 pub fn runtime_doctor_parse_smart_context_autopilot_line(
     line: &str,
 ) -> Option<RuntimeDoctorSmartContextAutopilotEvent> {
-    let message = runtime_doctor_smart_context_log_line_message(line);
+    let parsed_line = RuntimeDoctorParsedLogLine::new(line);
+    let message = parsed_line.message();
     if !runtime_doctor_log_message_has_marker(&message, "smart_context_autopilot") {
         return None;
     }
 
     let mut fields = runtime_proxy_log_fields(&message);
-    if let Some(value) = runtime_doctor_log_line_json_value(line)
+    if let Some(value) = parsed_line.json()
         && let Some(json_fields) = value.get("fields").and_then(serde_json::Value::as_object)
     {
         for (key, value) in json_fields {
@@ -231,28 +232,6 @@ fn runtime_doctor_increment_string_count(counts: &mut BTreeMap<String, usize>, v
         return;
     }
     *counts.entry(value.to_string()).or_insert(0) += 1;
-}
-
-fn runtime_doctor_smart_context_log_line_message(line: &str) -> Cow<'_, str> {
-    if let Some(value) = runtime_doctor_log_line_json_value(line)
-        && let Some(message) = value.get("message").and_then(serde_json::Value::as_str)
-    {
-        return Cow::Owned(message.to_string());
-    }
-    Cow::Borrowed(
-        line.split_once("] ")
-            .map(|(_, message)| message)
-            .unwrap_or(line)
-            .trim(),
-    )
-}
-
-fn runtime_doctor_log_line_json_value(line: &str) -> Option<serde_json::Value> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with('{') {
-        return None;
-    }
-    serde_json::from_str(trimmed).ok()
 }
 
 fn runtime_doctor_json_field_string(value: &serde_json::Value) -> Option<String> {

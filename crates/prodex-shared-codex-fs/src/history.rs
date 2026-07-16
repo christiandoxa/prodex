@@ -1,5 +1,5 @@
 use super::*;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read as _, Write as _};
 
 const CODEX_HISTORY_MERGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -29,9 +29,12 @@ pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<(
 
         loop {
             raw_line.clear();
-            let bytes = reader
-                .read_line(&mut raw_line)
-                .with_context(|| format!("failed to read {}", path.display()))?;
+            let bytes = read_history_line_bounded(
+                &mut reader,
+                &mut raw_line,
+                CODEX_HISTORY_MERGE_MAX_BYTES.saturating_sub(read_bytes),
+            )
+            .with_context(|| format!("failed to read {}", path.display()))?;
             if bytes == 0 {
                 break;
             }
@@ -65,7 +68,9 @@ pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<(
     let mut merged = Vec::new();
     let mut seen = BTreeSet::new();
 
-    if destination.exists() {
+    let destination_metadata = load_shared_codex_entry_metadata(destination)?;
+    if let Some(metadata) = destination_metadata.as_ref() {
+        ensure_shared_codex_file_public(destination, metadata)?;
         load_history_lines(destination, &mut merged, &mut seen)?;
     }
     load_history_lines(source, &mut merged, &mut seen)?;
@@ -96,8 +101,29 @@ pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<(
         content.push_str(&entry.line);
     }
 
-    fs::write(destination, content)
-        .with_context(|| format!("failed to write merged history {}", destination.display()))
+    let permissions = match destination_metadata {
+        Some(metadata) => metadata.permissions(),
+        None => fs::symlink_metadata(source)
+            .with_context(|| format!("failed to inspect {}", source.display()))?
+            .permissions(),
+    };
+    replace_shared_codex_file_atomic(
+        destination,
+        permissions,
+        None,
+        "failed to write merged history",
+        |file| file.write_all(content.as_bytes()),
+    )
+}
+
+fn read_history_line_bounded(
+    reader: &mut impl BufRead,
+    line: &mut String,
+    remaining_bytes: u64,
+) -> std::io::Result<usize> {
+    reader
+        .take(remaining_bytes.saturating_add(1))
+        .read_line(line)
 }
 
 fn open_history_file_for_merge(path: &Path) -> Result<fs::File> {
@@ -141,6 +167,7 @@ fn history_same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Cursor, Seek as _};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -160,13 +187,59 @@ mod tests {
             .expect("source should be created")
             .set_len(CODEX_HISTORY_MERGE_MAX_BYTES + 1)
             .expect("source size should be set");
-        fs::write(&destination, "{\"ts\":1,\"text\":\"existing\"}\n")
-            .expect("destination should be written");
+        let existing = "{\"ts\":1,\"text\":\"existing\"}\n";
+        fs::write(&destination, existing).expect("destination should be written");
 
         let err =
             merge_history_files(&source, &destination).expect_err("oversized history should fail");
 
         assert!(format!("{err:#}").contains("exceeds safe size limit"));
+        assert_eq!(fs::read_to_string(&destination).unwrap(), existing);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn history_line_reader_stops_after_bounded_overflow_byte() {
+        let mut reader = BufReader::new(Cursor::new(vec![b'x'; 32]));
+        let mut line = String::new();
+
+        let read = read_history_line_bounded(&mut reader, &mut line, 8).unwrap();
+
+        assert_eq!(read, 9);
+        assert_eq!(line.len(), 9);
+        assert_eq!(reader.stream_position().unwrap(), 9);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_history_files_preserves_destination_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = std::env::temp_dir().join(format!(
+            "prodex-history-mode-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source-history.jsonl");
+        let destination = root.join("history.jsonl");
+        fs::write(&source, "{\"ts\":2,\"text\":\"new\"}\n").unwrap();
+        fs::write(&destination, "{\"ts\":1,\"text\":\"old\"}\n").unwrap();
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o640)).unwrap();
+
+        merge_history_files(&source, &destination).unwrap();
+
+        assert_eq!(
+            fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(
+            fs::read_to_string(&destination).unwrap(),
+            "{\"ts\":1,\"text\":\"old\"}\n{\"ts\":2,\"text\":\"new\"}"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

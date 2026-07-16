@@ -35,6 +35,10 @@ impl Directory {
         Err(unsupported())
     }
 
+    pub(super) fn verify(&self, _name: &OsStr, _file: &File) -> io::Result<()> {
+        Err(unsupported())
+    }
+
     pub(super) fn remove_entry(&self, _name: &OsStr) -> io::Result<()> {
         Err(unsupported())
     }

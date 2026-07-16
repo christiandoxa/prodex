@@ -1,7 +1,7 @@
 use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
 use crate::{
-    codex_cli_config_override_exact_value, codex_cli_config_override_value,
-    codex_config_exact_value, codex_config_value,
+    codex_cli_config_override_value, codex_effective_config_exact_value,
+    codex_effective_config_value,
 };
 use anyhow::{Context, Result};
 use prodex_cli::{
@@ -68,11 +68,10 @@ fn external_provider_catalog_codex_args(
     if codex_cli_config_override_value(user_args, "model_catalog_json").is_some() {
         return Ok(user_args.to_vec());
     }
-    let Some(provider) = external_catalog_provider(codex_home, user_args) else {
+    let Some(provider) = external_catalog_provider(codex_home, user_args)? else {
         return Ok(user_args.to_vec());
     };
-
-    let model = external_catalog_model_for_launch(codex_home, user_args, provider);
+    let model = external_catalog_model_for_launch(codex_home, user_args, provider)?;
     let context_window = external_catalog_u64_config_for_launch(
         codex_home,
         user_args,
@@ -96,7 +95,6 @@ fn external_provider_catalog_codex_args(
             auto_compact_token_limit,
         )?;
     }
-
     let mut args = Vec::with_capacity(user_args.len() + 2);
     args.push(OsString::from("-c"));
     args.push(OsString::from(format!(
@@ -110,30 +108,35 @@ fn external_provider_catalog_codex_args(
 fn external_catalog_provider(
     codex_home: &Path,
     user_args: &[OsString],
-) -> Option<ExternalCatalogProvider> {
-    let provider = codex_cli_config_override_value(user_args, "model_provider")
-        .or_else(|| codex_config_value(codex_home, "model_provider"))?;
-    if provider.eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID) {
-        Some(ExternalCatalogProvider::Anthropic)
-    } else if provider.eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID) {
-        Some(ExternalCatalogProvider::Copilot)
-    } else if provider.eq_ignore_ascii_case(SUPER_KIRO_PROVIDER_ID) {
-        Some(ExternalCatalogProvider::Kiro)
-    } else {
-        None
-    }
+) -> Result<Option<ExternalCatalogProvider>> {
+    let Some(provider) = codex_effective_config_value(codex_home, user_args, "model_provider")?
+    else {
+        return Ok(None);
+    };
+    Ok(
+        if provider.eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID) {
+            Some(ExternalCatalogProvider::Anthropic)
+        } else if provider.eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID) {
+            Some(ExternalCatalogProvider::Copilot)
+        } else if provider.eq_ignore_ascii_case(SUPER_KIRO_PROVIDER_ID) {
+            Some(ExternalCatalogProvider::Kiro)
+        } else {
+            None
+        },
+    )
 }
 
 fn external_catalog_model_for_launch(
     codex_home: &Path,
     user_args: &[OsString],
     provider: ExternalCatalogProvider,
-) -> String {
-    codex_cli_config_override_value(user_args, "model")
-        .or_else(|| codex_config_value(codex_home, "model"))
-        .map(|model| model.trim().to_string())
-        .filter(|model| !model.is_empty())
-        .unwrap_or_else(|| provider.default_model().to_string())
+) -> Result<String> {
+    Ok(
+        codex_effective_config_value(codex_home, user_args, "model")?
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty())
+            .unwrap_or_else(|| provider.default_model().to_string()),
+    )
 }
 
 fn external_catalog_u64_config_for_launch(
@@ -142,9 +145,7 @@ fn external_catalog_u64_config_for_launch(
     key: &str,
     default_value: u64,
 ) -> Result<u64> {
-    let Some(value) = codex_cli_config_override_exact_value(user_args, key)
-        .or_else(|| codex_config_exact_value(codex_home, key))
-    else {
+    let Some(value) = codex_effective_config_exact_value(codex_home, user_args, key)? else {
         return Ok(default_value);
     };
     runtime_catalog_u64_config_value("external provider", key, &value)
@@ -684,7 +685,6 @@ mod tests {
             OsString::from("-c"),
             OsString::from("model=\"claude-sonnet-4-6\""),
         ];
-
         let args = prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
             .expect("Anthropic catalog should prepare");
         assert_eq!(args[0], OsString::from("-c"));

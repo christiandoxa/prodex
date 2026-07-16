@@ -23,14 +23,14 @@ fn active_request_guard_drop_records_lane_release() {
     assert_eq!(
         shared
             .lane_admission
-            .responses_active
+            .active_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         1
     );
     assert_eq!(
         shared
             .lane_admission
-            .responses_admissions_total
+            .admissions_total_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         1
     );
@@ -41,28 +41,27 @@ fn active_request_guard_drop_records_lane_release() {
     assert_eq!(
         shared
             .lane_admission
-            .responses_active
+            .active_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         0
     );
     assert_eq!(
         shared
             .lane_admission
-            .responses_releases_total
+            .releases_total_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         1
     );
     assert_eq!(
         shared
             .lane_admission
-            .active_request_release_underflows_total
-            .load(Ordering::SeqCst),
+            .active_request_release_underflows_total(),
         0
     );
     assert_eq!(
         shared
             .lane_admission
-            .responses_release_underflows_total
+            .release_underflows_total_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         0
     );
@@ -88,7 +87,7 @@ fn active_request_guard_drop_records_underflow_without_wrapping() {
     shared.active_request_count.store(0, Ordering::SeqCst);
     shared
         .lane_admission
-        .responses_active
+        .active_counter(RuntimeRouteKind::Responses)
         .store(0, Ordering::SeqCst);
 
     drop(guard);
@@ -97,28 +96,27 @@ fn active_request_guard_drop_records_underflow_without_wrapping() {
     assert_eq!(
         shared
             .lane_admission
-            .responses_active
+            .active_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         0
     );
     assert_eq!(
         shared
             .lane_admission
-            .responses_releases_total
+            .releases_total_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         1
     );
     assert_eq!(
         shared
             .lane_admission
-            .active_request_release_underflows_total
-            .load(Ordering::SeqCst),
+            .active_request_release_underflows_total(),
         1
     );
     assert_eq!(
         shared
             .lane_admission
-            .responses_release_underflows_total
+            .release_underflows_total_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         1
     );
@@ -137,7 +135,7 @@ fn response_lane_limit_still_rejects_fresh_request() {
     let limit = shared.lane_admission.limit(RuntimeRouteKind::Responses);
     shared
         .lane_admission
-        .responses_active
+        .active_counter(RuntimeRouteKind::Responses)
         .store(limit, Ordering::SeqCst);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -157,7 +155,10 @@ fn response_lane_limit_still_rejects_fresh_request() {
             RuntimeRouteKind::Responses
         ))
     ));
-    let wait = shared.lane_admission.admission_wait_metrics.snapshot();
+    let wait = shared
+        .lane_admission
+        .admission_wait_metric_counters()
+        .snapshot();
     assert_eq!(wait.wait_count, 1);
     assert!(wait.wait_total_ns > 0);
 }
@@ -192,7 +193,10 @@ fn active_request_admission_wait_metric_records_recovery_once() {
     .expect("admission should recover after the held request exits");
     release.join().expect("release thread should join");
 
-    let wait = shared.lane_admission.admission_wait_metrics.snapshot();
+    let wait = shared
+        .lane_admission
+        .admission_wait_metric_counters()
+        .snapshot();
     assert_eq!(wait.wait_count, 1);
     assert!(wait.wait_total_ns > 0);
     drop(recovered);
@@ -221,7 +225,7 @@ fn response_lane_limit_does_not_override_owned_previous_response_affinity() {
     let limit = shared.lane_admission.limit(RuntimeRouteKind::Responses);
     shared
         .lane_admission
-        .responses_active
+        .active_counter(RuntimeRouteKind::Responses)
         .store(limit, Ordering::SeqCst);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -246,14 +250,14 @@ fn response_lane_limit_does_not_override_owned_previous_response_affinity() {
     assert_eq!(
         shared
             .lane_admission
-            .responses_active
+            .active_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         limit + 1
     );
     assert_eq!(
         shared
             .lane_admission
-            .admission_wait_metrics
+            .admission_wait_metric_counters()
             .snapshot()
             .wait_count,
         0
@@ -276,7 +280,7 @@ fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
     let wait_count = || {
         shared
             .lane_admission
-            .long_lived_queue_wait_metrics
+            .long_lived_queue_wait_metric_counters()
             .snapshot()
             .wait_count
     };
@@ -343,7 +347,7 @@ fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
 
     let wait = shared
         .lane_admission
-        .long_lived_queue_wait_metrics
+        .long_lived_queue_wait_metric_counters()
         .snapshot();
     assert_eq!(wait.wait_count, 4);
     assert!(wait.wait_total_ns > 0);
@@ -373,7 +377,7 @@ fn response_lane_limit_retry_bypasses_owned_previous_response_affinity() {
     let limit = shared.lane_admission.limit(RuntimeRouteKind::Responses);
     shared
         .lane_admission
-        .responses_active
+        .active_counter(RuntimeRouteKind::Responses)
         .store(limit, Ordering::SeqCst);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
@@ -409,7 +413,7 @@ fn response_lane_limit_retry_bypasses_owned_previous_response_affinity() {
     assert_eq!(
         shared
             .lane_admission
-            .responses_active
+            .active_counter(RuntimeRouteKind::Responses)
             .load(Ordering::SeqCst),
         limit + 1
     );
@@ -431,36 +435,19 @@ fn profile_inflight_guard_drop_records_release() {
     let guard = acquire_runtime_profile_inflight_guard(shared, "main", context)
         .expect("profile inflight guard should be acquired");
 
-    assert_eq!(
-        shared
-            .lane_admission
-            .profile_inflight_admissions_total
-            .load(Ordering::SeqCst),
-        1
-    );
-    {
-        let runtime = shared.runtime.lock().expect("runtime state should lock");
-        assert_eq!(runtime.profile_inflight.get("main"), Some(&weight));
-    }
+    assert_eq!(shared.lane_admission.profile_inflight_admissions_total(), 1);
+    assert_eq!(shared.lane_admission.profile_inflight_count("main"), weight);
 
     drop(guard);
 
+    assert_eq!(shared.lane_admission.profile_inflight_releases_total(), 1);
     assert_eq!(
         shared
             .lane_admission
-            .profile_inflight_releases_total
-            .load(Ordering::SeqCst),
-        1
-    );
-    assert_eq!(
-        shared
-            .lane_admission
-            .profile_inflight_release_underflows_total
-            .load(Ordering::SeqCst),
+            .profile_inflight_release_underflows_total(),
         0
     );
-    let runtime = shared.runtime.lock().expect("runtime state should lock");
-    assert!(!runtime.profile_inflight.contains_key("main"));
+    assert_eq!(shared.lane_admission.profile_inflight_count("main"), 0);
 }
 
 #[test]
@@ -476,26 +463,16 @@ fn profile_inflight_guard_drop_records_underflow_and_log_marker() {
 
     let guard = acquire_runtime_profile_inflight_guard(shared, "main", context)
         .expect("profile inflight guard should be acquired");
-    {
-        let mut runtime = shared.runtime.lock().expect("runtime state should lock");
-        runtime.profile_inflight.clear();
-    }
+    shared.lane_admission.set_profile_inflight("main", 0);
 
     drop(guard);
     runtime_proxy_flush_logs_for_path(&shared.log_path);
 
+    assert_eq!(shared.lane_admission.profile_inflight_releases_total(), 1);
     assert_eq!(
         shared
             .lane_admission
-            .profile_inflight_releases_total
-            .load(Ordering::SeqCst),
-        1
-    );
-    assert_eq!(
-        shared
-            .lane_admission
-            .profile_inflight_release_underflows_total
-            .load(Ordering::SeqCst),
+            .profile_inflight_release_underflows_total(),
         1
     );
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
