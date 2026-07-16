@@ -172,7 +172,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
         let mut codex_args =
             prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
         if let Some(monitor) = self.goal_usage_limit_monitor.as_ref() {
-            add_runtime_goal_session_notify(
+            add_runtime_goal_session_tracking(
                 &prepared.codex_home,
                 self.profile_v2_name.as_deref(),
                 &mut codex_args,
