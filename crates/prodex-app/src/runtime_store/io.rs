@@ -17,7 +17,7 @@ use crate::{
 use crate::{AppPaths, AppState, RecoveredLoad};
 
 static RUNTIME_SIDECAR_GENERATION_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, u64>>> = OnceLock::new();
-const RUNTIME_STORE_JSON_MAX_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const RUNTIME_STORE_JSON_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(crate) fn acquire_state_file_lock(paths: &AppPaths) -> Result<StateFileLock> {
     fs::create_dir_all(&paths.root)
@@ -358,7 +358,7 @@ where
     }
 }
 
-fn read_json_file_to_string(path: &Path) -> io::Result<String> {
+pub(crate) fn read_json_file_to_string(path: &Path) -> io::Result<String> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(io::Error::other(format!(

@@ -1,63 +1,5 @@
 use super::*;
-use crate::{gemini_settings_source_paths_for, parse_gemini_settings_json};
-use std::sync::{Mutex, MutexGuard};
-
-static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
-
-struct TestEnvVarGuard {
-    key: &'static str,
-    old_value: Option<std::ffi::OsString>,
-    _lock: Option<MutexGuard<'static, ()>>,
-}
-
-impl TestEnvVarGuard {
-    fn lock() -> Self {
-        Self {
-            key: "",
-            old_value: None,
-            _lock: Some(TEST_ENV_LOCK.lock().unwrap()),
-        }
-    }
-
-    fn set(key: &'static str, value: &str) -> Self {
-        let old_value = std::env::var_os(key);
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self {
-            key,
-            old_value,
-            _lock: None,
-        }
-    }
-
-    fn unset(key: &'static str) -> Self {
-        let old_value = std::env::var_os(key);
-        unsafe {
-            std::env::remove_var(key);
-        }
-        Self {
-            key,
-            old_value,
-            _lock: None,
-        }
-    }
-}
-
-impl Drop for TestEnvVarGuard {
-    fn drop(&mut self) {
-        if self.key.is_empty() {
-            return;
-        }
-        unsafe {
-            if let Some(value) = &self.old_value {
-                std::env::set_var(self.key, value);
-            } else {
-                std::env::remove_var(self.key);
-            }
-        }
-    }
-}
+use crate::{gemini_settings_source_paths_for_config_home, parse_gemini_settings_json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -393,13 +335,11 @@ fn gemini_cli_compat_bridges_settings_mcp_over_extension_mcp_and_hooks() {
 
 #[test]
 fn gemini_cli_compat_settings_paths_follow_gemini_cli_precedence() {
-    let _env_lock = TestEnvVarGuard::lock();
-    let _home_guard = TestEnvVarGuard::unset("GEMINI_CLI_HOME");
-    let _system_guard = TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_SETTINGS_PATH");
-    let _defaults_guard = TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_DEFAULTS_PATH");
     let home = PathBuf::from("/tmp/prodex-gemini-home");
     let cwd = PathBuf::from("/tmp/prodex-gemini-workspace/repo/sub");
-    let paths = gemini_settings_source_paths_for(Some(&home), Some(&cwd));
+    let config_home = home.join(".gemini");
+    let paths =
+        gemini_settings_source_paths_for_config_home(Some(&config_home), Some(&cwd), None, None);
     let repo_settings = PathBuf::from("/tmp/prodex-gemini-workspace/repo")
         .join(".gemini")
         .join("settings.json");
@@ -450,14 +390,11 @@ fn gemini_cli_compat_settings_paths_follow_gemini_cli_precedence() {
 
 #[test]
 fn gemini_cli_compat_settings_paths_honor_gemini_cli_home() {
-    let _env_lock = TestEnvVarGuard::lock();
-    let _home_guard = TestEnvVarGuard::set("GEMINI_CLI_HOME", "/tmp/gemini-cli-home");
-    let _system_guard = TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_SETTINGS_PATH");
-    let _defaults_guard = TestEnvVarGuard::unset("GEMINI_CLI_SYSTEM_DEFAULTS_PATH");
-
-    let paths = gemini_settings_source_paths_for(
-        Some(Path::new("/tmp/plain-home")),
+    let paths = gemini_settings_source_paths_for_config_home(
+        Some(Path::new("/tmp/gemini-cli-home/.gemini")),
         Some(Path::new("/tmp/workspace")),
+        None,
+        None,
     );
 
     assert!(paths.iter().any(|(_, path)| {
@@ -525,19 +462,6 @@ fn gemini_cli_compat_ignores_oversized_existing_config() {
 #[test]
 fn gemini_cli_compat_refuses_symlinked_config_write() {
     let root = temp_dir("config-symlink-write");
-    let _lock = TestEnvVarGuard::lock();
-    let gemini_home = root.join("gemini-home");
-    let system_settings = root.join("system-settings.json");
-    let system_defaults = root.join("system-defaults.json");
-    let _gemini_home = TestEnvVarGuard::set("GEMINI_CLI_HOME", gemini_home.to_str().unwrap_or(""));
-    let _system_settings = TestEnvVarGuard::set(
-        "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
-        system_settings.to_str().unwrap_or(""),
-    );
-    let _system_defaults = TestEnvVarGuard::set(
-        "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
-        system_defaults.to_str().unwrap_or(""),
-    );
     let codex_home = root.join("codex");
     let outside = root.join("outside.toml");
     fs::create_dir_all(&codex_home).unwrap();
@@ -554,19 +478,6 @@ fn gemini_cli_compat_refuses_symlinked_config_write() {
 #[test]
 fn gemini_cli_compat_ignores_oversized_existing_hooks_json() {
     let root = temp_dir("oversized-hooks");
-    let _lock = TestEnvVarGuard::lock();
-    let gemini_home = root.join("gemini-home");
-    let system_settings = root.join("system-settings.json");
-    let system_defaults = root.join("system-defaults.json");
-    let _gemini_home = TestEnvVarGuard::set("GEMINI_CLI_HOME", gemini_home.to_str().unwrap_or(""));
-    let _system_settings = TestEnvVarGuard::set(
-        "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
-        system_settings.to_str().unwrap_or(""),
-    );
-    let _system_defaults = TestEnvVarGuard::set(
-        "GEMINI_CLI_SYSTEM_DEFAULTS_PATH",
-        system_defaults.to_str().unwrap_or(""),
-    );
     let codex_home = root.join("codex");
     fs::create_dir_all(&codex_home).unwrap();
     let hooks_path = codex_home.join("hooks.json");

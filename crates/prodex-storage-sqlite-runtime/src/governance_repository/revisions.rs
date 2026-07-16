@@ -353,14 +353,3 @@ fn pointer_table(kind: GovernanceArtifactKind) -> &'static str {
         GovernanceArtifactKind::RoutingScores => "prodex_routing_score_pointers",
     }
 }
-
-pub(super) fn validate_revision_id(
-    kind: GovernanceArtifactKind,
-    revision_id: &str,
-) -> Result<(), GovernanceRepositoryError> {
-    if kind == GovernanceArtifactKind::Policy {
-        prodex_domain::PolicyRevisionId::from_str(revision_id)
-            .map_err(|_| GovernanceRepositoryError::InvalidInput)?;
-    }
-    Ok(())
-}

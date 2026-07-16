@@ -76,11 +76,11 @@ pub fn runtime_launch_dry_run_report(
     base_codex_home: &Path,
     runtime_proxy: Option<RuntimeProxyCodexEndpoint<'_>>,
     plan: &RuntimeLaunchPlan,
-) -> String {
+) -> codex_config::CodexConfigResult<String> {
     let child = &plan.child;
-    let provider = dry_run_config_value(&child.args, base_codex_home, "model_provider")
+    let provider = dry_run_config_value(&child.args, base_codex_home, "model_provider")?
         .unwrap_or_else(|| "openai".to_string());
-    let model = dry_run_config_value(&child.args, base_codex_home, "model")
+    let model = dry_run_config_value(&child.args, base_codex_home, "model")?
         .unwrap_or_else(|| "(codex default)".to_string());
     let mut output = String::new();
     output.push_str("Prodex dry run: launch diagnostics\n");
@@ -131,17 +131,23 @@ pub fn runtime_launch_dry_run_report(
         }
     }
     output.push_str("Codex/TUI not started because --dry-run was set.\n");
-    output
+    Ok(output)
 }
 
-fn dry_run_config_value(args: &[OsString], codex_home: &Path, key: &str) -> Option<String> {
+fn dry_run_config_value(
+    args: &[OsString],
+    codex_home: &Path,
+    key: &str,
+) -> codex_config::CodexConfigResult<Option<String>> {
     if key == "model"
         && let Some(model) = dry_run_cli_model(args)
     {
-        return Some(model);
+        return Ok(Some(model));
     }
-    codex_config::codex_cli_config_override_value(args, key)
-        .or_else(|| codex_config::codex_config_value_for_args(codex_home, args, key))
+    if let Some(value) = codex_config::codex_cli_config_override_value(args, key) {
+        return Ok(Some(value));
+    }
+    codex_config::codex_config_value_for_args(codex_home, args, key)
 }
 
 fn dry_run_cli_model(args: &[OsString]) -> Option<String> {

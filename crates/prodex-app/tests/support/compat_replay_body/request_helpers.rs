@@ -104,6 +104,9 @@ fn compat_replay_sse_inspection_value(progress: RuntimeSseInspectionProgress) ->
         RuntimeSseInspectionProgress::QuotaBlocked => serde_json::json!({
             "kind": "quota_blocked",
         }),
+        RuntimeSseInspectionProgress::Overloaded => serde_json::json!({
+            "kind": "overloaded",
+        }),
         RuntimeSseInspectionProgress::PreviousResponseNotFound => serde_json::json!({
             "kind": "previous_response_not_found",
         }),

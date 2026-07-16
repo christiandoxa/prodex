@@ -1,7 +1,7 @@
 use super::*;
+use serde::Serialize;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use serde::Serialize;
 
 pub(super) fn running_in_ci() -> bool {
     std::env::var_os("GITHUB_ACTIONS").is_some() || std::env::var_os("CI").is_some()
@@ -248,10 +248,15 @@ pub(super) fn runtime_rotation_proxy_shared_with_auto_redeem(
     auto_redeem_enabled: bool,
 ) -> RuntimeRotationProxyShared {
     let active_request_limit = active_request_limit.max(1);
+    let runtime_config = Arc::new(crate::RuntimeConfig::compatibility_current());
+    let compact_client =
+        crate::build_runtime_upstream_async_http_compact_client(false, &runtime_config)
+            .expect("compact async client");
     RuntimeRotationProxyShared {
-        runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
+        runtime_config,
         upstream_no_proxy: false,
         auto_redeem_enabled,
+        compact_client,
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -301,7 +306,15 @@ impl RuntimeProxyFixtureBuilder {
     }
 
     pub(super) fn build_shared(self, temp_dir: &TestDir) -> RuntimeRotationProxyShared {
-        runtime_rotation_proxy_shared(temp_dir, self.build_runtime(temp_dir), usize::MAX)
+        let profile_inflight = self.profile_inflight.clone();
+        let shared =
+            runtime_rotation_proxy_shared(temp_dir, self.build_runtime(temp_dir), usize::MAX);
+        for (profile_name, count) in profile_inflight {
+            shared
+                .lane_admission
+                .set_profile_inflight(profile_name, count);
+        }
+        shared
     }
 
     pub(super) fn build_runtime(self, temp_dir: &TestDir) -> RuntimeRotationState {
@@ -326,7 +339,6 @@ impl RuntimeProxyFixtureBuilder {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: self.profile_inflight,
             profile_health: self.profile_health,
         }
     }
@@ -400,7 +412,6 @@ pub(super) fn runtime_shared_for_cold_start_probe_selection(
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::from([(
                 runtime_profile_auth_failure_key("main"),
                 RuntimeProfileHealth {

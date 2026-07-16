@@ -1,5 +1,20 @@
 use super::*;
 
+#[test]
+fn app_state_schema_migrates_legacy_and_rejects_future_versions() {
+    let legacy: AppState = serde_json::from_str(r#"{"active_profile":null}"#).unwrap();
+    assert_eq!(
+        serde_json::to_value(&legacy).unwrap()["schema_version"],
+        APP_STATE_SCHEMA_VERSION
+    );
+
+    let future = format!(
+        r#"{{"schema_version":{},"active_profile":null}}"#,
+        APP_STATE_SCHEMA_VERSION + 1
+    );
+    assert!(serde_json::from_str::<AppState>(&future).is_err());
+}
+
 fn profile(name: &str) -> (String, ProfileEntry) {
     (
         name.to_string(),
@@ -99,24 +114,35 @@ fn merge_profile_bindings_prefers_newer_known_profile_binding() {
 }
 
 #[test]
-fn duplicate_identity_key_combines_account_and_email_when_both_exist() {
+fn timestamp_ties_merge_commutatively() {
+    let profiles = BTreeMap::from([profile("p1"), profile("p2")]);
+    let left_bindings = BTreeMap::from([("same".to_string(), binding("p1", 10))]);
+    let right_bindings = BTreeMap::from([("same".to_string(), binding("p2", 10))]);
     assert_eq!(
-        duplicate_profile_identity_key(Some(" acct "), Some("User@Example.COM")),
-        Some("account:acct|email:user@example.com".to_string())
+        merge_profile_bindings(&left_bindings, &right_bindings, &profiles),
+        merge_profile_bindings(&right_bindings, &left_bindings, &profiles)
     );
+
+    let left_policies = BTreeMap::from([(
+        "p1".to_string(),
+        ProfileGovernancePolicy {
+            weight: 100,
+            updated_at: 10,
+            ..ProfileGovernancePolicy::default()
+        },
+    )]);
+    let right_policies = BTreeMap::from([(
+        "p1".to_string(),
+        ProfileGovernancePolicy {
+            weight: 200,
+            updated_at: 10,
+            ..ProfileGovernancePolicy::default()
+        },
+    )]);
     assert_eq!(
-        duplicate_profile_identity_key(Some(" acct "), None),
-        Some("account:acct".to_string())
+        merge_profile_governance_policies(&left_policies, &right_policies, &profiles),
+        merge_profile_governance_policies(&right_policies, &left_policies, &profiles)
     );
-    assert_eq!(
-        duplicate_profile_identity_key(None, Some(" User@Example.COM ")),
-        Some("email:user@example.com".to_string())
-    );
-    assert_ne!(
-        duplicate_profile_identity_key(Some("acct"), Some("first@example.com")),
-        duplicate_profile_identity_key(Some("acct"), Some("second@example.com"))
-    );
-    assert_eq!(duplicate_profile_identity_key(Some(" "), Some(" ")), None);
 }
 
 #[test]

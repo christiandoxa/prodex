@@ -1,8 +1,9 @@
-use prodex_quota::{
-    MainWindowSnapshot, RuntimeQuotaWindowStatus, UsageResponse, UsageWindow, WindowPair,
-    find_main_window, format_precise_reset_time, remaining_percent,
+use prodex_quota::{MainWindowSnapshot, UsageResponse, format_precise_reset_time};
+pub use prodex_runtime_quota::{
+    RuntimeProfileUsageSnapshot, required_main_window_snapshot_at,
+    runtime_profile_usage_snapshot_hold_active, runtime_profile_usage_snapshot_hold_expired,
+    runtime_usage_snapshot_is_usable, usage_from_runtime_usage_snapshot,
 };
-use prodex_runtime_state::RuntimeProfileUsageSnapshot as RuntimeProfileUsageSnapshotGeneric;
 use prodex_runtime_tuning::RuntimeTuningSnapshot;
 use prodex_shared_types::{
     InfoQuotaAggregate, InfoQuotaSource, InfoQuotaWindow, InfoRuntimeLoadSummary,
@@ -25,8 +26,6 @@ pub use runtime_load::*;
 pub use runtime_tuning::*;
 pub use summaries::*;
 pub use token_usage_render::*;
-
-pub type RuntimeProfileUsageSnapshot = RuntimeProfileUsageSnapshotGeneric<RuntimeQuotaWindowStatus>;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InfoTokenUsageCounts {

@@ -99,7 +99,7 @@ fn apply_runtime_profile_probe_result_to_runtime(
         if usage_apply_plan.snapshot_should_persist || usage_apply_plan.retry_backoff_changed {
             state_save_args = Some(RuntimeStateSaveRequest::from_snapshot(
                 runtime_state_save_snapshot_from_runtime(runtime),
-                &format!("usage_snapshot:{profile_name}"),
+                RuntimeStateMutation::UsageSnapshot(profile_name.to_string()),
             ));
         }
     }

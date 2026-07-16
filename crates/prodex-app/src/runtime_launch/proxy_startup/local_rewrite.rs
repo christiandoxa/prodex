@@ -1,10 +1,12 @@
 use super::super::copilot_instructions::runtime_copilot_init_current_workspace_custom_instructions;
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 mod context;
+mod listener_worker;
 pub(super) use self::context::{
     RuntimeLocalRewriteProcessServices, RuntimeLocalRewriteProxyShared,
     RuntimeLocalRewriteRequestContext,
 };
+use self::listener_worker::spawn_runtime_local_rewrite_listener_worker;
 #[cfg(test)]
 pub(crate) use super::local_rewrite_constraints::start_runtime_gateway_rewrite_proxy;
 #[cfg(test)]
@@ -60,11 +62,13 @@ pub(super) use super::local_rewrite_upstream::{
 use super::provider_bridge::runtime_provider_label;
 use crate::presidio_runtime::runtime_governed_presidio_redaction_config;
 use crate::proxy_config::{
-    build_runtime_upstream_async_http_client, runtime_upstream_proxy_mode_label,
+    build_runtime_upstream_async_http_client, build_runtime_upstream_async_http_compact_client,
+    runtime_upstream_proxy_mode_label,
 };
 use crate::quota_support::validate_credential_free_http_url;
 use crate::runtime_background::{
-    initialize_runtime_probe_refresh_queue, register_runtime_proxy_persistence_mode,
+    RuntimeProxyMarkerGuard, initialize_runtime_probe_refresh_queue,
+    register_runtime_proxy_persistence_mode,
 };
 use crate::runtime_config::RuntimeConfig;
 use crate::runtime_core_shared::{
@@ -308,6 +312,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         worker_count,
         secret_refresh,
         log_path,
+        marker_guard,
     } = prepared;
     let RuntimeLocalRewriteWorkers {
         worker_threads,
@@ -345,6 +350,7 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         #[cfg(test)]
         gateway_side_effect_snapshot: Some(super::gateway_snapshot_handle(shared.clone())),
         owner_lock: None,
+        _marker_guard: marker_guard,
     })
 }
 
@@ -355,6 +361,7 @@ pub(super) struct RuntimeLocalRewritePrepared {
     pub(super) worker_count: usize,
     pub(super) secret_refresh: Option<RuntimeGatewayCredentialRefreshPlan>,
     pub(super) log_path: PathBuf,
+    pub(super) marker_guard: RuntimeProxyMarkerGuard,
 }
 
 pub(super) fn prepare_runtime_local_rewrite_application(
@@ -412,6 +419,10 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         upstream_no_proxy,
         auto_redeem_enabled: false,
         async_client: build_runtime_upstream_async_http_client(true, &runtime_config)?,
+        compact_client: build_runtime_upstream_async_http_compact_client(
+            upstream_no_proxy,
+            &runtime_config,
+        )?,
         async_runtime,
         log_path: log_path.clone(),
         request_sequence: Arc::new(AtomicU64::new(runtime_proxy_request_sequence_seed(
@@ -439,7 +450,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };
@@ -462,6 +472,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         &provider,
         provider_credential.as_ref(),
     )?;
+    let marker_guard = RuntimeProxyMarkerGuard::new(&log_path);
     register_runtime_proxy_persistence_mode(&log_path, true);
     register_runtime_smart_context_proxy_state(
         &log_path,
@@ -625,6 +636,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         worker_count,
         secret_refresh,
         log_path,
+        marker_guard,
     })
 }
 
@@ -1296,52 +1308,31 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
     } else {
         None
     };
-    for _ in 0..worker_count {
+    for worker_index in 0..worker_count {
         let Some(server) = server else {
             break;
         };
-        let server = Arc::clone(server);
-        let shutdown = Arc::clone(shutdown);
-        let shared = shared.clone();
-        worker_threads.push(thread::spawn(move || {
-            runtime_local_rewrite_worker_loop(server, shutdown, shared)
-        }));
+        let worker = spawn_runtime_local_rewrite_listener_worker(
+            worker_index,
+            Arc::clone(server),
+            Arc::clone(shutdown),
+            shared.clone(),
+        );
+        match worker {
+            Ok(worker) => worker_threads.push(worker),
+            Err(err) => {
+                shutdown.store(true, Ordering::SeqCst);
+                for _ in 0..worker_index {
+                    server.unblock();
+                }
+                return Err(err.into());
+            }
+        }
     }
     Ok(RuntimeLocalRewriteWorkers {
         worker_threads,
         gemini_live_sidecar_addr,
     })
-}
-
-fn runtime_local_rewrite_worker_loop(
-    server: Arc<TinyServer>,
-    shutdown: Arc<AtomicBool>,
-    shared: RuntimeLocalRewriteProxyShared,
-) {
-    loop {
-        match server.recv() {
-            Ok(request) => {
-                let request_shared = runtime_gateway_pin_request_credentials(&shared);
-                let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
-                    handle_runtime_local_rewrite_proxy_request(request, &request_shared);
-                });
-                if let Err(panic) = result {
-                    runtime_proxy_log(
-                        &request_shared.runtime_shared,
-                        format!(
-                            "runtime_proxy_worker_panic lane=local_rewrite panic={}",
-                            crate::runtime_panic::runtime_panic_payload_label(panic.as_ref())
-                        ),
-                    );
-                }
-            }
-            Err(_) if shutdown.load(Ordering::SeqCst) => break,
-            Err(_) => {}
-        }
-        if shutdown.load(Ordering::SeqCst) {
-            break;
-        }
-    }
 }
 
 fn build_runtime_local_rewrite_http_client(

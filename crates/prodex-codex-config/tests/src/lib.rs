@@ -2,26 +2,32 @@ use super::*;
 
 #[test]
 fn parses_model_provider_from_config_toml() {
-    let contents = r#"
-            model_provider = "amazon-bedrock"
-            model = "gpt-5.4"
-        "#;
+    let root = temp_dir("model-provider");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("config.toml"),
+        "model_provider = \"amazon-bedrock\"\nmodel = \"gpt-5.4\"\n",
+    )
+    .unwrap();
 
     assert_eq!(
-        parse_toml_string_assignment(contents, "model_provider").as_deref(),
+        codex_configured_model_provider(&root).unwrap().as_deref(),
         Some("amazon-bedrock")
     );
 }
 
 #[test]
 fn parses_exact_key_without_stopping_on_prefix_match() {
-    let contents = r#"
-            model_provider = "prodex-local"
-            model = "qwen3-coder"
-        "#;
+    let root = temp_dir("exact-key");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("config.toml"),
+        "model_provider = \"prodex-local\"\nmodel = \"qwen3-coder\"\n",
+    )
+    .unwrap();
 
     assert_eq!(
-        parse_toml_string_assignment(contents, "model").as_deref(),
+        codex_config_value(&root, "model").unwrap().as_deref(),
         Some("qwen3-coder")
     );
 }
@@ -37,7 +43,9 @@ fn parses_nested_toml_table_string_value() {
     .unwrap();
 
     assert_eq!(
-        codex_config_value(&root, "model_providers.prodex-local.base_url").as_deref(),
+        codex_config_value(&root, "model_providers.prodex-local.base_url")
+            .unwrap()
+            .as_deref(),
         Some("http://127.0.0.1:8131/v1")
     );
 }
@@ -53,14 +61,16 @@ fn exact_config_value_preserves_empty_and_whitespace_strings() {
     .unwrap();
 
     assert_eq!(
-        codex_config_exact_value(&root, "empty").as_deref(),
+        codex_config_exact_value(&root, "empty").unwrap().as_deref(),
         Some("")
     );
     assert_eq!(
-        codex_config_exact_value(&root, "spaced").as_deref(),
+        codex_config_exact_value(&root, "spaced")
+            .unwrap()
+            .as_deref(),
         Some(" 128000 ")
     );
-    assert_eq!(codex_config_value(&root, "empty"), None);
+    assert_eq!(codex_config_value(&root, "empty").unwrap(), None);
 }
 
 #[test]
@@ -110,6 +120,7 @@ fn cli_override_takes_precedence_over_config_file() {
         )
         .as_deref(),
     )
+    .unwrap()
     .unwrap();
 
     assert_eq!(provider.provider_id, "amazon-bedrock");
@@ -153,7 +164,9 @@ fn ignores_path_like_profile_v2_names_for_config_lookup() {
         None
     );
     assert_eq!(
-        codex_configured_model_provider_with_profile_v2(&root, Some("../evil")).as_deref(),
+        codex_configured_model_provider_with_profile_v2(&root, Some("../evil"))
+            .unwrap()
+            .as_deref(),
         Some("amazon-bedrock")
     );
 }
@@ -174,10 +187,16 @@ fn profile_v2_config_overlays_base_config_for_model_provider() {
     .unwrap();
 
     assert_eq!(
-        codex_configured_model_provider_with_profile_v2(&root, Some("local")).as_deref(),
+        codex_configured_model_provider_with_profile_v2(&root, Some("local"))
+            .unwrap()
+            .as_deref(),
         Some("openai")
     );
-    assert!(codex_non_openai_model_provider_with_profile_v2(&root, None, Some("local")).is_none());
+    assert!(
+        codex_non_openai_model_provider_with_profile_v2(&root, None, Some("local"))
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -195,6 +214,7 @@ fn profile_v2_config_is_used_for_args_when_no_cli_override_exists() {
         &root,
         &[OsString::from("exec"), OsString::from("--profile=bedrock")],
     )
+    .unwrap()
     .unwrap();
 
     assert_eq!(provider.provider_id, "amazon-bedrock");
@@ -222,6 +242,7 @@ fn cli_override_takes_precedence_over_profile_v2_config() {
                 OsString::from("--config=model_provider=openai"),
             ],
         )
+        .unwrap()
         .is_none()
     );
 }
@@ -245,11 +266,11 @@ fn explicit_openai_override_clears_non_openai_config() {
         .as_deref(),
     );
 
-    assert!(provider.is_none());
+    assert!(provider.unwrap().is_none());
 }
 
 #[test]
-fn fast_service_tier_config_does_not_parse_as_model_provider() {
+fn invalid_toml_null_is_reported() {
     let root = temp_dir("fast-service-tier-not-model-provider");
     fs::create_dir_all(&root).unwrap();
     fs::write(
@@ -258,8 +279,10 @@ fn fast_service_tier_config_does_not_parse_as_model_provider() {
     )
     .unwrap();
 
-    assert!(codex_configured_model_provider(&root).is_none());
-    assert!(codex_non_openai_model_provider(&root, None).is_none());
+    assert!(matches!(
+        codex_configured_model_provider(&root),
+        Err(CodexConfigError::Parse { .. })
+    ));
     assert_eq!(
         codex_cli_config_override_value(
             &[
@@ -295,7 +318,47 @@ fn model_provider_override_survives_fast_service_tier_config() {
     );
 
     assert_eq!(override_value.as_deref(), Some("openai"));
-    assert!(codex_non_openai_model_provider(&root, override_value.as_deref()).is_none());
+    assert!(
+        codex_non_openai_model_provider(&root, override_value.as_deref())
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn malformed_toml_is_reported_instead_of_partially_parsed() {
+    let root = temp_dir("malformed");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("config.toml"),
+        "model_provider = 'amazon-bedrock'\ninvalid = [\n",
+    )
+    .unwrap();
+
+    assert!(matches!(
+        codex_configured_model_provider(&root),
+        Err(CodexConfigError::Parse { .. })
+    ));
+}
+
+#[test]
+fn oversized_config_is_rejected_after_bounded_read() {
+    let root = temp_dir("oversized");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("config.toml"),
+        vec![b'a'; CODEX_CONFIG_MAX_BYTES as usize + 1],
+    )
+    .unwrap();
+
+    let error = codex_config_value(&root, "model_provider").unwrap_err();
+
+    let CodexConfigError::Read { source, .. } = error else {
+        panic!("expected bounded read error")
+    };
+    assert_eq!(source.kind(), io::ErrorKind::InvalidData);
+    assert!(source.to_string().contains("safe size limit"));
+    fs::remove_dir_all(root).unwrap();
 }
 
 fn temp_dir(name: &str) -> PathBuf {

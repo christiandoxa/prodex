@@ -2,6 +2,7 @@ use std::env;
 use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
+// ponytail: Migrate remaining cases to injected readers if this blocks parallel tests.
 static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 thread_local! {

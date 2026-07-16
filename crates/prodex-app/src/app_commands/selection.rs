@@ -12,10 +12,10 @@ use crate::{
 };
 
 #[cfg(test)]
-pub(crate) use prodex_app_reports::ready_profile_sort_key;
+pub(crate) use prodex_runtime_quota::ready_profile_sort_key;
 #[cfg(test)]
-pub(crate) use prodex_app_reports::schedule_ready_profile_candidates_with_view;
-pub(crate) use prodex_app_reports::{
+pub(crate) use prodex_runtime_quota::schedule_ready_profile_candidates_with_view;
+pub(crate) use prodex_runtime_quota::{
     ProfileSelectionRead, ProfileSelectionView, RuntimeProfileSelectionCatalog,
     RuntimeRouteSelectionCatalog, RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry,
     RuntimeSelectionProfileEntry, active_profile_selection_order_with_view,
@@ -143,7 +143,7 @@ pub(crate) fn ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     selection: S,
     persisted_usage_snapshots: Option<&BTreeMap<String, RuntimeProfileUsageSnapshot>>,
 ) -> Vec<ReadyProfileCandidate> {
-    prodex_app_reports::ready_profile_candidates_with_view(
+    prodex_runtime_quota::ready_profile_candidates_with_view(
         reports,
         include_code_review,
         preferred_profile,
@@ -171,7 +171,7 @@ pub(crate) fn required_main_window_snapshot(
     usage: &UsageResponse,
     label: &str,
 ) -> Option<MainWindowSnapshot> {
-    prodex_app_reports::required_main_window_snapshot_at(usage, label, Local::now().timestamp())
+    prodex_runtime_quota::required_main_window_snapshot_at(usage, label, Local::now().timestamp())
 }
 
 pub(crate) fn active_profile_selection_order(

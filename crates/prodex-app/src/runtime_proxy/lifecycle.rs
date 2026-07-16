@@ -19,9 +19,6 @@ pub(crate) use wait::{
 
 impl Drop for RuntimeRotationProxy {
     fn drop(&mut self) {
-        clear_runtime_proxy_continuity_failure_reason_metrics(&self.log_path);
-        unregister_runtime_proxy_persistence_mode(&self.log_path);
-        unregister_runtime_broker_metadata(&self.log_path);
         self.shutdown.store(true, Ordering::SeqCst);
         for _ in 0..self.accept_worker_count {
             self.server.unblock();
@@ -74,85 +71,54 @@ fn probe_runtime_proxy_active_request_slot(
     request: Option<&RuntimeProxyRequest>,
 ) -> Result<RuntimeProxyActiveRequestGuard, RuntimeProxyAdmissionRejection> {
     let lane = runtime_proxy_request_lane(path, transport == "websocket");
-    let lane_active_count = shared.lane_admission.active_counter(lane);
-    let lane_limit = shared.lane_admission.limit(lane);
     let bypass_owned_affinity_lane_limit = request.is_some_and(|request| {
         runtime_proxy_request_has_owned_lane_affinity(shared, lane, request)
     });
-    loop {
-        let active = shared.active_request_count.load(Ordering::SeqCst);
-        if active >= shared.active_request_limit {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "runtime_proxy_active_limit_reached transport={transport} path={path} active={active} limit={}",
-                    shared.active_request_limit
-                ),
-            );
-            return Err(RuntimeProxyAdmissionRejection::GlobalLimit);
-        }
-        let lane_active = lane_active_count.load(Ordering::SeqCst);
-        let bypass_lane_limit = lane == RuntimeRouteKind::Standard
-            && runtime_proxy_startup_standard_lane_priority_path(path)
-            || bypass_owned_affinity_lane_limit;
-        if lane_active >= lane_limit && !bypass_lane_limit {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "runtime_proxy_lane_limit_reached transport={transport} path={path} lane={} active={lane_active} limit={lane_limit}",
-                    runtime_route_kind_label(lane)
-                ),
-            );
-            return Err(RuntimeProxyAdmissionRejection::LaneLimit(lane));
-        }
-        if lane_active >= lane_limit && bypass_owned_affinity_lane_limit {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "runtime_proxy_lane_limit_bypassed_affinity transport={transport} path={path} lane={} active={lane_active} limit={lane_limit}",
-                    runtime_route_kind_label(lane)
-                ),
-            );
-        }
-        if shared
-            .active_request_count
-            .compare_exchange(
-                active,
-                active.saturating_add(1),
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            )
-            .is_ok()
-        {
-            if lane_active_count
-                .compare_exchange(
-                    lane_active,
-                    lane_active.saturating_add(1),
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
-                .is_ok()
-            {
-                shared
-                    .lane_admission
-                    .admissions_total_counter(lane)
-                    .fetch_add(1, Ordering::Relaxed);
-                return Ok(RuntimeProxyActiveRequestGuard {
-                    active_request_count: Arc::clone(&shared.active_request_count),
-                    lane_active_count,
-                    lane_releases_total: shared.lane_admission.releases_total_counter(lane),
-                    active_request_release_underflows_total: Arc::clone(
-                        &shared
+    let bypass_lane_limit = lane == RuntimeRouteKind::Standard
+        && runtime_proxy_startup_standard_lane_priority_path(path)
+        || bypass_owned_affinity_lane_limit;
+    match shared.lane_admission.try_acquire(
+        Arc::clone(&shared.active_request_count),
+        shared.active_request_limit,
+        lane,
+        bypass_lane_limit,
+    ) {
+        Ok(acquired) => {
+            if acquired.bypassed_lane_limit && bypass_owned_affinity_lane_limit {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "runtime_proxy_lane_limit_bypassed_affinity transport={transport} path={path} lane={} active={} limit={}",
+                        runtime_route_kind_label(lane),
+                        shared
                             .lane_admission
-                            .active_request_release_underflows_total,
+                            .active_counter(lane)
+                            .load(Ordering::SeqCst)
+                            .saturating_sub(1),
+                        shared.lane_admission.limit(lane),
                     ),
-                    lane_release_underflows_total: shared
-                        .lane_admission
-                        .release_underflows_total_counter(lane),
-                    wait: Arc::clone(&shared.lane_admission.wait),
-                });
+                );
             }
-            shared.active_request_count.fetch_sub(1, Ordering::SeqCst);
+            Ok(acquired.permit)
+        }
+        Err(prodex_runtime_state::RuntimeProxyAdmissionLimit::Global { active, limit }) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "runtime_proxy_active_limit_reached transport={transport} path={path} active={active} limit={limit}"
+                ),
+            );
+            Err(RuntimeProxyAdmissionRejection::GlobalLimit)
+        }
+        Err(prodex_runtime_state::RuntimeProxyAdmissionLimit::Lane { active, limit }) => {
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "runtime_proxy_lane_limit_reached transport={transport} path={path} lane={} active={active} limit={limit}",
+                    runtime_route_kind_label(lane)
+                ),
+            );
+            Err(RuntimeProxyAdmissionRejection::LaneLimit(lane))
         }
     }
 }
@@ -281,7 +247,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
         &shared.runtime_config,
     );
     let mut wait_metric =
-        RuntimeProxyWaitMetricGuard::new(shared.lane_admission.admission_wait_metrics.as_ref());
+        RuntimeProxyWaitMetricGuard::new(shared.lane_admission.admission_wait_metric_counters());
     loop {
         match probe_runtime_proxy_active_request_slot(shared, transport, path, request) {
             Ok(guard) => {
@@ -332,7 +298,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                     );
                     wait_metric.start();
                 }
-                let (mutex, condvar) = &*shared.lane_admission.wait;
+                let (mutex, condvar) = shared.lane_admission.wait();
                 let wait_guard = mutex
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -371,7 +337,9 @@ where
         &shared.runtime_config,
     );
     let mut wait_metric = RuntimeProxyWaitMetricGuard::new(
-        shared.lane_admission.long_lived_queue_wait_metrics.as_ref(),
+        shared
+            .lane_admission
+            .long_lived_queue_wait_metric_counters(),
     );
     loop {
         match try_enqueue(item) {
@@ -411,7 +379,7 @@ where
                     );
                     wait_metric.start();
                 }
-                let (mutex, condvar) = &*shared.lane_admission.wait;
+                let (mutex, condvar) = shared.lane_admission.wait();
                 let wait_guard = mutex
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());

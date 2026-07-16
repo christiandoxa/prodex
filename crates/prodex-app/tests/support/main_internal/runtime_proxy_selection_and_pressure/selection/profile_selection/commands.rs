@@ -149,7 +149,10 @@ fn optimizer_shortcuts_parse_as_dedicated_commands() {
         panic!("expected rtk shortcut");
     };
     assert_eq!(args.profile.as_deref(), Some("main"));
-    assert_eq!(args.codex_args, vec![OsString::from("exec"), OsString::from("review")]);
+    assert_eq!(
+        args.codex_args,
+        vec![OsString::from("exec"), OsString::from("review")]
+    );
 
     let ponytail = parse_cli_command_from(["prodex", "ponytail", "exec", "review"])
         .expect("ponytail shortcut should parse");

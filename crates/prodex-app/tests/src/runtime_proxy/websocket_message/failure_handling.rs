@@ -35,6 +35,9 @@ fn configure_quota_last_chance_profiles(
     config.tuning.profile_inflight_soft_limit = 4;
     config.tuning.profile_inflight_hard_limit = 8;
     let now = chrono::Local::now().timestamp();
+    shared
+        .lane_admission
+        .set_profile_inflight("beta", beta_inflight);
     let mut runtime = shared
         .runtime
         .lock()
@@ -62,9 +65,6 @@ fn configure_quota_last_chance_profiles(
             result: Ok(ready_usage()),
         },
     );
-    runtime
-        .profile_inflight
-        .insert("beta".to_string(), beta_inflight);
     runtime.profile_route_circuit_open_until.insert(
         crate::runtime_proxy::runtime_profile_route_circuit_key(
             "beta",

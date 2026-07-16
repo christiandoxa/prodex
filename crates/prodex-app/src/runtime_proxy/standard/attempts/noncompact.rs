@@ -127,14 +127,7 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
                 &parts.body,
                 runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
             );
-            let retryable_quota = error_policy.action
-                == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
-                && matches!(
-                    error_policy.class,
-                    runtime_proxy_crate::RuntimeHttpErrorClass::Quota
-                        | runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable
-                );
-            if retryable_quota {
+            if error_policy.may_retry_or_rotate() {
                 runtime_proxy_log(
                     shared,
                     format!(
@@ -146,7 +139,8 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
                 return Ok(RuntimeStandardAttempt::RetryableFailure {
                     profile_name: profile_name.to_string(),
                     response: build_runtime_proxy_response_from_parts(parts),
-                    overload: false,
+                    overload: error_policy.action
+                        == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile,
                 });
             }
             if let Ok(usage) = serde_json::from_slice::<UsageResponse>(&parts.body) {
@@ -222,7 +216,15 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
         {
             continue;
         }
-        let retryable_quota = runtime_proxy_precommit_error_rotates_profile(status, &parts.body);
+        let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+            status,
+            &parts.body,
+            runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+        );
+        let retryable_quota =
+            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
+        let retryable_overload =
+            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
         let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
         if matches!(status, 402 | 403 | 429) && !retryable_quota {
             runtime_proxy_log(
@@ -267,11 +269,11 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_noncompact_standard_re
             });
         }
 
-        if retryable_quota {
+        if retryable_quota || retryable_overload {
             return Ok(RuntimeStandardAttempt::RetryableFailure {
                 profile_name: profile_name.to_string(),
                 response,
-                overload: false,
+                overload: retryable_overload,
             });
         }
 

@@ -66,8 +66,7 @@ fn previous_response_discovery_skips_blocked_profiles_before_cached_candidate() 
     assert_eq!(selected.as_deref(), Some("second"));
     let trace = selection_trace(&quota_shared);
     assert!(trace.candidates.iter().any(|candidate| {
-        candidate.eligibility
-            == runtime_proxy_crate::RuntimeRouteCandidateEligibility::Rejected
+        candidate.eligibility == runtime_proxy_crate::RuntimeRouteCandidateEligibility::Rejected
             && candidate.rejection_stage
                 == Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Quota)
     }));
@@ -191,8 +190,8 @@ fn response_selection_keeps_inflight_pressure_ahead_of_prompt_cache_owner() {
                 },
             );
         }
-        runtime.profile_inflight.insert("second".to_string(), 1);
     }
+    shared.lane_admission.set_profile_inflight("second", 1);
     let prompt_cache_key = "workspace-cache-bound-inflight";
     remember_runtime_prompt_cache_profile(
         &shared,

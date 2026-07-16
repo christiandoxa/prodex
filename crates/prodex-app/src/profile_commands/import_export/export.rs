@@ -159,11 +159,7 @@ fn read_exported_secret_file(
 }
 
 fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = matches!(
-        &error,
-        secret_store::SecretError::InvalidLocation { reason }
-            if reason.ends_with(" is not a regular secret file")
-    );
+    let is_non_regular_file = error.is_unsafe_file();
     let error = anyhow::Error::new(error);
     if is_non_regular_file {
         error.context("not a regular secret file")

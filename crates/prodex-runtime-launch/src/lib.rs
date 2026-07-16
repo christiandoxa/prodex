@@ -6,8 +6,6 @@ mod quota_plan;
 mod types;
 
 #[cfg(test)]
-use std::env;
-#[cfg(test)]
 use std::ffi::OsString;
 #[cfg(test)]
 use std::path::{Path, PathBuf};

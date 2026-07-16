@@ -27,7 +27,7 @@ pub(super) fn select_runtime_launch_profile(
         if let Some(profile_name) =
             persist_implicit_runtime_launch_profile_selection(state, &selection)
         {
-            print_runtime_launch_auto_selected_profile(&profile_name);
+            print_runtime_launch_auto_selected_profile(&profile_name)?;
         }
         return Ok(selection);
     }
@@ -43,7 +43,7 @@ pub(super) fn select_runtime_launch_profile(
 
     if let Some(profile_name) = persist_implicit_runtime_launch_profile_selection(state, &selection)
     {
-        print_runtime_launch_auto_selected_profile(&profile_name);
+        print_runtime_launch_auto_selected_profile(&profile_name)?;
     }
     Ok(selection)
 }
@@ -62,13 +62,13 @@ fn persist_implicit_runtime_launch_profile_selection(
     None
 }
 
-fn print_runtime_launch_auto_selected_profile(profile_name: &str) {
+fn print_runtime_launch_auto_selected_profile(profile_name: &str) -> Result<()> {
     print_runtime_launch_notice(
         "Profile Selection",
         vec![format!(
             "Auto-selected profile '{profile_name}' because no active profile was available."
         )],
-    );
+    )
 }
 
 fn run_auto_runtime_launch_preflight(
@@ -155,7 +155,7 @@ fn rotate_to_scored_runtime_candidate(
         messages.push(warning.to_string());
     }
     messages.push(selection_message.selection);
-    print_runtime_launch_notice("Quota Preflight", messages);
+    print_runtime_launch_notice("Quota Preflight", messages)?;
     Ok(())
 }
 
@@ -192,14 +192,17 @@ pub(super) fn handle_no_ready_runtime_profiles(
             print_runtime_launch_notice(
                 "Quota Preflight",
                 vec![blocked_message, no_ready_message, inspect_hint],
-            );
+            )?;
             return Err(command_exit_error(2, error_message));
         }
         prodex_runtime_launch::RuntimeLaunchNoReadyProfilesPlan::ProbeFailed {
             warning_message,
             continue_message,
         } => {
-            print_runtime_launch_notice("Quota Preflight", vec![warning_message, continue_message]);
+            print_runtime_launch_notice(
+                "Quota Preflight",
+                vec![warning_message, continue_message],
+            )?;
         }
     }
     Ok(())
@@ -239,7 +242,7 @@ fn run_selected_runtime_launch_preflight(
                     ),
                     "Continuing without quota gate.".to_string(),
                 ],
-            );
+            )?;
         }
     }
 
@@ -458,7 +461,7 @@ fn handle_blocked_selected_runtime_profile(
             rotate_message,
         } => {
             activate_runtime_launch_profile(paths, state, request, selection, &next_profile)?;
-            print_runtime_launch_notice("Quota Preflight", vec![blocked_message, rotate_message]);
+            print_runtime_launch_notice("Quota Preflight", vec![blocked_message, rotate_message])?;
         }
         prodex_runtime_launch::RuntimeLaunchBlockedSelectedProfilePlan::Stop {
             blocked_message,
@@ -467,7 +470,7 @@ fn handle_blocked_selected_runtime_profile(
         } => {
             let mut notice_messages = vec![blocked_message];
             notice_messages.extend(messages);
-            print_runtime_launch_notice("Quota Preflight", notice_messages);
+            print_runtime_launch_notice("Quota Preflight", notice_messages)?;
             return Err(command_exit_error(2, error_message));
         }
     }
@@ -475,8 +478,9 @@ fn handle_blocked_selected_runtime_profile(
     Ok(())
 }
 
-fn print_runtime_launch_notice(title: &str, messages: Vec<String>) {
-    print_stderr_panel(title, &messages);
+fn print_runtime_launch_notice(title: &str, messages: Vec<String>) -> Result<()> {
+    print_stderr_panel(title, &messages)?;
+    Ok(())
 }
 
 fn activate_runtime_launch_profile(

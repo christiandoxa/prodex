@@ -1,7 +1,9 @@
 use super::super::gemini_request_io::runtime_gemini_path_has_symlink_component;
 use super::gemini_request_local_context::{
-    RUNTIME_GEMINI_CONTEXT_FILE_LIMIT, RuntimeGeminiFileReadBudget,
-    runtime_gemini_part_from_local_path, runtime_gemini_resolve_local_path,
+    RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT, RUNTIME_GEMINI_CONTEXT_DIRECTORY_ENTRY_LIMIT,
+    RUNTIME_GEMINI_CONTEXT_FILE_LIMIT, RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT,
+    RuntimeGeminiFileReadBudget, runtime_gemini_part_from_local_path,
+    runtime_gemini_resolve_local_path,
 };
 use prodex_provider_core::{
     gemini_provider_core_collect_input_texts, gemini_provider_core_collect_string_values,
@@ -19,7 +21,6 @@ use self::path_match::{
     runtime_gemini_path_has_glob,
 };
 
-const RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT: usize = 2048;
 pub(super) fn runtime_gemini_collect_explicit_file_parts(
     original: &serde_json::Value,
     parts: &mut Vec<serde_json::Value>,
@@ -121,12 +122,12 @@ fn runtime_gemini_collect_glob_file_parts(
         return;
     }
     let mut candidates = Vec::new();
-    let mut scanned = 0;
     runtime_gemini_collect_context_candidates(
         &root,
         filter.use_default_excludes,
         &mut candidates,
-        &mut scanned,
+        &mut budget.scanned_entries,
+        0,
     );
     candidates.sort();
     for candidate in candidates {
@@ -150,20 +151,28 @@ fn runtime_gemini_collect_context_candidates(
     use_default_excludes: bool,
     candidates: &mut Vec<PathBuf>,
     scanned: &mut usize,
+    depth: usize,
 ) {
-    if *scanned >= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT {
+    if depth >= RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT || *scanned >= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT
+    {
         return;
     }
     let Ok(entries) = fs::read_dir(path) else {
         return;
     };
-    let mut entries = entries.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
+    let remaining = RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT.saturating_sub(*scanned);
+    let entry_limit = remaining.min(RUNTIME_GEMINI_CONTEXT_DIRECTORY_ENTRY_LIMIT);
+    let mut observed = 0usize;
+    let mut entries = entries
+        .take(entry_limit)
+        .filter_map(|entry| {
+            observed = observed.saturating_add(1);
+            entry.ok()
+        })
+        .collect::<Vec<_>>();
+    *scanned = scanned.saturating_add(observed);
     entries.sort_by_key(|entry| entry.path());
     for entry in entries {
-        if *scanned >= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT {
-            break;
-        }
-        *scanned = scanned.saturating_add(1);
         let path = entry.path();
         let name = path
             .file_name()
@@ -184,6 +193,7 @@ fn runtime_gemini_collect_context_candidates(
                 use_default_excludes,
                 candidates,
                 scanned,
+                depth + 1,
             );
         } else if metadata.is_file() {
             candidates.push(path);
@@ -251,4 +261,41 @@ fn runtime_gemini_at_paths_from_text(text: &str) -> Vec<PathBuf> {
         }
     }
     paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_context_candidate_walk_stops_at_depth_limit() {
+        let root = runtime_gemini_context_test_root("deep-tree");
+        let mut directory = root.clone();
+        fs::create_dir_all(&directory).unwrap();
+        for index in 0..=RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT {
+            directory = directory.join(format!("depth-{index}"));
+            fs::create_dir(&directory).unwrap();
+        }
+        let deep_file = directory.join("deep.txt");
+        fs::write(&deep_file, "too deep").unwrap();
+        let mut candidates = Vec::new();
+        let mut scanned = 0;
+
+        runtime_gemini_collect_context_candidates(&root, false, &mut candidates, &mut scanned, 0);
+
+        assert!(!candidates.contains(&deep_file));
+        assert!(scanned <= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn runtime_gemini_context_test_root(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "prodex-gemini-context-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
 }

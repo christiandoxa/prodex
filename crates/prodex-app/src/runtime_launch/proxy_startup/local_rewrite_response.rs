@@ -11,14 +11,14 @@ use super::local_rewrite_response_spend::{
     emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
 };
 use crate::{
-    RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, RuntimeStreamingResponse,
-    build_runtime_proxy_json_error_response, build_runtime_proxy_response_from_parts,
-    build_runtime_proxy_text_response, runtime_proxy_log,
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    RuntimeProxyRequest, RuntimeStreamingResponse, build_runtime_proxy_json_error_response,
+    build_runtime_proxy_response_from_parts, build_runtime_proxy_text_response,
+    read_blocking_response_body_with_limit, runtime_proxy_log,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use prodex_domain::CallId;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
-use std::io::Read;
 use std::path::Path;
 
 #[path = "local_rewrite_response_dispatch.rs"]
@@ -454,15 +454,47 @@ pub(super) fn runtime_local_rewrite_append_call_id_header(
 pub(super) fn runtime_local_rewrite_buffered_response_parts(
     status: u16,
     headers: Vec<(String, Vec<u8>)>,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
 ) -> Result<RuntimeHeapTrimmedBufferedResponseParts> {
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read local provider response body")?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read local provider response body",
+    )?;
     Ok(RuntimeHeapTrimmedBufferedResponseParts {
         status,
         headers,
         body: body.into(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use tiny_http::{Response as TinyResponse, Server as TinyServer};
+
+    #[test]
+    fn local_provider_buffered_response_rejects_oversized_body() {
+        let server = TinyServer::http("127.0.0.1:0").expect("test server should bind");
+        let addr = server.server_addr().to_ip().unwrap();
+        let handle = thread::spawn(move || {
+            let request = server.recv().expect("request should arrive");
+            let _ = request.respond(TinyResponse::from_data(vec![
+                b'a';
+                RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES
+                    + 1
+            ]));
+        });
+        let response =
+            reqwest::blocking::get(format!("http://{addr}/")).expect("response should arrive");
+
+        let error = match runtime_local_rewrite_buffered_response_parts(200, Vec::new(), response) {
+            Ok(_) => panic!("oversized local provider response should fail"),
+            Err(error) => error,
+        };
+        handle.join().expect("test server should finish");
+
+        assert!(error.to_string().contains("safe size limit"));
+    }
 }

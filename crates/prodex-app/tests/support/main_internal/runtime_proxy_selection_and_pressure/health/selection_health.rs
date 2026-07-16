@@ -60,7 +60,6 @@ fn selection_health_shared(
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight,
         profile_health: profile_health
             .into_iter()
             .map(|(key, score)| {
@@ -75,10 +74,11 @@ fn selection_health_shared(
             .collect(),
     };
 
-    RuntimeRotationProxyShared {
+    let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -97,7 +97,13 @@ fn selection_health_shared(
             RuntimeRotationProxyShared::new_runtime_state_lock_wait_counters(),
         lane_admission: runtime_proxy_lane_admission_for_global_limit(usize::MAX),
         runtime: Arc::new(Mutex::new(runtime)),
+    };
+    for (profile_name, count) in profile_inflight {
+        shared
+            .lane_admission
+            .set_profile_inflight(profile_name, count);
     }
+    shared
 }
 
 fn selection_health_probe_entry(checked_at: i64) -> RuntimeProfileProbeCacheEntry {
@@ -235,7 +241,6 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_performance_key("main", RuntimeRouteKind::Responses),
             RuntimeProfileHealth {
@@ -248,6 +253,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -355,7 +361,6 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_health_key("main", RuntimeRouteKind::Compact),
             RuntimeProfileHealth {
@@ -368,6 +373,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -484,7 +490,6 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_bad_pairing_key("main", RuntimeRouteKind::Websocket),
             RuntimeProfileHealth {
@@ -497,6 +502,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -604,13 +610,13 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()

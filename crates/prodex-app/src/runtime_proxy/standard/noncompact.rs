@@ -305,22 +305,41 @@ pub(super) fn proxy_runtime_noncompact_request(
             RuntimeStandardAttempt::RetryableFailure {
                 profile_name,
                 response,
-                overload: _,
+                overload,
             } => {
                 runtime_proxy_log(
                     shared,
                     format!(
-                        "request={request_id} transport=http standard_retryable_failure profile={profile_name}"
+                        "request={request_id} transport=http standard_retryable_failure profile={profile_name} reason={}",
+                        if overload { "overload" } else { "quota" }
                     ),
                 );
                 mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-                let released_affinity = release_runtime_quota_blocked_affinity(
-                    shared,
-                    &profile_name,
-                    None,
-                    None,
-                    request_session_id.as_deref(),
-                )?;
+                let released_affinity = if overload {
+                    let _ = bump_runtime_profile_health_score(
+                        shared,
+                        &profile_name,
+                        RuntimeRouteKind::Standard,
+                        RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY,
+                        "standard_overload",
+                    );
+                    let _ = bump_runtime_profile_bad_pairing_score(
+                        shared,
+                        &profile_name,
+                        RuntimeRouteKind::Standard,
+                        RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
+                        "standard_overload",
+                    );
+                    false
+                } else {
+                    release_runtime_quota_blocked_affinity(
+                        shared,
+                        &profile_name,
+                        None,
+                        None,
+                        request_session_id.as_deref(),
+                    )?
+                };
                 if session_profile.as_deref() == Some(profile_name.as_str()) {
                     session_profile = None;
                 }
@@ -332,16 +351,18 @@ pub(super) fn proxy_runtime_noncompact_request(
                         ),
                     );
                 }
-                if !runtime_has_route_eligible_quota_fallback(
-                    shared,
-                    &profile_name,
-                    &BTreeSet::new(),
-                    RuntimeRouteKind::Standard,
-                )? {
+                if !overload
+                    && !runtime_has_route_eligible_quota_fallback(
+                        shared,
+                        &profile_name,
+                        &BTreeSet::new(),
+                        RuntimeRouteKind::Standard,
+                    )?
+                {
                     return Ok(response);
                 }
                 loop_state.excluded_profiles.insert(profile_name);
-                loop_state.last_failure = Some((response, true));
+                loop_state.last_failure = Some((response, !overload));
             }
             RuntimeStandardAttempt::AuthFailed {
                 profile_name,

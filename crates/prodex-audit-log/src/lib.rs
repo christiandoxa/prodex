@@ -1,25 +1,42 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{Datelike, Local, TimeZone, Utc};
+use redaction::redaction_redact_json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+
+mod checksum;
+mod private_file;
+use checksum::{checksum_json, constant_time_text_eq, validate_audit_event};
+use private_file::{open_no_follow_read, open_private_append_locked};
 
 pub const AUDIT_LOG_FILE_NAME: &str = "prodex-audit.log";
 pub const AUDIT_LOG_READ_MAX_BYTES: u64 = 512 * 1024;
 pub const USAGE_LEDGER_FILE_NAME: &str = "prodex-usage-ledger.jsonl";
+const AUDIT_RECORD_VERSION: u8 = 1;
+const USAGE_LEDGER_RECORD_VERSION: u8 = 1;
+const USAGE_LEDGER_READ_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
-struct AuditEvent<'a> {
-    recorded_at: String,
+struct AuditEventPayload<'a> {
+    recorded_at: &'a str,
     recorded_at_epoch: i64,
     pid: u32,
     component: &'a str,
     action: &'a str,
     outcome: &'a str,
-    details: Value,
+    details: &'a Value,
+}
+
+#[derive(Debug, Serialize)]
+struct AuditEvent<'a> {
+    schema_version: u8,
+    #[serde(flatten)]
+    payload: AuditEventPayload<'a>,
+    checksum: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -38,6 +55,8 @@ impl AuditLogQuery {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditLogEventRecord {
+    #[serde(default)]
+    pub schema_version: u8,
     pub recorded_at: String,
     pub recorded_at_epoch: i64,
     pub pid: u32,
@@ -45,6 +64,8 @@ pub struct AuditLogEventRecord {
     pub action: String,
     pub outcome: String,
     pub details: Value,
+    #[serde(default)]
+    pub checksum: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,7 +121,14 @@ pub struct AuditLogReadResult {
 }
 
 pub fn audit_log_dir(default_log_dir: &Path) -> PathBuf {
-    env::var_os("PRODEX_AUDIT_LOG_DIR")
+    audit_log_dir_with_override(default_log_dir, env::var_os("PRODEX_AUDIT_LOG_DIR"))
+}
+
+fn audit_log_dir_with_override(
+    default_log_dir: &Path,
+    override_dir: Option<std::ffi::OsString>,
+) -> PathBuf {
+    override_dir
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| default_log_dir.to_path_buf())
@@ -119,31 +147,37 @@ pub fn append_audit_event(
     component: &str,
     action: &str,
     outcome: &str,
-    details: Value,
+    mut details: Value,
 ) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
+    redaction_redact_json(&mut details);
     let now = Local::now();
-    let event = AuditEvent {
-        recorded_at: now.to_rfc3339(),
+    let recorded_at = now.to_rfc3339();
+    let payload = AuditEventPayload {
+        recorded_at: &recorded_at,
         recorded_at_epoch: now.timestamp(),
         pid: std::process::id(),
         component,
         action,
         outcome,
-        details,
+        details: &details,
+    };
+    let checksum = checksum_json(&payload).context("failed to checksum audit event")?;
+    let event = AuditEvent {
+        schema_version: AUDIT_RECORD_VERSION,
+        payload,
+        checksum,
     };
     let line = serde_json::to_string(&event).context("failed to serialize audit event")?;
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
-    writeln!(file, "{line}").with_context(|| format!("failed to append {}", path.display()))?;
+    let mut file = open_private_append_locked(path)?;
+    file.write_all(line.as_bytes())
+        .and_then(|()| file.write_all(b"\n"))
+        .and_then(|()| file.sync_data())
+        .with_context(|| format!("failed to append {}", path.display()))?;
     Ok(())
 }
 
@@ -198,6 +232,13 @@ pub struct UsageLedgerRow {
     pub total_tokens: u64,
     #[serde(default)]
     pub cost_micros: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UsageLedgerEnvelope {
+    schema_version: u8,
+    row: UsageLedgerRow,
+    checksum: String,
 }
 
 impl UsageLedgerRow {
@@ -286,19 +327,39 @@ pub struct BudgetEvaluation {
 }
 
 pub fn usage_ledger_row_to_json_line(row: &UsageLedgerRow) -> Result<String> {
-    let line = serde_json::to_string(&row.clone().normalized())
-        .context("failed to serialize usage ledger row")?;
+    let row = row.clone().normalized();
+    let checksum = checksum_json(&row).context("failed to checksum usage ledger row")?;
+    let line = serde_json::to_string(&UsageLedgerEnvelope {
+        schema_version: USAGE_LEDGER_RECORD_VERSION,
+        row,
+        checksum,
+    })
+    .context("failed to serialize usage ledger row")?;
     Ok(format!("{line}\n"))
 }
 
 pub fn parse_usage_ledger_line(line: &str) -> Option<UsageLedgerRow> {
+    parse_usage_ledger_line_checked(line).ok().flatten()
+}
+
+fn parse_usage_ledger_line_checked(line: &str) -> Result<Option<UsageLedgerRow>> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
-        return None;
+        return Ok(None);
     }
-    serde_json::from_str::<UsageLedgerRow>(trimmed)
-        .ok()
-        .map(UsageLedgerRow::normalized)
+    if let Ok(envelope) = serde_json::from_str::<UsageLedgerEnvelope>(trimmed) {
+        if envelope.schema_version != USAGE_LEDGER_RECORD_VERSION {
+            bail!("unsupported usage ledger record version");
+        }
+        let expected = checksum_json(&envelope.row).context("failed to checksum usage row")?;
+        if !constant_time_text_eq(&expected, &envelope.checksum) {
+            bail!("usage ledger checksum mismatch");
+        }
+        return Ok(Some(envelope.row.normalized()));
+    }
+    let row =
+        serde_json::from_str::<UsageLedgerRow>(trimmed).context("invalid usage ledger record")?;
+    Ok(Some(row.normalized()))
 }
 
 pub fn append_usage_ledger_row(path: &Path, row: &UsageLedgerRow) -> Result<()> {
@@ -308,17 +369,9 @@ pub fn append_usage_ledger_row(path: &Path, row: &UsageLedgerRow) -> Result<()> 
     }
 
     let line = usage_ledger_row_to_json_line(row)?;
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
+    let mut file = open_private_append_locked(path)?;
     file.write_all(line.as_bytes())
+        .and_then(|()| file.sync_data())
         .with_context(|| format!("failed to append {}", path.display()))?;
     Ok(())
 }
@@ -327,12 +380,25 @@ pub fn read_usage_ledger_rows(path: &Path) -> Result<Vec<UsageLedgerRow>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let content =
-        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-    Ok(content
-        .lines()
-        .filter_map(parse_usage_ledger_line)
-        .collect())
+    let file = open_no_follow_read(path)?;
+    let size = file
+        .metadata()
+        .with_context(|| format!("failed to stat {}", path.display()))?
+        .len();
+    if size > USAGE_LEDGER_READ_MAX_BYTES {
+        bail!("usage ledger exceeds bounded read limit");
+    }
+    let content = read_utf8_bounded(file, USAGE_LEDGER_READ_MAX_BYTES, "usage ledger")
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut rows = Vec::new();
+    for (index, line) in content.lines().enumerate() {
+        if let Some(row) = parse_usage_ledger_line_checked(line)
+            .with_context(|| format!("invalid usage ledger record at line {}", index + 1))?
+        {
+            rows.push(row);
+        }
+    }
+    Ok(rows)
 }
 
 pub fn summarize_usage_for_window(
@@ -450,13 +516,14 @@ pub fn read_recent_audit_events_with_scope(
         read_recent_audit_lines(path, Some(query.tail))?
     };
     let mut matches = Vec::new();
-    for line in candidate_read.lines {
+    for (index, line) in candidate_read.lines.into_iter().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(event) = serde_json::from_str::<AuditLogEventRecord>(&line) else {
-            continue;
-        };
+        let event = serde_json::from_str::<AuditLogEventRecord>(&line)
+            .with_context(|| format!("invalid audit log record at candidate line {}", index + 1))?;
+        validate_audit_event(&event)
+            .with_context(|| format!("invalid audit log record at candidate line {}", index + 1))?;
         if audit_log_query_matches(query, &event) {
             matches.push(event);
         }
@@ -644,8 +711,7 @@ struct AuditLogLineRead {
 }
 
 fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<AuditLogLineRead> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let file = open_no_follow_read(path)?;
     let log_size_bytes = file
         .metadata()
         .with_context(|| format!("failed to stat {}", path.display()))?
@@ -662,9 +728,7 @@ fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<AuditLogL
     reader
         .seek(SeekFrom::Start(start))
         .with_context(|| format!("failed to seek {}", path.display()))?;
-    let mut content = String::new();
-    reader
-        .read_to_string(&mut content)
+    let content = read_utf8_bounded(&mut reader, AUDIT_LOG_READ_MAX_BYTES, "audit log")
         .with_context(|| format!("failed to read {}", path.display()))?;
     let mut lines = content.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
     if start > 0 && !content.starts_with('\n') && !lines.is_empty() {
@@ -684,6 +748,18 @@ fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<AuditLogL
             start,
         ),
     })
+}
+
+fn read_utf8_bounded(reader: impl Read, max_bytes: u64, label: &str) -> Result<String> {
+    let mut bytes = Vec::new();
+    reader
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read {label}"))?;
+    if bytes.len() as u64 > max_bytes {
+        bail!("{label} exceeds bounded read limit");
+    }
+    String::from_utf8(bytes).with_context(|| format!("{label} is not valid UTF-8"))
 }
 
 #[cfg(test)]

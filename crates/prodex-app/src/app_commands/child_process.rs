@@ -440,7 +440,7 @@ pub(crate) fn print_runtime_launch_dry_run(
         &prepared.codex_home,
         runtime_proxy,
         &plan,
-    );
+    )?;
     if let Some(extra_report) = extra_report {
         output.push_str(extra_report);
         output.push('\n');
@@ -566,7 +566,7 @@ fn profile_openai_compatible_dry_run_child(
     match child {
         RuntimeLaunchDryRunChild::Codex { codex_args } => {
             let codex_args =
-                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args);
+                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
             let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;
@@ -576,7 +576,7 @@ fn profile_openai_compatible_dry_run_child(
         }
         RuntimeLaunchDryRunChild::Caveman { codex_args } => {
             let codex_args =
-                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args);
+                runtime_launch_openai_spark_context_codex_args(codex_home, &codex_args)?;
             let codex_args = profile_openai_compatible_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_local_provider_catalog_codex_args(codex_home, &codex_args)?;
             let codex_args = preview_external_provider_catalog_codex_args(codex_home, &codex_args)?;

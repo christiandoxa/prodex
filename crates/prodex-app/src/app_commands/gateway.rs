@@ -32,7 +32,7 @@ fn handle_gateway_providers(args: &GatewayProvidersArgs) -> Result<()> {
         print_stdout_line(
             &serde_json::to_string_pretty(&catalog)
                 .context("failed to serialize provider contracts")?,
-        );
+        )?;
         return Ok(());
     }
     for provider in providers {
@@ -42,7 +42,7 @@ fn handle_gateway_providers(args: &GatewayProvidersArgs) -> Result<()> {
             provider.transform_status,
             provider.model_count,
             provider.supported_endpoints.join(",")
-        ));
+        ))?;
     }
     Ok(())
 }
@@ -54,18 +54,18 @@ fn handle_gateway_capabilities(args: &GatewayProviderFilterArgs) -> Result<()> {
         print_stdout_line(
             &serde_json::to_string_pretty(&spec)
                 .context("failed to serialize provider capabilities")?,
-        );
+        )?;
         return Ok(());
     }
     print_stdout_line(&format!(
         "{}: {}; streaming={}; fallback={}",
         spec.provider, spec.transform_status, spec.supports_streaming, spec.supports_model_fallback
-    ));
+    ))?;
     for endpoint in spec.endpoint_status {
         print_stdout_line(&format!(
             "  {}: {}; streaming={}; tested={}",
             endpoint.endpoint, endpoint.status, endpoint.streaming, endpoint.tested
-        ));
+        ))?;
     }
     Ok(())
 }
@@ -88,7 +88,7 @@ fn handle_gateway_models(args: &GatewayProviderFilterArgs) -> Result<()> {
         print_stdout_line(
             &serde_json::to_string_pretty(&models)
                 .context("failed to serialize provider model catalog")?,
-        );
+        )?;
         return Ok(());
     }
     let adapter = provider_adapter(provider);
@@ -103,7 +103,7 @@ fn handle_gateway_models(args: &GatewayProviderFilterArgs) -> Result<()> {
                 .map(|endpoint| endpoint.label())
                 .collect::<Vec<_>>()
                 .join(",")
-        ));
+        ))?;
     }
     Ok(())
 }
@@ -114,7 +114,7 @@ fn handle_gateway_kiro_models(args: &GatewayProviderFilterArgs) -> Result<()> {
         print_stdout_line(
             &serde_json::to_string_pretty(&models)
                 .context("failed to serialize Kiro model catalog")?,
-        );
+        )?;
         return Ok(());
     }
     for model in &models {
@@ -126,14 +126,18 @@ fn handle_gateway_kiro_models(args: &GatewayProviderFilterArgs) -> Result<()> {
             .get("name")
             .and_then(serde_json::Value::as_str)
             .unwrap_or(id);
-        print_stdout_line(&format!("{id}: {name} (imported kiro profile snapshot)"));
+        print_stdout_line(&format!("{id}: {name} (imported kiro profile snapshot)"))?;
     }
     Ok(())
 }
 
 fn gateway_kiro_model_catalog_json() -> Result<Vec<serde_json::Value>> {
     let paths = AppPaths::discover()?;
-    let state = AppState::load(&paths)?;
+    gateway_kiro_model_catalog_json_from_paths(&paths)
+}
+
+fn gateway_kiro_model_catalog_json_from_paths(paths: &AppPaths) -> Result<Vec<serde_json::Value>> {
+    let state = AppState::load(paths)?;
     let mut seen = BTreeSet::new();
     let mut models = Vec::new();
     for profile in state.profiles.values() {
@@ -173,7 +177,7 @@ fn parse_gateway_provider(value: &str) -> Result<ProviderId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TestEnvLockGuard, acquire_test_env_lock, create_codex_home_if_missing};
+    use crate::create_codex_home_if_missing;
     use std::collections::BTreeMap;
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -196,42 +200,6 @@ mod tests {
         assert!(error.contains("only supported when launching"), "{error}");
     }
 
-    struct EnvGuard {
-        _lock: TestEnvLockGuard,
-        previous_home: Option<std::ffi::OsString>,
-        previous_xdg: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(root: &std::path::Path) -> Self {
-            let lock = acquire_test_env_lock();
-            let previous_home = env::var_os("HOME");
-            let previous_xdg = env::var_os("XDG_CONFIG_HOME");
-            unsafe {
-                env::set_var("HOME", root.join("home"));
-                env::set_var("XDG_CONFIG_HOME", root.join("config"));
-            }
-            Self {
-                _lock: lock,
-                previous_home,
-                previous_xdg,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.previous_home.take() {
-                Some(value) => unsafe { env::set_var("HOME", value) },
-                None => unsafe { env::remove_var("HOME") },
-            }
-            match self.previous_xdg.take() {
-                Some(value) => unsafe { env::set_var("XDG_CONFIG_HOME", value) },
-                None => unsafe { env::remove_var("XDG_CONFIG_HOME") },
-            }
-        }
-    }
-
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -245,6 +213,16 @@ mod tests {
         dir
     }
 
+    fn test_paths(root: &std::path::Path) -> AppPaths {
+        AppPaths {
+            root: root.to_path_buf(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("codex"),
+            legacy_shared_codex_root: root.join("shared"),
+        }
+    }
+
     #[test]
     fn parse_gateway_provider_accepts_kiro() {
         assert_eq!(
@@ -255,11 +233,8 @@ mod tests {
 
     #[test]
     fn gateway_kiro_model_catalog_json_merges_imported_profile_snapshots() {
-        let _guard = acquire_test_env_lock();
         let root = temp_dir("catalog");
-        let _env = EnvGuard::set(&root);
-
-        let paths = AppPaths::discover().expect("paths should resolve");
+        let paths = test_paths(&root);
         let first_home = paths.managed_profiles_root.join("kiro-a");
         let second_home = paths.managed_profiles_root.join("kiro-b");
         create_codex_home_if_missing(&first_home).expect("first home should exist");
@@ -326,7 +301,8 @@ mod tests {
         .save(&paths)
         .expect("state should save");
 
-        let models = gateway_kiro_model_catalog_json().expect("catalog should load");
+        let models =
+            gateway_kiro_model_catalog_json_from_paths(&paths).expect("catalog should load");
         assert_eq!(models.len(), 2);
         assert_eq!(models[0]["id"], "claude-sonnet-4");
         assert_eq!(models[1]["id"], "claude-sonnet-4.5");
@@ -335,11 +311,8 @@ mod tests {
 
     #[test]
     fn gateway_kiro_capabilities_json_reports_runtime_surface() {
-        let _guard = acquire_test_env_lock();
         let root = temp_dir("capabilities");
-        let _env = EnvGuard::set(&root);
-
-        let paths = AppPaths::discover().expect("paths should resolve");
+        let paths = test_paths(&root);
         let kiro_home = paths.managed_profiles_root.join("kiro-cap");
         create_codex_home_if_missing(&kiro_home).expect("kiro home should exist");
         fs::write(
@@ -375,7 +348,10 @@ mod tests {
         .save(&paths)
         .expect("state should save");
 
-        let spec = gateway_capabilities_spec(ProviderId::Kiro).expect("capabilities should build");
+        let mut spec = prodex_provider_core::provider_adapter_contract_spec(ProviderId::Kiro);
+        spec.model_count = gateway_kiro_model_catalog_json_from_paths(&paths)
+            .expect("catalog should load")
+            .len();
         let spec = serde_json::to_value(spec).expect("spec should serialize");
         assert_eq!(spec["provider"], "kiro");
         assert_eq!(spec["supports_streaming"], true);

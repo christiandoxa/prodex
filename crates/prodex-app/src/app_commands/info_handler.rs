@@ -164,7 +164,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
 fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
     let height = info_panel_tui_height(fields);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        print_panel("Info", fields);
+        print_panel("Info", fields)?;
         return Ok(());
     };
     terminal.draw(|frame| {

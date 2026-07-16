@@ -1,13 +1,15 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 use crate::estimate_context_tokens;
 
-use super::files::{CONTEXT_AUDIT_ROOTS, collect_context_files, is_static_duplicate_context_file};
+use super::files::{
+    CONTEXT_AUDIT_ROOTS, CONTEXT_WALK_MAX_BYTES, ContextReadRoot, collect_context_files,
+    is_static_duplicate_context_file, read_context_file_bounded,
+};
 use super::types::{
     ContextStaticDuplicateCandidate, ContextStaticDuplicateOccurrence,
     ContextStaticDuplicateReport, ContextStaticDuplicateSnippet,
@@ -22,13 +24,16 @@ pub(super) fn collect_context_static_duplicate_report(
     limit: usize,
 ) -> Result<ContextStaticDuplicateReport> {
     let mut paths = Vec::new();
-    for entry in CONTEXT_AUDIT_ROOTS {
-        collect_context_files(&root.join(entry), &mut paths)?;
+    let read_root = ContextReadRoot::open(root)?;
+    if read_root.is_some() {
+        for entry in CONTEXT_AUDIT_ROOTS {
+            collect_context_files(&root.join(entry), &mut paths)?;
+        }
     }
     paths.sort();
     paths.dedup();
 
-    let candidates = collect_context_static_duplicate_candidates(root, &paths)?;
+    let candidates = collect_context_static_duplicate_candidates(root, read_root.as_ref(), &paths)?;
     Ok(build_context_static_duplicate_report(
         root.to_path_buf(),
         candidates,
@@ -38,17 +43,32 @@ pub(super) fn collect_context_static_duplicate_report(
 
 fn collect_context_static_duplicate_candidates(
     root: &Path,
+    read_root: Option<&ContextReadRoot>,
     paths: &[PathBuf],
 ) -> Result<Vec<ContextStaticDuplicateCandidate>> {
     let mut candidates = Vec::new();
+    let mut read_bytes = 0_u64;
     for path in paths {
         if !is_static_duplicate_context_file(path) {
             continue;
         }
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
+        let Some(read_root) = read_root else {
+            continue;
+        };
+        read_root.validate()?;
+        let opened = read_context_file_bounded(read_root, path);
+        read_root.validate()?;
+        let text = match opened {
+            Ok(opened) => opened.text,
             Err(_) => continue,
         };
+        read_bytes = read_bytes.saturating_add(text.len() as u64);
+        if read_bytes > CONTEXT_WALK_MAX_BYTES {
+            anyhow::bail!(
+                "context duplicate read limit exceeded at {}",
+                path.display()
+            );
+        }
         let relative_path = path
             .strip_prefix(root)
             .unwrap_or(path.as_path())

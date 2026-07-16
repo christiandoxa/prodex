@@ -1,17 +1,16 @@
 use super::*;
-use crossterm::terminal;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use redaction::{
-    redaction_key_looks_sensitive, redaction_redact_secret_like_text,
-    redaction_redacted_body_snippet,
+use redaction::redaction_redact_secret_like_text;
+
+mod bundle;
+mod render;
+
+#[cfg(test)]
+pub(crate) use bundle::doctor_redact_json_value;
+use bundle::{
+    DoctorRedactedBundleContext, doctor_redacted_bundle_json_value, doctor_runtime_policy_status,
+    format_import_auth_journal_status, import_auth_journals_json_value, write_doctor_bundle_json,
 };
-use terminal_ui::{
-    text_width, tui_border_style, tui_connected_header_block, tui_primary_style,
-    tui_secondary_style, tui_title_style,
-};
+use render::{doctor_quota_error_summary, print_doctor_output};
 
 #[derive(Debug, Clone)]
 struct DoctorPanel {
@@ -21,7 +20,12 @@ struct DoctorPanel {
 
 pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths)?;
+    let runtime_config = RuntimeConfig::from_env_policy_and_cli(&paths);
+    let runtime_config_error = runtime_config
+        .as_ref()
+        .err()
+        .map(|error| redaction_redact_secret_like_text(&error.to_string()));
+    let runtime_config = runtime_config.ok();
     let mut state = AppState::load(&paths)?;
     let repaired_import_auth_journals = if args.repair_import_auth_journals {
         let repaired = repair_profile_import_auth_journals(&paths, &mut state)?;
@@ -42,7 +46,12 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     };
     let import_auth_journal_count = count_profile_import_auth_journals(&paths)?;
     let codex_home = default_codex_home(&paths)?;
-    let policy_summary = runtime_policy_summary()?;
+    let policy_summary = runtime_policy_summary();
+    let policy_summary_error = policy_summary
+        .as_ref()
+        .err()
+        .map(|error| redaction_redact_secret_like_text(&format!("{error:#}")));
+    let policy_summary = policy_summary.ok().flatten();
     let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
 
     if args.bundle.is_some() {
@@ -58,7 +67,9 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             runtime_metrics_targets: &runtime_metrics_targets,
             import_auth_journal_count,
             repaired_import_auth_journals,
-            runtime_config: &runtime_config,
+            runtime_config: runtime_config.as_ref(),
+            runtime_config_error: runtime_config_error.as_deref(),
+            policy_summary_error: policy_summary_error.as_deref(),
         });
         let json = serde_json::to_string_pretty(&bundle)
             .context("failed to serialize redacted doctor bundle")?;
@@ -71,7 +82,10 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     if args.runtime && args.json {
         let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
         let mut value = if args.suggest_policy {
-            runtime_doctor_json_value_with_policy_suggestions(&summary, &runtime_config)
+            runtime_config
+                .as_ref()
+                .map(|config| runtime_doctor_json_value_with_policy_suggestions(&summary, config))
+                .unwrap_or_else(|| runtime_doctor_json_value(&summary))
         } else {
             runtime_doctor_json_value(&summary)
         };
@@ -80,6 +94,18 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 "runtime_policy".to_string(),
                 runtime_policy_json_value(policy_summary.as_ref()),
             );
+            if let Some(error) = policy_summary_error.as_deref() {
+                object.insert(
+                    "runtime_policy_error".to_string(),
+                    serde_json::Value::String(error.to_string()),
+                );
+            }
+            if let Some(error) = runtime_config_error.as_deref() {
+                object.insert(
+                    "runtime_configuration_error".to_string(),
+                    serde_json::Value::String(error.to_string()),
+                );
+            }
             object.insert("secret_backend".to_string(), secret_backend_json_value());
             object.insert("runtime_logs".to_string(), runtime_logs_json_value());
             object.insert("audit_logs".to_string(), audit_logs_json_value());
@@ -116,7 +142,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         }
         let json = serde_json::to_string_pretty(&value)
             .context("failed to serialize runtime doctor summary")?;
-        print_stdout_line(&json);
+        print_stdout_line(&json)?;
         return Ok(());
     }
 
@@ -164,7 +190,7 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
         ),
         (
             "Runtime policy".to_string(),
-            format_runtime_policy_summary(policy_summary.as_ref()),
+            doctor_runtime_policy_status(policy_summary.as_ref(), policy_summary_error.as_deref()),
         ),
         (
             "Runtime proxy contract".to_string(),
@@ -214,8 +240,10 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
             title: "Runtime Proxy".to_string(),
             fields,
         });
-        if args.suggest_policy {
-            let suggestions = runtime_doctor_policy_suggestions(&summary, &runtime_config);
+        if args.suggest_policy
+            && let Some(runtime_config) = runtime_config.as_ref()
+        {
+            let suggestions = runtime_doctor_policy_suggestions(&summary, runtime_config);
             suggestion_lines = runtime_doctor_policy_suggestion_lines(&suggestions);
         }
     }
@@ -333,363 +361,4 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
 
     print_doctor_output(&panels, &suggestion_lines)?;
     Ok(())
-}
-
-fn print_doctor_output(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Result<()> {
-    let height = doctor_tui_height(panels, suggestion_lines);
-    let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        for panel in panels {
-            print_panel(&panel.title, &panel.fields);
-        }
-        if !suggestion_lines.is_empty() {
-            print_blank_line();
-            for line in suggestion_lines {
-                print_stdout_line(line);
-            }
-        }
-        return Ok(());
-    };
-    terminal.draw(|frame| {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
-            .split(frame.area());
-        let header = Paragraph::new(Line::from(vec![
-            Span::styled("Prodex Doctor", tui_title_style()),
-            Span::raw("  "),
-            Span::styled(format!("{} panel(s)", panels.len()), tui_secondary_style()),
-        ]))
-        .block(tui_connected_header_block(tui_border_style()));
-        frame.render_widget(header, chunks[0]);
-
-        let body = Paragraph::new(doctor_tui_text(panels, suggestion_lines))
-            .block(
-                Block::default()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM)
-                    .border_style(tui_border_style()),
-            )
-            .wrap(Wrap { trim: false });
-        frame.render_widget(body, chunks[1]);
-    })?;
-    let _ = terminal.show_cursor();
-    Ok(())
-}
-
-fn doctor_tui_height(panels: &[DoctorPanel], suggestion_lines: &[String]) -> u16 {
-    let rows = doctor_tui_text(panels, suggestion_lines)
-        .lines
-        .len()
-        .saturating_add(4)
-        .max(4);
-    let terminal_height = terminal::size()
-        .map(|(_, height)| usize::from(height))
-        .unwrap_or(24);
-    rows.min(terminal_height).max(1) as u16
-}
-
-fn doctor_tui_text(panels: &[DoctorPanel], suggestion_lines: &[String]) -> Text<'static> {
-    let mut lines = Vec::new();
-    for panel in panels {
-        lines.push(Line::styled(panel.title.clone(), tui_title_style()));
-        let label_width = panel
-            .fields
-            .iter()
-            .map(|(label, _)| text_width(label))
-            .max()
-            .unwrap_or(0)
-            .min(24);
-        for (label, value) in &panel.fields {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!(
-                        "{label}{} ",
-                        " ".repeat(label_width.saturating_sub(text_width(label)))
-                    ),
-                    tui_secondary_style().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    value.clone(),
-                    Style::default().fg(doctor_value_color(label, value)),
-                ),
-            ]));
-        }
-    }
-    if !suggestion_lines.is_empty() {
-        lines.push(Line::raw(""));
-        lines.push(Line::styled("Policy Suggestions", tui_title_style()));
-        for line in suggestion_lines {
-            lines.push(Line::styled(line.clone(), tui_primary_style()));
-        }
-    }
-    Text::from(lines)
-}
-
-fn doctor_value_color(label: &str, value: &str) -> Color {
-    let lower = value.to_ascii_lowercase();
-    if lower.contains("error")
-        || lower.contains("missing")
-        || lower.contains("blocked")
-        || lower.contains("warning")
-        || lower.contains("orphan")
-        || lower.contains("critical")
-        || lower.contains("thin")
-        || lower.contains("degraded")
-    {
-        Color::Red
-    } else if lower.contains("ready") || lower.contains("yes") || lower.contains("exists") {
-        Color::Green
-    } else if label.contains("Runtime") || label.contains("Quota") || label.contains("Main") {
-        Color::Cyan
-    } else {
-        Color::Reset
-    }
-}
-
-fn doctor_quota_error_summary(err: &str) -> String {
-    let redacted = redaction_redact_secret_like_text(err);
-    format!("Error ({})", first_line_of_error(&redacted))
-}
-
-struct DoctorRedactedBundleContext<'a> {
-    args: &'a DoctorArgs,
-    paths: &'a AppPaths,
-    state: &'a AppState,
-    codex_home: &'a Path,
-    policy_summary: Option<&'a RuntimePolicySummary>,
-    runtime_metrics_targets: &'a [String],
-    import_auth_journal_count: usize,
-    repaired_import_auth_journals: Option<usize>,
-    runtime_config: &'a RuntimeConfig,
-}
-
-fn doctor_redacted_bundle_json_value(
-    context: DoctorRedactedBundleContext<'_>,
-) -> serde_json::Value {
-    let runtime_summary = collect_runtime_doctor_summary_with_tail_bytes(context.args.tail_bytes);
-    let runtime_json = if context.args.suggest_policy {
-        runtime_doctor_json_value_with_policy_suggestions(&runtime_summary, context.runtime_config)
-    } else {
-        runtime_doctor_json_value(&runtime_summary)
-    };
-    let profile_summaries = doctor_profile_summaries_json_value(context.state);
-
-    let mut value = serde_json::json!({
-        "bundle": {
-            "kind": "prodex_doctor",
-            "redacted": true,
-            "generated_at": Local::now().to_rfc3339(),
-        },
-        "prodex": {
-            "version": runtime_current_prodex_version(),
-            "codex_binary": format_binary_resolution(&codex_bin()),
-            "kiro_binary": format_binary_resolution(&kiro_bin()),
-        },
-        "paths": {
-            "prodex_root": context.paths.root.display().to_string(),
-            "state_file": context.paths.state_file.display().to_string(),
-            "state_file_exists": context.paths.state_file.exists(),
-            "profiles_root": context.paths.managed_profiles_root.display().to_string(),
-            "shared_codex_root": context.paths.shared_codex_root.display().to_string(),
-            "default_codex_home": context.codex_home.display().to_string(),
-            "default_codex_home_exists": context.codex_home.exists(),
-        },
-        "config": {
-            "runtime_policy": runtime_policy_json_value(context.policy_summary),
-            "runtime_logs": runtime_logs_json_value(),
-            "runtime_latest_log_pointer": runtime_proxy_latest_log_pointer_path().display().to_string(),
-            "audit_logs": audit_logs_json_value(),
-            "secret_backend": secret_backend_json_value(),
-            "runtime_metrics_targets": context.runtime_metrics_targets,
-            "live_brokers": collect_live_runtime_broker_observations(context.paths),
-            "live_broker_metrics_targets": context.runtime_metrics_targets,
-            "import_auth_journals": import_auth_journals_json_value(
-                context.import_auth_journal_count,
-                context.repaired_import_auth_journals,
-            ),
-        },
-        "state": {
-            "profile_count": context.state.profiles.len(),
-            "active_profile": context.state.active_profile.as_deref(),
-        },
-        "profiles": {
-            "count": context.state.profiles.len(),
-            "items": profile_summaries,
-        },
-        "runtime": runtime_json,
-    });
-    doctor_redact_json_value(&mut value);
-    value
-}
-
-fn doctor_profile_summaries_json_value(state: &AppState) -> serde_json::Value {
-    let profiles = collect_profile_summaries(state)
-        .into_iter()
-        .map(|profile| {
-            serde_json::json!({
-                "name": profile.name,
-                "active": profile.active,
-                "managed": profile.managed,
-                "provider": {
-                    "label": profile.provider.label(),
-                    "display_name": profile.provider.display_name(),
-                    "runtime_route_policy": profile.provider.capabilities().runtime_route_policy.label(),
-                    "quota_shape": profile.provider.capabilities().quota_shape.label(),
-                    "uses_openai_client_format": profile.provider.capabilities().uses_openai_client_format,
-                    "supports_runtime_rotation": profile.provider.capabilities().supports_runtime_rotation,
-                    "supports_remote_compact_affinity": profile.provider.capabilities().supports_remote_compact_affinity,
-                    "supports_websocket_reuse": profile.provider.capabilities().supports_websocket_reuse,
-                },
-                "auth": {
-                    "label": profile.auth.label,
-                    "quota_compatible": profile.auth.quota_compatible,
-                },
-                "identity": {
-                    "email": profile.email,
-                },
-                "codex_home": {
-                    "path": profile.codex_home.display().to_string(),
-                    "exists": profile.codex_home.exists(),
-                    "has_config_toml": profile.codex_home.join("config.toml").exists(),
-                    "configured_model_provider": codex_configured_model_provider(&profile.codex_home),
-                },
-            })
-        })
-        .collect::<Vec<_>>();
-    serde_json::Value::Array(profiles)
-}
-
-fn write_doctor_bundle_json(bundle_path: &Path, json: &str) -> Result<()> {
-    if bundle_path == Path::new("-") {
-        print_stdout_line(json);
-        return Ok(());
-    }
-
-    fs::write(bundle_path, format!("{json}\n"))
-        .with_context(|| format!("failed to write doctor bundle {}", bundle_path.display()))?;
-    Ok(())
-}
-
-pub(crate) fn doctor_redact_json_value(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, value) in object.iter_mut() {
-                if doctor_json_key_should_be_redacted(key) {
-                    *value = serde_json::Value::String("<redacted>".to_string());
-                } else {
-                    doctor_redact_json_value(value);
-                }
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                doctor_redact_json_value(value);
-            }
-        }
-        serde_json::Value::String(text) => {
-            *text = doctor_redacted_string(text);
-        }
-        _ => {}
-    }
-}
-
-fn doctor_json_key_should_be_redacted(key: &str) -> bool {
-    if matches!(key, "secret_backend") {
-        return false;
-    }
-    matches!(key, "raw_value") || redaction_key_looks_sensitive(key)
-}
-
-fn doctor_redacted_string(text: &str) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
-    redaction_redacted_body_snippet(text.as_bytes(), text.chars().count().saturating_add(64))
-}
-
-fn format_import_auth_journal_status(orphan_count: usize, repaired: Option<usize>) -> String {
-    if let Some(repaired) = repaired {
-        if orphan_count == 0 {
-            return format!("Repaired {repaired} orphan journal(s).");
-        }
-        return format!("Repaired {repaired}; {orphan_count} orphan journal(s) remain.");
-    }
-
-    if orphan_count > 0 {
-        format!(
-            "Warning: profile-import-auth-journal contains {orphan_count} orphan journal(s); run `prodex doctor --repair-import-auth-journals`."
-        )
-    } else {
-        "None".to_string()
-    }
-}
-
-fn import_auth_journals_json_value(
-    orphan_count: usize,
-    repaired: Option<usize>,
-) -> serde_json::Value {
-    serde_json::json!({
-        "orphan_count": orphan_count,
-        "repair_performed": repaired.is_some(),
-        "repaired": repaired.unwrap_or(0),
-        "status": if orphan_count > 0 { "warning" } else { "ok" },
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn doctor_tui_text_contains_panels_and_suggestions() {
-        let panels = vec![DoctorPanel {
-            title: "Doctor".to_string(),
-            fields: vec![
-                ("Runtime".to_string(), "ready".to_string()),
-                ("Quota".to_string(), "Blocked".to_string()),
-            ],
-        }];
-        let suggestions = vec!["increase active_request_limit".to_string()];
-        let text = format!("{:?}", doctor_tui_text(&panels, &suggestions));
-        assert!(text.contains("Doctor"));
-        assert!(text.contains("ready"));
-        assert!(text.contains("Blocked"));
-        assert!(text.contains("Policy Suggestions"));
-    }
-
-    #[test]
-    fn doctor_tui_text_does_not_pad_between_panels() {
-        let panels = vec![
-            DoctorPanel {
-                title: "One".to_string(),
-                fields: vec![("Runtime".to_string(), "ready".to_string())],
-            },
-            DoctorPanel {
-                title: "Two".to_string(),
-                fields: vec![("Quota".to_string(), "Ready".to_string())],
-            },
-        ];
-
-        let lines = doctor_tui_text(&panels, &[]).lines;
-        assert_eq!(lines.len(), 4);
-        assert!(format!("{:?}", lines[2]).contains("Two"));
-    }
-
-    #[test]
-    fn doctor_value_color_highlights_status() {
-        assert_eq!(doctor_value_color("Quota", "Blocked"), Color::Red);
-        assert_eq!(doctor_value_color("Runtime", "ready"), Color::Green);
-        assert_eq!(doctor_value_color("Runtime", "critical"), Color::Red);
-    }
-
-    #[test]
-    fn doctor_quota_error_summary_redacts_secret_like_material() {
-        let err = "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123";
-
-        let summary = doctor_quota_error_summary(err);
-
-        assert!(summary.contains("Authorization: Bearer <redacted>"));
-        assert!(summary.contains("api_key=<redacted>"));
-        assert!(!summary.contains("fixture-token-123"));
-        assert!(!summary.contains("sk-fixture-123"));
-    }
 }

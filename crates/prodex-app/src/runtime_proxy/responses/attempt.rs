@@ -113,8 +113,11 @@ pub(crate) fn attempt_runtime_responses_request(
             {
                 continue;
             }
-            let retryable_quota =
-                runtime_proxy_precommit_error_rotates_profile(status, &parts.body);
+            let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+                status,
+                &parts.body,
+                runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+            );
             let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
             let retryable_previous = status == 400
                 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
@@ -132,8 +135,14 @@ pub(crate) fn attempt_runtime_responses_request(
                     response,
                 });
             }
-            if retryable_quota {
+            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile {
                 return Ok(RuntimeResponsesAttempt::QuotaBlocked {
+                    profile_name: profile_name.to_string(),
+                    response,
+                });
+            }
+            if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile {
+                return Ok(RuntimeResponsesAttempt::Overloaded {
                     profile_name: profile_name.to_string(),
                     response,
                 });

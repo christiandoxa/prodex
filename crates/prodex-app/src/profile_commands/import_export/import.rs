@@ -705,8 +705,6 @@ fn write_imported_auth_update_journal(
         previous_auth_json,
         Local::now().to_rfc3339(),
     );
-    let json = serde_json::to_string_pretty(&journal)
-        .context("failed to serialize auth update journal")?;
-    write_secret_text_file(&journal_path, &json)?;
+    prodex_profile_export::write_profile_import_auth_update_journal(&journal_path, &journal)?;
     Ok(journal_path)
 }

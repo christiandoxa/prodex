@@ -8,7 +8,10 @@ use super::provider_bridge::{
     runtime_harness_log_provider_policy, runtime_provider_log_response_conformance,
     runtime_provider_response_conformance_result,
 };
-use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use crate::{
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
+    read_blocking_response_body_with_limit,
+};
 use anyhow::{Context, Result};
 use prodex_domain::{CallId, RequestId};
 #[cfg(test)]
@@ -19,7 +22,6 @@ use prodex_provider_core::{
     gemini_provider_core_response_terminal_without_history,
 };
 use std::fmt;
-use std::io::Read;
 use std::path::PathBuf;
 
 #[path = "gemini_request.rs"]
@@ -131,7 +133,7 @@ pub(super) struct RuntimeGeminiBufferedResponseContext<'a> {
 
 pub(super) fn runtime_gemini_generate_buffered_response_parts(
     status: u16,
-    mut response: reqwest::blocking::Response,
+    response: reqwest::blocking::Response,
     request_id: u64,
     conversation_messages: Vec<serde_json::Value>,
     context: RuntimeGeminiBufferedResponseContext<'_>,
@@ -142,10 +144,11 @@ pub(super) fn runtime_gemini_generate_buffered_response_parts(
         harness_mode,
         harness_model,
     } = context;
-    let mut body = Vec::new();
-    response
-        .read_to_end(&mut body)
-        .context("failed to read Gemini response body")?;
+    let body = read_blocking_response_body_with_limit(
+        response,
+        RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES,
+        "failed to read Gemini response body",
+    )?;
     let value: serde_json::Value =
         serde_json::from_slice(&body).context("failed to parse Gemini response JSON")?;
     let translated = runtime_provider_response_conformance_result(

@@ -1,14 +1,20 @@
 use super::*;
 
+fn environment(entries: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
+    entries
+        .iter()
+        .map(|(key, value)| (OsString::from(key), OsString::from(value)))
+        .collect()
+}
+
 #[test]
 fn codex_sandbox_removed_env_strips_inherited_codex_sandbox_vars() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _sandbox_guard = TestEnvVarGuard::set("CODEX_SANDBOX", "workspace-write");
-    let _network_guard = TestEnvVarGuard::set("CODEX_SANDBOX_NETWORK_DISABLED", "1");
-    let _custom_guard = TestEnvVarGuard::set("CODEX_SANDBOX_PROFILE", "danger-full-access");
-    let _other_guard = TestEnvVarGuard::set("PRODEX_TEST_KEEP_ENV", "1");
-
-    let removed = codex_sandbox_removed_env();
+    let removed = codex_sandbox_removed_env_from(&environment(&[
+        ("CODEX_SANDBOX", "workspace-write"),
+        ("CODEX_SANDBOX_NETWORK_DISABLED", "1"),
+        ("CODEX_SANDBOX_PROFILE", "danger-full-access"),
+        ("PRODEX_TEST_KEEP_ENV", "1"),
+    ]));
 
     assert!(removed.iter().any(|key| key == "CODEX_SANDBOX"));
     assert!(
@@ -22,21 +28,23 @@ fn codex_sandbox_removed_env_strips_inherited_codex_sandbox_vars() {
 
 #[test]
 fn codex_child_plan_applies_codex_sandbox_removed_env() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _custom_guard = TestEnvVarGuard::set("CODEX_SANDBOX_PROFILE", "danger-full-access");
-    let _ld_preload_guard = TestEnvVarGuard::set("LD_PRELOAD", "/tmp/inject.so");
-    let _dyld_guard = TestEnvVarGuard::set("DYLD_INSERT_LIBRARIES", "/tmp/inject.dylib");
-    let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", "example.com");
-    let _lower_no_proxy_guard = TestEnvVarGuard::set("no_proxy", "internal.local");
+    let environment = environment(&[
+        ("CODEX_SANDBOX_PROFILE", "danger-full-access"),
+        ("LD_PRELOAD", "/tmp/inject.so"),
+        ("DYLD_INSERT_LIBRARIES", "/tmp/inject.dylib"),
+        ("NO_PROXY", "example.com"),
+        ("no_proxy", "internal.local"),
+    ]);
     let binary = OsString::from("codex");
     let codex_home = PathBuf::from("/tmp/prodex-codex-home");
     let args = vec![OsString::from("login")];
 
-    let plan = codex_child_plan(
+    let plan = codex_child_plan_with_env(
         binary.clone(),
         codex_home.clone(),
         args.clone(),
         "prodex-local",
+        &environment,
     );
 
     assert_eq!(plan.binary, binary);
@@ -77,12 +85,10 @@ fn codex_child_plan_applies_codex_sandbox_removed_env() {
 
 #[test]
 fn child_process_hardening_strips_dynamic_loader_env_unless_allowed() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _ld_preload_guard = TestEnvVarGuard::set("LD_PRELOAD", "/tmp/inject.so");
-    let _dyld_custom_guard = TestEnvVarGuard::set("DYLD_CUSTOM_TEST", "1");
-    let _allow_guard = TestEnvVarGuard::unset("PRODEX_ALLOW_UNSAFE_CHILD_ENV");
-
-    let removed = child_process_hardening_removed_env();
+    let removed = child_process_hardening_removed_env_from(&environment(&[
+        ("LD_PRELOAD", "/tmp/inject.so"),
+        ("DYLD_CUSTOM_TEST", "1"),
+    ]));
 
     assert!(removed.iter().any(|key| key == "LD_PRELOAD"));
     assert!(removed.iter().any(|key| key == "LD_LIBRARY_PATH"));
@@ -91,11 +97,13 @@ fn child_process_hardening_strips_dynamic_loader_env_unless_allowed() {
 
 #[test]
 fn child_process_hardening_can_be_explicitly_disabled() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _ld_preload_guard = TestEnvVarGuard::set("LD_PRELOAD", "/tmp/inject.so");
-    let _allow_guard = TestEnvVarGuard::set("PRODEX_ALLOW_UNSAFE_CHILD_ENV", "1");
-
-    assert!(child_process_hardening_removed_env().is_empty());
+    assert!(
+        child_process_hardening_removed_env_from(&environment(&[
+            ("LD_PRELOAD", "/tmp/inject.so"),
+            ("PRODEX_ALLOW_UNSAFE_CHILD_ENV", "1"),
+        ]))
+        .is_empty()
+    );
 }
 
 #[test]
@@ -142,11 +150,13 @@ fn codex_child_plan_scopes_pre_exec_config_overrides() {
 
 #[test]
 fn local_proxy_bypass_env_deduplicates_existing_values() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", " example.com,127.0.0.1 ");
-    let _lower_no_proxy_guard = TestEnvVarGuard::set("no_proxy", "LOCALHOST,internal.local");
-
-    let env = local_proxy_bypass_env();
+    let env = local_proxy_bypass_env_for_hosts_and_env(
+        std::iter::empty::<&str>(),
+        &environment(&[
+            ("NO_PROXY", " example.com,127.0.0.1 "),
+            ("no_proxy", "LOCALHOST,internal.local"),
+        ]),
+    );
 
     assert_eq!(
         env,
@@ -165,9 +175,6 @@ fn local_proxy_bypass_env_deduplicates_existing_values() {
 
 #[test]
 fn codex_child_plan_adds_local_provider_host_to_proxy_bypass_env() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", "example.com");
-    let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
     let args = vec![
         OsString::from("-c"),
         OsString::from(
@@ -175,11 +182,12 @@ fn codex_child_plan_adds_local_provider_host_to_proxy_bypass_env() {
         ),
     ];
 
-    let plan = codex_child_plan(
+    let plan = codex_child_plan_with_env(
         OsString::from("codex"),
         PathBuf::from("/tmp/prodex-codex-home"),
         args,
         "prodex-local",
+        &environment(&[("NO_PROXY", "example.com")]),
     );
 
     assert_eq!(
@@ -206,11 +214,6 @@ fn codex_child_plan_adds_local_provider_host_to_proxy_bypass_env() {
 
 #[test]
 fn codex_child_plan_adds_runtime_proxy_ports_to_proxy_bypass_env() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _http_proxy_guard = TestEnvVarGuard::set("http_proxy", "http://127.0.0.1:1086");
-    let _https_proxy_guard = TestEnvVarGuard::set("https_proxy", "http://127.0.0.1:1086");
-    let _no_proxy_guard = TestEnvVarGuard::unset("NO_PROXY");
-    let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
     let args = vec![
         OsString::from("-c"),
         OsString::from("chatgpt_base_url=\"http://127.0.0.1:64550/backend-api\""),
@@ -218,11 +221,15 @@ fn codex_child_plan_adds_runtime_proxy_ports_to_proxy_bypass_env() {
         OsString::from("openai_base_url=\"http://127.0.0.1:64550/backend-api/prodex\""),
     ];
 
-    let plan = codex_child_plan(
+    let plan = codex_child_plan_with_env(
         OsString::from("codex"),
         PathBuf::from("/tmp/prodex-codex-home"),
         args,
         "prodex-local",
+        &environment(&[
+            ("http_proxy", "http://127.0.0.1:1086"),
+            ("https_proxy", "http://127.0.0.1:1086"),
+        ]),
     );
 
     assert_eq!(
@@ -243,16 +250,16 @@ fn codex_child_plan_adds_runtime_proxy_ports_to_proxy_bypass_env() {
 
 #[test]
 fn remove_upstream_proxy_env_preserves_local_proxy_bypass_env() {
-    let _env_guard = TestEnvVarGuard::lock();
-    let _http_proxy_guard = TestEnvVarGuard::set("HTTP_PROXY", "http://127.0.0.1:1086");
-    let _https_proxy_guard = TestEnvVarGuard::set("https_proxy", "http://127.0.0.1:1086");
-    let _no_proxy_guard = TestEnvVarGuard::set("NO_PROXY", "example.com");
-    let _lower_no_proxy_guard = TestEnvVarGuard::unset("no_proxy");
-    let mut plan = codex_child_plan(
+    let mut plan = codex_child_plan_with_env(
         OsString::from("codex"),
         PathBuf::from("/tmp/prodex-codex-home"),
         vec![],
         "prodex-local",
+        &environment(&[
+            ("HTTP_PROXY", "http://127.0.0.1:1086"),
+            ("https_proxy", "http://127.0.0.1:1086"),
+            ("NO_PROXY", "example.com"),
+        ]),
     );
 
     remove_upstream_proxy_env(&mut plan);

@@ -114,7 +114,7 @@ fn file_path(location: &SecretLocation) -> Result<&Path, SecretError> {
 }
 
 fn secret_size_error(path: &Path, max_bytes: u64) -> SecretError {
-    SecretError::invalid_location(format!(
+    SecretError::size_limit_exceeded(format!(
         "{} exceeds safe size limit ({} bytes)",
         path.display(),
         max_bytes
@@ -124,12 +124,12 @@ fn secret_size_error(path: &Path, max_bytes: u64) -> SecretError {
 fn secure_error(path: &Path, error: io::Error) -> SecretError {
     match error.kind() {
         io::ErrorKind::InvalidData if error.to_string().contains("safe size limit") => {
-            SecretError::invalid_location(format!("{}: {error}", path.display()))
+            SecretError::size_limit_exceeded(format!("{}: {error}", path.display()))
         }
-        io::ErrorKind::InvalidInput
-        | io::ErrorKind::InvalidData
-        | io::ErrorKind::NotADirectory
-        | io::ErrorKind::PermissionDenied => {
+        io::ErrorKind::NotADirectory | io::ErrorKind::PermissionDenied => {
+            SecretError::unsafe_file(format!("{}: {error}", path.display()))
+        }
+        io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData => {
             SecretError::invalid_location(format!("{}: {error}", path.display()))
         }
         _ => SecretError::io(path, error),

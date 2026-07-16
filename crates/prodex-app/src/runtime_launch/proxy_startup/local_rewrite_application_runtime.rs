@@ -35,6 +35,7 @@ pub(crate) struct RuntimeGatewayApplication {
     request_slots: Arc<Semaphore>,
     request_limit: usize,
     health_slots: Arc<Semaphore>,
+    _marker_guard: crate::RuntimeProxyMarkerGuard,
 }
 
 pub(crate) fn start_runtime_gateway_application_with_runtime_config(
@@ -65,6 +66,7 @@ impl RuntimeGatewayApplication {
             worker_count: _,
             secret_refresh,
             log_path: _,
+            marker_guard,
         } = prepared;
         let workers = spawn_runtime_local_rewrite_workers(
             &shared,
@@ -83,6 +85,7 @@ impl RuntimeGatewayApplication {
             request_slots: Arc::new(Semaphore::new(request_limit)),
             request_limit,
             health_slots: Arc::new(Semaphore::new(HEALTH_REQUEST_LIMIT)),
+            _marker_guard: marker_guard,
         })
     }
 

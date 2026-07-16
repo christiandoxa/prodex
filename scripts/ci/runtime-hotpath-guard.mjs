@@ -465,14 +465,6 @@ const ALLOWLIST = Object.freeze([
     reason: "checkpoint export writes only when explicitly requested by Gemini checkpoint metadata",
   },
   {
-    name: "gemini-tool-output-explicit-output-io",
-    file: "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_request_tool_output.rs",
-    id: "blocking-disk-io",
-    pattern: /\bfs::(?:create_dir_all|write)\s*\(/,
-    maxHits: 2,
-    reason: "masked tool-output persistence is bounded and uses explicit output directories",
-  },
-  {
     name: "runtime-websocket-tcp-dns-bounded-executor-threads",
     file: "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/executor.rs",
     id: "blocking-thread-builder-spawn",

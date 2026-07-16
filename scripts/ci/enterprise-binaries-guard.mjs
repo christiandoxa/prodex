@@ -8,11 +8,17 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 
 const BINARIES = [
   {
-    path: "src/bin/prodex-gateway.rs",
+    paths: ["src/bin/prodex-gateway.rs"],
     required: ["Data-plane gateway entrypoint", "DedicatedServerMode::DataPlane"],
   },
   {
-    path: "src/bin/prodex-control-plane.rs",
+    paths: [
+      "src/bin/prodex-control-plane.rs",
+      "src/bin/prodex_control_plane/mod.rs",
+      "src/bin/prodex_control_plane/cli.rs",
+      "src/bin/prodex_control_plane/http_plan.rs",
+      "src/bin/prodex_control_plane/publication.rs",
+    ],
     required: ["Control-plane entrypoint", "DedicatedServerMode::ControlPlane"],
   },
 ];
@@ -25,24 +31,31 @@ const FORBIDDEN_PATTERNS = [
 ];
 
 function validateBinary(binary) {
-  const filePath = path.join(repoRoot, binary.path);
   const errors = [];
-  if (!fs.existsSync(filePath)) {
-    return [`${binary.path}: required enterprise binary entrypoint is missing`];
+  const sources = [];
+  for (const sourcePath of binary.paths) {
+    const filePath = path.join(repoRoot, sourcePath);
+    if (!fs.existsSync(filePath)) {
+      errors.push(`${sourcePath}: required enterprise binary source is missing`);
+      continue;
+    }
+    sources.push({ path: sourcePath, source: fs.readFileSync(filePath, "utf8") });
   }
-  const source = fs.readFileSync(filePath, "utf8");
+  const combinedSource = sources.map(({ source }) => source).join("\n");
   for (const phrase of binary.required) {
-    if (!source.includes(phrase)) {
-      errors.push(`${binary.path}: missing required entrypoint phrase '${phrase}'`);
+    if (!combinedSource.includes(phrase)) {
+      errors.push(`${binary.paths[0]}: missing required entrypoint phrase '${phrase}'`);
     }
   }
-  source.split(/\r?\n/u).forEach((line, index) => {
-    for (const forbidden of FORBIDDEN_PATTERNS) {
-      if (forbidden.pattern.test(line)) {
-        errors.push(`${binary.path}:${index + 1}: binary entrypoint must stay thin; found ${forbidden.name} '${line.trim()}'`);
+  for (const { path: sourcePath, source } of sources) {
+    source.split(/\r?\n/u).forEach((line, index) => {
+      for (const forbidden of FORBIDDEN_PATTERNS) {
+        if (forbidden.pattern.test(line)) {
+          errors.push(`${sourcePath}:${index + 1}: binary entrypoint must stay thin; found ${forbidden.name} '${line.trim()}'`);
+        }
       }
-    }
-  });
+    });
+  }
   return errors;
 }
 

@@ -12,6 +12,7 @@ pub(crate) fn runtime_has_route_eligible_quota_fallback(
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let disk_fallback_profiles = {
         let mut runtime = shared
             .runtime
@@ -38,7 +39,7 @@ pub(crate) fn runtime_has_route_eligible_quota_fallback(
                 now,
             );
             let inflight_count =
-                runtime_profile_inflight_sort_key(candidate_name, &runtime.profile_inflight);
+                runtime_profile_inflight_sort_key(candidate_name, &profile_inflight);
             if auth_failure_active || in_selection_backoff || inflight_count >= inflight_soft_limit
             {
                 continue;

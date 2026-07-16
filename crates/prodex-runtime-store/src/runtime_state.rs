@@ -60,7 +60,7 @@ pub fn compact_runtime_usage_snapshots<W>(
     snapshots
 }
 
-pub fn merge_runtime_usage_snapshots<W: Clone>(
+pub fn merge_runtime_usage_snapshots<W: Clone + Ord>(
     existing: &BTreeMap<String, RuntimeProfileUsageSnapshot<W>>,
     incoming: &BTreeMap<String, RuntimeProfileUsageSnapshot<W>>,
     profiles: &BTreeMap<String, ProfileEntry>,
@@ -68,9 +68,10 @@ pub fn merge_runtime_usage_snapshots<W: Clone>(
 ) -> BTreeMap<String, RuntimeProfileUsageSnapshot<W>> {
     let mut merged = existing.clone();
     for (profile_name, snapshot) in incoming {
-        let should_replace = merged
-            .get(profile_name)
-            .is_none_or(|current| current.checked_at <= snapshot.checked_at);
+        let should_replace = merged.get(profile_name).is_none_or(|current| {
+            snapshot.checked_at > current.checked_at
+                || (snapshot.checked_at == current.checked_at && snapshot > current)
+        });
         if should_replace {
             merged.insert(profile_name.clone(), snapshot.clone());
         }

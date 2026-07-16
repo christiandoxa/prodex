@@ -71,7 +71,7 @@ pub(crate) fn remember_runtime_turn_state(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("turn_state:{profile_name}"),
+            RuntimeStateMutation::TurnState(profile_name.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(
@@ -178,7 +178,7 @@ pub(crate) fn remember_runtime_session_id(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("session_id:{profile_name}"),
+            RuntimeStateMutation::SessionId(profile_name.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(
@@ -309,7 +309,7 @@ pub(crate) fn remember_runtime_response_ids_with_turn_state(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("response_ids:{profile_name}"),
+            RuntimeStateMutation::ResponseIds(profile_name.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(
@@ -422,7 +422,7 @@ pub(crate) fn remember_runtime_successful_previous_response_owner(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("previous_response_owner:{profile_name}"),
+            RuntimeStateMutation::PreviousResponseOwner(profile_name.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(

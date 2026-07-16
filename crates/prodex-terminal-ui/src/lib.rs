@@ -4,6 +4,7 @@ mod print;
 mod runtime_launch;
 mod session;
 mod terminal;
+mod terminal_session;
 mod text;
 
 pub use info::{
@@ -43,6 +44,7 @@ pub use terminal::{
     current_cli_width, terminal_dimensions_from_tty, terminal_height_lines,
     terminal_size_override_usize, terminal_width_chars,
 };
+pub use terminal_session::AlternateScreenTerminal;
 pub use text::{chunk_token, fit_cell, pad_cell, text_width, wrap_text};
 
 pub const CLI_WIDTH: usize = 110;

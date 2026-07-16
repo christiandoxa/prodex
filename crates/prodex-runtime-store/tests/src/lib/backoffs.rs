@@ -39,6 +39,33 @@ fn usage_snapshot_compaction_prunes_missing_and_expired_profiles() {
 }
 
 #[test]
+fn usage_snapshot_timestamp_ties_merge_commutatively() {
+    let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+    let snapshot = |status, remaining| RuntimeProfileUsageSnapshot {
+        checked_at: 200,
+        five_hour_status: status,
+        five_hour_remaining_percent: remaining,
+        five_hour_reset_at: 300,
+        weekly_status: status,
+        weekly_remaining_percent: remaining,
+        weekly_reset_at: 400,
+    };
+    let left = BTreeMap::from([(
+        "alpha".to_string(),
+        snapshot(RuntimeQuotaWindowStatus::Ready, 90),
+    )]);
+    let right = BTreeMap::from([(
+        "alpha".to_string(),
+        snapshot(RuntimeQuotaWindowStatus::Critical, 5),
+    )]);
+
+    assert_eq!(
+        merge_runtime_usage_snapshots(&left, &right, &profiles, 200),
+        merge_runtime_usage_snapshots(&right, &left, &profiles, 200)
+    );
+}
+
+#[test]
 fn profile_score_compaction_supports_route_scoped_keys() {
     let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
     let scores = BTreeMap::from([
@@ -63,6 +90,30 @@ fn profile_score_compaction_supports_route_scoped_keys() {
     assert_eq!(
         compacted.keys().cloned().collect::<Vec<_>>(),
         vec!["__route_health__:responses:alpha".to_string()]
+    );
+}
+
+#[test]
+fn profile_score_timestamp_ties_merge_commutatively() {
+    let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+    let left = BTreeMap::from([(
+        "alpha".to_string(),
+        RuntimeProfileHealth {
+            score: 1,
+            updated_at: 200,
+        },
+    )]);
+    let right = BTreeMap::from([(
+        "alpha".to_string(),
+        RuntimeProfileHealth {
+            score: 2,
+            updated_at: 200,
+        },
+    )]);
+
+    assert_eq!(
+        merge_runtime_profile_scores(&left, &right, &profiles, 200),
+        merge_runtime_profile_scores(&right, &left, &profiles, 200)
     );
 }
 

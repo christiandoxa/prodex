@@ -1,43 +1,6 @@
 use super::*;
-use std::io::Write;
-use std::sync::{Mutex, OnceLock};
+use std::io::{Cursor, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct EnvGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
-    key: &'static str,
-    previous: Option<std::ffi::OsString>,
-}
-
-impl EnvGuard {
-    fn set(key: &'static str, value: &str) -> Self {
-        let lock = env_lock()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let previous = env::var_os(key);
-        unsafe { env::set_var(key, value) };
-        Self {
-            _lock: lock,
-            key,
-            previous,
-        }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        if let Some(value) = self.previous.as_ref() {
-            unsafe { env::set_var(self.key, value) };
-        } else {
-            unsafe { env::remove_var(self.key) };
-        }
-    }
-}
 
 fn temp_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
@@ -59,12 +22,14 @@ fn audit_event_line(epoch: i64, component: &str, action: &str, details: Value) -
 }
 
 #[test]
-fn audit_log_path_uses_env_override() {
+fn audit_log_dir_uses_injected_override() {
     let dir = temp_dir("path");
-    let _guard = EnvGuard::set("PRODEX_AUDIT_LOG_DIR", &dir.display().to_string());
     let fallback = temp_dir("fallback");
 
-    assert_eq!(audit_log_path(&fallback), dir.join(AUDIT_LOG_FILE_NAME));
+    assert_eq!(
+        audit_log_dir_with_override(&fallback, Some(dir.clone().into_os_string())),
+        dir
+    );
 
     let _ = fs::remove_dir_all(dir);
     let _ = fs::remove_dir_all(fallback);
@@ -118,7 +83,6 @@ fn read_recent_audit_events_applies_tail_and_filters() {
             &path,
             concat!(
                 "{\"recorded_at\":\"2026-04-08T00:00:00+00:00\",\"recorded_at_epoch\":1,\"pid\":10,\"component\":\"profile\",\"action\":\"add\",\"outcome\":\"success\",\"details\":{\"profile_name\":\"main\"}}\n",
-                "not-json\n",
                 "{\"recorded_at\":\"2026-04-08T00:00:01+00:00\",\"recorded_at_epoch\":2,\"pid\":10,\"component\":\"profile\",\"action\":\"use\",\"outcome\":\"success\",\"details\":{\"profile_name\":\"second\"}}\n",
                 "{\"recorded_at\":\"2026-04-08T00:00:02+00:00\",\"recorded_at_epoch\":3,\"pid\":10,\"component\":\"runtime\",\"action\":\"broker_start\",\"outcome\":\"success\",\"details\":{\"listen_addr\":\"127.0.0.1:12345\"}}\n"
             ),
@@ -294,6 +258,7 @@ fn render_audit_events_human_shows_filters_and_details() {
             outcome: Some("success".to_string()),
         },
         &[AuditLogEventRecord {
+            schema_version: 0,
             recorded_at: "2026-04-08T00:00:00+00:00".to_string(),
             recorded_at_epoch: 1,
             pid: 10,
@@ -301,6 +266,7 @@ fn render_audit_events_human_shows_filters_and_details() {
             action: "add".to_string(),
             outcome: "success".to_string(),
             details: serde_json::json!({"profile_name":"main"}),
+            checksum: None,
         }],
     );
 
@@ -349,7 +315,7 @@ fn usage_ledger_row_serialization_redacts_account_metadata() {
 }
 
 #[test]
-fn usage_ledger_append_and_read_skip_malformed_lines() {
+fn usage_ledger_read_rejects_malformed_lines() {
     let dir = temp_dir("usage-ledger");
     let path = dir.join(USAGE_LEDGER_FILE_NAME);
 
@@ -360,12 +326,130 @@ fn usage_ledger_append_and_read_skip_malformed_lines() {
         .unwrap()
         .write_all(b"not-json\n\n")
         .unwrap();
-    append_usage_ledger_row(&path, &usage_row(200, 20, 10)).unwrap();
+    let error = read_usage_ledger_rows(&path).unwrap_err();
+    assert!(error.to_string().contains("line 2"));
 
-    let rows = read_usage_ledger_rows(&path).unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].total_tokens, 10);
-    assert_eq!(rows[1].total_tokens, 20);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn usage_ledger_read_rejects_oversized_file() {
+    let dir = temp_dir("usage-ledger-oversized");
+    let path = dir.join(USAGE_LEDGER_FILE_NAME);
+    fs::File::create(&path)
+        .unwrap()
+        .set_len(USAGE_LEDGER_READ_MAX_BYTES + 1)
+        .unwrap();
+
+    let error = read_usage_ledger_rows(&path).unwrap_err();
+    assert!(error.to_string().contains("bounded read limit"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn bounded_utf8_reader_rejects_growth_past_limit() {
+    let error = read_utf8_bounded(Cursor::new(b"123456789"), 8, "audit log").unwrap_err();
+
+    assert!(error.to_string().contains("bounded read limit"));
+}
+
+#[test]
+fn append_audit_event_redacts_secrets_and_secures_file() {
+    let dir = temp_dir("append-private");
+    let path = dir.join(AUDIT_LOG_FILE_NAME);
+
+    append_audit_event(
+        &path,
+        "runtime",
+        "request",
+        "failure",
+        serde_json::json!({
+            "authorization": "Bearer secret-token",
+            "nested": {"api_key": "sensitive"},
+        }),
+    )
+    .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(!content.contains("secret-token"));
+    assert!(!content.contains("sensitive"));
+    assert!(content.contains("<redacted>"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn audit_reader_rejects_corrupt_checksummed_record() {
+    let dir = temp_dir("audit-corrupt");
+    let path = dir.join(AUDIT_LOG_FILE_NAME);
+    append_audit_event(
+        &path,
+        "profile",
+        "add",
+        "success",
+        serde_json::json!({"profile_name": "main"}),
+    )
+    .unwrap();
+
+    let content = fs::read_to_string(&path).unwrap();
+    fs::write(&path, content.replace("\"main\"", "\"tampered\"")).unwrap();
+
+    let error = read_recent_audit_events(
+        &path,
+        &AuditLogQuery {
+            tail: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("checksum mismatch"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn concurrent_audit_appends_keep_complete_records() {
+    let dir = temp_dir("audit-concurrent");
+    let path = dir.join(AUDIT_LOG_FILE_NAME);
+    let threads = (0..8)
+        .map(|index| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                append_audit_event(
+                    &path,
+                    "runtime",
+                    "request",
+                    "success",
+                    serde_json::json!({"index": index}),
+                )
+                .unwrap();
+            })
+        })
+        .collect::<Vec<_>>();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    let events = read_recent_audit_events(
+        &path,
+        &AuditLogQuery {
+            tail: 8,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(events.len(), 8);
 
     let _ = fs::remove_dir_all(dir);
 }

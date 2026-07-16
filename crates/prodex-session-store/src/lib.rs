@@ -1,19 +1,26 @@
 use anyhow::{Context, Result};
-use prodex_app_reports::{
-    SessionReport, apply_session_json_line, apply_session_json_lines, apply_session_value,
-    first_string_value, is_session_metadata_file, sort_session_reports,
-};
 use prodex_state::AppState;
-use rusqlite::{Connection, OpenFlags};
 use std::env;
-use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod repair_transaction;
+mod report;
+mod resolve_error;
 mod session_file;
 mod session_meta;
+mod state_db_index;
 
+pub use report::{
+    SessionReport, apply_session_json_line, apply_session_json_lines, apply_session_value,
+    first_i64_value, first_string_value, format_epoch, is_session_metadata_file,
+    session_id_from_path, sort_session_reports, timestamp_label_sort_key, value_at_path,
+};
+pub use resolve_error::*;
+
+use repair_transaction::SessionRepairTransaction;
 use session_file::{read_session_file_to_string, visit_session_lines};
+use state_db_index::collect_state_db_rollout_paths;
 
 const SESSIONS_DIR: &str = "sessions";
 const ARCHIVED_SESSIONS_DIR: &str = "archived_sessions";
@@ -29,64 +36,6 @@ pub struct SessionReportFilter<'a> {
     pub profile: Option<&'a str>,
     pub query: Option<&'a str>,
     pub include_subagents: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SessionResolveError {
-    Missing {
-        selector: String,
-    },
-    Ambiguous {
-        selector: String,
-        matches: Vec<String>,
-    },
-}
-
-impl fmt::Display for SessionResolveError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Missing { selector } => {
-                let _ = selector;
-                write!(formatter, "session could not be resolved")
-            }
-            Self::Ambiguous { selector, matches } => {
-                let _ = (selector, matches);
-                write!(formatter, "session selector is ambiguous")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SessionResolveError {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionResolveErrorStatus {
-    NotFound,
-    Conflict,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionResolveErrorResponsePlan {
-    pub status: SessionResolveErrorStatus,
-    pub code: &'static str,
-    pub message: &'static str,
-}
-
-pub fn plan_session_resolve_error_response(
-    error: &SessionResolveError,
-) -> SessionResolveErrorResponsePlan {
-    match error {
-        SessionResolveError::Missing { .. } => SessionResolveErrorResponsePlan {
-            status: SessionResolveErrorStatus::NotFound,
-            code: "session_not_found",
-            message: "session could not be resolved",
-        },
-        SessionResolveError::Ambiguous { .. } => SessionResolveErrorResponsePlan {
-            status: SessionResolveErrorStatus::Conflict,
-            code: "session_selector_ambiguous",
-            message: "session selector is ambiguous",
-        },
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -330,7 +279,12 @@ pub fn repair_resume_session_metadata_prefix(
     }
     for candidate in exact_paths {
         let repair_selector = candidate.resolved_session_id.as_deref().unwrap_or(selector);
-        if repair_session_file_metadata_prefix(&candidate.path, repair_selector, true)? {
+        if repair_session_file_metadata_prefix(
+            shared_codex_root,
+            &candidate.path,
+            repair_selector,
+            true,
+        )? {
             return Ok(Some(candidate.path));
         }
     }
@@ -360,6 +314,7 @@ pub fn repair_resume_session_metadata_prefix(
     }
     if prefix_paths.len() == 1
         && repair_session_file_metadata_prefix(
+            shared_codex_root,
             &prefix_paths[0].path,
             prefix_paths[0]
                 .resolved_session_id
@@ -374,19 +329,16 @@ pub fn repair_resume_session_metadata_prefix(
     Ok(None)
 }
 
-pub fn repair_codex_session_metadata_prefix(path: &Path, contents: &str) -> Result<bool> {
-    if contents
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .is_some_and(session_meta::line_starts_codex_rollout_metadata)
-    {
-        return Ok(false);
-    }
+pub fn repair_codex_session_metadata_prefix(path: &Path, _contents: &str) -> Result<bool> {
     let Some(selector) = codex_session_id_from_path(path) else {
         return Ok(false);
     };
-    repair_session_file_metadata_prefix(path, &selector, true)
+    repair_session_file_metadata_prefix(
+        repair_transaction::repository_root(path),
+        path,
+        &selector,
+        true,
+    )
 }
 
 pub fn find_unrepairable_resume_session(
@@ -580,153 +532,6 @@ fn collect_resume_repair_candidate_paths(
     Ok(deduped)
 }
 
-fn collect_state_db_rollout_paths(
-    root: &Path,
-    selector: &str,
-    paths: &mut Vec<SessionRepairCandidate>,
-) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_codex_state_db_path(&path) {
-            continue;
-        }
-        if let Ok(mut rollout_paths) = state_db_rollout_paths_for_selector(root, &path, selector) {
-            paths.append(&mut rollout_paths);
-        }
-    }
-}
-
-fn is_codex_state_db_path(path: &Path) -> bool {
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    file_name.starts_with("state_")
-        && file_name.ends_with(".sqlite")
-        && path_is_regular_file_no_symlink(path)
-}
-
-fn state_db_rollout_paths_for_selector(
-    codex_home: &Path,
-    db_path: &Path,
-    selector: &str,
-) -> Result<Vec<SessionRepairCandidate>> {
-    let connection = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .with_context(|| format!("failed to open state db {}", db_path.display()))?;
-    let mut paths = Vec::new();
-    if let Some(full_selector) = full_codex_session_id(selector) {
-        let mut statement = connection
-            .prepare("SELECT id, rollout_path FROM threads WHERE id = ?1 OR id = ?2")
-            .with_context(|| format!("failed to query state db {}", db_path.display()))?;
-        let thread_selector = format!("thread_{full_selector}");
-        let rows = statement
-            .query_map([full_selector, thread_selector.as_str()], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .with_context(|| format!("failed to read state db {}", db_path.display()))?;
-        append_state_db_rollout_rows(codex_home, db_path, selector, rows, &mut paths)?;
-    } else {
-        let mut statement = connection
-            .prepare("SELECT id, rollout_path FROM threads")
-            .with_context(|| format!("failed to query state db {}", db_path.display()))?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .with_context(|| format!("failed to read state db {}", db_path.display()))?;
-        append_state_db_rollout_rows(codex_home, db_path, selector, rows, &mut paths)?;
-    }
-    Ok(paths)
-}
-
-fn append_state_db_rollout_rows(
-    codex_home: &Path,
-    db_path: &Path,
-    selector: &str,
-    rows: impl IntoIterator<Item = rusqlite::Result<(String, String)>>,
-    paths: &mut Vec<SessionRepairCandidate>,
-) -> Result<()> {
-    for row in rows {
-        let (thread_id, rollout_path) =
-            row.with_context(|| format!("failed to read state db {}", db_path.display()))?;
-        let Some(match_kind) = state_db_rollout_row_match_kind(&thread_id, &rollout_path, selector)
-        else {
-            continue;
-        };
-        let resolved_session_id =
-            state_db_rollout_row_session_id(&thread_id, &rollout_path, selector);
-        let path = resolve_state_db_rollout_path(codex_home, &rollout_path);
-        if !prodex_core::path_is_under_root(codex_home, &path) {
-            continue;
-        }
-        if path_is_regular_file_no_symlink(&path) && is_session_metadata_file(&path) {
-            paths.push(SessionRepairCandidate {
-                path,
-                state_db_match_kind: Some(match_kind),
-                resolved_session_id,
-            });
-        }
-    }
-    Ok(())
-}
-
-fn state_db_rollout_row_match_kind(
-    thread_id: &str,
-    rollout_path: &str,
-    selector: &str,
-) -> Option<SessionRepairMatchKind> {
-    let normalized_thread_id = thread_id.strip_prefix("thread_").unwrap_or(thread_id);
-    if session_id_matches_selector(thread_id, selector, true)
-        || session_id_matches_selector(normalized_thread_id, selector, true)
-        || session_path_id_matches_selector(Path::new(rollout_path), selector, true)
-    {
-        return Some(SessionRepairMatchKind::Exact);
-    }
-    if session_id_matches_selector(thread_id, selector, false)
-        || session_id_matches_selector(normalized_thread_id, selector, false)
-        || session_path_id_matches_selector(Path::new(rollout_path), selector, false)
-    {
-        return Some(SessionRepairMatchKind::Prefix);
-    }
-    None
-}
-
-fn state_db_rollout_row_session_id(
-    thread_id: &str,
-    rollout_path: &str,
-    selector: &str,
-) -> Option<String> {
-    let normalized_thread_id = thread_id.strip_prefix("thread_").unwrap_or(thread_id);
-    if session_id_matches_selector(normalized_thread_id, selector, false)
-        && full_codex_session_id(normalized_thread_id).is_some()
-    {
-        return Some(normalized_thread_id.to_string());
-    }
-    if session_id_matches_selector(thread_id, selector, false)
-        && full_codex_session_id(thread_id).is_some()
-    {
-        return Some(thread_id.to_string());
-    }
-    session_path_id_matching_selector(Path::new(rollout_path), selector, false)
-}
-
-fn resolve_state_db_rollout_path(codex_home: &Path, rollout_path: &str) -> PathBuf {
-    let path = PathBuf::from(rollout_path);
-    if path.is_absolute() {
-        path
-    } else {
-        codex_home.join(path)
-    }
-}
-
-fn path_is_regular_file_no_symlink(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .ok()
-        .is_some_and(|metadata| metadata.file_type().is_file())
-}
-
 fn read_session_report(path: &Path, state: &AppState) -> Result<Option<SessionReport>> {
     let mut report = SessionReport::from_path(path, file_modified_epoch(path).unwrap_or(0));
 
@@ -797,6 +602,7 @@ fn session_value_starts_resume_metadata(value: &serde_json::Value) -> bool {
 }
 
 fn repair_session_file_metadata_prefix(
+    repository_root: &Path,
     path: &Path,
     selector: &str,
     synthesize_missing_metadata: bool,
@@ -820,7 +626,9 @@ fn repair_session_file_metadata_prefix(
             return Ok(false);
         }
     }
-    let raw = read_session_file_to_string(path)?;
+    let transaction =
+        SessionRepairTransaction::begin(repository_root, path, SESSION_STORE_FILE_MAX_BYTES)?;
+    let raw = transaction.contents();
     let lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
     let Some(first_content_index) = lines.iter().position(|line| !line.trim().is_empty()) else {
         return Ok(false);
@@ -885,27 +693,7 @@ fn repair_session_file_metadata_prefix(
         repaired.push('\n');
     }
 
-    let backup_path = path.with_extension(format!(
-        "{}.prodex-repair-bak",
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("session")
-    ));
-    if !backup_path.exists() {
-        fs::write(&backup_path, &raw)
-            .with_context(|| format!("failed to backup session {}", path.display()))?;
-    }
-
-    let temp_path = path.with_extension(format!(
-        "{}.prodex-repair-tmp",
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("session")
-    ));
-    fs::write(&temp_path, repaired)
-        .with_context(|| format!("failed to write repaired session {}", temp_path.display()))?;
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("failed to replace repaired session {}", path.display()))?;
+    transaction.commit(repaired.as_bytes())?;
 
     Ok(true)
 }

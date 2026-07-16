@@ -8,12 +8,13 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
     let allow_disk_auth_fallback =
         !runtime_proxy_sync_probe_pressure_mode_active_for_route(shared, route_kind);
     let now = Local::now().timestamp();
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let state = {
         let runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-        runtime_route_selection_catalog(&runtime, route_kind, now)
+        runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
 
     Ok(active_profile_selection_order_with_view(
@@ -61,13 +62,14 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let state = {
         let mut runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
-        runtime_route_selection_catalog(&runtime, route_kind, now)
+        runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
     let cached_usage_snapshots = state.persisted_usage_snapshots();
 
@@ -144,13 +146,14 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
     let pressure_mode = runtime_proxy_pressure_mode_active_for_route(shared, route_kind);
     let inflight_soft_limit =
         runtime_profile_inflight_soft_limit_for_shared(shared, route_kind, pressure_mode);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let state = {
         let mut runtime = shared
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
-        runtime_route_selection_catalog(&runtime, route_kind, now)
+        runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
     let cached_usage_snapshots = state.persisted_usage_snapshots();
 

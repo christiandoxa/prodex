@@ -45,6 +45,7 @@ impl RuntimeProxySseInspectBenchCase {
                 turn_state,
             } => response_ids.len() + usize::from(turn_state.is_some()),
             RuntimeSseInspectionProgress::QuotaBlocked
+            | RuntimeSseInspectionProgress::Overloaded
             | RuntimeSseInspectionProgress::PreviousResponseNotFound => 0,
         }
     }
@@ -140,7 +141,6 @@ impl RuntimeProxyLineageCleanupBenchCase {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
 
@@ -213,7 +213,6 @@ impl RuntimeProxySmartContextRewriteBenchCase {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = bench_runtime_shared("smart-context-rewrite", state, 8);

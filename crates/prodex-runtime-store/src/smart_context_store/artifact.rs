@@ -172,11 +172,15 @@ pub(super) fn runtime_smart_context_merge_artifact(
         runtime_smart_context_artifact_retention_time(incoming),
         incoming.created_at,
         incoming.byte_len,
+        incoming.content_hash.as_str(),
+        incoming.content.as_str(),
     );
     let current_rank = (
         runtime_smart_context_artifact_retention_time(current),
         current.created_at,
         current.byte_len,
+        current.content_hash.as_str(),
+        current.content.as_str(),
     );
     if incoming_rank >= current_rank {
         incoming.clone()

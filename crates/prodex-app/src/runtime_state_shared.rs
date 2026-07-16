@@ -50,6 +50,7 @@ pub(crate) struct RuntimeRotationProxyShared {
     pub(crate) upstream_no_proxy: bool,
     pub(crate) auto_redeem_enabled: bool,
     pub(crate) async_client: reqwest::Client,
+    pub(crate) compact_client: reqwest::Client,
     pub(crate) async_runtime: Arc<TokioRuntime>,
     pub(crate) runtime: Arc<Mutex<RuntimeRotationState>>,
     pub(crate) log_path: PathBuf,

@@ -1,12 +1,7 @@
 [
   {
-    "file": "crates/prodex-app/src/app_commands/status.rs",
-    "maxLines": 1396,
-    "reason": "The live status command keeps quota, token-history, Linux process sampling, responsive terminal rendering, and focused regressions together; capped until resource collection or rendering needs independent ownership."
-  },
-  {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 864,
+    "maxLines": 853,
     "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after live goal recovery moved to its focused module."
   },
   {
@@ -16,7 +11,7 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
-    "maxLines": 955,
+    "maxLines": 917,
     "reason": "Login flow TUI prompts, provider handling, and persisted profile setup remain capped while provider-specific flow ownership is extracted."
   },
   {
@@ -26,12 +21,12 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 1137,
+    "maxLines": 1119,
     "reason": "Kiro profile import now discovers the native CLI model catalog with an ACP fallback while preserving private credential staging; capped until catalog discovery splits from command orchestration."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1811,
+    "maxLines": 1809,
     "reason": "Data-plane authorization, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
@@ -91,7 +86,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1240,
+    "maxLines": 1194,
     "reason": "Provider-aware runtime and gateway argument parsing now includes typed harness selection and explicitly rejects normalized triple-slash URLs; the tightly coupled CLI surface remains capped."
   },
   {
@@ -108,21 +103,6 @@
     "file": "crates/prodex-provider-core/tests/provider_conformance_v1.rs",
     "maxLines": 1071,
     "reason": "Cross-provider conformance v1 fixtures verify capability, transform status, stream termination, usage, error, and tool-call contracts across every supported provider."
-  },
-  {
-    "file": "crates/prodex-profile-export/tests/src/lib.rs",
-    "maxLines": 1043,
-    "reason": "Profile export envelope and import-journal regression coverage now includes bounded artifact cases; capped until fixtures split by envelope and journal domain."
-  },
-  {
-    "file": "crates/prodex-session-store/src/lib.rs",
-    "maxLines": 1024,
-    "reason": "Session file I/O now lives in a focused sibling; remaining report resolution and resume repair stay capped until repair helpers split."
-  },
-  {
-    "file": "crates/prodex-session-store/tests/src/lib.rs",
-    "maxLines": 1044,
-    "reason": "Large-file regressions now live in a focused sibling; remaining state-db, unreadable-file, and metadata-synthesis fixtures stay capped by scenario."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_crud.rs",
@@ -166,7 +146,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
-    "maxLines": 1959,
+    "maxLines": 1919,
     "reason": "Runtime policy compatibility coverage includes typed gateway harness validation and remains capped while versioned policy, cache, and gateway settings tests are split."
   },
   {
@@ -175,19 +155,9 @@
     "reason": "Storage boundary characterization is capped while accounting, migration, idempotency, and readiness tests are split."
   },
   {
-    "file": "crates/prodex-storage-postgres/src/lib.rs",
-    "maxLines": 1588,
-    "reason": "PostgreSQL SQL-plan contracts are capped until migrations, reservation accounting, idempotency, and RLS plans are split."
-  },
-  {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
     "maxLines": 1665,
     "reason": "PostgreSQL storage characterization is capped while migration, tenant isolation, and accounting tests are split."
-  },
-  {
-    "file": "crates/prodex-storage-sqlite/src/lib.rs",
-    "maxLines": 1747,
-    "reason": "SQLite compatibility SQL-plan contracts export versioned enterprise-governance migrations including session revision and revocation metadata; capped until local accounting, idempotency, and readiness plans are split."
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
@@ -230,23 +200,8 @@
     "reason": "Gateway durable state and cross-proxy PostgreSQL/Redis admission coverage includes explicit local PostgreSQL plaintext setup and remains capped while backend scenarios are split."
   },
   {
-    "file": "src/bin/prodex-control-plane.rs",
-    "maxLines": 1385,
-    "reason": "Enterprise control-plane composition, storage setup, publication, observability, and the thin route-isolated serve dispatch remain capped while command handlers are split."
-  },
-  {
-    "file": "src/enterprise_observability.rs",
-    "maxLines": 1181,
-    "reason": "Enterprise OTLP log export and redaction integration remain capped while transport and serialization are split."
-  },
-  {
-    "file": "tests/enterprise_binaries.rs",
-    "maxLines": 8385,
-    "reason": "Enterprise binary characterization remains capped while control-plane, gateway, migration, and observability fixtures are split."
-  },
-  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1406,
+    "maxLines": 1397,
     "reason": "Gateway launch composes governed snapshot authorities, durable audit/session workers, immutable harness diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
@@ -285,16 +240,6 @@
     "reason": "Runtime-policy validation coverage keeps governance mode, PIP selector, unsupported workload identity, and dependency failure matrices with the gateway policy suite."
   },
   {
-    "file": "crates/prodex-storage-postgres-runtime/src/governance.rs",
-    "maxLines": 1613,
-    "reason": "The PostgreSQL governance facade retains tenant-scoped repository methods and transaction ordering after revision, approval, session, and audit/outbox helpers moved to focused backend modules."
-  },
-  {
-    "file": "crates/prodex-storage-sqlite-runtime/src/governance_repository.rs",
-    "maxLines": 1257,
-    "reason": "The SQLite governance facade retains repository APIs and explicit transaction ordering after revision, approval, session, and audit/outbox helpers moved to focused backend modules."
-  },
-  {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
     "maxLines": 1431,
     "reason": "SQLite governance integration coverage proves lifecycle, approval idempotency and denial audit, session revisions/revocation, audit integrity, bounded export, and SIEM outbox behavior."
@@ -328,10 +273,5 @@
     "file": "crates/prodex-gateway-server/src/tests.rs",
     "maxLines": 904,
     "reason": "Gateway server integration coverage keeps canonical targets, streaming limits, overload, trusted proxy, forwarding privacy, Host/Origin/CSRF, and expected-host cases in one harness."
-  },
-  {
-    "file": "crates/prodex-storage/src/governance.rs",
-    "maxLines": 906,
-    "reason": "The governance storage contract keeps public revision, approval, session, audit, and SIEM DTOs together while pure codecs, validation, and integrity helpers live in focused child modules."
   }
 ]

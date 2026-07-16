@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Local;
 
 use crate::{
-    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS, record_run_selection,
+    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS, RuntimeStateMutation, record_run_selection,
     update_runtime_broker_current_profile,
 };
 
@@ -67,7 +67,7 @@ pub(crate) fn commit_runtime_proxy_profile_selection_with_policy(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("profile_commit:{profile_name}"),
+            RuntimeStateMutation::ProfileCommit(profile_name.to_string()),
         );
     }
     drop(runtime);

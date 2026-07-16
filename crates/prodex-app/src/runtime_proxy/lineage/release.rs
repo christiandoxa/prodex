@@ -62,7 +62,7 @@ pub(crate) fn release_runtime_compact_lineage(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("compact_lineage_release:{profile_name}"),
+            RuntimeStateMutation::CompactLineageRelease(profile_name.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(
@@ -165,7 +165,7 @@ pub(crate) fn clear_runtime_dead_response_bindings(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("dead_response_binding_clear:{profile_name}"),
+            RuntimeStateMutation::DeadResponseBindingClear(profile_name.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(
@@ -227,7 +227,7 @@ pub(crate) fn clear_runtime_stale_previous_response_binding(
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
-        &format!("previous_response_binding_clear:{profile_name}"),
+        RuntimeStateMutation::PreviousResponseBindingClear(profile_name.to_string()),
     );
     drop(runtime);
     runtime_proxy_log(
@@ -359,7 +359,7 @@ pub(crate) fn release_runtime_session_affinity(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("session_affinity_release:{reason}"),
+            RuntimeStateMutation::SessionAffinityRelease(reason.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(
@@ -368,6 +368,28 @@ pub(crate) fn release_runtime_session_affinity(
         );
     }
     Ok(changed)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RuntimeAffinityReleaseReason {
+    Quota,
+    AuthFailed,
+}
+
+impl RuntimeAffinityReleaseReason {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Quota => "quota",
+            Self::AuthFailed => "auth_failed",
+        }
+    }
+
+    fn mutation(self, profile_name: &str) -> RuntimeStateMutation {
+        match self {
+            Self::Quota => RuntimeStateMutation::QuotaRelease(profile_name.to_string()),
+            Self::AuthFailed => RuntimeStateMutation::AuthFailedRelease(profile_name.to_string()),
+        }
+    }
 }
 
 pub(crate) fn release_runtime_quota_blocked_affinity(
@@ -383,7 +405,7 @@ pub(crate) fn release_runtime_quota_blocked_affinity(
         previous_response_id,
         turn_state,
         session_id,
-        "quota",
+        RuntimeAffinityReleaseReason::Quota,
     )
 }
 
@@ -400,17 +422,17 @@ pub(crate) fn release_runtime_auth_failed_affinity(
         previous_response_id,
         turn_state,
         session_id,
-        "auth_failed",
+        RuntimeAffinityReleaseReason::AuthFailed,
     )
 }
 
-pub(super) fn release_runtime_profile_affinity(
+fn release_runtime_profile_affinity(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     previous_response_id: Option<&str>,
     turn_state: Option<&str>,
     session_id: Option<&str>,
-    reason: &str,
+    reason: RuntimeAffinityReleaseReason,
 ) -> Result<bool> {
     let mut runtime = shared
         .runtime
@@ -427,16 +449,13 @@ pub(super) fn release_runtime_profile_affinity(
     );
 
     if changed {
-        schedule_runtime_state_save_from_runtime(
-            shared,
-            &runtime,
-            &format!("{reason}_release:{profile_name}"),
-        );
+        let reason_label = reason.label();
+        schedule_runtime_state_save_from_runtime(shared, &runtime, reason.mutation(profile_name));
         drop(runtime);
         runtime_proxy_log(
             shared,
             format!(
-                "{reason}_release_affinity profile={profile_name} previous_response_id={:?} turn_state={:?} session_id={:?}",
+                "{reason_label}_release_affinity profile={profile_name} previous_response_id={:?} turn_state={:?} session_id={:?}",
                 previous_response_id, turn_state, session_id
             ),
         );
@@ -490,7 +509,7 @@ pub(crate) fn release_runtime_previous_response_affinity(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("previous_response_release:{profile_name}"),
+            RuntimeStateMutation::PreviousResponseRelease(profile_name.to_string()),
         );
         drop(runtime);
         runtime_proxy_log(

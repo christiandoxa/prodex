@@ -1,14 +1,14 @@
 //! Runtime proxy wait outcome helpers.
 
-use super::*;
+use super::{
+    RuntimeRotationProxyShared, runtime_probe_refresh_queue, runtime_probe_refresh_revision,
+};
+use std::time::Duration;
 
 pub(crate) fn runtime_profile_inflight_release_revision(
     shared: &RuntimeRotationProxyShared,
 ) -> u64 {
-    shared
-        .lane_admission
-        .inflight_release_revision
-        .load(Ordering::SeqCst)
+    shared.lane_admission.inflight_release_revision()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub(crate) fn runtime_profile_inflight_wait_outcome_since(
     if runtime_profile_inflight_release_revision(shared) != observed_revision {
         return RuntimeProfileInFlightWaitOutcome::InflightRelease;
     }
-    let (mutex, condvar) = &*shared.lane_admission.wait;
+    let (mutex, condvar) = shared.lane_admission.wait();
     let guard = mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());

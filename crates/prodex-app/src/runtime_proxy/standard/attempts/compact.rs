@@ -123,10 +123,16 @@ pub(in crate::runtime_proxy::standard) fn attempt_runtime_standard_request(
         {
             continue;
         }
-        let retryable_quota = runtime_proxy_precommit_error_rotates_profile(status, &parts.body);
+        let error_policy = runtime_proxy_crate::runtime_http_error_policy(
+            status,
+            &parts.body,
+            runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit,
+        );
+        let retryable_quota =
+            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile;
         let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
         let retryable_overload =
-            extract_runtime_proxy_overload_message(status, &parts.body).is_some();
+            error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile;
         if matches!(status, 402 | 403 | 429) && !retryable_quota {
             runtime_proxy_log(
                 shared,

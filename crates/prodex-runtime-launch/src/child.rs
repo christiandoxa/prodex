@@ -79,12 +79,32 @@ pub fn codex_child_plan(
     args: Vec<OsString>,
     local_provider_id: &str,
 ) -> ChildProcessPlan {
+    codex_child_plan_with_env(
+        binary,
+        codex_home,
+        args,
+        local_provider_id,
+        &env::vars_os().collect::<Vec<_>>(),
+    )
+}
+
+#[doc(hidden)]
+pub fn codex_child_plan_with_env(
+    binary: OsString,
+    codex_home: PathBuf,
+    args: Vec<OsString>,
+    local_provider_id: &str,
+    environment: &[(OsString, OsString)],
+) -> ChildProcessPlan {
     let args = crate::scope_codex_exec_config_args(&args);
     let local_provider_hosts = local_proxy_bypass_hosts_from_args(&args, local_provider_id);
     ChildProcessPlan::new(binary, codex_home)
         .with_args(args)
-        .with_extra_env(local_proxy_bypass_env_for_hosts(&local_provider_hosts))
-        .with_removed_env(default_child_removed_env())
+        .with_extra_env(local_proxy_bypass_env_for_hosts_and_env(
+            &local_provider_hosts,
+            environment,
+        ))
+        .with_removed_env(default_child_removed_env_from(environment))
 }
 
 pub fn local_proxy_bypass_env() -> Vec<(&'static str, OsString)> {
@@ -96,9 +116,25 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    local_proxy_bypass_env_for_hosts_and_env(extra_hosts, &env::vars_os().collect::<Vec<_>>())
+}
+
+#[doc(hidden)]
+pub fn local_proxy_bypass_env_for_hosts_and_env<I, S>(
+    extra_hosts: I,
+    environment: &[(OsString, OsString)],
+) -> Vec<(&'static str, OsString)>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     let mut parts = Vec::<String>::new();
     for key in LOCAL_PROXY_BYPASS_ENV_KEYS {
-        if let Some(value) = env::var_os(key) {
+        if let Some(value) = environment
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value)
+        {
             push_proxy_bypass_parts(&mut parts, &value.to_string_lossy());
         }
     }
@@ -168,34 +204,58 @@ fn push_proxy_bypass_part(parts: &mut Vec<String>, value: &str) {
 }
 
 pub fn codex_sandbox_removed_env() -> Vec<OsString> {
+    codex_sandbox_removed_env_from(&env::vars_os().collect::<Vec<_>>())
+}
+
+#[doc(hidden)]
+pub fn codex_sandbox_removed_env_from(environment: &[(OsString, OsString)]) -> Vec<OsString> {
     let mut removed = BTreeSet::from([
         OsString::from("CODEX_SANDBOX"),
         OsString::from("CODEX_SANDBOX_NETWORK_DISABLED"),
     ]);
-    removed.extend(env::vars_os().filter_map(|(key, _)| {
-        key.to_str()
-            .is_some_and(|value| value.starts_with("CODEX_SANDBOX"))
-            .then_some(key)
-    }));
+    removed.extend(
+        environment
+            .iter()
+            .filter(|(key, _)| {
+                key.to_str()
+                    .is_some_and(|value| value.starts_with("CODEX_SANDBOX"))
+            })
+            .map(|(key, _)| key.clone()),
+    );
     removed.into_iter().collect()
 }
 
 pub fn child_process_hardening_removed_env() -> Vec<OsString> {
-    if env::var_os(CHILD_HARDENING_ALLOW_ENV).is_some() {
+    child_process_hardening_removed_env_from(&env::vars_os().collect::<Vec<_>>())
+}
+
+#[doc(hidden)]
+pub fn child_process_hardening_removed_env_from(
+    environment: &[(OsString, OsString)],
+) -> Vec<OsString> {
+    if environment
+        .iter()
+        .any(|(key, _)| key == CHILD_HARDENING_ALLOW_ENV)
+    {
         return Vec::new();
     }
     let mut removed = BTreeSet::from_iter(DANGEROUS_CHILD_ENV_KEYS.into_iter().map(OsString::from));
-    removed.extend(env::vars_os().filter_map(|(key, _)| {
-        key.to_str()
-            .is_some_and(|value| value.starts_with("DYLD_"))
-            .then_some(key)
-    }));
+    removed.extend(
+        environment
+            .iter()
+            .filter(|(key, _)| key.to_str().is_some_and(|value| value.starts_with("DYLD_")))
+            .map(|(key, _)| key.clone()),
+    );
     removed.into_iter().collect()
 }
 
 pub fn default_child_removed_env() -> Vec<OsString> {
-    let mut removed = BTreeSet::<OsString>::from_iter(codex_sandbox_removed_env());
-    removed.extend(child_process_hardening_removed_env());
+    default_child_removed_env_from(&env::vars_os().collect::<Vec<_>>())
+}
+
+fn default_child_removed_env_from(environment: &[(OsString, OsString)]) -> Vec<OsString> {
+    let mut removed = BTreeSet::<OsString>::from_iter(codex_sandbox_removed_env_from(environment));
+    removed.extend(child_process_hardening_removed_env_from(environment));
     removed.into_iter().collect()
 }
 

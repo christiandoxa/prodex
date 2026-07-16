@@ -25,7 +25,7 @@ pub(crate) fn fetch_profile_email(codex_home: &Path) -> Result<String> {
         Err(err) => Some(err),
     };
 
-    if let Some(model_provider) = codex_non_openai_model_provider(codex_home, None) {
+    if let Some(model_provider) = codex_non_openai_model_provider(codex_home, None)? {
         if let Some(auth_error) = auth_email_error {
             let auth_error = profile_identity_redacted_error(&auth_error);
             bail!(
@@ -64,7 +64,7 @@ pub(crate) fn fetch_profile_identity(codex_home: &Path) -> Result<ProfileIdentit
         return Ok(identity);
     }
 
-    if let Some(model_provider) = codex_non_openai_model_provider(codex_home, None) {
+    if let Some(model_provider) = codex_non_openai_model_provider(codex_home, None)? {
         if let Some(auth_error) = auth_identity_error {
             let auth_error = profile_identity_redacted_error(&auth_error);
             bail!(

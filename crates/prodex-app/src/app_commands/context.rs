@@ -33,7 +33,7 @@ pub(crate) fn handle_context_audit(args: ContextAuditArgs) -> Result<()> {
     if args.json {
         let json = serde_json::to_string_pretty(&report)
             .context("failed to serialize context audit report")?;
-        print_stdout_line(&json);
+        print_stdout_line(&json)?;
         return Ok(());
     }
 
@@ -67,7 +67,7 @@ pub(crate) fn handle_context_export(args: ContextExportArgs) -> Result<()> {
         "Exported session context {} -> {}",
         report.id,
         output_path.display()
-    ));
+    ))?;
     Ok(())
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn handle_context_compress(args: ContextCompressArgs) -> Result<()> {
     if args.json {
         let json = serde_json::to_string_pretty(&report)
             .context("failed to serialize context compress report")?;
-        print_stdout_line(&json);
+        print_stdout_line(&json)?;
     } else {
         let output = render_context_compress_report(&report, args.dry_run);
         print_context_human_output("Context Compress", &output)?;
@@ -100,7 +100,7 @@ pub(crate) fn handle_context_replay_report(args: ContextReplayReportArgs) -> Res
     if args.json {
         let json = serde_json::to_string_pretty(&evaluation)
             .context("failed to serialize Smart Context replay evaluation")?;
-        print_stdout_line(&json);
+        print_stdout_line(&json)?;
     } else {
         let report =
             runtime_proxy_crate::smart_context_render_replay_evaluation_markdown(&evaluation);
@@ -140,11 +140,11 @@ pub(crate) fn handle_context_compact_output(args: ContextCompactOutputArgs) -> R
     if args.json {
         let json = serde_json::to_string_pretty(&report)
             .context("failed to serialize context compact-output report")?;
-        print_stdout_line(&json);
+        print_stdout_line(&json)?;
     } else if io::stdout().is_terminal() {
         print_context_human_output("Context Compact Output", report.output.trim_end())?;
     } else {
-        print_stdout_line(report.output.trim_end());
+        print_stdout_line(report.output.trim_end())?;
     }
     Ok(())
 }
@@ -161,7 +161,7 @@ fn context_compact_output_kind(kind: ContextCompactOutputKind) -> CommandOutputK
 }
 
 fn print_context_human_output(title: &str, output: &str) -> Result<()> {
-    print_text_panel(title, output);
+    print_text_panel(title, output)?;
     Ok(())
 }
 
@@ -190,7 +190,7 @@ fn context_export_file_stem(session_id: &str) -> String {
 }
 
 fn render_session_context_export_markdown(
-    report: &prodex_app_reports::SessionReport,
+    report: &prodex_session_store::SessionReport,
     session_path: &Path,
 ) -> Result<String> {
     let raw = read_context_text_file(session_path)?;
@@ -292,7 +292,7 @@ fn fenced_markdown_block(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::test_support::TestEnvVarGuard;
-    use prodex_app_reports::{SessionReport, apply_session_json_line};
+    use prodex_session_store::{SessionReport, apply_session_json_line};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]

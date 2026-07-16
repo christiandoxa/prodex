@@ -337,11 +337,20 @@ impl<'a> UsageFetchFlow<'a> {
 }
 
 pub(crate) fn read_auth_summary(codex_home: &Path) -> AuthSummary {
-    if let Some(model_provider) = codex_non_openai_model_provider(codex_home, None) {
-        return AuthSummary {
-            label: format!("model-provider:{}", model_provider.provider_id),
-            quota_compatible: false,
-        };
+    match codex_non_openai_model_provider(codex_home, None) {
+        Ok(Some(model_provider)) => {
+            return AuthSummary {
+                label: format!("model-provider:{}", model_provider.provider_id),
+                quota_compatible: false,
+            };
+        }
+        Err(_) => {
+            return AuthSummary {
+                label: "config-error".to_string(),
+                quota_compatible: false,
+            };
+        }
+        Ok(None) => {}
     }
     prodex_quota::auth_summary_from_auth_text_result(read_auth_json_text(codex_home))
 }
@@ -385,7 +394,7 @@ pub(crate) fn read_profile_workspace_from_auth(
     let Ok(client) = build_upstream_blocking_http_client("accounts HTTP", false) else {
         return Ok(fallback());
     };
-    let mut request = codex_openai_auth_headers_for_home(client.get(&accounts_url), codex_home)
+    let mut request = codex_openai_auth_headers_for_home(client.get(&accounts_url), codex_home)?
         .header("Authorization", format!("Bearer {}", auth.access_token));
     request = request.header("ChatGPT-Account-Id", &account_id);
     let Ok(response) = request.send() else {
@@ -573,7 +582,7 @@ fn send_usage_request(
     usage_url: &str,
     auth: &UsageAuth,
 ) -> Result<(reqwest::StatusCode, Vec<u8>)> {
-    let mut request = codex_openai_auth_headers_for_home(client.get(usage_url), codex_home)
+    let mut request = codex_openai_auth_headers_for_home(client.get(usage_url), codex_home)?
         .header("Authorization", format!("Bearer {}", auth.access_token));
 
     if let Some(account_id) = auth.account_id.as_deref() {
@@ -599,7 +608,7 @@ fn send_rate_limit_reset_credit_consume_request(
     auth: &UsageAuth,
     redeem_request_id: &str,
 ) -> Result<(reqwest::StatusCode, Vec<u8>)> {
-    let mut request = codex_openai_auth_headers_for_home(client.post(consume_url), codex_home)
+    let mut request = codex_openai_auth_headers_for_home(client.post(consume_url), codex_home)?
         .header("Authorization", format!("Bearer {}", auth.access_token))
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&RateLimitResetCreditConsumeRequest { redeem_request_id });
@@ -685,7 +694,11 @@ fn request_chatgpt_auth_refresh_with_lease(
                 serde_json::to_string(&refreshed)
                     .context("failed to serialize shared auth refresh JSON")?,
             );
-            let _ = owner.commit_result(&result_json);
+            if let Err(error) = owner.commit_result(&result_json)
+                && error.is_ownership_lost()
+            {
+                return Err(anyhow::Error::new(error));
+            }
             Ok(refreshed)
         }
         secret_store::RefreshLeaseDecision::Bypass { .. } => {
@@ -708,7 +721,7 @@ fn request_chatgpt_auth_refresh_direct(
 ) -> Result<prodex_quota::ChatgptRefreshResponse> {
     let client = build_upstream_blocking_http_client("auth refresh HTTP", upstream_no_proxy)?;
     let response =
-        codex_openai_auth_headers_for_home(client.post(refresh_usage_auth_endpoint()), codex_home)
+        codex_openai_auth_headers_for_home(client.post(refresh_usage_auth_endpoint()), codex_home)?
             .header("Content-Type", "application/json")
             .json(&ChatgptRefreshRequest {
                 client_id: CHATGPT_AUTH_REFRESH_CLIENT_ID,

@@ -84,12 +84,7 @@ pub(crate) fn read_gemini_oauth_secret(codex_home: &Path) -> Result<GeminiOAuthS
 }
 
 fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = matches!(
-        &error,
-        secret_store::SecretError::InvalidLocation { reason }
-            if reason.ends_with(" is not a regular secret file")
-                || reason.ends_with("secret path contains a symlink")
-    );
+    let is_non_regular_file = error.is_unsafe_file();
     let error = anyhow::Error::new(error);
     if is_non_regular_file {
         error.context("not a regular secret file")
@@ -127,8 +122,8 @@ pub(crate) fn login_with_google_oauth(codex_home: &Path) -> Result<GeminiOAuthSe
     let state = random_hex(24)?;
     let auth_url = gemini_oauth_authorize_url(&redirect_uri, &state)?;
 
-    print_wrapped_stderr("Opening Google sign-in in your browser.");
-    print_wrapped_stderr(&format!("If it does not open, visit: {auth_url}"));
+    print_wrapped_stderr("Opening Google sign-in in your browser.")?;
+    print_wrapped_stderr(&format!("If it does not open, visit: {auth_url}"))?;
     let _ = open_browser(&auth_url);
 
     let code = wait_for_google_oauth_code(&server, &state)?;

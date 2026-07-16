@@ -1,11 +1,10 @@
 use crate::{
-    RuntimeTokenUsage, RuntimeWebsocketErrorPayload,
-    extract_runtime_proxy_overload_message_from_value,
-    extract_runtime_proxy_previous_response_message,
+    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase, RuntimeTokenUsage,
+    RuntimeWebsocketErrorPayload, extract_runtime_proxy_previous_response_message,
     extract_runtime_proxy_previous_response_message_from_value,
-    extract_runtime_proxy_quota_message_from_value, extract_runtime_response_ids_from_value,
-    extract_runtime_token_usage_from_value, extract_runtime_turn_state_from_value,
-    runtime_proxy_stale_continuation_message, runtime_response_event_type_from_value,
+    extract_runtime_response_ids_from_value, extract_runtime_token_usage_from_value,
+    extract_runtime_turn_state_from_value, runtime_proxy_stale_continuation_message,
+    runtime_response_event_type_from_value, runtime_stream_error_policy_from_value,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,18 +146,36 @@ pub fn runtime_translate_precommit_previous_response_websocket_text_frame(payloa
 }
 
 pub fn inspect_runtime_websocket_text_frame(payload: &str) -> RuntimeInspectedWebsocketTextFrame {
+    inspect_runtime_websocket_text_frame_with_phase(payload, RuntimeHttpErrorPhase::PreCommit)
+}
+
+pub fn inspect_runtime_websocket_text_frame_with_phase(
+    payload: &str,
+    phase: RuntimeHttpErrorPhase,
+) -> RuntimeInspectedWebsocketTextFrame {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
         return RuntimeInspectedWebsocketTextFrame::default();
     };
 
     let event_type = runtime_response_event_type_from_value(&value);
+    let error_policy = runtime_stream_error_policy_from_value(&value, phase);
     let retry_kind = if runtime_websocket_connection_limit_reached(&value) {
         Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached)
     } else if extract_runtime_proxy_previous_response_message_from_value(&value).is_some() {
         Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
-    } else if extract_runtime_proxy_overload_message_from_value(&value).is_some() {
+    } else if error_policy.action == RuntimeHttpErrorAction::RetryProfile
+        && matches!(
+            error_policy.class,
+            RuntimeHttpErrorClass::Overload | RuntimeHttpErrorClass::TransientServer
+        )
+    {
         Some(RuntimeWebsocketRetryInspectionKind::Overloaded)
-    } else if extract_runtime_proxy_quota_message_from_value(&value).is_some() {
+    } else if error_policy.action == RuntimeHttpErrorAction::RotateProfile
+        && matches!(
+            error_policy.class,
+            RuntimeHttpErrorClass::Quota | RuntimeHttpErrorClass::ProfileUnavailable
+        )
+    {
         Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked)
     } else {
         None

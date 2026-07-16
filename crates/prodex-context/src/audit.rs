@@ -4,10 +4,9 @@ mod render;
 mod types;
 
 use std::cmp::Reverse;
-use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::{estimate_context_tokens, is_compressible_context_file};
 
@@ -15,7 +14,10 @@ use duplicates::{
     build_context_static_duplicate_report, context_static_duplicate_candidates_for_text,
 };
 pub(crate) use files::collect_context_files;
-use files::{CONTEXT_AUDIT_ROOTS, is_auditable_context_file, is_static_duplicate_context_file};
+use files::{
+    CONTEXT_AUDIT_ROOTS, CONTEXT_WALK_MAX_BYTES, ContextReadRoot, is_auditable_context_file,
+    is_static_duplicate_context_file, read_context_file_bounded,
+};
 pub(crate) use render::format_count;
 pub use render::render_context_audit_report_with_width;
 pub use types::{
@@ -32,24 +34,37 @@ pub fn collect_context_static_duplicate_report(
 
 pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<ContextAuditReport> {
     let mut paths = Vec::new();
-    for entry in CONTEXT_AUDIT_ROOTS {
-        collect_context_files(&root.join(entry), &mut paths)?;
+    let read_root = ContextReadRoot::open(root)?;
+    if read_root.is_some() {
+        for entry in CONTEXT_AUDIT_ROOTS {
+            collect_context_files(&root.join(entry), &mut paths)?;
+        }
     }
     paths.sort();
     paths.dedup();
 
     let mut files = Vec::new();
     let mut duplicate_candidates = Vec::new();
+    let mut read_bytes = 0_u64;
     for path in paths {
         if !is_auditable_context_file(&path) {
             continue;
         }
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
+        let Some(read_root) = read_root.as_ref() else {
+            continue;
+        };
+        read_root.validate()?;
+        let opened = read_context_file_bounded(read_root, &path);
+        read_root.validate()?;
+        let opened = match opened {
+            Ok(opened) => opened,
             Err(_) => continue,
         };
-        let metadata =
-            fs::metadata(&path).with_context(|| format!("failed to inspect {}", path.display()))?;
+        read_bytes = read_bytes.saturating_add(opened.text.len() as u64);
+        if read_bytes > CONTEXT_WALK_MAX_BYTES {
+            anyhow::bail!("context audit read limit exceeded at {}", path.display());
+        }
+        let text = opened.text;
         let chars = text.chars().count();
         let words = text.split_whitespace().count();
         let estimated_tokens = estimate_context_tokens(chars, words);
@@ -70,7 +85,7 @@ pub fn collect_context_audit_report(root: &Path, limit: usize) -> Result<Context
         files.push(ContextAuditEntry {
             path,
             relative_path,
-            bytes: metadata.len(),
+            bytes: opened.metadata.len(),
             chars,
             words,
             estimated_tokens,

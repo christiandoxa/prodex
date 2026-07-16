@@ -1,10 +1,11 @@
 use crate::{
     RuntimeBackgroundQueueEnqueuePlan, RuntimeBackgroundQueueKind,
     RuntimeBackgroundQueuePressureThresholds, RuntimeDueJobs, RuntimeProbeUsageSnapshotApplyInput,
-    RuntimeProfileUsageSnapshot, RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits,
-    RuntimeQuotaWindowStatus, RuntimeScheduledSaveJob, RuntimeStartupProbeRefreshCandidate,
-    RuntimeStartupProbeRefreshInput, RuntimeStartupProbeRefreshPlan,
-    RuntimeStateLockWaitMetricCounters, RuntimeStateLockWaitMetrics, RuntimeStateSaveSections,
+    RuntimeProfileUsageSnapshot, RuntimeProxyAdmissionLimit, RuntimeProxyLaneAdmission,
+    RuntimeProxyLaneLimits, RuntimeQuotaWindowStatus, RuntimeRouteKind, RuntimeScheduledSaveJob,
+    RuntimeStartupProbeRefreshCandidate, RuntimeStartupProbeRefreshInput,
+    RuntimeStartupProbeRefreshPlan, RuntimeStateLockWaitMetricCounters,
+    RuntimeStateLockWaitMetrics, RuntimeStateMutation, RuntimeStateSaveSections,
     RuntimeStateSaveStateSection, RuntimeWaitDurationMetrics, runtime_background_enqueue_backlog,
     runtime_background_queue_enqueue_plan, runtime_continuation_journal_save_debounce,
     runtime_continuation_journal_save_enqueue_plan, runtime_probe_usage_snapshot_apply_plan,
@@ -12,10 +13,11 @@ use crate::{
     runtime_profiles_needing_startup_probe_refresh,
     runtime_profiles_needing_startup_probe_refresh_from_snapshots,
     runtime_proxy_queue_pressure_active, runtime_state_save_debounce,
-    runtime_state_save_enqueue_plan, runtime_state_save_sections_for_reason,
-    runtime_take_due_scheduled_jobs,
+    runtime_state_save_enqueue_plan, runtime_state_save_sections, runtime_take_due_scheduled_jobs,
 };
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -80,9 +82,9 @@ fn future_jobs_return_wait_duration() {
 }
 
 #[test]
-fn save_sections_follow_dirty_reason_scope() {
+fn save_sections_follow_typed_mutation_scope() {
     assert_eq!(
-        runtime_state_save_sections_for_reason("usage_snapshot:main"),
+        runtime_state_save_sections(&RuntimeStateMutation::UsageSnapshot("main".into())),
         RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::None,
             continuations: false,
@@ -92,7 +94,7 @@ fn save_sections_follow_dirty_reason_scope() {
         }
     );
     assert_eq!(
-        runtime_state_save_sections_for_reason("response_ids:main"),
+        runtime_state_save_sections(&RuntimeStateMutation::ResponseIds("main".into())),
         RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::Core,
             continuations: true,
@@ -102,7 +104,7 @@ fn save_sections_follow_dirty_reason_scope() {
         }
     );
     assert_eq!(
-        runtime_state_save_sections_for_reason("profile_commit:second"),
+        runtime_state_save_sections(&RuntimeStateMutation::ProfileCommit("second".into())),
         RuntimeStateSaveSections {
             state: RuntimeStateSaveStateSection::Core,
             continuations: false,
@@ -112,7 +114,7 @@ fn save_sections_follow_dirty_reason_scope() {
         }
     );
     assert_eq!(
-        runtime_state_save_sections_for_reason("startup_audit"),
+        runtime_state_save_sections(&RuntimeStateMutation::StartupAudit),
         RuntimeStateSaveSections::full()
     );
 }
@@ -122,11 +124,14 @@ fn debounce_only_applies_to_hot_continuation_reasons() {
     let debounce = Duration::from_millis(150);
 
     assert_eq!(
-        runtime_state_save_debounce("turn_state:abc", debounce),
+        runtime_state_save_debounce(&RuntimeStateMutation::TurnState("abc".into()), debounce),
         debounce
     );
     assert_eq!(
-        runtime_continuation_journal_save_debounce("profile_commit:main", debounce),
+        runtime_continuation_journal_save_debounce(
+            &RuntimeStateMutation::ProfileCommit("main".into()),
+            debounce,
+        ),
         Duration::ZERO
     );
 }
@@ -134,8 +139,11 @@ fn debounce_only_applies_to_hot_continuation_reasons() {
 #[test]
 fn schedule_plan_combines_sections_debounce_and_journal_need() {
     let queued_at = Instant::now();
-    let plan =
-        runtime_state_save_enqueue_plan("turn_state:abc", queued_at, Duration::from_millis(150));
+    let plan = runtime_state_save_enqueue_plan(
+        &RuntimeStateMutation::TurnState("abc".into()),
+        queued_at,
+        Duration::from_millis(150),
+    );
 
     assert_eq!(
         plan.schedule.sections,
@@ -153,14 +161,14 @@ fn schedule_plan_combines_sections_debounce_and_journal_need() {
     assert_eq!(plan.queue.ready_in_ms(), 150);
 
     let journal_plan = runtime_continuation_journal_save_enqueue_plan(
-        "profile_commit:main",
+        &RuntimeStateMutation::ProfileCommit("main".into()),
         queued_at,
         Duration::from_millis(150),
     );
     assert_eq!(journal_plan.ready_in(), Duration::ZERO);
 
     let release = runtime_state_save_enqueue_plan(
-        "session_affinity_release:goal_resume",
+        &RuntimeStateMutation::SessionAffinityRelease("goal_resume".into()),
         queued_at,
         Duration::from_millis(150),
     );
@@ -419,15 +427,15 @@ fn runtime_proxy_lane_admission_owns_distinct_shared_wait_metrics() {
         standard: 1,
     });
     admission
-        .admission_wait_metrics
+        .admission_wait_metric_counters()
         .record_wait(Duration::from_nanos(11));
     admission
-        .long_lived_queue_wait_metrics
+        .long_lived_queue_wait_metric_counters()
         .record_wait(Duration::from_nanos(17));
 
     let cloned = admission.clone();
     assert_eq!(
-        cloned.admission_wait_metrics.snapshot(),
+        cloned.admission_wait_metric_counters().snapshot(),
         RuntimeWaitDurationMetrics {
             wait_total_ns: 11,
             wait_count: 1,
@@ -435,11 +443,106 @@ fn runtime_proxy_lane_admission_owns_distinct_shared_wait_metrics() {
         }
     );
     assert_eq!(
-        cloned.long_lived_queue_wait_metrics.snapshot(),
+        cloned.long_lived_queue_wait_metric_counters().snapshot(),
         RuntimeWaitDurationMetrics {
             wait_total_ns: 17,
             wait_count: 1,
             wait_max_ns: 17,
         }
     );
+}
+
+#[test]
+fn runtime_proxy_admission_permit_releases_global_and_lane_capacity() {
+    let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+        responses: 1,
+        compact: 1,
+        websocket: 1,
+        standard: 1,
+    });
+    let active = Arc::new(AtomicUsize::new(0));
+
+    let acquired = admission
+        .try_acquire(Arc::clone(&active), 2, RuntimeRouteKind::Responses, false)
+        .expect("capacity should be available");
+    assert!(!acquired.bypassed_lane_limit);
+    assert_eq!(active.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        admission
+            .active_counter(RuntimeRouteKind::Responses)
+            .load(Ordering::SeqCst),
+        1
+    );
+
+    drop(acquired.permit);
+
+    assert_eq!(active.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        admission
+            .active_counter(RuntimeRouteKind::Responses)
+            .load(Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        admission
+            .releases_total_counter(RuntimeRouteKind::Responses)
+            .load(Ordering::Relaxed),
+        1
+    );
+}
+
+#[test]
+fn runtime_proxy_admission_bypasses_only_lane_limit() {
+    let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+        responses: 1,
+        compact: 1,
+        websocket: 1,
+        standard: 1,
+    });
+    let active = Arc::new(AtomicUsize::new(0));
+    let held = admission
+        .try_acquire(Arc::clone(&active), 2, RuntimeRouteKind::Responses, false)
+        .expect("first permit should be acquired");
+
+    assert!(matches!(
+        admission.try_acquire(Arc::clone(&active), 2, RuntimeRouteKind::Responses, false,),
+        Err(RuntimeProxyAdmissionLimit::Lane {
+            active: 1,
+            limit: 1,
+        })
+    ));
+    let bypassed = admission
+        .try_acquire(Arc::clone(&active), 2, RuntimeRouteKind::Responses, true)
+        .expect("owned affinity may bypass the lane limit");
+    assert!(bypassed.bypassed_lane_limit);
+    assert!(matches!(
+        admission.try_acquire(Arc::clone(&active), 2, RuntimeRouteKind::Responses, true,),
+        Err(RuntimeProxyAdmissionLimit::Global {
+            active: 2,
+            limit: 2,
+        })
+    ));
+
+    drop(bypassed.permit);
+    drop(held.permit);
+}
+
+#[test]
+fn runtime_proxy_profile_inflight_state_is_shared_and_underflow_safe() {
+    let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+        responses: 1,
+        compact: 1,
+        websocket: 1,
+        standard: 1,
+    });
+    let cloned = admission.clone();
+
+    assert_eq!(admission.acquire_profile_inflight("main", 2), 2);
+    assert_eq!(cloned.profile_inflight_count("main"), 2);
+    assert_eq!(cloned.release_profile_inflight("main", 1), (1, 2, false));
+    assert_eq!(admission.release_profile_inflight("main", 2), (0, 1, true));
+    assert!(admission.profile_inflight_snapshot().is_empty());
+    assert_eq!(admission.profile_inflight_admissions_total(), 1);
+    assert_eq!(admission.profile_inflight_releases_total(), 2);
+    assert_eq!(admission.profile_inflight_release_underflows_total(), 1);
 }

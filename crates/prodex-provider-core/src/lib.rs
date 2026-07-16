@@ -14,6 +14,7 @@ mod harness;
 mod harness_provider_policy;
 mod models;
 mod replay_cases;
+mod runtime_metadata;
 mod surface;
 #[cfg(test)]
 mod tests;
@@ -247,6 +248,7 @@ pub use harness_provider_policy::{
 pub use models::{provider_model_catalog, provider_model_cost, provider_model_spec};
 use replay_cases::provider_replay_case_count;
 pub use replay_cases::{ProviderReplayCase, provider_replay_cases};
+pub use runtime_metadata::*;
 pub use surface::*;
 pub(crate) use surface::{
     COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS, KIRO_ENDPOINTS, OPENAI_ENDPOINTS,

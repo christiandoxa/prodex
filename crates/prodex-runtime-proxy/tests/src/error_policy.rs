@@ -496,3 +496,97 @@ fn transient_5xx_retries_only_before_commit() {
         );
     }
 }
+
+#[test]
+fn failure_policy_is_transport_parity_safe_before_and_after_commit() {
+    #[derive(Clone, Copy, Debug)]
+    enum Surface {
+        ResponsesHttp,
+        ResponsesSse,
+        Compact,
+        Noncompact,
+        WebsocketHandshake,
+        WebsocketMessage,
+    }
+
+    let surfaces = [
+        Surface::ResponsesHttp,
+        Surface::ResponsesSse,
+        Surface::Compact,
+        Surface::Noncompact,
+        Surface::WebsocketHandshake,
+        Surface::WebsocketMessage,
+    ];
+    let cases: [(&str, u16, &[u8], RuntimeHttpErrorClass, RuntimeHttpErrorAction); 5] = [
+        (
+            "generic_429",
+            429,
+            br#"{"error":{"message":"Too Many Requests"}}"#,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+        ),
+        (
+            "explicit_quota",
+            429,
+            br#"{"error":{"code":"insufficient_quota","message":"Quota exhausted"}}"#,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+        ),
+        (
+            "workspace_credits",
+            429,
+            br#"{"error":{"code":"workspace_member_credits_depleted","message":"Workspace credits exhausted"}}"#,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+        ),
+        (
+            "overload",
+            503,
+            br#"{"error":{"code":"server_is_overloaded","message":"Server is overloaded"}}"#,
+            RuntimeHttpErrorClass::Overload,
+            RuntimeHttpErrorAction::RetryProfile,
+        ),
+        (
+            "auth",
+            401,
+            br#"{"error":{"code":"unauthorized","message":"Unauthorized"}}"#,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+        ),
+    ];
+
+    for surface in surfaces {
+        for (label, status, body, expected_class, expected_precommit_action) in cases {
+            let classify = |phase| match surface {
+                Surface::ResponsesSse | Surface::WebsocketMessage => {
+                    runtime_stream_error_policy(body, phase)
+                }
+                Surface::ResponsesHttp
+                | Surface::Compact
+                | Surface::Noncompact
+                | Surface::WebsocketHandshake => runtime_http_error_policy(status, body, phase),
+            };
+
+            let precommit = classify(RuntimeHttpErrorPhase::PreCommit);
+            assert_eq!(
+                precommit.class, expected_class,
+                "{surface:?} {label} precommit class"
+            );
+            assert_eq!(
+                precommit.action, expected_precommit_action,
+                "{surface:?} {label} precommit action"
+            );
+
+            let committed = classify(RuntimeHttpErrorPhase::Committed);
+            assert_eq!(
+                committed.class, expected_class,
+                "{surface:?} {label} committed class"
+            );
+            assert_eq!(
+                committed.action,
+                RuntimeHttpErrorAction::PassThrough,
+                "{surface:?} {label} committed action"
+            );
+        }
+    }
+}

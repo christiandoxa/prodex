@@ -28,7 +28,7 @@ pub(crate) fn handle_audit(args: AuditArgs) -> Result<()> {
             "events": result.events,
         }))
         .context("failed to serialize audit log output")?;
-        print_stdout_line(&json);
+        print_stdout_line(&json)?;
         return Ok(());
     }
 
@@ -44,6 +44,6 @@ pub(crate) fn handle_audit(args: AuditArgs) -> Result<()> {
 }
 
 fn print_audit_human_output(output: &str) -> Result<()> {
-    print_text_panel("Prodex Audit", output);
+    print_text_panel("Prodex Audit", output)?;
     Ok(())
 }

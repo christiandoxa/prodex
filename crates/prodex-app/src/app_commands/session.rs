@@ -1,8 +1,6 @@
 use anyhow::{Context, Result};
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -21,9 +19,9 @@ use crate::{
     AppPaths, AppState, AppStateIoExt, RunArgs, SessionCommands, SessionResumeArgs, absolutize,
     handle_run, print_stdout_line, print_stdout_text,
 };
-pub(crate) use prodex_app_reports::SessionReport;
 use prodex_app_reports::render_session_reports_output;
 use prodex_cli::CodexRuntimeFeatureArgs;
+pub(crate) use prodex_session_store::SessionReport;
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
     match command {
@@ -127,7 +125,7 @@ fn print_session_reports(
 ) -> Result<()> {
     match output_mode {
         SessionOutputMode::IdOnly => {
-            print_session_lines(reports.iter().map(|report| report.id.clone()));
+            print_session_lines(reports.iter().map(|report| report.id.clone()))?;
             Ok(())
         }
         SessionOutputMode::ResumeCommand => {
@@ -135,7 +133,7 @@ fn print_session_reports(
                 reports
                     .iter()
                     .map(|report| format!("prodex run {}", report.id)),
-            );
+            )?;
             Ok(())
         }
         SessionOutputMode::Json | SessionOutputMode::Text => {
@@ -143,11 +141,11 @@ fn print_session_reports(
             let output = render_session_reports_output(reports, json, empty_message)
                 .context("failed to render session JSON")?;
             if json {
-                print_stdout_line(&output);
+                print_stdout_line(&output)?;
             } else if io::stdout().is_terminal() {
                 render_session_reports_tui(reports, empty_message)?;
             } else {
-                print_stdout_text(&output);
+                print_stdout_text(&output)?;
             }
             Ok(())
         }
@@ -173,7 +171,7 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         let output = render_session_reports_output(reports, false, empty_message)
             .context("failed to render session fallback output")?;
-        print_stdout_text(&output);
+        print_stdout_text(&output)?;
         return Ok(());
     };
     terminal
@@ -244,21 +242,10 @@ fn render_session_reports_tui_scrollable(
     reports: &[SessionReport],
     empty_message: &str,
 ) -> Result<()> {
-    crossterm::terminal::enable_raw_mode().context("failed to enable raw mode")?;
-    let mut stdout = io::stdout();
-    if let Err(err) = crossterm::execute!(
-        stdout,
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::cursor::Hide
-    ) {
-        let _ = crossterm::terminal::disable_raw_mode();
-        return Err(err).context("failed to enter alternate screen");
-    }
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).context("failed to init terminal")?;
+    let mut terminal = terminal_ui::AlternateScreenTerminal::stdout("session list TUI")?;
 
     let mut scroll_offset = 0usize;
-    let result = (|| -> Result<()> {
+    (|| -> Result<()> {
         loop {
             let lines: Vec<Line<'_>> = session_scroll_lines(reports);
             let total = lines.len();
@@ -333,16 +320,7 @@ fn render_session_reports_tui_scrollable(
             }
         }
         Ok(())
-    })();
-
-    let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(
-        terminal.backend_mut(),
-        crossterm::cursor::Show,
-        crossterm::terminal::LeaveAlternateScreen
-    );
-    let _ = terminal.show_cursor();
-    result
+    })()
 }
 
 fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {
@@ -427,15 +405,16 @@ fn session_report_tui_item(report: &SessionReport) -> ListItem<'_> {
     .style(Style::default())
 }
 
-fn print_session_lines(lines: impl IntoIterator<Item = String>) {
+fn print_session_lines(lines: impl IntoIterator<Item = String>) -> io::Result<()> {
     let mut output = String::new();
     for line in lines {
         output.push_str(&line);
         output.push('\n');
     }
     if !output.is_empty() {
-        print_stdout_text(&output);
+        print_stdout_text(&output)?;
     }
+    Ok(())
 }
 
 fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
@@ -482,7 +461,7 @@ mod tests {
 
     fn test_session_report(id: &str) -> SessionReport {
         let mut report = SessionReport::from_path(Path::new(&format!("/tmp/{id}.jsonl")), 0);
-        prodex_app_reports::apply_session_json_line(
+        prodex_session_store::apply_session_json_line(
             &mut report,
             r#"{"timestamp":"2026-06-26T10:00:00Z","type":"session_meta","payload":{"thread_name":"Build UI","cwd":"/tmp/prodex"}}"#,
         );

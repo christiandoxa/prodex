@@ -3,52 +3,18 @@ use crate::{
     RuntimeProfileUsageSnapshot, load_live_quota_watch_runtime_usage_cache,
     load_runtime_usage_snapshots, quota_watch_detail_refresh_interval_for_cached_openai,
 };
-use anyhow::{Context, Result};
 use chrono::{Local, TimeZone};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
 use prodex_quota::RuntimeQuotaWindowStatus;
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::text::{Line, Text};
 use std::io;
 use std::time::{Duration, Instant};
+use terminal_ui::AlternateScreenTerminal;
 
 const LOG_TUI_SHORT_RESET_TIME_FORMAT: &str = "%H:%M";
 const LOG_TUI_RESET_TIME_FORMAT: &str = "%m-%d %H:%M";
 
-pub(super) struct LogTuiTerminal {
-    pub(super) terminal: Terminal<CrosstermBackend<io::Stdout>>,
-}
-
-impl LogTuiTerminal {
-    pub(super) fn new(label: &str) -> Result<Self> {
-        enable_raw_mode().with_context(|| format!("failed to enable {label} TUI raw mode"))?;
-        let mut stdout = io::stdout();
-        if let Err(err) = crossterm::execute!(stdout, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err)
-                .with_context(|| format!("failed to enter {label} TUI alternate screen"));
-        }
-        let terminal = Terminal::new(CrosstermBackend::new(stdout)).inspect_err(|_| {
-            let mut stdout = io::stdout();
-            let _ = crossterm::execute!(stdout, Show, LeaveAlternateScreen);
-            let _ = disable_raw_mode();
-        })?;
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for LogTuiTerminal {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+pub(super) type LogTuiTerminal = AlternateScreenTerminal<io::Stdout>;
 
 #[derive(Debug, Default, Clone)]
 pub(super) struct LogTuiState {

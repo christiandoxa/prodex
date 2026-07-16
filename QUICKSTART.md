@@ -4,7 +4,10 @@ One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges
 
 Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|kiro|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, imported Kiro accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
 
-For contributors: this is a Cargo workspace. `src/main.rs` is the binary entrypoint, `src/lib.rs` is a compatibility shim, application orchestration lives under `crates/prodex-app/`, and reusable leaf crates live under `crates/`.
+For contributors: this is a Cargo workspace. `src/main.rs` is the primary CLI entrypoint,
+`src/bin/` contains the dedicated gateway and control-plane entrypoints, `src/lib.rs` is their
+shared compatibility facade, application orchestration lives under `crates/prodex-app/`, and
+reusable crates live under `crates/`.
 
 Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), including the fast/serial split and runtime parallel-safety assumptions.
 

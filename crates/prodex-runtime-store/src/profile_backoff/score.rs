@@ -27,9 +27,10 @@ pub fn merge_runtime_profile_scores(
 ) -> BTreeMap<String, RuntimeProfileHealth> {
     let mut merged = existing.clone();
     for (key, value) in incoming {
-        let should_replace = merged
-            .get(key)
-            .is_none_or(|current| current.updated_at <= value.updated_at);
+        let should_replace = merged.get(key).is_none_or(|current| {
+            value.updated_at > current.updated_at
+                || (value.updated_at == current.updated_at && value.score > current.score)
+        });
         if should_replace {
             merged.insert(key.clone(), value.clone());
         }

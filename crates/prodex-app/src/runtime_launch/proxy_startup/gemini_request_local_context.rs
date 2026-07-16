@@ -11,6 +11,9 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 pub(super) const RUNTIME_GEMINI_CONTEXT_FILE_LIMIT: usize = 16;
+pub(super) const RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT: usize = 2048;
+pub(super) const RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT: usize = 32;
+pub(super) const RUNTIME_GEMINI_CONTEXT_DIRECTORY_ENTRY_LIMIT: usize = 256;
 const RUNTIME_GEMINI_CONTEXT_BYTE_LIMIT: usize = 128 * 1024;
 
 #[derive(Default)]
@@ -18,6 +21,7 @@ pub(super) struct RuntimeGeminiFileReadBudget {
     pub(super) files: usize,
     bytes: usize,
     paths: BTreeSet<PathBuf>,
+    pub(super) scanned_entries: usize,
 }
 
 pub(super) fn runtime_gemini_part_from_local_path(
@@ -77,11 +81,31 @@ fn runtime_gemini_part_from_local_dir(
     path: &Path,
     budget: &mut RuntimeGeminiFileReadBudget,
 ) -> Option<serde_json::Value> {
+    runtime_gemini_part_from_local_dir_at_depth(path, budget, 0)
+}
+
+fn runtime_gemini_part_from_local_dir_at_depth(
+    path: &Path,
+    budget: &mut RuntimeGeminiFileReadBudget,
+    depth: usize,
+) -> Option<serde_json::Value> {
+    if depth >= RUNTIME_GEMINI_CONTEXT_DEPTH_LIMIT
+        || budget.scanned_entries >= RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT
+    {
+        return None;
+    }
+    let remaining = RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT.saturating_sub(budget.scanned_entries);
+    let entry_limit = remaining.min(RUNTIME_GEMINI_CONTEXT_DIRECTORY_ENTRY_LIMIT);
+    let mut scanned = 0usize;
     let mut entries = fs::read_dir(path)
         .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
+        .take(entry_limit)
+        .filter_map(|entry| {
+            scanned = scanned.saturating_add(1);
+            entry.ok().map(|entry| entry.path())
+        })
         .collect::<Vec<_>>();
+    budget.scanned_entries = budget.scanned_entries.saturating_add(scanned);
     entries.sort();
     let mut parts = Vec::new();
     for entry in entries {
@@ -102,7 +126,9 @@ fn runtime_gemini_part_from_local_dir(
             continue;
         }
         if metadata.is_dir() {
-            if let Some(part) = runtime_gemini_part_from_local_dir(&entry, budget) {
+            if let Some(part) =
+                runtime_gemini_part_from_local_dir_at_depth(&entry, budget, depth + 1)
+            {
                 parts.push(part);
             }
         } else if metadata.is_file()
@@ -193,6 +219,45 @@ mod tests {
 
         assert!(data.is_none());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn gemini_local_context_directory_scan_is_bounded() {
+        let root = runtime_gemini_local_context_test_path("huge-directory");
+        fs::create_dir_all(&root).unwrap();
+        for index in 0..RUNTIME_GEMINI_CONTEXT_DIRECTORY_ENTRY_LIMIT + 32 {
+            fs::write(root.join(format!("{index:04}.txt")), "context").unwrap();
+        }
+        let mut budget = RuntimeGeminiFileReadBudget::default();
+
+        let part = runtime_gemini_part_from_local_path(&root, None, &mut budget);
+
+        assert!(part.is_some());
+        assert_eq!(
+            budget.scanned_entries,
+            RUNTIME_GEMINI_CONTEXT_DIRECTORY_ENTRY_LIMIT
+        );
+        assert_eq!(budget.files, RUNTIME_GEMINI_CONTEXT_FILE_LIMIT);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gemini_local_context_directory_scan_skips_symlinked_directory() {
+        let root = runtime_gemini_local_context_test_path("symlink-directory");
+        let outside = runtime_gemini_local_context_test_path("symlink-directory-outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), "outside secret").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("linked")).unwrap();
+        let mut budget = RuntimeGeminiFileReadBudget::default();
+
+        let part = runtime_gemini_part_from_local_path(&root, None, &mut budget);
+
+        assert!(part.is_none());
+        assert_eq!(budget.files, 0);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 
     fn runtime_gemini_local_context_test_path(name: &str) -> PathBuf {

@@ -80,7 +80,6 @@ fn affinity_candidate_skips_unknown_current_session_owner_when_pool_has_ready_we
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -157,13 +156,13 @@ fn optimistic_current_candidate_skips_open_route_circuit() {
             runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses),
             Local::now().timestamp() + 60,
         )]),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -277,7 +276,6 @@ fn fresh_websocket_fallback_allows_positive_critical_quota_candidates() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);

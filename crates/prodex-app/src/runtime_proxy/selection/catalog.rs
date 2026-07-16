@@ -35,6 +35,7 @@ pub(crate) fn runtime_route_selection_view(
 
 pub(crate) fn runtime_route_selection_catalog(
     runtime: &RuntimeRotationState,
+    profile_inflight: &std::collections::BTreeMap<String, usize>,
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> RuntimeRouteSelectionCatalog {
@@ -80,10 +81,7 @@ pub(crate) fn runtime_route_selection_catalog(
                     route_kind,
                     now,
                 ),
-                inflight_count: runtime_profile_inflight_sort_key(
-                    &profile.name,
-                    &runtime.profile_inflight,
-                ),
+                inflight_count: runtime_profile_inflight_sort_key(&profile.name, profile_inflight),
                 health_sort_key: runtime_profile_health_sort_key(
                     &profile.name,
                     &runtime.profile_health,

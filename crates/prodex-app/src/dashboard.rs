@@ -90,7 +90,7 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
 }
 
 fn print_dashboard_status(url: &str, warning: Option<&str>) -> Result<()> {
-    print_panel("Dashboard", &dashboard_status_fields(url, warning));
+    print_panel("Dashboard", &dashboard_status_fields(url, warning))?;
     Ok(())
 }
 
@@ -250,14 +250,14 @@ impl DashboardServer {
         let state = AppState::load(&self.paths)?;
         Ok(json!({
             "activeProfile": state.active_profile,
-            "providers": provider_presets(&state),
+            "providers": provider_presets(&state)?,
             "contracts": provider_adapter_contract_matrix(),
         }))
     }
 
     fn provider_presets_json(&self) -> Result<Value> {
         let state = AppState::load(&self.paths)?;
-        Ok(json!({ "providers": provider_presets(&state) }))
+        Ok(json!({ "providers": provider_presets(&state)? }))
     }
 
     fn models_json(&self) -> Result<Value> {
@@ -266,7 +266,7 @@ impl DashboardServer {
         for provider in DASHBOARD_PROVIDER_IDS {
             let default_model = provider_default_model(*provider);
             let availability =
-                provider_available_through(*provider, provider_profile_count(&state, *provider));
+                provider_available_through(*provider, provider_profile_count(&state, *provider)?);
             for mut model in provider_model_catalog_json(*provider) {
                 let id = model
                     .get("id")
@@ -290,7 +290,7 @@ impl DashboardServer {
                 models.push(model);
             }
         }
-        Ok(json!({ "models": models, "providers": provider_presets(&state) }))
+        Ok(json!({ "models": models, "providers": provider_presets(&state)? }))
     }
 
     fn runtime_status_json(&self) -> Result<Value> {
@@ -429,14 +429,14 @@ impl DashboardServer {
     }
 }
 
-fn provider_presets(state: &AppState) -> Vec<Value> {
+fn provider_presets(state: &AppState) -> Result<Vec<Value>> {
     DASHBOARD_PROVIDER_IDS
         .iter()
         .copied()
-        .map(|provider| {
-            let configured_profiles = provider_profile_count(state, provider);
+        .map(|provider| -> Result<Value> {
+            let configured_profiles = provider_profile_count(state, provider)?;
             let default_model = provider_default_model(provider);
-            json!({
+            Ok(json!({
                 "id": provider.label(),
                 "label": provider_display_name(provider),
                 "auth": provider_auth_summary(provider),
@@ -444,7 +444,7 @@ fn provider_presets(state: &AppState) -> Vec<Value> {
                 "recommendedModel": default_model,
                 "modelCount": provider_model_catalog_json(provider).len(),
                 "configuredProfiles": configured_profiles,
-                "active": provider_has_active_profile(state, provider),
+                "active": provider_has_active_profile(state, provider)?,
                 "availableThrough": provider_available_through(provider, configured_profiles),
                 "commands": {
                     "setup": provider_setup_commands(provider),
@@ -453,32 +453,32 @@ fn provider_presets(state: &AppState) -> Vec<Value> {
                     "gateway": provider_gateway_command(provider),
                 },
                 "notes": provider_notes(provider),
-            })
+            }))
         })
         .collect()
 }
 
-fn provider_profile_count(state: &AppState, provider: ProviderId) -> usize {
-    state
-        .profiles
-        .values()
-        .filter(|profile| profile_catalog_provider(profile) == Some(provider))
-        .count()
+fn provider_profile_count(state: &AppState, provider: ProviderId) -> Result<usize> {
+    state.profiles.values().try_fold(0, |count, profile| {
+        Ok(count + usize::from(profile_catalog_provider(profile)? == Some(provider)))
+    })
 }
 
-fn provider_has_active_profile(state: &AppState, provider: ProviderId) -> bool {
-    state
+fn provider_has_active_profile(state: &AppState, provider: ProviderId) -> Result<bool> {
+    Ok(state
         .active_profile
         .as_ref()
         .and_then(|name| state.profiles.get(name))
-        .and_then(profile_catalog_provider)
-        == Some(provider)
+        .map(profile_catalog_provider)
+        .transpose()?
+        .flatten()
+        == Some(provider))
 }
 
-fn profile_catalog_provider(profile: &ProfileEntry) -> Option<ProviderId> {
-    match &profile.provider {
+fn profile_catalog_provider(profile: &ProfileEntry) -> Result<Option<ProviderId>> {
+    Ok(match &profile.provider {
         ProfileProvider::Openai => {
-            let model_provider = crate::codex_non_openai_model_provider(&profile.codex_home, None);
+            let model_provider = crate::codex_non_openai_model_provider(&profile.codex_home, None)?;
             match model_provider
                 .as_ref()
                 .map(|provider| provider.provider_id.as_str())
@@ -497,7 +497,7 @@ fn profile_catalog_provider(profile: &ProfileEntry) -> Option<ProviderId> {
         ProfileProvider::Copilot { .. } => Some(ProviderId::Copilot),
         ProfileProvider::Kiro { .. } => Some(ProviderId::Kiro),
         ProfileProvider::Agy { .. } => None,
-    }
+    })
 }
 
 fn provider_display_name(provider: ProviderId) -> &'static str {

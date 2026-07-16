@@ -126,7 +126,7 @@ pub(crate) fn remember_runtime_compact_lineage(
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
-            &format!("compact_lineage:{profile_name}"),
+            RuntimeStateMutation::CompactLineage(profile_name.to_string()),
         );
         drop(runtime);
     } else {

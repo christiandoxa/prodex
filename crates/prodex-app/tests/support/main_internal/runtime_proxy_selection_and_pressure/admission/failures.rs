@@ -8,7 +8,10 @@ use super::{
 use chrono::Local;
 
 fn two_ready_profiles(backend: &RuntimeProxyBackend) -> RuntimeProxyProfileHarness {
-    let ready = runtime_usage_snapshot(quota_window_ready(80, 3_600), quota_window_ready(80, 86_400));
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
     RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
@@ -71,13 +74,14 @@ fn session_affinity_prefers_bound_profile_for_compact_requests() {
 fn compact_transport_timeout_rotates_fresh_request_to_next_profile_once() {
     let _compact_timeout_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS", "300");
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::stalled_json(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-            Duration::from_millis(400),
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::stalled_json(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+                Duration::from_millis(400),
+            ),
+        ]));
     let harness = two_ready_profiles(&backend);
     let shared = harness.shared();
 
@@ -102,20 +106,25 @@ fn compact_transport_timeout_rotates_fresh_request_to_next_profile_once() {
             && log.contains("compact_committed profile=second"),
         "compact transport timeout should back off main and commit second: {log}"
     );
-    assert_eq!(log.matches("compact_committed profile=").count(), 1, "{log}");
+    assert_eq!(
+        log.matches("compact_committed profile=").count(),
+        1,
+        "{log}"
+    );
 }
 
 #[test]
 fn session_affined_compact_transport_failure_does_not_rotate() {
     let _compact_timeout_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_COMPACT_REQUEST_TIMEOUT_MS", "300");
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::stalled_json(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-            Duration::from_millis(400),
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::stalled_json(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+                Duration::from_millis(400),
+            ),
+        ]));
     let harness = two_ready_profiles(&backend);
     bind_session(&harness, "sess-main", "main");
     let shared = harness.shared();
@@ -126,19 +135,26 @@ fn session_affined_compact_transport_failure_does_not_rotate() {
     let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
 
     assert_eq!(status, 503, "{log}");
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
-    assert!(log.contains("compact_final_failure exit=hard_affinity_transport_failure"), "{log}");
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
+    assert!(
+        log.contains("compact_final_failure exit=hard_affinity_transport_failure"),
+        "{log}"
+    );
     assert!(!log.contains("compact_committed profile=second"), "{log}");
 }
 
 #[test]
 fn session_affined_compact_auth_failure_does_not_rotate() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::unauthorized(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::unauthorized(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+        ]));
     let harness = two_ready_profiles(&backend);
     bind_session(&harness, "sess-main", "main");
     let shared = harness.shared();
@@ -151,19 +167,26 @@ fn session_affined_compact_auth_failure_does_not_rotate() {
 
     assert_eq!(status, 401, "{log}");
     assert!(!accounts.is_empty(), "{log}");
-    assert!(accounts.iter().all(|account| account == "main-account"), "{accounts:?}");
-    assert!(log.contains("compact_final_failure exit=hard_affinity_auth_failure"), "{log}");
+    assert!(
+        accounts.iter().all(|account| account == "main-account"),
+        "{accounts:?}"
+    );
+    assert!(
+        log.contains("compact_final_failure exit=hard_affinity_auth_failure"),
+        "{log}"
+    );
     assert!(!log.contains("compact_committed profile=second"), "{log}");
 }
 
 #[test]
 fn generic_compact_429_passes_through_without_rotation() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::plain_429(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::plain_429(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+        ]));
     let harness = two_ready_profiles(&backend);
     let shared = harness.shared();
 
@@ -174,6 +197,13 @@ fn generic_compact_429_passes_through_without_rotation() {
 
     assert_eq!(status, 429, "{log}");
     assert_eq!(body, "Too Many Requests");
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
-    assert_eq!(log.matches("compact_committed profile=").count(), 1, "{log}");
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
+    assert_eq!(
+        log.matches("compact_committed profile=").count(),
+        1,
+        "{log}"
+    );
 }

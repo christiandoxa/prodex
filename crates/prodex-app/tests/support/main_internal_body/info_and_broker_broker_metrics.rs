@@ -264,7 +264,6 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         2,
@@ -279,11 +278,11 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
     drop(guard);
     shared
         .lane_admission
-        .admission_wait_metrics
+        .admission_wait_metric_counters()
         .record_wait(Duration::from_nanos(13));
     shared
         .lane_admission
-        .long_lived_queue_wait_metrics
+        .long_lived_queue_wait_metric_counters()
         .record_wait(Duration::from_nanos(29));
 
     shared
@@ -301,8 +300,8 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
 
     shared
         .lane_admission
-        .responses_active
-        .store(shared.lane_admission.limits.responses, Ordering::SeqCst);
+        .active_counter(RuntimeRouteKind::Responses)
+        .store(shared.lane_admission.limits().responses, Ordering::SeqCst);
     assert!(matches!(
         try_acquire_runtime_proxy_active_request_slot(
             &shared,
@@ -315,7 +314,7 @@ fn runtime_broker_metrics_snapshot_tracks_lane_admissions_and_rejections() {
     ));
     shared
         .lane_admission
-        .responses_active
+        .active_counter(RuntimeRouteKind::Responses)
         .store(0, Ordering::SeqCst);
 
     let metrics = runtime_broker_metrics_snapshot(
@@ -396,7 +395,6 @@ fn runtime_broker_metrics_snapshot_records_runtime_state_lock_wait() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime.clone(), 2);

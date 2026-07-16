@@ -29,14 +29,10 @@ pub(crate) fn runtime_proxy_current_profile(shared: &RuntimeRotationProxyShared)
 }
 
 pub(crate) fn runtime_profile_inflight_count(
-    runtime: &RuntimeRotationState,
+    shared: &RuntimeRotationProxyShared,
     profile_name: &str,
 ) -> usize {
-    runtime
-        .profile_inflight
-        .get(profile_name)
-        .copied()
-        .unwrap_or(0)
+    shared.lane_admission.profile_inflight_count(profile_name)
 }
 
 pub(crate) fn runtime_profile_inflight_hard_limit_context(context: &str) -> usize {
@@ -49,11 +45,7 @@ pub(crate) fn runtime_profile_inflight_hard_limited_for_context(
     context: &str,
 ) -> Result<bool> {
     let hard_limit = shared.runtime_config.tuning.profile_inflight_hard_limit;
-    let runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    Ok(runtime_profile_inflight_count(&runtime, profile_name)
+    Ok(runtime_profile_inflight_count(shared, profile_name)
         .saturating_add(runtime_profile_inflight_hard_limit_context(context))
         > hard_limit)
 }

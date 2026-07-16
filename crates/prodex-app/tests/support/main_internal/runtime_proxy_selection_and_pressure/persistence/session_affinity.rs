@@ -56,13 +56,13 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -193,13 +193,13 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -316,13 +316,13 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -441,13 +441,13 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()

@@ -20,7 +20,6 @@ pub(crate) struct RuntimeRotationState {
     pub(crate) profile_retry_backoff_until: BTreeMap<String, i64>,
     pub(crate) profile_transport_backoff_until: BTreeMap<String, i64>,
     pub(crate) profile_route_circuit_open_until: BTreeMap<String, i64>,
-    pub(crate) profile_inflight: BTreeMap<String, usize>,
     pub(crate) profile_health: BTreeMap<String, RuntimeProfileHealth>,
 }
 

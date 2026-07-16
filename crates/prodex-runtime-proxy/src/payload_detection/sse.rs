@@ -1,8 +1,11 @@
 use super::{
     RuntimeTokenUsage, extract_runtime_proxy_previous_response_message_from_value,
-    extract_runtime_proxy_quota_message_from_value, extract_runtime_response_ids_from_value,
-    extract_runtime_token_usage_from_value, extract_runtime_turn_state_from_value,
-    push_runtime_response_id, runtime_response_event_type_from_value,
+    extract_runtime_response_ids_from_value, extract_runtime_token_usage_from_value,
+    extract_runtime_turn_state_from_value, push_runtime_response_id,
+    runtime_response_event_type_from_value,
+};
+use crate::{
+    RuntimeHttpErrorAction, RuntimeHttpErrorPhase, runtime_stream_error_policy_from_value,
 };
 
 const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
@@ -10,6 +13,7 @@ const RUNTIME_SSE_INVALID_DATA_MARKER: &str = "\u{0}prodex-invalid-sse-data";
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeParsedSseEvent {
     pub quota_blocked: bool,
+    pub overloaded: bool,
     pub previous_response_not_found: bool,
     pub response_ids: Vec<String>,
     pub event_type: Option<String>,
@@ -28,6 +32,7 @@ pub enum RuntimeSseInspectionProgress {
         turn_state: Option<String>,
     },
     QuotaBlocked,
+    Overloaded,
     PreviousResponseNotFound,
 }
 
@@ -229,6 +234,9 @@ pub fn inspect_runtime_sse_buffer(buffered: &[u8]) -> RuntimeSseInspectionProgre
         if event.quota_blocked {
             return Some(RuntimeSseInspectionProgress::QuotaBlocked);
         }
+        if event.overloaded {
+            return Some(RuntimeSseInspectionProgress::Overloaded);
+        }
         if event.previous_response_not_found {
             return Some(RuntimeSseInspectionProgress::PreviousResponseNotFound);
         }
@@ -288,6 +296,7 @@ fn runtime_sse_inspection_event(data_lines: &[String]) -> RuntimeParsedSseEvent 
 
     RuntimeParsedSseEvent {
         quota_blocked: false,
+        overloaded: false,
         previous_response_not_found: false,
         response_ids,
         event_type: runtime_json_string_field(payload, "\"type\":\""),
@@ -303,6 +312,9 @@ fn runtime_sse_payload_needs_full_inspection(payload: &str) -> bool {
         || payload.contains("rate_limit_exceeded")
         || payload.contains("usage_limit_reached")
         || payload.contains("usage_not_included")
+        || payload.contains("workspace_member_credits_depleted")
+        || payload.contains("server_is_overloaded")
+        || payload.contains("slow_down")
         || payload.contains("previous_response_not_found")
         || payload.contains("\"usage\"")
         || payload.contains("x-codex-turn-state")
@@ -337,8 +349,11 @@ pub fn parse_runtime_sse_event(data_lines: &[String]) -> RuntimeParsedSseEvent {
         return RuntimeParsedSseEvent::default();
     };
 
+    let error_policy =
+        runtime_stream_error_policy_from_value(&value, RuntimeHttpErrorPhase::PreCommit);
     RuntimeParsedSseEvent {
-        quota_blocked: extract_runtime_proxy_quota_message_from_value(&value).is_some(),
+        quota_blocked: error_policy.action == RuntimeHttpErrorAction::RotateProfile,
+        overloaded: error_policy.action == RuntimeHttpErrorAction::RetryProfile,
         previous_response_not_found: extract_runtime_proxy_previous_response_message_from_value(
             &value,
         )

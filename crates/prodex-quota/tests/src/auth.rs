@@ -1,4 +1,5 @@
 use super::*;
+use base64::Engine as _;
 
 #[test]
 fn auth_summary_detects_chatgpt_token() {

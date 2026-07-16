@@ -114,7 +114,14 @@ pub(crate) fn attempt_runtime_websocket_request(
                     shared.runtime_config.tuning.stream_idle_timeout_ms,
                 )?;
 
-                let mut inspected = inspect_runtime_websocket_text_frame(text.as_str());
+                let mut inspected = inspect_runtime_websocket_text_frame_with_phase(
+                    text.as_str(),
+                    if committed {
+                        runtime_proxy_crate::RuntimeHttpErrorPhase::Committed
+                    } else {
+                        runtime_proxy_crate::RuntimeHttpErrorPhase::PreCommit
+                    },
+                );
                 if realtime_websocket
                     && inspected
                         .event_type

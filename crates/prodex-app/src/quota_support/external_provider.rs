@@ -130,13 +130,15 @@ fn parse_agy_quota_json(
 pub(super) fn custom_model_provider_quota_info(
     provider: &ProfileProvider,
     codex_home: &Path,
-) -> Option<ExternalQuotaInfo> {
+) -> anyhow::Result<Option<ExternalQuotaInfo>> {
     if !matches!(provider, ProfileProvider::Openai) {
-        return None;
+        return Ok(None);
     }
-    let model_provider = codex_non_openai_model_provider(codex_home, None)?;
+    let Some(model_provider) = codex_non_openai_model_provider(codex_home, None)? else {
+        return Ok(None);
+    };
     let provider_name = custom_model_provider_display_name(&model_provider.provider_id);
-    Some(ExternalQuotaInfo {
+    Ok(Some(ExternalQuotaInfo {
         provider: provider_name,
         account: Some(model_provider.provider_id.clone()),
         plan: Some(model_provider.source.display_name().to_string()),
@@ -154,7 +156,7 @@ pub(super) fn custom_model_provider_quota_info(
                 value: model_provider.source.display_name().to_string(),
             },
         ],
-    })
+    }))
 }
 
 fn custom_model_provider_display_name(provider_id: &str) -> String {

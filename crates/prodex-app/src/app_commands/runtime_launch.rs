@@ -167,7 +167,7 @@ impl RuntimeLaunchStrategy for RunCommandStrategy {
     ) -> Result<RuntimeLaunchPlan> {
         repair_resume_session_in_home(&prepared.codex_home, &self.codex_args)?;
         let codex_args =
-            runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args);
+            runtime_launch_openai_spark_context_codex_args(&prepared.codex_home, &self.codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(&prepared.codex_home, &codex_args)?;
         let mut codex_args =
             prepare_provider_capability_codex_args(&prepared.codex_home, &codex_args)?;
@@ -266,7 +266,7 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
         backend.listen_addr(),
         backend.provider_name(),
         backend.auth_required(),
-    );
+    )?;
     gateway_shutdown::wait_for_signal_and_drain(&backend)
 }
 
@@ -422,12 +422,12 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
                     &[format!(
                         "Using provider '{provider}' through the Smart Context rewrite proxy. {rotation}",
                     )],
-                );
+                )?;
             } else {
                 print_stderr_panel(
                     "Runtime Provider",
                     &["Using prodex-local through the Smart Context rewrite proxy. Quota preflight and account rotation stay disabled.".to_string()],
-                );
+                )?;
             }
             return Ok(());
         }
@@ -438,7 +438,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
                 setting.provider_id.as_str(),
                 setting.source.display_name(),
             )],
-        );
+        )?;
         Ok(())
     }
 
@@ -548,7 +548,10 @@ impl RuntimeProxyStartupFactory {
                 request.include_code_review,
                 request.upstream_no_proxy,
                 request.smart_context_enabled,
-                runtime_launch_effective_model_context_window_tokens(request, selection),
+                runtime_launch_effective_model_context_window_tokens(
+                    request,
+                    &selection.codex_home,
+                )?,
             )?));
         }
 
@@ -669,7 +672,7 @@ fn validate_runtime_launch_upstream_base_url(
             &selection.codex_home,
             &format!("model_providers.{}.base_url", provider.provider_id),
             request.profile_v2_name,
-        )
+        )?
     {
         validate_credential_free_http_url(&base_url, "runtime upstream base URL")?;
     }
@@ -707,7 +710,7 @@ fn start_runtime_proxy_endpoint(
     fixed: bool,
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
-        runtime_launch_effective_model_context_window_tokens(request, selection);
+        runtime_launch_effective_model_context_window_tokens(request, &selection.codex_home)?;
     let proxy_state = runtime_proxy_endpoint_state(state, selection, fixed)?;
     let proxy = start_runtime_rotation_proxy_with_options(RuntimeRotationProxyStartOptions {
         paths,
@@ -748,7 +751,7 @@ fn start_local_rewrite_proxy_endpoint(
     resolved_harness: prodex_provider_core::ResolvedHarnessMode,
 ) -> Result<RuntimeProxyEndpoint> {
     let model_context_window_tokens =
-        runtime_launch_effective_model_context_window_tokens(request, selection);
+        runtime_launch_effective_model_context_window_tokens(request, &selection.codex_home)?;
     let proxy = start_runtime_local_rewrite_proxy_with_harness(
         RuntimeLocalRewriteProxyStartOptions {
             paths,
@@ -803,13 +806,14 @@ fn local_rewrite_proxy_upstream_base_url(
     if !runtime_launch_model_provider_uses_local_rewrite(provider) {
         return Ok(None);
     }
-    let base_url = request.base_url.map(str::to_string).or_else(|| {
-        codex_config_value_with_profile_v2(
+    let base_url = match request.base_url {
+        Some(base_url) => Some(base_url.to_string()),
+        None => codex_config_value_with_profile_v2(
             &selection.codex_home,
             &format!("model_providers.{}.base_url", provider.provider_id.as_str()),
             request.profile_v2_name,
-        )
-    });
+        )?,
+    };
     if let Some(base_url) = base_url.as_deref() {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
     }
@@ -830,21 +834,6 @@ fn runtime_proxy_endpoint_state<'a>(
 
 fn fixed_runtime_proxy_state(state: &AppState, profile_name: &str) -> Result<AppState> {
     prodex_runtime_launch::fixed_runtime_proxy_state(state, profile_name)
-}
-
-fn runtime_launch_effective_model_context_window_tokens(
-    request: &RuntimeLaunchRequest<'_>,
-    selection: &RuntimeLaunchSelection,
-) -> Option<u64> {
-    if !request.smart_context_enabled {
-        return None;
-    }
-    request.model_context_window_tokens.or_else(|| {
-        runtime_launch_config_model_context_window_tokens_with_profile_v2(
-            &selection.codex_home,
-            request.profile_v2_name,
-        )
-    })
 }
 
 fn runtime_launch_effective_gemini_thinking_budget_tokens(

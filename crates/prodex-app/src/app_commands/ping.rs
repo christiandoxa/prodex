@@ -51,7 +51,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
     ready_profiles.sort_by(|left, right| left.0.cmp(&right.0));
 
     if ready_profiles.is_empty() {
-        print_stdout_line("No ready OpenAI profiles.");
+        print_stdout_line("No ready OpenAI profiles.")?;
         return Ok(());
     }
 
@@ -60,13 +60,13 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
         let Some(profile) = state.profiles.get(&profile_name) else {
             continue;
         };
-        let models = ping_openai_models_for_usage(&profile.codex_home, &usage);
+        let models = ping_openai_models_for_usage(&profile.codex_home, &usage)?;
         for model in models {
             match model {
                 Some(model) => print_stdout_line(&format!("Pinging {profile_name} ({model})...")),
                 None => print_stdout_line(&format!("Pinging {profile_name}...")),
-            }
-            let plan = ping_openai_child_plan(profile.codex_home.clone(), model);
+            }?;
+            let plan = ping_openai_child_plan(profile.codex_home.clone(), model)?;
             let status = run_child_plan(&plan, None)?;
             if !status.success() {
                 failures.push((
@@ -81,7 +81,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
     }
 
     if failures.is_empty() {
-        print_stdout_line("Ping complete.");
+        print_stdout_line("Ping complete.")?;
         return Ok(());
     }
 
@@ -96,27 +96,29 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
 fn ping_openai_models_for_usage(
     codex_home: &Path,
     usage: &crate::UsageResponse,
-) -> Vec<Option<&'static str>> {
+) -> Result<Vec<Option<&'static str>>> {
     let mut models = vec![None];
-    if usage_has_spark_limit(usage) && !ping_openai_default_model_is_spark(codex_home) {
+    if usage_has_spark_limit(usage) && !ping_openai_default_model_is_spark(codex_home)? {
         models.push(Some(OPENAI_CODEX_SPARK_MODEL));
     }
-    models
+    Ok(models)
 }
 
-fn ping_openai_default_model_is_spark(codex_home: &Path) -> bool {
-    codex_config_value(codex_home, "model").is_some_and(|model| {
-        matches!(
-            model.trim().to_ascii_lowercase().as_str(),
-            "gpt-5.3-codex-spark" | "gpt-5.3-spark"
-        )
-    })
+fn ping_openai_default_model_is_spark(codex_home: &Path) -> Result<bool> {
+    Ok(
+        codex_config_value(codex_home, "model")?.is_some_and(|model| {
+            matches!(
+                model.trim().to_ascii_lowercase().as_str(),
+                "gpt-5.3-codex-spark" | "gpt-5.3-spark"
+            )
+        }),
+    )
 }
 
 fn ping_openai_child_plan(
     codex_home: std::path::PathBuf,
     model: Option<&str>,
-) -> crate::ChildProcessPlan {
+) -> Result<crate::ChildProcessPlan> {
     let mut args = Vec::new();
     if let Some(model) = model {
         args.push(OsString::from("--model"));
@@ -124,8 +126,8 @@ fn ping_openai_child_plan(
     }
     args.extend([OsString::from("exec"), OsString::from("ping")]);
     let (args, _) = prepare_codex_launch_args(&args, true);
-    let args = runtime_launch_openai_spark_context_codex_args(&codex_home, &args);
-    codex_child_plan(codex_home, args)
+    let args = runtime_launch_openai_spark_context_codex_args(&codex_home, &args)?;
+    Ok(codex_child_plan(codex_home, args))
 }
 
 #[cfg(test)]
@@ -134,7 +136,7 @@ mod tests {
 
     #[test]
     fn ping_openai_child_plan_bypasses_approvals_and_sandbox() {
-        let plan = ping_openai_child_plan("/tmp/codex-home".into(), None);
+        let plan = ping_openai_child_plan("/tmp/codex-home".into(), None).unwrap();
         assert_eq!(
             plan.args,
             vec![
@@ -147,7 +149,8 @@ mod tests {
 
     #[test]
     fn ping_openai_child_plan_can_target_spark() {
-        let plan = ping_openai_child_plan("/tmp/codex-home".into(), Some(OPENAI_CODEX_SPARK_MODEL));
+        let plan = ping_openai_child_plan("/tmp/codex-home".into(), Some(OPENAI_CODEX_SPARK_MODEL))
+            .unwrap();
         assert_eq!(
             plan.args,
             vec![

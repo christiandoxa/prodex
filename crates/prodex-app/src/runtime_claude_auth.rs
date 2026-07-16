@@ -157,11 +157,7 @@ fn read_claude_credentials_text(path: &Path) -> Result<String> {
 }
 
 fn secret_file_read_error(error: secret_store::SecretError) -> anyhow::Error {
-    let is_non_regular_file = matches!(
-        &error,
-        secret_store::SecretError::InvalidLocation { reason }
-            if reason.ends_with(" is not a regular secret file")
-    );
+    let is_non_regular_file = error.is_unsafe_file();
     let error = anyhow::Error::new(error);
     if is_non_regular_file {
         error.context("not a regular secret file")
@@ -190,7 +186,7 @@ pub(crate) fn login_with_claude_oauth(
     if let Some(email) = email.map(str::trim).filter(|email| !email.is_empty()) {
         command.arg("--email").arg(email);
     }
-    print_wrapped_stderr("Opening Claude sign-in through Claude Code.");
+    print_wrapped_stderr("Opening Claude sign-in through Claude Code.")?;
     command
         .status()
         .with_context(|| format!("failed to execute {}", claude_binary()))

@@ -9,7 +9,7 @@ use super::local_rewrite_provider_registry::{
 use super::provider_bridge::{RuntimeProviderGatewaySpendEvent, runtime_provider_model_from_body};
 use crate::{
     RuntimeProxyRequest, RuntimeRouteKind, runtime_profile_in_selection_backoff,
-    runtime_profile_inflight_count, runtime_profile_route_circuit_open_until,
+    runtime_profile_inflight_sort_key, runtime_profile_route_circuit_open_until,
     runtime_profile_route_health_key, runtime_profile_route_health_score, runtime_proxy_log,
 };
 use prodex_application::{
@@ -528,12 +528,9 @@ fn runtime_gateway_provider_runtime_snapshot(
 ) -> Result<RuntimeGatewayProviderRuntimeSnapshot, RuntimeGatewayApplicationDataPlaneError> {
     let now = (runtime_gateway_unix_epoch_millis() / 1_000) as i64;
     let route_kind = runtime_gateway_route_kind(route);
-    let lane_active = shared
-        .runtime_shared
-        .lane_admission
-        .active_counter(route_kind)
-        .load(Ordering::Relaxed);
-    let lane_limit = shared.runtime_shared.lane_admission.limit(route_kind);
+    let admission = &shared.runtime_shared.lane_admission;
+    let lane_active = admission.active_counter(route_kind).load(Ordering::Relaxed);
+    let lane_limit = admission.limit(route_kind);
     let global_active = shared
         .runtime_shared
         .active_request_count
@@ -546,6 +543,7 @@ fn runtime_gateway_provider_runtime_snapshot(
         .runtime_config
         .tuning
         .profile_inflight_hard_limit;
+    let profile_inflight = admission.profile_inflight_snapshot();
     let runtime = shared
         .runtime_shared
         .lock_runtime_state()
@@ -553,7 +551,7 @@ fn runtime_gateway_provider_runtime_snapshot(
     let mut snapshot = RuntimeGatewayProviderRuntimeSnapshot::default();
     for provider in registry.provider_ids() {
         let profile = registry.runtime_profile_name(provider);
-        let profile_inflight = runtime_profile_inflight_count(&runtime, profile);
+        let profile_inflight = runtime_profile_inflight_sort_key(profile, &profile_inflight);
         let health_key = runtime_profile_route_health_key(profile, route_kind);
         let health = runtime.profile_health.contains_key(&health_key).then(|| {
             let penalty = runtime_profile_route_health_score(&runtime, profile, now, route_kind);

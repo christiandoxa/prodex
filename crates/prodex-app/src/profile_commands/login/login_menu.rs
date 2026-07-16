@@ -1,12 +1,6 @@
 use super::LoginMethod;
 use anyhow::{Context, Result, bail};
-use crossterm::cursor::{Hide, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span, Text};
@@ -64,39 +58,7 @@ enum LoginMenuKey {
     Ignore,
 }
 
-struct LoginMenuTui {
-    terminal: Terminal<CrosstermBackend<io::Stderr>>,
-}
-
-impl LoginMenuTui {
-    fn new() -> Result<Self> {
-        enable_raw_mode().context("failed to enable login TUI raw mode")?;
-        let mut stderr = io::stderr();
-        if let Err(err) = crossterm::execute!(stderr, EnterAlternateScreen, Hide) {
-            let _ = disable_raw_mode();
-            return Err(err).context("failed to enter login TUI alternate screen");
-        }
-        let backend = CrosstermBackend::new(stderr);
-        let terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                let mut stderr = io::stderr();
-                let _ = crossterm::execute!(stderr, Show, LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                return Err(err).context("failed to initialize login TUI terminal");
-            }
-        };
-        Ok(Self { terminal })
-    }
-}
-
-impl Drop for LoginMenuTui {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = crossterm::execute!(self.terminal.backend_mut(), Show, LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
-}
+type LoginMenuTui = terminal_ui::AlternateScreenTerminal<io::Stderr>;
 
 pub(super) fn login_prompt_is_interactive() -> bool {
     io::stdin().is_terminal() && io::stderr().is_terminal()
@@ -197,7 +159,7 @@ pub(super) fn prompt_login_menu_action() -> Result<LoginMenuAction> {
 
 fn prompt_login_menu_action_raw() -> Result<Option<LoginMenuAction>> {
     let entries = login_menu_entries();
-    let mut tui = match LoginMenuTui::new() {
+    let mut tui = match LoginMenuTui::stderr("login TUI") {
         Ok(tui) => tui,
         Err(_) => return Ok(None),
     };

@@ -5,8 +5,10 @@ use prodex_provider_core::{ProviderId, provider_model_catalog, provider_model_fa
 pub const GEMINI_DEFAULT_MODEL: &str = prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL;
 pub const GEMINI_CHAT_COMPRESSION_MODEL: &str =
     prodex_provider_core::PRODEX_GEMINI_CHAT_COMPRESSION_MODEL;
-pub const GEMINI_DEFAULT_CONTEXT_WINDOW: usize = 1_048_576;
-pub const GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
+pub const GEMINI_DEFAULT_CONTEXT_WINDOW: usize =
+    prodex_provider_core::PRODEX_GEMINI_DEFAULT_CONTEXT_WINDOW;
+pub const GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize =
+    prodex_provider_core::PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT;
 
 pub fn gemini_model_catalog() -> &'static [GeminiModelSpec] {
     provider_model_catalog(ProviderId::Gemini)

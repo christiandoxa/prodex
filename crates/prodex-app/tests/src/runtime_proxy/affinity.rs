@@ -22,6 +22,7 @@ fn runtime_proxy_affinity_test_shared(name: &str) -> RuntimeRotationProxyShared 
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::new(),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_current_thread()
@@ -44,7 +45,6 @@ fn runtime_proxy_affinity_test_shared(name: &str) -> RuntimeRotationProxyShared 
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
         log_path: env::temp_dir().join(format!(

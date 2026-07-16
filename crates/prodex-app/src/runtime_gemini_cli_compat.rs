@@ -21,7 +21,7 @@ fn print_gemini_compat_refresh_status(codex_home: &Path) -> Result<()> {
     print_panel(
         "Gemini CLI Compatibility",
         &gemini_compat_status_fields(codex_home),
-    );
+    )?;
     Ok(())
 }
 

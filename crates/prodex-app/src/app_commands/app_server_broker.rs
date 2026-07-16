@@ -64,7 +64,7 @@ pub(crate) fn handle_app_server_broker(args: AppServerBrokerArgs) -> Result<()> 
     }
 
     let output = render_app_server_broker_output(args.json)?;
-    print_stdout_line(&output);
+    print_stdout_line(&output)?;
     Ok(())
 }
 

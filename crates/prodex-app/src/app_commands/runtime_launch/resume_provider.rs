@@ -1,4 +1,12 @@
-use super::*;
+use crate::app_state::AppStateIoExt;
+use anyhow::Result;
+use prodex_cli::{
+    SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID, SUPER_DEEPSEEK_PROVIDER_ID,
+    SUPER_GEMINI_PROVIDER_ID, SuperExternalProvider,
+};
+use prodex_core::AppPaths;
+use prodex_state::AppState;
+use std::ffi::OsString;
 
 pub(super) fn runtime_resume_external_provider_from_codex_args(
     codex_args: &[OsString],
@@ -47,7 +55,7 @@ fn runtime_external_provider_from_model_provider_id(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{SuperExternalProvider, runtime_external_provider_from_model_provider_id};
 
     #[test]
     fn runtime_external_provider_from_model_provider_id_accepts_kiro() {

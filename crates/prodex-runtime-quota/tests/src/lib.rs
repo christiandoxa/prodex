@@ -7,6 +7,9 @@ use prodex_quota::{
 use prodex_runtime_state::{RuntimeProbeCacheFreshness, RuntimeRouteKind};
 use prodex_shared_types::{RuntimeProfileProbeCacheEntry, RuntimeQuotaSource};
 
+#[path = "selection.rs"]
+mod selection;
+
 fn usage_response(
     five_hour_used_percent: i64,
     weekly_used_percent: i64,

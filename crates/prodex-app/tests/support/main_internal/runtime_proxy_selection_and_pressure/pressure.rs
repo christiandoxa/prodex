@@ -78,11 +78,12 @@ fn runtime_heap_trimmed_buffered_response_parts_drop_requests_heap_trim_after_la
 #[test]
 fn buffered_runtime_proxy_response_drop_requests_heap_trim_after_large_release() {
     reset_runtime_heap_trim_request_count();
-    let response = build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
-        status: 200,
-        headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
-        body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES].into(),
-    });
+    let response =
+        build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
+            status: 200,
+            headers: vec![("Content-Type".to_string(), b"application/json".to_vec())],
+            body: vec![0_u8; RUNTIME_PROXY_HEAP_TRIM_MIN_RELEASE_BYTES].into(),
+        });
     drop(response);
     assert_eq!(runtime_heap_trim_request_count(), 1);
 }
@@ -152,48 +153,52 @@ fn runtime_proxy_only_responses_lane_limit_marks_global_overload() {
 #[test]
 fn runtime_state_save_debounce_applies_to_hot_continuation_updates() {
     assert_eq!(
-        runtime_state_save_debounce("profile_commit:main"),
+        runtime_state_save_debounce(&RuntimeStateMutation::ProfileCommit("main".into())),
         Duration::ZERO
     );
     assert!(
-        runtime_state_save_debounce("session_id:main") > Duration::ZERO,
+        runtime_state_save_debounce(&RuntimeStateMutation::SessionId("main".into()))
+            > Duration::ZERO,
         "session id saves should be debounced"
     );
     assert!(
-        runtime_state_save_debounce("response_ids:main") > Duration::ZERO,
+        runtime_state_save_debounce(&RuntimeStateMutation::ResponseIds("main".into()))
+            > Duration::ZERO,
         "response id saves should be debounced"
     );
     assert!(
-        runtime_state_save_debounce("compact_session_touch:session-main") > Duration::ZERO,
+        runtime_state_save_debounce(&RuntimeStateMutation::CompactSessionTouch(
+            "session-main".into(),
+        )) > Duration::ZERO,
         "compact lineage touches should be debounced"
     );
 }
 
 #[test]
-fn runtime_state_save_reason_only_journals_owner_changes() {
-    assert!(runtime_state_save_reason_requires_continuation_journal(
-        "response_ids:main"
+fn runtime_state_save_mutation_only_journals_owner_changes() {
+    assert!(runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::ResponseIds("main".into())
     ));
-    assert!(runtime_state_save_reason_requires_continuation_journal(
-        "turn_state:turn-main"
+    assert!(runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::TurnState("turn-main".into())
     ));
-    assert!(runtime_state_save_reason_requires_continuation_journal(
-        "session_id:session-main"
+    assert!(runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::SessionId("session-main".into())
     ));
-    assert!(runtime_state_save_reason_requires_continuation_journal(
-        "compact_lineage:main"
+    assert!(runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::CompactLineage("main".into())
     ));
-    assert!(!runtime_state_save_reason_requires_continuation_journal(
-        "response_touch:main"
+    assert!(!runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::ResponseTouch("main".into())
     ));
-    assert!(!runtime_state_save_reason_requires_continuation_journal(
-        "turn_state_touch:main"
+    assert!(!runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::TurnStateTouch("main".into())
     ));
-    assert!(!runtime_state_save_reason_requires_continuation_journal(
-        "session_touch:main"
+    assert!(!runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::SessionTouch("main".into())
     ));
-    assert!(!runtime_state_save_reason_requires_continuation_journal(
-        "compact_session_touch:main"
+    assert!(!runtime_state_save_requires_continuation_journal(
+        &RuntimeStateMutation::CompactSessionTouch("main".into())
     ));
 }
 
@@ -458,7 +463,6 @@ fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -474,7 +478,7 @@ fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
                 usage_snapshots: BTreeMap::new(),
                 backoffs: RuntimeProfileBackoffs::default(),
             },
-            "legacy_backoffs",
+            RuntimeStateMutation::FullState,
         ),
     );
     wait_for_runtime_background_queues_idle();

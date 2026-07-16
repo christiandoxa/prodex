@@ -1,17 +1,17 @@
 use super::*;
 
+#[path = "selection/affinity_policy.rs"]
+mod affinity_policy;
+#[path = "selection/fallback_shapes.rs"]
+mod fallback_shapes;
+#[path = "selection/http_error_policy.rs"]
+mod http_error_policy;
+#[path = "selection/previous_response_policy.rs"]
+mod previous_response_policy;
 #[path = "selection/prompt_cache.rs"]
 mod prompt_cache;
 #[path = "selection/sync_probe.rs"]
 mod sync_probe;
-#[path = "selection/fallback_shapes.rs"]
-mod fallback_shapes;
-#[path = "selection/previous_response_policy.rs"]
-mod previous_response_policy;
-#[path = "selection/http_error_policy.rs"]
-mod http_error_policy;
-#[path = "selection/affinity_policy.rs"]
-mod affinity_policy;
 
 struct RuntimeResponsesRequestBuilder {
     previous_response_id: Option<&'static str>,
@@ -458,7 +458,6 @@ fn runtime_shared_for_affinity_selection(
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -471,14 +470,14 @@ fn apply_local_selection_penalties(
     route_kind: RuntimeRouteKind,
 ) {
     let now = Local::now().timestamp();
+    shared.lane_admission.set_profile_inflight(
+        profile_name.to_string(),
+        runtime_profile_inflight_soft_limit(route_kind, false),
+    );
     let mut runtime = shared.runtime.lock().expect("runtime lock should succeed");
     runtime.profile_transport_backoff_until.insert(
         runtime_profile_transport_backoff_key(profile_name, route_kind),
         now + 60,
-    );
-    runtime.profile_inflight.insert(
-        profile_name.to_string(),
-        runtime_profile_inflight_soft_limit(route_kind, false),
     );
     runtime.profile_health.insert(
         profile_name.to_string(),

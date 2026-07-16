@@ -5,7 +5,9 @@ use crate::window::{
     runtime_quota_window_status_to_proxy,
 };
 use chrono::Local;
-use prodex_quota::{RuntimeQuotaSummary, RuntimeQuotaWindowStatus, UsageResponse};
+use prodex_quota::{
+    RuntimeQuotaSummary, RuntimeQuotaWindowStatus, UsageResponse, UsageWindow, WindowPair,
+};
 use prodex_runtime_state::{
     RuntimeProfileUsageSnapshot as RuntimeProfileUsageSnapshotGeneric, RuntimeRouteKind,
 };
@@ -51,6 +53,30 @@ pub fn runtime_profile_usage_snapshot_from_usage(
             Local::now().timestamp(),
         ),
     )
+}
+
+pub fn usage_from_runtime_usage_snapshot(snapshot: &RuntimeProfileUsageSnapshot) -> UsageResponse {
+    UsageResponse {
+        email: None,
+        plan_type: None,
+        rate_limit: Some(WindowPair {
+            primary_window: Some(UsageWindow {
+                used_percent: Some((100 - snapshot.five_hour_remaining_percent).clamp(0, 100)),
+                reset_at: (snapshot.five_hour_reset_at != i64::MAX)
+                    .then_some(snapshot.five_hour_reset_at),
+                limit_window_seconds: Some(18_000),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: Some((100 - snapshot.weekly_remaining_percent).clamp(0, 100)),
+                reset_at: (snapshot.weekly_reset_at != i64::MAX)
+                    .then_some(snapshot.weekly_reset_at),
+                limit_window_seconds: Some(604_800),
+            }),
+        }),
+        code_review_rate_limit: None,
+        rate_limit_reset_credits: None,
+        additional_rate_limits: Vec::new(),
+    }
 }
 
 pub fn runtime_quota_summary_from_usage_snapshot(

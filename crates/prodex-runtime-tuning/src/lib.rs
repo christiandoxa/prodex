@@ -14,7 +14,21 @@ pub fn timeout_override_ms_with_policy(
     policy_value: Option<u64>,
     default_ms: u64,
 ) -> u64 {
-    env_positive_u64(env_key)
+    timeout_override_ms_with_policy_value(
+        env_key,
+        env::var(env_key).ok().as_deref(),
+        policy_value,
+        default_ms,
+    )
+}
+
+fn timeout_override_ms_with_policy_value(
+    env_key: &str,
+    env_value: Option<&str>,
+    policy_value: Option<u64>,
+    default_ms: u64,
+) -> u64 {
+    positive_u64(env_key, env_value)
         .or(policy_value.filter(|value| *value > 0))
         .unwrap_or(default_ms)
 }
@@ -24,7 +38,21 @@ pub fn percent_override_with_policy(
     policy_value: Option<i64>,
     default_value: i64,
 ) -> i64 {
-    env_positive_i64(env_key)
+    percent_override_with_policy_value(
+        env_key,
+        env::var(env_key).ok().as_deref(),
+        policy_value,
+        default_value,
+    )
+}
+
+fn percent_override_with_policy_value(
+    env_key: &str,
+    env_value: Option<&str>,
+    policy_value: Option<i64>,
+    default_value: i64,
+) -> i64 {
+    positive_i64(env_key, env_value)
         .or(policy_value.filter(|value| *value > 0))
         .unwrap_or(default_value)
 }
@@ -34,7 +62,23 @@ pub fn usize_override_with_policy(
     policy_value: Option<usize>,
     default_value: usize,
 ) -> usize {
-    env_usize(env_key, false)
+    usize_override_with_policy_value(
+        env_key,
+        env::var(env_key).ok().as_deref(),
+        policy_value,
+        default_value,
+        false,
+    )
+}
+
+fn usize_override_with_policy_value(
+    env_key: &str,
+    env_value: Option<&str>,
+    policy_value: Option<usize>,
+    default_value: usize,
+    allow_zero: bool,
+) -> usize {
+    parse_usize(env_key, env_value, allow_zero)
         .or(policy_value.filter(|value| *value > 0))
         .unwrap_or(default_value)
 }
@@ -44,13 +88,13 @@ pub fn usize_override_with_policy_allow_zero(
     policy_value: Option<usize>,
     default_value: usize,
 ) -> usize {
-    env_usize(env_key, true)
+    parse_usize(env_key, env::var(env_key).ok().as_deref(), true)
         .or(policy_value)
         .unwrap_or(default_value)
 }
 
-fn env_positive_u64(env_key: &str) -> Option<u64> {
-    let value = env::var(env_key).ok()?;
+fn positive_u64(env_key: &str, value: Option<&str>) -> Option<u64> {
+    let value = value?;
     if value.is_empty() {
         panic!("{env_key} cannot be empty");
     }
@@ -66,8 +110,8 @@ fn env_positive_u64(env_key: &str) -> Option<u64> {
     Some(parsed)
 }
 
-fn env_positive_i64(env_key: &str) -> Option<i64> {
-    let value = env::var(env_key).ok()?;
+fn positive_i64(env_key: &str, value: Option<&str>) -> Option<i64> {
+    let value = value?;
     if value.is_empty() {
         panic!("{env_key} cannot be empty");
     }
@@ -83,8 +127,8 @@ fn env_positive_i64(env_key: &str) -> Option<i64> {
     Some(parsed)
 }
 
-fn env_usize(env_key: &str, allow_zero: bool) -> Option<usize> {
-    let value = env::var(env_key).ok()?;
+fn parse_usize(env_key: &str, value: Option<&str>, allow_zero: bool) -> Option<usize> {
+    let value = value?;
     if value.is_empty() {
         panic!("{env_key} cannot be empty");
     }

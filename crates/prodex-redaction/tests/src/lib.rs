@@ -20,6 +20,7 @@ fn redaction_headers_mask_sensitive_values_and_nested_tokens() {
     let forwarded_token = fake_named_secret("forwarded");
     let account_id = fake_secret(&["acct_", "fixture_", "12345"]);
     let nested_bearer_token = fake_named_secret("nested_bearer");
+    let proxy_authorization = fake_named_secret("proxy_authorization");
     let headers = vec![
         (
             "authorization".to_string(),
@@ -33,6 +34,10 @@ fn redaction_headers_mask_sensitive_values_and_nested_tokens() {
             "x-observed-value".to_string(),
             format!("Bearer {nested_bearer_token}"),
         ),
+        (
+            "Proxy-Authorization".to_string(),
+            format!("Basic {proxy_authorization}"),
+        ),
         ("anthropic-version".to_string(), "2023-06-01".to_string()),
     ];
 
@@ -40,6 +45,7 @@ fn redaction_headers_mask_sensitive_values_and_nested_tokens() {
 
     assert!(redacted.contains("authorization"));
     assert!(redacted.contains("Bearer <redacted>"));
+    assert!(redacted.contains("Basic <redacted>"));
     assert!(redacted.contains("anthropic-version"));
     assert!(redacted.contains("2023-06-01"));
     assert!(!redacted.contains(authorization_token.as_str()));
@@ -48,6 +54,30 @@ fn redaction_headers_mask_sensitive_values_and_nested_tokens() {
     assert!(!redacted.contains(forwarded_token.as_str()));
     assert!(!redacted.contains(account_id.as_str()));
     assert!(!redacted.contains(nested_bearer_token.as_str()));
+    assert!(!redacted.contains(proxy_authorization.as_str()));
+}
+
+#[test]
+fn redaction_masks_standalone_basic_and_token_credentials() {
+    let basic = fake_named_secret("standalone_basic");
+    let token = fake_named_secret("standalone_token");
+    let value = format!("Basic {basic}\nToken {token}");
+
+    let redacted = redaction_redact_secret_like_text(&value);
+
+    assert_eq!(redacted, "Basic <redacted>\nToken <redacted>");
+    assert!(!redacted.contains(&basic));
+    assert!(!redacted.contains(&token));
+}
+
+#[test]
+fn gateway_json_serialization_failure_is_fail_closed() {
+    let error = serde_json::Error::io(std::io::Error::other("injected serialization failure"));
+
+    assert_eq!(
+        redaction_gateway_json_bytes(Err(error)),
+        REDACTION_FAILED_GATEWAY_BODY
+    );
 }
 
 #[test]

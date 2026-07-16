@@ -229,6 +229,7 @@ struct RuntimeRotationProxy {
     gateway_side_effect_snapshot:
         Option<Arc<dyn Fn() -> RuntimeGatewaySideEffectSnapshot + Send + Sync>>,
     owner_lock: Option<StateFileLock>,
+    _marker_guard: RuntimeProxyMarkerGuard,
 }
 
 type RuntimeLocalWebSocket = WsSocket<Box<dyn TinyReadWrite + Send>>;
@@ -366,9 +367,24 @@ pub fn main_entry() {
         return;
     }
     if let Err(err) = run() {
-        eprintln!("Error: {}", main_entry_error_message(&err));
+        if main_entry_error_is_broken_pipe(&err) {
+            return;
+        }
+        let _ = writeln!(
+            io::stderr().lock(),
+            "Error: {}",
+            main_entry_error_message(&err)
+        );
         std::process::exit(main_entry_exit_code(&err));
     }
+}
+
+fn main_entry_error_is_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|error| error.kind() == io::ErrorKind::BrokenPipe)
+    })
 }
 
 fn main_entry_exit_code(err: &anyhow::Error) -> i32 {
@@ -386,9 +402,16 @@ fn run() -> Result<()> {
     if command.should_show_update_notice() {
         let _ = show_update_notice_if_available(&command);
     }
-    ensure_runtime_policy_valid()?;
+    validate_command_runtime_policy(&command)?;
     schedule_prodex_auto_runtime_housekeeping(&command);
     command.execute()
+}
+
+fn validate_command_runtime_policy(command: &Commands) -> Result<()> {
+    if command.requires_valid_runtime_policy() {
+        ensure_runtime_policy_valid()?;
+    }
+    Ok(())
 }
 
 fn parse_cli_command_or_exit() -> Commands {
@@ -422,19 +445,22 @@ fn agy_bin() -> OsString {
     env::var_os("PRODEX_AGY_BIN").unwrap_or_else(|| OsString::from("agy"))
 }
 
-fn command_exists_on_path(command: &str) -> bool {
-    env::var_os("PATH")
-        .is_some_and(|paths| env::split_paths(&paths).any(|dir| dir.join(command).is_file()))
+fn command_exists_on_path(command: &str, paths: Option<&std::ffi::OsStr>) -> bool {
+    paths.is_some_and(|paths| env::split_paths(paths).any(|dir| dir.join(command).is_file()))
 }
 
 fn kiro_bin() -> OsString {
-    if let Some(path) = env::var_os("PRODEX_KIRO_BIN") {
+    kiro_bin_from(env::var_os("PRODEX_KIRO_BIN"), env::var_os("PATH"))
+}
+
+fn kiro_bin_from(override_path: Option<OsString>, paths: Option<OsString>) -> OsString {
+    if let Some(path) = override_path {
         return path;
     }
-    if command_exists_on_path("kiro-cli-chat") {
+    if command_exists_on_path("kiro-cli-chat", paths.as_deref()) {
         return OsString::from("kiro-cli-chat");
     }
-    if command_exists_on_path("kiro-cli") {
+    if command_exists_on_path("kiro-cli", paths.as_deref()) {
         return OsString::from("kiro-cli");
     }
     OsString::from("kiro-cli-chat")
@@ -442,55 +468,17 @@ fn kiro_bin() -> OsString {
 
 #[cfg(test)]
 mod kiro_bin_tests {
-    use super::kiro_bin;
-    use crate::{TestEnvLockGuard, acquire_test_env_lock};
+    use super::kiro_bin_from;
     use std::env;
     use std::ffi::OsString;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    struct EnvGuard {
-        _lock: TestEnvLockGuard,
-        key: &'static str,
-        previous: Option<OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: Option<OsString>) -> Self {
-            let lock = acquire_test_env_lock();
-            let previous = env::var_os(key);
-            match value {
-                Some(value) => unsafe { env::set_var(key, value) },
-                None => unsafe { env::remove_var(key) },
-            }
-            Self {
-                _lock: lock,
-                key,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match self.previous.take() {
-                Some(value) => unsafe { env::set_var(self.key, value) },
-                None => unsafe { env::remove_var(self.key) },
-            }
-        }
-    }
-
-    fn with_env_var(key: &'static str, value: Option<OsString>, f: impl FnOnce()) {
-        let _guard = EnvGuard::set(key, value);
-        f();
-    }
-
     #[test]
     fn kiro_bin_prefers_explicit_override() {
-        with_env_var(
-            "PRODEX_KIRO_BIN",
-            Some(OsString::from("/tmp/custom-kiro")),
-            || assert_eq!(kiro_bin(), OsString::from("/tmp/custom-kiro")),
+        assert_eq!(
+            kiro_bin_from(Some(OsString::from("/tmp/custom-kiro")), None),
+            OsString::from("/tmp/custom-kiro")
         );
     }
 
@@ -512,10 +500,10 @@ mod kiro_bin_tests {
         )
         .expect("fake binary should write");
 
-        with_env_var("PRODEX_KIRO_BIN", None, || {
-            let _path = EnvGuard::set("PATH", Some(root.clone().into_os_string()));
-            assert_eq!(kiro_bin(), OsString::from("kiro-cli"));
-        });
+        assert_eq!(
+            kiro_bin_from(None, Some(root.clone().into_os_string())),
+            OsString::from("kiro-cli")
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

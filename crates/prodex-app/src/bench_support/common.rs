@@ -123,6 +123,7 @@ pub(super) fn bench_runtime_shared(
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder()
             .build()
             .expect("benchmark async client should build"),

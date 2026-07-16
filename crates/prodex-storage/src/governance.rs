@@ -9,6 +9,9 @@ use prodex_domain::{
     compute_audit_chain_digest,
 };
 
+mod decisions;
+pub use decisions::*;
+
 pub const MAX_COMPILED_GOVERNANCE_ARTIFACT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,17 +279,6 @@ impl ApprovalVoteStableOutcome {
 pub enum ApprovalVoteMutationOutcome {
     Applied(ApprovalRecord),
     Replayed(ApprovalVoteSnapshot),
-}
-
-pub fn denied_approval_audit_outbox(
-    mut command: AuditOutboxWriteCommand,
-    denial: ApprovalVoteStableDenial,
-) -> AuditOutboxWriteCommand {
-    command.audit.event.outcome = AuditOutcome::Denied;
-    command.audit.event.reason_code = Some(denial.reason_code().to_string());
-    command.audit.event_digest =
-        compute_audit_chain_digest(command.audit.previous_digest.as_ref(), &command.audit.event);
-    command
 }
 
 impl fmt::Debug for ApprovalVoteRequest {
@@ -715,95 +707,6 @@ pub fn plan_governance_revision_write(
         return Err(GovernanceStorageError::ArtifactSizeInvalid);
     }
     Ok(GovernanceRevisionWritePlan(command))
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct GovernanceActivationCommand {
-    pub storage_key: TenantStorageKey,
-    pub tenant_id: TenantId,
-    pub kind: GovernanceArtifactKind,
-    pub revision_id: String,
-    pub fingerprint: ApprovalFingerprint,
-    pub approval: ApprovalRecord,
-    pub expected_etag: String,
-    pub current_active_revision_id: Option<String>,
-    pub current_last_known_good_revision_id: Option<String>,
-    pub activated_at_unix_ms: u64,
-}
-
-impl fmt::Debug for GovernanceActivationCommand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GovernanceActivationCommand")
-            .field("storage_key", &"<redacted>")
-            .field("tenant_id", &"<redacted>")
-            .field("kind", &self.kind)
-            .field("revision_id", &"<redacted>")
-            .field("fingerprint", &self.fingerprint)
-            .field("approval", &"<redacted>")
-            .field("expected_etag", &"<redacted>")
-            .field("current_active_revision_id", &"<redacted>")
-            .field("current_last_known_good_revision_id", &"<redacted>")
-            .field("activated_at_unix_ms", &"<redacted>")
-            .finish()
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct GovernanceActivationPlan {
-    pub tenant_id: TenantId,
-    pub kind: GovernanceArtifactKind,
-    pub activated_revision_id: String,
-    pub previous_active_revision_id: Option<String>,
-    pub last_known_good_revision_id: Option<String>,
-    pub expected_etag: String,
-    pub transactional_audit_required: bool,
-    pub invalidation_required: bool,
-}
-
-impl fmt::Debug for GovernanceActivationPlan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("GovernanceActivationPlan")
-            .field("tenant_id", &"<redacted>")
-            .field("kind", &self.kind)
-            .field("activated_revision_id", &"<redacted>")
-            .field("previous_active_revision_id", &"<redacted>")
-            .field("last_known_good_revision_id", &"<redacted>")
-            .field("expected_etag", &"<redacted>")
-            .field("transactional_audit_required", &true)
-            .field("invalidation_required", &true)
-            .finish()
-    }
-}
-
-pub fn plan_governance_activation(
-    command: GovernanceActivationCommand,
-) -> Result<GovernanceActivationPlan, GovernanceStorageError> {
-    if command.storage_key.tenant_id != command.tenant_id
-        || command.approval.tenant_id != command.tenant_id
-    {
-        return Err(GovernanceStorageError::TenantMismatch);
-    }
-    if command.approval.state != ApprovalState::Approved
-        || command.approval.fingerprint != command.fingerprint
-    {
-        return Err(GovernanceStorageError::ApprovalRequired);
-    }
-    if command.expected_etag.is_empty() || command.expected_etag.len() > 128 {
-        return Err(GovernanceStorageError::InvalidEtag);
-    }
-    Ok(GovernanceActivationPlan {
-        tenant_id: command.tenant_id,
-        kind: command.kind,
-        activated_revision_id: command.revision_id,
-        last_known_good_revision_id: command
-            .current_active_revision_id
-            .clone()
-            .or(command.current_last_known_good_revision_id),
-        previous_active_revision_id: command.current_active_revision_id,
-        expected_etag: command.expected_etag,
-        transactional_audit_required: true,
-        invalidation_required: true,
-    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

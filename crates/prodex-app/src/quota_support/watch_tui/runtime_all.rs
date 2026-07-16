@@ -140,7 +140,7 @@ fn watch_all_quotas_tui(
     provider_filter: QuotaProviderFilter,
     provider_filter_locked: bool,
 ) -> Result<()> {
-    let mut tui = QuotaWatchTui::new()?;
+    let mut tui = QuotaWatchTui::stdout("quota TUI")?;
     let mut scroll_offset = 0_usize;
     let mut sort = QuotaReportSort::Current;
     let mut provider_filter = provider_filter;

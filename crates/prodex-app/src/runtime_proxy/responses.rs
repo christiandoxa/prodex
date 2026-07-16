@@ -4,6 +4,7 @@ mod affinity_state;
 mod attempt;
 mod fallback;
 mod local_selection;
+mod overloaded;
 mod previous_response;
 mod quota_blocked;
 
@@ -21,6 +22,7 @@ use self::local_selection::{
     handle_runtime_responses_local_selection_blocked, runtime_responses_local_selection_action,
     runtime_responses_local_selection_failure_reply,
 };
+use self::overloaded::{RuntimeResponsesOverloaded, handle_runtime_responses_overloaded};
 use self::previous_response::{
     RuntimeResponsesPreviousResponseNotFoundContextInput,
     runtime_responses_previous_response_not_found_context,
@@ -375,6 +377,24 @@ pub(crate) fn proxy_runtime_responses_request(
                         previous_response_fresh_fallback_shape,
                         affinity_state: &mut affinity_state,
                         auto_redeemed_profiles: &mut auto_redeemed_profiles,
+                        excluded_profiles: &mut loop_state.excluded_profiles,
+                        last_failure: &mut loop_state.last_failure,
+                    })?
+                {
+                    return Ok(response);
+                }
+            }
+            RuntimeResponsesAttempt::Overloaded {
+                profile_name,
+                response,
+            } => {
+                if let Some(response) =
+                    handle_runtime_responses_overloaded(RuntimeResponsesOverloaded {
+                        request_id,
+                        shared,
+                        profile_name,
+                        response,
+                        affinity_state: &affinity_state,
                         excluded_profiles: &mut loop_state.excluded_profiles,
                         last_failure: &mut loop_state.last_failure,
                     })?

@@ -28,13 +28,14 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
         RuntimeResponsesAttempt::LocalSelectionBlocked {
             profile_name,
             reason,
-        } => panic!(
-            "weekly exhausted should not pre-send block profile {profile_name}: {reason}"
-        ),
+        } => panic!("weekly exhausted should not pre-send block profile {profile_name}: {reason}"),
         RuntimeResponsesAttempt::Success { profile_name, .. } => {
             assert_eq!(profile_name, "main");
         }
         RuntimeResponsesAttempt::QuotaBlocked { profile_name, .. } => {
+            assert_eq!(profile_name, "main");
+        }
+        RuntimeResponsesAttempt::Overloaded { profile_name, .. } => {
             assert_eq!(profile_name, "main");
         }
         RuntimeResponsesAttempt::AuthFailed { profile_name, .. } => {
@@ -44,17 +45,21 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
             assert_eq!(profile_name, "main");
         }
     }
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
 }
 
 #[test]
 fn scripted_backend_fault_plain_429_passes_through_without_rotation() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::plain_429(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::plain_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
         "main-account",
@@ -78,17 +83,21 @@ fn scripted_backend_fault_plain_429_passes_through_without_rotation() {
 
     assert_eq!(parts.status, 429);
     assert_eq!(body, "Too Many Requests");
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
 }
 
 #[test]
 fn usage_workspace_credits_error_rotates_to_ready_profile() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::workspace_credits_exhausted(
-            RuntimeProxyBackendFaultRoute::Usage,
-            "main-account",
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::workspace_credits_exhausted(
+                RuntimeProxyBackendFaultRoute::Usage,
+                "main-account",
+            ),
+        ]));
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
@@ -107,7 +116,10 @@ fn usage_workspace_credits_error_rotates_to_ready_profile() {
         .expect("usage quota failure should rotate to another ready profile");
     let (status, body) = tiny_http_response_status_and_body(response);
 
-    assert_eq!(status, 200, "usage retry should succeed on second profile: {body}");
+    assert_eq!(
+        status, 200,
+        "usage retry should succeed on second profile: {body}"
+    );
     assert!(
         body.contains("second@example.com"),
         "ready second profile usage response should be returned: {body}"
@@ -123,8 +135,52 @@ fn usage_workspace_credits_error_rotates_to_ready_profile() {
         "usage route should try main first: {usage_accounts:?}"
     );
     assert!(
-        usage_accounts.iter().any(|account| account == "second-account"),
+        usage_accounts
+            .iter()
+            .any(|account| account == "second-account"),
         "usage route should rotate to the ready second profile: {usage_accounts:?}"
+    );
+}
+
+#[test]
+fn scripted_noncompact_overload_rotates_fresh_request() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Usage,
+                "main-account",
+            ),
+        ]));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/wham/usage".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+
+    let response = proxy_runtime_standard_request(15, &request, harness.shared())
+        .expect("fresh noncompact overload should retry another profile");
+    let (status, body) = tiny_http_response_status_and_body(response);
+
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("second@example.com"), "{body}");
+    let usage_accounts = backend.usage_accounts();
+    assert_eq!(
+        usage_accounts.first().map(String::as_str),
+        Some("main-account")
+    );
+    assert!(
+        usage_accounts
+            .get(1..)
+            .is_some_and(|accounts| accounts.iter().all(|account| account == "second-account")),
+        "{usage_accounts:?}"
     );
 }
 
@@ -178,7 +234,8 @@ fn standard_get_waits_for_ready_profile_inflight_relief() {
 
     assert_eq!(status, 200);
     release.join().expect("release thread should join");
-    let log = fs::read_to_string(&harness.shared().log_path).expect("runtime log should be readable");
+    let log =
+        fs::read_to_string(&harness.shared().log_path).expect("runtime log should be readable");
     assert!(log.contains("inflight_wait_started route=standard"));
     assert!(log.contains("inflight_wait_finished route=standard"));
     assert!(log.contains("useful=true"));
@@ -186,12 +243,13 @@ fn standard_get_waits_for_ready_profile_inflight_relief() {
 
 #[test]
 fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::explicit_quota_429(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::explicit_quota_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
@@ -219,7 +277,10 @@ fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
         .expect("healthy streaming response body should read");
 
     assert_eq!(status, 200);
-    assert!(!body.contains("usage limit"), "quota failure leaked: {body}");
+    assert!(
+        !body.contains("usage limit"),
+        "quota failure leaked: {body}"
+    );
     assert_eq!(
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
@@ -227,13 +288,112 @@ fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
 }
 
 #[test]
+fn scripted_responses_overload_rotates_fresh_request() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"input":[]}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_responses_request(13, &request, harness.shared())
+        .expect("fresh overload should retry another profile");
+    let RuntimeResponsesReply::Streaming(mut streaming) = response else {
+        panic!("fresh overload retry should finish with the healthy streaming response");
+    };
+    let mut body = String::new();
+    streaming
+        .body
+        .read_to_string(&mut body)
+        .expect("healthy streaming response should read");
+
+    assert_eq!(streaming.status, 200);
+    assert!(!body.contains("server_is_overloaded"), "{body}");
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
+fn scripted_responses_overload_keeps_hard_affinity_owner() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    {
+        let now = Local::now().timestamp();
+        let mut runtime = harness.shared().runtime.lock().expect("runtime lock");
+        runtime.state.response_profile_bindings.insert(
+            "resp-main".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: now,
+            },
+        );
+        assert!(runtime_mark_continuation_status_verified(
+            &mut runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::Response,
+            "resp-main",
+            now,
+            Some(RuntimeRouteKind::Responses),
+        ));
+    }
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body: br#"{"previous_response_id":"resp-main","input":[{"role":"user","content":"continue"}]}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_responses_request(14, &request, harness.shared())
+        .expect("hard-affinity overload should pass through");
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("hard-affinity overload should preserve the upstream HTTP response");
+    };
+    let body = String::from_utf8(parts.body.into_vec()).expect("overload body should decode");
+
+    assert_eq!(parts.status, 503);
+    assert!(body.contains("server_is_overloaded"), "{body}");
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
+}
+
+#[test]
 fn scripted_backend_fault_usage_limit_429_passes_through_without_rotation() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new(
-        [RuntimeProxyBackendFaultStep::usage_limit_429(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        )],
-    ));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::usage_limit_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
@@ -256,8 +416,14 @@ fn scripted_backend_fault_usage_limit_429_passes_through_without_rotation() {
     let body = String::from_utf8(parts.body.into_vec()).expect("429 body should decode");
 
     assert_eq!(parts.status, 429);
-    assert!(body.contains("usage limit"), "expected original 429 body: {body}");
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert!(
+        body.contains("usage limit"),
+        "expected original 429 body: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
 }
 
 #[test]

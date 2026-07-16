@@ -2,6 +2,25 @@ use super::*;
 use std::path::PathBuf;
 
 #[test]
+fn smart_context_artifact_ties_merge_commutatively() {
+    let left_artifact = runtime_smart_context_artifact_from_content("same", "alpha", 10);
+    let right_artifact = runtime_smart_context_artifact_from_content("same", "bravo", 10);
+    let left = RuntimeSmartContextArtifactStore {
+        artifacts: BTreeMap::from([("same".to_string(), left_artifact)]),
+        ..RuntimeSmartContextArtifactStore::default()
+    };
+    let right = RuntimeSmartContextArtifactStore {
+        artifacts: BTreeMap::from([("same".to_string(), right_artifact)]),
+        ..RuntimeSmartContextArtifactStore::default()
+    };
+
+    assert_eq!(
+        merge_runtime_smart_context_artifact_stores(left.clone(), right.clone()).artifacts,
+        merge_runtime_smart_context_artifact_stores(right, left).artifacts
+    );
+}
+
+#[test]
 fn smart_context_stale_pruning_reuses_exact_large_payload() {
     let decision = runtime_smart_context_stale_context_pruning_decision(
         RuntimeSmartContextStaleContextPruningInput {
@@ -214,7 +233,7 @@ fn smart_context_artifact_json_round_trips_and_validates_metadata() {
         100,
     );
 
-    let json = runtime_smart_context_artifact_store_to_json(&store);
+    let json = runtime_smart_context_artifact_store_to_json(&store).expect("store json serialized");
     assert!(json.contains("\\\"quoted\\\""));
     assert!(json.contains("\\n"));
     assert!(json.contains("\\t"));
@@ -239,9 +258,31 @@ fn smart_context_artifact_json_round_trips_and_validates_metadata() {
 }
 
 #[test]
+fn smart_context_artifact_json_reads_legacy_object_shape() {
+    let content = "alpha";
+    let hash = runtime_smart_context_artifact_content_hash(content.as_bytes());
+    let json = serde_json::json!({
+        "artifacts": {
+            "legacy": {
+                "content_hash": hash,
+                "byte_len": content.len(),
+                "created_at": 10,
+                "last_accessed_at": 20,
+                "content": content,
+            }
+        }
+    })
+    .to_string();
+
+    let store = runtime_smart_context_artifact_store_from_json(&json).unwrap();
+    assert_eq!(store.version, RUNTIME_SMART_CONTEXT_ARTIFACT_STORE_VERSION);
+    assert_eq!(store.artifacts["legacy"].key, "legacy");
+}
+
+#[test]
 fn smart_context_artifact_file_save_merges_existing_json() {
     let path = smart_context_temp_path("merge");
-    let _ = std::fs::remove_file(&path);
+    remove_smart_context_temp_files(&path);
     let policy = RuntimeSmartContextArtifactStorePolicy {
         ttl_seconds: 100,
         max_entries: 8,
@@ -269,7 +310,41 @@ fn smart_context_artifact_file_save_merges_existing_json() {
     let loaded =
         load_runtime_smart_context_artifact_store(&path, 40, policy).expect("store loaded");
     assert_eq!(loaded, merged);
-    std::fs::remove_file(path).expect("temp store removed");
+    remove_smart_context_temp_files(&path);
+}
+
+#[test]
+fn smart_context_artifact_file_concurrent_merges_keep_both_writers() {
+    let path = smart_context_temp_path("concurrent-merge");
+    remove_smart_context_temp_files(&path);
+    let policy = RuntimeSmartContextArtifactStorePolicy {
+        ttl_seconds: 100,
+        max_entries: 8,
+    };
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let handles = ["alpha", "bravo"].map(|key| {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            let mut store = RuntimeSmartContextArtifactStore::default();
+            runtime_smart_context_upsert_artifact(&mut store, key, key, 40);
+            barrier.wait();
+            save_merged_runtime_smart_context_artifact_store(&path, &store, 40, policy)
+                .expect("concurrent merge saved");
+        })
+    });
+    barrier.wait();
+    for handle in handles {
+        handle.join().expect("merge worker joined");
+    }
+
+    let loaded =
+        load_runtime_smart_context_artifact_store(&path, 40, policy).expect("merged store loaded");
+    assert_eq!(
+        loaded.artifacts.keys().cloned().collect::<Vec<_>>(),
+        vec!["alpha".to_string(), "bravo".to_string()]
+    );
+    remove_smart_context_temp_files(&path);
 }
 
 #[test]
@@ -301,4 +376,11 @@ fn smart_context_temp_path(name: &str) -> PathBuf {
         "prodex-runtime-store-smart-context-{name}-{}-{nanos}.json",
         std::process::id()
     ))
+}
+
+fn remove_smart_context_temp_files(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
+    if let Some(file_name) = path.file_name().and_then(|value| value.to_str()) {
+        let _ = std::fs::remove_file(path.with_file_name(format!(".{file_name}.lock")));
+    }
 }

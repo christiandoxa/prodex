@@ -7,7 +7,10 @@ use anyhow::{Context, Result};
 use dirs::home_dir;
 use std::path::{Path, PathBuf};
 
-pub fn runtime_proxy_claude_config_value(codex_home: &Path, key: &str) -> Option<String> {
+pub fn runtime_proxy_claude_config_value(
+    codex_home: &Path,
+    key: &str,
+) -> codex_config::CodexConfigResult<Option<String>> {
     codex_config::codex_config_value(codex_home, key)
 }
 

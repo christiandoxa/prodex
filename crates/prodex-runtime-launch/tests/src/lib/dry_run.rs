@@ -47,7 +47,7 @@ fn runtime_launch_dry_run_report_redacts_secret_env_and_args() {
             ]),
     );
 
-    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan);
+    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan).unwrap();
 
     assert!(report.contains("Model: gpt-5.4"));
     assert!(report.contains("ANTHROPIC_AUTH_TOKEN=<redacted>"));
@@ -73,7 +73,7 @@ fn runtime_launch_dry_run_report_prefers_cli_model_flag() {
         ]),
     );
 
-    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan);
+    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan).unwrap();
 
     assert!(report.contains("Model: gpt-5.3-codex-spark"));
 }
@@ -104,7 +104,7 @@ fn runtime_launch_dry_run_report_reads_profile_v2_overlay() {
             .with_args(vec![OsString::from("--profile-v2=local")]),
     );
 
-    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan);
+    let report = runtime_launch_dry_run_report("run", &codex_home, None, &plan).unwrap();
 
     assert!(report.contains("Provider: prodex-local"));
     assert!(report.contains("Model: qwen3-coder"));

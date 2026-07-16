@@ -570,9 +570,9 @@ fn profile_import_auth_update_journal_rejects_mismatched_codex_home() {
         )),
         Local::now().to_rfc3339(),
     );
-    fs::write(
+    prodex_profile_export::write_profile_import_auth_update_journal(
         journal_root.join("main-forged.json"),
-        serde_json::to_string_pretty(&journal).expect("journal should serialize"),
+        &journal,
     )
     .expect("forged journal should be written");
 

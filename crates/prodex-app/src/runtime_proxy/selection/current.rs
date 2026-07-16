@@ -25,6 +25,7 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
 ) -> Result<Option<String>> {
     let pressure_mode = runtime_proxy_pressure_mode_active(shared);
     let prompt_cache_owner_profile = runtime_prompt_cache_bound_profile(prompt_cache_key);
+    let profile_inflight = shared.lane_admission.profile_inflight_snapshot();
     let (
         current_profile,
         codex_home,
@@ -66,7 +67,7 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
                 route_kind,
                 now,
             ),
-            runtime_profile_inflight_count(&runtime, &runtime.current_profile),
+            runtime_profile_inflight_sort_key(&runtime.current_profile, &profile_inflight),
             runtime_profile_health_score(&runtime, &runtime.current_profile, now, route_kind),
             runtime_profile_route_performance_score(
                 &runtime.profile_health,

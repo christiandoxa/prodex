@@ -102,6 +102,10 @@ fn file_backend_rejects_oversized_secret_reads() {
 
     let err = store.read(&location).unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
+    assert_eq!(
+        err.invalid_location_kind(),
+        Some(crate::SecretInvalidLocationKind::SizeLimitExceeded)
+    );
     assert!(err.to_string().contains("exceeds safe size limit"));
 
     let _ = fs::remove_dir_all(root);
@@ -118,6 +122,10 @@ fn file_backend_rejects_oversized_secret_writes() {
         .write(&location, SecretValue::bytes(vec![b'x'; 1024 * 1024 + 1]))
         .unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
+    assert_eq!(
+        err.invalid_location_kind(),
+        Some(crate::SecretInvalidLocationKind::SizeLimitExceeded)
+    );
     assert!(err.to_string().contains("exceeds safe size limit"));
     assert!(!path.exists());
 
@@ -261,10 +269,9 @@ fn file_backend_rejects_symlink_secret_reads() {
     let store = SecretManager::new(FileSecretBackend::new());
     let location = SecretLocation::file(&path);
 
-    assert!(matches!(
-        store.read_text(&location).unwrap_err(),
-        SecretError::InvalidLocation { .. }
-    ));
+    let read_error = store.read_text(&location).unwrap_err();
+    assert!(matches!(&read_error, SecretError::InvalidLocation { .. }));
+    assert!(read_error.is_unsafe_file());
     assert!(matches!(
         store.probe_revision(&location).unwrap_err(),
         SecretError::InvalidLocation { .. }
@@ -466,23 +473,19 @@ fn selectable_backend_file_round_trips_text_values() {
 
 #[test]
 fn secret_error_response_is_stable_and_redacted() {
-    let error = SecretError::Io {
-        path: PathBuf::from("/tmp/prodex/auth.json"),
-        reason: "permission denied".to_string(),
-    };
+    let error = SecretError::io(
+        "/tmp/prodex/auth.json",
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied"),
+    );
     assert!(!error.to_string().contains("/tmp"));
     assert!(!error.to_string().contains("auth.json"));
     assert!(!error.to_string().contains("permission"));
 
-    let unsupported = SecretError::UnsupportedLocation {
-        location: "keyring://prodex/auth-json:/tmp/codex-home".to_string(),
-    };
+    let unsupported = SecretError::unsupported("keyring://prodex/auth-json:/tmp/codex-home");
     assert!(!unsupported.to_string().contains("keyring://"));
     assert!(!unsupported.to_string().contains("/tmp/codex-home"));
 
-    let invalid = SecretError::InvalidLocation {
-        reason: "unknown secret backend 'raw-prod-token'".to_string(),
-    };
+    let invalid = SecretError::invalid_location("unknown secret backend 'raw-prod-token'");
     assert!(!invalid.to_string().contains("raw-prod-token"));
 
     let response = plan_secret_error_response(&error);
@@ -502,10 +505,13 @@ fn secret_error_response_is_stable_and_redacted() {
 fn secret_store_debug_output_is_stable_and_redacted() {
     let location = SecretLocation::keyring("prodex-secret-service", "auth-json:/tmp/codex-home");
     let value = SecretValue::text("super-secret-token");
-    let error = SecretError::Io {
-        path: PathBuf::from("/tmp/prodex/auth.json"),
-        reason: "permission denied for super-secret-token".to_string(),
-    };
+    let error = SecretError::io(
+        "/tmp/prodex/auth.json",
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied for super-secret-token",
+        ),
+    );
     let keyring_backend = KeyringSecretBackend::new("prodex-secret-service").unwrap();
     let selection = SecretBackendSelection::Keyring(keyring_backend.clone());
 
@@ -530,14 +536,15 @@ fn secret_store_debug_output_is_stable_and_redacted() {
 
     fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
     requires_zeroize_on_drop::<SecretValue>();
+    requires_zeroize_on_drop::<SecretError>();
 }
 
 #[test]
 fn refresh_lease_error_response_is_stable_and_redacted() {
-    let error = RefreshLeaseError::Io {
-        path: PathBuf::from("/tmp/prodex/refresh-token-secret.lock"),
-        reason: "permission denied".to_string(),
-    };
+    let error = RefreshLeaseError::io(
+        "/tmp/prodex/refresh-token-secret.lock",
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied"),
+    );
     assert!(!error.to_string().contains("/tmp"));
     assert!(!error.to_string().contains("refresh-token-secret"));
     assert!(!error.to_string().contains("permission"));
@@ -575,10 +582,13 @@ fn refresh_lease_debug_output_is_stable_and_redacted() {
             .to_string()
             .into(),
     };
-    let error = RefreshLeaseError::Io {
-        path: root.join("refresh-token-secret.lock"),
-        reason: "permission denied for super-refresh-secret".to_string(),
-    };
+    let error = RefreshLeaseError::io(
+        root.join("refresh-token-secret.lock"),
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "permission denied for super-refresh-secret",
+        ),
+    );
 
     let rendered = format!("{coordinator:?} {paths:?} {owner:?} {follower:?} {error:?}");
 
@@ -601,6 +611,9 @@ fn refresh_lease_debug_output_is_stable_and_redacted() {
     assert!(rendered.contains("RefreshLeaseOwner"));
     assert!(rendered.contains("Follower"));
     assert!(rendered.contains("Io"));
+
+    fn requires_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    requires_zeroize_on_drop::<RefreshLeaseError>();
 
     let _ = fs::remove_dir_all(root);
 }

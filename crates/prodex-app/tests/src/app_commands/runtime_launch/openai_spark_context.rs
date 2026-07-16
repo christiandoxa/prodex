@@ -11,7 +11,8 @@ fn runtime_launch_injects_openai_spark_context_defaults() {
             OsString::from("--model"),
             OsString::from("gpt-5.3-codex-spark"),
         ],
-    );
+    )
+    .unwrap();
     let rendered = args
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
@@ -41,7 +42,8 @@ fn runtime_launch_uses_cached_openai_spark_context_metadata() {
             OsString::from("--model"),
             OsString::from("gpt-5.3-codex-spark"),
         ],
-    );
+    )
+    .unwrap();
 
     let rendered = args
         .iter()
@@ -63,7 +65,7 @@ fn runtime_launch_injects_cached_openai_gpt5_context_metadata() {
     )
     .unwrap();
 
-    let args = runtime_launch_openai_spark_context_codex_args(&root, &[]);
+    let args = runtime_launch_openai_spark_context_codex_args(&root, &[]).unwrap();
     let rendered = args
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
@@ -86,7 +88,8 @@ fn runtime_launch_does_not_inject_openai_spark_defaults_for_copilot_provider() {
             OsString::from("--model"),
             OsString::from("gpt-5.3-codex-spark"),
         ],
-    );
+    )
+    .unwrap();
 
     assert!(!args.iter().any(|arg| arg == "model_context_window=128000"));
     assert!(

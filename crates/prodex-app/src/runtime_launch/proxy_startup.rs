@@ -406,6 +406,10 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         upstream_no_proxy,
         auto_redeem_enabled: auto_redeem,
         async_client: build_runtime_upstream_async_http_client(upstream_no_proxy, &runtime_config)?,
+        compact_client: build_runtime_upstream_async_http_compact_client(
+            upstream_no_proxy,
+            &runtime_config,
+        )?,
         async_runtime,
         log_path: log_path.clone(),
         request_sequence: Arc::new(AtomicU64::new(runtime_proxy_request_sequence_seed(
@@ -433,10 +437,10 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
             profile_retry_backoff_until: persisted_backoffs.value.retry_backoff_until,
             profile_transport_backoff_until: persisted_backoffs.value.transport_backoff_until,
             profile_route_circuit_open_until: persisted_backoffs.value.route_circuit_open_until,
-            profile_inflight: BTreeMap::new(),
             profile_health: persisted_profile_scores.value,
         })),
     };
+    let marker_guard = RuntimeProxyMarkerGuard::new(&log_path);
     register_runtime_proxy_persistence_mode(&log_path, persistence_enabled);
     register_runtime_smart_context_proxy_state(
         &log_path,
@@ -502,13 +506,17 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     audit_runtime_proxy_startup_state(&shared);
     schedule_runtime_startup_probe_warmup(&shared);
     if persisted_backoffs_softened && let Ok(runtime) = shared.runtime.lock() {
-        schedule_runtime_state_save_from_runtime(&shared, &runtime, "startup_backoff_soften");
+        schedule_runtime_state_save_from_runtime(
+            &shared,
+            &runtime,
+            RuntimeStateMutation::StartupBackoffSoften,
+        );
     }
     if continuation_migration_needed && let Ok(runtime) = shared.runtime.lock() {
         schedule_runtime_state_save_from_runtime(
             &shared,
             &runtime,
-            "startup_continuation_migration",
+            RuntimeStateMutation::StartupContinuationMigration,
         );
     }
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -516,10 +524,10 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         &log_path,
         &format!(
             "runtime proxy worker_count={worker_count} async_worker_count={async_worker_count} long_lived_worker_count={long_lived_worker_count} long_lived_queue_capacity={long_lived_queue_capacity} active_request_limit={active_request_limit} lane_limits=responses:{} compact:{} websocket:{} standard:{}",
-            lane_admission.limits.responses,
-            lane_admission.limits.compact,
-            lane_admission.limits.websocket,
-            lane_admission.limits.standard
+            lane_admission.limits().responses,
+            lane_admission.limits().compact,
+            lane_admission.limits().websocket,
+            lane_admission.limits().standard
         ),
     );
     let worker_threads = spawn_runtime_rotation_proxy_workers(
@@ -529,7 +537,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         worker_count,
         long_lived_worker_count,
         long_lived_queue_capacity,
-    );
+    )?;
 
     Ok(RuntimeRotationProxy {
         runtime_config: Arc::clone(&runtime_config),
@@ -553,6 +561,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         #[cfg(test)]
         gateway_side_effect_snapshot: None,
         owner_lock,
+        _marker_guard: marker_guard,
     })
 }
 

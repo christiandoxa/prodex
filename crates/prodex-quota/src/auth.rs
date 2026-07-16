@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -288,21 +287,7 @@ pub fn parse_jwt_payload<T>(raw_jwt: &str) -> Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    let mut parts = raw_jwt.split('.');
-    let (_header_b64, payload_b64, _sig_b64) = match (parts.next(), parts.next(), parts.next()) {
-        (Some(header), Some(payload), Some(signature))
-            if !header.is_empty() && !payload.is_empty() && !signature.is_empty() =>
-        {
-            (header, payload, signature)
-        }
-        _ => bail!("invalid JWT format"),
-    };
-
-    let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload_b64)
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(payload_b64))
-        .context("failed to decode JWT payload")?;
-    serde_json::from_slice(&payload_bytes).context("failed to parse JWT payload JSON")
+    prodex_profile_identity::parse_jwt_payload(raw_jwt)
 }
 
 #[derive(Deserialize, Serialize)]

@@ -48,6 +48,10 @@ impl OpenedFile {
         }
         Ok(std::mem::take(&mut *bytes))
     }
+
+    pub(crate) fn into_file(self) -> File {
+        self.file
+    }
 }
 
 pub(crate) struct SecureDirectory(platform::Directory);
@@ -169,6 +173,11 @@ pub(crate) fn delete_private_verified(path: &Path, file: &File) -> io::Result<()
         Err(error) => return Err(error),
     };
     directory.0.remove_verified(&name, file)
+}
+
+pub(crate) fn verify_private_file(path: &Path, file: &File) -> io::Result<()> {
+    let (directory, name) = open_parent(path, false)?;
+    directory.0.verify(&name, file)
 }
 
 pub(crate) fn remove_untrusted_entry(path: &Path) -> io::Result<()> {

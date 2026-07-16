@@ -1,6 +1,6 @@
 use crate::{
-    codex_cli_config_override_exact_value, codex_cli_config_override_value,
-    codex_config_exact_value, codex_config_value,
+    codex_cli_config_override_value, codex_effective_config_exact_value,
+    codex_effective_config_value,
 };
 use anyhow::{Context, Result};
 use prodex_cli::{
@@ -45,14 +45,14 @@ fn local_provider_catalog_codex_args(
     user_args: &[OsString],
     write_catalog: bool,
 ) -> Result<Vec<OsString>> {
-    if !local_provider_enabled(codex_home, user_args) {
+    if !local_provider_enabled(codex_home, user_args)? {
         return Ok(user_args.to_vec());
     }
     if codex_cli_config_override_value(user_args, "model_catalog_json").is_some() {
         return Ok(user_args.to_vec());
     }
 
-    let model = local_model_for_launch(codex_home, user_args);
+    let model = local_model_for_launch(codex_home, user_args)?;
     let context_window = local_u64_config_for_launch(
         codex_home,
         user_args,
@@ -86,18 +86,20 @@ fn local_provider_catalog_codex_args(
     Ok(args)
 }
 
-fn local_provider_enabled(codex_home: &Path, user_args: &[OsString]) -> bool {
-    codex_cli_config_override_value(user_args, "model_provider")
-        .or_else(|| codex_config_value(codex_home, "model_provider"))
-        .is_some_and(|provider| provider.eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID))
+fn local_provider_enabled(codex_home: &Path, user_args: &[OsString]) -> Result<bool> {
+    Ok(
+        codex_effective_config_value(codex_home, user_args, "model_provider")?
+            .is_some_and(|provider| provider.eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)),
+    )
 }
 
-fn local_model_for_launch(codex_home: &Path, user_args: &[OsString]) -> String {
-    codex_cli_config_override_value(user_args, "model")
-        .or_else(|| codex_config_value(codex_home, "model"))
-        .map(|model| model.trim().to_string())
-        .filter(|model| !model.is_empty())
-        .unwrap_or_else(|| SUPER_DEFAULT_LOCAL_MODEL.to_string())
+fn local_model_for_launch(codex_home: &Path, user_args: &[OsString]) -> Result<String> {
+    Ok(
+        codex_effective_config_value(codex_home, user_args, "model")?
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty())
+            .unwrap_or_else(|| SUPER_DEFAULT_LOCAL_MODEL.to_string()),
+    )
 }
 
 fn local_u64_config_for_launch(
@@ -106,9 +108,7 @@ fn local_u64_config_for_launch(
     key: &str,
     default_value: u64,
 ) -> Result<u64> {
-    let Some(value) = codex_cli_config_override_exact_value(user_args, key)
-        .or_else(|| codex_config_exact_value(codex_home, key))
-    else {
+    let Some(value) = codex_effective_config_exact_value(codex_home, user_args, key)? else {
         return Ok(default_value);
     };
     runtime_catalog_u64_config_value("local provider", key, &value)

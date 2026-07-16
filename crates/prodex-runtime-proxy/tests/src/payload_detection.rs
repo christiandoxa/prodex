@@ -498,6 +498,7 @@ fn quota_http_body_detection_accepts_explicit_quota_payloads_but_not_generic_429
         "rate_limit_exceeded",
         "usage_not_included",
         "usage_limit_reached",
+        "workspace_member_credits_depleted",
     ] {
         let body = serde_json::to_vec(&serde_json::json!({
             "error": {
@@ -523,6 +524,29 @@ fn quota_http_body_detection_accepts_explicit_quota_payloads_but_not_generic_429
                 .to_string()
         )
     );
+}
+
+#[test]
+fn websocket_workspace_credit_detection_uses_central_code_and_message_rules() {
+    for payload in [
+        RuntimeWebsocketErrorPayload::Text(
+            r#"{"error":{"code":"workspace_member_credits_depleted"}}"#.to_string(),
+        ),
+        RuntimeWebsocketErrorPayload::Text(
+            "Your workspace is out of credits. Ask your workspace owner to refill.".to_string(),
+        ),
+        RuntimeWebsocketErrorPayload::Binary(
+            br#"{"error":{"type":"workspace_member_credits_depleted"}}"#.to_vec(),
+        ),
+    ] {
+        assert!(runtime_websocket_workspace_credit_exhausted(&payload));
+    }
+
+    assert!(!runtime_websocket_workspace_credit_exhausted(
+        &RuntimeWebsocketErrorPayload::Text(
+            r#"{"error":{"code":"insufficient_quota"}}"#.to_string(),
+        )
+    ));
 }
 
 #[test]
@@ -627,6 +651,15 @@ fn inspect_sse_buffer_detects_usage_not_included_before_commit() {
         progress,
         RuntimeSseInspectionProgress::QuotaBlocked
     ));
+}
+
+#[test]
+fn inspect_sse_buffer_detects_overload_before_commit() {
+    let progress = inspect_runtime_sse_buffer(
+        b"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Server is overloaded\"}}}",
+    );
+
+    assert!(matches!(progress, RuntimeSseInspectionProgress::Overloaded));
 }
 
 #[test]

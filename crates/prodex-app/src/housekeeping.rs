@@ -35,7 +35,11 @@ fn prodex_cleanup_transient_root_file_paths(paths: &AppPaths) -> Vec<PathBuf> {
 }
 
 pub(crate) fn cleanup_prodex_transient_root_files(paths: &AppPaths) -> usize {
-    prodex_housekeeping::cleanup_existing_files(prodex_cleanup_transient_root_file_paths(paths))
+    prodex_housekeeping::cleanup_existing_files_under(
+        &paths.root,
+        prodex_cleanup_transient_root_file_paths(paths),
+    )
+    .removed
 }
 
 pub(crate) fn cleanup_prodex_stale_root_temp_files_at(paths: &AppPaths, now: SystemTime) -> usize {

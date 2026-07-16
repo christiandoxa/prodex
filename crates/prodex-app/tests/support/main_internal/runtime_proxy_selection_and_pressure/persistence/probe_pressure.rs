@@ -67,7 +67,6 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_auth_failure_key("main"),
             RuntimeProfileHealth {
@@ -80,6 +79,7 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()
@@ -275,7 +275,6 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
-        profile_inflight: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_auth_failure_key("main"),
             RuntimeProfileHealth {
@@ -288,6 +287,7 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         auto_redeem_enabled: false,
         upstream_no_proxy: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_multi_thread()

@@ -182,13 +182,10 @@ pub(crate) fn runtime_load_json_file_or_default<T>(path: &Path, valid: impl Fn(&
 where
     T: DeserializeOwned + Default,
 {
-    if !runtime_json_path_is_regular_file(path) {
-        return T::default();
-    }
-    let Ok(bytes) = fs::read(path) else {
+    let Ok(json) = crate::runtime_store::read_json_file_to_string(path) else {
         return T::default();
     };
-    let Ok(value) = serde_json::from_slice::<T>(&bytes) else {
+    let Ok(value) = serde_json::from_str::<T>(&json) else {
         return T::default();
     };
     if valid(&value) { value } else { T::default() }
@@ -213,14 +210,6 @@ where
     let bytes = serde_json::to_vec(&merged).context("failed to encode JSON")?;
     runtime_write_json_file_atomic(path, &bytes)
         .with_context(|| format!("failed to write {}", path.display()))
-}
-
-fn runtime_json_path_is_regular_file(path: &Path) -> bool {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata.file_type().is_file(),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => false,
-        Err(_) => false,
-    }
 }
 
 fn runtime_write_json_file_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -261,7 +250,6 @@ fn open_private_file(path: &Path) -> io::Result<fs::File> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
     use std::collections::BTreeMap;
     use std::env;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -319,14 +307,49 @@ mod tests {
     }
 
     #[test]
+    fn load_json_defaults_for_oversized_file() {
+        let root = temp_dir("oversized-load");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("calibration.json");
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(crate::runtime_store::RUNTIME_STORE_JSON_MAX_BYTES + 1)
+            .unwrap();
+
+        let loaded: BTreeMap<String, String> = runtime_load_json_file_or_default(&path, |_| true);
+
+        assert!(loaded.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_json_defaults_for_symlink() {
+        let root = temp_dir("symlink-load");
+        fs::create_dir_all(&root).unwrap();
+        let target = root.join("target.json");
+        let path = root.join("calibration.json");
+        fs::write(&target, r#"{"outside":"secret"}"#).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+
+        let loaded: BTreeMap<String, String> = runtime_load_json_file_or_default(&path, |_| true);
+
+        assert!(loaded.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn runtime_token_calibration_save_error_redacts_secret_like_chain() {
         let err = anyhow::anyhow!("failed: Authorization: Bearer token-calibration-token")
-            .context("token calibration save failed");
+            .context("calibration save failed");
 
         let message = runtime_token_calibration_save_error(&err);
 
-        assert!(message.contains("token calibration save failed"));
-        assert!(message.contains("Authorization: Bearer <redacted>"));
+        assert!(message.contains("calibration save failed"), "{message}");
+        assert!(
+            message.contains("Authorization: Bearer <redacted>"),
+            "{message}"
+        );
         assert!(!message.contains("token-calibration-token"));
     }
 }

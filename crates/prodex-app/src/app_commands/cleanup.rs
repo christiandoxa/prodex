@@ -94,7 +94,7 @@ pub(crate) fn handle_cleanup(args: CleanupArgs) -> Result<()> {
 fn print_cleanup_panel(fields: &[(String, String)]) -> Result<()> {
     let height = cleanup_tui_height(fields);
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
-        print_panel("Cleanup", fields);
+        print_panel("Cleanup", fields)?;
         return Ok(());
     };
     terminal.draw(|frame| {

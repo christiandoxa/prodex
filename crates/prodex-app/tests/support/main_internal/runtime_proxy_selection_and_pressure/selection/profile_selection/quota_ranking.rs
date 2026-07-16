@@ -265,9 +265,7 @@ fn response_selection_trace_preserves_optimistic_current_circuit_rejection() {
             .reason
             .as_ref()
             .map(runtime_proxy_crate::RuntimeRouteDecisionReason::as_str),
-        Some(
-            runtime_proxy_crate::RuntimeRouteDecisionReasonKind::RouteCircuitOpen.as_str()
-        )
+        Some(runtime_proxy_crate::RuntimeRouteDecisionReasonKind::RouteCircuitOpen.as_str())
     );
     assert_eq!(
         current.circuit_state,

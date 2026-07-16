@@ -123,7 +123,11 @@ pub(crate) fn audit_runtime_proxy_startup_state(shared: &RuntimeRotationProxySha
         ),
     );
     if changed {
-        schedule_runtime_state_save_from_runtime(shared, &runtime, "startup_audit");
+        schedule_runtime_state_save_from_runtime(
+            shared,
+            &runtime,
+            RuntimeStateMutation::StartupAudit,
+        );
     }
     drop(runtime);
 }

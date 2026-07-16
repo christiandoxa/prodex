@@ -17,6 +17,7 @@ fn test_runtime_probe_refresh_shared() -> RuntimeRotationProxyShared {
         runtime_config: Arc::new(crate::RuntimeConfig::compatibility_current()),
         upstream_no_proxy: false,
         auto_redeem_enabled: false,
+        compact_client: reqwest::Client::new(),
         async_client: reqwest::Client::builder().build().expect("async client"),
         async_runtime: Arc::new(
             TokioRuntimeBuilder::new_current_thread()
@@ -45,7 +46,6 @@ fn test_runtime_probe_refresh_shared() -> RuntimeRotationProxyShared {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
-            profile_inflight: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
         log_path: root.join("runtime-proxy.log"),

@@ -4,24 +4,41 @@ This file applies to the entire repository.
 
 ## Project Summary
 
-`prodex` is a single-binary Rust CLI that wraps `codex` and manages multiple isolated `CODEX_HOME` profiles.
+`prodex` is a Rust workspace whose primary CLI wraps `codex` and manages multiple isolated
+`CODEX_HOME` profiles. The root package also builds dedicated `prodex-gateway` and
+`prodex-control-plane` entrypoints.
 
 The codebase is now a Cargo workspace split across focused crates and modules:
 
 - `src/main.rs`: binary entrypoint
-- `src/lib.rs`: compatibility shim that re-exports `prodex_app`
+- `src/lib.rs`: root facade that re-exports `prodex_app` plus dedicated-server helpers
+- `src/bin/`: dedicated gateway and control-plane composition roots
 - `crates/prodex-app/`: application orchestration, command routing, Prodex-owned command handlers, profile flows, and runtime integration glue
 - `crates/prodex-app-reports/`: reusable application report rendering helpers
+- `crates/prodex-application/`: enterprise application use cases and ports
 - `crates/prodex-audit-log/`: audit log append, query, and rendering helpers
+- `crates/prodex-authn/`: enterprise authentication boundary
+- `crates/prodex-authz/`: enterprise authorization boundary
 - `crates/prodex-bench-support/`: benchmark support helpers
 - `crates/prodex-caveman-assets/`: embedded Codex/Claude Caveman plugin assets and Caveman home/config preparation
 - `crates/prodex-cli/`: reusable CLI argument model, help text, and parse/default-run rewrite helpers
 - `crates/prodex-codex-config/`: reusable Codex config parsing helpers
+- `crates/prodex-config/`: typed enterprise deployment configuration
+- `crates/prodex-control-plane/`: enterprise control-plane domain/application surface
 - `crates/prodex-context/`: context audit and compression helpers
 - `crates/prodex-core/`: common path discovery and core filesystem helpers
+- `crates/prodex-domain/`: side-effect-free enterprise domain models and decisions
+- `crates/prodex-gateway-core/`: gateway request/response and policy contracts
+- `crates/prodex-gateway-http/`: HTTP gateway adaptation
+- `crates/prodex-gateway-server/`: async gateway server composition
 - `crates/prodex-housekeeping/`: cleanup and duplicate-detection helpers
+- `crates/prodex-mcp-stdio/`: MCP stdio boundary
+- `crates/prodex-observability/`: enterprise metrics, trace, and log contracts
+- `crates/prodex-presidio/`: Presidio integration boundary
 - `crates/prodex-profile-export/`: encrypted profile export/import envelope helpers
 - `crates/prodex-profile-identity/`: account identity parsing and profile-name normalization helpers
+- `crates/prodex-provider-core/`: built-in provider metadata and protocol bridges
+- `crates/prodex-provider-spi/`: provider plugin contracts
 - `crates/prodex-proxy-config/`: reusable upstream proxy/client configuration helpers
 - `crates/prodex-quota/`: quota API models and quota classification helpers
 - `crates/prodex-redaction/`: reusable log/diagnostic redaction helpers
@@ -46,6 +63,9 @@ The codebase is now a Cargo workspace split across focused crates and modules:
 - `crates/prodex-shared-codex-fs/`: shared Codex home file operations
 - `crates/prodex-shared-types/`: shared serializable command/runtime models used across modules
 - `crates/prodex-state/`: state models and merge/compaction helpers
+- `crates/prodex-storage/`: backend-neutral enterprise storage contracts
+- `crates/prodex-storage-{sqlite,postgres,redis}/`: backend configuration and migrations
+- `crates/prodex-storage-{sqlite,postgres,redis}-runtime/`: runtime repository adapters
 - `crates/prodex-terminal-ui/`: reusable terminal layout and printing helpers
 - `crates/prodex-update-notice/`: GitHub latest-version update notice cache and rendering helpers
 - `README.md`: full user-facing documentation
