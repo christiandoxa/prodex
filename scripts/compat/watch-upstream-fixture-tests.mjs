@@ -163,6 +163,7 @@ function mockFetchModule() {
 const FIXTURES = ${JSON.stringify(FETCH_FIXTURES)};
 const mode = process.env.WATCH_UPSTREAM_FIXTURE_MODE;
 const fixture = FIXTURES[mode];
+const expectedAuthorization = "Bearer " + process.env.GITHUB_TOKEN;
 
 if (!fixture) {
   throw new Error(\`unknown WATCH_UPSTREAM_FIXTURE_MODE: \${mode}\`);
@@ -217,8 +218,14 @@ function contentsResponse(body) {
   });
 }
 
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (url, options = {}) => {
   const href = String(url);
+  if (
+    href.startsWith("https://api.github.com/") &&
+    options.headers?.Authorization !== expectedAuthorization
+  ) {
+    throw new Error("missing fixture GitHub API authorization");
+  }
   if (href === "https://api.github.com/repos/openai/codex/releases/latest") {
     return jsonResponse(fixture.codexRelease);
   }
@@ -256,7 +263,7 @@ globalThis.fetch = async (url) => {
 `;
 }
 
-function runWatchdog({ mode, baselinePath, reportPath, mockPath }) {
+function runWatchdog({ mode, baselinePath, reportPath, mockPath, githubToken = "fixture-github-token" }) {
   return new Promise((resolve, reject) => {
     const args = [
       "--import",
@@ -271,7 +278,7 @@ function runWatchdog({ mode, baselinePath, reportPath, mockPath }) {
       cwd: repoRoot,
       env: {
         ...process.env,
-        GITHUB_TOKEN: "",
+        GITHUB_TOKEN: githubToken,
         WATCH_UPSTREAM_FIXTURE_MODE: mode,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -300,7 +307,7 @@ function runWatchdog({ mode, baselinePath, reportPath, mockPath }) {
   });
 }
 
-async function runFixture(mode) {
+async function runFixture(mode, { githubToken, expectReport = true } = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "prodex-watch-upstream-fixtures-"));
   const baselinePath = path.join(tempDir, "baseline.json");
   const reportPath = path.join(tempDir, "report.json");
@@ -309,12 +316,12 @@ async function runFixture(mode) {
   try {
     await fs.writeFile(baselinePath, `${JSON.stringify(baseline(), null, 2)}\n`);
     await fs.writeFile(mockPath, mockFetchModule());
-    const result = await runWatchdog({ mode, baselinePath, reportPath, mockPath });
+    const result = await runWatchdog({ mode, baselinePath, reportPath, mockPath, githubToken });
     let report = null;
     try {
       report = JSON.parse(await fs.readFile(reportPath, "utf8"));
     } catch (error) {
-      if (result.code === 0 || result.code === 1) {
+      if (expectReport) {
         throw error;
       }
     }
@@ -346,6 +353,17 @@ function assertCleanExit(name, result, expectedExit) {
 }
 
 const FIXTURES = [
+  {
+    name: "missing GitHub token fails before API access",
+    mode: "sync",
+    githubToken: "",
+    expectReport: false,
+    expectedExit: 1,
+    assert(result) {
+      assert.match(result.stderr, /GITHUB_TOKEN is required for GitHub API requests/);
+      assert.equal(result.report, null);
+    },
+  },
   {
     name: "in-sync report stays clean",
     mode: "sync",
@@ -499,7 +517,7 @@ const FIXTURES = [
 let failures = 0;
 for (const fixture of FIXTURES) {
   try {
-    const result = await runFixture(fixture.mode);
+    const result = await runFixture(fixture.mode, fixture);
     assertCleanExit(fixture.name, result, fixture.expectedExit);
     fixture.assert(result);
     process.stdout.write(`ok - ${fixture.name}\n`);
