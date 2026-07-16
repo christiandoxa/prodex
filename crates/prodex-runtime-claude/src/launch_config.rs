@@ -114,17 +114,7 @@ pub fn ensure_runtime_proxy_claude_launch_config(
         .get_mut("allowedTools")
         .and_then(serde_json::Value::as_array_mut)
     {
-        let mut seen = BTreeSet::new();
-        for entry in allowed_tools.iter() {
-            if let Some(tool_name) = entry.as_str() {
-                seen.insert(tool_name.to_string());
-            }
-        }
-        for tool_name in PRODEX_CLAUDE_DEFAULT_WEB_TOOLS {
-            if seen.insert((*tool_name).to_string()) {
-                allowed_tools.push(serde_json::Value::String((*tool_name).to_string()));
-            }
-        }
+        append_default_web_tools(allowed_tools);
     }
     if !project
         .get("mcpServers")
@@ -194,17 +184,7 @@ pub fn ensure_runtime_proxy_claude_settings(config_dir: &Path) -> Result<()> {
         *allow = serde_json::json!([]);
     }
     if let Some(allow) = allow.as_array_mut() {
-        let mut seen = BTreeSet::new();
-        for entry in allow.iter() {
-            if let Some(tool_name) = entry.as_str() {
-                seen.insert(tool_name.to_string());
-            }
-        }
-        for tool_name in PRODEX_CLAUDE_DEFAULT_WEB_TOOLS {
-            if seen.insert((*tool_name).to_string()) {
-                allow.push(serde_json::Value::String((*tool_name).to_string()));
-            }
-        }
+        append_default_web_tools(allow);
     }
 
     let rendered =
@@ -216,4 +196,17 @@ pub fn ensure_runtime_proxy_claude_settings(config_dir: &Path) -> Result<()> {
         )
     })?;
     Ok(())
+}
+
+fn append_default_web_tools(tools: &mut Vec<serde_json::Value>) {
+    let mut seen = tools
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    for tool in PRODEX_CLAUDE_DEFAULT_WEB_TOOLS {
+        if seen.insert((*tool).to_string()) {
+            tools.push(serde_json::Value::String((*tool).to_string()));
+        }
+    }
 }

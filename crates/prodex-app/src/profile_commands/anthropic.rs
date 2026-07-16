@@ -131,7 +131,6 @@ fn default_anthropic_profile_name(
         })
         .unwrap_or_else(|| "claude".to_string());
     prodex_profile_identity::unique_profile_name_from_base(&base, "claude", |candidate| {
-        !state.profiles.contains_key(candidate)
-            && !paths.managed_profiles_root.join(candidate).exists()
+        crate::profile_name_is_available(paths, state, candidate)
     })
 }

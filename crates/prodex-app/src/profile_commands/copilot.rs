@@ -223,12 +223,8 @@ fn find_copilot_profile_by_identity(state: &AppState, host: &str, login: &str) -
 
 fn default_copilot_profile_name(paths: &AppPaths, state: &AppState, login: &str) -> String {
     prodex_profile_identity::unique_copilot_profile_name(login, |candidate| {
-        is_available_profile_name(paths, state, candidate)
+        crate::profile_name_is_available(paths, state, candidate)
     })
-}
-
-fn is_available_profile_name(paths: &AppPaths, state: &AppState, candidate: &str) -> bool {
-    !state.profiles.contains_key(candidate) && !paths.managed_profiles_root.join(candidate).exists()
 }
 
 fn resolve_copilot_import_context() -> Result<CopilotImportContext> {

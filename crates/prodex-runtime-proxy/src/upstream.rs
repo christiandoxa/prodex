@@ -75,24 +75,41 @@ fn runtime_encoded_dot_segment_len(segment: &str) -> Option<usize> {
     matches!(dots, 1 | 2).then_some(dots)
 }
 
+const RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS: &[&str] = &[
+    "connection",
+    "content-length",
+    "host",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
+
+fn runtime_header_name_starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
+    name.get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+}
+
+pub fn is_runtime_transport_local_request_header(name: &str) -> bool {
+    let name = name.trim();
+    RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS
+        .iter()
+        .any(|transport_name| name.eq_ignore_ascii_case(transport_name))
+        || runtime_header_name_starts_with_ignore_ascii_case(name, "sec-websocket-")
+}
+
+pub fn is_prodex_internal_request_header(name: &str) -> bool {
+    runtime_header_name_starts_with_ignore_ascii_case(name.trim(), "x-prodex-internal-")
+}
+
 pub fn should_skip_runtime_request_header(name: &str) -> bool {
-    let lower = name.trim().to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "authorization"
-            | "chatgpt-account-id"
-            | "connection"
-            | "content-length"
-            | "host"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    ) || lower.starts_with("sec-websocket-")
-        || lower.starts_with("x-prodex-internal-")
+    is_runtime_transport_local_request_header(name)
+        || is_prodex_internal_request_header(name)
+        || name.trim().eq_ignore_ascii_case("authorization")
+        || name.trim().eq_ignore_ascii_case("chatgpt-account-id")
 }
 
 pub fn runtime_forward_request_headers<'a>(

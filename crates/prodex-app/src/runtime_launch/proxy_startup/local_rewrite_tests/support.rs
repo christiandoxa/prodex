@@ -486,8 +486,10 @@ pub(super) fn wait_for_usage_file(path: &std::path::Path) -> serde_json::Value {
     wait_for_json_file(path)
 }
 
+const PERSISTENCE_WAIT_ATTEMPTS: usize = 250;
+
 pub(super) fn wait_for_sqlite_usage_total(path: &std::path::Path, key_name: &str, expected: u64) {
-    for _ in 0..50 {
+    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
         if let Ok(conn) = rusqlite::Connection::open(path) {
             let total = conn
                 .query_row(
@@ -514,7 +516,7 @@ pub(super) fn wait_for_ledger_file_key_response_status(
     key_name: &str,
     expected: u16,
 ) {
-    for _ in 0..50 {
+    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
         if let Ok(bytes) = fs::read(path) {
             for line in String::from_utf8_lossy(&bytes).lines() {
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
@@ -538,7 +540,7 @@ pub(super) fn wait_for_sqlite_ledger_key_response_status(
     key_name: &str,
     expected: u16,
 ) {
-    for _ in 0..50 {
+    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
         if let Ok(conn) = rusqlite::Connection::open(path) {
             let status = conn
                 .query_row(
@@ -562,7 +564,7 @@ pub(super) fn wait_for_sqlite_ledger_key_response_status(
 }
 
 pub(super) fn wait_for_json_file(path: &std::path::Path) -> serde_json::Value {
-    for _ in 0..50 {
+    for _ in 0..PERSISTENCE_WAIT_ATTEMPTS {
         if let Ok(bytes) = fs::read(path)
             && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
         {

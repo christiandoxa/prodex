@@ -217,7 +217,7 @@ fn gateway_operational_health_exposes_active_policy_version() {
 
 #[test]
 fn gateway_readyz_fails_while_draining_without_failing_livez_or_startupz() {
-    let _workers = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "4");
+    let _workers = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "5");
     let root = temp_root("gateway-health-draining");
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(0);
