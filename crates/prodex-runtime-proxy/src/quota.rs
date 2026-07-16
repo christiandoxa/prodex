@@ -575,6 +575,20 @@ pub fn runtime_proxy_precommit_quota_gate_initial_decision(
 pub fn runtime_proxy_precommit_quota_gate_final_decision(
     input: RuntimeProxyPrecommitQuotaGateFinalInput,
 ) -> RuntimeProxyPrecommitQuotaGateFinalDecision {
+    if matches!(
+        input.route_kind,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) && input.has_alternative_quota_profile
+        && matches!(
+            input.summary.weekly.status,
+            RuntimeSelectionQuotaWindowStatus::Exhausted
+        )
+    {
+        return RuntimeProxyPrecommitQuotaGateFinalDecision::Block {
+            reason: RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend,
+        };
+    }
+
     if runtime_proxy_quota_summary_requires_live_source_after_probe(
         input.summary,
         input.source,

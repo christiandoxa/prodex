@@ -456,6 +456,45 @@ fn precommit_quota_gate_allows_weekly_exhausted_continuation_from_persisted_snap
 }
 
 #[test]
+fn precommit_quota_gate_blocks_weekly_exhaustion_when_pool_fallback_exists() {
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .profile_usage_snapshot(
+            "main",
+            runtime_usage_snapshot(quota_window_ready(81, 3600), quota_window_exhausted(300)),
+        )
+        .profile_usage_snapshot(
+            "second",
+            runtime_usage_snapshot(
+                quota_window_ready(82, 3600),
+                quota_window_ready(83, 86_400),
+            ),
+        )
+        .build();
+
+    match runtime_precommit_quota_gate(RuntimePrecommitQuotaGateRequest {
+        shared: harness.shared(),
+        profile_name: "main",
+        route_kind: RuntimeRouteKind::Websocket,
+        has_continuation_context: false,
+        reprobe_context: "websocket_precommit_reprobe",
+    })
+    .expect("websocket quota gate should succeed")
+    {
+        RuntimePrecommitQuotaGateDecision::Block { reason, .. } => assert_eq!(
+            reason,
+            RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend
+        ),
+        RuntimePrecommitQuotaGateDecision::Proceed => {
+            panic!("weekly exhausted profile should be skipped while a fallback is ready")
+        }
+    }
+}
+
+#[test]
 fn attempt_runtime_standard_request_skips_exhausted_profile_before_send() {
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
