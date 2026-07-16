@@ -63,7 +63,12 @@ pub(super) fn create_lock(path: &Path) -> io::Result<(File, String)> {
         unix_millis(SystemTime::now())
     );
     let file = secure_file::create_private(path, content.as_bytes())?;
-    file.lock()?;
+    if !try_lock_refresh_lease(&file)? {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refresh lease is already locked",
+        ));
+    }
     if let Err(error) = secure_file::verify_private_file(path, &file) {
         let _ = secure_file::delete_private_verified(path, &file);
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, error));

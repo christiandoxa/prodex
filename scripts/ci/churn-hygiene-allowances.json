@@ -4,15 +4,17 @@
     "requiredSubjects": [
       "refactor: simplify runtime and persistence boundaries",
       "chore(release): release 0.297.0",
-      "chore(ci): allow reviewed 0.297.0 refactor range"
+      "chore(ci): allow reviewed 0.297.0 refactor range",
+      "chore(deps): classify test-only dependencies",
+      "fix(secrets): keep refresh lease records readable on Windows"
     ],
     "caps": {
       "maxFiles": 420,
       "maxBehaviorFiles": 395,
-      "maxLines": 54500,
+      "maxLines": 54550,
       "maxFileLines": 8350
     },
-    "reason": "Reviewed the whole-repository maintainability refactor across runtime supervision and bounded transport I/O, persistence fencing and atomic private files, state and storage ownership, CLI/control-plane composition, enterprise boundaries, and extracted test modules with parallel implementation and independent bounded-I/O audits; verified by the locked all-features full suite, 525 focused runtime proxy tests, strict workspace Clippy, complete report-only preflight, optimized release build, boundary/size/hot-path/security guards, and tracked-diff credential and identifier scans before the 0.297.0 release."
+    "reason": "Reviewed the whole-repository maintainability refactor across runtime supervision and bounded transport I/O, persistence fencing and atomic private files, state and storage ownership, CLI/control-plane composition, enterprise boundaries, and extracted test modules with parallel implementation and independent bounded-I/O audits; also reviewed Windows refresh-lease sentinel locking and test-only dependency classification found by release CI; verified by the locked all-features full suite, 525 focused runtime proxy tests, Windows-target checks, strict workspace Clippy, complete report-only preflight, optimized release build, boundary/size/hot-path/security/supply-chain guards, and tracked-diff credential and identifier scans before the 0.297.0 release."
   },
   {
     "id": "live-goal-quota-recovery-0.294.0",
