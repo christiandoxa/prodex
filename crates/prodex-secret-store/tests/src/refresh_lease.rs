@@ -142,7 +142,7 @@ fn refresh_lease_reads_legacy_unversioned_result() {
         .paths_for_key(sensitive_key)
         .result_path()
         .to_path_buf();
-    fs::write(&result_path, "{\"access_token\":\"legacy-result\"}").unwrap();
+    write_private_file_atomic(&result_path, b"{\"access_token\":\"legacy-result\"}").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
