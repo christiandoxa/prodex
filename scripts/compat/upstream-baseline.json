@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.144.4 release",
+      "baseline_source": "openai/codex rust-v0.144.5 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -1174,7 +1174,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.144.4",
+      "tested_codex_release": "rust-v0.144.5",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1191,15 +1191,16 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.144.4",
-      "name": "0.144.4",
-      "published_at": "2026-07-14T05:08:11Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.4",
+      "tag_name": "rust-v0.144.5",
+      "name": "0.144.5",
+      "published_at": "2026-07-16T02:54:48Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.5",
       "body_head": [
-        "## Chores",
-        "- No user-facing changes in this patch release.",
+        "## Bug Fixes",
+        "- Improved dangerous-command detection, including more forced `rm` forms, and provides clearer rejection reasons when commands are denied. (#33455)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.144.3...rust-v0.144.4"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.144.4...rust-v0.144.5",
+        "- #33455 [release/0.144] fix(core) expand is_dangerous_command @dylan-hurd-oai"
       ]
     }
   },
