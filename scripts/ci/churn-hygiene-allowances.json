@@ -1,5 +1,20 @@
 [
   {
+    "id": "whole-repo-maintainability-refactor-0.297.0",
+    "requiredSubjects": [
+      "refactor: simplify runtime and persistence boundaries",
+      "chore(release): release 0.297.0",
+      "chore(ci): allow reviewed 0.297.0 refactor range"
+    ],
+    "caps": {
+      "maxFiles": 420,
+      "maxBehaviorFiles": 395,
+      "maxLines": 54500,
+      "maxFileLines": 8350
+    },
+    "reason": "Reviewed the whole-repository maintainability refactor across runtime supervision and bounded transport I/O, persistence fencing and atomic private files, state and storage ownership, CLI/control-plane composition, enterprise boundaries, and extracted test modules with parallel implementation and independent bounded-I/O audits; verified by the locked all-features full suite, 525 focused runtime proxy tests, strict workspace Clippy, complete report-only preflight, optimized release build, boundary/size/hot-path/security guards, and tracked-diff credential and identifier scans before the 0.297.0 release."
+  },
+  {
     "id": "live-goal-quota-recovery-0.294.0",
     "requiredSubjects": [
       "fix(runtime): resume live goals across profiles"
