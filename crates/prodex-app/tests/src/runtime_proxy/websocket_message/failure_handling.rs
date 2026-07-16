@@ -122,7 +122,7 @@ fn quota_blocked_uses_one_last_chance_ready_profile_past_soft_load_and_circuit()
 }
 
 #[test]
-fn quota_last_chance_does_not_bypass_active_transport_backoff() {
+fn quota_last_chance_bypasses_active_transport_backoff_once() {
     let _guard = acquire_test_runtime_lock();
     let mut shared = test_runtime_shared("failure-quota-last-chance-transport-backoff");
     configure_quota_last_chance_profiles(&mut shared, 6, true);
@@ -139,12 +139,13 @@ fn quota_last_chance_does_not_bypass_active_transport_backoff() {
                 "The usage limit has been reached.",
             )),
         )
-        .expect("active transport backoff should stay fail-closed");
+        .expect("quota-ready transport fallback should remain retryable");
 
     assert!(matches!(
         action,
-        RuntimeWebsocketMessageLoopAction::Finished
+        RuntimeWebsocketMessageLoopAction::Continue
     ));
+    assert_eq!(flow.select_candidate().unwrap(), Some("beta".to_string()));
     assert!(flow.quota_last_chance_profile.is_none());
 }
 
