@@ -259,6 +259,7 @@ fn parse_super_cli_agent(value: &str) -> Option<SuperCliAgent> {
     match value {
         "codex" => Some(SuperCliAgent::Codex),
         "gemini" => Some(SuperCliAgent::Gemini),
+        "copilot" => Some(SuperCliAgent::Copilot),
         "kiro" => Some(SuperCliAgent::Kiro),
         "agy" => Some(SuperCliAgent::Agy),
         _ => None,

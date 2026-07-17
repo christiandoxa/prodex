@@ -277,6 +277,30 @@ fn s_session_tail_equals_forms_cover_value_options_and_aliases() {
 }
 
 #[test]
+fn s_session_tail_extracts_native_copilot_cli() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "019ef8ae-c7cc-75c3-8575-a8d247ad291b",
+        "--provider=copilot",
+        "--cli=copilot",
+    ])
+    .unwrap();
+    let Commands::Super(mut args) = command else {
+        panic!("expected super command");
+    };
+
+    args.extract_provider_overrides_from_codex_args().unwrap();
+
+    assert_eq!(args.provider, Some(SuperExternalProvider::Copilot));
+    assert_eq!(args.cli, Some(SuperCliAgent::Copilot));
+    assert_eq!(
+        args.codex_args,
+        os_args(&["019ef8ae-c7cc-75c3-8575-a8d247ad291b"])
+    );
+}
+
+#[test]
 fn s_session_tail_missing_and_invalid_values_keep_exact_forward_order() {
     let command = parse_cli_command_from([
         "prodex",

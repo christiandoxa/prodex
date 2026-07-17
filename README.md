@@ -67,11 +67,11 @@ Prodex supports two provider paths:
 | Provider | Launch path | Auth path | Quota view | Notes |
 |---|---:|---|---:|---|
 | OpenAI / Codex | `prodex`, `prodex run`, `prodex s` | ChatGPT OAuth, device code, or OpenAI/API-compatible key via `prodex login` | Yes | Quota preflight, plus profile auto-rotation when multiple eligible profiles exist. |
-| Google Gemini | `prodex s gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` | OAuth profiles | API-key mode uses Google's OpenAI-compatible Chat Completions endpoint; OAuth uses Code Assist. Both can rotate before commit across configured profiles/keys. |
+| Google Gemini | `prodex s gemini` or `prodex s gemini --cli gemini` | Google OAuth via `prodex login --with-google`, or `GEMINI_API_KEY(S)` / `GOOGLE_API_KEY(S)` / `--api-key` for the Codex front end | OAuth profiles | Native Gemini CLI uses the Prodex Code Assist OAuth proxy; API-key mode uses the Codex front end and Google's OpenAI-compatible Chat Completions endpoint. |
 | Google Antigravity CLI | `prodex s gemini --cli agy` | Antigravity keyring / Google Sign-In via `prodex login --with-antigravity` or `agy auth login` | CLI quota snapshot | Native CLI path; no Prodex account auto-rotation or Presidio proxying. |
 | Anthropic Claude | `prodex s --provider anthropic` | Claude Code OAuth via `prodex login --with-claude` / `prodex profile import claude`, or `ANTHROPIC_API_KEY(S)` / `--api-key` | OAuth profiles | Shows Claude OAuth readiness; add `ANTHROPIC_ADMIN_KEY` to include Anthropic Admin rate-limit groups. |
-| GitHub Copilot | `prodex s --provider copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Native profile and API-key modes can rotate before commit across configured profiles/keys; continuations stay bound to the owning profile. |
-| Kiro CLI | `prodex s --provider kiro` or `prodex super --cli kiro` | Imported Kiro CLI profile via `prodex profile import kiro` | Imported profiles | Prodex snapshots the installed Kiro CLI auth store into a managed profile, can route Codex through the Kiro bridge, and can launch native Kiro CLI from that imported snapshot. |
+| GitHub Copilot | `prodex s --provider copilot` or `prodex s --provider copilot --cli copilot` | Imported Copilot CLI profile via `prodex profile import copilot`, or `GITHUB_COPILOT_API_KEY(S)` / `--api-key` | Imported profiles | Codex and native Copilot CLI front ends use the Prodex Responses adapter; fresh requests can rotate before commit and continuations stay bound to the owning profile. |
+| Kiro CLI | `prodex s --provider kiro` or `prodex super --cli kiro` | Imported Kiro CLI profile via `prodex profile import kiro` | Imported profiles | Codex uses Prodex's Kiro ACP adapter; native Kiro launches directly from the imported snapshot because Kiro has no OpenAI-compatible inbound endpoint. |
 | DeepSeek | `prodex s deepseek` | `DEEPSEEK_API_KEY(S)` / `--api-key` | API-key balance | `prodex quota --all --provider deepseek` reads DeepSeek `/user/balance`. |
 | Local OpenAI-compatible | `prodex super --url http://127.0.0.1:8131` | Local server auth/config | Health snapshot | `prodex quota --all --provider local --base-url ...` checks the local `/models` endpoint. |
 | Bedrock / custom Codex `model_provider` | `prodex run` / `prodex caveman` direct pass-through | Codex-owned config | Config snapshot | Prodex reports configured provider metadata; provider-side quota stays owned by Codex/upstream. |
@@ -630,9 +630,12 @@ Use `--provider copilot` when you want the Codex/Super front end with GitHub Cop
 ```bash
 prodex profile import copilot
 prodex s --provider copilot --model gpt-5.3-codex
+prodex s --provider copilot --cli copilot --model gpt-5.3-codex
 ```
 
 Without `--api-key`, Prodex uses imported Copilot CLI profiles, resolves the stored Copilot OAuth token before launch, refreshes the Copilot model catalog, can rotate fresh native Responses requests across multiple eligible profiles, and binds streaming response IDs back to the owning profile for continuations. `GITHUB_COPILOT_API_KEY`, `GITHUB_COPILOT_API_KEYS`, or `--api-key` can be used when you already have a usable Copilot API bearer token; plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.
+
+Add `--cli copilot` to keep the native GitHub Copilot CLI front end while routing its OpenAI Responses traffic through the same local Prodex adapter. Prodex configures Copilot's documented custom-provider environment for OpenAI Responses over HTTP, sends only a synthetic local key to the child, and keeps imported account or API-key credentials inside the proxy. `PRODEX_COPILOT_BIN` overrides the `copilot` executable.
 
 Use `--provider kiro` or `--cli kiro` when you want the Codex/Super front end or native Kiro CLI with imported Kiro credentials:
 
@@ -642,7 +645,7 @@ prodex s --provider kiro --model claude-sonnet-4.5
 prodex super --cli kiro --profile kiro-main
 ```
 
-`prodex profile import kiro` reads the installed Kiro CLI auth database (`~/.local/share/kiro-cli/data.sqlite3` or the Amazon Q compatibility location when present), snapshots the current credential payload into `kiro_auth.json`, and stores a model catalog snapshot for runtime routing. `--provider kiro` routes Codex through Prodex's local Kiro adapter, while `--cli kiro` launches the native Kiro CLI from the imported Prodex snapshot. Override binary discovery with `PRODEX_KIRO_BIN` when the installed launcher is not on `PATH`.
+`prodex profile import kiro` reads the installed Kiro CLI auth database (`~/.local/share/kiro-cli/data.sqlite3` or the Amazon Q compatibility location when present), snapshots the current credential payload into `kiro_auth.json`, and stores a model catalog snapshot for runtime routing. `--provider kiro` routes Codex through Prodex's local Kiro ACP adapter, while `--cli kiro` launches the native Kiro CLI from the imported Prodex snapshot. Current Kiro binaries expose their proprietary service protocol and ACP backend, not an OpenAI-compatible inbound endpoint, so the native Kiro front end talks to Kiro directly; the supported proxied direction is Codex/Super through Prodex to Kiro ACP. Override binary discovery with `PRODEX_KIRO_BIN` when the installed launcher is not on `PATH`.
 
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
