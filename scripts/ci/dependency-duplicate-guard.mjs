@@ -51,6 +51,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "ratatui-core/kasuari and rusqlite/hashlink currently resolve separate hashbrown minor lines.",
   },
   {
+    name: "hmac",
+    maxVersions: 2,
+    reason: "the native Secret Service keyring backend and current export/PostgreSQL crypto resolve hmac 0.12 and 0.13.",
+  },
+  {
     name: "itertools",
     maxVersions: 2,
     reason: "ratatui-core/unicode-truncate and criterion benchmark tooling currently resolve separate itertools minor lines.",
@@ -64,6 +69,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     name: "rand_core",
     maxVersions: 2,
     reason: "legacy crypto and current rand/JWT AWS-LC dependencies resolve rand_core 0.6 and 0.10.",
+  },
+  {
+    name: "sha2",
+    maxVersions: 2,
+    reason: "the native Secret Service keyring backend and current application/storage crypto resolve sha2 0.10 and 0.11.",
   },
   {
     name: "thiserror",
