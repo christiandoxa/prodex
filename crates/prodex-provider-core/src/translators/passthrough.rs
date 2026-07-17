@@ -1,3 +1,4 @@
+use super::{provider_declares_passthrough, unsupported_endpoint_result};
 use crate::translator::{
     ProviderParamSupport, ProviderTransformInput, ProviderTransformResult, ProviderTranslator,
     ProviderUnsupportedReason,
@@ -47,6 +48,19 @@ impl ProviderTranslator for PassthroughTranslator {
     }
 
     fn transform_request(&self, input: ProviderTransformInput) -> ProviderTransformResult {
+        if !provider_declares_passthrough(
+            self.provider,
+            input.endpoint,
+            self.client_wire_format(),
+            self.upstream_wire_format(),
+        ) {
+            return unsupported_endpoint_result(
+                self.provider,
+                input.endpoint,
+                self.client_wire_format(),
+                self.upstream_wire_format(),
+            );
+        }
         ProviderTransformResult::lossless(
             self.provider,
             input.endpoint,
@@ -57,6 +71,19 @@ impl ProviderTranslator for PassthroughTranslator {
     }
 
     fn transform_response(&self, input: ProviderTransformInput) -> ProviderTransformResult {
+        if !provider_declares_passthrough(
+            self.provider,
+            input.endpoint,
+            self.upstream_wire_format(),
+            self.client_wire_format(),
+        ) {
+            return unsupported_endpoint_result(
+                self.provider,
+                input.endpoint,
+                self.upstream_wire_format(),
+                self.client_wire_format(),
+            );
+        }
         ProviderTransformResult::lossless(
             self.provider,
             input.endpoint,
@@ -67,6 +94,19 @@ impl ProviderTranslator for PassthroughTranslator {
     }
 
     fn transform_stream_event(&self, input: ProviderTransformInput) -> ProviderTransformResult {
+        if !provider_declares_passthrough(
+            self.provider,
+            input.endpoint,
+            self.upstream_wire_format(),
+            self.client_wire_format(),
+        ) {
+            return unsupported_endpoint_result(
+                self.provider,
+                input.endpoint,
+                self.upstream_wire_format(),
+                self.client_wire_format(),
+            );
+        }
         ProviderTransformResult::lossless(
             self.provider,
             input.endpoint,
