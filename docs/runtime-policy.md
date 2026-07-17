@@ -76,11 +76,7 @@ serving; secret files are not read on the request hot path.
 | `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from non-empty, whitespace-free `--auth-token`, non-empty, whitespace-free `PRODEX_GATEWAY_TOKEN`, or configured virtual key env vars. |
 | `gateway.auth_token_ref` | none | empty | Projected data-plane bearer-token reference. Required in production unless at least one `gateway.virtual_keys[].token_ref` exists. |
 | `gateway.provider_api_key_ref` | none | empty | Projected upstream provider API-key reference. Required in production. |
-| `gateway.adaptive_routing.enabled` | none | `false` | Enable adaptive routing telemetry and shadow recommendations. Live route selection remains deterministic until an explicit non-shadow policy is implemented. |
-| `gateway.adaptive_routing.shadow_mode` | none | `true` | Keep adaptive routing recommendations observational only. Continuation affinity and quota/safety constraints still win. |
-| `gateway.adaptive_routing.window_size` | none | `128` | Bounded owner-attributed feedback window size used by adaptive quality scoring. |
-| `gateway.adaptive_routing.min_samples` | none | `8` | Minimum samples before a model can be recommended by the adaptive shadow scorer. |
-| `gateway.adaptive_routing.exploration_rate` | none | `0.0` | Reserved exploration rate in the range `0.0..=1.0`; currently parsed and validated but not applied to live routing. |
+| `gateway.adaptive_routing.*` | none | unset | Reserved. Any configured adaptive-routing value fails validation until adaptive decisions are wired into live gateway routing. |
 | `gateway.state.backend` | none | `file` | Gateway admin/usage state backend. Valid values: `file`, `sqlite`, `postgres`, `redis`. `postgres` stores admin-managed virtual keys, cumulative per-key/grouped request counts, token/cost reservations, usage counters, and billing ledger rows in a shared Postgres database. `redis` stores compatibility state and is not a durable production accounting backend. |
 | `gateway.state.sqlite_path` | none | `gateway-state.sqlite` under the Prodex root when `backend=sqlite` | Optional non-empty SQLite database path for admin-managed virtual keys, usage counters, and schema migrations. Relative paths are resolved under the Prodex root and non-blank values are preserved exactly. |
 | `gateway.state.postgres_url_env` | none | empty | Environment variable containing a non-empty, whitespace-free Postgres connection URL. Required when `backend="postgres"`. |
