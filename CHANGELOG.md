@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.306.0 - 2026-07-17
+
+### CLI
+
+- Add playwright shortcut (`5855b89`)
+
 ## 0.305.0 - 2026-07-17
 
 ### Runtime
@@ -71,9 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.295.0 - 2026-07-15
 
 - No grouped changes.
-
-## 0.294.0 - 2026-07-15
-
-### Runtime
-
-- Resume live goals across profiles (`724212c`)
