@@ -179,17 +179,16 @@ fn format_info_provider_capabilities_summary_reports_routes_and_quota_shapes() {
 }
 
 #[test]
-fn secret_backend_summary_rejects_unimplemented_keyring_backend() {
+fn secret_backend_summary_reports_native_keyring_backend() {
     let _backend = TestEnvVarGuard::set(PRODEX_SECRET_BACKEND_ENV, "keyring");
     let _service = TestEnvVarGuard::set(PRODEX_SECRET_KEYRING_SERVICE_ENV, "prodex");
 
     let summary = format_secret_backend_summary();
     let json = secret_backend_json_value();
 
-    assert!(summary.contains("invalid"));
-    assert!(summary.contains("not implemented"));
-    assert_eq!(json["invalid"], serde_json::Value::Bool(true));
-    assert!(json["error"].as_str().unwrap().contains("not implemented"));
+    assert_eq!(summary, "keyring (prodex)");
+    assert_eq!(json["backend"], "keyring");
+    assert_eq!(json["keyring_service"], "prodex");
 }
 
 #[test]

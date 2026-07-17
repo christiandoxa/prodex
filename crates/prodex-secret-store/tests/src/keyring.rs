@@ -16,8 +16,7 @@ fn file_backend_rejects_keyring_locations() {
 fn keyring_backend_validates_service_name() {
     let backend = KeyringSecretBackend::new("prodex").unwrap();
     assert_eq!(backend.service(), "prodex");
-    assert!(!backend.is_supported());
-    assert!(backend.unsupported_reason().contains("not implemented"));
+    assert!(backend.is_supported());
 
     let err = KeyringSecretBackend::new("   ").unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
@@ -30,6 +29,16 @@ fn keyring_backend_validates_service_name() {
 fn keyring_backend_rejects_empty_location_account() {
     let backend = KeyringSecretBackend::new("prodex").unwrap();
     let location = SecretLocation::keyring("prodex", "");
+
+    let err = backend.read(&location).unwrap_err();
+
+    assert!(matches!(err, SecretError::InvalidLocation { .. }));
+}
+
+#[test]
+fn keyring_backend_rejects_mismatched_service_without_accessing_the_os_store() {
+    let backend = KeyringSecretBackend::new("prodex").unwrap();
+    let location = SecretLocation::keyring("another-service", "account");
 
     let err = backend.read(&location).unwrap_err();
 
@@ -54,7 +63,7 @@ fn selectable_backend_from_kind_requires_keyring_service() {
     let SecretBackendSelection::Keyring(backend) = selection else {
         panic!("expected keyring selection marker");
     };
-    assert!(!backend.is_supported());
+    assert!(backend.is_supported());
 }
 
 #[test]

@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-native-client-hardening-0.308.0",
+    "requiredSubjects": [
+      "fix(secrets): enable native keyring storage"
+    ],
+    "caps": {
+      "maxFiles": 34,
+      "maxBehaviorFiles": 26,
+      "maxLines": 1325,
+      "maxFileLines": 576
+    },
+    "reason": "Reviewed current Gemini, Kiro, Copilot, Claude, and Antigravity launch contracts, fail-closed native Presidio and adaptive-routing behavior, native OS keyring storage, release compatibility probes, focused regressions, the full all-features suite, strict Clippy, documentation checks, dependency audits, and tracked-diff secret scanning before the 0.308.0 release."
+  },
+  {
     "id": "accounting-and-broker-reliability-0.305.0",
     "requiredSubjects": [
       "fix(runtime): harden accounting and broker reliability"
