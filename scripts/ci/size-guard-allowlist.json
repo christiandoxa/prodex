@@ -21,8 +21,8 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 1109,
-    "reason": "Kiro profile import now discovers the native CLI model catalog with an ACP fallback while preserving private credential staging; capped until catalog discovery splits from command orchestration."
+    "maxLines": 1141,
+    "reason": "Kiro profile import discovers the native CLI model catalog with an ACP fallback, preserves private credential staging, and surfaces catalog refresh failures; capped until catalog discovery splits from command orchestration."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
@@ -61,8 +61,8 @@
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal_body/app_server_broker.rs",
-    "maxLines": 6735,
-    "reason": "App-server protocol fixture, schema drift, replay, lifecycle, affinity, redaction, and stdio broker regressions remain capped while the shared harness is split by protocol concern."
+    "maxLines": 6764,
+    "reason": "App-server protocol fixture, schema drift, replay, lifecycle, affinity, redaction, and bounded streaming stdio broker regressions remain capped while the shared harness is split by protocol concern."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/websocket/precommit_hold.rs",
@@ -126,8 +126,8 @@
   },
   {
     "file": "crates/prodex-domain/tests/accounting.rs",
-    "maxLines": 1191,
-    "reason": "Accounting domain characterization remains capped while reservation, reconciliation, and idempotency cases are split."
+    "maxLines": 1194,
+    "reason": "Accounting domain characterization includes actual usage above reservation and remains capped while reservation, reconciliation, and idempotency cases are split."
   },
   {
     "file": "crates/prodex-domain/tests/audit.rs",
@@ -146,18 +146,18 @@
   },
   {
     "file": "crates/prodex-storage/tests/storage_contract.rs",
-    "maxLines": 2496,
-    "reason": "Storage boundary characterization is capped while accounting, migration, idempotency, and readiness tests are split."
+    "maxLines": 2495,
+    "reason": "Storage boundary characterization includes actual usage above reservation and is capped while accounting, migration, idempotency, and readiness tests are split."
   },
   {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
-    "maxLines": 1665,
-    "reason": "PostgreSQL storage characterization is capped while migration, tenant isolation, and accounting tests are split."
+    "maxLines": 1667,
+    "reason": "PostgreSQL storage characterization includes actual usage above reservation and is capped while migration, tenant isolation, and accounting tests are split."
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
-    "maxLines": 1609,
-    "reason": "SQLite storage characterization is capped while migration, tenant isolation, and accounting tests are split."
+    "maxLines": 1611,
+    "reason": "SQLite storage characterization includes actual usage above reservation and is capped while migration, tenant isolation, and accounting tests are split."
   },
   {
     "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",
@@ -191,8 +191,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1397,
-    "reason": "Gateway launch composes governed snapshot authorities, durable audit/session workers, immutable harness diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
+    "maxLines": 1407,
+    "reason": "Gateway launch composes governed snapshot authorities, durable audit/session workers, bounded accounting queues, immutable harness diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
@@ -241,8 +241,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 889,
-    "reason": "Gateway virtual-key admission now carries trusted team, project, and user scope into the governed PIP while preserving key mutation and accounting behavior."
+    "maxLines": 937,
+    "reason": "Gateway virtual-key admission carries trusted team, project, and user scope into the governed PIP and reserves bounded usage and reconciliation capacity before upstream dispatch."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
