@@ -206,7 +206,10 @@ fn commit_runtime_proxy_profile_selection_clears_matching_route_bad_pairing() {
         ),
     ] {
         assert_eq!(
-            runtime.profile_health.contains_key(key),
+            runtime
+                .profile_health
+                .get(key)
+                .is_some_and(|entry| entry.score > 0),
             should_exist,
             "{message}"
         );
@@ -266,7 +269,11 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
             "successful commit should clear the matching route circuit reopen stage",
         ),
     ] {
-        assert!(!runtime.profile_health.contains_key(key), "{message}");
+        assert_eq!(
+            runtime.profile_health.get(key).map(|entry| entry.score),
+            Some(0),
+            "{message}"
+        );
     }
 }
 
@@ -363,12 +370,13 @@ fn commit_runtime_proxy_profile_selection_accelerates_recovery_after_success_str
     commit_runtime_proxy_profile_selection(shared, "main", RuntimeRouteKind::Responses)
         .expect("second profile commit should succeed");
     assert!(
-        !shared
+        shared
             .runtime
             .lock()
             .expect("runtime should lock")
             .profile_health
-            .contains_key(&route_key),
+            .get(&route_key)
+            .is_some_and(|entry| entry.score == 0),
         "consecutive successes should accelerate route recovery"
     );
 }
