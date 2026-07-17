@@ -876,25 +876,28 @@ fn stream_interruption_reconciliation_without_delta_has_no_release_event() {
 }
 
 #[test]
-fn reconciliation_rejects_actual_usage_above_reserved_amount() {
+fn reconciliation_commits_actual_usage_above_reserved_amount() {
     let request = reservation(TenantId::new(), UsageAmount::new(100, 1_000));
     let record = ReservationRecord::from_request(request, 1_000, 60_000).unwrap();
 
-    assert_eq!(
-        reconcile_reserved_usage(
-            BudgetSnapshot {
-                reserved: UsageAmount::new(100, 1_000),
-                committed: UsageAmount::ZERO,
-            },
-            record,
-            UsageAmount::new(101, 900),
-            ReservationReconciliationReason::Completed,
-        ),
-        Err(ReservationReconciliationError::ActualExceedsReserved {
+    let (updated, reconciliation) = reconcile_reserved_usage(
+        BudgetSnapshot {
             reserved: UsageAmount::new(100, 1_000),
-            actual: UsageAmount::new(101, 900),
-        })
+            committed: UsageAmount::ZERO,
+        },
+        record,
+        UsageAmount::new(101, 1_100),
+        ReservationReconciliationReason::Completed,
+    )
+    .unwrap();
+
+    assert_eq!(updated.reserved, UsageAmount::ZERO);
+    assert_eq!(updated.committed, UsageAmount::new(101, 1_100));
+    assert_eq!(
+        reconciliation.committed_event.amount,
+        UsageAmount::new(101, 1_100)
     );
+    assert_eq!(reconciliation.released_event, None);
 }
 
 #[test]

@@ -5,7 +5,7 @@ use super::{
     RequestId, ReservationRequest, RuntimeGatewayDurableReservationError, RuntimeGatewayStateStore,
     RuntimeGatewayVirtualKeyStoreFile, TenantId, UsageAmount, calculate_cost_microusd,
     estimate_request_input_tokens, runtime_gateway_sqlite_open,
-    runtime_gateway_sqlite_reserve_usage, runtime_gateway_virtual_key_store_load,
+    runtime_gateway_sqlite_reserve_usage, runtime_gateway_virtual_key_store_load_strict,
 };
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_store_types::{
@@ -14,7 +14,7 @@ use crate::runtime_launch::proxy_startup::local_rewrite_gateway_store_types::{
 use std::sync::{Arc, Barrier};
 
 #[test]
-fn key_store_load_failure_log_uses_stable_error_without_path_details() {
+fn key_store_load_failure_is_fail_closed_and_logs_without_path_details() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -31,8 +31,7 @@ fn key_store_load_failure_log_uses_stable_error_without_path_details() {
         ledger_path: root.join("gateway-billing-ledger.jsonl"),
     };
 
-    let store = runtime_gateway_virtual_key_store_load(&state_store, &log_path);
-    assert!(store.keys.is_empty());
+    assert!(runtime_gateway_virtual_key_store_load_strict(&state_store, &log_path).is_err());
     let runtime_log = std::fs::read_to_string(&log_path).expect("runtime log should exist");
     assert!(runtime_log.contains("gateway_virtual_key_store_load_failed"));
     assert!(runtime_log.contains("error_kind=gateway_key_store_persistence_failed"));
@@ -85,7 +84,7 @@ fn key_store_load_filters_malformed_scim_rows_from_active_state() {
         ledger_path: root.join("gateway-billing-ledger.jsonl"),
     };
 
-    let loaded = runtime_gateway_virtual_key_store_load(&state_store, &log_path);
+    let loaded = runtime_gateway_virtual_key_store_load_strict(&state_store, &log_path).unwrap();
 
     assert_eq!(loaded.scim_users.len(), 1);
     assert_eq!(loaded.scim_users[0].user_name, valid.user_name);

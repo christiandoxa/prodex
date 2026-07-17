@@ -31,14 +31,17 @@ use super::local_rewrite_gateway_credentials::{
 pub(super) use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_guardrail_webhook_block;
 pub(super) use super::local_rewrite_gateway_keys::{
     RuntimeGatewayDurableReservationState, runtime_gateway_virtual_key_entries_from_sources,
-    runtime_gateway_virtual_key_store_load, runtime_gateway_virtual_key_store_load_strict,
+    runtime_gateway_virtual_key_store_load_strict,
 };
 pub(super) use super::local_rewrite_gateway_ledger::runtime_gateway_billing_ledger_load;
-pub(super) use super::local_rewrite_gateway_reconciliation_worker::schedule_runtime_gateway_billing_ledger_reconcile;
+pub(super) use super::local_rewrite_gateway_reconciliation_worker::{
+    RuntimeGatewayReconciliationQueue, schedule_runtime_gateway_billing_ledger_reconcile,
+};
 #[cfg(test)]
 pub(super) use super::local_rewrite_gateway_usage::runtime_gateway_virtual_key_usage_apply_deltas;
 pub(super) use super::local_rewrite_gateway_usage::{
-    runtime_gateway_virtual_key_usage_load_strict, schedule_runtime_gateway_virtual_key_usage_save,
+    RuntimeGatewayPendingUsageDelta, runtime_gateway_virtual_key_usage_load_strict,
+    schedule_runtime_gateway_virtual_key_usage_save,
 };
 pub(super) use super::local_rewrite_gateway_usage_backend::RuntimeGatewayVirtualKeyUsageDelta;
 pub(super) use super::local_rewrite_gateway_util::runtime_gateway_generate_virtual_key_token;
@@ -244,7 +247,9 @@ pub(super) struct RuntimeGatewayVirtualKeyUsageState {
     pub(super) path: Option<PathBuf>,
     pub(super) save_in_flight: Arc<AtomicBool>,
     pub(super) save_dirty: Arc<AtomicBool>,
-    pub(super) pending_deltas: Arc<Mutex<Vec<RuntimeGatewayVirtualKeyUsageDelta>>>,
+    pub(super) usage_slots: Arc<tokio::sync::Semaphore>,
+    pub(super) pending_deltas: Arc<Mutex<Vec<RuntimeGatewayPendingUsageDelta>>>,
+    pub(super) reconciliation: RuntimeGatewayReconciliationQueue,
     pub(super) request_ids: Arc<Mutex<BTreeSet<u64>>>,
     pub(super) typed_request_ids: Arc<Mutex<BTreeMap<u64, String>>>,
     pub(super) call_ids: Arc<Mutex<BTreeMap<u64, String>>>,
@@ -935,7 +940,11 @@ fn runtime_local_rewrite_usage_state(
         path: Some(path),
         save_in_flight: Arc::new(AtomicBool::new(false)),
         save_dirty: Arc::new(AtomicBool::new(false)),
+        usage_slots: Arc::new(tokio::sync::Semaphore::new(
+            super::local_rewrite_gateway_usage::RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT,
+        )),
         pending_deltas: Arc::new(Mutex::new(Vec::new())),
+        reconciliation: RuntimeGatewayReconciliationQueue::new(),
         request_ids: Arc::new(Mutex::new(BTreeSet::new())),
         typed_request_ids: Arc::new(Mutex::new(BTreeMap::new())),
         call_ids: Arc::new(Mutex::new(BTreeMap::new())),
@@ -1379,6 +1388,7 @@ mod request_guard_tests {
         {
             let _guard = RuntimeGatewayUsageRequestGuard {
                 request_ids: Arc::clone(&request_ids),
+                reconciliation: super::RuntimeGatewayReconciliationQueue::new(),
                 request_id: 7,
             };
         }
