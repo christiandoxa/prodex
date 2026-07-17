@@ -116,6 +116,7 @@ pub const CLI_CAVEMAN_AFTER_HELP: &str = "\
 Examples:
   prodex caveman
   prodex rtk
+  prodex playwright
   prodex ponytail
   prodex super
   prodex caveman --profile main
@@ -128,8 +129,8 @@ Notes:
   The selected profile's auth, shared sessions, and quota behavior stay the same as `prodex run`.
   Codex runtime feature overrides from `prodex run` also work here.
   If the selected profile's `config.toml` sets `model_provider` to a non-OpenAI backend, prodex launches Caveman directly without quota preflight or the local auto-rotate proxy.
-  Add prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `ponytail`, `presidio`.
-  Top-level shortcuts `prodex rtk` and `prodex ponytail` map to `prodex caveman <prefix>`.
+  Add prefixes before Codex args to enable session tools in the Prodex overlay: `rtk`, `playwright`, `ponytail`, `presidio`.
+  Top-level shortcuts `prodex rtk`, `prodex playwright`, and `prodex ponytail` map to `prodex caveman <prefix>`.
   Caveman activation is sourced from Julius Brussee's Caveman plugin and a session-start hook adapted for the current Codex hooks schema.";
 pub const CLI_SUPER_AFTER_HELP: &str = "\
 Examples:

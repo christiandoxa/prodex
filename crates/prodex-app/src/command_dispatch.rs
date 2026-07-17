@@ -44,6 +44,7 @@ impl CommandDispatchExt for Commands {
             Commands::Run(_)
                 | Commands::Caveman(_)
                 | Commands::Rtk(_)
+                | Commands::Playwright(_)
                 | Commands::Ponytail(_)
                 | Commands::Super(_)
                 | Commands::Expose(_)
@@ -91,6 +92,9 @@ fn execute_command(command: Commands) -> Result<()> {
         Commands::Run(args) => handle_run(args),
         Commands::Caveman(args) => execute_caveman(args),
         Commands::Rtk(args) => execute_caveman(caveman_args_with_optimizer_prefix(args, "rtk")),
+        Commands::Playwright(args) => {
+            execute_caveman(caveman_args_with_optimizer_prefix(args, "playwright"))
+        }
         Commands::Ponytail(args) => {
             execute_caveman(caveman_args_with_optimizer_prefix(args, "ponytail"))
         }

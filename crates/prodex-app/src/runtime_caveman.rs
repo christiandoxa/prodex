@@ -277,7 +277,7 @@ pub(crate) fn runtime_caveman_extract_presidio_prefix(
 }
 
 fn runtime_caveman_super_optimizer_prefix(prefix: &str) -> bool {
-    prefix == "ponytail"
+    matches!(prefix, "playwright" | "ponytail")
 }
 
 #[cfg(test)]
@@ -557,6 +557,7 @@ mod tests {
         let (rtk_enabled, super_optimizer_overlay, codex_args) =
             runtime_caveman_extract_launch_prefixes(&[
                 OsString::from("rtk"),
+                OsString::from("playwright"),
                 OsString::from("ponytail"),
                 OsString::from("--full-access"),
                 OsString::from("exec"),
