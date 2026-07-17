@@ -21,8 +21,8 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 1141,
-    "reason": "Kiro profile import discovers the native CLI model catalog with an ACP fallback, preserves private credential staging, and surfaces catalog refresh failures; capped until catalog discovery splits from command orchestration."
+    "maxLines": 1112,
+    "reason": "Kiro profile import and catalog refresh remain capped after data-directory discovery and environment compatibility moved to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
@@ -86,8 +86,8 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1190,
-    "reason": "Provider-aware runtime and gateway argument parsing now includes typed harness selection and explicitly rejects normalized triple-slash URLs; the tightly coupled CLI surface remains capped."
+    "maxLines": 1187,
+    "reason": "Provider-aware runtime and gateway argument parsing remains capped after Super compatibility validation moved to a focused module."
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
@@ -141,8 +141,8 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
-    "maxLines": 1919,
-    "reason": "Runtime policy compatibility coverage includes typed gateway harness validation and remains capped while versioned policy, cache, and gateway settings tests are split."
+    "maxLines": 1907,
+    "reason": "Runtime policy compatibility coverage remains capped after inactive adaptive-routing validation moved to a focused test module."
   },
   {
     "file": "crates/prodex-storage/tests/storage_contract.rs",
