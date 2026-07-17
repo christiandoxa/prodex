@@ -62,11 +62,8 @@ pub const ALL_PROVIDER_ENDPOINTS: &[ProviderEndpoint] = &[
 ];
 
 pub fn provider_supported_endpoints(provider: ProviderId) -> &'static [ProviderEndpoint] {
-    match provider {
-        ProviderId::OpenAi | ProviderId::Local => OPENAI_ENDPOINTS,
-        ProviderId::Gemini => GEMINI_ENDPOINTS,
-        ProviderId::Copilot => COPILOT_TEXT_ENDPOINTS,
-        ProviderId::Kiro => KIRO_ENDPOINTS,
-        ProviderId::Anthropic | ProviderId::DeepSeek => CORE_TEXT_ENDPOINTS,
-    }
+    crate::provider_implementation_registry()
+        .get(provider)
+        .expect("built-in provider implementation must be registered")
+        .supported_endpoints()
 }

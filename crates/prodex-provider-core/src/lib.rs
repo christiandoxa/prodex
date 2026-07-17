@@ -12,6 +12,7 @@ mod fallback;
 mod gemini_bridge;
 mod harness;
 mod harness_provider_policy;
+mod implementation_registry;
 mod models;
 mod replay_cases;
 mod runtime_metadata;
@@ -244,6 +245,10 @@ pub use harness_provider_policy::{
     harness_canonical_tool_name, harness_provider_native_tool_name, harness_provider_policy,
     harness_provider_policy_catalog, postprocess_harness_provider_response,
     postprocess_harness_provider_stream_event, shape_harness_provider_request,
+};
+pub use implementation_registry::{
+    PROVIDER_IMPLEMENTATION_ORDER, ProviderImplementationDescriptor,
+    ProviderImplementationRegistry, provider_implementation_registry,
 };
 pub use models::{provider_model_catalog, provider_model_cost, provider_model_spec};
 use replay_cases::provider_replay_case_count;

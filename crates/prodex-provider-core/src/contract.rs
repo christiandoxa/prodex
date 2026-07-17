@@ -6,7 +6,8 @@ use crate::{
     ALL_PROVIDER_ENDPOINTS, EffectiveHarnessMode, HarnessMode, HarnessModeSpec,
     ProviderAdapterContract, ProviderCapabilityStatus, ProviderConformanceOperation,
     ProviderEndpoint, ProviderId, harness_mode_catalog, provider_adapter,
-    provider_conformance_cases, provider_replay_case_count, provider_translator,
+    provider_conformance_cases, provider_implementation_registry, provider_replay_case_count,
+    provider_translator,
 };
 
 #[path = "contract/markdown.rs"]
@@ -66,15 +67,7 @@ impl ProviderEndpointCoverage {
     }
 }
 
-pub const PROVIDER_CONTRACT_PROVIDERS: &[ProviderId] = &[
-    ProviderId::OpenAi,
-    ProviderId::Anthropic,
-    ProviderId::Copilot,
-    ProviderId::DeepSeek,
-    ProviderId::Gemini,
-    ProviderId::Kiro,
-    ProviderId::Local,
-];
+pub const PROVIDER_CONTRACT_PROVIDERS: &[ProviderId] = crate::PROVIDER_IMPLEMENTATION_ORDER;
 
 pub fn provider_adapter_contract_spec(provider: ProviderId) -> ProviderAdapterContractSpec {
     let adapter = provider_adapter(provider);
@@ -131,10 +124,9 @@ pub fn provider_adapter_contract_spec(provider: ProviderId) -> ProviderAdapterCo
 }
 
 pub fn provider_adapter_contract_matrix() -> Vec<ProviderAdapterContractSpec> {
-    PROVIDER_CONTRACT_PROVIDERS
+    provider_implementation_registry()
         .iter()
-        .copied()
-        .map(provider_adapter_contract_spec)
+        .map(|descriptor| provider_adapter_contract_spec(descriptor.provider()))
         .collect()
 }
 

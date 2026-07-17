@@ -56,18 +56,7 @@ impl ProviderId {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "openai" | "openai-responses" | "openai_compatible" | "openai-compatible" => {
-                Some(Self::OpenAi)
-            }
-            "anthropic" | "claude" => Some(Self::Anthropic),
-            "copilot" | "github-copilot" | "github_copilot" => Some(Self::Copilot),
-            "deepseek" => Some(Self::DeepSeek),
-            "gemini" | "google" => Some(Self::Gemini),
-            "kiro" => Some(Self::Kiro),
-            "local" | "local-openai" | "local_openai" => Some(Self::Local),
-            _ => None,
-        }
+        crate::provider_implementation_registry().resolve_alias(value)
     }
 }
 

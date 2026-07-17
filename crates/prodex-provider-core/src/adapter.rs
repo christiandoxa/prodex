@@ -1,6 +1,7 @@
 use crate::{
     ProviderAdapterContract, ProviderCapabilityStatus, ProviderEndpoint, ProviderId,
-    ProviderModelSpec, ProviderWireFormat, provider_model_catalog, provider_supported_endpoints,
+    ProviderImplementationDescriptor, ProviderModelSpec, ProviderWireFormat,
+    provider_implementation_registry,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,6 +13,12 @@ impl StaticProviderAdapter {
     pub const fn new(provider: ProviderId) -> Self {
         Self { provider }
     }
+
+    fn descriptor(&self) -> &'static ProviderImplementationDescriptor {
+        provider_implementation_registry()
+            .get(self.provider)
+            .expect("built-in provider implementation must be registered")
+    }
 }
 
 impl ProviderAdapterContract for StaticProviderAdapter {
@@ -20,36 +27,15 @@ impl ProviderAdapterContract for StaticProviderAdapter {
     }
 
     fn client_request_format(&self) -> ProviderWireFormat {
-        match self.provider {
-            ProviderId::OpenAi | ProviderId::Local => ProviderWireFormat::OpenAiResponses,
-            ProviderId::Anthropic | ProviderId::Copilot | ProviderId::DeepSeek => {
-                ProviderWireFormat::OpenAiResponses
-            }
-            ProviderId::Gemini => ProviderWireFormat::OpenAiResponses,
-            ProviderId::Kiro => ProviderWireFormat::OpenAiResponses,
-        }
+        self.descriptor().client_request_format()
     }
 
     fn upstream_request_format(&self) -> ProviderWireFormat {
-        match self.provider {
-            ProviderId::OpenAi | ProviderId::Local => ProviderWireFormat::OpenAiResponses,
-            ProviderId::Anthropic | ProviderId::Copilot | ProviderId::DeepSeek => {
-                ProviderWireFormat::OpenAiChatCompletions
-            }
-            ProviderId::Gemini => ProviderWireFormat::GeminiGenerateContent,
-            ProviderId::Kiro => ProviderWireFormat::Passthrough,
-        }
+        self.descriptor().upstream_request_format()
     }
 
     fn response_format(&self) -> ProviderWireFormat {
-        match self.provider {
-            ProviderId::OpenAi | ProviderId::Local => ProviderWireFormat::OpenAiResponses,
-            ProviderId::Anthropic | ProviderId::Copilot | ProviderId::DeepSeek => {
-                ProviderWireFormat::OpenAiResponses
-            }
-            ProviderId::Gemini => ProviderWireFormat::OpenAiResponses,
-            ProviderId::Kiro => ProviderWireFormat::OpenAiResponses,
-        }
+        self.descriptor().response_format()
     }
 
     fn canonical_client_endpoint(&self) -> &'static str {
@@ -61,64 +47,29 @@ impl ProviderAdapterContract for StaticProviderAdapter {
     }
 
     fn supports_streaming(&self) -> bool {
-        true
+        self.descriptor().supports_streaming()
     }
 
     fn supports_model_fallback(&self) -> bool {
-        !matches!(
-            self.provider,
-            ProviderId::OpenAi | ProviderId::Kiro | ProviderId::Local
-        )
+        self.descriptor().supports_model_fallback()
     }
 
     fn supported_endpoints(&self) -> &'static [ProviderEndpoint] {
-        provider_supported_endpoints(self.provider)
+        self.descriptor().supported_endpoints()
     }
 
     fn model_catalog(&self) -> &'static [ProviderModelSpec] {
-        provider_model_catalog(self.provider)
+        self.descriptor().model_catalog()
     }
 
     fn capability_status(&self, endpoint: ProviderEndpoint) -> ProviderCapabilityStatus {
-        if !self.supported_endpoints().contains(&endpoint) {
-            return ProviderCapabilityStatus::Unsupported;
-        }
-        match self.provider {
-            ProviderId::OpenAi => ProviderCapabilityStatus::Native,
-            ProviderId::Local => ProviderCapabilityStatus::Passthrough,
-            ProviderId::Anthropic | ProviderId::Copilot | ProviderId::DeepSeek => match endpoint {
-                ProviderEndpoint::Responses => ProviderCapabilityStatus::Translated,
-                ProviderEndpoint::ResponsesCompact if self.provider == ProviderId::Copilot => {
-                    ProviderCapabilityStatus::Passthrough
-                }
-                ProviderEndpoint::ChatCompletions | ProviderEndpoint::Messages => {
-                    ProviderCapabilityStatus::Passthrough
-                }
-                ProviderEndpoint::Models => ProviderCapabilityStatus::Emulated,
-                _ => ProviderCapabilityStatus::Unsupported,
-            },
-            ProviderId::Gemini => match endpoint {
-                ProviderEndpoint::Responses => ProviderCapabilityStatus::Translated,
-                ProviderEndpoint::ResponsesCompact => ProviderCapabilityStatus::Emulated,
-                ProviderEndpoint::ChatCompletions
-                | ProviderEndpoint::Messages
-                | ProviderEndpoint::Embeddings => ProviderCapabilityStatus::Passthrough,
-                ProviderEndpoint::Models => ProviderCapabilityStatus::Emulated,
-                _ => ProviderCapabilityStatus::Unsupported,
-            },
-            ProviderId::Kiro => match endpoint {
-                ProviderEndpoint::Responses
-                | ProviderEndpoint::ChatCompletions
-                | ProviderEndpoint::Messages => ProviderCapabilityStatus::Translated,
-                ProviderEndpoint::ResponsesCompact | ProviderEndpoint::Models => {
-                    ProviderCapabilityStatus::Emulated
-                }
-                _ => ProviderCapabilityStatus::Unsupported,
-            },
-        }
+        self.descriptor().capability_status(endpoint)
     }
 }
 
 pub fn provider_adapter(provider: ProviderId) -> StaticProviderAdapter {
-    StaticProviderAdapter::new(provider)
+    provider_implementation_registry()
+        .get(provider)
+        .expect("built-in provider implementation must be registered")
+        .adapter()
 }

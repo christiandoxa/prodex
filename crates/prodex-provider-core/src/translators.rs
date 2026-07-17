@@ -8,7 +8,8 @@ mod passthrough;
 mod tool_args;
 
 use crate::ProviderId;
-use crate::translator::{ProviderConformanceCase, ProviderTranslator};
+use crate::translator::{ProviderConformanceCase, ProviderTransformResult, ProviderTranslator};
+use crate::{ProviderEndpoint, ProviderWireFormat};
 
 pub use anthropic::{
     AnthropicMessagesTranslator, AnthropicTranslator,
@@ -147,25 +148,43 @@ pub use kiro::{
 pub use passthrough::PassthroughTranslator;
 pub(crate) use tool_args::chat_compatible_rtk_wrapped_tool_arguments;
 
-static OPENAI_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::OpenAi);
-static ANTHROPIC_TRANSLATOR: AnthropicTranslator = AnthropicTranslator;
+pub(super) fn unsupported_endpoint_result(
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    from_format: ProviderWireFormat,
+    to_format: ProviderWireFormat,
+) -> ProviderTransformResult {
+    ProviderTransformResult::unsupported(
+        provider,
+        endpoint,
+        from_format,
+        to_format,
+        format!(
+            "{} translator does not support {}",
+            provider.label(),
+            endpoint.label()
+        ),
+    )
+}
+
+pub(super) fn provider_declares_passthrough(
+    provider: ProviderId,
+    endpoint: ProviderEndpoint,
+    from_format: ProviderWireFormat,
+    to_format: ProviderWireFormat,
+) -> bool {
+    crate::provider_implementation_registry()
+        .get(provider)
+        .is_some_and(|descriptor| descriptor.declares_passthrough(endpoint, from_format, to_format))
+}
+
 static ANTHROPIC_MESSAGES_TRANSLATOR: AnthropicMessagesTranslator = AnthropicMessagesTranslator;
-static COPILOT_TRANSLATOR: CopilotTranslator = CopilotTranslator;
-static DEEPSEEK_TRANSLATOR: DeepSeekTranslator = DeepSeekTranslator;
-static GEMINI_TRANSLATOR: GeminiTranslator = GeminiTranslator;
-static KIRO_TRANSLATOR: KiroTranslator = KiroTranslator;
-static LOCAL_TRANSLATOR: PassthroughTranslator = PassthroughTranslator::new(ProviderId::Local);
 
 pub fn provider_translator(provider: ProviderId) -> &'static dyn ProviderTranslator {
-    match provider {
-        ProviderId::OpenAi => &OPENAI_TRANSLATOR,
-        ProviderId::Anthropic => &ANTHROPIC_TRANSLATOR,
-        ProviderId::Copilot => &COPILOT_TRANSLATOR,
-        ProviderId::DeepSeek => &DEEPSEEK_TRANSLATOR,
-        ProviderId::Gemini => &GEMINI_TRANSLATOR,
-        ProviderId::Kiro => &KIRO_TRANSLATOR,
-        ProviderId::Local => &LOCAL_TRANSLATOR,
-    }
+    crate::provider_implementation_registry()
+        .get(provider)
+        .expect("built-in provider implementation must be registered")
+        .translator()
 }
 
 pub fn anthropic_messages_translator() -> &'static dyn ProviderTranslator {

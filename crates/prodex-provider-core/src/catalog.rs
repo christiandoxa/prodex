@@ -174,16 +174,12 @@ mod tests {
     fn provider_catalog_json_parses_and_covers_all_supported_providers() {
         let entries = provider_catalog_entries();
         assert!(!entries.is_empty());
-        for provider in [
-            ProviderId::OpenAi,
-            ProviderId::Anthropic,
-            ProviderId::Copilot,
-            ProviderId::DeepSeek,
-            ProviderId::Gemini,
-            ProviderId::Kiro,
-            ProviderId::Local,
-        ] {
-            assert!(entries.iter().any(|entry| entry.provider == provider));
+        for descriptor in crate::provider_implementation_registry().iter() {
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| entry.provider == descriptor.provider())
+            );
         }
     }
 

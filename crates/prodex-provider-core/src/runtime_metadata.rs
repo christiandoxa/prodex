@@ -54,7 +54,7 @@ pub struct ProviderRuntimeMetadata {
     pub image_generation_enabled: bool,
 }
 
-const LOCAL_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
+pub(crate) const LOCAL_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
     provider: ProviderId::Local,
     model_provider_id: PRODEX_LOCAL_PROVIDER_ID,
     display_name: PRODEX_LOCAL_PROVIDER_NAME,
@@ -67,7 +67,7 @@ const LOCAL_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata 
     image_generation_enabled: false,
 };
 
-const DEEPSEEK_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
+pub(crate) const DEEPSEEK_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
     provider: ProviderId::DeepSeek,
     model_provider_id: PRODEX_DEEPSEEK_PROVIDER_ID,
     display_name: PRODEX_DEEPSEEK_PROVIDER_NAME,
@@ -80,7 +80,7 @@ const DEEPSEEK_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetada
     image_generation_enabled: false,
 };
 
-const GEMINI_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
+pub(crate) const GEMINI_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
     provider: ProviderId::Gemini,
     model_provider_id: PRODEX_GEMINI_PROVIDER_ID,
     display_name: PRODEX_GEMINI_PROVIDER_NAME,
@@ -93,7 +93,7 @@ const GEMINI_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata
     image_generation_enabled: true,
 };
 
-const ANTHROPIC_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
+pub(crate) const ANTHROPIC_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
     provider: ProviderId::Anthropic,
     model_provider_id: PRODEX_ANTHROPIC_PROVIDER_ID,
     display_name: PRODEX_ANTHROPIC_PROVIDER_NAME,
@@ -106,7 +106,7 @@ const ANTHROPIC_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetad
     image_generation_enabled: false,
 };
 
-const COPILOT_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
+pub(crate) const COPILOT_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
     provider: ProviderId::Copilot,
     model_provider_id: PRODEX_COPILOT_PROVIDER_ID,
     display_name: PRODEX_COPILOT_PROVIDER_NAME,
@@ -119,7 +119,7 @@ const COPILOT_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadat
     image_generation_enabled: false,
 };
 
-const KIRO_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
+pub(crate) const KIRO_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
     provider: ProviderId::Kiro,
     model_provider_id: PRODEX_KIRO_PROVIDER_ID,
     display_name: PRODEX_KIRO_PROVIDER_NAME,
@@ -135,15 +135,7 @@ const KIRO_RUNTIME_METADATA: ProviderRuntimeMetadata = ProviderRuntimeMetadata {
 pub const fn provider_runtime_metadata(
     provider: ProviderId,
 ) -> Option<&'static ProviderRuntimeMetadata> {
-    match provider {
-        ProviderId::Anthropic => Some(&ANTHROPIC_RUNTIME_METADATA),
-        ProviderId::Copilot => Some(&COPILOT_RUNTIME_METADATA),
-        ProviderId::DeepSeek => Some(&DEEPSEEK_RUNTIME_METADATA),
-        ProviderId::Gemini => Some(&GEMINI_RUNTIME_METADATA),
-        ProviderId::Kiro => Some(&KIRO_RUNTIME_METADATA),
-        ProviderId::Local => Some(&LOCAL_RUNTIME_METADATA),
-        ProviderId::OpenAi => None,
-    }
+    crate::implementation_registry::builtin_provider_runtime_metadata(provider)
 }
 
 pub fn copilot_prompt_token_limit_for_model(model: &str) -> Option<usize> {
