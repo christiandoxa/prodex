@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.303.0 - 2026-07-17
+
+### Runtime
+
+- Harden audited runtime and gateway features (`3171d4e`)
+
 ## 0.302.0 - 2026-07-16
 
 - No grouped changes.
@@ -65,9 +71,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Recheck exhausted launch snapshots (`da65756`)
-
-## 0.291.0 - 2026-07-15
-
-### Misc
-
-- Implement evaluated provider policies (`f04ad0e`)
