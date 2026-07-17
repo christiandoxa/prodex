@@ -65,6 +65,12 @@ hashbrown v0.16.1
 hashbrown v0.17.1
     hashlink v0.12.0
 
+hmac v0.12.1
+    secret-service v5.1.0
+
+hmac v0.13.0
+    pbkdf2 v0.13.0
+
 itertools v0.13.0
     criterion v0.8.2
 
@@ -81,6 +87,12 @@ rand_core v0.6.4 (*)
 
 rand_core v0.10.1
     rand v0.10.2
+
+sha2 v0.10.9
+    secret-service v5.1.0
+
+sha2 v0.11.0
+    prodex-secret-store v0.307.0
 
 thiserror v1.0.69
     filedescriptor v0.8.3
@@ -119,9 +131,11 @@ test("default budget accepts current duplicate families", () => {
       ["fallible-iterator", 2],
       ["getrandom", 2],
       ["hashbrown", 2],
+      ["hmac", 2],
       ["itertools", 2],
       ["nix", 2],
       ["rand_core", 2],
+      ["sha2", 2],
       ["thiserror", 2],
       ["thiserror-impl", 2],
       ["untrusted", 2],
