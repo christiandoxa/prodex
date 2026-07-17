@@ -567,5 +567,8 @@ fn validate_policy_version(policy: &RuntimePolicyFile, path: &Path) -> Result<()
 }
 
 #[cfg(test)]
+#[path = "../tests/src/validate_adaptive.rs"]
+mod adaptive_tests;
+#[cfg(test)]
 #[path = "../tests/src/validate.rs"]
 mod tests;
