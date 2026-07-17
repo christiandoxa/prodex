@@ -8,39 +8,19 @@ use crate::runtime_launch::proxy_startup::local_rewrite::{
 };
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_migrate_compatibility_state,
+    runtime_gateway_postgres_migrate_enterprise_state,
     runtime_gateway_sqlite_create_current_schema_for_tests,
 };
 use postgres::NoTls;
 use prodex_provider_core::{calculate_cost_microusd, estimate_request_input_tokens};
-use prodex_storage_postgres::{PostgresRuntimeMode, plan_postgres_migrations};
 use std::fs;
 use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
 pub(super) fn runtime_gateway_postgres_create_current_schema_for_tests(url: &str) {
-    let mut client = postgres::Client::connect(url, NoTls).expect("postgres should connect");
-    let has_enterprise_schema: bool = client
-        .query_one(
-            "SELECT EXISTS(
-                SELECT 1
-                FROM information_schema.tables
-                WHERE table_schema = current_schema()
-                  AND table_name = 'prodex_tenants'
-            )",
-            &[],
-        )
-        .expect("postgres enterprise schema probe should load")
-        .get(0);
-    if !has_enterprise_schema {
-        let plan = plan_postgres_migrations(PostgresRuntimeMode::ExternalMigrator)
-            .expect("postgres schema plan should build");
-        for migration in &plan.migrations {
-            client
-                .batch_execute(migration.sql)
-                .expect("postgres enterprise migration should apply");
-        }
-    }
     let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+    runtime_gateway_postgres_migrate_enterprise_state(url, &tls)
+        .expect("postgres enterprise migrations should apply");
     runtime_gateway_postgres_migrate_compatibility_state(url, &tls)
         .expect("postgres compatibility migrations should apply");
 }
