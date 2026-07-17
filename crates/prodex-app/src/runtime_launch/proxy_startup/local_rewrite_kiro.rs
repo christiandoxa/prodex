@@ -234,7 +234,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
         let secret = read_kiro_auth_secret(&auth.codex_home)?;
         let data_dir = overlay_root.join("kiro-data");
         write_kiro_cli_data_dir(&data_dir, &secret)?;
-        let mut extra_env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
+        let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
         if let Some(region) = secret
             .region
             .as_deref()
@@ -347,7 +347,7 @@ fn runtime_kiro_semantic_compact_summary(
         let secret = read_kiro_auth_secret(&auth.codex_home)?;
         let data_dir = overlay_root.join("kiro-data");
         write_kiro_cli_data_dir(&data_dir, &secret)?;
-        let mut extra_env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
+        let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
         if let Some(region) = secret
             .region
             .as_deref()
@@ -530,7 +530,7 @@ fn runtime_kiro_streaming_reader(
     let overlay_root = create_private_kiro_temp_root("runtime")?;
     let data_dir = overlay_root.join("kiro-data");
     write_kiro_cli_data_dir(&data_dir, &secret)?;
-    let mut extra_env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
+    let mut extra_env = crate::kiro_cli_data_dir_env(&data_dir);
     if let Some(region) = secret
         .region
         .as_deref()

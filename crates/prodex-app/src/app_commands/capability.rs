@@ -1,4 +1,4 @@
-use crate::{claude_bin, codex_bin, copilot_bin, gemini_bin, kiro_bin};
+use crate::{agy_bin, claude_bin, codex_bin, copilot_bin, gemini_bin, kiro_bin};
 use anyhow::{Context, Result, bail};
 use crossterm::terminal;
 use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs, SuperDoctorArgs};
@@ -9,6 +9,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use redaction::redaction_redact_secret_like_text;
 use std::env;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -29,7 +30,7 @@ struct ProdexCapability {
     name: &'static str,
     category: &'static str,
     status: String,
-    command: Option<&'static str>,
+    command: Option<String>,
     description: String,
 }
 
@@ -96,6 +97,7 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
         version_check_row("Gemini CLI", gemini_bin(), "--version"),
         version_check_row("GitHub Copilot CLI", copilot_bin(), "--version"),
         version_check_row("Kiro CLI", kiro_bin(), "--version"),
+        version_check_row("Antigravity CLI", agy_bin(), "--version"),
         version_check_row("RTK", "rtk", "--version"),
         version_check_row("Node.js", "node", "--version"),
         version_check_row("npx", "npx", "--version"),
@@ -396,33 +398,29 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
         ),
         (
             "Super tools".to_string(),
-            "probe codex, claude, gemini, copilot, kiro, rtk, npx, Codebase Memory MCP, Playwright MCP, Ponytail, and Presidio".to_string(),
+            "probe codex, claude, gemini, copilot, kiro, agy, rtk, npx, Codebase Memory MCP, Playwright MCP, Ponytail, and Presidio".to_string(),
         ),
     ]
 }
 
 fn collect_capabilities() -> Vec<ProdexCapability> {
     vec![
-        capability("codex", "runtime", Some("codex"), "Codex CLI frontend"),
-        capability("claude", "runtime", Some("claude"), "Claude Code frontend"),
-        capability(
-            "gemini",
-            "runtime",
-            Some("gemini"),
-            "Gemini CLI frontend through the Prodex OAuth proxy",
-        ),
+        capability("codex", "runtime", Some(codex_bin()), "Codex CLI frontend"),
+        capability("claude", "runtime", Some(claude_bin()), "Claude frontend"),
+        capability("gemini", "runtime", Some(gemini_bin()), "Gemini proxy"),
         capability(
             "copilot",
             "runtime",
-            Some("copilot"),
+            Some(copilot_bin()),
             "GitHub Copilot CLI frontend through the Prodex Responses proxy",
         ),
         capability(
             "kiro",
             "runtime",
-            Some("kiro-cli"),
-            "Kiro CLI frontend and ACP-backed provider bridge",
+            Some(kiro_bin()),
+            "Kiro CLI and ACP bridge",
         ),
+        capability("antigravity", "runtime", Some(agy_bin()), "Antigravity CLI"),
         capability(
             "caveman",
             "mode-assets",
@@ -432,19 +430,19 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
         capability(
             "rtk",
             "optimizer",
-            Some("rtk"),
+            Some(OsString::from("rtk")),
             "upstream shell-output token reduction",
         ),
         capability(
             "codebase-memory-mcp",
             "optimizer",
-            Some("codebase-memory-mcp"),
+            Some(OsString::from("codebase-memory-mcp")),
             "structural codebase graph MCP",
         ),
         capability(
             "playwright-mcp",
             "optimizer",
-            Some("npx"),
+            Some(OsString::from("npx")),
             "isolated headless browser automation MCP",
         ),
         capability(
@@ -473,24 +471,25 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
 fn capability(
     name: &'static str,
     category: &'static str,
-    command: Option<&'static str>,
+    command: Option<OsString>,
     description: &'static str,
 ) -> ProdexCapability {
     ProdexCapability {
         name,
         category,
         status: command
-            .map(command_available_status)
+            .as_deref()
+            .map(|command| command_available_status(name, command))
             .unwrap_or("built-in")
             .to_string(),
-        command,
+        command: command.map(|command| command.to_string_lossy().into_owned()),
         description: description.to_string(),
     }
 }
 
-fn command_available_status(command: &str) -> &'static str {
+fn command_available_status(capability_name: &str, command: &OsStr) -> &'static str {
     if Command::new(command)
-        .args(command_capability_probe_args(command))
+        .args(command_capability_probe_args(capability_name))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -723,9 +722,11 @@ fn find_path_optimizer_command_for_super_status(command: &str) -> Option<PathBuf
         }
         #[cfg(windows)]
         {
-            let candidate = dir.join(format!("{command}.exe"));
-            if optimizer_command_ready_for_super_status(command, &candidate) {
-                return Some(candidate);
+            for suffix in [".exe", ".cmd", ".bat"] {
+                let candidate = dir.join(format!("{command}{suffix}"));
+                if optimizer_command_ready_for_super_status(command, &candidate) {
+                    return Some(candidate);
+                }
             }
         }
     }

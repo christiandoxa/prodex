@@ -462,7 +462,7 @@ fn agy_bin() -> OsString {
 }
 
 fn command_exists_on_path(command: &str, paths: Option<&std::ffi::OsStr>) -> bool {
-    paths.is_some_and(|paths| env::split_paths(paths).any(|dir| dir.join(command).is_file()))
+    prodex_core::resolve_binary_path_in_path(&OsString::from(command), paths).is_some()
 }
 
 fn kiro_bin() -> OsString {

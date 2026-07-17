@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 #[path = "runtime_args/super_tail_extract.rs"]
 mod super_tail_extract;
+#[path = "runtime_args/super_validation.rs"]
+mod super_validation;
 
 pub const SUPER_OPTIMIZER_PREFIXES: [&str; 1] = ["ponytail"];
 
@@ -219,7 +221,7 @@ pub struct SuperArgs {
     /// Disable system and environment proxy settings for upstream OpenAI/quota HTTP requests.
     #[arg(long)]
     pub no_proxy: bool,
-    /// Enable Presidio request-body and WebSocket text redaction without prompting.
+    /// Enable Presidio request-body and WebSocket text redaction without prompting. Unsupported by native Kiro and Antigravity CLIs.
     #[arg(long, conflicts_with = "no_presidio")]
     pub presidio: bool,
     /// Disable Presidio redaction and skip the interactive opt-in prompt.
@@ -515,12 +517,7 @@ impl SuperArgs {
     }
 
     pub fn validate_urls(&self) -> std::result::Result<(), String> {
-        if self.harness.is_some() && self.provider.is_none() && self.url.is_none() {
-            return Err("--harness requires --provider or --url".to_string());
-        }
-        if self.harness.is_some() && self.cli.is_some_and(|agent| agent != SuperCliAgent::Codex) {
-            return Err("--harness is only supported with the Codex CLI bridge".to_string());
-        }
+        super_validation::validate_super_mode_compatibility(self)?;
         if let Some(base_url) = self.base_url.as_deref() {
             parse_runtime_base_url(base_url)?;
         }

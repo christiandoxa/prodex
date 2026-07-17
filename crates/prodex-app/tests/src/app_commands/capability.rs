@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(unix)]
+use crate::TestEnvVarGuard;
 
 #[test]
 fn rtk_capability_probe_uses_version() {
@@ -83,4 +85,29 @@ fn capabilities_include_super_mcp_defaults() {
             .iter()
             .any(|capability| capability.name == "playwright-mcp")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn capabilities_use_runtime_binary_overrides_and_include_antigravity() {
+    let _codex = TestEnvVarGuard::set("PRODEX_CODEX_BIN", "/bin/true");
+    let _claude = TestEnvVarGuard::set("PRODEX_CLAUDE_BIN", "/bin/true");
+    let _gemini = TestEnvVarGuard::set("PRODEX_GEMINI_BIN", "/bin/true");
+    let _copilot = TestEnvVarGuard::set("PRODEX_COPILOT_BIN", "/bin/true");
+    let _kiro = TestEnvVarGuard::set("PRODEX_KIRO_BIN", "/bin/true");
+    let _agy = TestEnvVarGuard::set("PRODEX_AGY_BIN", "/bin/true");
+
+    let capabilities = collect_capabilities();
+    for name in [
+        "codex",
+        "claude",
+        "gemini",
+        "copilot",
+        "kiro",
+        "antigravity",
+    ] {
+        let capability = capabilities.iter().find(|item| item.name == name).unwrap();
+        assert_eq!(capability.command.as_deref(), Some("/bin/true"));
+        assert_eq!(capability.status, "available");
+    }
 }

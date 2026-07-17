@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use dirs::{data_local_dir, home_dir};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 use std::env;
@@ -8,6 +7,11 @@ use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[path = "kiro_environment.rs"]
+mod environment;
+use environment::discover_kiro_database_path;
+pub(crate) use environment::kiro_cli_data_dir_env;
 
 use super::manage::print_profile_panel;
 use super::write_secret_text_file;
@@ -379,40 +383,6 @@ fn resolve_kiro_import_context() -> Result<KiroImportContext> {
     })
 }
 
-fn discover_kiro_database_path() -> Result<PathBuf> {
-    if let Some(path) = env::var_os("Q_CLI_DATA_DIR") {
-        let candidate = PathBuf::from(path).join("data.sqlite3");
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-
-    let mut candidates = Vec::new();
-    if let Some(data_dir) = data_local_dir() {
-        candidates.push(data_dir.join("kiro-cli").join("data.sqlite3"));
-        candidates.push(data_dir.join("amazon-q").join("data.sqlite3"));
-    }
-    if let Some(home) = home_dir() {
-        candidates.push(
-            home.join(".local")
-                .join("share")
-                .join("kiro-cli")
-                .join("data.sqlite3"),
-        );
-        candidates.push(
-            home.join(".local")
-                .join("share")
-                .join("amazon-q")
-                .join("data.sqlite3"),
-        );
-    }
-
-    candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .context("failed to find Kiro auth database; expected ~/.local/share/kiro-cli/data.sqlite3 or ~/.local/share/amazon-q/data.sqlite3")
-}
-
 fn read_kiro_auth_token(connection: &Connection) -> Result<(String, String)> {
     for key in KIRO_AUTH_KEY_PRIORITY {
         if let Some(value) = connection
@@ -666,7 +636,7 @@ fn write_kiro_model_catalog_snapshot_with_command(
     let result = (|| {
         let data_dir = overlay_root.join("kiro-data");
         write_kiro_cli_data_dir(&data_dir, secret)?;
-        let mut extra_env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
+        let mut extra_env = kiro_cli_data_dir_env(&data_dir);
         if let Some(region) = secret
             .region
             .as_deref()
@@ -988,7 +958,8 @@ mod tests {
         fs::write(
             &script,
             r#"#!/usr/bin/env python3
-import json, sys
+import json, os, sys
+assert os.environ['KIRO_DATA_DIR'] == os.environ['Q_CLI_DATA_DIR']
 if len(sys.argv) > 2 and sys.argv[1] == 'chat' and sys.argv[2] == '--list-models':
     print(json.dumps({"models":[{"model_name":"auto","description":"Models chosen by task","model_id":"auto","context_window_tokens":1000000},{"model_name":"claude-sonnet-4.5","description":"Claude Sonnet 4.5 model","model_id":"claude-sonnet-4.5","context_window_tokens":200000}],"default_model":"auto"}))
     sys.exit(0)
