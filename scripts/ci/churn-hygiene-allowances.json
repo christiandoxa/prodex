@@ -1,5 +1,18 @@
 [
   {
+    "id": "accounting-and-broker-reliability-0.305.0",
+    "requiredSubjects": [
+      "fix(runtime): harden accounting and broker reliability"
+    ],
+    "caps": {
+      "maxFiles": 23,
+      "maxBehaviorFiles": 23,
+      "maxLines": 1306,
+      "maxFileLines": 361
+    },
+    "reason": "Reviewed actual-usage overage settlement, bounded lossless usage and reconciliation queues, fail-closed SCIM reads, streaming bounded app-server validation, and visible Kiro catalog failures; verified by focused domain/storage/gateway/runtime regressions, provider conformance, offline compatibility, security and boundary guards, strict workspace Clippy, the full all-features suite, release preparation, optimized locked build, and tracked-diff secret scanning before the 0.305.0 release."
+  },
+  {
     "id": "provider-implementation-registry-0.304.0",
     "requiredSubjects": [
       "feat(provider): add immutable implementation registry"
