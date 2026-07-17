@@ -89,14 +89,17 @@ where
 }
 
 fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
-    print_launch_status("preparing runtime and Prodex overlay...");
+    print_launch_status("preparing runtime launch...");
     if request.presidio_redaction_enabled {
         print_launch_status("Presidio redaction requested; preparing local redaction proxy.");
     }
     if request.smart_context_enabled {
         print_launch_status("Smart Context runtime proxy requested.");
     }
-    if request.model_provider_override.is_some() || request.external_provider.is_some() {
+    let proxied_external_provider = request.external_provider.is_some_and(|provider| {
+        !provider.eq_ignore_ascii_case("kiro") && !provider.eq_ignore_ascii_case("antigravity")
+    });
+    if request.model_provider_override.is_some() || proxied_external_provider {
         print_launch_status("local provider bridge requested.");
     }
 }

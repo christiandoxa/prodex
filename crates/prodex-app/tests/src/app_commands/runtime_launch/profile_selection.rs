@@ -250,3 +250,33 @@ fn prepare_runtime_launch_uses_active_kiro_profile_for_kiro_cli_routing() {
     assert_eq!(prepared.codex_home, kiro_home);
     assert!(prepared.runtime_proxy.is_none());
 }
+
+#[test]
+fn prepare_runtime_launch_allows_profileless_antigravity() {
+    let root = temp_dir("profileless-antigravity");
+    let _env = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let shared_root = root.join("shared-codex");
+    let _shared = TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared_root.to_str().unwrap());
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: true,
+        auto_redeem: false,
+        skip_quota_check: true,
+        base_url: None,
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        gemini_thinking_budget_tokens: None,
+        force_runtime_proxy: false,
+        model_provider_override: None,
+        profile_v2_name: None,
+        external_provider: Some("antigravity"),
+        external_provider_api_key: None,
+    })
+    .unwrap();
+    assert_eq!(prepared.codex_home, shared_root);
+    assert!(!prepared.managed);
+    assert!(prepared.runtime_proxy.is_none());
+}

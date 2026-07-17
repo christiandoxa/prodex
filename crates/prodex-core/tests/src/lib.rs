@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn binary_resolution_uses_explicit_path_list() {
+    let root = env::temp_dir().join(format!(
+        "prodex-core-binary-resolution-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let name = if cfg!(windows) {
+        "prodex-test.exe"
+    } else {
+        "prodex-test"
+    };
+    let expected = root.join(name);
+    fs::write(&expected, b"test").unwrap();
+    let path = env::join_paths([&root]).unwrap();
+
+    assert_eq!(
+        resolve_binary_path_in_path(&OsString::from("prodex-test"), Some(&path)),
+        Some(fs::canonicalize(&expected).unwrap())
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn root_temp_file_pid_parses_atomic_write_names() {
     assert_eq!(
         root_temp_file_pid("runtime-backoffs.json.999999999.1.0.tmp"),

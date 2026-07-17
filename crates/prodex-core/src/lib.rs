@@ -349,22 +349,40 @@ pub fn format_binary_resolution(binary: &OsString) -> String {
 }
 
 pub fn resolve_binary_path(binary: &OsString) -> Option<PathBuf> {
+    resolve_binary_path_in_path(binary, env::var_os("PATH").as_deref())
+}
+
+pub fn resolve_binary_path_in_path(
+    binary: &OsString,
+    path_var: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
     let candidate = PathBuf::from(binary);
     if candidate.components().count() > 1 {
-        if candidate.is_file() {
-            return Some(fs::canonicalize(&candidate).unwrap_or(candidate));
-        }
-        return None;
+        return existing_binary_path(&candidate);
     }
 
-    let path_var = env::var_os("PATH")?;
-    for directory in env::split_paths(&path_var) {
-        let full_path = directory.join(&candidate);
-        if full_path.is_file() {
-            return Some(full_path);
+    for directory in env::split_paths(path_var?) {
+        if let Some(path) = existing_binary_path(&directory.join(&candidate)) {
+            return Some(path);
         }
     }
 
+    None
+}
+
+fn existing_binary_path(candidate: &Path) -> Option<PathBuf> {
+    if candidate.is_file() {
+        return Some(fs::canonicalize(candidate).unwrap_or_else(|_| candidate.to_path_buf()));
+    }
+    #[cfg(windows)]
+    for suffix in [".exe", ".cmd", ".bat", ".com"] {
+        let mut path = candidate.as_os_str().to_os_string();
+        path.push(suffix);
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Some(fs::canonicalize(&path).unwrap_or(path));
+        }
+    }
     None
 }
 
