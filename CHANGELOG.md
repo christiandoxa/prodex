@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.307.0 - 2026-07-17
+
+### Runtime
+
+- Launch Copilot through Prodex proxy (`2ac38df`)
+
 ## 0.306.0 - 2026-07-17
 
 ### CLI
@@ -71,9 +77,5 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Classify test-only dependencies (`54e3865`)
 
 ## 0.296.0 - 2026-07-16
-
-- No grouped changes.
-
-## 0.295.0 - 2026-07-15
 
 - No grouped changes.
