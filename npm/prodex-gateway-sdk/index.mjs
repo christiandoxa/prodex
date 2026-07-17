@@ -145,6 +145,10 @@ export class ProdexGatewayClient {
   }
 
   async request(path, options = {}) {
+    const url = new URL(path, this.baseUrl);
+    if (url.origin !== this.baseUrl.origin) {
+      throw new TypeError("ProdexGatewayClient requests must stay on the configured origin");
+    }
     const headers = new Headers(options.headers ?? {});
     if (this.token && !headers.has("authorization")) {
       headers.set("authorization", `Bearer ${this.token}`);
@@ -155,6 +159,7 @@ export class ProdexGatewayClient {
     const init = {
       method: options.method ?? "GET",
       headers,
+      redirect: "error",
       signal: options.signal,
     };
     if (options.body !== undefined) {
@@ -167,7 +172,7 @@ export class ProdexGatewayClient {
           : JSON.stringify(options.body);
     }
 
-    const response = await this.fetch(new URL(path, this.baseUrl), init);
+    const response = await this.fetch(url, init);
     const responseBody = await readResponseBody(response, options.parse);
     if (!response.ok) {
       const error = responseBody?.error ?? {};
@@ -194,6 +199,15 @@ async function readResponseBody(response, parse) {
 
 function normalizeBaseUrl(value) {
   const url = new URL(value);
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new TypeError("ProdexGatewayClient baseUrl must be an HTTP(S) origin without credentials");
+  }
   url.pathname = url.pathname.replace(/\/+$/, "/");
   return url;
 }

@@ -20,7 +20,40 @@ test("createKey sends bearer JSON request", async () => {
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.get("authorization"), "Bearer admin-token");
   assert.equal(calls[0].init.headers.get("content-type"), "application/json");
+  assert.equal(calls[0].init.redirect, "error");
   assert.deepEqual(JSON.parse(calls[0].init.body), { name: "team-a", budget_usd: 1.5 });
+});
+
+test("request rejects cross-origin targets before attaching credentials", async () => {
+  let calls = 0;
+  const client = new ProdexGatewayClient({
+    baseUrl: "https://gateway.example.com",
+    token: "admin-token",
+    fetch: async () => {
+      calls += 1;
+      return jsonResponse({});
+    },
+  });
+
+  await assert.rejects(
+    () => client.request("https://attacker.example/collect"),
+    /must stay on the configured origin/,
+  );
+  await assert.rejects(
+    () => client.request("//attacker.example/collect"),
+    /must stay on the configured origin/,
+  );
+  assert.equal(calls, 0);
+});
+
+test("constructor rejects unsafe base URLs", () => {
+  for (const baseUrl of [
+    "file:///tmp/prodex",
+    "https://user:secret@gateway.example.com",
+    "https://gateway.example.com?token=secret",
+  ]) {
+    assert.throws(() => new ProdexGatewayClient({ baseUrl }), /must be an HTTP\(S\) origin/);
+  }
 });
 
 test("metrics requests text format", async () => {

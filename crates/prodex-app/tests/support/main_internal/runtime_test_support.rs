@@ -339,6 +339,7 @@ impl RuntimeProxyFixtureBuilder {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: self.profile_health,
         }
     }
@@ -412,6 +413,7 @@ pub(super) fn runtime_shared_for_cold_start_probe_selection(
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::from([(
                 runtime_profile_auth_failure_key("main"),
                 RuntimeProfileHealth {

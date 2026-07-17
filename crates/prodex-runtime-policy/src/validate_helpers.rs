@@ -29,8 +29,8 @@ pub(crate) fn validate_gateway_observability_http_schema(value: &str) -> Result<
         bail!("schema must not contain whitespace");
     }
     match value.to_ascii_lowercase().as_str() {
-        "generic" | "otel" | "opentelemetry" | "datadog" | "langfuse" => Ok(()),
-        _ => bail!("schema must be one of generic, otel, datadog, langfuse"),
+        "generic" | "otel" | "otlp" | "opentelemetry" | "datadog" | "langfuse" => Ok(()),
+        _ => bail!("schema must be one of generic, otel, otlp, datadog, langfuse"),
     }
 }
 

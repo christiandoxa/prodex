@@ -29,7 +29,9 @@ pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
         let job = runtime_probe_refresh_take_next_job(&queue);
         queue.active.fetch_add(1, Ordering::SeqCst);
         let log_path = job.shared.log_path.clone();
-        let panic_result = crate::runtime_panic::catch_runtime_unwind_silently(|| job.execute());
+        let panic_result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
+            execute_runtime_probe_refresh_job(job)
+        });
         queue.active.fetch_sub(1, Ordering::SeqCst);
         if let Err(panic_payload) = panic_result {
             let panic_message =
@@ -45,34 +47,28 @@ pub(super) fn runtime_probe_refresh_worker_loop(queue: Arc<RuntimeProbeRefreshQu
     }
 }
 
-trait RuntimeProbeRefreshJobExt {
-    fn execute(self);
-}
-
-impl RuntimeProbeRefreshJobExt for RuntimeProbeRefreshJob {
-    fn execute(self) {
-        runtime_proxy_log(
-            &self.shared,
-            runtime_proxy_structured_log_message(
-                "profile_probe_refresh_start",
-                [runtime_proxy_log_field(
-                    "profile",
-                    self.profile_name.as_str(),
-                )],
-            ),
-        );
-        RuntimeProbeRefreshAttempt::collect(
-            &self.codex_home,
-            self.upstream_base_url.as_str(),
-            self.shared.upstream_no_proxy,
-        )
-        .execute(
-            RuntimeProbeExecutionMode::Queued {
-                apply_timeout: runtime_probe_refresh_apply_wait_timeout(),
-            },
-            &self.shared,
-            &self.profile_name,
-            self.queued_at,
-        );
-    }
+fn execute_runtime_probe_refresh_job(job: RuntimeProbeRefreshJob) {
+    runtime_proxy_log(
+        &job.shared,
+        runtime_proxy_structured_log_message(
+            "profile_probe_refresh_start",
+            [runtime_proxy_log_field(
+                "profile",
+                job.profile_name.as_str(),
+            )],
+        ),
+    );
+    RuntimeProbeRefreshAttempt::collect(
+        &job.codex_home,
+        job.upstream_base_url.as_str(),
+        job.shared.upstream_no_proxy,
+    )
+    .execute(
+        RuntimeProbeExecutionMode::Queued {
+            apply_timeout: runtime_probe_refresh_apply_wait_timeout(),
+        },
+        &job.shared,
+        &job.profile_name,
+        job.queued_at,
+    );
 }

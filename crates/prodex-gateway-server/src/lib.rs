@@ -18,8 +18,6 @@ use hyper::{
     Request, Response, StatusCode, Uri,
     body::{Body, Incoming},
     header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HOST, HeaderName, HeaderValue},
-    server::conn::http1,
-    service::service_fn,
     upgrade,
 };
 use hyper_util::{
@@ -33,14 +31,17 @@ use prodex_gateway_http::{
 };
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     sync::{OwnedSemaphorePermit, Semaphore, watch},
     task::JoinSet,
     time::{Instant, timeout, timeout_at},
 };
 
 mod channel_body;
+mod connection;
 mod in_process_upgrade;
+
+use connection::serve_connection;
 
 pub use channel_body::{
     GatewayResponseBodySender, bounded_response_body, bounded_response_body_with_guard,
@@ -71,6 +72,8 @@ const LOCAL_OVERLOAD: &[u8] =
 const EDGE_REQUEST_DENIED: &[u8] =
     br#"{"error":{"code":"edge_request_denied","message":"gateway edge request is denied"}}"#;
 const MAX_FORWARDED_FOR_HOPS: usize = 16;
+const DEFAULT_REQUEST_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_MAX_CONNECTION_AGE: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GatewayServerMode {
@@ -84,7 +87,9 @@ pub struct GatewayServerConfig {
     pub mode: GatewayServerMode,
     pub max_connections: usize,
     pub max_request_body_bytes: usize,
+    pub request_header_timeout: Duration,
     pub response_header_timeout: Duration,
+    pub max_connection_age: Duration,
     pub drain_timeout: Duration,
     pub edge_security: GatewayServerEdgeSecurity,
 }
@@ -248,7 +253,9 @@ impl GatewayServerConfig {
             mode,
             max_connections: policy.max_concurrent_streams as usize,
             max_request_body_bytes: policy.max_body_bytes,
+            request_header_timeout: DEFAULT_REQUEST_HEADER_TIMEOUT,
             response_header_timeout: Duration::from_millis(policy.request_timeout_ms),
+            max_connection_age: DEFAULT_MAX_CONNECTION_AGE,
             drain_timeout: Duration::from_millis(policy.connection_drain_timeout_ms),
             edge_security: GatewayServerEdgeSecurity {
                 trusted_proxies: Vec::new(),
@@ -272,8 +279,16 @@ impl GatewayServerConfig {
             "gateway max_request_body_bytes must be non-zero"
         );
         ensure!(
+            !self.request_header_timeout.is_zero(),
+            "gateway request_header_timeout must be non-zero"
+        );
+        ensure!(
             !self.response_header_timeout.is_zero(),
             "gateway response_header_timeout must be non-zero"
+        );
+        ensure!(
+            !self.max_connection_age.is_zero(),
+            "gateway max_connection_age must be non-zero"
         );
         ensure!(
             !self.drain_timeout.is_zero(),
@@ -401,7 +416,9 @@ struct ServerState<H> {
     handler: Arc<H>,
     edge_security: Arc<GatewayServerEdgeSecurity>,
     max_request_body_bytes: usize,
+    request_header_timeout: Duration,
     response_header_timeout: Duration,
+    max_connection_age: Duration,
     shutdown: watch::Receiver<bool>,
 }
 
@@ -412,7 +429,9 @@ impl<H> Clone for ServerState<H> {
             handler: Arc::clone(&self.handler),
             edge_security: Arc::clone(&self.edge_security),
             max_request_body_bytes: self.max_request_body_bytes,
+            request_header_timeout: self.request_header_timeout,
             response_header_timeout: self.response_header_timeout,
+            max_connection_age: self.max_connection_age,
             shutdown: self.shutdown.clone(),
         }
     }
@@ -466,7 +485,9 @@ where
             handler: Arc::clone(&handler),
             edge_security: Arc::clone(&edge_security),
             max_request_body_bytes: config.max_request_body_bytes,
+            request_header_timeout: config.request_header_timeout,
             response_header_timeout: config.response_header_timeout,
+            max_connection_age: config.max_connection_age,
             shutdown: shutdown_rx.clone(),
         };
         tasks.spawn(serve_connection(stream, peer_addr, state, permit));
@@ -493,33 +514,6 @@ where
         }
     }
     stop_result
-}
-
-async fn serve_connection<H, Fut>(
-    stream: TcpStream,
-    peer_addr: SocketAddr,
-    state: ServerState<H>,
-    permit: OwnedSemaphorePermit,
-) where
-    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
-{
-    let permit = Arc::new(permit);
-    let mut shutdown = state.shutdown.clone();
-    let service = service_fn(move |request| {
-        handle_ingress_request(request, peer_addr, state.clone(), Arc::clone(&permit))
-    });
-    let connection = http1::Builder::new()
-        .serve_connection(TokioIo::new(stream), service)
-        .with_upgrades();
-    tokio::pin!(connection);
-    tokio::select! {
-        _ = shutdown.changed() => {
-            connection.as_mut().graceful_shutdown();
-            let _ = connection.await;
-        }
-        _ = connection.as_mut() => {}
-    }
 }
 
 async fn handle_ingress_request<H, Fut>(

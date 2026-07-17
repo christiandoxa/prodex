@@ -23,9 +23,6 @@ pub const INITIAL_LOCAL_ACCOUNTING_MIGRATION: SqliteMigration = SqliteMigration 
     phase: SqliteMigrationPhase::Expand,
     name: "001_local_tenant_accounting",
     sql: r#"
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
-
 CREATE TABLE IF NOT EXISTS prodex_tenants (
     tenant_id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,

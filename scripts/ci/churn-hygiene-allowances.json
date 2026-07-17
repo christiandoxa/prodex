@@ -1,5 +1,18 @@
 [
   {
+    "id": "whole-repo-feature-audit-0.303.0",
+    "requiredSubjects": [
+      "fix: harden audited runtime and gateway features"
+    ],
+    "caps": {
+      "maxFiles": 136,
+      "maxBehaviorFiles": 134,
+      "maxLines": 4450,
+      "maxFileLines": 410
+    },
+    "reason": "Reviewed the whole-repository feature audit across runtime affinity and persistence, provider translation, quota handling, profile lifecycle, gateway transport and migrations, enterprise authorization, observability, SDK request safety, cookie and file security, and CLI behavior; verified by the locked all-features full suite, focused runtime and migration regressions, strict workspace Clippy, size/hot-path/boundary guards, optimized release build, and tracked-diff secret and identifier scans before the 0.303.0 release."
+  },
+  {
     "id": "whole-repo-maintainability-refactor-0.302.0",
     "requiredSubjects": [
       "refactor: consolidate shared runtime and gateway paths",

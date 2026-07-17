@@ -334,9 +334,7 @@ pub(crate) fn extension_skill_dirs(extension: &GeminiExtension) -> Vec<PathBuf> 
             let Ok(metadata) = fs::symlink_metadata(path) else {
                 return false;
             };
-            metadata.is_dir()
-                && !metadata.file_type().is_symlink()
-                && read_text_limited(&path.join("SKILL.md"), GEMINI_COMPAT_FILE_LIMIT).is_some()
+            metadata.is_dir() && !metadata.file_type().is_symlink()
         })
         .take(GEMINI_EXTENSION_SCAN_LIMIT)
         .collect::<Vec<_>>();

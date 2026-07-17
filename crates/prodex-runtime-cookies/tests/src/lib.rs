@@ -108,3 +108,36 @@ fn cookie_jar_deletes_expired_cookie() {
         None
     );
 }
+
+#[test]
+fn cookie_jar_keeps_same_name_on_distinct_paths_and_deletes_only_one_path() {
+    let jar = RuntimeProxyCookieJar::new();
+    capture(
+        &jar,
+        "alpha",
+        "chatgpt.com",
+        "/api/login",
+        &["sid=root; Path=/", "sid=api; Path=/api"],
+    );
+
+    assert_eq!(
+        merged(&jar, "alpha", "https://chatgpt.com/api/responses", &[]).as_deref(),
+        Some("sid=api; sid=root")
+    );
+    assert_eq!(
+        merged(&jar, "alpha", "https://chatgpt.com/other", &[]).as_deref(),
+        Some("sid=root")
+    );
+
+    capture(
+        &jar,
+        "alpha",
+        "chatgpt.com",
+        "/api/login",
+        &["sid=gone; Path=/api; Max-Age=0"],
+    );
+    assert_eq!(
+        merged(&jar, "alpha", "https://chatgpt.com/api/responses", &[]).as_deref(),
+        Some("sid=root")
+    );
+}

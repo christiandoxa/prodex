@@ -71,6 +71,19 @@ fn redaction_masks_standalone_basic_and_token_credentials() {
 }
 
 #[test]
+fn redaction_masks_every_cookie_on_a_plain_text_header_line() {
+    let first = fake_named_secret("first_cookie");
+    let second = fake_named_secret("second_cookie");
+    let value = format!("Cookie: first={first}; second={second}\nvisible=ok");
+
+    let redacted = redaction_redact_secret_like_text(&value);
+
+    assert_eq!(redacted, "Cookie: <redacted>\nvisible=ok");
+    assert!(!redacted.contains(&first));
+    assert!(!redacted.contains(&second));
+}
+
+#[test]
 fn gateway_json_serialization_failure_is_fail_closed() {
     let error = serde_json::Error::io(std::io::Error::other("injected serialization failure"));
 

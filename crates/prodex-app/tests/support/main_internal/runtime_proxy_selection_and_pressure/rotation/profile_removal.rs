@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn remove_profile_deletes_managed_home_by_default() {
+fn remove_profile_preserves_managed_home_without_delete_home() {
     let temp_dir = TestDir::isolated();
     let prodex_home = temp_dir.path.join("prodex");
     let prodex_home_string = prodex_home.to_string_lossy().to_string();
@@ -57,8 +57,8 @@ fn remove_profile_deletes_managed_home_by_default() {
     let reloaded = AppState::load(&paths).expect("state should reload");
     assert!(!reloaded.profiles.contains_key("main"));
     assert!(
-        !profile_home.exists(),
-        "managed profile home should be deleted even without --delete-home"
+        profile_home.exists(),
+        "managed profile home should remain without --delete-home"
     );
 }
 
@@ -215,7 +215,7 @@ fn remove_profile_refuses_managed_home_outside_managed_root() {
     let err = handle_remove_profile(RemoveProfileArgs {
         name: Some("main".to_string()),
         all: false,
-        delete_home: false,
+        delete_home: true,
     })
     .expect_err("managed profile home outside root should be refused");
 
@@ -273,7 +273,7 @@ fn remove_profile_refuses_symlink_managed_profiles_root() {
     let err = handle_remove_profile(RemoveProfileArgs {
         name: Some("main".to_string()),
         all: false,
-        delete_home: false,
+        delete_home: true,
     })
     .expect_err("managed profile root symlink should be refused");
 
@@ -515,8 +515,8 @@ fn remove_all_profiles_clears_state_and_continuation_sidecars() {
         "session bindings should be cleared"
     );
     assert!(
-        !managed_home.exists(),
-        "managed profile home should be deleted during bulk removal"
+        managed_home.exists(),
+        "managed profile home should remain during bulk removal without --delete-home"
     );
     assert!(
         external_home.exists(),

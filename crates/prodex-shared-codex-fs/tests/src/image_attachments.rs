@@ -68,6 +68,40 @@ fn persist_codex_session_image_attachments_rewrites_escaped_session_path() {
     assert!(!rewritten.contains(&image_source.display().to_string()));
 }
 
+#[cfg(unix)]
+#[test]
+fn persist_codex_session_image_attachments_preserves_private_file_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = ImageAttachmentTestDir::new("private-file-mode");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/06/10");
+    let image_source = temp_dir.path.join("codex-clipboard-private.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+    fs::create_dir_all(&sessions_dir).unwrap();
+    fs::write(&image_source, b"png").unwrap();
+    fs::write(
+        &session_file,
+        format!(
+            r#"{{"payload":{{"text":"<image path=\"{}\">"}}}}"#,
+            image_source.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&session_file, fs::Permissions::from_mode(0o600)).unwrap();
+
+    persist_codex_session_image_attachments(&codex_home).unwrap();
+
+    assert_eq!(
+        fs::metadata(&session_file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let stable = codex_home.join("image_attachments/codex-clipboard-private.png");
+    let rewritten = fs::read_to_string(&session_file).unwrap();
+    assert!(rewritten.contains(&stable.display().to_string()));
+    assert!(!rewritten.contains(&image_source.display().to_string()));
+}
+
 #[test]
 fn persist_codex_session_file_image_attachment_error_redacts_session_path() {
     let temp_dir = ImageAttachmentTestDir::new("session-path-error-redaction");

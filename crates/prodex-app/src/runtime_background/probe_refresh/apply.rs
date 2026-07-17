@@ -73,6 +73,7 @@ fn apply_runtime_profile_probe_result_to_runtime(
             runtime
                 .profile_retry_backoff_until
                 .insert(profile_name.to_string(), until);
+            mark_runtime_profile_retry_backoff_update(runtime, profile_name);
         }
         runtime
             .profile_usage_snapshots

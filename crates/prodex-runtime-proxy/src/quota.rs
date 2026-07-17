@@ -538,7 +538,7 @@ pub fn runtime_proxy_precommit_quota_block_reason(
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
     ) && runtime_proxy_quota_window_precommit_guard(summary.five_hour, floor_percent)
     {
-        return Some(RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend);
+        return Some(RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend);
     }
 
     None

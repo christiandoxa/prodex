@@ -31,9 +31,20 @@ struct RuntimeProxyCookieEntry {
     updated_at: SystemTime,
 }
 
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct RuntimeProxyCookieIdentity {
+    name: String,
+    path: String,
+}
+
 #[derive(Debug, Default)]
 pub struct RuntimeProxyCookieJar {
-    entries: Mutex<BTreeMap<RuntimeProxyCookieKey, BTreeMap<String, RuntimeProxyCookieEntry>>>,
+    entries: Mutex<
+        BTreeMap<
+            RuntimeProxyCookieKey,
+            BTreeMap<RuntimeProxyCookieIdentity, RuntimeProxyCookieEntry>,
+        >,
+    >,
 }
 
 impl RuntimeProxyCookieJar {
@@ -121,11 +132,17 @@ impl RuntimeProxyCookieJar {
             let cookies = jar.entry(key.clone()).or_default();
             match change {
                 RuntimeProxyCookieChange::Set(entry) => {
-                    cookies.insert(entry.name.clone(), entry);
+                    cookies.insert(
+                        RuntimeProxyCookieIdentity {
+                            name: entry.name.clone(),
+                            path: entry.path.clone(),
+                        },
+                        entry,
+                    );
                     runtime_proxy_cookie_prune_host_locked(cookies);
                 }
-                RuntimeProxyCookieChange::Delete(name) => {
-                    cookies.remove(&name);
+                RuntimeProxyCookieChange::Delete(identity) => {
+                    cookies.remove(&identity);
                 }
             }
         }
@@ -209,7 +226,22 @@ impl RuntimeProxyCookieJar {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             runtime_proxy_cookie_prune_expired_locked(&mut jar, now);
             if let Some(cookies) = jar.get(&key) {
-                for entry in cookies.values() {
+                let mut matching = cookies
+                    .values()
+                    .filter(|entry| {
+                        !caller_names.contains(entry.name.as_str())
+                            && (!entry.secure || secure_request)
+                            && runtime_proxy_cookie_path_matches(path, &entry.path)
+                    })
+                    .collect::<Vec<_>>();
+                matching.sort_by(|left, right| {
+                    right
+                        .path
+                        .len()
+                        .cmp(&left.path.len())
+                        .then_with(|| left.name.cmp(&right.name))
+                });
+                for entry in matching {
                     if caller_names.contains(entry.name.as_str()) {
                         continue;
                     }
@@ -231,7 +263,7 @@ impl RuntimeProxyCookieJar {
 
 enum RuntimeProxyCookieChange {
     Set(RuntimeProxyCookieEntry),
-    Delete(String),
+    Delete(RuntimeProxyCookieIdentity),
 }
 
 impl RuntimeProxyCookieChange {
@@ -298,7 +330,10 @@ impl RuntimeProxyCookieChange {
         }
 
         if delete {
-            return Some(Self::Delete(name.to_string()));
+            return Some(Self::Delete(RuntimeProxyCookieIdentity {
+                name: name.to_string(),
+                path,
+            }));
         }
 
         Some(Self::Set(RuntimeProxyCookieEntry {
@@ -375,7 +410,10 @@ fn runtime_proxy_cookie_parse_expires(value: &str) -> Option<SystemTime> {
 }
 
 fn runtime_proxy_cookie_prune_expired_locked(
-    jar: &mut BTreeMap<RuntimeProxyCookieKey, BTreeMap<String, RuntimeProxyCookieEntry>>,
+    jar: &mut BTreeMap<
+        RuntimeProxyCookieKey,
+        BTreeMap<RuntimeProxyCookieIdentity, RuntimeProxyCookieEntry>,
+    >,
     now: SystemTime,
 ) {
     for cookies in jar.values_mut() {
@@ -384,21 +422,26 @@ fn runtime_proxy_cookie_prune_expired_locked(
     jar.retain(|_, cookies| !cookies.is_empty());
 }
 
-fn runtime_proxy_cookie_prune_host_locked(cookies: &mut BTreeMap<String, RuntimeProxyCookieEntry>) {
+fn runtime_proxy_cookie_prune_host_locked(
+    cookies: &mut BTreeMap<RuntimeProxyCookieIdentity, RuntimeProxyCookieEntry>,
+) {
     while cookies.len() > RUNTIME_PROXY_COOKIE_MAX_PER_HOST {
-        let Some(oldest_name) = cookies
-            .values()
-            .min_by_key(|entry| entry.updated_at)
-            .map(|entry| entry.name.clone())
+        let Some(oldest_identity) = cookies
+            .iter()
+            .min_by_key(|(_, entry)| entry.updated_at)
+            .map(|(identity, _)| identity.clone())
         else {
             break;
         };
-        cookies.remove(&oldest_name);
+        cookies.remove(&oldest_identity);
     }
 }
 
 fn runtime_proxy_cookie_prune_global_locked(
-    jar: &mut BTreeMap<RuntimeProxyCookieKey, BTreeMap<String, RuntimeProxyCookieEntry>>,
+    jar: &mut BTreeMap<
+        RuntimeProxyCookieKey,
+        BTreeMap<RuntimeProxyCookieIdentity, RuntimeProxyCookieEntry>,
+    >,
 ) {
     while jar.len() > RUNTIME_PROXY_COOKIE_MAX_HOSTS {
         let Some(oldest_key) = jar

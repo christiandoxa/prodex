@@ -450,6 +450,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };
@@ -1389,7 +1390,6 @@ mod request_guard_tests {
     fn gateway_background_task_slots_are_bounded() {
         let slots = Arc::new(tokio::sync::Semaphore::new(1));
         let permit = runtime_gateway_try_reserve_background_task(&slots).unwrap();
-
         assert!(runtime_gateway_try_reserve_background_task(&slots).is_none());
         drop(permit);
         assert!(runtime_gateway_try_reserve_background_task(&slots).is_some());

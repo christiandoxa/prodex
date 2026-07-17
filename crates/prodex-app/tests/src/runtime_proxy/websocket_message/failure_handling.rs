@@ -232,7 +232,7 @@ fn candidate_usage_not_included_with_ready_fallback_rotates() {
 }
 
 #[test]
-fn workspace_credit_continuation_uses_fresh_retry_when_ready_profile_exists() {
+fn workspace_credit_continuation_preserves_affinity_and_context() {
     let _guard = acquire_test_runtime_lock();
     let shared = test_runtime_shared("failure-workspace-credit-fresh-retry");
     {
@@ -282,23 +282,19 @@ fn workspace_credit_continuation_uses_fresh_retry_when_ready_profile_exists() {
                 r#"{"type":"error","status_code":429,"headers":{"X-Codex-Rate-Limit-Reached-Type":"workspace_member_credits_depleted"},"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}"#.to_string(),
             ),
         )
-        .expect("workspace-credit continuation should become a fresh retry");
+        .expect("workspace-credit continuation should pass through");
 
     assert!(matches!(
         action,
-        RuntimeWebsocketMessageLoopAction::Continue
+        RuntimeWebsocketMessageLoopAction::Finished
     ));
-    assert!(flow.excluded_profiles.contains("alpha"));
-    assert!(flow.previous_response_id.is_none());
-    assert!(flow.previous_response_fresh_fallback_shape.is_none());
-    assert!(flow.pinned_profile.is_none());
-    assert!(flow.bound_profile.is_none());
-    assert!(!flow.trusted_previous_response_affinity);
-    assert!(!flow.request_text.contains("previous_response_id"));
-    assert!(matches!(
-        &flow.last_failure,
-        Some((RuntimeUpstreamFailureResponse::Websocket(_), true))
-    ));
+    assert!(!flow.excluded_profiles.contains("alpha"));
+    assert_eq!(flow.previous_response_id.as_deref(), Some("resp_alpha"));
+    assert_eq!(flow.pinned_profile.as_deref(), Some("alpha"));
+    assert_eq!(flow.bound_profile.as_deref(), Some("alpha"));
+    assert!(flow.trusted_previous_response_affinity);
+    assert!(flow.request_text.contains("previous_response_id"));
+    assert!(flow.last_failure.is_none());
 }
 
 #[test]

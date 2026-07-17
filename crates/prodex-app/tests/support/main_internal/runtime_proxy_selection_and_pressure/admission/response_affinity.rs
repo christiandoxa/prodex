@@ -96,6 +96,7 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };
@@ -188,6 +189,7 @@ fn response_affinity_skips_recent_negative_cache_for_same_route() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::from([(
                 runtime_previous_response_negative_cache_key(
                     "resp-main",
@@ -295,6 +297,7 @@ fn response_affinity_skips_dead_continuation_status() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };
@@ -393,6 +396,7 @@ fn response_affinity_keeps_stale_verified_continuation_status_bound() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };
@@ -508,6 +512,7 @@ fn session_affinity_skips_stale_verified_continuation_status() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };

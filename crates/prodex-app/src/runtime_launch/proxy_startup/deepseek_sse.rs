@@ -3,7 +3,9 @@
 
 use super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::provider_bridge::{
-    RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_stream_text_delta_event,
+    RuntimeProviderBridgeKind, runtime_provider_label,
+    runtime_provider_stream_reasoning_summary_text_delta_event,
+    runtime_provider_stream_text_delta_event,
 };
 use prodex_domain::{CallId, RequestId};
 use prodex_provider_core::{
@@ -31,6 +33,8 @@ pub(super) struct RuntimeDeepSeekSseState {
     pub(super) eof: bool,
     output_text_item_added: bool,
     output_text_item_done: bool,
+    reasoning_summary_part_added: bool,
+    reasoning_summary_done: bool,
     model: Option<String>,
     output_text: String,
     reasoning_content: String,
@@ -165,6 +169,8 @@ impl RuntimeDeepSeekSseState {
             eof: false,
             output_text_item_added: false,
             output_text_item_done: false,
+            reasoning_summary_part_added: false,
+            reasoning_summary_done: false,
             model: None,
             output_text: String::new(),
             reasoning_content: String::new(),
@@ -233,7 +239,7 @@ impl RuntimeDeepSeekSseState {
         }
         let choice_delta = deepseek_provider_core_stream_choice_delta(choice);
         if let Some(reasoning_content) = choice_delta.reasoning_content.as_deref() {
-            self.reasoning_content.push_str(reasoning_content);
+            events.extend(self.observe_reasoning_delta(value, reasoning_content));
         }
         if let Some(refusal) = choice_delta.refusal.as_deref() {
             self.refusal.push_str(refusal);
@@ -282,6 +288,56 @@ impl RuntimeDeepSeekSseState {
             if !self.tool_calls.is_empty() {
                 self.store_conversation_snapshot();
             }
+        }
+        events
+    }
+
+    pub(super) fn observe_reasoning_delta(
+        &mut self,
+        upstream_value: &serde_json::Value,
+        text: &str,
+    ) -> Vec<String> {
+        if text.is_empty() {
+            return Vec::new();
+        }
+        self.reasoning_content.push_str(text);
+        let mut events = Vec::new();
+        if !self.reasoning_summary_part_added {
+            self.reasoning_summary_part_added = true;
+            let sequence_number = self.next_sequence_number();
+            events.push(self.event(
+                "response.reasoning_summary_part.added",
+                serde_json::json!({
+                    "type": "response.reasoning_summary_part.added",
+                    "sequence_number": sequence_number,
+                    "response_id": self.response_id,
+                    "output_index": 0,
+                    "summary_index": 0,
+                    "part": {"type": "summary_text", "text": ""},
+                }),
+            ));
+        }
+        let sequence_number = self.next_sequence_number();
+        if let Some((event_name, data)) = runtime_provider_stream_reasoning_summary_text_delta_event(
+            self.provider_kind,
+            upstream_value,
+            sequence_number,
+            &self.response_id,
+            0,
+        ) {
+            events.push(self.event(&event_name, data));
+        } else {
+            events.push(self.event(
+                "response.reasoning_summary_text.delta",
+                serde_json::json!({
+                    "type": "response.reasoning_summary_text.delta",
+                    "sequence_number": sequence_number,
+                    "response_id": self.response_id,
+                    "output_index": 0,
+                    "summary_index": 0,
+                    "delta": text,
+                }),
+            ));
         }
         events
     }

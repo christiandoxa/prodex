@@ -61,7 +61,10 @@ use std::error::Error;
 use std::fmt;
 use std::sync::atomic::Ordering;
 
+mod compatibility;
 mod governance_decision;
+#[cfg(test)]
+use compatibility::runtime_gateway_compatibility_http_route;
 use governance_decision::runtime_gateway_governance_decision;
 
 const MAX_RUNTIME_GATEWAY_REQUESTED_TOOLS: usize = 128;
@@ -194,29 +197,6 @@ impl RuntimeGatewayApplicationAdmission {
             }
             RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous { .. } => None,
         }
-    }
-
-    /// Compatibility is owned here until intentionally open anonymous data-plane access is
-    /// removed; callers cannot forge provider routing fields outside this adapter.
-    pub(super) fn compatibility_anonymous(
-        route: GatewayHttpRouteKind,
-        captured: &RuntimeProxyRequest,
-        shared: &RuntimeLocalRewriteProxyShared,
-        inspection: ApplicationInspectionPlan,
-    ) -> Result<Self, RuntimeGatewayApplicationDataPlaneError> {
-        runtime_gateway_compatibility_provider_invocation(
-            shared.provider.bridge_kind().provider_id(),
-            route,
-            captured,
-        )
-        .map(|invocation| {
-            Self(
-                RuntimeGatewayApplicationAdmissionKind::CompatibilityAnonymous {
-                    invocation,
-                    inspection,
-                },
-            )
-        })
     }
 }
 

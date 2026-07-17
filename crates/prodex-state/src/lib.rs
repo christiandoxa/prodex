@@ -652,27 +652,26 @@ pub fn merge_app_state_for_save_with_policy(
     now: i64,
     policy: AppStateCompactionPolicy,
 ) -> AppState {
-    let active_profile = desired
-        .active_profile
-        .clone()
-        .filter(|profile_name| desired.profiles.contains_key(profile_name));
+    let mut profiles = existing.profiles.clone();
+    profiles.extend(desired.profiles.clone());
+    let active_profile = merge_active_profile(&existing, desired, &profiles);
     let merged = AppState {
         active_profile,
-        profiles: desired.profiles.clone(),
+        profiles: profiles.clone(),
         last_run_selected_at: merge_last_run_selection(
             &existing.last_run_selected_at,
             &desired.last_run_selected_at,
-            &desired.profiles,
+            &profiles,
         ),
         response_profile_bindings: merge_profile_bindings(
             &existing.response_profile_bindings,
             &desired.response_profile_bindings,
-            &desired.profiles,
+            &profiles,
         ),
         session_profile_bindings: merge_profile_bindings(
             &existing.session_profile_bindings,
             &desired.session_profile_bindings,
-            &desired.profiles,
+            &profiles,
         ),
     };
     compact_app_state_with_policy(merged, now, policy)
@@ -698,11 +697,7 @@ pub fn merge_runtime_state_snapshot_with_policy(
     } else {
         existing.profiles.clone()
     };
-    let active_profile = snapshot
-        .active_profile
-        .clone()
-        .or(existing.active_profile.clone())
-        .filter(|profile_name| profiles.contains_key(profile_name));
+    let active_profile = merge_active_profile(&existing, snapshot, &profiles);
 
     let merged = AppState {
         active_profile,
@@ -724,6 +719,35 @@ pub fn merge_runtime_state_snapshot_with_policy(
         ),
     };
     compact_app_state_with_policy(merged, now, policy)
+}
+
+fn merge_active_profile(
+    existing: &AppState,
+    incoming: &AppState,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> Option<String> {
+    let existing_active = existing
+        .active_profile
+        .as_ref()
+        .filter(|profile_name| profiles.contains_key(*profile_name));
+    let incoming_active = incoming
+        .active_profile
+        .as_ref()
+        .filter(|profile_name| profiles.contains_key(*profile_name));
+    match (existing_active, incoming_active) {
+        (Some(existing_name), Some(incoming_name)) if existing_name != incoming_name => {
+            let existing_selected_at = existing.last_run_selected_at.get(existing_name).copied();
+            let incoming_selected_at = incoming.last_run_selected_at.get(incoming_name).copied();
+            if existing_selected_at > incoming_selected_at {
+                Some(existing_name.clone())
+            } else {
+                Some(incoming_name.clone())
+            }
+        }
+        (_, Some(incoming_name)) => Some(incoming_name.clone()),
+        (Some(existing_name), None) => Some(existing_name.clone()),
+        (None, None) => None,
+    }
 }
 
 fn current_unix_timestamp() -> i64 {

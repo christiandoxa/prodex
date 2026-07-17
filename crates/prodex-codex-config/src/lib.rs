@@ -167,6 +167,9 @@ pub fn codex_cli_profile_v2_name(args: &[OsString]) -> Option<String> {
             index += 1;
             continue;
         };
+        if arg == "--" {
+            break;
+        }
         let profile_v2_name = if matches!(arg, "--profile" | "--profile-v2") {
             index += 1;
             args.get(index).and_then(|value| value.to_str())
@@ -234,6 +237,9 @@ pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<S
             index += 1;
             continue;
         };
+        if arg == "--" {
+            break;
+        }
         let assignment = if matches!(arg, "-c" | "--config") {
             index += 1;
             args.get(index)?.to_str()
@@ -259,6 +265,9 @@ pub fn codex_cli_config_override_exact_value(args: &[OsString], key: &str) -> Op
             index += 1;
             continue;
         };
+        if arg == "--" {
+            break;
+        }
         let assignment = if matches!(arg, "-c" | "--config") {
             index += 1;
             args.get(index)?.to_str()

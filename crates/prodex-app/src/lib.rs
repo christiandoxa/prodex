@@ -164,6 +164,16 @@ pub fn migrate_gateway_compatibility_state_postgres(
 ) -> anyhow::Result<()> {
     runtime_launch::runtime_gateway_postgres_migrate_compatibility_state(url, tls)
 }
+pub fn migrate_gateway_enterprise_state_sqlite(path: &Path) -> anyhow::Result<usize> {
+    runtime_launch::runtime_gateway_sqlite_migrate_enterprise_state(path)
+}
+
+pub fn migrate_gateway_enterprise_state_postgres(
+    url: &str,
+    tls: &prodex_storage_postgres_runtime::PostgresTlsConfig,
+) -> anyhow::Result<usize> {
+    runtime_launch::runtime_gateway_postgres_migrate_enterprise_state(url, tls)
+}
 pub use gateway_application::{
     GatewayApplication, start_policy_gateway_application, start_policy_gateway_application_for_mode,
 };

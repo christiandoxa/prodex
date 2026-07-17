@@ -284,7 +284,7 @@ fn merge_runtime_state_snapshot_keeps_existing_profile_set_when_present() {
         AppStateCompactionPolicy::default(),
     );
 
-    assert_eq!(merged.active_profile, None);
+    assert_eq!(merged.active_profile.as_deref(), Some("p1"));
     assert!(merged.profiles.contains_key("p1"));
     assert!(!merged.profiles.contains_key("p2"));
     assert_eq!(
@@ -292,6 +292,61 @@ fn merge_runtime_state_snapshot_keeps_existing_profile_set_when_present() {
         BTreeMap::from([("p1".to_string(), 10)])
     );
     assert!(merged.response_profile_bindings.is_empty());
+}
+
+#[test]
+fn merge_app_state_for_save_preserves_concurrent_profile_additions() {
+    let existing = AppState {
+        active_profile: Some("first".to_string()),
+        profiles: BTreeMap::from([profile("first")]),
+        ..AppState::default()
+    };
+    let desired = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: BTreeMap::from([profile("second")]),
+        ..AppState::default()
+    };
+
+    let merged = merge_app_state_for_save_with_policy(
+        existing,
+        &desired,
+        1,
+        AppStateCompactionPolicy::default(),
+    );
+
+    assert_eq!(merged.active_profile.as_deref(), Some("second"));
+    assert_eq!(merged.profiles.len(), 2);
+    assert!(merged.profiles.contains_key("first"));
+    assert!(merged.profiles.contains_key("second"));
+}
+
+#[test]
+fn merge_app_state_for_save_does_not_restore_stale_active_profile() {
+    let profiles = BTreeMap::from([profile("first"), profile("second")]);
+    let existing = AppState {
+        active_profile: Some("second".to_string()),
+        profiles: profiles.clone(),
+        last_run_selected_at: BTreeMap::from([
+            ("first".to_string(), 10),
+            ("second".to_string(), 20),
+        ]),
+        ..AppState::default()
+    };
+    let stale = AppState {
+        active_profile: Some("first".to_string()),
+        profiles,
+        last_run_selected_at: BTreeMap::from([("first".to_string(), 10)]),
+        ..AppState::default()
+    };
+
+    let merged = merge_app_state_for_save_with_policy(
+        existing,
+        &stale,
+        20,
+        AppStateCompactionPolicy::default(),
+    );
+
+    assert_eq!(merged.active_profile.as_deref(), Some("second"));
 }
 
 #[test]

@@ -489,13 +489,12 @@ fn expired_recovery_request(
 }
 
 fn control_plane_principal(tenant_id: TenantId, role: Role, scope: CredentialScope) -> Principal {
-    Principal::new(
-        PrincipalId::new(),
-        Some(tenant_id),
-        PrincipalKind::User,
-        role,
-        scope,
-    )
+    let kind = if scope == CredentialScope::BreakGlass {
+        PrincipalKind::BreakGlass
+    } else {
+        PrincipalKind::User
+    };
+    Principal::new(PrincipalId::new(), Some(tenant_id), kind, role, scope)
 }
 
 fn control_plane_action(

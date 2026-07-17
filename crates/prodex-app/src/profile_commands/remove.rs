@@ -19,6 +19,7 @@ struct RemovedProfileRecord {
     name: String,
     managed: bool,
     deleted_home: bool,
+    delete_home: bool,
     codex_home: PathBuf,
 }
 
@@ -61,11 +62,12 @@ pub(crate) fn handle_remove_profile(args: RemoveProfileArgs) -> Result<()> {
         args.name.as_deref(),
         args.delete_home,
     )?;
-    let removed_profiles =
+    let mut removed_profiles =
         remove_profiles_from_state(&paths, &mut state, &target_names, args.delete_home)?;
     prune_removed_profile_metadata(&mut state, &target_names);
-    state.save(&paths)?;
+    state.save_with_removed_profiles(&paths, &target_names)?;
     persist_pruned_profile_runtime_sidecars(&paths, &state.profiles)?;
+    delete_removed_profile_homes(&mut removed_profiles)?;
 
     if args.all {
         print_bulk_profile_removal_result(&state, &removed_profiles)?;
@@ -92,11 +94,12 @@ fn remove_profiles_from_state(
             .profiles
             .remove(name)
             .with_context(|| format!("profile '{}' disappeared from state", name))?;
-        let deleted_home = remove_profile_home_if_requested(paths, &profile, delete_home)?;
+        let delete_home = profile_home_deletion_requested(paths, &profile, delete_home)?;
         removed_profiles.push(RemovedProfileRecord {
             name: name.clone(),
             managed: profile.managed,
-            deleted_home,
+            deleted_home: false,
+            delete_home,
             codex_home: profile.codex_home,
         });
     }
@@ -104,7 +107,7 @@ fn remove_profiles_from_state(
     Ok(removed_profiles)
 }
 
-fn remove_profile_home_if_requested(
+fn profile_home_deletion_requested(
     paths: &AppPaths,
     profile: &ProfileEntry,
     delete_home: bool,
@@ -128,12 +131,21 @@ fn remove_profile_home_if_requested(
         }
     }
 
-    if profile.codex_home.exists() {
-        fs::remove_dir_all(&profile.codex_home)
-            .with_context(|| format!("failed to delete {}", profile.codex_home.display()))?;
-    }
-
     Ok(true)
+}
+
+fn delete_removed_profile_homes(removed_profiles: &mut [RemovedProfileRecord]) -> Result<()> {
+    for profile in removed_profiles
+        .iter_mut()
+        .filter(|profile| profile.delete_home)
+    {
+        if profile.codex_home.exists() {
+            fs::remove_dir_all(&profile.codex_home)
+                .with_context(|| format!("failed to delete {}", profile.codex_home.display()))?;
+        }
+        profile.deleted_home = true;
+    }
+    Ok(())
 }
 
 fn prune_removed_profile_metadata(state: &mut AppState, target_names: &[String]) {

@@ -18,6 +18,8 @@ use std::path::Path;
 use std::time::Duration;
 
 const RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const RUNTIME_GATEWAY_OBSERVABILITY_HTTP_MAX_ATTEMPTS: usize = 2;
+const RUNTIME_GATEWAY_OBSERVABILITY_HTTP_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 pub(in crate::runtime_launch::proxy_startup) fn emit_runtime_gateway_spend_event(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -125,34 +127,51 @@ fn emit_runtime_gateway_observability_sinks_blocking(
             event,
             shared.gateway_observability.http_schema.as_str(),
         );
-        let mut request = shared
-            .client
-            .post(endpoint)
-            .timeout(RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT)
-            .json(&payload);
-        if let Some(secret) = shared.gateway_observability.http_bearer_token.as_ref() {
-            request = match runtime_gateway_with_outbound_secret(secret, |token| {
-                Ok(request.bearer_auth(token))
-            }) {
-                Ok(request) => request,
-                Err(_) => {
-                    runtime_gateway_observability_log_http_failure(
-                        shared,
-                        event.request,
-                        endpoint,
-                        "credential_resolution",
-                    );
-                    return;
-                }
-            };
-        }
-        if let Err(err) = request.send() {
-            let error = runtime_gateway_observability_redacted_log_text(
-                &reqwest::Error::without_url(err).to_string(),
-            );
+        if let Err(error) = runtime_gateway_observability_send_http(shared, endpoint, &payload) {
             runtime_gateway_observability_log_http_failure(shared, event.request, endpoint, &error);
         }
     }
+}
+
+fn runtime_gateway_observability_send_http(
+    shared: &RuntimeLocalRewriteProxyShared,
+    endpoint: &str,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    for attempt in 0..RUNTIME_GATEWAY_OBSERVABILITY_HTTP_MAX_ATTEMPTS {
+        let send = |token: Option<&str>| {
+            let mut request = shared
+                .client
+                .post(endpoint)
+                .timeout(RUNTIME_GATEWAY_OBSERVABILITY_HTTP_TIMEOUT)
+                .json(payload);
+            if let Some(token) = token {
+                request = request.bearer_auth(token);
+            }
+            request.send().map_err(anyhow::Error::new)
+        };
+        let response = match shared.gateway_observability.http_bearer_token.as_ref() {
+            Some(secret) => runtime_gateway_with_outbound_secret(secret, |token| send(Some(token))),
+            None => send(None),
+        }
+        .map_err(|error| runtime_gateway_observability_redacted_log_text(&error.to_string()))?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        if runtime_gateway_observability_retryable_status(status)
+            && attempt + 1 < RUNTIME_GATEWAY_OBSERVABILITY_HTTP_MAX_ATTEMPTS
+        {
+            std::thread::sleep(RUNTIME_GATEWAY_OBSERVABILITY_HTTP_RETRY_DELAY);
+            continue;
+        }
+        return Err(format!("http_status={}", status.as_u16()));
+    }
+    unreachable!("bounded observability attempts always return")
+}
+
+fn runtime_gateway_observability_retryable_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
 }
 
 fn runtime_gateway_observability_log_http_failure(
@@ -203,7 +222,7 @@ fn runtime_gateway_observability_http_payload(
     schema: &str,
 ) -> serde_json::Value {
     match schema.trim().to_ascii_lowercase().as_str() {
-        "otel" | "opentelemetry" => serde_json::json!({
+        "otel" | "otlp" | "opentelemetry" => serde_json::json!({
             "resourceLogs": [{
                 "resource": {"attributes": [
                     {"key": "service.name", "value": {"stringValue": "prodex-gateway"}}
@@ -292,12 +311,30 @@ mod tests {
             otel["resourceLogs"][0]["scopeLogs"][0]["scope"]["name"],
             "prodex.gateway"
         );
+        assert_eq!(
+            runtime_gateway_observability_http_payload(&event, "otlp"),
+            otel
+        );
 
         let datadog = runtime_gateway_observability_http_payload(&event, "datadog");
         assert_eq!(datadog[0]["service"], "prodex-gateway");
 
         let langfuse = runtime_gateway_observability_http_payload(&event, "langfuse");
         assert_eq!(langfuse["batch"][0]["type"], "trace-create");
+    }
+
+    #[test]
+    fn gateway_observability_retries_only_throttle_and_server_errors() {
+        for status in [429, 500, 503] {
+            assert!(runtime_gateway_observability_retryable_status(
+                reqwest::StatusCode::from_u16(status).unwrap()
+            ));
+        }
+        for status in [200, 400, 401, 404] {
+            assert!(!runtime_gateway_observability_retryable_status(
+                reqwest::StatusCode::from_u16(status).unwrap()
+            ));
+        }
     }
 
     #[test]

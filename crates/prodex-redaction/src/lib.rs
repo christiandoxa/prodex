@@ -308,8 +308,14 @@ fn redaction_redact_sensitive_key_value_text(value: &str) -> String {
             if separator < bytes.len() && matches!(bytes[separator], b':' | b'=') {
                 if redaction_key_looks_sensitive(key) {
                     let value_start = redaction_skip_ascii_whitespace(bytes, separator + 1);
-                    let (value_end, replacement) =
-                        redaction_redacted_field_value(value, value_start);
+                    let (value_end, replacement) = if key.to_ascii_lowercase().contains("cookie") {
+                        let value_end = value[value_start..]
+                            .find(['\r', '\n'])
+                            .map_or(bytes.len(), |offset| value_start + offset);
+                        (value_end, REDACTED.to_string())
+                    } else {
+                        redaction_redacted_field_value(value, value_start)
+                    };
                     redacted.push_str(&value[index..value_start]);
                     redacted.push_str(&replacement);
                     index = value_end;

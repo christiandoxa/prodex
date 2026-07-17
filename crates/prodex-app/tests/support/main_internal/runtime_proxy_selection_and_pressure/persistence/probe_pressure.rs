@@ -67,6 +67,7 @@ fn next_runtime_response_candidate_sync_probes_cold_start_when_existing_candidat
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_auth_failure_key("main"),
             RuntimeProfileHealth {
@@ -275,6 +276,7 @@ fn next_runtime_response_candidate_skips_sync_cold_start_probe_during_pressure_m
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_auth_failure_key("main"),
             RuntimeProfileHealth {
