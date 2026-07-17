@@ -29,13 +29,35 @@ pub fn merge_runtime_profile_scores(
     for (key, value) in incoming {
         let should_replace = merged.get(key).is_none_or(|current| {
             value.updated_at > current.updated_at
-                || (value.updated_at == current.updated_at && value.score > current.score)
+                || (value.updated_at == current.updated_at
+                    && ((value.score == 0 && current.score != 0)
+                        || (value.score != 0 && current.score != 0 && value.score > current.score)))
         });
         if should_replace {
             merged.insert(key.clone(), value.clone());
         }
     }
     compact_runtime_profile_scores(merged, profiles, now)
+}
+
+pub fn clear_runtime_profile_score(
+    profile_health: &mut BTreeMap<String, RuntimeProfileHealth>,
+    key: &str,
+    now: i64,
+) -> bool {
+    let changed = profile_health
+        .get(key)
+        .is_some_and(|entry| entry.score != 0);
+    if changed {
+        profile_health.insert(
+            key.to_string(),
+            RuntimeProfileHealth {
+                score: 0,
+                updated_at: now,
+            },
+        );
+    }
+    changed
 }
 
 pub fn runtime_profile_score_profile_name(key: &str) -> &str {
@@ -266,6 +288,7 @@ pub fn clear_runtime_previous_response_negative_cache(
     profile_health: &mut BTreeMap<String, RuntimeProfileHealth>,
     previous_response_id: &str,
     profile_name: &str,
+    now: i64,
 ) -> bool {
     let mut changed = false;
     for route_kind in [
@@ -274,14 +297,15 @@ pub fn clear_runtime_previous_response_negative_cache(
         RuntimeRouteKind::Compact,
         RuntimeRouteKind::Standard,
     ] {
-        changed = profile_health
-            .remove(&runtime_previous_response_negative_cache_key(
+        changed = clear_runtime_profile_score(
+            profile_health,
+            &runtime_previous_response_negative_cache_key(
                 previous_response_id,
                 profile_name,
                 route_kind,
-            ))
-            .is_some()
-            || changed;
+            ),
+            now,
+        ) || changed;
     }
     changed
 }

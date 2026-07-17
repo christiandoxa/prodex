@@ -411,6 +411,7 @@ pub(crate) fn clear_runtime_previous_response_negative_cache(
         &mut runtime.profile_health,
         previous_response_id,
         profile_name,
+        Local::now().timestamp(),
     )
 }
 

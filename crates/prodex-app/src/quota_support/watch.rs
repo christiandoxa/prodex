@@ -409,97 +409,11 @@ fn quota_watch_runtime_usage_cache_enabled(
 }
 
 fn all_quota_watch_refresh_interval(
-    snapshot: &AllQuotaWatchSnapshot,
-    detail: bool,
-    now: i64,
+    _snapshot: &AllQuotaWatchSnapshot,
+    _detail: bool,
+    _now: i64,
 ) -> Duration {
-    match snapshot {
-        AllQuotaWatchSnapshot::Reports { reports, .. } => {
-            all_quota_watch_reports_refresh_interval(reports, detail, now)
-        }
-        AllQuotaWatchSnapshot::Empty { .. } => {
-            Duration::from_secs(ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS)
-        }
-        AllQuotaWatchSnapshot::Loading { .. } | AllQuotaWatchSnapshot::Error { .. } => {
-            Duration::from_secs(ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS)
-        }
-    }
-}
-
-fn all_quota_watch_reports_refresh_interval(
-    reports: &[QuotaReport],
-    detail: bool,
-    now: i64,
-) -> Duration {
-    let signal = reports
-        .iter()
-        .map(|report| report_quota_refresh_signal(report, now))
-        .max()
-        .unwrap_or(QuotaRefreshSignal::Stable);
-
-    quota_watch_refresh_interval_for_signal(signal, detail, reports.len(), now)
-}
-
-fn report_quota_refresh_signal(report: &QuotaReport, now: i64) -> QuotaRefreshSignal {
-    let Ok(snapshot) = &report.result else {
-        return QuotaRefreshSignal::Watch;
-    };
-    match snapshot {
-        ProviderQuotaSnapshot::OpenAi(usage) => openai_usage_quota_refresh_signal(usage, now),
-        ProviderQuotaSnapshot::Copilot(info) => info
-            .limited_user_reset_date
-            .as_deref()
-            .and_then(parse_quota_reset_epoch)
-            .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
-            .unwrap_or(QuotaRefreshSignal::Stable),
-        ProviderQuotaSnapshot::Gemini(info) => info
-            .buckets
-            .iter()
-            .filter_map(|bucket| {
-                bucket
-                    .reset_time
-                    .as_deref()
-                    .and_then(parse_quota_reset_epoch)
-                    .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
-            })
-            .max()
-            .unwrap_or(QuotaRefreshSignal::Stable),
-        ProviderQuotaSnapshot::External(_) => QuotaRefreshSignal::Stable,
-    }
-}
-
-fn openai_usage_quota_refresh_signal(usage: &UsageResponse, now: i64) -> QuotaRefreshSignal {
-    if !collect_blocked_limits(usage, false).is_empty() {
-        return QuotaRefreshSignal::Watch;
-    }
-    if usage
-        .rate_limit_reset_credits
-        .as_ref()
-        .is_some_and(|credits| credits.available_count > 0)
-    {
-        return QuotaRefreshSignal::Watch;
-    }
-    main_quota_reset_refresh_signal(usage, now)
-}
-
-fn main_quota_reset_refresh_signal(usage: &UsageResponse, now: i64) -> QuotaRefreshSignal {
-    usage
-        .rate_limit
-        .as_ref()
-        .into_iter()
-        .flat_map(|pair| [&pair.primary_window, &pair.secondary_window])
-        .flatten()
-        .filter_map(|window| window.reset_at)
-        .map(|reset_at| quota_reset_refresh_signal(reset_at, now))
-        .max()
-        .unwrap_or(QuotaRefreshSignal::Stable)
-}
-
-fn parse_quota_reset_epoch(value: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|datetime| datetime.timestamp())
-        .ok()
-        .or_else(|| value.trim().parse::<i64>().ok())
+    Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
 }
 
 fn quota_watch_max_scroll_offset(

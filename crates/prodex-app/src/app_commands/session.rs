@@ -154,7 +154,7 @@ fn print_session_reports(
 
 fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) -> Result<()> {
     // Try scrollable TUI first (like profile list)
-    let total_lines = session_tui_item_count(reports) * 2;
+    let total_lines = session_tui_item_count(reports);
     let term_h = usize::from(terminal::size().map(|(_, h)| h).unwrap_or(24));
     let needs_scroll = total_lines.saturating_add(6) > term_h
         && env::var_os("CODEX_CI").is_none()
@@ -475,6 +475,7 @@ mod tests {
         assert!(session_report_tui_height(&[] as &[SessionReport]) >= 1);
         let reports = vec![test_session_report("a"), test_session_report("b")];
         assert!(usize::from(session_report_tui_height(&reports)) >= 8);
+        assert_eq!(session_tui_item_count(&reports), 8);
     }
 
     #[test]

@@ -27,6 +27,8 @@ pub struct RuntimeProfileBackoffs {
     pub transport_backoff_until: BTreeMap<String, i64>,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub route_circuit_open_until: BTreeMap<String, i64>,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub updated_at: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

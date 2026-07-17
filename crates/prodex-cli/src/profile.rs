@@ -143,10 +143,10 @@ pub struct ProdexUpdateArgs {}
 #[derive(Args)]
 pub struct QuotaArgs {
     /// Inspect a single profile. If omitted, prodex uses the active profile.
-    #[arg(short, long, value_name = "NAME")]
+    #[arg(short, long, value_name = "NAME", conflicts_with = "all")]
     pub profile: Option<String>,
     /// Show every configured profile in one aggregated view.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "profile")]
     pub all: bool,
     /// Show only profiles whose auth label or compatibility matches this filter.
     ///
@@ -160,15 +160,18 @@ pub struct QuotaArgs {
     #[arg(long, value_name = "PROVIDER", requires = "all")]
     pub provider: Option<String>,
     /// Include exact reset timestamps and expanded window details.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "raw")]
     pub detail: bool,
     /// Print raw usage JSON for a single profile and disable the live refresh view.
-    #[arg(long)]
+    #[arg(
+        long,
+        conflicts_with_all = ["all", "detail", "watch", "once", "auth", "provider"]
+    )]
     pub raw: bool,
-    #[arg(long, hide = true)]
+    #[arg(long, hide = true, conflicts_with_all = ["raw", "once"])]
     pub watch: bool,
     /// Render one human-readable snapshot instead of refreshing every 5 seconds.
-    #[arg(long, conflicts_with = "watch")]
+    #[arg(long, conflicts_with_all = ["watch", "raw"])]
     pub once: bool,
     /// Override the ChatGPT backend base URL used for quota requests.
     #[arg(long, value_name = "URL")]

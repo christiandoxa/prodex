@@ -401,6 +401,25 @@ fn soft_affinity_allows_response_on_positive_critical_five_hour() {
 }
 
 #[test]
+fn response_critical_floor_blocks_below_configured_reserve() {
+    let mut summary = healthy_summary();
+    summary.five_hour = RuntimeSelectionQuotaWindowSummary {
+        status: RuntimeSelectionQuotaWindowStatus::Critical,
+        remaining_percent: 1,
+    };
+    summary.route_band = RuntimeSelectionQuotaPressureBand::Critical;
+
+    assert_eq!(
+        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Responses, 2),
+        Some("quota_critical_floor_before_send")
+    );
+    assert_eq!(
+        runtime_quota_precommit_guard_reason(summary, RuntimeRouteKind::Compact, 2),
+        None
+    );
+}
+
+#[test]
 fn soft_affinity_allows_response_when_only_weekly_is_critical() {
     let mut summary = healthy_summary();
     summary.weekly = RuntimeSelectionQuotaWindowSummary {

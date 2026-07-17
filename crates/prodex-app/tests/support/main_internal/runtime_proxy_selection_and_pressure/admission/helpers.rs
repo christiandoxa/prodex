@@ -147,6 +147,7 @@ impl RuntimeProxyProfileHarnessBuilder {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         };
         let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, self.active_request_limit);

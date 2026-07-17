@@ -197,7 +197,7 @@
     }
 
     #[test]
-    fn all_quota_watch_refresh_interval_slows_stable_detail_views() {
+    fn all_quota_watch_refresh_interval_is_five_seconds_for_stable_views() {
         let now = Local::now().timestamp();
         let reset_at = now + 60 * 60;
         let snapshot = AllQuotaWatchSnapshot::Reports {
@@ -210,11 +210,11 @@
 
         assert_refresh_interval_near(
             all_quota_watch_refresh_interval(&snapshot, true, now),
-            ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS,
+            DEFAULT_WATCH_INTERVAL_SECONDS,
         );
         assert_refresh_interval_near(
             all_quota_watch_refresh_interval(&snapshot, false, now),
-            ALL_QUOTA_WATCH_STABLE_INTERVAL_SECONDS,
+            DEFAULT_WATCH_INTERVAL_SECONDS,
         );
     }
 
@@ -232,7 +232,7 @@
 
         assert_refresh_interval_near(
             all_quota_watch_refresh_interval(&snapshot, true, now),
-            ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS,
+            DEFAULT_WATCH_INTERVAL_SECONDS,
         );
     }
 
@@ -252,7 +252,7 @@
 
         assert_refresh_interval_near(
             all_quota_watch_refresh_interval(&snapshot, true, now),
-            ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS,
+            DEFAULT_WATCH_INTERVAL_SECONDS,
         );
     }
 
@@ -270,12 +270,12 @@
 
         assert_eq!(
             all_quota_watch_refresh_interval(&snapshot, true, now),
-            Duration::from_secs(ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS)
+            Duration::from_secs(DEFAULT_WATCH_INTERVAL_SECONDS)
         );
     }
 
     #[test]
-    fn all_quota_watch_refresh_interval_scales_with_profile_count() {
+    fn all_quota_watch_refresh_interval_stays_five_seconds_with_many_profiles() {
         let now = Local::now().timestamp();
         let reset_at = now + 60 * 60;
         let reports = (0..50)
@@ -296,7 +296,7 @@
 
         assert_refresh_interval_near(
             all_quota_watch_refresh_interval(&snapshot, true, now),
-            50 * ALL_QUOTA_WATCH_PROFILE_SCALE_SECONDS,
+            DEFAULT_WATCH_INTERVAL_SECONDS,
         );
     }
 

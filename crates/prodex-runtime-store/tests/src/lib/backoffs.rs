@@ -118,6 +118,53 @@ fn profile_score_timestamp_ties_merge_commutatively() {
 }
 
 #[test]
+fn profile_score_clear_tombstone_wins_timestamp_ties() {
+    let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+    let active = BTreeMap::from([(
+        "alpha".to_string(),
+        RuntimeProfileHealth {
+            score: 2,
+            updated_at: 200,
+        },
+    )]);
+    let cleared = BTreeMap::from([(
+        "alpha".to_string(),
+        RuntimeProfileHealth {
+            score: 0,
+            updated_at: 200,
+        },
+    )]);
+
+    for merged in [
+        merge_runtime_profile_scores(&active, &cleared, &profiles, 200),
+        merge_runtime_profile_scores(&cleared, &active, &profiles, 200),
+    ] {
+        assert_eq!(merged["alpha"].score, 0);
+    }
+}
+
+#[test]
+fn cleared_backoff_is_not_resurrected_by_stale_snapshot() {
+    let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+    let update_key = runtime_profile_retry_backoff_update_key("alpha");
+    let stale = RuntimeProfileBackoffs {
+        retry_backoff_until: BTreeMap::from([("alpha".to_string(), 300)]),
+        transport_backoff_until: BTreeMap::new(),
+        route_circuit_open_until: BTreeMap::new(),
+        updated_at: BTreeMap::from([(update_key.clone(), 1_000)]),
+    };
+    let cleared = RuntimeProfileBackoffs {
+        updated_at: BTreeMap::from([(update_key, 2_000)]),
+        ..RuntimeProfileBackoffs::default()
+    };
+
+    let merged = merge_runtime_profile_backoffs(&stale, &cleared, &profiles, 100);
+    assert!(!merged.retry_backoff_until.contains_key("alpha"));
+    let merged_again = merge_runtime_profile_backoffs(&merged, &stale, &profiles, 100);
+    assert!(!merged_again.retry_backoff_until.contains_key("alpha"));
+}
+
+#[test]
 fn profile_health_sort_key_includes_route_coupling_and_performance() {
     let scores = BTreeMap::from([
         (
@@ -227,8 +274,13 @@ fn previous_response_negative_cache_helpers_decay_and_clear_route_keys() {
         &mut scores,
         "resp",
         "alpha",
+        103,
     ));
-    assert!(scores.is_empty());
+    assert!(
+        scores
+            .values()
+            .all(|entry| entry.score == 0 && entry.updated_at == 103)
+    );
 }
 
 #[test]
@@ -251,6 +303,7 @@ fn backoff_compaction_keeps_valid_route_keys_and_future_backoffs() {
             ("__route_circuit__:responses:alpha".to_string(), 300),
             ("__route_circuit__:responses:missing".to_string(), 300),
         ]),
+        updated_at: BTreeMap::new(),
     };
 
     let compacted = compact_runtime_profile_backoffs(backoffs, &profiles, 200);
@@ -409,6 +462,7 @@ fn startup_backoff_softening_prunes_expired_and_caps_future_route_state() {
             ("expired".to_string(), 90),
             (circuit_key.clone(), 500),
         ]),
+        updated_at: BTreeMap::new(),
     };
     let profile_scores = BTreeMap::from([(
         runtime_profile_route_health_key("alpha", RuntimeRouteKind::Responses),

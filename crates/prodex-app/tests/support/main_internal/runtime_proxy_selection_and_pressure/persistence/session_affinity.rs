@@ -56,6 +56,7 @@ fn responses_compact_followup_affinity_allows_owner_without_runtime_quota_data()
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -193,6 +194,7 @@ fn affinity_candidate_skips_persisted_exhausted_session_owner() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -316,6 +318,7 @@ fn responses_session_affinity_skips_profiles_without_usable_quota_data() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -441,6 +444,7 @@ fn previous_response_discovery_skips_exhausted_current_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {

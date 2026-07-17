@@ -59,6 +59,7 @@ fn previous_response_owner_discovery_ignores_retry_backoff() {
         )]),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -157,6 +158,7 @@ fn previous_response_owner_profile_changes_still_persist() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -256,6 +258,7 @@ fn duplicate_non_response_continuation_verifies_do_not_requeue_persistence() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -400,6 +403,7 @@ fn previous_response_release_preserves_session_and_compact_session_lineage_for_c
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);
@@ -613,6 +617,7 @@ fn fresh_runtime_responses_rotates_after_unrecoverable_401() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,

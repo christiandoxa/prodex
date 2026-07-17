@@ -9,10 +9,11 @@ use crate::{
 use super::{
     RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS, RuntimeRotationProxyShared, RuntimeRotationState,
     RuntimeRouteKind, clear_runtime_profile_circuit_for_route,
-    clear_runtime_profile_transport_backoff_for_route, recover_runtime_profile_health_for_route,
-    runtime_profile_effective_score_from_map, runtime_profile_route_bad_pairing_key,
-    runtime_profile_route_circuit_reopen_key, runtime_profile_route_health_score,
-    runtime_proxy_log, runtime_route_kind_label, schedule_runtime_state_save_from_runtime,
+    clear_runtime_profile_transport_backoff_for_route, mark_runtime_profile_retry_backoff_update,
+    recover_runtime_profile_health_for_route, runtime_profile_effective_score_from_map,
+    runtime_profile_route_bad_pairing_key, runtime_profile_route_circuit_reopen_key,
+    runtime_profile_route_health_score, runtime_proxy_log, runtime_route_kind_label,
+    schedule_runtime_state_save_from_runtime,
 };
 
 pub(crate) fn commit_runtime_proxy_profile_selection(
@@ -42,6 +43,9 @@ pub(crate) fn commit_runtime_proxy_profile_selection_with_policy(
         .profile_retry_backoff_until
         .remove(profile_name)
         .is_some();
+    if cleared_retry_backoff {
+        mark_runtime_profile_retry_backoff_update(&mut runtime, profile_name);
+    }
     let cleared_transport_backoff =
         clear_runtime_profile_transport_backoff_for_route(&mut runtime, profile_name, route_kind);
     let cleared_route_circuit =
@@ -90,7 +94,11 @@ pub(crate) fn clear_runtime_profile_health_for_route(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
-    let mut changed = runtime.profile_health.remove(profile_name).is_some();
+    let mut changed = prodex_runtime_store::clear_runtime_profile_score(
+        &mut runtime.profile_health,
+        profile_name,
+        now,
+    );
     let previous_route_score =
         runtime_profile_route_health_score(runtime, profile_name, now, route_kind);
     let previous_bad_pairing = runtime_profile_effective_score_from_map(
@@ -109,22 +117,16 @@ pub(crate) fn clear_runtime_profile_health_for_route(
     changed = changed || previous_route_score > 0;
     changed = changed || previous_bad_pairing > 0;
     changed = changed || previous_circuit_reopen > 0;
-    changed = runtime
-        .profile_health
-        .remove(&runtime_profile_route_bad_pairing_key(
-            profile_name,
-            route_kind,
-        ))
-        .is_some()
-        || changed;
-    changed = runtime
-        .profile_health
-        .remove(&runtime_profile_route_circuit_reopen_key(
-            profile_name,
-            route_kind,
-        ))
-        .is_some()
-        || changed;
+    changed = prodex_runtime_store::clear_runtime_profile_score(
+        &mut runtime.profile_health,
+        &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
+        now,
+    ) || changed;
+    changed = prodex_runtime_store::clear_runtime_profile_score(
+        &mut runtime.profile_health,
+        &runtime_profile_route_circuit_reopen_key(profile_name, route_kind),
+        now,
+    ) || changed;
     changed
 }
 

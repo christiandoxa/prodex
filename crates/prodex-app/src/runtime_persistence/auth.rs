@@ -354,11 +354,11 @@ pub(crate) fn clear_runtime_profile_auth_failure(
         Ok(runtime) => runtime,
         Err(_) => return,
     };
-    if runtime
-        .profile_health
-        .remove(&runtime_profile_auth_failure_key(profile_name))
-        .is_none()
-    {
+    if !prodex_runtime_store::clear_runtime_profile_score(
+        &mut runtime.profile_health,
+        &runtime_profile_auth_failure_key(profile_name),
+        Local::now().timestamp(),
+    ) {
         return;
     }
     runtime_proxy_log(

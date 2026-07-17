@@ -25,7 +25,7 @@ pub(crate) fn update_runtime_profile_route_performance(
     let now = Local::now().timestamp();
     let key = runtime_profile_route_performance_key(profile_name, route_kind);
     if next_score == 0 {
-        runtime.profile_health.remove(&key);
+        prodex_runtime_store::clear_runtime_profile_score(&mut runtime.profile_health, &key, now);
     } else {
         runtime.profile_health.insert(
             key,
@@ -127,12 +127,11 @@ pub(crate) fn reset_runtime_profile_success_streak(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) {
-    runtime
-        .profile_health
-        .remove(&runtime_profile_route_success_streak_key(
-            profile_name,
-            route_kind,
-        ));
+    prodex_runtime_store::clear_runtime_profile_score(
+        &mut runtime.profile_health,
+        &runtime_profile_route_success_streak_key(profile_name, route_kind),
+        Local::now().timestamp(),
+    );
 }
 
 pub(crate) fn bump_runtime_profile_bad_pairing_score(
@@ -234,12 +233,11 @@ pub(crate) fn bump_runtime_profile_health_score(
     let circuit_until = if let Some(circuit_open_seconds) = bump_decision.circuit_open_seconds {
         let reopen_stage = bump_decision.circuit_reopen_stage.unwrap_or(0);
         if bump_decision.circuit_reopen_stage == Some(0) {
-            runtime
-                .profile_health
-                .remove(&runtime_profile_route_circuit_reopen_key(
-                    profile_name,
-                    route_kind,
-                ));
+            prodex_runtime_store::clear_runtime_profile_score(
+                &mut runtime.profile_health,
+                &runtime_profile_route_circuit_reopen_key(profile_name, route_kind),
+                now,
+            );
         } else {
             runtime.profile_health.insert(
                 runtime_profile_route_circuit_reopen_key(profile_name, route_kind),
@@ -252,9 +250,10 @@ pub(crate) fn bump_runtime_profile_health_score(
         let until = now.saturating_add(circuit_open_seconds);
         runtime
             .profile_route_circuit_open_until
-            .entry(circuit_key)
+            .entry(circuit_key.clone())
             .and_modify(|current| *current = (*current).max(until))
             .or_insert(until);
+        mark_runtime_profile_route_circuit_update(&mut runtime, &circuit_key);
         Some((until, reopen_stage))
     } else {
         None
@@ -341,8 +340,12 @@ pub(crate) fn recover_runtime_profile_health_for_route(
             },
         );
     } else {
-        runtime.profile_health.remove(&key);
-        runtime.profile_health.remove(&streak_key);
+        prodex_runtime_store::clear_runtime_profile_score(&mut runtime.profile_health, &key, now);
+        prodex_runtime_store::clear_runtime_profile_score(
+            &mut runtime.profile_health,
+            &streak_key,
+            now,
+        );
     }
 }
 

@@ -5,6 +5,7 @@ fn runtime_doctor_degraded_routes_sort_and_cap_output() {
     let now = Local::now().timestamp();
     let routes = runtime_doctor_degraded_routes(
         &RuntimeProfileBackoffs {
+            updated_at: BTreeMap::new(),
             retry_backoff_until: BTreeMap::from([
                 ("alpha".to_string(), now + 10),
                 ("zeta".to_string(), now + 11),

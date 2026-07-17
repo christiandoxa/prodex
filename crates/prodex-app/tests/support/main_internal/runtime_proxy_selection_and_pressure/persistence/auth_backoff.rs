@@ -46,6 +46,7 @@ fn note_runtime_profile_auth_failure_applies_stronger_penalty_for_401_than_403()
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -87,6 +88,7 @@ fn note_runtime_profile_auth_failure_applies_stronger_penalty_for_401_than_403()
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,
@@ -197,6 +199,7 @@ fn next_runtime_response_candidate_skips_auth_failed_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_auth_failure_key("main"),
             RuntimeProfileHealth {

@@ -537,7 +537,7 @@ pub fn should_delete_profile_home(
     delete_home: bool,
     codex_home_label: impl std::fmt::Display,
 ) -> Result<bool> {
-    let should_delete_home = managed_profile || delete_home;
+    let should_delete_home = delete_home;
     if !should_delete_home {
         return Ok(false);
     }

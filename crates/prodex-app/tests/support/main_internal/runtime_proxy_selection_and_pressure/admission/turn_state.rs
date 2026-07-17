@@ -62,6 +62,7 @@ fn turn_state_affinity_prefers_bound_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -168,6 +169,7 @@ fn turn_state_affinity_ignores_inflight_and_health_penalties() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             "second".to_string(),
             RuntimeProfileHealth {

@@ -1,16 +1,18 @@
-use prodex_config::ConfigRevision;
 use prodex_control_plane::{
-    BreakGlassAuthorization, ConfigurationPublicationDecision, ConfigurationPublicationErrorStatus,
-    ConfigurationPublicationRequest, ControlPlaneActionRequest, ControlPlaneAuditWriteMode,
-    ControlPlaneAuthorizationError, ControlPlaneAuthorizationErrorStatus, ControlPlaneDecision,
-    ControlPlaneOperation, ControlPlaneResourceRef, decide_break_glass_action,
-    decide_configuration_publication, decide_control_plane_action,
-    plan_configuration_publication_error_response, plan_control_plane_authorization_error_response,
+    ControlPlaneActionRequest, ControlPlaneAuditWriteMode, ControlPlaneAuthorizationError,
+    ControlPlaneAuthorizationErrorStatus, ControlPlaneDecision, ControlPlaneOperation,
+    ControlPlaneResourceRef, decide_control_plane_action,
+    plan_control_plane_authorization_error_response,
 };
 use prodex_domain::{
-    AuditOutcome, CredentialScope, IdempotencyKey, PolicyRevisionId, Principal, PrincipalId,
-    PrincipalKind, ResourceAction, ResourceKind, Role, TenantId,
+    AuditOutcome, CredentialScope, IdempotencyKey, Principal, PrincipalId, PrincipalKind,
+    ResourceAction, ResourceKind, Role, TenantId,
 };
+
+#[path = "control_plane/break_glass.rs"]
+mod break_glass;
+#[path = "control_plane/configuration_publication.rs"]
+mod configuration_publication;
 
 fn principal(tenant_id: TenantId, role: Role, scope: CredentialScope) -> Principal {
     Principal::new(
@@ -575,125 +577,6 @@ fn viewer_cannot_purge_audit_retention() {
 }
 
 #[test]
-fn break_glass_requires_separate_scope_reason_expiry_and_audit() {
-    let tenant_id = TenantId::new();
-    let normal_control_plane = request(
-        tenant_id,
-        principal(tenant_id, Role::Admin, CredentialScope::BreakGlass),
-        ControlPlaneOperation::ProviderCredentialRotate,
-        ResourceKind::ProviderCredential,
-    );
-
-    assert!(matches!(
-        decide_control_plane_action(normal_control_plane.clone()),
-        ControlPlaneDecision::Denied {
-            error: ControlPlaneAuthorizationError::CredentialScopeMismatch { .. },
-            ..
-        }
-    ));
-
-    let decision = decide_break_glass_action(
-        normal_control_plane,
-        BreakGlassAuthorization {
-            reason: "incident response".to_string(),
-            expires_at_unix_ms: 11_000,
-        },
-    );
-    assert!(matches!(decision, ControlPlaneDecision::Authorized(_)));
-
-    let expired = decide_break_glass_action(
-        request(
-            tenant_id,
-            principal(tenant_id, Role::Admin, CredentialScope::BreakGlass),
-            ControlPlaneOperation::ProviderCredentialRotate,
-            ResourceKind::ProviderCredential,
-        ),
-        BreakGlassAuthorization {
-            reason: "incident response".to_string(),
-            expires_at_unix_ms: 10_000,
-        },
-    );
-    assert!(matches!(
-        expired,
-        ControlPlaneDecision::Denied {
-            error: ControlPlaneAuthorizationError::BreakGlassExpired { .. },
-            ..
-        }
-    ));
-
-    for reason in ["", "   ", "incident\nresponse", &"x".repeat(513)] {
-        let denied = decide_break_glass_action(
-            request(
-                tenant_id,
-                principal(tenant_id, Role::Admin, CredentialScope::BreakGlass),
-                ControlPlaneOperation::ProviderCredentialRotate,
-                ResourceKind::ProviderCredential,
-            ),
-            BreakGlassAuthorization {
-                reason: reason.to_string(),
-                expires_at_unix_ms: 11_000,
-            },
-        );
-        assert!(matches!(
-            denied,
-            ControlPlaneDecision::Denied {
-                error: ControlPlaneAuthorizationError::BreakGlassReasonMissing
-                    | ControlPlaneAuthorizationError::BreakGlassReasonMalformed,
-                ..
-            }
-        ));
-    }
-}
-
-#[test]
-fn configuration_publication_requires_newer_same_tenant_revision() {
-    let tenant_id = TenantId::new();
-    let candidate = ConfigRevision {
-        tenant_id,
-        revision_id: PolicyRevisionId::new(),
-        published_at_unix_ms: 10_000,
-        payload: "payload",
-    };
-    let decision = decide_configuration_publication(ConfigurationPublicationRequest {
-        action: request(
-            tenant_id,
-            principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
-            ControlPlaneOperation::ConfigurationPublish,
-            ResourceKind::Configuration,
-        ),
-        current_revision_id: None,
-        candidate,
-    });
-
-    assert!(matches!(
-        decision,
-        ConfigurationPublicationDecision::Authorized(_)
-    ));
-
-    let wrong_tenant = TenantId::new();
-    let rejected = decide_configuration_publication(ConfigurationPublicationRequest {
-        action: request(
-            tenant_id,
-            principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
-            ControlPlaneOperation::ConfigurationPublish,
-            ResourceKind::Configuration,
-        ),
-        current_revision_id: None,
-        candidate: ConfigRevision {
-            tenant_id: wrong_tenant,
-            revision_id: PolicyRevisionId::new(),
-            published_at_unix_ms: 10_000,
-            payload: "payload",
-        },
-    });
-
-    assert!(matches!(
-        rejected,
-        ConfigurationPublicationDecision::Denied { .. }
-    ));
-}
-
-#[test]
 fn control_plane_authorization_error_responses_are_stable_and_redacted() {
     let tenant_id = TenantId::new();
     let resource_tenant_id = TenantId::new();
@@ -805,103 +688,5 @@ fn control_plane_authorization_error_responses_are_stable_and_redacted() {
             &ControlPlaneAuthorizationError::BreakGlassReasonMalformed
         ),
         break_glass_response
-    );
-}
-
-#[test]
-fn configuration_publication_error_responses_are_stable_and_redacted_at_control_plane_boundary() {
-    let tenant_id = TenantId::new();
-    let wrong_tenant = TenantId::new();
-    let current_revision_id = PolicyRevisionId::new();
-
-    let denied_by_authorization =
-        decide_configuration_publication(ConfigurationPublicationRequest {
-            action: request(
-                tenant_id,
-                principal(tenant_id, Role::Viewer, CredentialScope::ControlPlane),
-                ControlPlaneOperation::ConfigurationPublish,
-                ResourceKind::Configuration,
-            ),
-            current_revision_id: None,
-            candidate: ConfigRevision {
-                tenant_id,
-                revision_id: PolicyRevisionId::new(),
-                published_at_unix_ms: 10_000,
-                payload: "sensitive-policy-payload",
-            },
-        });
-    let ConfigurationPublicationDecision::Denied { error, .. } = denied_by_authorization else {
-        panic!("expected authorization denial");
-    };
-    let authorization_response = plan_configuration_publication_error_response(&error);
-    assert_eq!(
-        authorization_response.status,
-        ConfigurationPublicationErrorStatus::Forbidden
-    );
-    assert_eq!(authorization_response.code, "role_not_authorized");
-    assert!(!authorization_response.message.contains("Viewer"));
-    assert!(!authorization_response.message.contains("Admin"));
-
-    let denied_by_tenant = decide_configuration_publication(ConfigurationPublicationRequest {
-        action: request(
-            tenant_id,
-            principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
-            ControlPlaneOperation::ConfigurationPublish,
-            ResourceKind::Configuration,
-        ),
-        current_revision_id: None,
-        candidate: ConfigRevision {
-            tenant_id: wrong_tenant,
-            revision_id: PolicyRevisionId::new(),
-            published_at_unix_ms: 10_000,
-            payload: "sensitive-policy-payload",
-        },
-    });
-    let ConfigurationPublicationDecision::Denied { error, .. } = denied_by_tenant else {
-        panic!("expected tenant publication denial");
-    };
-    let tenant_response = plan_configuration_publication_error_response(&error);
-    assert_eq!(
-        tenant_response.status,
-        ConfigurationPublicationErrorStatus::BadRequest
-    );
-    assert_eq!(tenant_response.code, "configuration_tenant_mismatch");
-    assert!(!tenant_response.message.contains(&tenant_id.to_string()));
-    assert!(!tenant_response.message.contains(&wrong_tenant.to_string()));
-    assert!(!tenant_response.message.contains("sensitive-policy-payload"));
-
-    let denied_by_revision = decide_configuration_publication(ConfigurationPublicationRequest {
-        action: request(
-            tenant_id,
-            principal(tenant_id, Role::Admin, CredentialScope::ControlPlane),
-            ControlPlaneOperation::ConfigurationPublish,
-            ResourceKind::Configuration,
-        ),
-        current_revision_id: Some(current_revision_id),
-        candidate: ConfigRevision {
-            tenant_id,
-            revision_id: current_revision_id,
-            published_at_unix_ms: 10_000,
-            payload: "sensitive-policy-payload",
-        },
-    });
-    let ConfigurationPublicationDecision::Denied { error, .. } = denied_by_revision else {
-        panic!("expected stale revision denial");
-    };
-    let revision_response = plan_configuration_publication_error_response(&error);
-    assert_eq!(
-        revision_response.status,
-        ConfigurationPublicationErrorStatus::Conflict
-    );
-    assert_eq!(revision_response.code, "configuration_revision_not_newer");
-    assert!(
-        !revision_response
-            .message
-            .contains(&current_revision_id.to_string())
-    );
-    assert!(
-        !revision_response
-            .message
-            .contains("sensitive-policy-payload")
     );
 }

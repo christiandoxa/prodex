@@ -7,7 +7,11 @@ use super::route::{
 use super::score::runtime_profile_effective_health_score_from_map;
 use prodex_runtime_state::{RuntimeProfileBackoffs, RuntimeProfileHealth, RuntimeRouteKind};
 use prodex_state::ProfileEntry;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+const RETRY_BACKOFF_UPDATE_PREFIX: &str = "retry:";
+const TRANSPORT_BACKOFF_UPDATE_PREFIX: &str = "transport:";
+const ROUTE_CIRCUIT_UPDATE_PREFIX: &str = "circuit:";
 
 pub fn compact_runtime_profile_backoffs(
     mut backoffs: RuntimeProfileBackoffs,
@@ -27,6 +31,13 @@ pub fn compact_runtime_profile_backoffs(
                 route_profile_key,
             ))
         });
+    let oldest_update = now
+        .saturating_sub(crate::RUNTIME_SCORE_RETENTION_SECONDS)
+        .saturating_mul(1_000);
+    backoffs.updated_at.retain(|key, updated_at| {
+        runtime_profile_backoff_update_key_matches_profiles(key, profiles)
+            && *updated_at >= oldest_update
+    });
     backoffs
 }
 
@@ -36,23 +47,103 @@ pub fn merge_runtime_profile_backoffs(
     profiles: &BTreeMap<String, ProfileEntry>,
     now: i64,
 ) -> RuntimeProfileBackoffs {
-    let mut merged = existing.clone();
-    for (profile_name, until) in &incoming.retry_backoff_until {
-        merged
-            .retry_backoff_until
-            .insert(profile_name.clone(), *until);
-    }
-    for (profile_name, until) in &incoming.transport_backoff_until {
-        merged
-            .transport_backoff_until
-            .insert(profile_name.clone(), *until);
-    }
-    for (route_profile_key, until) in &incoming.route_circuit_open_until {
-        merged
-            .route_circuit_open_until
-            .insert(route_profile_key.clone(), *until);
+    let mut merged = RuntimeProfileBackoffs {
+        retry_backoff_until: merge_runtime_profile_backoff_map(
+            &existing.retry_backoff_until,
+            &incoming.retry_backoff_until,
+            &existing.updated_at,
+            &incoming.updated_at,
+            RETRY_BACKOFF_UPDATE_PREFIX,
+        ),
+        transport_backoff_until: merge_runtime_profile_backoff_map(
+            &existing.transport_backoff_until,
+            &incoming.transport_backoff_until,
+            &existing.updated_at,
+            &incoming.updated_at,
+            TRANSPORT_BACKOFF_UPDATE_PREFIX,
+        ),
+        route_circuit_open_until: merge_runtime_profile_backoff_map(
+            &existing.route_circuit_open_until,
+            &incoming.route_circuit_open_until,
+            &existing.updated_at,
+            &incoming.updated_at,
+            ROUTE_CIRCUIT_UPDATE_PREFIX,
+        ),
+        updated_at: existing.updated_at.clone(),
+    };
+    for (key, updated_at) in &incoming.updated_at {
+        if merged
+            .updated_at
+            .get(key)
+            .is_none_or(|current| updated_at >= current)
+        {
+            merged.updated_at.insert(key.clone(), *updated_at);
+        }
     }
     compact_runtime_profile_backoffs(merged, profiles, now)
+}
+
+fn merge_runtime_profile_backoff_map(
+    existing: &BTreeMap<String, i64>,
+    incoming: &BTreeMap<String, i64>,
+    existing_updates: &BTreeMap<String, i64>,
+    incoming_updates: &BTreeMap<String, i64>,
+    update_prefix: &str,
+) -> BTreeMap<String, i64> {
+    let mut merged = existing.clone();
+    let mut keys = existing
+        .keys()
+        .chain(incoming.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    keys.extend(
+        existing_updates
+            .keys()
+            .chain(incoming_updates.keys())
+            .filter_map(|key| key.strip_prefix(update_prefix))
+            .map(str::to_string),
+    );
+
+    for key in keys {
+        let update_key = format!("{update_prefix}{key}");
+        let existing_updated_at = existing_updates.get(&update_key).copied();
+        let incoming_updated_at = incoming_updates.get(&update_key).copied();
+        let incoming_is_newer = incoming_updated_at.is_some_and(|updated_at| {
+            existing_updated_at.is_none_or(|current| updated_at >= current)
+        });
+        if incoming_is_newer {
+            if let Some(until) = incoming.get(&key) {
+                merged.insert(key, *until);
+            } else {
+                merged.remove(&key);
+            }
+        } else if existing_updated_at.is_none()
+            && incoming_updated_at.is_none()
+            && let Some(until) = incoming.get(&key)
+        {
+            merged.insert(key, *until);
+        }
+    }
+    merged
+}
+
+pub fn runtime_profile_retry_backoff_update_key(profile_name: &str) -> String {
+    format!("{RETRY_BACKOFF_UPDATE_PREFIX}{profile_name}")
+}
+
+pub fn runtime_profile_transport_backoff_update_key(key: &str) -> String {
+    format!("{TRANSPORT_BACKOFF_UPDATE_PREFIX}{key}")
+}
+
+pub fn runtime_profile_route_circuit_update_key(key: &str) -> String {
+    format!("{ROUTE_CIRCUIT_UPDATE_PREFIX}{key}")
+}
+
+pub fn runtime_profile_backoff_update_key_valid(
+    key: &str,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> bool {
+    runtime_profile_backoff_update_key_matches_profiles(key, profiles)
 }
 
 pub fn runtime_profile_transport_backoff_until_from_map(
@@ -289,4 +380,22 @@ fn runtime_profile_transport_backoff_key_matches_profiles(
             runtime_route_kind_from_label(route).is_some() && profiles.contains_key(profile_name)
         })
         .unwrap_or_else(|| profiles.contains_key(key))
+}
+
+fn runtime_profile_backoff_update_key_matches_profiles(
+    key: &str,
+    profiles: &BTreeMap<String, ProfileEntry>,
+) -> bool {
+    if let Some(profile_name) = key.strip_prefix(RETRY_BACKOFF_UPDATE_PREFIX) {
+        return profiles.contains_key(profile_name);
+    }
+    if let Some(transport_key) = key.strip_prefix(TRANSPORT_BACKOFF_UPDATE_PREFIX) {
+        return runtime_profile_transport_backoff_key_matches_profiles(transport_key, profiles);
+    }
+    if let Some(route_circuit_key) = key.strip_prefix(ROUTE_CIRCUIT_UPDATE_PREFIX) {
+        return profiles.contains_key(runtime_profile_route_circuit_profile_name(
+            route_circuit_key,
+        ));
+    }
+    false
 }

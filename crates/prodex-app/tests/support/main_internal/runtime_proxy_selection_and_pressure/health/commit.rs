@@ -100,6 +100,7 @@ fn commit_runtime_fixture_with_options(
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: options.profile_route_circuit_open_until,
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: options.profile_health,
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);

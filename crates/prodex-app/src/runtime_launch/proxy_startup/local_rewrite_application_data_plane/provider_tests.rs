@@ -1,5 +1,5 @@
 use super::{
-    runtime_gateway_application_provider_retry_precommit,
+    runtime_gateway_application_provider_retry_precommit, runtime_gateway_compatibility_http_route,
     runtime_gateway_compatibility_provider_invocation, runtime_gateway_provider_credential_ref,
 };
 use crate::RuntimeProxyRequest;
@@ -44,6 +44,21 @@ fn anonymous_compatibility_owns_typed_provider_dispatch() {
             ProviderId::Gemini,
             GatewayHttpRouteKind::Unknown,
             &captured(false),
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn anonymous_compatibility_rejects_invalid_http_method() {
+    let mut request = captured(false);
+    request.method = "GET".to_string();
+
+    assert!(
+        runtime_gateway_compatibility_http_route(
+            prodex_gateway_http::GatewayHttpPolicy::production_default(),
+            GatewayHttpRouteKind::DataPlaneResponses,
+            &request,
         )
         .is_err()
     );

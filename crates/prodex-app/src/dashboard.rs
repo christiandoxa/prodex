@@ -419,7 +419,7 @@ impl DashboardServer {
         if state.active_profile.as_deref() == Some(name.as_str()) {
             state.active_profile = state.profiles.keys().next().cloned();
         }
-        if let Err(err) = state.save(&self.paths) {
+        if let Err(err) = state.save_with_removed_profiles(&self.paths, &[name]) {
             return respond_error(request, StatusCode(500), err);
         }
         respond_json(

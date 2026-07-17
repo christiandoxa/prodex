@@ -33,27 +33,6 @@ pub(crate) trait RuntimeLaunchStrategy {
     }
 }
 
-pub(crate) trait RuntimeLaunchPlanFactory {
-    fn build_runtime_launch_plan(
-        &self,
-        prepared: &PreparedRuntimeLaunch,
-        runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    ) -> Result<RuntimeLaunchPlan>;
-}
-
-impl<T> RuntimeLaunchPlanFactory for T
-where
-    T: RuntimeLaunchStrategy,
-{
-    fn build_runtime_launch_plan(
-        &self,
-        prepared: &PreparedRuntimeLaunch,
-        runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    ) -> Result<RuntimeLaunchPlan> {
-        self.build_plan(prepared, runtime_proxy)
-    }
-}
-
 #[derive(Debug)]
 struct RuntimeLaunchExecution {
     plan: RuntimeLaunchPlan,
@@ -63,39 +42,6 @@ struct RuntimeLaunchExecution {
 struct RuntimeLaunchCompleted {
     status: ExitStatus,
     plan: RuntimeLaunchPlan,
-}
-
-struct RuntimeLaunchExecutionBuilder<'a, F> {
-    prepared: PreparedRuntimeLaunch,
-    plan_factory: &'a F,
-}
-
-impl<'a, F> RuntimeLaunchExecutionBuilder<'a, F>
-where
-    F: RuntimeLaunchPlanFactory,
-{
-    fn new(prepared: PreparedRuntimeLaunch, plan_factory: &'a F) -> Self {
-        Self {
-            prepared,
-            plan_factory,
-        }
-    }
-
-    fn build(self) -> Result<RuntimeLaunchExecution> {
-        let RuntimeLaunchExecutionBuilder {
-            prepared,
-            plan_factory,
-        } = self;
-        let plan = {
-            let runtime_proxy = prepared.runtime_proxy.as_ref();
-            plan_factory.build_runtime_launch_plan(&prepared, runtime_proxy)?
-        };
-        let runtime_proxy = prepared.runtime_proxy;
-        Ok(RuntimeLaunchExecution {
-            plan,
-            runtime_proxy,
-        })
-    }
 }
 
 pub(crate) fn execute_runtime_launch<S>(mut strategy: S) -> Result<()>
@@ -135,7 +81,11 @@ where
     ) {
         runtime_proxy.release_session_affinity(session_id)?;
     }
-    RuntimeLaunchExecutionBuilder::new(prepared, strategy).build()
+    let plan = strategy.build_plan(&prepared, prepared.runtime_proxy.as_ref())?;
+    Ok(RuntimeLaunchExecution {
+        plan,
+        runtime_proxy: prepared.runtime_proxy,
+    })
 }
 
 fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
