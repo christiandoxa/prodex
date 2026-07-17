@@ -2,7 +2,7 @@
 
 One Prodex profile pool for OpenAI-backed routing, plus runtime provider bridges for Gemini, Anthropic, Copilot, Kiro, DeepSeek, and local OpenAI-compatible servers.
 
-Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|kiro|deepseek` keeps the Codex/Super front end while routing to those provider backends. `prodex quota` supports Google Gemini OAuth profiles, Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, imported Kiro accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
+Use `prodex` for Codex CLI, `prodex caveman` for Caveman-mode Codex, and `prodex claude` for Claude Code. OpenAI/Codex profiles use Prodex quota-aware routing. `prodex s gemini`, `prodex s deepseek`, or `prodex s --provider gemini|anthropic|copilot|kiro|deepseek` keeps the Codex/Super front end while routing to those provider backends. Add `--cli gemini` or `--cli copilot` to keep the corresponding native front end through a Prodex proxy. `prodex quota` supports Google Gemini OAuth profiles, Antigravity CLI quota snapshots, Anthropic OAuth profiles, imported Copilot accounts, imported Kiro accounts, DeepSeek API-key balances, local OpenAI-compatible health checks, and custom provider metadata snapshots. Codex CLI 0.124.0 and newer versions support Amazon Bedrock and OpenAI-compatible custom providers through `model_provider`; when a selected profile sets a non-OpenAI value such as `amazon-bedrock`, `prodex run` and `prodex caveman` launch Codex directly without quota preflight or the local auto-rotate proxy, and `prodex claude` is unsupported.
 
 For contributors: this is a Cargo workspace. `src/main.rs` is the primary CLI entrypoint,
 `src/bin/` contains the dedicated gateway and control-plane entrypoints, `src/lib.rs` is their
@@ -17,6 +17,9 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Codex CLI 0.124.0 or newer if you want to use Amazon Bedrock or another custom `model_provider`
 - Codex CLI if you want to use `prodex`
 - Claude Code (`claude`) if you want to use `prodex claude`
+- Gemini CLI (`gemini`) for `prodex s gemini --cli gemini`
+- GitHub Copilot CLI (`copilot`) for `prodex s --provider copilot --cli copilot`
+- Kiro CLI (`kiro-cli`) for imported Kiro profiles, the Kiro ACP provider bridge, or `--cli kiro`
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex rtk` or default `prodex super` RTK shell-command guidance
 - Optional: Codebase Memory MCP and a Ponytail checkout for the minimal Super stack; Presidio services when you need PII redaction
 - Optional: Node.js 18+ with `npx` for `prodex playwright` and the Playwright MCP server added to Codex-based `prodex s` sessions
@@ -255,9 +258,12 @@ Use GitHub Copilot with the Codex/Super front end:
 ```bash
 prodex profile import copilot
 prodex s --provider copilot --model gpt-5.3-codex
+prodex s --provider copilot --cli copilot --model gpt-5.3-codex
 ```
 
 Without `--api-key`, Prodex uses imported Copilot CLI profiles, resolves the stored Copilot OAuth token before launch, refreshes the Copilot model catalog, can rotate fresh native Responses requests across multiple eligible profiles, and keeps `previous_response_id` continuations on the owning profile. `GITHUB_COPILOT_API_KEY` or `GITHUB_COPILOT_API_KEYS` is also accepted when you already have a usable Copilot API bearer token; plural keys may be comma-, semicolon-, or newline-separated and can rotate before commit on auth/quota/rate/temporary failures.
+
+Add `--cli copilot` to launch the native Copilot CLI through Prodex's local OpenAI Responses adapter. `PRODEX_COPILOT_BIN` overrides the executable. The child receives a synthetic local provider key; imported profile or explicit provider credentials stay in the Prodex proxy.
 
 Use Kiro with either the Codex/Super front end or the native Kiro CLI:
 
@@ -267,7 +273,7 @@ prodex s --provider kiro --model claude-sonnet-4.5
 prodex super --cli kiro --profile kiro-main
 ```
 
-`prodex profile import kiro` reads the installed Kiro CLI auth database, snapshots the current credential payload into the managed profile, and refreshes a Kiro model catalog snapshot for later routing. `--provider kiro` keeps the Codex front end and routes through Prodex's Kiro adapter; `--cli kiro` launches the imported Kiro CLI snapshot directly. Use `PRODEX_KIRO_BIN` if the installed Kiro launcher is not on `PATH`.
+`prodex profile import kiro` reads the installed Kiro CLI auth database, snapshots the current credential payload into the managed profile, and refreshes a Kiro model catalog snapshot for later routing. `--provider kiro` keeps the Codex front end and routes through Prodex's Kiro ACP adapter; `--cli kiro` launches the imported Kiro CLI snapshot directly. Current Kiro binaries do not expose an OpenAI-compatible inbound endpoint, so native Kiro talks to its service directly; the proxied direction is Codex/Super through Prodex to Kiro ACP. Use `PRODEX_KIRO_BIN` if the installed Kiro launcher is not on `PATH`.
 
 Use Gemini with Google sign-in or an API key:
 

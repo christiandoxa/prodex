@@ -79,15 +79,24 @@ pub(crate) fn start_policy_gateway_application_inner(
 
 pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
-    let use_presidio = match args.presidio_preference() {
-        Some(use_presidio) => use_presidio,
-        None => prompt_super_presidio_opt_in()?,
+    let use_presidio = if matches!(args.cli, Some(SuperCliAgent::Kiro | SuperCliAgent::Agy)) {
+        false
+    } else {
+        match args.presidio_preference() {
+            Some(use_presidio) => use_presidio,
+            None => prompt_super_presidio_opt_in()?,
+        }
     };
     if matches!(
         args.cli,
-        Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+        Some(
+            SuperCliAgent::Gemini
+                | SuperCliAgent::Copilot
+                | SuperCliAgent::Kiro
+                | SuperCliAgent::Agy
+        )
     ) {
-        return crate::runtime_gemini_cli::handle_super_google_cli(args, use_presidio);
+        return crate::runtime_gemini_cli::handle_super_native_cli(args, use_presidio);
     }
     handle_caveman(args.into_caveman_args_with_presidio(use_presidio))
 }

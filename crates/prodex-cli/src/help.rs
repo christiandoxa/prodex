@@ -139,6 +139,7 @@ Examples:
   prodex super deepseek --model deepseek-v4-pro
   prodex super gemini
   prodex super gemini --cli gemini
+  prodex super --provider copilot --cli copilot
   prodex super --cli kiro --profile kiro-main
   prodex super gemini --cli agy
   prodex super doctor
@@ -160,10 +161,11 @@ Notes:
   When `--url` is set, Prodex injects a temporary `prodex-local` model provider, skips quota/rotation, and uses a local Smart Context rewrite proxy.
   Use `--provider anthropic` to route through Anthropic's OpenAI-compatible Chat Completions API. Sign in with `prodex login --with-claude`, or supply `--api-key`, ANTHROPIC_API_KEY, or ANTHROPIC_API_KEYS.
   Use `--provider copilot` to keep Codex/Super and route through a local Responses-to-Copilot adapter. Import Copilot profiles first for account routing/rotation, or supply `--api-key`, GITHUB_COPILOT_API_KEY, or GITHUB_COPILOT_API_KEYS.
+  Add `--cli copilot` with `--provider copilot` to launch GitHub Copilot CLI through the same Prodex Responses proxy. Override the binary with PRODEX_COPILOT_BIN.
   Use `deepseek` or `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
   Use `gemini` or `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login --with-google`.
   Add `--cli gemini` to launch Gemini CLI with its native tools in YOLO mode through Prodex OAuth profile routing. Override the binary with PRODEX_GEMINI_BIN.
-  Add `--cli kiro` to launch Kiro CLI from an imported Kiro profile snapshot. Import first with `prodex profile import kiro`; override the binary with PRODEX_KIRO_BIN.
+  Add `--cli kiro` to launch Kiro CLI from an imported Kiro profile snapshot. Native Kiro uses its proprietary service directly; `--provider kiro` is the proxied Codex-to-Kiro ACP direction. Override the binary with PRODEX_KIRO_BIN.
   Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring auth and currently cannot use Prodex account rotation. Override the binary with PRODEX_AGY_BIN.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";

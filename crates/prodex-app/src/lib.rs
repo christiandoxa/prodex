@@ -453,6 +453,10 @@ fn gemini_bin() -> OsString {
     env::var_os("PRODEX_GEMINI_BIN").unwrap_or_else(|| OsString::from("gemini"))
 }
 
+fn copilot_bin() -> OsString {
+    env::var_os("PRODEX_COPILOT_BIN").unwrap_or_else(|| OsString::from("copilot"))
+}
+
 fn agy_bin() -> OsString {
     env::var_os("PRODEX_AGY_BIN").unwrap_or_else(|| OsString::from("agy"))
 }
