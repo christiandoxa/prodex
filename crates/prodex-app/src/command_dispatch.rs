@@ -144,7 +144,12 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
         if matches!(
             args.cli,
-            Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
+            Some(
+                SuperCliAgent::Gemini
+                    | SuperCliAgent::Copilot
+                    | SuperCliAgent::Kiro
+                    | SuperCliAgent::Agy
+            )
         ) {
             bail!("--dry-run is not supported with native external agent CLIs")
         }

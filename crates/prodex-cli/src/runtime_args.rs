@@ -239,7 +239,7 @@ pub struct SuperArgs {
         requires = "provider_or_url"
     )]
     pub harness: Option<prodex_provider_core::HarnessMode>,
-    /// Agent CLI to launch. Gemini CLI requires the Gemini provider; Kiro CLI uses an imported Kiro profile.
+    /// Agent CLI to launch. Gemini and Copilot use their matching provider; Kiro uses an imported profile.
     #[arg(long, value_name = "CLI", value_enum)]
     pub cli: Option<SuperCliAgent>,
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
@@ -310,6 +310,7 @@ impl fmt::Debug for SuperArgs {
 pub enum SuperCliAgent {
     Codex,
     Gemini,
+    Copilot,
     Kiro,
     Agy,
 }
@@ -517,12 +518,7 @@ impl SuperArgs {
         if self.harness.is_some() && self.provider.is_none() && self.url.is_none() {
             return Err("--harness requires --provider or --url".to_string());
         }
-        if self.harness.is_some()
-            && matches!(
-                self.cli,
-                Some(SuperCliAgent::Gemini | SuperCliAgent::Kiro | SuperCliAgent::Agy)
-            )
-        {
+        if self.harness.is_some() && self.cli.is_some_and(|agent| agent != SuperCliAgent::Codex) {
             return Err("--harness is only supported with the Codex CLI bridge".to_string());
         }
         if let Some(base_url) = self.base_url.as_deref() {

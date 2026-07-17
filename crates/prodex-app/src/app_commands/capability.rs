@@ -1,4 +1,4 @@
-use crate::{claude_bin, codex_bin, kiro_bin};
+use crate::{claude_bin, codex_bin, copilot_bin, gemini_bin, kiro_bin};
 use anyhow::{Context, Result, bail};
 use crossterm::terminal;
 use prodex_cli::{CapabilityCommands, CapabilityListArgs, SetupArgs, SuperDoctorArgs};
@@ -93,6 +93,8 @@ pub(crate) fn collect_install_check_rows(paths: &AppPaths) -> Vec<(String, Strin
             command_status(codex_bin(), &["login", "status"]),
         ),
         version_check_row("Claude Code", claude_bin(), "--version"),
+        version_check_row("Gemini CLI", gemini_bin(), "--version"),
+        version_check_row("GitHub Copilot CLI", copilot_bin(), "--version"),
         version_check_row("Kiro CLI", kiro_bin(), "--version"),
         version_check_row("RTK", "rtk", "--version"),
         version_check_row("Node.js", "node", "--version"),
@@ -394,7 +396,7 @@ fn setup_planned_actions(paths: &AppPaths) -> Vec<(String, String)> {
         ),
         (
             "Super tools".to_string(),
-            "probe codex, claude, rtk, npx, Codebase Memory MCP, Playwright MCP, Ponytail, and Presidio".to_string(),
+            "probe codex, claude, gemini, copilot, kiro, rtk, npx, Codebase Memory MCP, Playwright MCP, Ponytail, and Presidio".to_string(),
         ),
     ]
 }
@@ -403,6 +405,24 @@ fn collect_capabilities() -> Vec<ProdexCapability> {
     vec![
         capability("codex", "runtime", Some("codex"), "Codex CLI frontend"),
         capability("claude", "runtime", Some("claude"), "Claude Code frontend"),
+        capability(
+            "gemini",
+            "runtime",
+            Some("gemini"),
+            "Gemini CLI frontend through the Prodex OAuth proxy",
+        ),
+        capability(
+            "copilot",
+            "runtime",
+            Some("copilot"),
+            "GitHub Copilot CLI frontend through the Prodex Responses proxy",
+        ),
+        capability(
+            "kiro",
+            "runtime",
+            Some("kiro-cli"),
+            "Kiro CLI frontend and ACP-backed provider bridge",
+        ),
         capability(
             "caveman",
             "mode-assets",

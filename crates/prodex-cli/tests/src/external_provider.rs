@@ -125,6 +125,31 @@ fn super_gemini_cli_alias_selects_native_gemini_agent() {
 }
 
 #[test]
+fn super_copilot_cli_selects_native_copilot_agent() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "s",
+        "--provider",
+        "copilot",
+        "--cli",
+        "copilot",
+        "--model",
+        "gpt-test",
+        "--prompt",
+        "review",
+    ])
+    .expect("Copilot CLI super command should parse");
+    let Commands::Super(args) = command else {
+        panic!("expected super command");
+    };
+
+    assert_eq!(args.provider, Some(SuperExternalProvider::Copilot));
+    assert_eq!(args.cli, Some(SuperCliAgent::Copilot));
+    assert_eq!(args.local_model.as_deref(), Some("gpt-test"));
+    assert_eq!(args.codex_args, os_args(&["--prompt", "review"]));
+}
+
+#[test]
 fn super_gemini_agy_alias_selects_antigravity_agent() {
     let command = parse_cli_command_from(["prodex", "s", "gemini", "--cli", "agy", "--continue"])
         .expect("Antigravity CLI super command should parse");
