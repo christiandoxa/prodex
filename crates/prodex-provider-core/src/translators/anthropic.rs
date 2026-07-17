@@ -6,6 +6,7 @@ use crate::translators::openai_chat_compat::{
     responses_chat_compat_supported_params, translate_chat_response_to_responses,
     translate_chat_stream_event_to_responses, translate_responses_request_to_chat,
 };
+use crate::translators::{provider_declares_passthrough, unsupported_endpoint_result};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
 
 #[path = "anthropic/messages.rs"]
@@ -61,13 +62,25 @@ impl ProviderTranslator for AnthropicTranslator {
     fn transform_request(&self, input: ProviderTransformInput) -> ProviderTransformResult {
         if input.endpoint == ProviderEndpoint::Responses {
             translate_responses_request_to_chat(ProviderId::Anthropic, input, "auto")
-        } else {
+        } else if provider_declares_passthrough(
+            self.provider(),
+            input.endpoint,
+            self.client_wire_format(),
+            self.upstream_wire_format(),
+        ) {
             ProviderTransformResult::lossless(
                 self.provider(),
                 input.endpoint,
                 self.client_wire_format(),
                 self.upstream_wire_format(),
                 input.body,
+            )
+        } else {
+            unsupported_endpoint_result(
+                self.provider(),
+                input.endpoint,
+                self.client_wire_format(),
+                self.upstream_wire_format(),
             )
         }
     }
@@ -75,7 +88,12 @@ impl ProviderTranslator for AnthropicTranslator {
     fn transform_response(&self, input: ProviderTransformInput) -> ProviderTransformResult {
         if input.endpoint == ProviderEndpoint::Responses {
             translate_chat_response_to_responses(ProviderId::Anthropic, input)
-        } else {
+        } else if provider_declares_passthrough(
+            self.provider(),
+            input.endpoint,
+            self.upstream_wire_format(),
+            self.client_wire_format(),
+        ) {
             ProviderTransformResult::lossless(
                 self.provider(),
                 input.endpoint,
@@ -83,19 +101,38 @@ impl ProviderTranslator for AnthropicTranslator {
                 self.client_wire_format(),
                 input.body,
             )
+        } else {
+            unsupported_endpoint_result(
+                self.provider(),
+                input.endpoint,
+                self.upstream_wire_format(),
+                self.client_wire_format(),
+            )
         }
     }
 
     fn transform_stream_event(&self, input: ProviderTransformInput) -> ProviderTransformResult {
         if input.endpoint == ProviderEndpoint::Responses {
             translate_chat_stream_event_to_responses(ProviderId::Anthropic, input)
-        } else {
+        } else if provider_declares_passthrough(
+            self.provider(),
+            input.endpoint,
+            self.upstream_wire_format(),
+            self.client_wire_format(),
+        ) {
             ProviderTransformResult::lossless(
                 self.provider(),
                 input.endpoint,
                 self.upstream_wire_format(),
                 self.client_wire_format(),
                 input.body,
+            )
+        } else {
+            unsupported_endpoint_result(
+                self.provider(),
+                input.endpoint,
+                self.upstream_wire_format(),
+                self.client_wire_format(),
             )
         }
     }

@@ -8,6 +8,14 @@ mod kiro;
 mod local;
 mod openai;
 
+pub(crate) const ANTHROPIC_MODELS: &[ProviderModelSpec] = anthropic::MODELS;
+pub(crate) const COPILOT_MODELS: &[ProviderModelSpec] = copilot::MODELS;
+pub(crate) const DEEPSEEK_MODELS: &[ProviderModelSpec] = deepseek::MODELS;
+pub(crate) const GEMINI_MODELS: &[ProviderModelSpec] = gemini::MODELS;
+pub(crate) const KIRO_MODELS: &[ProviderModelSpec] = kiro::MODELS;
+pub(crate) const LOCAL_MODELS: &[ProviderModelSpec] = local::MODELS;
+pub(crate) const OPENAI_MODELS: &[ProviderModelSpec] = openai::MODELS;
+
 const OPENAI_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
 const OPENAI_CODEX_SPARK_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
 const ANTHROPIC_CONTEXT_WINDOW_TOKENS: u64 = 200_000;
@@ -38,15 +46,10 @@ macro_rules! model {
 pub(super) use model;
 
 pub fn provider_model_catalog(provider: ProviderId) -> &'static [ProviderModelSpec] {
-    match provider {
-        ProviderId::OpenAi => openai::MODELS,
-        ProviderId::Anthropic => anthropic::MODELS,
-        ProviderId::Copilot => copilot::MODELS,
-        ProviderId::DeepSeek => deepseek::MODELS,
-        ProviderId::Gemini => gemini::MODELS,
-        ProviderId::Kiro => kiro::MODELS,
-        ProviderId::Local => local::MODELS,
-    }
+    crate::provider_implementation_registry()
+        .get(provider)
+        .expect("built-in provider implementation must be registered")
+        .model_catalog()
 }
 
 pub fn provider_model_spec(
