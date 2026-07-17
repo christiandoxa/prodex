@@ -2,11 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.304.0 - 2026-07-17
+
+### Misc
+
+- Add immutable implementation registry (`4591fbb`)
+
 ## 0.303.0 - 2026-07-17
 
 ### Runtime
 
 - Harden audited runtime and gateway features (`3171d4e`)
+
+### Deps
+
+- Remove unused postgres dependency (`e4e2684`)
 
 ## 0.302.0 - 2026-07-16
 
@@ -65,9 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.293.0 - 2026-07-15
 
 - No grouped changes.
-
-## 0.292.0 - 2026-07-15
-
-### CLI
-
-- Recheck exhausted launch snapshots (`da65756`)
