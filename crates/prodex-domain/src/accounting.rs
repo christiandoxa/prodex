@@ -728,12 +728,6 @@ pub fn reconcile_reserved_usage(
     actual: UsageAmount,
     reason: ReservationReconciliationReason,
 ) -> Result<(BudgetSnapshot, ReservationReconciliation), ReservationReconciliationError> {
-    if actual.exceeds(record.reserved) {
-        return Err(ReservationReconciliationError::ActualExceedsReserved {
-            reserved: record.reserved,
-            actual,
-        });
-    }
     if record.reserved.exceeds(snapshot.reserved) {
         return Err(ReservationReconciliationError::ReservedBalanceUnderflow {
             reserved: record.reserved,

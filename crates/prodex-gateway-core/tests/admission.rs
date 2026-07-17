@@ -476,17 +476,20 @@ fn gateway_usage_reconciliation_rejects_cross_tenant_storage_or_record() {
 }
 
 #[test]
-fn gateway_usage_reconciliation_rejects_actual_usage_above_reserved() {
+fn gateway_usage_reconciliation_commits_actual_usage_above_reserved() {
     let tenant_id = TenantId::new();
 
-    assert!(matches!(
-        plan_gateway_usage_reconciliation(reconciliation_request(
-            tenant_id,
-            UsageAmount::new(10, 100),
-            UsageAmount::new(11, 90),
-        )),
-        Err(GatewayUsageReconciliationError::Reconciliation(_))
-    ));
+    let plan = plan_gateway_usage_reconciliation(reconciliation_request(
+        tenant_id,
+        UsageAmount::new(10, 100),
+        UsageAmount::new(11, 110),
+    ))
+    .unwrap();
+
+    assert_eq!(
+        plan.reconciliation.reconciliation.commit.actual,
+        UsageAmount::new(11, 110)
+    );
 }
 
 #[test]
@@ -518,12 +521,13 @@ fn gateway_usage_reconciliation_error_responses_are_stable_and_redacted() {
     assert!(!tenant_response.message.contains(&tenant_id.to_string()));
     assert!(!tenant_response.message.contains(&other_tenant.to_string()));
 
-    let usage_error = plan_gateway_usage_reconciliation(reconciliation_request(
+    let mut overflow = reconciliation_request(
         tenant_id,
         UsageAmount::new(10, 100),
-        UsageAmount::new(11, 90),
-    ))
-    .unwrap_err();
+        UsageAmount::new(1, 10),
+    );
+    overflow.reconciliation.snapshot.committed = UsageAmount::new(u64::MAX, 10);
+    let usage_error = plan_gateway_usage_reconciliation(overflow).unwrap_err();
     let usage_response = plan_gateway_usage_reconciliation_error_response(&usage_error);
     assert_eq!(usage_response.code, "usage_reconciliation_rejected");
     assert!(!usage_response.message.contains("tokens"));

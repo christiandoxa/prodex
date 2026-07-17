@@ -25,7 +25,7 @@ pub(crate) fn app_server_broker_write_stdio_validate_passthrough_stream<
     )
 }
 
-fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
+pub(super) fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
     mut reader: R,
     mut passthrough_writer: W,
     mut diagnostics_writer: D,
@@ -53,12 +53,14 @@ fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
         let line = raw_line.trim();
         if line.is_empty() {
             passthrough_writer.write_all(raw_line.as_bytes())?;
+            passthrough_writer.flush()?;
             continue;
         }
         let observation = session.validate_line(line_index, line);
         app_server_broker_log_preview_event(&log_path, line_index, &observation.preview);
         serde_json::to_writer(&mut diagnostics_writer, &observation.preview)?;
         diagnostics_writer.write_all(b"\n")?;
+        diagnostics_writer.flush()?;
 
         let parse_failed = !observation.preview["preview"]["parse_ok"]
             .as_bool()
@@ -98,6 +100,7 @@ fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
 
         // Validate-before-forward ordering is intentionally explicit.
         passthrough_writer.write_all(raw_line.as_bytes())?;
+        passthrough_writer.flush()?;
     }
     let pending_failure = session.finish(line_index);
     let summary = session.into_report_json();
@@ -105,6 +108,7 @@ fn write_validate_passthrough_stream<R: BufRead, W: Write, D: Write>(
     app_server_broker_audit_preview_summary(mode, &summary);
     serde_json::to_writer(&mut diagnostics_writer, &summary)?;
     diagnostics_writer.write_all(b"\n")?;
+    diagnostics_writer.flush()?;
     if let Some(failure) = pending_failure {
         anyhow::bail!("app-server broker request/response validation failed at EOF: {failure}");
     }

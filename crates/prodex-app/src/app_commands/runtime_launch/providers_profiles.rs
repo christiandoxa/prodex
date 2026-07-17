@@ -362,11 +362,15 @@ fn runtime_kiro_profile_auth(
             selected_profile.provider.display_name()
         );
     }
-    let model_catalog =
-        std::fs::read_to_string(selected_profile.codex_home.join(KIRO_MODEL_CATALOG_FILE))
-            .ok()
-            .and_then(|text| parse_kiro_model_catalog_text(&text).ok())
-            .unwrap_or_default();
+    let model_catalog_path = selected_profile.codex_home.join(KIRO_MODEL_CATALOG_FILE);
+    let model_catalog = match std::fs::read_to_string(&model_catalog_path) {
+        Ok(text) => parse_kiro_model_catalog_text(&text)
+            .context("failed to parse the imported Kiro model catalog")?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            return Err(error).context("failed to read the imported Kiro model catalog");
+        }
+    };
     Ok(RuntimeKiroProfileAuth {
         profile_name: selected_profile_name.to_string(),
         codex_home: selected_profile.codex_home.clone(),

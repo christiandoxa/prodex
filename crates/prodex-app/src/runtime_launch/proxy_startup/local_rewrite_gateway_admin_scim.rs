@@ -1,5 +1,5 @@
 use super::local_rewrite::{
-    RuntimeLocalRewriteProxyShared, runtime_gateway_virtual_key_store_load,
+    RuntimeLocalRewriteProxyShared, runtime_gateway_virtual_key_store_load_strict,
 };
 use super::local_rewrite_gateway_admin_audit::runtime_gateway_audit_admin_authorization_denied_event;
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
@@ -36,10 +36,13 @@ pub(super) fn runtime_gateway_admin_scim_list_users_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    let store = runtime_gateway_virtual_key_store_load(
+    let store = match runtime_gateway_virtual_key_store_load_strict(
         &shared.gateway_state_store,
         &shared.runtime_shared.log_path,
-    );
+    ) {
+        Ok(store) => store,
+        Err(_error) => return runtime_gateway_scim_store_unavailable_response(),
+    };
     let resources = store
         .scim_users
         .iter()
@@ -107,10 +110,13 @@ pub(super) fn runtime_gateway_admin_scim_get_user_response(
     shared: &RuntimeLocalRewriteProxyShared,
     admin_auth: &RuntimeGatewayAdminAuth,
 ) -> tiny_http::ResponseBox {
-    let store = runtime_gateway_virtual_key_store_load(
+    let store = match runtime_gateway_virtual_key_store_load_strict(
         &shared.gateway_state_store,
         &shared.runtime_shared.log_path,
-    );
+    ) {
+        Ok(store) => store,
+        Err(_error) => return runtime_gateway_scim_store_unavailable_response(),
+    };
     let Some(user) = store.scim_users.iter().find(|user| user.id == id) else {
         return runtime_gateway_scim_not_found_error().into_response();
     };
@@ -123,6 +129,15 @@ pub(super) fn runtime_gateway_admin_scim_get_user_response(
         );
     }
     runtime_gateway_admin_json_response(200, runtime_gateway_scim_user_json(user, shared))
+}
+
+fn runtime_gateway_scim_store_unavailable_response() -> tiny_http::ResponseBox {
+    RuntimeGatewayAdminError::new(
+        503,
+        "gateway_key_store_unavailable",
+        "gateway key store is temporarily unavailable",
+    )
+    .into_response()
 }
 
 pub(super) fn runtime_gateway_admin_scim_update_user_response(
@@ -388,6 +403,18 @@ fn runtime_gateway_admin_scim_scope_forbidden_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn scim_store_failure_response_is_stable_and_fail_closed() {
+        let response = runtime_gateway_scim_store_unavailable_response();
+        assert_eq!(response.status_code().0, 503);
+        let mut body = String::new();
+        response.into_reader().read_to_string(&mut body).unwrap();
+        assert!(body.contains("gateway_key_store_unavailable"));
+        assert!(!body.contains("/tmp/"));
+        assert!(!body.contains("permission denied"));
+    }
 
     #[test]
     fn scim_entity_tag_rejects_stale_mutation() {
