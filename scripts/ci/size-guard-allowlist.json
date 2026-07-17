@@ -176,17 +176,17 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_key_store_backend.rs",
-    "maxLines": 1409,
+    "maxLines": 1388,
     "reason": "Gateway key-store compatibility, exact decoding, backend persistence, and explicit local PostgreSQL TLS fixtures remain capped until backend implementations are split."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1722,
+    "maxLines": 1701,
     "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh; canonical OIDC/SCIM evidence coverage moved to a focused nested fixture, and the remaining legacy matrix stays capped."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
-    "maxLines": 1299,
+    "maxLines": 1279,
     "reason": "Gateway durable state and cross-proxy PostgreSQL/Redis admission coverage includes explicit local PostgreSQL plaintext setup and remains capped while backend scenarios are split."
   },
   {
