@@ -1,5 +1,18 @@
 [
   {
+    "id": "keyring-dependency-lock-0.308.0",
+    "requiredSubjects": [
+      "fix(ci): sync keyring dependency guards"
+    ],
+    "caps": {
+      "maxFiles": 4,
+      "maxBehaviorFiles": 3,
+      "maxLines": 886,
+      "maxFileLines": 849
+    },
+    "reason": "Reviewed the fuzz-workspace lock synchronization and exact hmac/sha2 duplicate budgets introduced by the native keyring dependency; verified with locked fuzz metadata, the live duplicate guard, and all duplicate-budget fixtures after CI exposed the omitted secondary lockfile."
+  },
+  {
     "id": "audited-native-client-hardening-0.308.0",
     "requiredSubjects": [
       "fix(secrets): enable native keyring storage"
