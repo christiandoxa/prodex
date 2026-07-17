@@ -34,6 +34,7 @@ use super::{
 use prodex_gateway_http::GatewayHttpRouteKind;
 
 mod direct_support;
+mod slowloris;
 use direct_support::{DropSignal, GatedBody, full_response, spawn_direct_frontend};
 
 type TestClient = Client<HttpConnector, Full<Bytes>>;
@@ -55,7 +56,6 @@ async fn route_isolation_keeps_data_and_control_planes_separate() {
     })
     .await;
     let client = test_client();
-
     let (data_addr, data_stop, data) =
         spawn_frontend(GatewayServerMode::DataPlane, backend_addr, |_| {}).await;
     let response = request(&client, data_addr, "/admin/keys", Bytes::new()).await;

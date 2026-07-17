@@ -10,6 +10,27 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeProxyClaudeMergeOutcome {
+    Merged,
+    Identical,
+    Conflict,
+}
+
+impl RuntimeProxyClaudeMergeOutcome {
+    fn absorbed(self) -> bool {
+        !matches!(self, Self::Conflict)
+    }
+
+    fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Conflict, _) | (_, Self::Conflict) => Self::Conflict,
+            (Self::Merged, _) | (_, Self::Merged) => Self::Merged,
+            _ => Self::Identical,
+        }
+    }
+}
+
 pub fn prepare_runtime_proxy_claude_config_dir(
     prodex_root: &Path,
     codex_home: &Path,
@@ -39,24 +60,29 @@ pub fn maybe_import_runtime_proxy_claude_legacy_home(target_dir: &Path) -> Resul
         return Ok(());
     }
 
-    let mut imported = false;
+    let mut import_found = false;
+    let mut import_absorbed = true;
     if let Ok(legacy_dir) = legacy_default_claude_config_dir()
         && legacy_dir.is_dir()
     {
-        merge_runtime_proxy_claude_directory_contents(&legacy_dir, target_dir)?;
-        imported = true;
+        import_found = true;
+        import_absorbed = merge_runtime_proxy_claude_directory_contents(&legacy_dir, target_dir)?
+            .absorbed()
+            && import_absorbed;
     }
     if let Ok(legacy_config_path) = legacy_default_claude_config_path()
         && legacy_config_path.is_file()
     {
-        merge_runtime_proxy_claude_file(
+        import_found = true;
+        import_absorbed = merge_runtime_proxy_claude_file(
             &legacy_config_path,
             &runtime_proxy_claude_config_path(target_dir),
-        )?;
-        imported = true;
+        )?
+        .absorbed()
+            && import_absorbed;
     }
 
-    if imported {
+    if import_found && import_absorbed {
         fs::write(&marker_path, "imported\n").with_context(|| {
             format!(
                 "failed to write Claude legacy import marker at {}",
@@ -96,7 +122,13 @@ pub fn migrate_runtime_proxy_claude_profile_dir_to_target(
                 profile_dir.display()
             );
         }
-        merge_runtime_proxy_claude_directory_contents(&source_dir, target_dir)?;
+        let outcome = merge_runtime_proxy_claude_directory_contents(&source_dir, target_dir)?;
+        if !outcome.absorbed() {
+            anyhow::bail!(
+                "Claude state migration from {} has unresolved conflicts",
+                source_dir.display()
+            );
+        }
         runtime_proxy_remove_path(profile_dir)?;
         return Ok(());
     }
@@ -108,7 +140,13 @@ pub fn migrate_runtime_proxy_claude_profile_dir_to_target(
         );
     }
 
-    merge_runtime_proxy_claude_directory_contents(profile_dir, target_dir)?;
+    let outcome = merge_runtime_proxy_claude_directory_contents(profile_dir, target_dir)?;
+    if !outcome.absorbed() {
+        anyhow::bail!(
+            "Claude state migration from {} has unresolved conflicts",
+            profile_dir.display()
+        );
+    }
     fs::remove_dir_all(profile_dir)
         .with_context(|| format!("failed to remove {}", profile_dir.display()))?;
     Ok(())
@@ -141,12 +179,13 @@ pub fn ensure_runtime_proxy_claude_profile_link(link_path: &Path, target_dir: &P
 pub fn merge_runtime_proxy_claude_directory_contents(
     source: &Path,
     destination: &Path,
-) -> Result<()> {
+) -> Result<RuntimeProxyClaudeMergeOutcome> {
     if prodex_core::same_path(source, destination) {
-        return Ok(());
+        return Ok(RuntimeProxyClaudeMergeOutcome::Identical);
     }
     prodex_shared_codex_fs::create_codex_home_if_missing(destination)?;
 
+    let mut outcome = RuntimeProxyClaudeMergeOutcome::Identical;
     for entry in fs::read_dir(source)
         .with_context(|| format!("failed to read directory {}", source.display()))?
     {
@@ -159,20 +198,34 @@ pub fn merge_runtime_proxy_claude_directory_contents(
             .with_context(|| format!("failed to inspect {}", source_path.display()))?;
 
         if file_type.is_dir() {
-            merge_runtime_proxy_claude_directory_contents(&source_path, &destination_path)?;
+            outcome = outcome.combine(merge_runtime_proxy_claude_directory_contents(
+                &source_path,
+                &destination_path,
+            )?);
         } else if file_type.is_file() {
-            merge_runtime_proxy_claude_file(&source_path, &destination_path)?;
+            outcome = outcome.combine(merge_runtime_proxy_claude_file(
+                &source_path,
+                &destination_path,
+            )?);
         } else if file_type.is_symlink() {
-            merge_runtime_proxy_claude_symlink(&source_path, &destination_path)?;
+            outcome = outcome.combine(merge_runtime_proxy_claude_symlink(
+                &source_path,
+                &destination_path,
+            )?);
+        } else {
+            outcome = RuntimeProxyClaudeMergeOutcome::Conflict;
         }
     }
 
-    Ok(())
+    Ok(outcome)
 }
 
-pub fn merge_runtime_proxy_claude_file(source: &Path, destination: &Path) -> Result<()> {
+pub fn merge_runtime_proxy_claude_file(
+    source: &Path,
+    destination: &Path,
+) -> Result<RuntimeProxyClaudeMergeOutcome> {
     if prodex_core::same_path(source, destination) {
-        return Ok(());
+        return Ok(RuntimeProxyClaudeMergeOutcome::Identical);
     }
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)
@@ -187,7 +240,7 @@ pub fn merge_runtime_proxy_claude_file(source: &Path, destination: &Path) -> Res
                 destination.display()
             )
         })?;
-        return Ok(());
+        return Ok(RuntimeProxyClaudeMergeOutcome::Merged);
     }
 
     if destination.is_dir() {
@@ -212,27 +265,38 @@ pub fn merge_runtime_proxy_claude_file(source: &Path, destination: &Path) -> Res
         return merge_runtime_proxy_claude_jsonl_file(source, destination);
     }
 
-    Ok(())
+    if fs::read(source).with_context(|| format!("failed to read {}", source.display()))?
+        == fs::read(destination)
+            .with_context(|| format!("failed to read {}", destination.display()))?
+    {
+        Ok(RuntimeProxyClaudeMergeOutcome::Identical)
+    } else {
+        Ok(RuntimeProxyClaudeMergeOutcome::Conflict)
+    }
 }
 
-pub fn merge_runtime_proxy_claude_json_file(source: &Path, destination: &Path) -> Result<()> {
+pub fn merge_runtime_proxy_claude_json_file(
+    source: &Path,
+    destination: &Path,
+) -> Result<RuntimeProxyClaudeMergeOutcome> {
     let source_raw = fs::read_to_string(source)
         .with_context(|| format!("failed to read {}", source.display()))?;
     let destination_raw = fs::read_to_string(destination)
         .with_context(|| format!("failed to read {}", destination.display()))?;
     let source_value = match serde_json::from_str::<serde_json::Value>(&source_raw) {
         Ok(value) => value,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(RuntimeProxyClaudeMergeOutcome::Conflict),
     };
     let mut destination_value = match serde_json::from_str::<serde_json::Value>(&destination_raw) {
         Ok(value) => value,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(RuntimeProxyClaudeMergeOutcome::Conflict),
     };
     runtime_proxy_merge_json_defaults(&mut destination_value, &source_value);
     let rendered = serde_json::to_string_pretty(&destination_value)
         .context("failed to render merged Claude config")?;
     fs::write(destination, rendered)
-        .with_context(|| format!("failed to write {}", destination.display()))
+        .with_context(|| format!("failed to write {}", destination.display()))?;
+    Ok(RuntimeProxyClaudeMergeOutcome::Merged)
 }
 
 pub fn runtime_proxy_merge_json_defaults(
@@ -257,7 +321,10 @@ pub fn runtime_proxy_merge_json_defaults(
     }
 }
 
-pub fn merge_runtime_proxy_claude_jsonl_file(source: &Path, destination: &Path) -> Result<()> {
+pub fn merge_runtime_proxy_claude_jsonl_file(
+    source: &Path,
+    destination: &Path,
+) -> Result<RuntimeProxyClaudeMergeOutcome> {
     fn load_jsonl_lines(
         path: &Path,
         merged: &mut Vec<String>,
@@ -280,17 +347,29 @@ pub fn merge_runtime_proxy_claude_jsonl_file(source: &Path, destination: &Path) 
     load_jsonl_lines(destination, &mut merged, &mut seen)?;
     load_jsonl_lines(source, &mut merged, &mut seen)?;
     fs::write(destination, merged.join("\n"))
-        .with_context(|| format!("failed to write {}", destination.display()))
+        .with_context(|| format!("failed to write {}", destination.display()))?;
+    Ok(RuntimeProxyClaudeMergeOutcome::Merged)
 }
 
-pub fn merge_runtime_proxy_claude_symlink(source: &Path, destination: &Path) -> Result<()> {
+pub fn merge_runtime_proxy_claude_symlink(
+    source: &Path,
+    destination: &Path,
+) -> Result<RuntimeProxyClaudeMergeOutcome> {
     if destination.exists() || fs::symlink_metadata(destination).is_ok() {
-        return Ok(());
+        let source_target = fs::read_link(source)
+            .with_context(|| format!("failed to read symlink {}", source.display()))?;
+        let destination_target = fs::read_link(destination).ok();
+        return Ok(if destination_target.as_ref() == Some(&source_target) {
+            RuntimeProxyClaudeMergeOutcome::Identical
+        } else {
+            RuntimeProxyClaudeMergeOutcome::Conflict
+        });
     }
 
     let target = fs::read_link(source)
         .with_context(|| format!("failed to read symlink {}", source.display()))?;
-    runtime_proxy_create_symlink(&target, destination, true)
+    runtime_proxy_create_symlink(&target, destination, true)?;
+    Ok(RuntimeProxyClaudeMergeOutcome::Merged)
 }
 
 pub fn runtime_proxy_resolve_symlink_target(path: &Path) -> Result<PathBuf> {
@@ -367,4 +446,87 @@ pub fn runtime_proxy_create_symlink(target: &Path, link: &Path, is_dir: bool) ->
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new(name: &str) -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "prodex-claude-{name}-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn migration_keeps_source_directory_when_plain_file_conflicts() {
+        let root = TestDir::new("plain-conflict");
+        let source = root.0.join("source");
+        let target = root.0.join("target");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(source.join("notes.txt"), "source").unwrap();
+        fs::write(target.join("notes.txt"), "target").unwrap();
+
+        assert!(migrate_runtime_proxy_claude_profile_dir_to_target(&source, &target).is_err());
+        assert_eq!(
+            fs::read_to_string(source.join("notes.txt")).unwrap(),
+            "source"
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("notes.txt")).unwrap(),
+            "target"
+        );
+    }
+
+    #[test]
+    fn migration_keeps_source_directory_when_json_cannot_be_merged() {
+        for (source_json, target_json) in [("{", "{}"), ("{}", "{")] {
+            let root = TestDir::new("json-conflict");
+            let source = root.0.join("source");
+            let target = root.0.join("target");
+            fs::create_dir_all(&source).unwrap();
+            fs::create_dir_all(&target).unwrap();
+            fs::write(source.join(DEFAULT_CLAUDE_CONFIG_FILE_NAME), source_json).unwrap();
+            fs::write(target.join(DEFAULT_CLAUDE_CONFIG_FILE_NAME), target_json).unwrap();
+
+            assert!(migrate_runtime_proxy_claude_profile_dir_to_target(&source, &target).is_err());
+            assert!(source.exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migration_keeps_source_directory_when_symlink_conflicts() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestDir::new("symlink-conflict");
+        let source = root.0.join("source");
+        let target = root.0.join("target");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        symlink("source-target", source.join("link")).unwrap();
+        symlink("destination-target", target.join("link")).unwrap();
+
+        assert!(migrate_runtime_proxy_claude_profile_dir_to_target(&source, &target).is_err());
+        assert!(fs::symlink_metadata(source.join("link")).is_ok());
+    }
 }

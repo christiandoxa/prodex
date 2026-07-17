@@ -5,7 +5,7 @@ use super::{
     runtime_proxy_log, runtime_proxy_quota_reset_at_from_message, runtime_route_kind_label,
     schedule_runtime_state_save_from_runtime,
 };
-use crate::RuntimeStateMutation;
+use crate::{RuntimeStateMutation, mark_runtime_profile_retry_backoff_update};
 use anyhow::Result;
 use chrono::Local;
 
@@ -60,6 +60,7 @@ pub(crate) fn mark_runtime_profile_quota_quarantine(
         .entry(profile_name.to_string())
         .and_modify(|current| *current = (*current).max(until))
         .or_insert(until);
+    mark_runtime_profile_retry_backoff_update(&mut runtime, profile_name);
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,

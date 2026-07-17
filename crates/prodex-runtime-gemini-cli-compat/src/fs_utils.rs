@@ -4,13 +4,16 @@ use std::io::Read as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
+const GEMINI_EXTENSION_MAX_DEPTH: usize = 32;
+
 pub(super) fn collect_files(
     directory: &Path,
     extension: &str,
     limit: usize,
 ) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    collect_files_inner(directory, extension, limit, &mut files)?;
+    let mut remaining = limit;
+    collect_files_inner(directory, extension, &mut remaining, 0, &mut files)?;
     files.sort();
     Ok(files)
 }
@@ -18,11 +21,15 @@ pub(super) fn collect_files(
 fn collect_files_inner(
     directory: &Path,
     extension: &str,
-    limit: usize,
+    remaining: &mut usize,
+    depth: usize,
     files: &mut Vec<PathBuf>,
 ) -> Result<()> {
-    if files.len() >= limit {
+    if *remaining == 0 {
         return Ok(());
+    }
+    if depth > GEMINI_EXTENSION_MAX_DEPTH {
+        anyhow::bail!("Gemini extension directory exceeds maximum scan depth");
     }
     if path_has_symlink_component(directory) {
         return Ok(());
@@ -31,9 +38,10 @@ fn collect_files_inner(
         return Ok(());
     };
     for entry in entries.flatten() {
-        if files.len() >= limit {
+        if *remaining == 0 {
             break;
         }
+        *remaining = remaining.saturating_sub(1);
         let path = entry.path();
         let Ok(metadata) = fs::symlink_metadata(&path) else {
             continue;
@@ -42,7 +50,7 @@ fn collect_files_inner(
             continue;
         }
         if metadata.is_dir() {
-            collect_files_inner(&path, extension, limit, files)?;
+            collect_files_inner(&path, extension, remaining, depth + 1, files)?;
         } else if metadata.is_file()
             && path.extension().and_then(|value| value.to_str()) == Some(extension)
         {
@@ -53,13 +61,30 @@ fn collect_files_inner(
 }
 
 pub(super) fn copy_dir_limited(source: &Path, target: &Path, limit: usize) -> Result<()> {
+    let mut remaining = limit;
+    copy_dir_limited_inner(source, target, &mut remaining, 0)
+}
+
+fn copy_dir_limited_inner(
+    source: &Path,
+    target: &Path,
+    remaining: &mut usize,
+    depth: usize,
+) -> Result<()> {
+    if depth > GEMINI_EXTENSION_MAX_DEPTH {
+        anyhow::bail!("Gemini extension directory exceeds maximum copy depth");
+    }
     if path_has_symlink_component(source) {
         return Ok(());
     }
     let Ok(entries) = fs::read_dir(source) else {
         return Ok(());
     };
-    for entry in entries.flatten().take(limit) {
+    for entry in entries.flatten() {
+        if *remaining == 0 {
+            break;
+        }
+        *remaining = remaining.saturating_sub(1);
         let source_path = entry.path();
         let target_path = target.join(entry.file_name());
         let metadata = fs::symlink_metadata(&source_path)
@@ -70,7 +95,7 @@ pub(super) fn copy_dir_limited(source: &Path, target: &Path, limit: usize) -> Re
         if metadata.is_dir() {
             fs::create_dir_all(&target_path)
                 .with_context(|| format!("failed to create {}", target_path.display()))?;
-            copy_dir_limited(&source_path, &target_path, limit)?;
+            copy_dir_limited_inner(&source_path, &target_path, remaining, depth + 1)?;
         } else if metadata.is_file() {
             copy_file_limited(&source_path, &target_path, &metadata)?;
         }

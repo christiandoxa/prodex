@@ -64,6 +64,7 @@ pub(crate) fn runtime_profile_backoffs_snapshot(
         retry_backoff_until: runtime.profile_retry_backoff_until.clone(),
         transport_backoff_until: runtime.profile_transport_backoff_until.clone(),
         route_circuit_open_until: runtime.profile_route_circuit_open_until.clone(),
+        updated_at: runtime.profile_backoff_updated_at.clone(),
     }
 }
 
@@ -100,6 +101,10 @@ pub(crate) fn mark_runtime_profile_retry_backoff(
     runtime
         .profile_retry_backoff_until
         .insert(profile_name.to_string(), until);
+    runtime.profile_backoff_updated_at.insert(
+        prodex_runtime_store::runtime_profile_retry_backoff_update_key(profile_name),
+        Local::now().timestamp_millis(),
+    );
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
@@ -152,9 +157,13 @@ pub(crate) fn mark_runtime_profile_transport_backoff(
     let until = now.saturating_add(next_backoff_seconds);
     runtime
         .profile_transport_backoff_until
-        .entry(route_key)
+        .entry(route_key.clone())
         .and_modify(|current| *current = (*current).max(until))
         .or_insert(until);
+    runtime.profile_backoff_updated_at.insert(
+        prodex_runtime_store::runtime_profile_transport_backoff_update_key(&route_key),
+        Local::now().timestamp_millis(),
+    );
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
@@ -185,17 +194,47 @@ pub(crate) fn clear_runtime_profile_transport_backoff_for_route(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> bool {
+    let route_key = runtime_profile_transport_backoff_key(profile_name, route_kind);
     let mut changed = runtime
         .profile_transport_backoff_until
-        .remove(&runtime_profile_transport_backoff_key(
-            profile_name,
-            route_kind,
-        ))
+        .remove(&route_key)
         .is_some();
-    changed = runtime
+    if changed {
+        runtime.profile_backoff_updated_at.insert(
+            prodex_runtime_store::runtime_profile_transport_backoff_update_key(&route_key),
+            Local::now().timestamp_millis(),
+        );
+    }
+    let cleared_legacy = runtime
         .profile_transport_backoff_until
         .remove(profile_name)
-        .is_some()
-        || changed;
+        .is_some();
+    if cleared_legacy {
+        runtime.profile_backoff_updated_at.insert(
+            prodex_runtime_store::runtime_profile_transport_backoff_update_key(profile_name),
+            Local::now().timestamp_millis(),
+        );
+    }
+    changed = cleared_legacy || changed;
     changed
+}
+
+pub(crate) fn mark_runtime_profile_retry_backoff_update(
+    runtime: &mut RuntimeRotationState,
+    profile_name: &str,
+) {
+    runtime.profile_backoff_updated_at.insert(
+        prodex_runtime_store::runtime_profile_retry_backoff_update_key(profile_name),
+        Local::now().timestamp_millis(),
+    );
+}
+
+pub(crate) fn mark_runtime_profile_route_circuit_update(
+    runtime: &mut RuntimeRotationState,
+    route_key: &str,
+) {
+    runtime.profile_backoff_updated_at.insert(
+        prodex_runtime_store::runtime_profile_route_circuit_update_key(route_key),
+        Local::now().timestamp_millis(),
+    );
 }

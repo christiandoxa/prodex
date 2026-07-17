@@ -116,6 +116,100 @@ fn gemini_cli_compat_does_not_cleanup_symlinked_generated_skill_dirs() {
 }
 
 #[test]
+fn gemini_cli_compat_preserves_user_owned_skill_and_agent_collisions() {
+    let root = temp_dir("owned-collision");
+    let codex_home = root.join("codex");
+    let extension_dir = root.join("extension");
+    fs::create_dir_all(extension_dir.join("skills/review")).unwrap();
+    fs::create_dir_all(extension_dir.join("agents")).unwrap();
+    fs::write(
+        extension_dir.join("skills/review/SKILL.md"),
+        "generated source",
+    )
+    .unwrap();
+    fs::write(extension_dir.join("agents/reviewer.md"), "generated agent").unwrap();
+    let skill_target = codex_home.join(".agents/skills/gemini-tools-review");
+    fs::create_dir_all(&skill_target).unwrap();
+    fs::write(skill_target.join("SKILL.md"), "user skill").unwrap();
+    let agent_target = codex_home.join("agents/gemini-tools-reviewer.toml");
+    fs::create_dir_all(agent_target.parent().unwrap()).unwrap();
+    fs::write(&agent_target, "user agent").unwrap();
+    let extensions = vec![GeminiExtension {
+        directory: extension_dir,
+        name: "tools".to_string(),
+        value: serde_json::json!({}),
+    }];
+
+    assert!(write_gemini_skills(&codex_home, &extensions).is_err());
+    assert_eq!(
+        fs::read_to_string(skill_target.join("SKILL.md")).unwrap(),
+        "user skill"
+    );
+    assert!(write_gemini_agents(&codex_home, &extensions).is_err());
+    assert_eq!(fs::read_to_string(agent_target).unwrap(), "user agent");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn missing_gemini_skill_source_does_not_remove_existing_generated_target() {
+    let root = temp_dir("missing-skill");
+    let codex_home = root.join("codex");
+    let extension_dir = root.join("extension");
+    fs::create_dir_all(extension_dir.join("skills/review")).unwrap();
+    let target = codex_home.join(".agents/skills/gemini-tools-review");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join(GENERATED_SKILL_MARKER_FILE), "tools").unwrap();
+    fs::write(target.join("sentinel.txt"), "keep").unwrap();
+    let extensions = vec![GeminiExtension {
+        directory: extension_dir,
+        name: "tools".to_string(),
+        value: serde_json::json!({}),
+    }];
+
+    assert!(write_gemini_skills(&codex_home, &extensions).is_err());
+    assert_eq!(
+        fs::read_to_string(target.join("sentinel.txt")).unwrap(),
+        "keep"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn gemini_directory_copy_uses_one_global_entry_budget() {
+    let root = temp_dir("copy-budget");
+    let source = root.join("source");
+    let target = root.join("target");
+    for directory in 0..5 {
+        let nested = source.join(format!("d{directory}"));
+        fs::create_dir_all(&nested).unwrap();
+        for file in 0..5 {
+            fs::write(nested.join(format!("f{file}.txt")), "x").unwrap();
+        }
+    }
+    fs::create_dir_all(&target).unwrap();
+
+    crate::fs_utils::copy_dir_limited(&source, &target, 7).unwrap();
+    let copied = crate::fs_utils::collect_files(&target, "txt", 100).unwrap();
+    assert!(copied.len() <= 7, "copied {} files", copied.len());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn gemini_directory_scan_rejects_excessive_depth() {
+    let root = temp_dir("scan-depth");
+    let mut directory = root.join("source");
+    fs::create_dir_all(&directory).unwrap();
+    for index in 0..=GEMINI_EXTENSION_SCAN_LIMIT.min(40) {
+        directory = directory.join(format!("d{index}"));
+        fs::create_dir_all(&directory).unwrap();
+    }
+    fs::write(directory.join("agent.md"), "deep").unwrap();
+
+    assert!(crate::fs_utils::collect_files(&root.join("source"), "md", 1_000).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn gemini_cli_compat_bridges_extension_mcp_commands_hooks_and_skills() {
     let root = temp_dir("full");
     let codex_home = root.join("codex");

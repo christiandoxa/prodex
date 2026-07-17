@@ -383,6 +383,7 @@ fn runtime_proxy_streams_anthropic_mcp_messages_without_buffering() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,

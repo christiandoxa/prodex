@@ -24,6 +24,7 @@ fn local_proxy_overload_backoff_activates_and_expires() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -144,6 +145,7 @@ fn responses_selection_ignores_websocket_transport_backoff() {
             now.saturating_add(60),
         )]),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -267,6 +269,7 @@ fn next_runtime_response_candidate_prefers_healthier_profile() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             "main".to_string(),
             RuntimeProfileHealth {
@@ -350,6 +353,7 @@ fn transport_backoff_escalates_for_repeated_failures() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -494,6 +498,7 @@ fn next_runtime_response_candidate_skips_transport_backoff_when_alternative_is_r
             now.saturating_add(60),
         )]),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {
@@ -617,6 +622,7 @@ fn next_runtime_response_candidate_falls_back_to_soonest_transport_recovery() {
             ),
         ]),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {

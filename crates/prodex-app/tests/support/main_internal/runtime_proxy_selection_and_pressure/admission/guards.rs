@@ -266,6 +266,61 @@ fn response_lane_limit_does_not_override_owned_previous_response_affinity() {
 }
 
 #[test]
+fn compact_lane_limit_does_not_override_owned_turn_state_lineage() {
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .active_request_limit(4)
+    .build();
+    let shared = harness.shared();
+    shared
+        .runtime
+        .lock()
+        .expect("runtime state should lock")
+        .turn_state_bindings
+        .insert(
+            runtime_compact_turn_state_lineage_key("turn-owned"),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        );
+    let limit = shared.lane_admission.limit(RuntimeRouteKind::Compact);
+    shared
+        .lane_admission
+        .active_counter(RuntimeRouteKind::Compact)
+        .store(limit, Ordering::SeqCst);
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses/compact".to_string(),
+        headers: vec![(
+            "x-codex-turn-state".to_string(),
+            "turn-owned".to_string(),
+        )],
+        body: br#"{"input":"continue"}"#.to_vec(),
+    };
+
+    let guard = acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+        shared,
+        "http",
+        "/backend-api/codex/responses/compact",
+        Some(&request),
+    )
+    .expect("owned compact lineage should bypass only the compact lane cap");
+
+    assert_eq!(
+        shared
+            .lane_admission
+            .active_counter(RuntimeRouteKind::Compact)
+            .load(Ordering::SeqCst),
+        limit + 1
+    );
+    drop(guard);
+}
+
+#[test]
 fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
     let _budget_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS", "5");

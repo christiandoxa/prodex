@@ -60,6 +60,7 @@ fn selection_health_shared(
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: profile_health
             .into_iter()
             .map(|(key, score)| {
@@ -241,6 +242,7 @@ fn next_runtime_response_candidate_prefers_lower_latency_penalty() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_performance_key("main", RuntimeRouteKind::Responses),
             RuntimeProfileHealth {
@@ -361,6 +363,7 @@ fn compact_health_penalty_does_not_degrade_responses_selection() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_health_key("main", RuntimeRouteKind::Compact),
             RuntimeProfileHealth {
@@ -490,6 +493,7 @@ fn websocket_bad_pairing_lightly_degrades_responses_selection() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::from([(
             runtime_profile_route_bad_pairing_key("main", RuntimeRouteKind::Websocket),
             RuntimeProfileHealth {
@@ -610,6 +614,7 @@ fn next_runtime_response_candidate_prefers_healthier_quota_window_mix() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = RuntimeRotationProxyShared {

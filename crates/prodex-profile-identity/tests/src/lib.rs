@@ -415,7 +415,7 @@ fn remove_profile_target_planning_validates_bulk_delete() {
 
 #[test]
 fn profile_home_delete_and_removed_state_are_planned() {
-    assert!(should_delete_profile_home(true, false, "/tmp/managed").unwrap());
+    assert!(!should_delete_profile_home(true, false, "/tmp/managed").unwrap());
     assert!(!should_delete_profile_home(false, false, "/tmp/external").unwrap());
     assert_eq!(
         should_delete_profile_home(false, true, "/tmp/external")

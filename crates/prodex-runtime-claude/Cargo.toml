@@ -14,6 +14,7 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 codex_config = { workspace = true }
 dirs = { workspace = true }
+fs2 = { workspace = true }
 prodex_core = { workspace = true }
 prodex_runtime_launch = { workspace = true }
 prodex_shared_codex_fs = { workspace = true }

@@ -152,19 +152,30 @@ fn runtime_proxy_request_has_owned_lane_affinity(
         }
     }
 
-    if lane == RuntimeRouteKind::Compact
-        && let Some(session_id) = runtime_request_session_id(request)
-    {
-        return runtime
-            .session_id_bindings
-            .get(session_id.as_str())
-            .or_else(|| {
-                runtime
-                    .state
-                    .session_profile_bindings
-                    .get(session_id.as_str())
-            })
-            .is_some_and(binding_profile_exists);
+    if lane == RuntimeRouteKind::Compact {
+        if runtime_request_turn_state(request)
+            .as_deref()
+            .map(runtime_compact_turn_state_lineage_key)
+            .as_deref()
+            .and_then(|key| runtime.turn_state_bindings.get(key))
+            .is_some_and(binding_profile_exists)
+        {
+            return true;
+        }
+        if let Some(session_id) = runtime_request_session_id(request) {
+            let compact_lineage_key = runtime_compact_session_lineage_key(&session_id);
+            return runtime
+                .session_id_bindings
+                .get(session_id.as_str())
+                .or_else(|| {
+                    runtime
+                        .state
+                        .session_profile_bindings
+                        .get(session_id.as_str())
+                })
+                .or_else(|| runtime.session_id_bindings.get(&compact_lineage_key))
+                .is_some_and(binding_profile_exists);
+        }
     }
 
     false

@@ -97,7 +97,7 @@ fn profile_identity_redacted_error(err: &anyhow::Error) -> String {
     redaction_redact_secret_like_text(&format!("{err:#}"))
 }
 
-fn read_profile_identity_from_auth(codex_home: &Path) -> Result<ProfileIdentity> {
+pub(crate) fn read_profile_identity_from_auth(codex_home: &Path) -> Result<ProfileIdentity> {
     let auth_location = secret_store::auth_json_path(codex_home);
 
     let Some(content) = read_auth_json_text(codex_home)

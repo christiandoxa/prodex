@@ -103,7 +103,7 @@ fn first_codex_positional_arg_index(codex_args: &[OsString]) -> Option<usize> {
             return Some(index);
         };
         if arg == "--" {
-            return (index + 1 < codex_args.len()).then_some(index + 1);
+            return None;
         }
         if codex_option_takes_separate_value(arg) {
             index += 2;
@@ -247,6 +247,11 @@ pub fn runtime_proxy_local_model_provider_codex_args(
             continue;
         };
 
+        if arg == "--" {
+            args.extend(user_args[index..].iter().cloned());
+            break;
+        }
+
         if matches!(arg, "-c" | "--config") {
             args.push(user_args[index].clone());
             index += 1;
@@ -294,8 +299,14 @@ pub fn runtime_proxy_local_model_provider_codex_args(
     }
 
     if !replaced {
-        args.push(OsString::from("-c"));
-        args.push(OsString::from(provider_base_override));
+        let insert_at = args
+            .iter()
+            .position(|arg| arg == "--")
+            .unwrap_or(args.len());
+        args.splice(
+            insert_at..insert_at,
+            [OsString::from("-c"), OsString::from(provider_base_override)],
+        );
     }
     args
 }
@@ -331,6 +342,11 @@ fn runtime_proxy_realtime_codex_args(
             index += 1;
             continue;
         };
+
+        if arg == "--" {
+            args.extend(user_args[index..].iter().cloned());
+            break;
+        }
 
         if (arg == "-c" || arg == "--config")
             && let Some(next) = user_args.get(index + 1)
@@ -384,8 +400,17 @@ fn runtime_proxy_realtime_codex_args(
 
     for (index, (key, value)) in overrides.iter().enumerate() {
         if !replaced[index] {
-            args.push(OsString::from("-c"));
-            args.push(OsString::from(format!("{key}={value}")));
+            let insert_at = args
+                .iter()
+                .position(|arg| arg == "--")
+                .unwrap_or(args.len());
+            args.splice(
+                insert_at..insert_at,
+                [
+                    OsString::from("-c"),
+                    OsString::from(format!("{key}={value}")),
+                ],
+            );
         }
     }
     args
@@ -544,9 +569,17 @@ fn scope_codex_exec_resume_config_args_to_resume(codex_args: &[OsString]) -> Vec
 }
 
 pub fn normalize_codex_profile_args(codex_args: &[OsString]) -> Vec<OsString> {
+    let mut after_separator = false;
     codex_args
         .iter()
         .map(|arg| {
+            if after_separator {
+                return arg.clone();
+            }
+            if arg == "--" {
+                after_separator = true;
+                return arg.clone();
+            }
             let Some(value) = arg.to_str() else {
                 return arg.clone();
             };
@@ -563,9 +596,12 @@ pub fn normalize_codex_profile_args(codex_args: &[OsString]) -> Vec<OsString> {
 
 pub fn extract_prodex_dry_run_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
     let mut dry_run = false;
+    let mut after_separator = false;
     let mut filtered = Vec::with_capacity(codex_args.len());
     for arg in codex_args {
-        if arg == PRODEX_DRY_RUN_ARG {
+        if arg == "--" {
+            after_separator = true;
+        } else if !after_separator && arg == PRODEX_DRY_RUN_ARG {
             dry_run = true;
             continue;
         }
@@ -575,18 +611,26 @@ pub fn extract_prodex_dry_run_flag(codex_args: &[OsString]) -> (bool, Vec<OsStri
 }
 
 pub fn prodex_dry_run_requested(codex_args: &[OsString]) -> bool {
-    codex_args.iter().any(|arg| arg == PRODEX_DRY_RUN_ARG)
+    codex_args
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == PRODEX_DRY_RUN_ARG)
 }
 
 pub fn is_review_invocation(args: &[OsString]) -> bool {
-    args.iter().any(|arg| arg == "review")
+    args.iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| arg == "review")
 }
 
 fn extract_prodex_full_access_flag(codex_args: &[OsString]) -> (bool, Vec<OsString>) {
     let mut full_access = false;
+    let mut after_separator = false;
     let mut filtered = Vec::with_capacity(codex_args.len());
     for arg in codex_args {
-        if arg == PRODEX_CODEX_FULL_ACCESS_ARG {
+        if arg == "--" {
+            after_separator = true;
+        } else if !after_separator && arg == PRODEX_CODEX_FULL_ACCESS_ARG {
             full_access = true;
             continue;
         }

@@ -297,12 +297,25 @@ fn write_json_file_atomic_private(path: &Path, json: &str) -> Result<()> {
         let _ = fs::remove_file(&temp_file);
         return Err(err).with_context(|| format!("failed to replace {}", path.display()));
     }
+    sync_parent_directory(path)
+        .with_context(|| format!("failed to sync parent of {}", path.display()))?;
     Ok(())
 }
 
 fn write_private_file(path: &Path, content: &str) -> io::Result<()> {
     let mut file = open_private_file(path)?;
-    file.write_all(content.as_bytes())
+    file.write_all(content.as_bytes())?;
+    file.sync_all()
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(path: &Path) -> io::Result<()> {
+    fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]

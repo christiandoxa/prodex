@@ -25,14 +25,26 @@ impl ProviderTokenUsage {
 }
 
 pub fn extract_usage_tokens(body: &[u8]) -> ProviderTokenUsage {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return ProviderTokenUsage::default();
-    };
-    extract_usage_from_value(&value)
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
+        return extract_usage_from_value(&value);
+    }
+    extract_usage_from_sse(body)
 }
 
 fn extract_usage_from_value(value: &serde_json::Value) -> ProviderTokenUsage {
-    let usage = value.get("usage").unwrap_or(value);
+    let usage = value
+        .get("usage")
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("usage"))
+        })
+        .or_else(|| {
+            value
+                .get("message")
+                .and_then(|message| message.get("usage"))
+        })
+        .unwrap_or(value);
     let input_tokens = first_u64(
         usage,
         &[
@@ -72,6 +84,53 @@ fn extract_usage_from_value(value: &serde_json::Value) -> ProviderTokenUsage {
         output_tokens,
         total_tokens,
     }
+}
+
+fn extract_usage_from_sse(body: &[u8]) -> ProviderTokenUsage {
+    let Ok(text) = std::str::from_utf8(body) else {
+        return ProviderTokenUsage::default();
+    };
+    let mut data_lines = Vec::new();
+    let mut merged = ProviderTokenUsage::default();
+    let flush = |data_lines: &mut Vec<&str>, merged: &mut ProviderTokenUsage| {
+        if data_lines.is_empty() {
+            return;
+        }
+        let data = data_lines.join("\n");
+        data_lines.clear();
+        if data.trim() == "[DONE]" {
+            return;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) else {
+            return;
+        };
+        let usage = extract_usage_from_value(&value);
+        if usage.input_tokens.is_some() {
+            merged.input_tokens = usage.input_tokens;
+        }
+        if usage.output_tokens.is_some() {
+            merged.output_tokens = usage.output_tokens;
+        }
+        if usage.total_tokens.is_some() {
+            merged.total_tokens = usage.total_tokens;
+        }
+    };
+
+    for line in text.lines() {
+        if line.is_empty() || line == "\r" {
+            flush(&mut data_lines, &mut merged);
+            continue;
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            data_lines.push(
+                data.strip_prefix(' ')
+                    .unwrap_or(data)
+                    .trim_end_matches('\r'),
+            );
+        }
+    }
+    flush(&mut data_lines, &mut merged);
+    merged
 }
 
 fn first_u64(value: &serde_json::Value, keys: &[&str]) -> Option<u64> {
@@ -129,6 +188,30 @@ mod tests {
         assert_eq!(gemini.input_tokens, Some(11));
         assert_eq!(gemini.output_tokens, Some(22));
         assert_eq!(gemini.total_tokens, Some(33));
+    }
+
+    #[test]
+    fn usage_parser_reads_final_sse_usage_without_counting_framing() {
+        let usage = extract_usage_tokens(
+            concat!(
+                "event: response.in_progress\n",
+                "data: {\"type\":\"response.in_progress\"}\n\n",
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{",
+                "\"input_tokens\":12,\"output_tokens\":7,\"total_tokens\":19}}}\n\n",
+                "data: [DONE]\n\n"
+            )
+            .as_bytes(),
+        );
+
+        assert_eq!(
+            usage,
+            ProviderTokenUsage {
+                input_tokens: Some(12),
+                output_tokens: Some(7),
+                total_tokens: Some(19),
+            }
+        );
     }
 
     #[test]

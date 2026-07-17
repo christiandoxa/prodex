@@ -43,6 +43,7 @@ fn clear_runtime_stale_previous_response_binding_marks_dead_tombstone() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         },
         usize::MAX,

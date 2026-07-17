@@ -379,6 +379,7 @@ fn runtime_doctor_state_collects_persisted_degradation_and_orphans() {
     save_runtime_profile_backoffs(
         &paths,
         &RuntimeProfileBackoffs {
+            updated_at: BTreeMap::new(),
             retry_backoff_until: BTreeMap::from([(
                 "main".to_string(),
                 Local::now().timestamp() + 30,

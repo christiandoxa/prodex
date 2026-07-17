@@ -124,6 +124,7 @@ fn runtime_profile_selection_jitter_is_deterministic_for_same_sequence() {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
     };

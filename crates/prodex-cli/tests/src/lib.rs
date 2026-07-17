@@ -369,6 +369,21 @@ fn super_presidio_flags_conflict() {
         parse_cli_command_from(["prodex", "super", "--presidio", "--no-presidio", "exec"]).is_err()
     );
 }
+
+#[test]
+fn quota_rejects_conflicting_output_and_scope_flags() {
+    for args in [
+        ["prodex", "quota", "--profile", "main", "--all"].as_slice(),
+        ["prodex", "quota", "--raw", "--all"].as_slice(),
+        ["prodex", "quota", "--raw", "--detail"].as_slice(),
+        ["prodex", "quota", "--raw", "--once"].as_slice(),
+    ] {
+        assert!(
+            parse_cli_command_from(args.iter().copied()).is_err(),
+            "{args:?}"
+        );
+    }
+}
 #[test]
 fn super_url_sets_runtime_base_url_for_local_rewrite_proxy() {
     let args = parse_super_as_caveman(&["prodex", "super", "--url", "http://127.0.0.1:8131"]);

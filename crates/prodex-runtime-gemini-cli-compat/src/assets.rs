@@ -17,6 +17,32 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn write_gemini_skills(codex_home: &Path, extensions: &[GeminiExtension]) -> Result<()> {
     let skills_root = codex_home.join(".agents").join("skills");
+    for extension in extensions {
+        for skill_dir in extension_skill_dirs(extension) {
+            let source_name = skill_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("skill");
+            let source_skill = skill_dir.join("SKILL.md");
+            if read_text_limited(&source_skill, GEMINI_COMPAT_FILE_LIMIT).is_none() {
+                bail!("Gemini extension skill missing {}", source_skill.display());
+            }
+            let target_dir = skills_root.join(format!(
+                "gemini-{}-{}",
+                safe_slug(&extension.name),
+                safe_slug(source_name)
+            ));
+            if fs::symlink_metadata(&target_dir).is_ok()
+                && read_text_limited(&target_dir.join(GENERATED_SKILL_MARKER_FILE), 4096).as_deref()
+                    != Some(extension.name.as_str())
+            {
+                bail!(
+                    "refusing to replace user-owned Gemini skill target {}",
+                    target_dir.display()
+                );
+            }
+        }
+    }
     fs::create_dir_all(&skills_root)
         .with_context(|| format!("failed to create {}", skills_root.display()))?;
     remove_generated_skill_dirs(&skills_root)?;
@@ -41,6 +67,40 @@ pub(super) fn write_gemini_skills(codex_home: &Path, extensions: &[GeminiExtensi
 
 pub(super) fn write_gemini_agents(codex_home: &Path, extensions: &[GeminiExtension]) -> Result<()> {
     let agents_root = codex_home.join("agents");
+    for extension in extensions {
+        let Ok(paths) = collect_files(
+            &extension.directory.join("agents"),
+            "md",
+            GEMINI_EXTENSION_SCAN_LIMIT,
+        ) else {
+            continue;
+        };
+        for path in paths {
+            let Some(body) = read_text_limited(&path, GEMINI_COMPAT_FILE_LIMIT) else {
+                continue;
+            };
+            let source_name = path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("agent");
+            let agent_name = format!(
+                "gemini-{}-{}",
+                safe_slug(&extension.name),
+                safe_slug(source_name)
+            );
+            let target = agents_root.join(format!("{agent_name}.toml"));
+            if fs::symlink_metadata(&target).is_ok()
+                && !read_text_limited(&target, 4096)
+                    .is_some_and(|text| text.starts_with(&format!("# {GENERATED_MARKER}")))
+            {
+                bail!(
+                    "refusing to replace user-owned Gemini agent target {}",
+                    target.display()
+                );
+            }
+            let _ = body;
+        }
+    }
     fs::create_dir_all(&agents_root)
         .with_context(|| format!("failed to create {}", agents_root.display()))?;
     remove_generated_agent_files(&agents_root)?;
@@ -153,7 +213,23 @@ fn copy_skill_dir(
     target_dir: &Path,
     source_name: &str,
 ) -> Result<()> {
-    if target_dir.exists() {
+    let Some(source_skill) =
+        read_text_limited(&source_dir.join("SKILL.md"), GEMINI_COMPAT_FILE_LIMIT)
+    else {
+        bail!(
+            "Gemini extension skill missing {}",
+            source_dir.join("SKILL.md").display()
+        );
+    };
+    if fs::symlink_metadata(target_dir).is_ok() {
+        if read_text_limited(&target_dir.join(GENERATED_SKILL_MARKER_FILE), 4096).as_deref()
+            != Some(extension.name.as_str())
+        {
+            bail!(
+                "refusing to replace user-owned Gemini skill target {}",
+                target_dir.display()
+            );
+        }
         fs::remove_dir_all(target_dir)
             .with_context(|| format!("failed to remove {}", target_dir.display()))?;
     }
@@ -165,14 +241,6 @@ fn copy_skill_dir(
     )
     .with_context(|| format!("failed to mark {}", target_dir.display()))?;
     copy_dir_limited(source_dir, target_dir, GEMINI_EXTENSION_SCAN_LIMIT)?;
-    let Some(source_skill) =
-        read_text_limited(&source_dir.join("SKILL.md"), GEMINI_COMPAT_FILE_LIMIT)
-    else {
-        bail!(
-            "Gemini extension skill missing {}",
-            source_dir.join("SKILL.md").display()
-        );
-    };
     let skill_name = format!(
         "gemini-{}-{}",
         safe_slug(&extension.name),

@@ -45,6 +45,7 @@ fn runtime_proxy_affinity_test_shared(name: &str) -> RuntimeRotationProxyShared 
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
         log_path: env::temp_dir().join(format!(

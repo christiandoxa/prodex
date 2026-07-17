@@ -46,6 +46,7 @@ fn test_runtime_probe_refresh_shared() -> RuntimeRotationProxyShared {
             profile_retry_backoff_until: BTreeMap::new(),
             profile_transport_backoff_until: BTreeMap::new(),
             profile_route_circuit_open_until: BTreeMap::new(),
+            profile_backoff_updated_at: BTreeMap::new(),
             profile_health: BTreeMap::new(),
         })),
         log_path: root.join("runtime-proxy.log"),

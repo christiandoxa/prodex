@@ -86,6 +86,7 @@ fn runtime_sidecar_housekeeping_prunes_stale_entries() {
 
     let backoffs = compact_runtime_profile_backoffs(
         RuntimeProfileBackoffs {
+            updated_at: BTreeMap::new(),
             retry_backoff_until: BTreeMap::from([
                 ("main".to_string(), now + 60),
                 ("ghost".to_string(), now + 60),

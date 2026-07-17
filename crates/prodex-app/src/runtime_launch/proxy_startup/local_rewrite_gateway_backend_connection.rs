@@ -2,10 +2,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use postgres::Client as PostgresClient;
-#[cfg(test)]
-use prodex_storage_sqlite::{SqliteRuntimeMode, plan_sqlite_migrations};
 use rusqlite::{Connection, OptionalExtension};
 
 const RUNTIME_GATEWAY_SCHEMA_VERSION: i64 = 3;
@@ -22,6 +20,18 @@ const RUNTIME_GATEWAY_POSTGRES_SCHEMA_MIGRATIONS_TABLE_SQL: &str = r#"
                 applied_at_epoch BIGINT NOT NULL
             );
             "#;
+
+mod enterprise_migration;
+#[cfg(test)]
+#[path = "local_rewrite_gateway_backend_connection/enterprise_migration/tests.rs"]
+mod enterprise_migration_tests;
+pub(crate) use enterprise_migration::{
+    runtime_gateway_postgres_migrate_enterprise_state,
+    runtime_gateway_sqlite_migrate_enterprise_state,
+};
+use enterprise_migration::{
+    runtime_gateway_postgres_require_schema, runtime_gateway_sqlite_require_schema,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RuntimeGatewayCompatibilityMigration {
@@ -230,35 +240,18 @@ pub(super) fn runtime_gateway_postgres_open(
     Ok(client)
 }
 
-fn runtime_gateway_sqlite_require_schema(conn: &Connection) -> Result<()> {
-    let version = runtime_gateway_sqlite_observed_schema_version(conn)?
-        .ok_or_else(|| anyhow!("gateway sqlite schema has not been migrated"))?;
-    if version < RUNTIME_GATEWAY_SCHEMA_VERSION {
-        bail!("gateway sqlite schema is too old");
-    }
-    runtime_gateway_sqlite_require_enterprise_schema(conn)?;
-    Ok(())
-}
-
-fn runtime_gateway_postgres_require_schema(client: &mut PostgresClient) -> Result<()> {
-    let version = runtime_gateway_postgres_observed_schema_version(client)?
-        .ok_or_else(|| anyhow!("gateway postgres schema has not been migrated"))?;
-    if version < RUNTIME_GATEWAY_SCHEMA_VERSION {
-        bail!("gateway postgres schema is too old");
-    }
-    runtime_gateway_postgres_require_enterprise_schema(client)?;
-    Ok(())
-}
-
 pub(crate) fn runtime_gateway_sqlite_migrate_compatibility_state(path: &Path) -> Result<()> {
+    let conn = runtime_gateway_sqlite_open_for_migration(path)?;
+    runtime_gateway_sqlite_apply_compatibility_migrations(&conn)
+}
+
+fn runtime_gateway_sqlite_open_for_migration(path: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let conn = Connection::open(path)
-        .with_context(|| format!("failed to open gateway sqlite state {}", path.display()))?;
-    runtime_gateway_sqlite_apply_compatibility_migrations(&conn)?;
-    Ok(())
+    Connection::open(path)
+        .with_context(|| format!("failed to open gateway sqlite state {}", path.display()))
 }
 
 pub(crate) fn runtime_gateway_postgres_migrate_compatibility_state(
@@ -273,22 +266,7 @@ pub(crate) fn runtime_gateway_postgres_migrate_compatibility_state(
 
 #[cfg(test)]
 pub(super) fn runtime_gateway_sqlite_create_current_schema_for_tests(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let conn = Connection::open(path)
-        .with_context(|| format!("failed to open gateway sqlite state {}", path.display()))?;
-    let plan = plan_sqlite_migrations(SqliteRuntimeMode::ExternalMigrator)?;
-    for migration in &plan.migrations {
-        conn.execute_batch(migration.sql).with_context(|| {
-            format!(
-                "failed to apply gateway sqlite enterprise migration {}",
-                migration.name
-            )
-        })?;
-    }
-    drop(conn);
+    runtime_gateway_sqlite_migrate_enterprise_state(path)?;
     runtime_gateway_sqlite_migrate_compatibility_state(path)
 }
 
@@ -524,32 +502,6 @@ fn runtime_gateway_sqlite_observed_schema_version(conn: &Connection) -> Result<O
     .map(|value| value.flatten())
 }
 
-fn runtime_gateway_sqlite_require_enterprise_schema(conn: &Connection) -> Result<()> {
-    for table_name in [
-        "prodex_tenants",
-        "prodex_budget_counters",
-        "prodex_reservations",
-        "prodex_usage_ledger",
-        "prodex_audit_log",
-        "prodex_idempotency_records",
-    ] {
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(
-                SELECT 1
-                FROM sqlite_master
-                WHERE type = 'table'
-                  AND name = ?1
-            )",
-            [table_name],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            bail!("gateway sqlite enterprise accounting schema has not been migrated");
-        }
-    }
-    Ok(())
-}
-
 fn runtime_gateway_postgres_observed_schema_version(
     client: &mut PostgresClient,
 ) -> Result<Option<i64>> {
@@ -577,33 +529,6 @@ fn runtime_gateway_postgres_observed_schema_version(
         .and_then(|row| row.get(0)))
 }
 
-fn runtime_gateway_postgres_require_enterprise_schema(client: &mut PostgresClient) -> Result<()> {
-    for table_name in [
-        "prodex_tenants",
-        "prodex_budget_counters",
-        "prodex_reservations",
-        "prodex_usage_ledger",
-        "prodex_audit_log",
-        "prodex_idempotency_records",
-    ] {
-        let exists: bool = client
-            .query_one(
-                "SELECT EXISTS(
-                    SELECT 1
-                    FROM information_schema.tables
-                    WHERE table_schema = current_schema()
-                      AND table_name = $1
-                )",
-                &[&table_name],
-            )?
-            .get(0);
-        if !exists {
-            bail!("gateway postgres enterprise accounting schema has not been migrated");
-        }
-    }
-    Ok(())
-}
-
 fn runtime_gateway_sqlite_table_has_column(
     conn: &Connection,
     table_name: &str,
@@ -615,6 +540,76 @@ fn runtime_gateway_sqlite_table_has_column(
         |row| row.get(0),
     )?;
     Ok(count > 0)
+}
+
+fn runtime_gateway_sqlite_table_exists(conn: &Connection, table_name: &str) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+        )",
+        [table_name],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn runtime_gateway_sqlite_index_exists(conn: &Connection, index_name: &str) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1
+        )",
+        [index_name],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+fn runtime_gateway_postgres_table_exists(
+    client: &mut PostgresClient,
+    table_name: &str,
+) -> Result<bool> {
+    Ok(client
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = current_schema() AND table_name = $1
+            )",
+            &[&table_name],
+        )?
+        .get(0))
+}
+
+fn runtime_gateway_postgres_table_has_column(
+    client: &mut PostgresClient,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool> {
+    Ok(client
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = $1
+                  AND column_name = $2
+            )",
+            &[&table_name, &column_name],
+        )?
+        .get(0))
+}
+
+fn runtime_gateway_postgres_index_exists(
+    client: &mut PostgresClient,
+    index_name: &str,
+) -> Result<bool> {
+    Ok(client
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM pg_indexes
+                WHERE schemaname = current_schema() AND indexname = $1
+            )",
+            &[&index_name],
+        )?
+        .get(0))
 }
 
 fn runtime_gateway_schema_key(kind: &str, identity: &str) -> String {
@@ -956,7 +951,7 @@ mod tests {
         let sqlite_open_body = &source[sqlite_open_start..postgres_open_start];
         let postgres_open_body = &source[postgres_open_start
             ..source
-                .find("fn runtime_gateway_sqlite_require_schema")
+                .find("pub(crate) fn runtime_gateway_sqlite_migrate_compatibility_state")
                 .unwrap()];
         let expand_ddl = "ALTER TABLE";
 

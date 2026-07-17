@@ -394,7 +394,7 @@ sinks = ["log", "jsonl", "http"]
 call_id_header = "x-prodex-call-id"
 jsonl_path = "gateway-spend.jsonl"
 http_endpoint = "https://otel-collector.example/v1/events"
-http_schema = "otel"
+http_schema = "otlp"
 http_bearer_token_env = "PRODEX_GATEWAY_OBSERVABILITY_TOKEN"
 
 [gateway.guardrails]
@@ -558,7 +558,7 @@ webhook_fail_closed = true
     );
     assert_eq!(
         loaded.gateway.observability.http_schema.as_deref(),
-        Some("otel")
+        Some("otlp")
     );
     assert_eq!(
         loaded

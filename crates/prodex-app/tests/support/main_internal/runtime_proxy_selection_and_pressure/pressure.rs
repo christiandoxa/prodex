@@ -274,6 +274,7 @@ fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() 
     let now = Local::now().timestamp();
     let circuit_key = runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses);
     let mut backoffs = RuntimeProfileBackoffs {
+            updated_at: BTreeMap::new(),
         retry_backoff_until: BTreeMap::from([("retry".to_string(), now + 60)]),
         transport_backoff_until: BTreeMap::from([
             ("expired".to_string(), now - 1),
@@ -354,6 +355,7 @@ fn runtime_softened_backoffs_persist_after_proxy_startup() {
     save_runtime_profile_backoffs(
         &paths,
         &RuntimeProfileBackoffs {
+            updated_at: BTreeMap::new(),
             retry_backoff_until: BTreeMap::from([("main".to_string(), saved_now + 600)]),
             transport_backoff_until: BTreeMap::from([(
                 runtime_profile_transport_backoff_key("main", RuntimeRouteKind::Responses),
@@ -463,6 +465,7 @@ fn runtime_state_save_accepts_legacy_backoffs_without_last_good_backup() {
         profile_retry_backoff_until: BTreeMap::new(),
         profile_transport_backoff_until: BTreeMap::new(),
         profile_route_circuit_open_until: BTreeMap::new(),
+        profile_backoff_updated_at: BTreeMap::new(),
         profile_health: BTreeMap::new(),
     };
     let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, usize::MAX);

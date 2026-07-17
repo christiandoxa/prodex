@@ -6,8 +6,9 @@ use crate::{RuntimeProfileHealth, RuntimeStateMutation};
 
 use super::{
     RuntimeRotationProxyShared, RuntimeRotationState, RuntimeRouteKind,
-    runtime_profile_effective_health_score_from_map, runtime_profile_route_health_key,
-    runtime_proxy_log, runtime_route_kind_label, schedule_runtime_state_save_from_runtime,
+    mark_runtime_profile_route_circuit_update, runtime_profile_effective_health_score_from_map,
+    runtime_profile_route_health_key, runtime_proxy_log, runtime_route_kind_label,
+    schedule_runtime_state_save_from_runtime,
 };
 
 pub(crate) use prodex_runtime_store::{
@@ -120,7 +121,12 @@ pub(crate) fn reserve_runtime_profile_route_circuit_half_open_probe(
         runtime_profile_effective_health_score_from_map(&runtime.profile_health, &health_key, now);
     if health_score == 0 {
         runtime.profile_route_circuit_open_until.remove(&key);
-        runtime.profile_health.remove(&reopen_key);
+        mark_runtime_profile_route_circuit_update(&mut runtime, &key);
+        prodex_runtime_store::clear_runtime_profile_score(
+            &mut runtime.profile_health,
+            &reopen_key,
+            now,
+        );
         schedule_runtime_state_save_from_runtime(
             shared,
             &runtime,
@@ -133,7 +139,8 @@ pub(crate) fn reserve_runtime_profile_route_circuit_half_open_probe(
     let reserve_until = now.saturating_add(probe_seconds);
     runtime
         .profile_route_circuit_open_until
-        .insert(key, reserve_until);
+        .insert(key.clone(), reserve_until);
+    mark_runtime_profile_route_circuit_update(&mut runtime, &key);
     schedule_runtime_state_save_from_runtime(
         shared,
         &runtime,
@@ -155,8 +162,13 @@ pub(crate) fn clear_runtime_profile_circuit_for_route(
     profile_name: &str,
     route_kind: RuntimeRouteKind,
 ) -> bool {
-    runtime
+    let key = runtime_profile_route_circuit_key(profile_name, route_kind);
+    let changed = runtime
         .profile_route_circuit_open_until
-        .remove(&runtime_profile_route_circuit_key(profile_name, route_kind))
-        .is_some()
+        .remove(&key)
+        .is_some();
+    if changed {
+        mark_runtime_profile_route_circuit_update(runtime, &key);
+    }
+    changed
 }

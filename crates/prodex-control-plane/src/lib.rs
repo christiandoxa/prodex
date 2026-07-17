@@ -16,7 +16,7 @@ use prodex_config::{
 use prodex_domain::{
     AuditAction, AuditEvent, AuditOutcome, AuditResource, AuthorizationError, CredentialScope,
     IdempotencyKey, IdempotentOperation, IdempotentOperationError, PolicyRevisionId, Principal,
-    ResourceAction, ResourceKind, Role, TenantAccessError, TenantContext, TenantId,
+    PrincipalKind, ResourceAction, ResourceKind, Role, TenantAccessError, TenantContext, TenantId,
     TenantScopedResource, authorize_min_role, authorize_tenant_access,
 };
 
@@ -384,6 +384,9 @@ pub enum ControlPlaneAuthorizationError {
         now_unix_ms: u64,
         expires_at_unix_ms: u64,
     },
+    BreakGlassPrincipalKindMismatch {
+        actual: PrincipalKind,
+    },
     BreakGlassReasonMissing,
     BreakGlassReasonMalformed,
 }
@@ -439,6 +442,7 @@ pub fn plan_control_plane_authorization_error_response(
             }
         }
         ControlPlaneAuthorizationError::BreakGlassExpired { .. }
+        | ControlPlaneAuthorizationError::BreakGlassPrincipalKindMismatch { .. }
         | ControlPlaneAuthorizationError::BreakGlassReasonMissing
         | ControlPlaneAuthorizationError::BreakGlassReasonMalformed => {
             ControlPlaneAuthorizationErrorResponsePlan {
@@ -529,6 +533,13 @@ fn validate_break_glass(
     request: &ControlPlaneActionRequest,
     authorization: &BreakGlassAuthorization,
 ) -> Result<(), ControlPlaneAuthorizationError> {
+    if request.principal.kind != PrincipalKind::BreakGlass {
+        return Err(
+            ControlPlaneAuthorizationError::BreakGlassPrincipalKindMismatch {
+                actual: request.principal.kind,
+            },
+        );
+    }
     if authorization.reason.is_empty() {
         return Err(ControlPlaneAuthorizationError::BreakGlassReasonMissing);
     }
@@ -572,6 +583,7 @@ impl ControlPlaneAuthorizationError {
             Self::Tenant(_) => "tenant_access_denied",
             Self::ResourceKindMismatch { .. } => "resource_kind_mismatch",
             Self::BreakGlassExpired { .. } => "break_glass_expired",
+            Self::BreakGlassPrincipalKindMismatch { .. } => "break_glass_principal_kind_mismatch",
             Self::BreakGlassReasonMissing => "break_glass_reason_missing",
             Self::BreakGlassReasonMalformed => "break_glass_reason_malformed",
         }

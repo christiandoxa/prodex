@@ -8,27 +8,30 @@ use crate::{
 };
 
 pub(crate) fn merge_app_state_for_save(existing: AppState, desired: &AppState) -> AppState {
+    let mut profiles = existing.profiles.clone();
+    profiles.extend(desired.profiles.clone());
     let active_profile = desired
         .active_profile
         .clone()
-        .filter(|profile_name| desired.profiles.contains_key(profile_name));
+        .or(existing.active_profile.clone())
+        .filter(|profile_name| profiles.contains_key(profile_name));
     let merged = AppState {
         active_profile,
-        profiles: desired.profiles.clone(),
+        profiles: profiles.clone(),
         last_run_selected_at: merge_last_run_selection(
             &existing.last_run_selected_at,
             &desired.last_run_selected_at,
-            &desired.profiles,
+            &profiles,
         ),
         response_profile_bindings: merge_profile_bindings(
             &existing.response_profile_bindings,
             &desired.response_profile_bindings,
-            &desired.profiles,
+            &profiles,
         ),
         session_profile_bindings: merge_profile_bindings(
             &existing.session_profile_bindings,
             &desired.session_profile_bindings,
-            &desired.profiles,
+            &profiles,
         ),
     };
     compact_app_state(merged, Local::now().timestamp())

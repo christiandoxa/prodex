@@ -117,16 +117,31 @@ fn write_codex_session_attachment_file(path: &Path, contents: &str) -> Result<()
         std::process::id()
     ));
     let _ = fs::remove_file(&temp_path);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(
+            fs::metadata(path)
+                .context("failed to read codex session file permissions")?
+                .permissions()
+                .mode(),
+        );
+    }
+    let mut file = options
         .open(&temp_path)
         .context("failed to write codex session file")?;
     file.write_all(contents.as_bytes())
         .context("failed to write codex session file")?;
     file.sync_all()
         .context("failed to sync codex session file")?;
-    fs::rename(&temp_path, path).context("failed to write codex session file")
+    fs::rename(&temp_path, path).context("failed to write codex session file")?;
+    #[cfg(unix)]
+    fs::File::open(path.parent().unwrap_or_else(|| Path::new(".")))
+        .and_then(|directory| directory.sync_all())
+        .context("failed to sync codex session directory")?;
+    Ok(())
 }
 
 #[cfg(unix)]

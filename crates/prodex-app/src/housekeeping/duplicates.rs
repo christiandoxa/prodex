@@ -1,10 +1,10 @@
 use super::{
     AppState, AppStateIoExt, ProdexCleanupSummary, ProfileIdentity, RuntimeContinuationStore,
     fetch_profile_identity, load_runtime_continuation_journal_with_recovery,
-    load_runtime_continuations_with_recovery, map_parallel, runtime_continuation_journal_file_path,
-    runtime_continuation_journal_last_good_file_path, runtime_continuations_file_path,
-    runtime_continuations_last_good_file_path, save_runtime_continuation_journal_for_profiles,
-    save_runtime_continuations_for_profiles,
+    load_runtime_continuations_with_recovery, map_parallel, read_profile_identity_from_auth,
+    runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
+    runtime_continuations_file_path, runtime_continuations_last_good_file_path,
+    save_runtime_continuation_journal_for_profiles, save_runtime_continuations_for_profiles,
 };
 use anyhow::{Context, Result};
 use prodex_core::{AppPaths, path_is_strictly_under_root, same_path};
@@ -13,7 +13,7 @@ use prodex_state::{
     ensure_active_profile_after_duplicate_cleanup, remap_profile_binding_targets,
     remove_duplicate_profile_from_state, select_canonical_duplicate_profile,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
 fn remap_runtime_continuation_store_profiles(
@@ -64,15 +64,26 @@ fn resolve_cleanup_profile_identities(state: &mut AppState) -> Vec<(String, Prof
         .collect::<Vec<_>>();
 
     let resolved = map_parallel(jobs, |(name, codex_home, cached_email)| {
-        let mut identity = fetch_profile_identity(&codex_home).unwrap_or_default();
-        if identity.email.is_none() {
-            identity.email = cached_email;
-        }
+        let stored_identity = if secret_store::auth_json_path(&codex_home).exists() {
+            read_profile_identity_from_auth(&codex_home)
+        } else {
+            Ok(ProfileIdentity::default())
+        };
+        let identity = stored_identity.map(|stored_identity| {
+            let mut identity = fetch_profile_identity(&codex_home).unwrap_or(stored_identity);
+            if identity.email.is_none() {
+                identity.email = cached_email;
+            }
+            identity
+        });
         (name, identity)
     });
 
     let mut discovered = Vec::new();
     for (name, identity) in resolved {
+        let Ok(identity) = identity else {
+            continue;
+        };
         if let Some(email) = identity.email.as_ref()
             && let Some(profile) = state.profiles.get_mut(&name)
         {
@@ -124,6 +135,8 @@ pub(super) fn cleanup_duplicate_profiles(
     };
 
     let mut summary = ProdexCleanupSummary::default();
+    let mut removed_names = BTreeSet::new();
+    let mut homes_to_delete = Vec::new();
     for mut profile_names in duplicate_groups {
         profile_names.sort();
         let Some(canonical_name) = select_canonical_duplicate_profile(state, &profile_names) else {
@@ -160,6 +173,7 @@ pub(super) fn cleanup_duplicate_profiles(
                 continue;
             };
             summary.duplicate_profiles_removed += 1;
+            removed_names.insert(duplicate_name);
 
             if removed_profile.managed
                 && removed_profile.codex_home.exists()
@@ -175,13 +189,7 @@ pub(super) fn cleanup_duplicate_profiles(
                         removed_profile.codex_home.display()
                     );
                 }
-                fs::remove_dir_all(&removed_profile.codex_home).with_context(|| {
-                    format!(
-                        "failed to delete duplicate managed profile home {}",
-                        removed_profile.codex_home.display()
-                    )
-                })?;
-                summary.duplicate_managed_profile_homes_removed += 1;
+                homes_to_delete.push(removed_profile.codex_home);
             }
         }
     }
@@ -200,6 +208,16 @@ pub(super) fn cleanup_duplicate_profiles(
         )?;
     }
 
-    state.save(paths)?;
+    let removed_names = removed_names.into_iter().collect::<Vec<_>>();
+    state.save_with_removed_profiles(paths, &removed_names)?;
+    for home in homes_to_delete {
+        fs::remove_dir_all(&home).with_context(|| {
+            format!(
+                "failed to delete duplicate managed profile home {}",
+                home.display()
+            )
+        })?;
+        summary.duplicate_managed_profile_homes_removed += 1;
+    }
     Ok(summary)
 }

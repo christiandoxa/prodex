@@ -46,7 +46,9 @@ pub(super) use proxy_startup::{
 };
 pub(crate) use proxy_startup::{
     runtime_gateway_postgres_migrate_compatibility_state,
+    runtime_gateway_postgres_migrate_enterprise_state,
     runtime_gateway_sqlite_migrate_compatibility_state,
+    runtime_gateway_sqlite_migrate_enterprise_state,
 };
 
 const OPENAI_CODEX_DEFAULT_CONTEXT_WINDOW_TOKENS: u64 = 128_000;

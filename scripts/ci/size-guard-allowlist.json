@@ -26,7 +26,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1809,
+    "maxLines": 1789,
     "reason": "Data-plane authorization, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
@@ -111,7 +111,7 @@
   },
   {
     "file": "crates/prodex-application/tests/application_boundary.rs",
-    "maxLines": 6378,
+    "maxLines": 6377,
     "reason": "Application boundary characterization now verifies that governed inspection and policy plans cross data-plane admission; capped while security, accounting, and policy cases move to focused modules."
   },
   {
@@ -123,11 +123,6 @@
     "file": "crates/prodex-config/tests/config_boundary.rs",
     "maxLines": 954,
     "reason": "Config boundary characterization remains capped while refresh, invalidation, publication, and secret-reference cases are split."
-  },
-  {
-    "file": "crates/prodex-control-plane/tests/control_plane.rs",
-    "maxLines": 907,
-    "reason": "Control-plane boundary characterization remains capped while tenant, identity, key, and policy flows are split into focused modules."
   },
   {
     "file": "crates/prodex-domain/tests/accounting.rs",
@@ -176,8 +171,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",
-    "maxLines": 995,
-    "reason": "Gateway SQLite, PostgreSQL, and Redis compatibility migration handling now threads one fail-closed TLS policy through blocking opens and migrations; capped while backend-specific connections are split."
+    "maxLines": 990,
+    "reason": "Gateway SQLite, PostgreSQL, and Redis compatibility migration handling remains capped after enterprise migrations moved to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_key_store_backend.rs",
@@ -261,7 +256,7 @@
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",
-    "maxLines": 942,
+    "maxLines": 936,
     "reason": "The async gateway server now owns transport peer trust, bounded forwarded-chain parsing, Host/Origin/CSRF enforcement, body limits, upgrades, and graceful drain; capped until edge transport splits out."
   },
   {

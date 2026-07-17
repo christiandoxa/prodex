@@ -129,7 +129,9 @@ pub(crate) use local_rewrite_application_runtime::{
 pub(crate) use local_rewrite_copilot::{RuntimeCopilotProfileAuth, RuntimeCopilotProviderAuth};
 pub(crate) use local_rewrite_gateway_backend_connection::{
     runtime_gateway_postgres_migrate_compatibility_state,
+    runtime_gateway_postgres_migrate_enterprise_state,
     runtime_gateway_sqlite_migrate_compatibility_state,
+    runtime_gateway_sqlite_migrate_enterprise_state,
 };
 pub(crate) use local_rewrite_gateway_credentials::{
     RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialRefreshPlan,
@@ -437,6 +439,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
             profile_retry_backoff_until: persisted_backoffs.value.retry_backoff_until,
             profile_transport_backoff_until: persisted_backoffs.value.transport_backoff_until,
             profile_route_circuit_open_until: persisted_backoffs.value.route_circuit_open_until,
+            profile_backoff_updated_at: persisted_backoffs.value.updated_at,
             profile_health: persisted_profile_scores.value,
         })),
     };

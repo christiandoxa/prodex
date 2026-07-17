@@ -26,12 +26,12 @@ pub use paths::{
     runtime_proxy_claude_settings_path, runtime_proxy_shared_claude_config_dir,
 };
 pub use state_merge::{
-    ensure_runtime_proxy_claude_profile_link, maybe_import_runtime_proxy_claude_legacy_home,
-    merge_runtime_proxy_claude_directory_contents, merge_runtime_proxy_claude_file,
-    merge_runtime_proxy_claude_json_file, merge_runtime_proxy_claude_jsonl_file,
-    merge_runtime_proxy_claude_symlink, migrate_runtime_proxy_claude_profile_dir_to_target,
-    prepare_runtime_proxy_claude_config_dir, prepare_runtime_proxy_claude_import_target,
-    runtime_proxy_create_directory_symlink, runtime_proxy_create_symlink,
-    runtime_proxy_merge_json_defaults, runtime_proxy_remove_path,
+    RuntimeProxyClaudeMergeOutcome, ensure_runtime_proxy_claude_profile_link,
+    maybe_import_runtime_proxy_claude_legacy_home, merge_runtime_proxy_claude_directory_contents,
+    merge_runtime_proxy_claude_file, merge_runtime_proxy_claude_json_file,
+    merge_runtime_proxy_claude_jsonl_file, merge_runtime_proxy_claude_symlink,
+    migrate_runtime_proxy_claude_profile_dir_to_target, prepare_runtime_proxy_claude_config_dir,
+    prepare_runtime_proxy_claude_import_target, runtime_proxy_create_directory_symlink,
+    runtime_proxy_create_symlink, runtime_proxy_merge_json_defaults, runtime_proxy_remove_path,
     runtime_proxy_resolve_symlink_target,
 };

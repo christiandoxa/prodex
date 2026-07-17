@@ -49,6 +49,7 @@ pub(crate) trait AppStateIoExt: Sized {
     fn load(paths: &AppPaths) -> Result<Self>;
     fn load_and_repair(paths: &AppPaths) -> Result<Self>;
     fn save(&self, paths: &AppPaths) -> Result<()>;
+    fn save_with_removed_profiles(&self, paths: &AppPaths, removed: &[String]) -> Result<()>;
 }
 
 impl AppStateIoExt for AppState {
@@ -85,7 +86,7 @@ impl AppStateIoExt for AppState {
             &state_last_good_file_path(paths),
         )?;
         let compacted = compact_app_state(loaded.value.clone(), Local::now().timestamp());
-        if compacted != loaded.value {
+        if loaded.recovered_from_backup || compacted != loaded.value {
             let json = serde_json::to_string_pretty(&compacted)
                 .context("failed to serialize prodex state")?;
             write_state_json_atomic(paths, &json)?;
@@ -94,17 +95,25 @@ impl AppStateIoExt for AppState {
     }
 
     fn save(&self, paths: &AppPaths) -> Result<()> {
-        let _lock = acquire_state_file_lock(paths)?;
-        let existing = Self::load(paths)?;
-        let merged = compact_app_state(
-            merge_app_state_for_save(existing, self),
-            Local::now().timestamp(),
-        );
-        let json =
-            serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
-        write_state_json_atomic(paths, &json)?;
-        Ok(())
+        save_app_state(self, paths, &[])
     }
+
+    fn save_with_removed_profiles(&self, paths: &AppPaths, removed: &[String]) -> Result<()> {
+        save_app_state(self, paths, removed)
+    }
+}
+
+fn save_app_state(state: &AppState, paths: &AppPaths, removed: &[String]) -> Result<()> {
+    let _lock = acquire_state_file_lock(paths)?;
+    let existing = AppState::load(paths)?;
+    let mut merged = merge_app_state_for_save(existing, state);
+    for profile_name in removed {
+        merged.profiles.remove(profile_name);
+    }
+    let merged = compact_app_state(merged, Local::now().timestamp());
+    let json = serde_json::to_string_pretty(&merged).context("failed to serialize prodex state")?;
+    write_state_json_atomic(paths, &json)?;
+    Ok(())
 }
 
 pub(crate) fn repair_missing_active_profile(state: &mut AppState) -> Option<String> {

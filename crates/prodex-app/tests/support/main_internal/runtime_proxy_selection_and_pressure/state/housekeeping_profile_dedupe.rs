@@ -157,6 +157,56 @@ fn perform_prodex_cleanup_deduplicates_profiles_by_email() {
 }
 
 #[test]
+fn perform_prodex_cleanup_skips_profiles_with_unreadable_identity() {
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let first_home = paths.managed_profiles_root.join("first");
+    let second_home = paths.managed_profiles_root.join("second");
+    fs::create_dir_all(&first_home).unwrap();
+    fs::create_dir_all(&second_home).unwrap();
+    fs::write(first_home.join("auth.json"), "{").unwrap();
+    fs::write(second_home.join("auth.json"), "{").unwrap();
+    let mut state = AppState {
+        active_profile: Some("first".to_string()),
+        profiles: BTreeMap::from([
+            (
+                "first".to_string(),
+                ProfileEntry {
+                    codex_home: first_home.clone(),
+                    managed: true,
+                    email: Some("shared@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+            (
+                "second".to_string(),
+                ProfileEntry {
+                    codex_home: second_home.clone(),
+                    managed: true,
+                    email: Some("shared@example.com".to_string()),
+                    provider: ProfileProvider::Openai,
+                },
+            ),
+        ]),
+        ..AppState::default()
+    };
+    state.save(&paths).unwrap();
+
+    let summary = perform_prodex_cleanup(&paths, &mut state).unwrap();
+
+    assert_eq!(summary.duplicate_profiles_removed, 0);
+    assert_eq!(state.profiles.len(), 2);
+    assert!(first_home.exists());
+    assert!(second_home.exists());
+}
+
+#[test]
 fn perform_prodex_cleanup_refuses_duplicate_managed_home_outside_managed_root() {
     let temp_dir = TestDir::isolated();
     let paths = AppPaths {

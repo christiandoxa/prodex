@@ -420,6 +420,24 @@ fn prepare_codex_launch_args_extracts_prodex_full_access_passthrough_marker() {
 }
 
 #[test]
+fn prepare_codex_launch_args_preserves_markers_after_separator() {
+    let input = vec![
+        OsString::from("exec"),
+        OsString::from("--"),
+        OsString::from("--full-access"),
+        OsString::from("--dry-run"),
+        OsString::from("--profile-v2=literal"),
+        OsString::from("review"),
+    ];
+
+    let (args, include_code_review) = prepare_codex_launch_args(&input, false);
+
+    assert_eq!(args, input);
+    assert!(!include_code_review);
+    assert_eq!(extract_prodex_dry_run_flag(&args), (false, args.clone()));
+}
+
+#[test]
 fn prepare_codex_launch_args_full_access_keeps_resume_normalization_and_review_detection() {
     let (args, include_code_review) = prepare_codex_launch_args(
         &[

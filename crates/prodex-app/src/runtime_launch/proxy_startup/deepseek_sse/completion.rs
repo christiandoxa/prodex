@@ -26,6 +26,7 @@ impl RuntimeDeepSeekSseState {
             return self.failed_event("invalid_tool_call_arguments", &message);
         }
         let mut events = self.complete_tool_call_events();
+        events.extend(self.complete_reasoning_events());
         events.extend(self.complete_output_text_item_events());
         let response = deepseek_provider_core_stream_response_value(
             &self.response_id,
@@ -118,6 +119,25 @@ impl RuntimeDeepSeekSseState {
             &self.output_text,
         ));
         events
+    }
+
+    fn complete_reasoning_events(&mut self) -> Vec<String> {
+        if self.reasoning_content.is_empty() || self.reasoning_summary_done {
+            return Vec::new();
+        }
+        self.reasoning_summary_done = true;
+        let sequence_number = self.next_sequence_number();
+        vec![self.event(
+            "response.reasoning_summary_text.done",
+            serde_json::json!({
+                "type": "response.reasoning_summary_text.done",
+                "sequence_number": sequence_number,
+                "response_id": self.response_id,
+                "output_index": 0,
+                "summary_index": 0,
+                "text": self.reasoning_content,
+            }),
+        )]
     }
 
     pub(super) fn store_conversation_snapshot(&self) {
