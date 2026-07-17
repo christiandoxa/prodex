@@ -26,6 +26,12 @@ pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) 
             path.display()
         );
     }
+    if policy.gateway.adaptive_routing != Default::default() {
+        bail!(
+            "gateway.adaptive_routing in {} is reserved and unsupported until adaptive decisions are wired into live gateway routing",
+            path.display()
+        );
+    }
     validate_gateway_request_constraints(policy, path)?;
     for (index, alias) in policy.gateway.route_aliases.iter().enumerate() {
         let field = format!("gateway.route_aliases[{index}]");
