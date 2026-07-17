@@ -247,11 +247,90 @@ jobs:
           overwrite: true
           retention-days: 7
 
+  native-client-compat:
+    name: Probe current native clients
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Download Linux release binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: x86_64-unknown-linux-gnu
+          path: artifacts
+
+      - name: Install current native clients
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.local/bin"
+          npm install --global @google/gemini-cli
+          curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/kiro-install.sh" https://cli.kiro.dev/install
+          bash "${RUNNER_TEMP}/kiro-install.sh" --force
+          curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/copilot-install.sh" https://gh.io/copilot-install
+          PREFIX="${HOME}/.local" bash "${RUNNER_TEMP}/copilot-install.sh"
+          curl --proto '=https' --tlsv1.2 -fsSLo "${RUNNER_TEMP}/claude-install.sh" https://claude.ai/install.sh
+          bash "${RUNNER_TEMP}/claude-install.sh" stable
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Verify client discovery and direct-native guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:${PATH}"
+          for command in gemini kiro-cli-chat copilot claude; do
+            command -v "${command}"
+            "${command}" --version
+          done
+          gemini --help > "${RUNNER_TEMP}/gemini-help.txt"
+          grep -q -- "--yolo" "${RUNNER_TEMP}/gemini-help.txt"
+          kiro-cli-chat chat --help > "${RUNNER_TEMP}/kiro-help.txt"
+          grep -q -- "--model" "${RUNNER_TEMP}/kiro-help.txt"
+          grep -a -q -- "KIRO_DATA_DIR" "$(command -v kiro-cli-chat)"
+          copilot help environment > "${RUNNER_TEMP}/copilot-environment.txt"
+          for variable in COPILOT_PROVIDER_BASE_URL COPILOT_PROVIDER_TYPE COPILOT_PROVIDER_API_KEY COPILOT_PROVIDER_WIRE_API COPILOT_PROVIDER_TRANSPORT COPILOT_MODEL; do
+            grep -q -- "${variable}" "${RUNNER_TEMP}/copilot-environment.txt"
+          done
+          for variable in ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL; do
+            grep -a -q -- "${variable}" "$(command -v claude)"
+          done
+          chmod 0755 artifacts/prodex
+          PRODEX_HOME="${RUNNER_TEMP}/prodex-capability" artifacts/prodex capability list --json > "${RUNNER_TEMP}/capabilities.json"
+          CAPABILITIES="${RUNNER_TEMP}/capabilities.json" python - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["CAPABILITIES"], encoding="utf-8") as handle:
+              rows = {row["name"]: row for row in json.load(handle)}
+          for name in ("gemini", "kiro", "copilot", "claude"):
+              assert rows[name]["status"] == "available", rows[name]
+          PY
+          PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true artifacts/prodex s gemini --cli agy --no-presidio
+          if PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true artifacts/prodex s gemini --cli agy --presidio 2> "${RUNNER_TEMP}/presidio-error.txt"; then
+            echo "native Antigravity unexpectedly accepted --presidio" >&2
+            exit 1
+          fi
+          grep -q -- "--presidio is unsupported" "${RUNNER_TEMP}/presidio-error.txt"
+
   prepare-release:
     name: Prepare release SBOM
     runs-on: ubuntu-latest
     needs:
       - build
+      - native-client-compat
 
     steps:
       - name: Check out repository

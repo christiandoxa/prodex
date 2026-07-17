@@ -163,6 +163,19 @@ fn super_gemini_agy_alias_selects_antigravity_agent() {
 }
 
 #[test]
+fn native_direct_clis_reject_unsupported_presidio_flag() {
+    for argv in [
+        ["prodex", "s", "gemini", "--cli", "agy", "--presidio"].as_slice(),
+        ["prodex", "s", "--cli", "kiro", "--presidio"].as_slice(),
+    ] {
+        let Commands::Super(args) = parse_cli_command_from(argv).unwrap() else {
+            panic!("expected super command");
+        };
+        assert!(args.validate_urls().unwrap_err().contains("--presidio"));
+    }
+}
+
+#[test]
 fn login_accepts_antigravity_flag_as_passthrough_arg() {
     let command = parse_cli_command_from(["prodex", "login", "--with-antigravity"])
         .expect("login command should parse");

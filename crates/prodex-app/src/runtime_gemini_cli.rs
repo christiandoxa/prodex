@@ -1,8 +1,8 @@
 use crate::{
     PreparedRuntimeLaunch, RuntimeLaunchRequest, RuntimeLaunchStrategy, RuntimeProxyEndpoint,
     agy_bin, clear_rtk_auto_wrap_control_env, copilot_bin, execute_runtime_launch, gemini_bin,
-    kiro_bin, prepare_prodex_overlay_home, prepend_child_path, read_kiro_auth_secret,
-    refresh_gemini_oauth_secret_if_needed, write_kiro_cli_data_dir,
+    kiro_bin, kiro_cli_data_dir_env, prepare_prodex_overlay_home, prepend_child_path,
+    read_kiro_auth_secret, refresh_gemini_oauth_secret_if_needed, write_kiro_cli_data_dir,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -25,7 +25,8 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
     fn runtime_request(&self) -> RuntimeLaunchRequest<'_> {
         RuntimeLaunchRequest {
             profile: self.args.profile.as_deref(),
-            allow_auto_rotate: !self.args.no_auto_rotate,
+            allow_auto_rotate: !self.args.no_auto_rotate
+                && matches!(self.agent, SuperCliAgent::Gemini | SuperCliAgent::Copilot),
             auto_redeem: false,
             skip_quota_check: true,
             base_url: self.args.base_url.as_deref().or(match self.agent {
@@ -54,7 +55,8 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
                 SuperCliAgent::Gemini => Some("gemini-oauth"),
                 SuperCliAgent::Copilot => Some("copilot"),
                 SuperCliAgent::Kiro => Some("kiro"),
-                SuperCliAgent::Agy | SuperCliAgent::Codex => None,
+                SuperCliAgent::Agy => Some("antigravity"),
+                SuperCliAgent::Codex => None,
             },
             external_provider_api_key: (self.agent == SuperCliAgent::Copilot)
                 .then_some(self.args.api_key.as_deref())
@@ -72,18 +74,24 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
         if presidio_enabled {
             crate::ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
+        let launch_args = runtime_super_native_cli_launch_args(
+            self.agent,
+            &self.args.codex_args,
+            self.args.local_model.as_deref(),
+        );
+        if self.agent == SuperCliAgent::Agy {
+            let mut child = ChildProcessPlan::new(agy_bin(), prepared.codex_home.clone())
+                .with_args(launch_args);
+            clear_rtk_auto_wrap_control_env(&mut child);
+            return Ok(RuntimeLaunchPlan::new(child));
+        }
+
         let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
         prodex_caveman_assets::configure_rtk_codex_home(&overlay_home)?;
         prodex_caveman_assets::configure_super_optimizer_codex_home_with_presidio(
             &overlay_home,
             presidio_enabled,
         )?;
-
-        let launch_args = runtime_super_native_cli_launch_args(
-            self.agent,
-            &self.args.codex_args,
-            self.args.local_model.as_deref(),
-        );
         let mut child = match self.agent {
             SuperCliAgent::Gemini => {
                 let runtime_proxy =
@@ -125,9 +133,7 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
                         "COPILOT_PROVIDER_WIRE_MODEL",
                     ])
             }
-            SuperCliAgent::Agy => {
-                ChildProcessPlan::new(agy_bin(), prepared.codex_home.clone()).with_args(launch_args)
-            }
+            SuperCliAgent::Agy => unreachable!("Antigravity launch returns before overlay setup"),
             SuperCliAgent::Kiro => ChildProcessPlan::new(kiro_bin(), prepared.codex_home.clone())
                 .with_args(launch_args)
                 .with_extra_env(runtime_super_kiro_cli_profile_env(
@@ -267,7 +273,7 @@ fn runtime_super_kiro_cli_profile_env(
     let secret = read_kiro_auth_secret(codex_home)?;
     let data_dir = overlay_home.join("kiro-data");
     write_kiro_cli_data_dir(&data_dir, &secret)?;
-    let mut env = vec![(OsString::from("Q_CLI_DATA_DIR"), data_dir.into_os_string())];
+    let mut env = kiro_cli_data_dir_env(&data_dir);
     if let Some(region) = secret.region.filter(|value| !value.trim().is_empty()) {
         env.push((OsString::from("AWS_REGION"), OsString::from(region)));
     }
@@ -503,6 +509,22 @@ mod tests {
         assert_eq!(request.external_provider, Some("kiro"));
         assert!(!request.smart_context_enabled);
         assert!(!request.presidio_redaction_enabled);
+        assert_eq!(request.base_url, None);
+        assert!(!request.allow_auto_rotate);
+    }
+
+    #[test]
+    fn native_antigravity_cli_runtime_request_skips_proxy_features() {
+        let strategy = SuperNativeCliLaunchStrategy {
+            args: native_cli_super_args(),
+            presidio_enabled: true,
+            agent: SuperCliAgent::Agy,
+        };
+        let request = strategy.runtime_request();
+        assert_eq!(request.external_provider, Some("antigravity"));
+        assert!(!request.smart_context_enabled);
+        assert!(!request.presidio_redaction_enabled);
+        assert!(!request.allow_auto_rotate);
         assert_eq!(request.base_url, None);
     }
 
