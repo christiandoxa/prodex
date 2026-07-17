@@ -103,7 +103,7 @@ The gateway can enforce optional model-aware request constraints under `[gateway
 
 Enterprise OTLP export endpoints from `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` must be absolute `http://` or `https://` URLs without whitespace, userinfo, query strings, or fragments; put collector credentials in `OTEL_EXPORTER_OTLP_HEADERS`. `prodex-control-plane plan-http-control-plane` request files must use the top-level `principal` field and non-credential HTTP headers, because `Authorization` headers are rejected.
 
-`[gateway.adaptive_routing]` is a shadow-mode foundation for owner-attributed quality feedback and route recommendations. Live gateway routing remains deterministic unless a future explicit adaptive policy is enabled, and continuation affinity still wins over any recommendation.
+`[gateway.adaptive_routing]` is reserved. Any configured value fails policy validation instead of silently claiming inactive recommendations; gateway routing remains deterministic.
 
 JavaScript clients can use `@christiandoxa/prodex-gateway-sdk` for `/v1/responses` plus gateway key, usage, billing ledger, metrics, and OpenAPI admin calls.
 
@@ -645,7 +645,7 @@ prodex s --provider kiro --model claude-sonnet-4.5
 prodex super --cli kiro --profile kiro-main
 ```
 
-`prodex profile import kiro` reads the installed Kiro CLI auth database (`~/.local/share/kiro-cli/data.sqlite3` or the Amazon Q compatibility location when present), snapshots the current credential payload into `kiro_auth.json`, and stores a model catalog snapshot for runtime routing. `--provider kiro` routes Codex through Prodex's local Kiro ACP adapter, while `--cli kiro` launches the native Kiro CLI from the imported Prodex snapshot. Current Kiro binaries expose their proprietary service protocol and ACP backend, not an OpenAI-compatible inbound endpoint, so the native Kiro front end talks to Kiro directly; the supported proxied direction is Codex/Super through Prodex to Kiro ACP. Override binary discovery with `PRODEX_KIRO_BIN` when the installed launcher is not on `PATH`.
+`prodex profile import kiro` reads the installed Kiro CLI auth database (`~/.local/share/kiro-cli/data.sqlite3` or the Amazon Q compatibility location when present), snapshots the current credential payload into `kiro_auth.json`, and stores a model catalog snapshot for runtime routing. `--provider kiro` routes Codex through Prodex's local Kiro ACP adapter, while `--cli kiro` launches the native Kiro CLI from the imported Prodex snapshot. Current Kiro binaries expose their proprietary service protocol and ACP backend, not an OpenAI-compatible inbound endpoint, so the native Kiro front end talks to Kiro directly; the supported proxied direction is Codex/Super through Prodex to Kiro ACP. Native Kiro rejects `--presidio` instead of silently ignoring it. Override binary discovery with `PRODEX_KIRO_BIN` when the installed launcher is not on `PATH`.
 
 Use `--provider deepseek` when you want the Codex/Super front end with DeepSeek as the upstream model:
 
@@ -701,7 +701,7 @@ Without `--api-key`, Prodex uses the Google OAuth profile created by `prodex log
 
 `prodex s gemini --cli gemini` launches the native Google Gemini CLI instead of Codex, defaults its native tools to YOLO approval mode, and routes Code Assist requests through Prodex OAuth profile routing. This native CLI path currently requires a Google OAuth profile and does not accept `--api-key`. Set `PRODEX_GEMINI_BIN` to override the `gemini` executable.
 
-`prodex s gemini --cli agy` launches the native Antigravity CLI with `--dangerously-skip-permissions` so tool permission prompts are auto-approved. Antigravity CLI owns its authentication through the system keyring/Google Sign-In and does not expose an endpoint or token override, so Prodex account auto-rotation and Presidio proxying are not available on this path. Set `PRODEX_AGY_BIN` to override the `agy` executable.
+`prodex s gemini --cli agy` launches the native Antigravity CLI with `--dangerously-skip-permissions` so tool permission prompts are auto-approved. Antigravity CLI owns its authentication through the system keyring/Google Sign-In and does not expose an endpoint or token override, so Prodex account auto-rotation and Presidio proxying are not available on this path. It works without a Prodex profile and rejects `--presidio` instead of silently ignoring it. Set `PRODEX_AGY_BIN` to override the `agy` executable.
 
 The OAuth bridge also maps native Gemini `computerUse`, code execution, grounding/citation/URL-context metadata, generated images, video metadata, multimodal file inputs, log-probability metadata, tool-use and cached-token accounting, safety metadata, and Gemini finish reasons into Codex-compatible request, response, and SSE shapes. Citations are emitted as a separate completed output item after Gemini supplies a finish reason. Assistant followups retain native Gemini code, media, video, cache, and thought-signature parts without replaying citation display text as model history.
 
@@ -947,7 +947,7 @@ In practice, profile `history.jsonl`, `sessions`, `archived_sessions`, `config.t
 
 Codex 0.140.0 defaults CLI auth credentials to the file store, so managed Prodex profiles continue to keep `auth.json` isolated per profile, including OpenAI, API-key, and Bedrock API-key auth JSON. MCP OAuth defaults to Codex `auto`; when it falls back to the file store, `.credentials.json` is shared with direct Codex. OS keyring-backed MCP OAuth credentials remain Codex/OS-owned and are not part of Prodex profile export bundles.
 
-Prodex's own `prodex-secret-store` keyring backend is currently unavailable. If `PRODEX_SECRET_BACKEND=keyring` or `[secrets].backend = "keyring"` is selected, `prodex doctor` and `prodex info` report an invalid backend instead of silently pretending that OS keyring storage is active. Use `backend = "file"` until a real OS keyring implementation is enabled.
+Prodex's `prodex-secret-store` keyring backend uses the native macOS Keychain, Windows Credential Manager, or Linux Secret Service. Select it for Prodex secret-store consumers with `PRODEX_SECRET_BACKEND=keyring` or `[secrets].backend = "keyring"` plus an exact `keyring_service`; unavailable or locked OS stores fail closed without exposing secret values. This setting does not migrate Codex-managed profile `auth.json` files, which remain isolated in each profile home.
 
 Prodex strips dynamic-loader injection variables such as `LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`, and `DYLD_*` from Codex child processes by default. Set `PRODEX_ALLOW_UNSAFE_CHILD_ENV=1` only when intentionally debugging a custom local runtime environment.
 

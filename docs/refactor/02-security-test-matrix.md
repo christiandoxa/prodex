@@ -66,11 +66,13 @@ HTTP metadata that can reach a valid typed runtime snapshot.
 | Secret write publishes partial or public content | private temporary, flush, atomic replace, directory flush/write-through, identity check | atomic replacement, `0600`, residue, and symlink-target tests | `crates/prodex-secret-store/src/file_backend.rs`; `crates/prodex-secret-store/tests/src/tests.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
 | Kubernetes rotation mixes generations | pin and validate one `..data` generation | rotation, anchoring, escape, nested-target, and reparse tests | `crates/prodex-secret-store/src/projected_provider.rs`; `crates/prodex-secret-store/tests/projected_secret_provider.rs` | pass on Unix; Windows native gate configured, first CI execution pending |
 | Secret material survives or escapes generic APIs | zeroize-on-drop, no material `Clone`/serde, closure-scoped exposure | compile-fail doctests and zeroize/redaction tests | `crates/prodex-domain/src/secrets.rs`; `crates/prodex-domain/tests/secrets.rs`; `crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/projected_provider.rs` | partial: the core type and production provider adapter are scoped; telemetry/webhook snapshots still retain cloneable raw strings |
-| Unsupported keyring appears production-capable | production rejects the metadata-only stub | selection and operation negatives | `crates/prodex-secret-store/src/keyring_backend.rs`; `crates/prodex-secret-store/tests/src/keyring.rs` | pass |
+| Keyring operations fall back to plaintext or leak backend errors | OS-native credential store, tagged text/binary envelope, bounded values, redacted errors | selection, envelope, location, and error-path tests | `crates/prodex-secret-store/src/keyring_backend.rs`; `crates/prodex-secret-store/tests/src/keyring.rs` | pass |
 
 Compatibility note: `SecretMaterial::expose_secret`, its generic serde implementations, and its
 value `Clone` were removed; callers use `with_exposed_secret`. `SecretValue` also no longer clones.
-The keyring marker remains source-compatible, but production configuration rejects it explicitly.
+The keyring selection remains source-compatible and now performs native credential-store operations.
+Codex-managed profile `auth.json` files remain on the existing hardened file path until their
+callers deliberately migrate to the backend-neutral location API.
 
 Windows evidence: `.github/workflows/ci.yml` now runs the secret-store, runtime-broker,
 profile-export, and application broker-capability tests natively on `windows-latest` with Rust

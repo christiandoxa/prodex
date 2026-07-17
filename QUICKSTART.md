@@ -273,7 +273,7 @@ prodex s --provider kiro --model claude-sonnet-4.5
 prodex super --cli kiro --profile kiro-main
 ```
 
-`prodex profile import kiro` reads the installed Kiro CLI auth database, snapshots the current credential payload into the managed profile, and refreshes a Kiro model catalog snapshot for later routing. `--provider kiro` keeps the Codex front end and routes through Prodex's Kiro ACP adapter; `--cli kiro` launches the imported Kiro CLI snapshot directly. Current Kiro binaries do not expose an OpenAI-compatible inbound endpoint, so native Kiro talks to its service directly; the proxied direction is Codex/Super through Prodex to Kiro ACP. Use `PRODEX_KIRO_BIN` if the installed Kiro launcher is not on `PATH`.
+`prodex profile import kiro` reads the installed Kiro CLI auth database, snapshots the current credential payload into the managed profile, and refreshes a Kiro model catalog snapshot for later routing. `--provider kiro` keeps the Codex front end and routes through Prodex's Kiro ACP adapter; `--cli kiro` launches the imported Kiro CLI snapshot directly. Current Kiro binaries do not expose an OpenAI-compatible inbound endpoint, so native Kiro talks to its service directly; the proxied direction is Codex/Super through Prodex to Kiro ACP. Native Kiro rejects `--presidio` instead of silently ignoring it. Use `PRODEX_KIRO_BIN` if the installed Kiro launcher is not on `PATH`.
 
 Use Gemini with Google sign-in or an API key:
 
@@ -289,7 +289,7 @@ When no API key is supplied, the Gemini path uses the Google OAuth profile from 
 
 Add `--cli gemini` to launch the native Gemini CLI with its tools in YOLO mode through Prodex OAuth profile routing. This native path currently requires Google OAuth and does not accept `--api-key`; `PRODEX_GEMINI_BIN` overrides the executable.
 
-Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring/Google Sign-In authentication, so Prodex account rotation and Presidio proxying are unavailable for this native path. `PRODEX_AGY_BIN` overrides the executable.
+Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring/Google Sign-In authentication, so Prodex account rotation and Presidio proxying are unavailable for this native path. It works without a Prodex profile and rejects `--presidio` instead of silently ignoring it. `PRODEX_AGY_BIN` overrides the executable.
 
 **Feature Parity Mapping (Codex to Gemini):**
 
@@ -434,12 +434,6 @@ listen_addr = "127.0.0.1:4000"
 provider = "gemini"
 require_auth = true
 
-[gateway.adaptive_routing]
-enabled = true
-shadow_mode = true
-window_size = 128
-min_samples = 8
-
 [gateway.request_constraints]
 # Disabled by default for compatibility. Enable strict pre-commit admission explicitly.
 enabled = true
@@ -488,8 +482,8 @@ webhook_phases = ["pre", "post"]
 Environment variables still override `policy.toml`.
 Use `prodex info` to inspect the resulting effective runtime tuning values.
 See [docs/runtime-policy.md](./docs/runtime-policy.md) for all `runtime`, `gateway`, and `runtime_proxy` keys, env overrides, defaults, and meanings.
-Gateway adaptive routing is a shadow-mode foundation: it can score owner-attributed feedback and report recommendations, but deterministic routing and continuation affinity still decide live traffic.
-Prodex's own keyring secret backend is not implemented yet. Selecting `PRODEX_SECRET_BACKEND=keyring` or `[secrets].backend = "keyring"` makes doctor/info report an invalid backend instead of silently claiming OS keyring storage is active.
+Gateway adaptive routing is reserved; configuring `[gateway.adaptive_routing]` fails closed until live decisions are implemented.
+Prodex's keyring secret backend uses the native macOS Keychain, Windows Credential Manager, or Linux Secret Service. Select it for Prodex secret-store consumers with `PRODEX_SECRET_BACKEND=keyring` or `[secrets].backend = "keyring"` plus `keyring_service`; unavailable or locked OS stores fail closed. Codex-managed profile `auth.json` files remain isolated files and are not migrated by this setting.
 
 ## Admin And Observability Notes
 
