@@ -416,7 +416,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         .to_ip()
         .expect("busy health server should expose a TCP address");
     let health_thread = thread::spawn(move || {
-        while let Ok(Some(request)) = server.recv_timeout(Duration::from_millis(250)) {
+        if let Ok(Some(request)) = server.recv_timeout(Duration::from_secs(5)) {
             let body = serde_json::to_string(&RuntimeBrokerHealth {
                 pid: child_pid,
                 started_at: Local::now().timestamp(),
