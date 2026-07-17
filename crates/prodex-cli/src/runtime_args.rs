@@ -634,7 +634,7 @@ fn extract_super_leading_launch_prefixes(args: Vec<OsString>) -> (bool, Vec<OsSt
             break;
         };
         match prefix {
-            "rtk" | "ponytail" => {}
+            "rtk" | "playwright" | "ponytail" => {}
             "presidio" => presidio = true,
             _ => break,
         }

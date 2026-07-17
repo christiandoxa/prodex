@@ -496,7 +496,11 @@ fn caveman_command_keeps_smart_context_autopilot_disabled() {
 }
 #[test]
 fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
-    for (command_name, expected) in [("rtk", "rtk"), ("ponytail", "ponytail")] {
+    for (command_name, expected) in [
+        ("rtk", "rtk"),
+        ("playwright", "playwright"),
+        ("ponytail", "ponytail"),
+    ] {
         assert!(!should_default_cli_invocation_to_run(&os_args(&[
             "prodex",
             command_name,
@@ -504,7 +508,7 @@ fn optimizer_shortcuts_parse_as_top_level_commands_not_run_passthrough() {
         let command = parse_cli_command_from(["prodex", command_name, "exec", "hello"])
             .expect("optimizer shortcut should parse");
         let args = match command {
-            Commands::Rtk(args) | Commands::Ponytail(args) => args,
+            Commands::Rtk(args) | Commands::Playwright(args) | Commands::Ponytail(args) => args,
             other => panic!("expected optimizer shortcut command, got {other:?}"),
         };
         assert_eq!(args.codex_args, os_args(&["exec", "hello"]));

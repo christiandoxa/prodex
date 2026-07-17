@@ -19,7 +19,7 @@ Contributor testing guidance lives in [docs/testing.md](./docs/testing.md), incl
 - Claude Code (`claude`) if you want to use `prodex claude`
 - Optional: RTK (`rtk-ai/rtk`) if you want `prodex rtk` or default `prodex super` RTK shell-command guidance
 - Optional: Codebase Memory MCP and a Ponytail checkout for the minimal Super stack; Presidio services when you need PII redaction
-- Optional: Node.js 18+ with `npx` for the Playwright MCP server automatically added to Codex-based `prodex s` sessions
+- Optional: Node.js 18+ with `npx` for `prodex playwright` and the Playwright MCP server added to Codex-based `prodex s` sessions
 
 Standalone Prodex uses the `codex` command on `PATH`; install Codex first and keep it current. To pin a specific Codex CLI, set `PRODEX_CODEX_BIN=/path/to/codex` or `PRODEX_CODEX_RESOLUTION=external`. Claude Code is still a separate CLI and should already be installed when you use `prodex claude`.
 
@@ -208,6 +208,7 @@ If the selected profile sets `model_provider` to a non-OpenAI backend, Prodex sk
 ```bash
 prodex caveman
 prodex rtk
+prodex playwright
 prodex ponytail
 prodex super --url http://127.0.0.1:8131
 prodex super --url http://127.0.0.1:8131 --dry-run
@@ -216,7 +217,7 @@ prodex caveman --profile second
 prodex caveman exec "review this repo in caveman mode"
 ```
 
-Prodex launches Caveman from a temporary overlay `CODEX_HOME`; the base profile stays unchanged. `prodex rtk` and `prodex ponytail` are shortcuts for the matching Caveman prefix.
+Prodex launches Caveman from a temporary overlay `CODEX_HOME`; the base profile stays unchanged. `prodex rtk`, `prodex playwright`, and `prodex ponytail` are shortcuts for the matching Caveman prefix.
 
 `prodex super` and `prodex s` enable Caveman, RTK guidance, Ponytail when installed, Codebase Memory MCP when installed, Playwright MCP when Node.js 18+ and `npx` are available, Smart Context, and launch-time full access. They ask only whether to enable Presidio. Use `--presidio` or `--no-presidio` for non-interactive launches. This MCP default applies to the Codex Super front end; native `--cli gemini`, `--cli kiro`, and `--cli agy` launches keep their own MCP configuration.
 

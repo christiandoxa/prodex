@@ -155,6 +155,12 @@ pub enum Commands {
     Rtk(CavemanArgs),
     #[command(
         trailing_var_arg = true,
+        about = "Shortcut for `prodex caveman playwright`.",
+        after_help = CLI_CAVEMAN_AFTER_HELP
+    )]
+    Playwright(CavemanArgs),
+    #[command(
+        trailing_var_arg = true,
         about = "Shortcut for `prodex caveman ponytail`.",
         after_help = CLI_CAVEMAN_AFTER_HELP
     )]
@@ -309,6 +315,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "run"
             | "caveman"
             | "rtk"
+            | "playwright"
             | "ponytail"
             | "super"
             | "s"

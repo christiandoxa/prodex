@@ -47,9 +47,10 @@ For OpenAI/Codex quota-aware routing, you need at least one logged-in Prodex pro
 
 | Tool | Used by |
 |---|---|
-| Codex CLI | `prodex`, `prodex run`, `prodex caveman`, `prodex super` |
+| Codex CLI | `prodex`, `prodex run`, `prodex caveman`, `prodex playwright`, `prodex super` |
 | Claude Code | `prodex claude` |
 | RTK | `rtk` variants and `prodex s` / `prodex super` |
+| Node.js 18+ with `npx` | `prodex playwright` and Playwright MCP in `prodex s` / `prodex super` |
 
 </details>
 
@@ -169,7 +170,7 @@ Prodex Super keeps a deliberately small optional stack:
 - [Ponytail](https://github.com/DietrichGebert/ponytail) for minimal-implementation guidance.
 - [Presidio](https://github.com/data-privacy-stack/presidio) for opt-in PII redaction.
 
-Caveman and Smart Context are built into Prodex. Every default Codex-based `prodex s` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking launch.
+Caveman and Smart Context are built into Prodex. Every default Codex-based `prodex s` or `prodex playwright` launch adds a pinned Playwright MCP server to its temporary overlay when Node.js 18+ and `npx` are available. Prodex runs without every external tool above; missing tools are skipped instead of blocking launch.
 
 <details>
 <summary>Install and verify the Super tools</summary>
@@ -198,6 +199,7 @@ Playwright MCP (Prodex currently pins `@playwright/mcp@0.0.78`):
 node --version
 npx --version
 npx -y @playwright/mcp@0.0.78 --version
+prodex playwright
 ```
 
 Playwright starts through `npx` in headless, isolated mode, so concurrent Prodex terminals do not share browser login state. It requires a browser usable by Playwright and prompts before tools marked as writes. Playwright MCP is not a security boundary.
@@ -568,6 +570,7 @@ prodex exec "review this repo"
 ```bash
 prodex caveman
 prodex rtk
+prodex playwright
 prodex ponytail
 prodex caveman --dry-run
 prodex s doctor
@@ -579,7 +582,7 @@ prodex caveman 019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9
 
 `prodex caveman` runs Codex with Caveman mode active in a temporary Prodex overlay `CODEX_HOME`, so the base profile home stays unchanged after the session ends.
 
-Add `rtk`, `ponytail`, or `presidio` before Codex args to enable that session surface. The `prodex rtk` and `prodex ponytail` shortcuts map to `prodex caveman <prefix>`.
+Add `rtk`, `playwright`, `ponytail`, or `presidio` before Codex args to enable that session surface. The `prodex rtk`, `prodex playwright`, and `prodex ponytail` shortcuts map to `prodex caveman <prefix>`.
 
 RTK is still an external binary. Install it separately if `rtk gain` is unavailable.
 
