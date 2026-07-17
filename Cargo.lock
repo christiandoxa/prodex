@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "arc-swap",
  "base64",
@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2814,7 +2814,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app-reports"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -2829,7 +2829,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-application"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-authn",
  "prodex-authz",
@@ -2849,7 +2849,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-audit-log"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2862,7 +2862,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
  "url",
@@ -2870,18 +2870,18 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-bench-support"
-version = "0.307.0"
+version = "0.308.0"
 
 [[package]]
 name = "prodex-caveman-assets"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2892,7 +2892,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-cli"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "clap",
  "prodex-provider-core",
@@ -2902,21 +2902,21 @@ dependencies = [
 
 [[package]]
 name = "prodex-codex-config"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "prodex-config"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-context"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2927,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-control-plane"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-config",
  "prodex-domain",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-core"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2943,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2954,7 +2954,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -2968,7 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -2977,7 +2977,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-server"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2990,7 +2990,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-housekeeping"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-core",
  "prodex-state",
@@ -2999,7 +2999,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-mcp-stdio"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -3007,14 +3007,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-presidio"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "prodex-cli",
@@ -3027,7 +3027,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -3044,7 +3044,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-identity"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3055,7 +3055,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "base64",
  "serde",
@@ -3064,7 +3064,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -3072,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-proxy-config"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -3081,7 +3081,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-quota"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3096,14 +3096,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-anthropic"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3114,7 +3114,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-runtime-state",
  "serde",
@@ -3124,14 +3124,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker-log"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-capabilities"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-proxy",
@@ -3140,7 +3140,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-claude"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3155,7 +3155,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-cookies"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -3164,7 +3164,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-doctor"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3178,14 +3178,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-gemini"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-provider-core",
 ]
 
 [[package]]
 name = "prodex-runtime-gemini-cli-compat"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3195,7 +3195,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-launch"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "prodex-codex-config",
@@ -3211,7 +3211,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-log"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-runtime-proxy",
  "serde_json",
@@ -3219,14 +3219,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-metrics"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "prodex-authn",
@@ -3240,7 +3240,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "base64",
  "prodex-gateway-core",
@@ -3254,7 +3254,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-quota"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -3266,14 +3266,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "prodex-runtime-store"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-runtime-state",
  "prodex-state",
@@ -3283,11 +3283,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.307.0"
+version = "0.308.0"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "keyring",
  "libc",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-session-store"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3312,7 +3312,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-codex-fs"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3326,7 +3326,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-types"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-quota",
  "prodex-runtime-proxy",
@@ -3336,7 +3336,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-state"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3344,14 +3344,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-storage-postgres"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "postgres",
  "prodex-domain",
@@ -3360,7 +3360,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-postgres-runtime"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "deadpool-postgres",
  "postgres",
@@ -3379,7 +3379,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-redis"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3387,7 +3387,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-redis-runtime"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage-redis",
@@ -3397,7 +3397,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-sqlite"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-sqlite-runtime"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3418,7 +3418,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-terminal-ui"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -3428,7 +3428,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-update-notice"
-version = "0.307.0"
+version = "0.308.0"
 dependencies = [
  "anyhow",
  "chrono",

@@ -2,6 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.308.0 - 2026-07-17
+
+### CLI
+
+- Enable native keyring storage (`98c89ad`)
+
+### Misc
+
+- Reject inactive adaptive routing (`f0f9199`)
+- Harden native client launches (`9dfe354`)
+
 ## 0.307.0 - 2026-07-17
 
 ### Runtime
@@ -75,7 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Deps
 
 - Classify test-only dependencies (`54e3865`)
-
-## 0.296.0 - 2026-07-16
-
-- No grouped changes.
