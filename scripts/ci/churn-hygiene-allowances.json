@@ -1,5 +1,18 @@
 [
   {
+    "id": "provider-implementation-registry-0.304.0",
+    "requiredSubjects": [
+      "feat(provider): add immutable implementation registry"
+    ],
+    "caps": {
+      "maxFiles": 15,
+      "maxBehaviorFiles": 14,
+      "maxLines": 1437,
+      "maxFileLines": 701
+    },
+    "reason": "Reviewed the immutable seven-provider implementation registry, compatibility wrappers, fail-closed translation edges, deterministic construction validation, provider contract and catalog enumeration, follow-on runtime boundary note, focused provider and runtime proxy tests, full all-features suite, strict Clippy, size/hot-path/crate/secret guards, and unchanged generated provider capability documentation before the 0.304.0 release."
+  },
+  {
     "id": "whole-repo-feature-audit-0.303.0",
     "requiredSubjects": [
       "fix: harden audited runtime and gateway features"
