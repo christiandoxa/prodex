@@ -1493,7 +1493,7 @@ fn sqlite_usage_reconciliation_plan_omits_release_ledger_when_actual_equals_rese
 }
 
 #[test]
-fn sqlite_usage_reconciliation_rejects_cross_tenant_and_over_reserved_inputs() {
+fn sqlite_usage_reconciliation_rejects_cross_tenant_and_overflow_inputs() {
     let record_tenant = TenantId::new();
     let key_tenant = TenantId::new();
     let mut cross_tenant = reconciliation_command(
@@ -1511,14 +1511,16 @@ fn sqlite_usage_reconciliation_rejects_cross_tenant_and_over_reserved_inputs() {
         })
     );
 
-    assert!(matches!(
+    assert_eq!(
         plan_sqlite_usage_reconciliation(reconciliation_command(
             record_tenant,
             UsageAmount::new(10, 100),
-            UsageAmount::new(11, 90),
-        )),
-        Err(SqliteStoragePlanError::ActualUsageExceedsReserved { .. })
-    ));
+            UsageAmount::new(11, 110),
+        ))
+        .unwrap()
+        .ledger_event_count,
+        1
+    );
 
     let mut overflow = reconciliation_command(
         record_tenant,

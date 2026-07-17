@@ -493,13 +493,39 @@ export function validateProductionBoundary(sources) {
     errors,
     reconciliationSchedule,
     [
-      "runtime_gateway_application_reconciliation_execution(",
-      "spawn_blocking(move ||",
-      "reconciliation.retry.attempts()",
-      "runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt)",
-      "runtime_gateway_record_reconciliation_audit(",
+      ".reconciliation.enqueue(event)",
+      "start_runtime_gateway_reconciliation_workers(shared)",
     ],
-    `${FILES.reconciliationWorker}: every backend must consume application reconciliation policy before retry and audit side effects`,
+    `${FILES.reconciliationWorker}: accepted reconciliation must enter the bounded worker queue`,
+  );
+  const reconciliationWorkers =
+    functionBody(sources.reconciliationWorker, "start_runtime_gateway_reconciliation_workers") ?? "";
+  for (const required of [
+    "RUNTIME_GATEWAY_RECONCILIATION_WORKER_LIMIT",
+    "spawn_blocking(move ||",
+  ]) {
+    requireText(
+      errors,
+      reconciliationWorkers,
+      required,
+      `${FILES.reconciliationWorker}: reconciliation workers must remain bounded`,
+    );
+  }
+  const reconciliationLoop =
+    functionBody(sources.reconciliationWorker, "runtime_gateway_reconcile_until_persisted") ?? "";
+  requireOrdered(
+    errors,
+    reconciliationLoop,
+    [
+      "runtime_gateway_application_reconciliation_execution(",
+      "reconciliation.retry.attempts().last()",
+      "loop {",
+      "runtime_gateway_billing_ledger_reconcile_response(",
+      "runtime_gateway_durable_reconcile_response(",
+      "runtime_gateway_record_reconciliation_audit(",
+      "runtime_gateway_finish_reconciliation(",
+    ],
+    `${FILES.reconciliationWorker}: every backend must consume application reconciliation policy before retry and success side effects`,
   );
   for (const duplicate of ["0..25", "Duration::from_millis(20)"]) {
     forbidText(
@@ -511,19 +537,30 @@ export function validateProductionBoundary(sources) {
   }
   requireText(
     errors,
-    reconciliationSchedule,
+    reconciliationLoop,
     "reconciliation.exhausted(storage_error_observed)",
-    `${FILES.reconciliationWorker}: exhausted reconciliation schedules must receive an application failure classification`,
+    `${FILES.reconciliationWorker}: extended reconciliation retries must receive an application failure classification`,
   );
-  for (const failureSideEffect of [
-    "ApplicationUsageReconciliationAuditOutcome::Failure",
-    '"gateway_billing_ledger_reconcile_failed"',
+  for (const retrySideEffect of [
+    "runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt)",
+    '"gateway_billing_ledger_reconcile_retrying"',
   ]) {
     requireText(
       errors,
-      reconciliationSchedule,
-      failureSideEffect,
-      `${FILES.reconciliationWorker}: exhausted pending reconciliation must emit failure audit and log side effects`,
+      reconciliationLoop,
+      retrySideEffect,
+      `${FILES.reconciliationWorker}: pending reconciliation must retain state and retry after policy exhaustion`,
+    );
+  }
+  for (const lossyFailureSideEffect of [
+    "ApplicationUsageReconciliationAuditOutcome::Failure",
+    '"gateway_billing_ledger_reconcile_failed"',
+  ]) {
+    forbidText(
+      errors,
+      sources.reconciliationWorker,
+      lossyFailureSideEffect,
+      `${FILES.reconciliationWorker}: retry exhaustion must not discard pending reconciliation state`,
     );
   }
   const reconciliationAudit =
@@ -1506,17 +1543,28 @@ function runSelfTest() {
       runtime_gateway_sqlite_reserve_usage();
     }`,
     reconciliationWorker: `fn schedule_runtime_gateway_billing_ledger_reconcile() {
-      runtime_gateway_application_reconciliation_execution();
+      shared.gateway_usage.reconciliation.enqueue(event);
+      start_runtime_gateway_reconciliation_workers(shared);
+    }
+    fn start_runtime_gateway_reconciliation_workers() {
+      RUNTIME_GATEWAY_RECONCILIATION_WORKER_LIMIT;
       spawn_blocking(move || {
-        let storage_error_observed = false;
-        for attempt in reconciliation.retry.attempts() {
-          runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt);
-          runtime_gateway_record_reconciliation_audit();
-        }
-        ApplicationUsageReconciliationAuditOutcome::Failure;
-        "gateway_billing_ledger_reconcile_failed";
-        reconciliation.exhausted(storage_error_observed);
+        runtime_gateway_reconciliation_worker_loop();
       });
+    }
+    fn runtime_gateway_reconcile_until_persisted() {
+      let reconciliation = runtime_gateway_application_reconciliation_execution();
+      let terminal_attempt = reconciliation.retry.attempts().last();
+      let storage_error_observed = false;
+      loop {
+          runtime_gateway_billing_ledger_reconcile_response();
+          runtime_gateway_durable_reconcile_response();
+          runtime_gateway_record_reconciliation_audit();
+          runtime_gateway_finish_reconciliation();
+        reconciliation.exhausted(storage_error_observed);
+        "gateway_billing_ledger_reconcile_retrying";
+        runtime_gateway_reconciliation_retry_sleep(reconciliation, attempt);
+      }
     }
     fn runtime_gateway_record_reconciliation_audit() {
       if runtime_gateway_audit_usage_reconciliation(runtime_shared, audit).is_err() {
@@ -2105,7 +2153,7 @@ function runSelfTest() {
         "runtime_gateway_application_reconciliation_execution();",
         "",
       ),
-    }).some((error) => error.includes("before retry and audit side effects")),
+    }).some((error) => error.includes("before retry and success side effects")),
     "compatibility reconciliation policy bypass accepted",
   );
   assertSelfTest(
@@ -2115,18 +2163,15 @@ function runSelfTest() {
         "reconciliation.exhausted(storage_error_observed);",
         "",
       ),
-    }).some((error) => error.includes("failure classification")),
+    }).some((error) => error.includes("application failure classification")),
     "silent reconciliation retry exhaustion accepted",
   );
   assertSelfTest(
     validateProductionBoundary({
       ...valid,
-      reconciliationWorker: valid.reconciliationWorker.replace(
-        "ApplicationUsageReconciliationAuditOutcome::Failure;",
-        "",
-      ),
-    }).some((error) => error.includes("failure audit and log side effects")),
-    "silent pending reconciliation failure accepted",
+      reconciliationWorker: `${valid.reconciliationWorker}\nApplicationUsageReconciliationAuditOutcome::Failure;`,
+    }).some((error) => error.includes("must not discard pending reconciliation state")),
+    "lossy pending reconciliation cleanup accepted",
   );
   assertSelfTest(
     validateProductionBoundary({

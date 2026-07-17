@@ -89,31 +89,7 @@ pub(super) fn runtime_gateway_durable_reconcile_response(
         );
         return Ok(());
     };
-    let (actual, clamped) = runtime_gateway_durable_actual_usage(&state.record, event);
-    if clamped {
-        runtime_proxy_log(
-            runtime_shared,
-            runtime_proxy_structured_log_message(
-                "gateway_durable_actual_clamped",
-                [
-                    runtime_proxy_log_field("request", event.request.to_string()),
-                    runtime_proxy_log_field("backend", state_store.label()),
-                    runtime_proxy_log_field(
-                        "reserved_tokens",
-                        state.record.reserved.tokens.to_string(),
-                    ),
-                    runtime_proxy_log_field(
-                        "actual_tokens",
-                        event
-                            .input_tokens
-                            .unwrap_or_default()
-                            .saturating_add(event.output_tokens.unwrap_or_default())
-                            .to_string(),
-                    ),
-                ],
-            ),
-        );
-    }
+    let actual = runtime_gateway_durable_actual_usage(event);
     let planned = runtime_gateway_application_usage_reconciliation(
         RuntimeGatewayApplicationReconciliationInput {
             state_store,
@@ -384,8 +360,6 @@ mod tests {
             reservation_id: prodex_domain::ReservationId::new(),
             estimate: UsageAmount::new(25, 0),
         };
-        let record = prodex_domain::ReservationRecord::from_request(request, 1_000, 60_000)
-            .expect("reservation record");
         let event = RuntimeProviderGatewaySpendEvent {
             event: "gateway_spend",
             phase: "response",
@@ -410,13 +384,13 @@ mod tests {
         };
 
         assert_eq!(
-            runtime_gateway_durable_actual_usage(&record, &event),
-            (UsageAmount::new(18, 0), false)
+            runtime_gateway_durable_actual_usage(&event),
+            UsageAmount::new(18, 0)
         );
     }
 
     #[test]
-    fn durable_actual_usage_clamps_when_request_was_under_reserved() {
+    fn durable_actual_usage_records_overage_when_request_was_under_reserved() {
         let tenant_id = prodex_domain::TenantId::new();
         let request = prodex_domain::ReservationRequest {
             tenant_id,
@@ -424,8 +398,6 @@ mod tests {
             reservation_id: prodex_domain::ReservationId::new(),
             estimate: UsageAmount::new(2, 0),
         };
-        let record = prodex_domain::ReservationRecord::from_request(request, 1_000, 60_000)
-            .expect("reservation record");
         let event = RuntimeProviderGatewaySpendEvent {
             event: "gateway_spend",
             phase: "response",
@@ -450,13 +422,13 @@ mod tests {
         };
 
         assert_eq!(
-            runtime_gateway_durable_actual_usage(&record, &event),
-            (UsageAmount::new(2, 0), true)
+            runtime_gateway_durable_actual_usage(&event),
+            UsageAmount::new(18, 0)
         );
     }
 
     #[test]
-    fn sqlite_durable_reconcile_is_idempotent_for_repeated_response_settlement() {
+    fn sqlite_durable_reconcile_records_overage_idempotently() {
         let root = std::env::temp_dir().join(format!(
             "prodex-gateway-durable-reconcile-{}",
             prodex_domain::RequestId::new()
@@ -477,7 +449,7 @@ mod tests {
         };
         let record =
             ReservationRecord::from_request(request, 1_000, 60_000).expect("reservation record");
-        let actual = UsageAmount::new(18, 29);
+        let actual = UsageAmount::new(28, 49);
         let plan = prodex_storage_sqlite::plan_sqlite_usage_reconciliation(
             prodex_storage::UsageReconciliationCommand {
                 storage_key,
@@ -551,8 +523,8 @@ mod tests {
             .expect("budget counters should load");
         assert_eq!(reserved_tokens, 0);
         assert_eq!(reserved_cost_micros, 0);
-        assert_eq!(committed_tokens, 18);
-        assert_eq!(committed_cost_micros, 29);
+        assert_eq!(committed_tokens, 28);
+        assert_eq!(committed_cost_micros, 49);
 
         let committed_rows: i64 = conn
             .query_row(
@@ -569,7 +541,7 @@ mod tests {
             )
             .expect("released ledger rows should load");
         assert_eq!(committed_rows, 1);
-        assert_eq!(released_rows, 1);
+        assert_eq!(released_rows, 0);
 
         std::fs::remove_dir_all(root).expect("test root should clean up");
     }

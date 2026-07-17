@@ -27,10 +27,18 @@ use std::sync::atomic::Ordering;
 
 const RUNTIME_GATEWAY_REDIS_USAGE_KEY: &str = "prodex:gateway:virtual_key_usage";
 const RUNTIME_GATEWAY_REDIS_USAGE_LOCK: &str = "prodex:gateway:virtual_key_usage:lock";
-const RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT: usize = 4_096;
+pub(super) const RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT: usize = 4_096;
+const RUNTIME_GATEWAY_USAGE_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
+
+pub(super) struct RuntimeGatewayPendingUsageDelta {
+    delta: RuntimeGatewayVirtualKeyUsageDelta,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
 
 pub(super) struct RuntimeGatewayUsageRequestGuard {
     pub(super) request_ids: Arc<Mutex<BTreeSet<u64>>>,
+    pub(super) reconciliation:
+        super::local_rewrite_gateway_reconciliation_worker::RuntimeGatewayReconciliationQueue,
     pub(super) request_id: u64,
 }
 
@@ -38,6 +46,7 @@ impl RuntimeGatewayUsageRequestGuard {
     pub(super) fn new(shared: &RuntimeLocalRewriteProxyShared, request_id: u64) -> Self {
         Self {
             request_ids: Arc::clone(&shared.gateway_usage.request_ids),
+            reconciliation: shared.gateway_usage.reconciliation.clone(),
             request_id,
         }
     }
@@ -45,21 +54,39 @@ impl RuntimeGatewayUsageRequestGuard {
 
 impl Drop for RuntimeGatewayUsageRequestGuard {
     fn drop(&mut self) {
-        if let Ok(mut request_ids) = self.request_ids.lock() {
-            request_ids.remove(&self.request_id);
-        }
+        self.request_ids
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.request_id);
+        self.reconciliation.cancel(self.request_id);
     }
 }
 
+pub(super) fn runtime_gateway_try_reserve_usage_delta(
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    Arc::clone(&shared.gateway_usage.usage_slots)
+        .try_acquire_owned()
+        .ok()
+}
+
 fn runtime_gateway_enqueue_usage_delta(
-    pending: &mut Vec<RuntimeGatewayVirtualKeyUsageDelta>,
+    pending: &mut Vec<RuntimeGatewayPendingUsageDelta>,
     delta: RuntimeGatewayVirtualKeyUsageDelta,
-) -> bool {
-    if pending.len() >= RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT {
-        return false;
-    }
-    pending.push(delta);
-    true
+    permit: tokio::sync::OwnedSemaphorePermit,
+) {
+    pending.push(RuntimeGatewayPendingUsageDelta {
+        delta,
+        _permit: permit,
+    });
+}
+
+fn runtime_gateway_restore_pending_usage_batch(
+    pending: &mut Vec<RuntimeGatewayPendingUsageDelta>,
+    mut failed: Vec<RuntimeGatewayPendingUsageDelta>,
+) {
+    failed.append(pending);
+    *pending = failed;
 }
 
 pub(super) fn runtime_gateway_virtual_key_usage_load_strict(
@@ -98,27 +125,18 @@ pub(super) fn runtime_gateway_virtual_key_usage_load_strict(
 pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
     shared: &RuntimeLocalRewriteProxyShared,
     delta: RuntimeGatewayVirtualKeyUsageDelta,
+    permit: tokio::sync::OwnedSemaphorePermit,
 ) {
     let state_store = shared.gateway_state_store.clone();
-    if let Ok(mut pending) = shared.gateway_usage.pending_deltas.lock() {
-        if !runtime_gateway_enqueue_usage_delta(&mut pending, delta.clone()) {
-            // ponytail: persistence is best effort; use synchronous admission if durable backpressure is required.
-            runtime_proxy_log(
-                &shared.runtime_shared,
-                runtime_proxy_structured_log_message(
-                    "gateway_virtual_key_usage_delta_dropped",
-                    [
-                        runtime_proxy_log_field("request", delta.request_id.to_string()),
-                        runtime_proxy_log_field("key", delta.key_name.as_str()),
-                        runtime_proxy_log_field("reason", "queue_limit"),
-                    ],
-                ),
-            );
-            return;
-        }
-    } else {
-        return;
-    }
+    runtime_gateway_enqueue_usage_delta(
+        &mut shared
+            .gateway_usage
+            .pending_deltas
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        delta,
+        permit,
+    );
     shared
         .gateway_usage
         .save_dirty
@@ -140,27 +158,40 @@ pub(super) fn schedule_runtime_gateway_virtual_key_usage_save(
         let _background_task = background_task;
         loop {
             dirty.store(false, Ordering::Release);
-            let deltas = pending_deltas
+            let pending_batch = pending_deltas
                 .lock()
-                .map(|mut pending| pending.drain(..).collect::<Vec<_>>())
-                .unwrap_or_default();
-            if !deltas.is_empty()
-                && let Err(_err) =
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .drain(..)
+                .collect::<Vec<_>>();
+            if !pending_batch.is_empty() {
+                let deltas = pending_batch
+                    .iter()
+                    .map(|pending| pending.delta.clone())
+                    .collect::<Vec<_>>();
+                if let Err(_err) =
                     runtime_gateway_virtual_key_usage_apply_deltas(&state_store, &deltas)
-            {
-                runtime_proxy_log_to_path(
-                    &log_path,
-                    &runtime_proxy_structured_log_message(
-                        "gateway_virtual_key_usage_save_failed",
-                        [
-                            runtime_proxy_log_field("backend", state_store.label()),
-                            runtime_proxy_log_field(
-                                "error_kind",
-                                "gateway_usage_persistence_failed",
-                            ),
-                        ],
-                    ),
-                );
+                {
+                    let mut pending = pending_deltas
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    runtime_gateway_restore_pending_usage_batch(&mut pending, pending_batch);
+                    drop(pending);
+                    dirty.store(true, Ordering::Release);
+                    runtime_proxy_log_to_path(
+                        &log_path,
+                        &runtime_proxy_structured_log_message(
+                            "gateway_virtual_key_usage_save_failed",
+                            [
+                                runtime_proxy_log_field("backend", state_store.label()),
+                                runtime_proxy_log_field(
+                                    "error_kind",
+                                    "gateway_usage_persistence_failed",
+                                ),
+                            ],
+                        ),
+                    );
+                    std::thread::sleep(RUNTIME_GATEWAY_USAGE_RETRY_BACKOFF);
+                }
             }
             if !dirty.load(Ordering::Acquire) {
                 in_flight.store(false, Ordering::Release);
@@ -262,31 +293,62 @@ mod tests {
 
     #[test]
     fn gateway_usage_delta_queue_is_bounded() {
-        let delta = RuntimeGatewayVirtualKeyUsageDelta {
-            request_id: 1,
-            typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
-            call_id: format!("prodex-{}", prodex_domain::CallId::new()),
-            key_name: "team-a".to_string(),
-            tenant_id: Some("tenant-a".to_string()),
-            team_id: None,
-            project_id: None,
-            user_id: None,
-            budget_id: None,
-            model: "gpt-5.4".to_string(),
-            minute_epoch: 1,
-            input_tokens: 1,
-            reserved_tokens: 1,
-            estimated_cost_microusd: Some(1),
-            created_at_epoch: 1,
-        };
-        let mut pending = Vec::new();
+        let slots = Arc::new(tokio::sync::Semaphore::new(
+            RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT,
+        ));
+        let mut permits = Vec::new();
         for _ in 0..RUNTIME_GATEWAY_PENDING_USAGE_DELTA_LIMIT {
-            assert!(runtime_gateway_enqueue_usage_delta(
-                &mut pending,
-                delta.clone()
-            ));
+            permits.push(Arc::clone(&slots).try_acquire_owned().unwrap());
         }
 
-        assert!(!runtime_gateway_enqueue_usage_delta(&mut pending, delta));
+        assert!(Arc::clone(&slots).try_acquire_owned().is_err());
+        drop(permits.pop());
+        assert!(Arc::clone(&slots).try_acquire_owned().is_ok());
+    }
+
+    #[test]
+    fn failed_usage_batch_is_requeued_before_newer_deltas() {
+        fn pending(
+            request_id: u64,
+            slots: &Arc<tokio::sync::Semaphore>,
+        ) -> RuntimeGatewayPendingUsageDelta {
+            RuntimeGatewayPendingUsageDelta {
+                delta: RuntimeGatewayVirtualKeyUsageDelta {
+                    request_id,
+                    typed_request_id: format!("prodex-{}", prodex_domain::RequestId::new()),
+                    call_id: format!("prodex-{}", prodex_domain::CallId::new()),
+                    key_name: "team-a".to_string(),
+                    tenant_id: Some("tenant-a".to_string()),
+                    team_id: None,
+                    project_id: None,
+                    user_id: None,
+                    budget_id: None,
+                    model: "gpt-5.4".to_string(),
+                    minute_epoch: 1,
+                    input_tokens: 1,
+                    reserved_tokens: 1,
+                    estimated_cost_microusd: Some(1),
+                    created_at_epoch: 1,
+                },
+                _permit: Arc::clone(slots).try_acquire_owned().unwrap(),
+            }
+        }
+
+        let slots = Arc::new(tokio::sync::Semaphore::new(2));
+        let failed = vec![pending(1, &slots)];
+        let mut newer = vec![pending(2, &slots)];
+        assert_eq!(slots.available_permits(), 0);
+
+        runtime_gateway_restore_pending_usage_batch(&mut newer, failed);
+
+        assert_eq!(
+            newer
+                .iter()
+                .map(|pending| pending.delta.request_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        drop(newer);
+        assert_eq!(slots.available_permits(), 2);
     }
 }

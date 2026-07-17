@@ -136,10 +136,11 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
             &profile.codex_home,
             &kiro_auth_secret_from_context(&context),
         )?;
-        refresh_kiro_model_catalog_snapshot(
+        let model_catalog_refreshed = refresh_kiro_model_catalog_snapshot(
             &profile.codex_home,
             &kiro_auth_secret_from_context(&context),
-        );
+        )
+        .is_ok();
         let profile = state
             .profiles
             .get_mut(&existing_name)
@@ -150,7 +151,13 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
             state.active_profile = Some(existing_name.clone());
         }
         state.save(&paths)?;
-        render_kiro_import_result(&state, &existing_name, &context, true)?;
+        render_kiro_import_result(
+            &state,
+            &existing_name,
+            &context,
+            true,
+            model_catalog_refreshed,
+        )?;
         audit_kiro_import(&state, &existing_name, &context, true);
         return Ok(());
     } else {
@@ -174,7 +181,9 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
     create_codex_home_if_missing(&codex_home)?;
     prepare_managed_codex_home(&paths, &codex_home)?;
     write_kiro_auth_secret(&codex_home, &kiro_auth_secret_from_context(&context))?;
-    refresh_kiro_model_catalog_snapshot(&codex_home, &kiro_auth_secret_from_context(&context));
+    let model_catalog_refreshed =
+        refresh_kiro_model_catalog_snapshot(&codex_home, &kiro_auth_secret_from_context(&context))
+            .is_ok();
     state.profiles.insert(
         profile_name.clone(),
         ProfileEntry {
@@ -188,7 +197,13 @@ pub(crate) fn handle_import_kiro_profile(args: &ImportProfileArgs) -> Result<()>
         state.active_profile = Some(profile_name.clone());
     }
     state.save(&paths)?;
-    render_kiro_import_result(&state, &profile_name, &context, false)?;
+    render_kiro_import_result(
+        &state,
+        &profile_name,
+        &context,
+        false,
+        model_catalog_refreshed,
+    )?;
     audit_kiro_import(&state, &profile_name, &context, false);
     Ok(())
 }
@@ -198,6 +213,7 @@ fn render_kiro_import_result(
     profile_name: &str,
     context: &KiroImportContext,
     updated_existing: bool,
+    model_catalog_refreshed: bool,
 ) -> Result<()> {
     let mut fields = vec![
         (
@@ -238,6 +254,9 @@ fn render_kiro_import_result(
     if state.active_profile.as_deref() == Some(profile_name) {
         fields.push(("Active".to_string(), profile_name.to_string()));
     }
+    if let Some(warning) = kiro_model_catalog_warning(model_catalog_refreshed) {
+        fields.push(("Models".to_string(), warning.to_string()));
+    }
     print_profile_panel(
         if updated_existing {
             "Profile Updated"
@@ -246,6 +265,10 @@ fn render_kiro_import_result(
         },
         &fields,
     )
+}
+
+fn kiro_model_catalog_warning(refreshed: bool) -> Option<&'static str> {
+    (!refreshed).then_some("Catalog refresh failed; re-import this Kiro profile to retry.")
 }
 
 fn audit_kiro_import(
@@ -623,8 +646,8 @@ fn write_kiro_auth_secret(codex_home: &Path, secret: &KiroAuthSecret) -> Result<
     )
 }
 
-fn refresh_kiro_model_catalog_snapshot(codex_home: &Path, secret: &KiroAuthSecret) {
-    let _ = write_kiro_model_catalog_snapshot(codex_home, secret);
+fn refresh_kiro_model_catalog_snapshot(codex_home: &Path, secret: &KiroAuthSecret) -> Result<()> {
+    write_kiro_model_catalog_snapshot(codex_home, secret)
 }
 
 pub(crate) fn write_kiro_model_catalog_snapshot(
@@ -949,6 +972,15 @@ mod tests {
                 assert!(!rendered.contains(raw), "{rendered}");
             }
         }
+    }
+
+    #[test]
+    fn failed_kiro_model_catalog_refresh_is_user_visible_without_error_details() {
+        let warning = kiro_model_catalog_warning(false).unwrap();
+        assert!(warning.contains("Catalog refresh failed"));
+        assert!(!warning.contains("/tmp/"));
+        assert!(!warning.contains("token"));
+        assert_eq!(kiro_model_catalog_warning(true), None);
     }
 
     fn write_fake_kiro_binary(root: &Path) -> PathBuf {

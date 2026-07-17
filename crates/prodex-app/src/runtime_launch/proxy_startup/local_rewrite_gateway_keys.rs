@@ -22,6 +22,7 @@ use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayVirtualKeyStoreFile, runtime_gateway_virtual_key_effective_id,
     runtime_gateway_virtual_key_entry_from_stored,
 };
+use super::local_rewrite_gateway_usage::runtime_gateway_try_reserve_usage_delta;
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
 use super::provider_bridge::runtime_provider_gateway_cost_for_request;
@@ -192,13 +193,6 @@ pub(super) fn runtime_gateway_virtual_key_store_load_strict(
         );
     })?;
     Ok(runtime_gateway_prepare_virtual_key_store(store))
-}
-
-pub(super) fn runtime_gateway_virtual_key_store_load(
-    state_store: &RuntimeGatewayStateStore,
-    log_path: &Path,
-) -> RuntimeGatewayVirtualKeyStoreFile {
-    runtime_gateway_virtual_key_store_load_strict(state_store, log_path).unwrap_or_default()
 }
 
 pub(super) fn runtime_gateway_request_header_virtual_key(
@@ -480,6 +474,36 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         inspection.clone(),
     )
     .map_err(runtime_gateway_application_admission_rejection)?;
+    let Some(usage_delta_permit) = runtime_gateway_try_reserve_usage_delta(shared) else {
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_accounting_queue_saturated",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("queue", "usage"),
+                ],
+            ),
+        );
+        return Err(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into(),
+        );
+    };
+    let Some(reconciliation_permit) = shared.gateway_usage.reconciliation.try_reserve() else {
+        runtime_proxy_log(
+            &shared.runtime_shared,
+            runtime_proxy_structured_log_message(
+                "gateway_accounting_queue_saturated",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("queue", "reconciliation"),
+                ],
+            ),
+        );
+        return Err(
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable.into(),
+        );
+    };
     if let Some(rate_limit) = virtual_key_plan.distributed_rate_limit.as_ref() {
         drop(usage.take());
         runtime_gateway_distributed_rate_limit_admission(shared, rate_limit)?;
@@ -523,9 +547,13 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         None
     };
     if usage.is_none() {
-        usage = Some(shared.gateway_usage.usage.lock().map_err(|_| {
-            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
-        })?);
+        usage = Some(
+            shared
+                .gateway_usage
+                .usage
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
     }
     let Some(usage_map) = usage.as_deref_mut() else {
         return Err(
@@ -535,31 +563,50 @@ pub(super) fn runtime_gateway_virtual_key_admission(
     let usage_entry = usage_map.entry(admission.key_name.clone()).or_default();
     apply_gateway_virtual_key_usage_update(usage_entry, usage_update);
     drop(usage);
-    if let Ok(mut request_ids) = shared.gateway_usage.request_ids.lock() {
-        request_ids.insert(request_id);
-    }
+    shared
+        .gateway_usage
+        .request_ids
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(request_id);
     let typed_request_id = format!("prodex-{typed_request_id}");
-    if let Ok(mut typed_request_ids) = shared.gateway_usage.typed_request_ids.lock() {
-        typed_request_ids.insert(request_id, typed_request_id.clone());
-    }
-    if let Some(state) = durable_reservation
-        && let Ok(mut durable_reservations) = shared.gateway_usage.durable_reservations.lock()
-    {
-        durable_reservations.insert(request_id, state);
+    shared
+        .gateway_usage
+        .typed_request_ids
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(request_id, typed_request_id.clone());
+    if let Some(state) = durable_reservation {
+        shared
+            .gateway_usage
+            .durable_reservations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(request_id, state);
     }
     let call_id = format!("prodex-{call_id}");
-    if let Ok(mut call_ids) = shared.gateway_usage.call_ids.lock() {
-        call_ids.insert(request_id, call_id.clone());
-    }
-    if let Ok(mut ledger_scopes) = shared.gateway_usage.ledger_scopes.lock() {
-        ledger_scopes.insert(
+    shared
+        .gateway_usage
+        .call_ids
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(request_id, call_id.clone());
+    shared
+        .gateway_usage
+        .ledger_scopes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(
             request_id,
             RuntimeGatewayLedgerScope {
                 key_name: admission.key_name.clone(),
                 tenant_id: key.tenant_id.clone(),
             },
         );
-    }
+    shared
+        .gateway_usage
+        .reconciliation
+        .commit(request_id, reconciliation_permit);
     schedule_runtime_gateway_virtual_key_usage_save(
         shared,
         RuntimeGatewayVirtualKeyUsageDelta {
@@ -579,6 +626,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             estimated_cost_microusd: admission.estimated_cost_microusd,
             created_at_epoch: runtime_gateway_unix_epoch_seconds(),
         },
+        usage_delta_permit,
     );
     runtime_proxy_log(
         &shared.runtime_shared,

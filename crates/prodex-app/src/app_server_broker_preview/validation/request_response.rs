@@ -1,9 +1,9 @@
 use super::super::super::app_server_broker_protocol::app_server_broker_lifecycle_response_schema_file;
-use super::ValidationFailure;
 use super::payload::{
     frame_string, frame_value, is_valid_turn_status, preview_id_key, thread_object_has_context,
     thread_response_has_context, thread_response_has_valid_context, thread_status_failure_reason,
 };
+use super::{APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS, ValidationFailure};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -44,7 +44,11 @@ impl RequestResponseValidation {
                     let lifecycle_stage = preview["preview"]["summary"]["lifecycle_stage"]
                         .as_str()
                         .map(str::to_string);
-                    self.pending_requests.insert(id, lifecycle_stage);
+                    if self.pending_requests.len() < APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS
+                        || self.pending_requests.contains_key(&id)
+                    {
+                        self.pending_requests.insert(id, lifecycle_stage);
+                    }
                 }
             }
             Some("response") => {
@@ -81,16 +85,19 @@ impl RequestResponseValidation {
         let lifecycle_stage = preview["preview"]["summary"]["lifecycle_stage"]
             .as_str()
             .map(str::to_string);
-        if self
-            .pending_requests
-            .insert(id.clone(), lifecycle_stage)
-            .is_some()
-        {
+        if self.pending_requests.contains_key(&id) {
             return Some(
                 ValidationFailure::from_preview(preview, "duplicate_pending_request_id")
                     .request_id(id),
             );
         }
+        if self.pending_requests.len() >= APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS {
+            return Some(
+                ValidationFailure::from_preview(preview, "pending_request_limit_exceeded")
+                    .request_id(id),
+            );
+        }
+        self.pending_requests.insert(id, lifecycle_stage);
         None
     }
 

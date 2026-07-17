@@ -6532,8 +6532,34 @@ fn app_server_broker_command_stdio_live_mirrors_replay_fixture() {
 }
 
 #[test]
+fn app_server_broker_command_stdio_live_forwards_before_reader_eof() {
+    struct FailingReader;
+
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("synthetic read failure"))
+        }
+    }
+
+    let first = "{\"jsonrpc\":\"2.0\",\"method\":\"custom/event\",\"params\":{}}\n";
+    let reader = std::io::BufReader::new(std::io::Cursor::new(first).chain(FailingReader));
+    let mut passthrough = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    run_app_server_broker_stdio_live(reader, &mut passthrough, &mut diagnostics)
+        .expect_err("reader failure should stop live mode");
+
+    assert_eq!(String::from_utf8(passthrough).unwrap(), first);
+    assert!(String::from_utf8(diagnostics).unwrap().contains("custom/event"));
+}
+
+#[test]
 fn app_server_broker_command_stdio_live_wraps_validation_failure() {
-    let replay = app_server_broker_stdio_preview_malformed_replay_fixture();
+    let replay = "\
+{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"custom/ping\",\"params\":{}}\n\
+\n\
+{\"jsonrpc\":\"2.0\"\n\
+{\"jsonrpc\":\"2.0\",\"id\":\"resp-1\",\"result\":{\"ok\":true}}\n";
     let mut passthrough = Vec::new();
     let mut diagnostics = Vec::new();
 
@@ -6549,10 +6575,13 @@ fn app_server_broker_command_stdio_live_wraps_validation_failure() {
             .contains("failed to run app-server broker stdio live mode")
     );
     assert_eq!(
-        String::from_utf8(diagnostics).unwrap(),
-        app_server_broker_stdio_preview_malformed_expected_stream_fixture()
+        String::from_utf8(passthrough).unwrap(),
+        "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"custom/ping\",\"params\":{}}\n\n"
     );
-    assert_eq!(String::from_utf8(passthrough).unwrap(), "");
+    let diagnostics = String::from_utf8(diagnostics).unwrap();
+    assert!(diagnostics.contains("\"error\":\"invalid_json\""));
+    assert!(diagnostics.contains("\"line\":3"));
+    assert!(!diagnostics.contains("resp-1"));
 }
 
 #[test]

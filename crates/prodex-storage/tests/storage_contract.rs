@@ -2087,20 +2087,19 @@ fn usage_reconciliation_plan_rejects_cross_tenant_record_storage_key() {
 }
 
 #[test]
-fn usage_reconciliation_plan_rejects_actual_usage_above_reserved() {
+fn usage_reconciliation_plan_commits_actual_usage_above_reserved() {
     let tenant_id = TenantId::new();
 
-    assert_eq!(
-        plan_usage_reconciliation(reconciliation_command(
-            tenant_id,
-            UsageAmount::new(10, 100),
-            UsageAmount::new(11, 90),
-        )),
-        Err(UsageReconciliationPlanError::ActualExceedsReserved {
-            reserved: UsageAmount::new(10, 100),
-            actual: UsageAmount::new(11, 90),
-        })
-    );
+    let plan = plan_usage_reconciliation(reconciliation_command(
+        tenant_id,
+        UsageAmount::new(10, 100),
+        UsageAmount::new(11, 110),
+    ))
+    .unwrap();
+
+    assert_eq!(plan.updated_snapshot.reserved, UsageAmount::ZERO);
+    assert_eq!(plan.reconciliation.commit.actual, UsageAmount::new(11, 110));
+    assert_eq!(plan.ledger_events.len(), 1);
 }
 
 #[test]

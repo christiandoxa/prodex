@@ -76,20 +76,12 @@ pub(super) fn runtime_gateway_postgres_load_durable_reservation_state(
 }
 
 pub(super) fn runtime_gateway_durable_actual_usage(
-    record: &prodex_domain::ReservationRecord,
     event: &RuntimeProviderGatewaySpendEvent,
-) -> (UsageAmount, bool) {
+) -> UsageAmount {
     let actual_tokens = event
         .input_tokens
         .unwrap_or_default()
         .saturating_add(event.output_tokens.unwrap_or_default());
     let actual_cost_micros = runtime_gateway_usd_to_microusd(event.cost_usd).unwrap_or_default();
-    let actual = UsageAmount::new(actual_tokens, actual_cost_micros);
-    if actual.exceeds(record.reserved) {
-        // ponytail: under-reserved requests still settle at the reserved estimate; once every
-        // request reserves enough output-side headroom, remove this clamp and trust actual usage.
-        (record.reserved, true)
-    } else {
-        (actual, false)
-    }
+    UsageAmount::new(actual_tokens, actual_cost_micros)
 }

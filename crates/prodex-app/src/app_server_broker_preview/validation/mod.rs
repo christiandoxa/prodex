@@ -10,6 +10,9 @@ use request_response::RequestResponseValidation;
 use serde_json::Value;
 use std::fmt;
 
+pub(super) const APP_SERVER_BROKER_MAX_ACTIVE_VALIDATION_ITEMS: usize = 4_096;
+const APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS: usize = 4_096;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ValidationFailure {
     pub(super) reason: &'static str,
@@ -110,6 +113,10 @@ pub(super) struct PreviewObservation {
 #[derive(Default)]
 pub(super) struct PreviewSession {
     previews: Vec<Value>,
+    preview_count: usize,
+    parsed_count: usize,
+    invalid_count: usize,
+    previews_truncated: bool,
     request_response: RequestResponseValidation,
     lifecycle: LifecycleValidation,
     lifecycle_payload: LifecyclePayloadValidation,
@@ -130,7 +137,7 @@ impl PreviewSession {
         self.request_response
             .annotate_response_schema(&mut preview, frame.as_ref());
         self.request_response.observe_for_schema_tracking(&preview);
-        self.previews.push(preview.clone());
+        self.record_preview(&preview);
         preview
     }
 
@@ -146,7 +153,7 @@ impl PreviewSession {
         let lifecycle_payload_failure = self
             .lifecycle_payload
             .observe_preview_and_frame(&preview, frame.as_ref());
-        self.previews.push(preview.clone());
+        self.record_preview(&preview);
         PreviewObservation {
             preview,
             lifecycle_failure,
@@ -159,15 +166,68 @@ impl PreviewSession {
         self.request_response.finish(line_index)
     }
 
+    fn record_preview(&mut self, preview: &Value) {
+        self.preview_count = self.preview_count.saturating_add(1);
+        if preview["preview"]["parse_ok"].as_bool().unwrap_or_default() {
+            self.parsed_count = self.parsed_count.saturating_add(1);
+        }
+        if preview["preview"]["summary"]["frame_kind"].as_str() == Some("invalid") {
+            self.invalid_count = self.invalid_count.saturating_add(1);
+        }
+        if self.previews.len() < APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS {
+            self.previews.push(preview.clone());
+        } else {
+            // ponytail: retain a bounded diagnostic window; use an external streaming sink if
+            // full-session frame history beyond this limit becomes operationally necessary.
+            self.previews_truncated = true;
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn into_previews(self) -> Vec<Value> {
         self.previews
     }
 
     pub(super) fn into_report_json(self) -> Value {
+        let mut report = app_server_broker_preview_report_from_previews(self.previews);
+        if self.previews_truncated {
+            report["line_count"] = self.preview_count.into();
+            report["parsed_count"] = self.parsed_count.into();
+            report["error_count"] = self.preview_count.saturating_sub(self.parsed_count).into();
+            report["frame_kind_counts"]["invalid"] = self.invalid_count.into();
+            report["previews_truncated"] = Value::Bool(true);
+            report["retained_preview_count"] = APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS.into();
+        }
         serde_json::json!({
             "object": "app_server_broker.preview_report",
-            "report": app_server_broker_preview_report_from_previews(self.previews),
+            "report": report,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_session_retains_a_bounded_report_window() {
+        let mut session = PreviewSession::default();
+        for line in 1..=APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS + 1 {
+            session.observe_line(
+                line,
+                r#"{"jsonrpc":"2.0","method":"custom/event","params":{}}"#,
+            );
+        }
+
+        let summary = session.into_report_json();
+        assert_eq!(
+            summary["report"]["line_count"].as_u64(),
+            Some((APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS + 1) as u64)
+        );
+        assert_eq!(
+            summary["report"]["previews"].as_array().unwrap().len(),
+            APP_SERVER_BROKER_MAX_RETAINED_PREVIEWS
+        );
+        assert_eq!(summary["report"]["previews_truncated"], Value::Bool(true));
     }
 }
