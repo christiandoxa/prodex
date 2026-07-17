@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.305.0 - 2026-07-17
+
+### Runtime
+
+- Harden accounting and broker reliability (`7356147`)
+
 ## 0.304.0 - 2026-07-17
 
 ### Misc
@@ -71,7 +77,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Resume live goals across profiles (`724212c`)
-
-## 0.293.0 - 2026-07-15
-
-- No grouped changes.
