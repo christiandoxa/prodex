@@ -61,7 +61,6 @@ fn production_gateway_resolves_projected_credentials_and_rejects_raw_cli_secret(
         production: true,
         projected_root: Some(secret_root),
         projected_provider: Some("external".to_string()),
-        ..Default::default()
     };
 
     let config = resolve_gateway_launch_config_with_secrets(
