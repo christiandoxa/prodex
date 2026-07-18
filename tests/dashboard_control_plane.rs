@@ -26,6 +26,17 @@ fn dashboard_control_plane_endpoints_work_and_redact_secrets() {
     let shared_codex = root.join("shared-codex");
     fs::create_dir_all(&runtime_logs).expect("runtime log root should be created");
     fs::create_dir_all(&shared_codex).expect("shared codex root should be created");
+    let runtime_log = runtime_logs.join("prodex-runtime-dashboard-test.log");
+    fs::write(
+        &runtime_log,
+        "runtime_ready route=responses\nauthorization=Bearer sk-secret-dashboard-test\n",
+    )
+    .expect("runtime log should be written");
+    fs::write(
+        runtime_logs.join("prodex-runtime-latest.path"),
+        format!("{}\n", runtime_log.display()),
+    )
+    .expect("runtime log pointer should be written");
 
     let port = free_port();
     let server = spawn_dashboard(&root, &runtime_logs, &shared_codex, port);
@@ -33,6 +44,33 @@ fn dashboard_control_plane_endpoints_work_and_redact_secrets() {
     let state = wait_for_json(port, "/api/state");
     assert_eq!(state["profileCount"], 0);
     assert!(state["activeProfile"].is_null());
+
+    let health = get_json(port, "/healthz");
+    assert_eq!(health["status"], "ok");
+    assert_eq!(health["service"], "prodex-dashboard");
+
+    let logs = get_json(port, "/api/logs");
+    assert!(logs["lines"].as_array().unwrap().len() >= 2);
+    let logs_text = serde_json::to_string(&logs).unwrap();
+    assert!(logs_text.contains("runtime_ready"));
+    assert!(!logs_text.contains("sk-secret-dashboard-test"));
+    assert!(logs_text.contains("<redacted>"));
+
+    let (dashboard_head, dashboard_html) =
+        get_response(port, "/").expect("dashboard shell should respond");
+    assert!(
+        dashboard_head
+            .to_ascii_lowercase()
+            .contains("content-security-policy:")
+    );
+    assert!(dashboard_html.contains("Prodex Control Center"));
+    assert!(dashboard_html.contains("data-route=\"logs\""));
+    assert!(!dashboard_html.contains("innerHTML"));
+
+    let notices = get_text(port, "/third-party-notices")
+        .expect("third-party notices endpoint should respond");
+    assert!(notices.contains("OpenCodex"));
+    assert!(notices.contains("MIT License"));
 
     let usage = get_json(port, "/api/usage");
     assert_eq!(usage["summary"]["total"], 0);
@@ -93,6 +131,7 @@ fn dashboard_control_plane_endpoints_work_and_redact_secrets() {
         "/api/provider-presets",
         "/api/models",
         "/api/runtime-status",
+        "/api/logs",
     ] {
         let body = get_text(port, endpoint).unwrap_or_else(|err| panic!("{endpoint}: {err}"));
         assert!(
@@ -105,6 +144,104 @@ fn dashboard_control_plane_endpoints_work_and_redact_secrets() {
 
     drop(server);
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn dashboard_can_fall_back_when_the_requested_gui_port_is_busy() {
+    let occupied = TcpListener::bind("127.0.0.1:0").expect("occupied port should bind");
+    let port = occupied.local_addr().unwrap().port();
+    let root = temp_root("dashboard-port-fallback");
+    let runtime_logs = root.join("runtime-logs");
+    let shared_codex = root.join("shared-codex");
+    fs::create_dir_all(&runtime_logs).expect("runtime log root should be created");
+    fs::create_dir_all(&shared_codex).expect("shared codex root should be created");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .args([
+            "dashboard",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "--fallback-port",
+        ])
+        .env("PRODEX_HOME", &root)
+        .env("PRODEX_RUNTIME_LOG_DIR", &runtime_logs)
+        .env("PRODEX_SHARED_CODEX_HOME", &shared_codex)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("dashboard should spawn");
+
+    thread::sleep(Duration::from_millis(500));
+    assert!(
+        child
+            .try_wait()
+            .expect("child status should be readable")
+            .is_none(),
+        "dashboard should remain running on its fallback port"
+    );
+
+    let server = DashboardChild { child };
+    drop(server);
+    drop(occupied);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn gui_shortcut_opens_xdg_browser_and_keeps_serving() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_root("dashboard-linux-gui");
+    let runtime_logs = root.join("runtime-logs");
+    let shared_codex = root.join("shared-codex");
+    let bin_dir = root.join("bin");
+    let opener_output = root.join("opened-url.txt");
+    fs::create_dir_all(&runtime_logs).expect("runtime log root should be created");
+    fs::create_dir_all(&shared_codex).expect("shared codex root should be created");
+    fs::create_dir_all(&bin_dir).expect("test bin directory should be created");
+    let opener = bin_dir.join("xdg-open");
+    fs::write(
+        &opener,
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" > \"$PRODEX_GUI_TEST_OUTPUT\"\n",
+    )
+    .expect("mock xdg-open should be written");
+    fs::set_permissions(&opener, fs::Permissions::from_mode(0o755))
+        .expect("mock xdg-open should be executable");
+
+    let port = free_port();
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let child = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .args(["gui", "--host", "127.0.0.1", "--port", &port.to_string()])
+        .env("PATH", path)
+        .env("PRODEX_HOME", &root)
+        .env("PRODEX_RUNTIME_LOG_DIR", &runtime_logs)
+        .env("PRODEX_SHARED_CODEX_HOME", &shared_codex)
+        .env("PRODEX_GUI_TEST_OUTPUT", &opener_output)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("GUI shortcut should spawn");
+    let server = DashboardChild { child };
+
+    let health = wait_for_json(port, "/healthz");
+    assert_eq!(health["status"], "ok");
+    for _ in 0..80 {
+        if let Ok(url) = fs::read_to_string(&opener_output) {
+            assert_eq!(url.trim(), format!("http://127.0.0.1:{port}"));
+            drop(server);
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    panic!("GUI shortcut did not invoke xdg-open");
 }
 
 fn spawn_dashboard(
@@ -150,6 +287,10 @@ fn try_get_json(port: u16, path: &str) -> Result<Value, Box<dyn std::error::Erro
 }
 
 fn get_text(port: u16, path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(get_response(port, path)?.1)
+}
+
+fn get_response(port: u16, path: &str) -> Result<(String, String), Box<dyn std::error::Error>> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))?;
     stream.set_read_timeout(Some(Duration::from_secs(3)))?;
     write!(
@@ -166,9 +307,9 @@ fn get_text(port: u16, path: &str) -> Result<String, Box<dyn std::error::Error>>
         .to_ascii_lowercase()
         .contains("transfer-encoding: chunked")
     {
-        return decode_chunked(body);
+        return Ok((head.to_string(), decode_chunked(body)?));
     }
-    Ok(body.to_string())
+    Ok((head.to_string(), body.to_string()))
 }
 
 fn decode_chunked(body: &str) -> Result<String, Box<dyn std::error::Error>> {

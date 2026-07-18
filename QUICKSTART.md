@@ -138,7 +138,8 @@ prodex quota --all --detail --provider openai
 prodex quota --all --provider deepseek --once
 prodex quota --all --provider local --base-url http://127.0.0.1:8131/v1 --once
 prodex redeem main
-prodex dashboard
+prodex gui
+prodex s gui
 prodex session list
 prodex info
 prodex status
@@ -156,7 +157,7 @@ In the live `prodex quota --all --detail` view, press `f` to cycle provider filt
 
 For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits when the upstream usage API reports them. Use `prodex redeem <profile>` when you explicitly want to redeem one reset credit on a named profile, even if the 5h and weekly quota windows still have remaining quota. If either quota window resets within 1 hour, Prodex asks before consuming the credit; pass `--yes` to skip that prompt.
 
-`prodex dashboard` starts a localhost browser control plane, defaulting to `http://127.0.0.1:8765`. Happy path: open the dashboard, choose a provider setup command, pick a recommended model, run `prodex s` or `prodex s --provider ...`, then check quota/logs. The dashboard shows configured profiles, active account controls, provider setup commands for OpenAI, Gemini, Anthropic, Copilot, DeepSeek, Kiro, and local OpenAI-compatible servers, model catalog metadata, runtime/gateway pointers, and live quota usage using the same quota collectors as `prodex quota`. It generates commands for provider secrets instead of storing them. Use `prodex dashboard --port 0` to bind a free port, or `--base-url` to point quota checks at a custom Codex-compatible backend. The dashboard has no password auth, so keep it bound to localhost unless the network is trusted.
+`prodex gui` and `prodex s gui` start the same localhost browser control plane, defaulting to `http://127.0.0.1:8765`. They open the system browser and fall back to a free port when 8765 is busy; Linux uses `xdg-open` and keeps serving with a printed URL when no graphical opener exists. Happy path: choose a provider setup command, pick a recommended model, run `prodex s` or `prodex s --provider ...`, then check quota/logs. The responsive control center shows configured profiles, active account controls, provider setup commands for OpenAI, Gemini, Anthropic, Copilot, DeepSeek, Kiro, and local OpenAI-compatible servers, model metadata, quota, a bounded redacted runtime-log tail, and runtime/gateway commands. It generates commands for provider secrets instead of storing them. `prodex dashboard` remains the foreground non-opening form for scripts or headless systems; use `prodex dashboard --port 0` to bind a free port or `--base-url` to point quota checks at a custom Codex-compatible backend. The dashboard has no password auth, so keep it bound to localhost unless the network is trusted.
 
 Use `prodex session list` to inspect shared Codex sessions, or `prodex session current` to show sessions started from the current directory. Add `--parent-only` when you only want resumable parent sessions.
 

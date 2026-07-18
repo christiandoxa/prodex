@@ -132,6 +132,7 @@ pub enum Commands {
     )]
     Ping(PingCommands),
     #[command(
+        visible_alias = "gui",
         about = "Serve a local browser dashboard for profiles, active account, and quota usage."
     )]
     Dashboard(DashboardArgs),
@@ -200,6 +201,7 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let raw_args = rewrite_gui_args(&raw_args);
     let raw_args = rewrite_super_doctor_args(&raw_args);
     let raw_args = rewrite_super_expose_args(&raw_args);
     let raw_args = rewrite_super_provider_alias_args(&raw_args);
@@ -209,6 +211,28 @@ where
         raw_args
     };
     Ok(Cli::try_parse_from(parse_args)?.command)
+}
+
+fn rewrite_gui_args(args: &[OsString]) -> Vec<OsString> {
+    let command = args.get(1).and_then(|arg| arg.to_str());
+    let gui_arg_offset = match command {
+        Some("gui") => 2,
+        Some("s" | "super") if args.get(2).and_then(|arg| arg.to_str()) == Some("gui") => 3,
+        _ => return args.to_vec(),
+    };
+    let mut rewritten = Vec::with_capacity(args.len() + 1);
+    rewritten.push(
+        args.first()
+            .cloned()
+            .unwrap_or_else(|| OsString::from("prodex")),
+    );
+    rewritten.extend([
+        OsString::from("dashboard"),
+        OsString::from("--open"),
+        OsString::from("--fallback-port"),
+    ]);
+    rewritten.extend(args.iter().skip(gui_arg_offset).cloned());
+    rewritten
 }
 
 fn rewrite_super_doctor_args(args: &[OsString]) -> Vec<OsString> {
@@ -312,6 +336,7 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "redeem"
             | "ping"
             | "dashboard"
+            | "gui"
             | "run"
             | "caveman"
             | "rtk"

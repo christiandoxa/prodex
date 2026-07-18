@@ -4,8 +4,10 @@ use prodex_provider_core::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::ffi::OsString;
 use std::io::Read;
 use std::net::SocketAddr;
+use std::process::{Command, Stdio};
 use terminal_ui::print_panel;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
@@ -30,6 +32,9 @@ const DASHBOARD_PROVIDER_IDS: &[ProviderId] = &[
     ProviderId::Local,
 ];
 const DASHBOARD_MAX_JSON_BODY_BYTES: usize = 64 * 1024;
+const DASHBOARD_RUNTIME_LOG_TAIL_BYTES: usize = 128 * 1024;
+const DASHBOARD_RUNTIME_LOG_MAX_LINES: usize = 200;
+const DASHBOARD_RUNTIME_LOG_MAX_LINE_CHARS: usize = 2_000;
 
 #[derive(Debug)]
 struct DashboardJsonBodyTooLarge {
@@ -68,14 +73,41 @@ struct AddProfileRequest {
 
 pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()> {
     let bind = format!("{}:{}", args.host.trim(), args.port);
-    let server = Server::http(&bind).map_err(|err| anyhow!("failed to bind {bind}: {err}"))?;
+    let (server, fallback_warning) = match Server::http(&bind) {
+        Ok(server) => (server, None),
+        Err(primary_error) if args.fallback_port && args.port != 0 => {
+            let fallback_bind = format!("{}:0", args.host.trim());
+            let server = Server::http(&fallback_bind).map_err(|fallback_error| {
+                anyhow!(
+                    "failed to bind {bind}: {primary_error}; fallback {fallback_bind} failed: {fallback_error}"
+                )
+            })?;
+            (
+                server,
+                Some(format!(
+                    "port {} was unavailable; using an OS-assigned port",
+                    args.port
+                )),
+            )
+        }
+        Err(err) => return Err(anyhow!("failed to bind {bind}: {err}")),
+    };
     let addr = server.server_addr();
     let url = dashboard_url(addr);
-    let warning = (!bind.starts_with("127.0.0.1:")
-        && !bind.starts_with("localhost:")
-        && !bind.starts_with("[::1]:"))
-    .then_some("dashboard has no password auth; bind localhost unless the network is trusted");
-    print_dashboard_status(&url, warning)?;
+    let warning = if !is_local_dashboard_host(args.host.trim()) {
+        Some(
+            "dashboard has no password auth; bind localhost unless the network is trusted"
+                .to_string(),
+        )
+    } else {
+        fallback_warning
+    };
+    print_dashboard_status(&url, warning.as_deref())?;
+    if args.open
+        && let Err(err) = open_dashboard_browser(&url)
+    {
+        eprintln!("failed to open the dashboard browser: {err:#}\nOpen {url} manually.");
+    }
 
     let dashboard = DashboardServer {
         paths,
@@ -104,10 +136,64 @@ fn dashboard_status_fields(url: &str, warning: Option<&str>) -> Vec<(String, Str
 
 fn dashboard_url(addr: tiny_http::ListenAddr) -> String {
     match addr.to_ip() {
-        Some(SocketAddr::V4(addr)) => format!("http://{}:{}", addr.ip(), addr.port()),
-        Some(SocketAddr::V6(addr)) => format!("http://[{}]:{}", addr.ip(), addr.port()),
+        Some(SocketAddr::V4(addr)) => {
+            let host = if addr.ip().is_unspecified() {
+                std::net::Ipv4Addr::LOCALHOST
+            } else {
+                *addr.ip()
+            };
+            format!("http://{host}:{}", addr.port())
+        }
+        Some(SocketAddr::V6(addr)) => {
+            let host = if addr.ip().is_unspecified() {
+                std::net::Ipv6Addr::LOCALHOST
+            } else {
+                *addr.ip()
+            };
+            format!("http://[{host}]:{}", addr.port())
+        }
         None => "http://127.0.0.1:8765".to_string(),
     }
+}
+
+fn is_local_dashboard_host(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
+}
+
+fn open_dashboard_browser(url: &str) -> Result<()> {
+    let (program, args) = dashboard_browser_command(url);
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("failed to start {program}"))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn dashboard_browser_command(url: &str) -> (&'static str, Vec<OsString>) {
+    ("open", vec![OsString::from(url)])
+}
+
+#[cfg(target_os = "windows")]
+fn dashboard_browser_command(url: &str) -> (&'static str, Vec<OsString>) {
+    (
+        "rundll32",
+        vec![
+            OsString::from("url.dll,FileProtocolHandler"),
+            OsString::from(url),
+        ],
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn dashboard_browser_command(url: &str) -> (&'static str, Vec<OsString>) {
+    ("xdg-open", vec![OsString::from(url)])
 }
 
 impl DashboardServer {
@@ -118,6 +204,22 @@ impl DashboardServer {
             (Method::Get, "/") | (Method::Get, "/dashboard") => {
                 respond_html(request, DASHBOARD_HTML)
             }
+            (Method::Get, "/healthz") => respond_json(
+                request,
+                json!({
+                    "status": "ok",
+                    "service": "prodex-dashboard",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }),
+            ),
+            (Method::Get, "/third-party-notices") => respond_status(
+                request,
+                StatusCode(200),
+                "text/plain; charset=utf-8",
+                include_str!("../../../THIRD_PARTY_NOTICES.md")
+                    .as_bytes()
+                    .to_vec(),
+            ),
             (Method::Get, "/api/state") => respond_json_result(request, self.state_json()),
             (Method::Get, "/api/accounts") => respond_json_result(request, self.accounts_json()),
             (Method::Get, "/api/usage") => respond_json_result(request, self.usage_json()),
@@ -129,6 +231,7 @@ impl DashboardServer {
             (Method::Get, "/api/runtime-status") => {
                 respond_json_result(request, self.runtime_status_json())
             }
+            (Method::Get, "/api/logs") => respond_json_result(request, self.logs_json()),
             (Method::Post, "/api/profile") => self.handle_add_profile(request),
             (Method::Post, "/api/profile/active") => self.handle_set_active(request),
             (Method::Delete, path) if path.starts_with("/api/profile/") => {
@@ -154,7 +257,7 @@ impl DashboardServer {
                 "managedProfilesRoot": self.paths.managed_profiles_root.display().to_string(),
             },
             "commands": {
-                "open": "prodex dashboard",
+                "open": "prodex gui",
                 "login": "prodex login --profile <name>",
                 "addManagedProfile": "prodex profile add <name> --activate",
                 "importCurrent": "prodex profile import-current <name>",
@@ -314,6 +417,36 @@ impl DashboardServer {
                 "providersCommand": "prodex gateway providers --json",
                 "modelsCommand": "prodex gateway models --provider <provider> --json",
             }
+        }))
+    }
+
+    fn logs_json(&self) -> Result<Value> {
+        let Some(path) = runtime_proxy_latest_log_path_from_pointer() else {
+            return Ok(json!({ "path": null, "lines": [] }));
+        };
+        if !path.exists() {
+            return Ok(json!({ "path": path.display().to_string(), "lines": [] }));
+        }
+
+        let tail =
+            prodex_runtime_doctor::read_runtime_log_tail(&path, DASHBOARD_RUNTIME_LOG_TAIL_BYTES)?;
+        let text = String::from_utf8_lossy(&tail);
+        let mut lines = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .rev()
+            .take(DASHBOARD_RUNTIME_LOG_MAX_LINES)
+            .map(|line| {
+                redaction::redaction_text_snippet(
+                    &redaction::redaction_redact_secret_like_text(line),
+                    DASHBOARD_RUNTIME_LOG_MAX_LINE_CHARS,
+                )
+            })
+            .collect::<Vec<_>>();
+        lines.reverse();
+        Ok(json!({
+            "path": path.display().to_string(),
+            "lines": lines,
         }))
     }
 
@@ -752,11 +885,12 @@ fn respond_json_result(request: Request, result: Result<Value>) -> Result<()> {
 }
 
 fn respond_error(request: Request, status: StatusCode, err: anyhow::Error) -> Result<()> {
+    let message = redaction::redaction_redact_secret_like_text(&err.to_string());
     respond_status(
         request,
         status,
         "application/json",
-        serde_json::to_vec(&json!({ "error": err.to_string() }))
+        serde_json::to_vec(&json!({ "error": message }))
             .context("failed to serialize dashboard error")?,
     )
 }
@@ -780,10 +914,22 @@ fn respond_status(
         .map_err(|_| anyhow!("failed to build dashboard content-type header"))?;
     let cache_control = Header::from_bytes("cache-control", "no-store")
         .map_err(|_| anyhow!("failed to build dashboard cache-control header"))?;
+    let content_type_options = Header::from_bytes("x-content-type-options", "nosniff")
+        .map_err(|_| anyhow!("failed to build dashboard content-type-options header"))?;
+    let referrer_policy = Header::from_bytes("referrer-policy", "no-referrer")
+        .map_err(|_| anyhow!("failed to build dashboard referrer-policy header"))?;
+    let content_security_policy = Header::from_bytes(
+        "content-security-policy",
+        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    )
+    .map_err(|_| anyhow!("failed to build dashboard content-security-policy header"))?;
     let response = Response::from_data(body)
         .with_status_code(status)
         .with_header(content_type)
-        .with_header(cache_control);
+        .with_header(cache_control)
+        .with_header(content_type_options)
+        .with_header(referrer_policy)
+        .with_header(content_security_policy);
     request
         .respond(response)
         .map_err(|err| anyhow!("failed to send dashboard response: {err}"))
@@ -839,6 +985,15 @@ mod tests {
         )));
     }
 
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[test]
+    fn dashboard_browser_uses_xdg_open_on_linux_and_unix() {
+        let (program, args) = dashboard_browser_command("http://127.0.0.1:8765");
+
+        assert_eq!(program, "xdg-open");
+        assert_eq!(args, vec![OsString::from("http://127.0.0.1:8765")]);
+    }
+
     #[test]
     fn dashboard_state_json_works_with_empty_state() {
         let paths = dashboard_test_paths("state-json-empty-state");
@@ -860,7 +1015,7 @@ mod tests {
         );
 
         let commands = &value["commands"];
-        assert_eq!(commands["open"], "prodex dashboard");
+        assert_eq!(commands["open"], "prodex gui");
         assert!(commands["quota"].as_str().is_some());
     }
 
