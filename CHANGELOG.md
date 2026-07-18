@@ -2,6 +2,10 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.317.0 - 2026-07-19
+
+- No grouped changes.
+
 ## 0.316.0 - 2026-07-19
 
 ### Runtime
@@ -76,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Add playwright shortcut (`5855b89`)
-
-## 0.305.0 - 2026-07-17
-
-### Runtime
-
-- Harden accounting and broker reliability (`7356147`)
