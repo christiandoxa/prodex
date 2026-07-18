@@ -6,8 +6,8 @@
   },
   {
     "file": "crates/prodex-app/src/dashboard.rs",
-    "maxLines": 1205,
-    "reason": "The local control-plane HTTP server, redacted JSON endpoints, provider/model catalog assembly, and dashboard tests remain capped while endpoint handlers are split from server orchestration."
+    "maxLines": 1107,
+    "reason": "The local control-plane JSON endpoints, provider/model catalog assembly, and dashboard tests remain capped after HTTP serving, browser launch, request parsing, and response transport moved to dashboard/server.rs."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
