@@ -272,7 +272,7 @@ fn runtime_gemini_load_nested_gitignore_rules(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("");
-        if !path.is_dir() || name == ".git" {
+        if !entry.file_type().is_ok_and(|file_type| file_type.is_dir()) || name == ".git" {
             continue;
         }
         if use_default_excludes && gemini_provider_core_skip_context_path_name(name) {
@@ -463,6 +463,34 @@ mod tests {
         );
 
         assert_eq!(scanned, RUNTIME_GEMINI_CONTEXT_SCAN_LIMIT);
+        assert!(rules.is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gemini_context_filter_does_not_follow_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let directory = std::env::temp_dir().join(format!(
+            "prodex-gemini-ignore-symlink-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        symlink(&directory, directory.join("cycle")).unwrap();
+
+        let mut rules = Vec::new();
+        let mut scanned = 0;
+        runtime_gemini_load_nested_gitignore_rules(
+            &directory,
+            &directory,
+            false,
+            &mut rules,
+            &mut scanned,
+        );
+
+        assert_eq!(scanned, 1);
         assert!(rules.is_empty());
         fs::remove_dir_all(directory).unwrap();
     }

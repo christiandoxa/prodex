@@ -4,8 +4,9 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct DashboardChild {
     child: Child,
@@ -147,6 +148,141 @@ fn dashboard_control_plane_endpoints_work_and_redact_secrets() {
 }
 
 #[test]
+fn dashboard_rejects_cross_origin_mutations_and_non_loopback_hosts() {
+    let root = temp_root("dashboard-request-boundary");
+    let runtime_logs = root.join("runtime-logs");
+    let shared_codex = root.join("shared-codex");
+    fs::create_dir_all(&runtime_logs).expect("runtime log root should be created");
+    fs::create_dir_all(&shared_codex).expect("shared codex root should be created");
+
+    let port = free_port();
+    let server = spawn_dashboard(&root, &runtime_logs, &shared_codex, port);
+    wait_for_json(port, "/healthz");
+
+    let (head, body) = send_request(
+        port,
+        "GET /api/state HTTP/1.1\r\nHost: attacker.example\r\nConnection: close\r\n\r\n",
+    )
+    .unwrap();
+    assert!(head.contains(" 403 "));
+    assert!(body.contains("forbidden_host"));
+
+    let payload = r#"{"name":"secure-profile","activate":true}"#;
+    let without_origin = format!(
+        "POST /api/profile HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        payload.len()
+    );
+    let (head, body) = send_request(port, &without_origin).unwrap();
+    assert!(head.contains(" 403 "));
+    assert!(body.contains("forbidden_origin"));
+
+    let wrong_content_type = format!(
+        "POST /api/profile HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        payload.len()
+    );
+    let (head, body) = send_request(port, &wrong_content_type).unwrap();
+    assert!(head.contains(" 415 "));
+    assert!(body.contains("unsupported_media_type"));
+
+    let valid = format!(
+        "POST /api/profile HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        payload.len()
+    );
+    let (head, _) = send_request(port, &valid).unwrap();
+    assert!(head.contains(" 200 "));
+    assert_eq!(get_json(port, "/api/state")["profileCount"], 1);
+
+    drop(server);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn dashboard_rejects_non_loopback_bind() {
+    let root = temp_root("dashboard-non-loopback");
+    let output = Command::new(env!("CARGO_BIN_EXE_prodex"))
+        .args(["dashboard", "--host", "0.0.0.0", "--port", "0"])
+        .env("PRODEX_HOME", &root)
+        .output()
+        .expect("dashboard should start");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("dashboard only accepts loopback --host values")
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn dashboard_keeps_serving_while_usage_refresh_is_slow() {
+    let root = temp_root("dashboard-concurrency");
+    let runtime_logs = root.join("runtime-logs");
+    let shared_codex = root.join("shared-codex");
+    fs::create_dir_all(&runtime_logs).expect("runtime log root should be created");
+    fs::create_dir_all(&shared_codex).expect("shared codex root should be created");
+    write_secret_state(&root);
+    fs::write(
+        root.join("profiles/openai-main/auth.json"),
+        r#"{"tokens":{"access_token":"test-token","account_id":"main-account"}}"#,
+    )
+    .expect("quota auth should be written");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for directory in [
+            root.as_path(),
+            &root.join("profiles"),
+            &root.join("profiles/openai-main"),
+        ] {
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        fs::set_permissions(
+            root.join("profiles/openai-main/auth.json"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+    }
+
+    let usage_listener = TcpListener::bind("127.0.0.1:0").expect("usage server should bind");
+    let usage_addr = usage_listener.local_addr().unwrap();
+    let (accepted_tx, accepted_rx) = mpsc::channel();
+    let usage_server = thread::spawn(move || {
+        let (mut stream, _) = usage_listener
+            .accept()
+            .expect("usage request should arrive");
+        accepted_tx.send(()).unwrap();
+        thread::sleep(Duration::from_millis(1_500));
+        stream
+            .write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            )
+            .unwrap();
+    });
+
+    let port = free_port();
+    let base_url = format!("http://{usage_addr}/backend-api");
+    let dashboard =
+        spawn_dashboard_with_base_url(&root, &runtime_logs, &shared_codex, port, Some(&base_url));
+    wait_for_json(port, "/healthz");
+    let usage_request = thread::spawn(move || get_text(port, "/api/usage").unwrap());
+    accepted_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("usage request should reach the slow upstream");
+
+    let started = Instant::now();
+    assert_eq!(get_json(port, "/healthz")["status"], "ok");
+    assert!(
+        started.elapsed() < Duration::from_millis(800),
+        "health endpoint was serialized behind the usage refresh"
+    );
+
+    usage_request.join().unwrap();
+    usage_server.join().unwrap();
+    drop(dashboard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn dashboard_can_fall_back_when_the_requested_gui_port_is_busy() {
     let occupied = TcpListener::bind("127.0.0.1:0").expect("occupied port should bind");
     let port = occupied.local_addr().unwrap().port();
@@ -257,14 +393,28 @@ fn spawn_dashboard(
     shared_codex: &Path,
     port: u16,
 ) -> DashboardChild {
-    let child = Command::new(env!("CARGO_BIN_EXE_prodex"))
-        .args([
-            "dashboard",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-        ])
+    spawn_dashboard_with_base_url(root, runtime_logs, shared_codex, port, None)
+}
+
+fn spawn_dashboard_with_base_url(
+    root: &Path,
+    runtime_logs: &Path,
+    shared_codex: &Path,
+    port: u16,
+    base_url: Option<&str>,
+) -> DashboardChild {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_prodex"));
+    command.args([
+        "dashboard",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        &port.to_string(),
+    ]);
+    if let Some(base_url) = base_url {
+        command.args(["--base-url", base_url]);
+    }
+    let child = command
         .env("PRODEX_HOME", root)
         .env("PRODEX_RUNTIME_LOG_DIR", runtime_logs)
         .env("PRODEX_SHARED_CODEX_HOME", shared_codex)
@@ -298,18 +448,25 @@ fn get_text(port: u16, path: &str) -> Result<String, Box<dyn std::error::Error>>
 }
 
 fn get_response(port: u16, path: &str) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    let response = send_request(port, &request)?;
+    assert!(
+        response.0.contains(" 200 "),
+        "unexpected response head: {}",
+        response.0
+    );
+    Ok(response)
+}
+
+fn send_request(port: u16, request: &str) -> Result<(String, String), Box<dyn std::error::Error>> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))?;
     stream.set_read_timeout(Some(Duration::from_secs(3)))?;
-    write!(
-        stream,
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-    )?;
+    stream.write_all(request.as_bytes())?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
     let (head, body) = response
         .split_once("\r\n\r\n")
         .ok_or("invalid HTTP response")?;
-    assert!(head.contains(" 200 "), "unexpected response head: {head}");
     if head
         .to_ascii_lowercase()
         .contains("transfer-encoding: chunked")

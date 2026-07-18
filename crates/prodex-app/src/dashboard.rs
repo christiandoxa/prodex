@@ -722,13 +722,13 @@ mod tests {
     fn dashboard_status_fields_contain_url_and_warning() {
         let fields = dashboard_status_fields(
             "http://127.0.0.1:8765",
-            Some("dashboard has no password auth"),
+            Some("port 8765 was unavailable; using an OS-assigned port"),
         );
 
         assert!(fields.contains(&("URL".to_string(), "http://127.0.0.1:8765".to_string())));
         assert!(fields.contains(&(
             "Warning".to_string(),
-            "dashboard has no password auth".to_string()
+            "port 8765 was unavailable; using an OS-assigned port".to_string()
         )));
     }
 

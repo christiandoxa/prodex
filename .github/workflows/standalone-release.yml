@@ -194,6 +194,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Test native desktop launcher
+        if: ${{ matrix.can-native-smoke }}
+        shell: bash
+        run: cargo test --locked --target "${{ matrix.target }}" -p prodex-app --all-features --lib 'runtime_desktop::tests::' -- --test-threads=1
+
       - name: Build prodex
         shell: bash
         run: |
