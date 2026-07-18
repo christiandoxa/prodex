@@ -5,11 +5,12 @@
       "fix(gui): harden audited desktop and dashboard paths",
       "fix: remove unimplemented audited surfaces",
       "chore(release): release 0.312.0",
-      "chore(ci): allow reviewed 0.312.0 audit range"
+      "chore(ci): allow reviewed 0.312.0 audit range",
+      "fix(ci): satisfy Rust 1.97 clippy gate"
     ],
     "caps": {
-      "maxFiles": 46,
-      "maxBehaviorFiles": 30,
+      "maxFiles": 47,
+      "maxBehaviorFiles": 31,
       "maxLines": 1200,
       "maxFileLines": 185
     },
