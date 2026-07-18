@@ -1,7 +1,7 @@
 use super::*;
 use crate::runtime_desktop::{
     DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
-    prepare_runtime_overlay_home,
+    prepare_desktop_overlay_home, prepare_runtime_overlay_home,
 };
 #[cfg(test)]
 pub(crate) use prodex_caveman_assets::PRODEX_CAVEMAN_FULL_ASSETS_ENV;
@@ -99,7 +99,13 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.presidio_enabled {
             ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
-        let overlay_home = if self.configure_prodex_overlay {
+        let overlay_home = if self.desktop_command.is_some() {
+            prepare_desktop_overlay_home(
+                &prepared.paths,
+                &prepared.codex_home,
+                self.configure_prodex_overlay,
+            )?
+        } else if self.configure_prodex_overlay {
             prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?
         } else {
             prepare_runtime_overlay_home(&prepared.paths, &prepared.codex_home)?
@@ -392,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_plan_persists_runtime_proxy_config_for_native_app() {
+    fn desktop_plan_persists_proxy_config_and_shares_chat_state() {
         let root = env::temp_dir().join(format!(
             "prodex-desktop-plan-{}-{}",
             std::process::id(),
@@ -405,6 +411,8 @@ mod tests {
         create_codex_home_if_missing(&base_home).expect("base home should exist");
         std::fs::write(base_home.join("config.toml"), "model = 'gpt-5'\n")
             .expect("base config should write");
+        std::fs::write(base_home.join("state_5.sqlite"), "shared chat index")
+            .expect("base chat index should write");
         let paths = AppPaths {
             root: root.clone(),
             state_file: root.join("state.json"),
@@ -425,7 +433,7 @@ mod tests {
         strategy.configure_prodex_overlay = false;
         let prepared = PreparedRuntimeLaunch {
             paths,
-            codex_home: base_home,
+            codex_home: base_home.clone(),
             managed: false,
             runtime_proxy: None,
         };
@@ -463,6 +471,19 @@ mod tests {
             Some("http://127.0.0.1:2455/openai/v1")
         );
         assert!(config.get("approval_policy").is_none());
+        let overlay_state = plan.child.codex_home.join("state_5.sqlite");
+        assert!(
+            std::fs::symlink_metadata(&overlay_state)
+                .expect("desktop chat index metadata")
+                .file_type()
+                .is_symlink()
+        );
+        std::fs::write(&overlay_state, "desktop update").expect("desktop chat index should write");
+        assert_eq!(
+            std::fs::read_to_string(base_home.join("state_5.sqlite"))
+                .expect("base chat index should persist"),
+            "desktop update"
+        );
         prodex_runtime_launch::cleanup_runtime_launch_plan(&plan);
         let _ = std::fs::remove_dir_all(root);
     }

@@ -19,28 +19,62 @@ pub fn prepare_prodex_overlay_home(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true, false)
 }
 
 pub fn prepare_prodex_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, true)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, true, false)
 }
 
 pub fn prepare_runtime_overlay_home(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, false)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, false, false)
 }
 
 pub fn prepare_runtime_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, false)
+    prepare_prodex_overlay_home_internal(
+        managed_profiles_root,
+        base_codex_home,
+        false,
+        false,
+        false,
+    )
+}
+
+pub fn prepare_desktop_overlay_home(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+    configure_prodex: bool,
+) -> Result<PathBuf> {
+    prepare_prodex_overlay_home_internal(
+        managed_profiles_root,
+        base_codex_home,
+        true,
+        configure_prodex,
+        true,
+    )
+}
+
+pub fn prepare_desktop_overlay_home_from_prepared_base(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+    configure_prodex: bool,
+) -> Result<PathBuf> {
+    prepare_prodex_overlay_home_internal(
+        managed_profiles_root,
+        base_codex_home,
+        false,
+        configure_prodex,
+        true,
+    )
 }
 
 fn prepare_prodex_overlay_home_internal(
@@ -48,6 +82,7 @@ fn prepare_prodex_overlay_home_internal(
     base_codex_home: &Path,
     maintain_session_attachments: bool,
     configure_prodex: bool,
+    share_rollout_state: bool,
 ) -> Result<PathBuf> {
     let overlay_home = create_temporary_prodex_overlay_home(managed_profiles_root)?;
     if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &overlay_home)
@@ -59,9 +94,16 @@ fn prepare_prodex_overlay_home_internal(
                 maintain_session_attachments,
             )
         })
-        .and_then(|_| localize_prodex_overlay_rollout_state(&overlay_home))
         .and_then(|_| {
-            localize_prodex_overlay_rollout_state_symlinks_from_base(base_codex_home, &overlay_home)
+            if share_rollout_state {
+                share_prodex_overlay_rollout_state(base_codex_home, &overlay_home)
+            } else {
+                localize_prodex_overlay_rollout_state(&overlay_home)?;
+                localize_prodex_overlay_rollout_state_symlinks_from_base(
+                    base_codex_home,
+                    &overlay_home,
+                )
+            }
         })
         .and_then(|_| {
             if configure_prodex {
@@ -212,6 +254,27 @@ fn link_prodex_overlay_shared_chat_file(source: &Path, link: &Path) -> Result<()
 fn link_prodex_overlay_shared_chat_dir(source: &Path, link: &Path) -> Result<()> {
     fs::create_dir_all(source).with_context(|| format!("failed to create {}", source.display()))?;
     replace_prodex_overlay_path_with_symlink(source, link, true)
+}
+
+fn share_prodex_overlay_rollout_state(base_codex_home: &Path, overlay_home: &Path) -> Result<()> {
+    if !base_codex_home.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(base_codex_home)
+        .with_context(|| format!("failed to read {}", base_codex_home.display()))?
+    {
+        let entry = entry
+            .with_context(|| format!("failed to read entry in {}", base_codex_home.display()))?;
+        let file_name = entry.file_name();
+        if is_prodex_overlay_rollout_state_file_name(&file_name.to_string_lossy()) {
+            replace_prodex_overlay_path_with_symlink(
+                &entry.path(),
+                &overlay_home.join(file_name),
+                false,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn localize_prodex_overlay_rollout_state(codex_home: &Path) -> Result<()> {
