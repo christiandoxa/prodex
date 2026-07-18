@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.144.5 release",
+      "baseline_source": "openai/codex rust-v0.144.6 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -128,6 +128,19 @@
             "ThreadSource",
             "THREAD_SOURCE_KEY",
             "thread_source"
+          ]
+        },
+        {
+          "path": "codex-rs/models-manager/models.json",
+          "reason": "Owns bundled GPT-5.6 Sol, Terra, and Luna instructions and context-window metadata. Prodex must preserve these upstream values while patching unrelated model entries.",
+          "required_contains": [
+            "\"slug\": \"gpt-5.6-sol\"",
+            "\"slug\": \"gpt-5.6-terra\"",
+            "\"slug\": \"gpt-5.6-luna\"",
+            "\"context_window\": 272000",
+            "\"max_context_window\": 272000",
+            "\"base_instructions\":",
+            "\"instructions_template\":"
           ]
         },
         {
@@ -850,6 +863,21 @@
           ]
         },
         {
+          "id": "models-manager.gpt-5-6-bundled-metadata",
+          "kind": "model_catalog",
+          "file": "codex-rs/models-manager/models.json",
+          "reason": "Codex 0.144.6 refreshes the bundled GPT-5.6 Sol/Terra/Luna instructions and corrects both context-window fields to 272,000 tokens.",
+          "file_contains_all": [
+            "\"slug\": \"gpt-5.6-sol\"",
+            "\"slug\": \"gpt-5.6-terra\"",
+            "\"slug\": \"gpt-5.6-luna\"",
+            "\"context_window\": 272000",
+            "\"max_context_window\": 272000",
+            "\"base_instructions\":",
+            "\"instructions_template\":"
+          ]
+        },
+        {
           "id": "model-provider.bedrock-gpt-5-6-catalog",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
@@ -1174,7 +1202,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.144.5",
+      "tested_codex_release": "rust-v0.144.6",
       "app_server_protocol": {
         "schema_command": "codex app-server generate-json-schema --out DIR",
         "schema_hash": null,
@@ -1191,16 +1219,17 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.144.5",
-      "name": "0.144.5",
-      "published_at": "2026-07-16T02:54:48Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.5",
+      "tag_name": "rust-v0.144.6",
+      "name": "0.144.6",
+      "published_at": "2026-07-18T13:51:52Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.144.6",
       "body_head": [
         "## Bug Fixes",
-        "- Improved dangerous-command detection, including more forced `rm` forms, and provides clearer rejection reasons when commands are denied. (#33455)",
+        "- Refreshed bundled instructions for GPT-5.6 Sol, Terra, and Luna, and corrected their context windows to 272,000 tokens. (#33972, #34009)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.144.4...rust-v0.144.5",
-        "- #33455 [release/0.144] fix(core) expand is_dangerous_command @dylan-hurd-oai"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.144.5...rust-v0.144.6",
+        "- #33972 Backport refreshed bundled model metadata to 0.144 @sayan-oai",
+        "- #34009 Narrow 0.144 hotfix to GPT-5.6 prompts and context @sayan-oai"
       ]
     }
   },
