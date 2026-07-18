@@ -22,6 +22,10 @@ pub(super) enum Command {
 pub(super) struct ServeArgs {
     #[arg(long, value_name = "ADDR")]
     pub listen: Option<String>,
+    #[arg(long, value_name = "PATH", requires = "config_publication_replica")]
+    pub config_publication_transport: Option<PathBuf>,
+    #[arg(long, value_name = "ID", requires = "config_publication_transport")]
+    pub config_publication_replica: Option<String>,
 }
 
 #[derive(Args, Debug, PartialEq, Eq)]
@@ -139,7 +143,9 @@ mod tests {
         assert_eq!(
             parse_from(["serve", "--listen", "127.0.0.1:8080"]),
             Ok(Invocation::Command(Command::Serve(ServeArgs {
-                listen: Some("127.0.0.1:8080".to_string())
+                listen: Some("127.0.0.1:8080".to_string()),
+                config_publication_transport: None,
+                config_publication_replica: None,
             })))
         );
         assert_eq!(

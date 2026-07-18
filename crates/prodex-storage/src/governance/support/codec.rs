@@ -28,10 +28,8 @@ pub fn approval_artifact_kind(
     approval_kind: ApprovalKind,
 ) -> Result<Option<GovernanceArtifactKind>, GovernanceRepositoryError> {
     match approval_kind {
-        ApprovalKind::Execution => Ok(None),
-        ApprovalKind::HighImpactConfiguration | ApprovalKind::BreakGlass => {
-            Err(GovernanceRepositoryError::InvalidInput)
-        }
+        ApprovalKind::Execution | ApprovalKind::BreakGlass => Ok(None),
+        ApprovalKind::HighImpactConfiguration => Err(GovernanceRepositoryError::InvalidInput),
         _ => artifact_kind_for_approval(approval_kind).map(Some),
     }
 }
@@ -222,6 +220,16 @@ mod tests {
         assert_eq!(
             classification_from_label("unknown"),
             Err(GovernanceRepositoryError::Database)
+        );
+    }
+
+    #[test]
+    fn non_revision_approval_kinds_are_explicit() {
+        assert_eq!(approval_artifact_kind(ApprovalKind::Execution), Ok(None));
+        assert_eq!(approval_artifact_kind(ApprovalKind::BreakGlass), Ok(None));
+        assert_eq!(
+            approval_artifact_kind(ApprovalKind::HighImpactConfiguration),
+            Err(GovernanceRepositoryError::InvalidInput)
         );
     }
 }

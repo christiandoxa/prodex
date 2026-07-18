@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 8,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 30,
+  "clippy::too_many_arguments": 35,
   "clippy::type_complexity": 1,
 });
 
@@ -61,6 +61,10 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs|fn runtime_gateway_obligation_execution(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn activation_response(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn vote_response(",
+  // ponytail: keep security/audit inputs explicit; add a request context if this endpoint family grows again.
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn audit_retention_purge_response(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn audit_retention_response(",
+  "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs|fn break_glass_transition_response(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_live/session.rs|fn runtime_gemini_live_drain_upstream<S>(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs|pub(super) fn remember(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_response_dispatch.rs|pub(super) fn respond_runtime_local_rewrite_live_response(",
@@ -72,6 +76,9 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn activation_request(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approval_for_existing(",
   "clippy::too_many_arguments|crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs|fn prepare_approved_revision(",
+  // ponytail: immutable live-reload inputs stay explicit; add a watcher context when another consumer appears.
+  "clippy::too_many_arguments|src/enterprise_serve.rs|fn deliver_live_config_publications(",
+  "clippy::too_many_arguments|src/enterprise_serve.rs|fn spawn_live_config_publication_watcher(",
   "clippy::type_complexity|crates/prodex-bench-support/src/lib.rs|pub fn run_runtime_proxy_hot_path_case_suite<",
 ]);
 

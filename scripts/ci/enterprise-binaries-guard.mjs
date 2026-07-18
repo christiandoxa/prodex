@@ -62,7 +62,7 @@ function validateBinary(binary) {
 function validateServeComposition(source) {
   const errors = [];
   const applicationStart = "prodex_app::start_policy_gateway_application_for_mode(policy_mode)";
-  const asyncFront = "let server_result = serve_with_handler(";
+  const asyncFront = "serve_with_handler_reloadable(";
   const applicationDispatch = "application.handle(request).await";
   const applicationDrain = "application.shutdown_and_drain(drain_timeout)";
   for (const [needle, message] of [
@@ -82,6 +82,14 @@ function validateServeComposition(source) {
       applicationDrain,
       `${SERVE_COMPOSITION_PATH}: in-process application must drain after the async server stops`,
     ],
+    [
+      "applications.swap(candidate)",
+      `${SERVE_COMPOSITION_PATH}: live reload must atomically replace the active application`,
+    ],
+    [
+      "previous.shutdown_and_drain(drain_timeout)",
+      `${SERVE_COMPOSITION_PATH}: live reload must drain the replaced application`,
+    ],
   ]) {
     if (!source.includes(needle)) errors.push(message);
   }
@@ -97,8 +105,10 @@ function validateServeComposition(source) {
   if (dispatch < serve || dispatch > drain) {
     errors.push(`${SERVE_COMPOSITION_PATH}: in-process dispatch must remain inside the serve phase`);
   }
-  if ((source.match(/start_policy_gateway_application_for_mode\s*\(/gu) ?? []).length !== 1) {
-    errors.push(`${SERVE_COMPOSITION_PATH}: dedicated serve must own exactly one application`);
+  if ((source.match(/start_policy_gateway_application_for_mode\s*\(/gu) ?? []).length !== 2) {
+    errors.push(
+      `${SERVE_COMPOSITION_PATH}: dedicated serve must own initial and live-reload application lifecycles`,
+    );
   }
   for (const forbidden of [
     "start_policy_gateway_backend",
@@ -119,23 +129,29 @@ function runSelfTest() {
   }
   const validServe = `
     let application = prodex_app::start_policy_gateway_application_for_mode(policy_mode);
-    let server_result = serve_with_handler(
+    let server_result = serve_with_handler_reloadable(
       GatewayServerConfig::production(listen_addr, server_mode),
       move |request| async move { application.handle(request).await },
     );
     application.shutdown_and_drain(drain_timeout);
+    let candidate = prodex_app::start_policy_gateway_application_for_mode(policy_mode);
+    let previous = applications.swap(candidate);
+    previous.shutdown_and_drain(drain_timeout);
   `;
   if (validateServeComposition(validServe).length !== 0) {
     throw new Error("self-test failed: valid in-process serve composition was rejected");
   }
   const loopbackLegacy = validServe
     .replace("start_policy_gateway_application_for_mode(policy_mode)", 'start_policy_gateway_backend(Some("127.0.0.1:0".to_string()))')
-    .replace("serve_with_handler(", "serve(")
+    .replace("serve_with_handler_reloadable(", "serve(")
     .replace("move |request| async move { application.handle(request).await },", "backend.listen_addr(),");
   if (validateServeComposition(loopbackLegacy).length === 0) {
     throw new Error("self-test failed: loopback legacy backend was accepted");
   }
-  const bypassedFront = validServe.replace("let server_result = serve_with_handler(", "let server_result = direct(");
+  const bypassedFront = validServe.replace(
+    "let server_result = serve_with_handler_reloadable(",
+    "let server_result = direct(",
+  );
   if (validateServeComposition(bypassedFront).length === 0) {
     throw new Error("self-test failed: route-isolated async front bypass was accepted");
   }

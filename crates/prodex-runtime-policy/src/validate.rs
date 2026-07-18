@@ -449,12 +449,6 @@ fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<(
             path.display()
         );
     }
-    if sso.browser_flow == Some(true) {
-        bail!(
-            "bank governance mode cannot enable unsupported browser OIDC flow in {}",
-            path.display()
-        );
-    }
     let observability = &policy.gateway.observability;
     if !observability.sinks.iter().any(|sink| sink == "siem")
         || observability.siem_endpoint.is_none()

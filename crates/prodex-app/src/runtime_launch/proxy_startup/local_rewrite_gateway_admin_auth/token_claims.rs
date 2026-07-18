@@ -11,8 +11,9 @@ use prodex_domain::{
 use std::collections::BTreeMap;
 use std::time::Instant;
 
+#[derive(Clone)]
 pub(in super::super) struct RuntimeGatewayVerifiedOidcToken {
-    pub(super) claims: BTreeMap<String, serde_json::Value>,
+    pub(in super::super) claims: BTreeMap<String, serde_json::Value>,
     policy: OidcValidationPolicy,
     jwks_snapshot: JwksCacheSnapshot,
     algorithm: JwtAlgorithm,
@@ -43,6 +44,28 @@ impl RuntimeGatewayVerifiedOidcToken {
             principal_kind: PrincipalKind::User,
             credential_scope: CredentialScope::ControlPlane,
             role_claim,
+            expires_at_unix_ms: self.expires_at_unix_ms,
+            not_before_unix_ms: self.not_before_unix_ms,
+        }
+    }
+
+    pub(in super::super) fn canonical_workload_claims(
+        &self,
+        principal_id: PrincipalId,
+        tenant_id: TenantId,
+    ) -> TokenClaims {
+        TokenClaims {
+            issuer: self.issuer.clone(),
+            audience: self.audience.clone(),
+            algorithm: self.algorithm,
+            key_id: self.key_id.clone(),
+            key_known: true,
+            signature_verified: true,
+            principal_id,
+            tenant_id: Some(tenant_id),
+            principal_kind: PrincipalKind::ServiceAccount,
+            credential_scope: CredentialScope::DataPlane,
+            role_claim: None,
             expires_at_unix_ms: self.expires_at_unix_ms,
             not_before_unix_ms: self.not_before_unix_ms,
         }
@@ -92,18 +115,44 @@ pub(in super::super) fn runtime_gateway_test_verified_oidc_token() -> RuntimeGat
     }
 }
 
-pub(super) fn runtime_gateway_verify_oidc_token(
+pub(in super::super) fn runtime_gateway_verify_oidc_token(
     token: &str,
     config: &RuntimeGatewayOidcConfig,
     shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<RuntimeGatewayVerifiedOidcToken> {
+    runtime_gateway_verify_oidc_token_with_snapshot(
+        token,
+        config,
+        shared,
+        &shared.gateway_oidc_jwks_snapshot,
+    )
+}
+
+pub(in super::super) fn runtime_gateway_verify_workload_token(
+    token: &str,
+    config: &RuntimeGatewayOidcConfig,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<RuntimeGatewayVerifiedOidcToken> {
+    runtime_gateway_verify_oidc_token_with_snapshot(
+        token,
+        config,
+        shared,
+        &shared.gateway_workload_jwks_snapshot,
+    )
+}
+
+fn runtime_gateway_verify_oidc_token_with_snapshot(
+    token: &str,
+    config: &RuntimeGatewayOidcConfig,
+    shared: &RuntimeLocalRewriteProxyShared,
+    snapshot: &arc_swap::ArcSwapOption<super::RuntimeGatewayOidcJwksSnapshot>,
 ) -> Result<RuntimeGatewayVerifiedOidcToken> {
     let header = decode_header(token).context("failed to decode gateway OIDC JWT header")?;
     let alg = runtime_gateway_oidc_algorithm(header.alg)?;
     let algorithm = runtime_gateway_domain_oidc_algorithm(alg)?;
     let now = Instant::now();
     let now_unix_ms = runtime_gateway_unix_epoch_millis();
-    let snapshot = shared
-        .gateway_oidc_jwks_snapshot
+    let snapshot = snapshot
         .load_full()
         .ok_or_else(|| anyhow::anyhow!("gateway OIDC JWKS is not cached"))?;
     if !snapshot.usable_at(now) {

@@ -25,6 +25,7 @@ pub(super) struct RuntimeLocalRewriteRequest {
     path_and_query: String,
     headers: Vec<(String, String)>,
     network_zone: prodex_domain::NetworkZone,
+    mtls_peer_certificate_sha256: Option<[u8; 32]>,
     transport: RuntimeLocalRewriteTransport,
 }
 
@@ -53,7 +54,7 @@ enum RuntimeDirectRequestBodyMessage {
     Error(io::Error),
 }
 
-struct RuntimeDirectReply {
+pub(super) struct RuntimeDirectReply {
     head: Option<oneshot::Sender<GatewayHandlerResult>>,
     permit: Arc<tokio::sync::OwnedSemaphorePermit>,
 }
@@ -87,6 +88,7 @@ impl RuntimeLocalRewriteRequest {
             path_and_query,
             headers,
             network_zone,
+            mtls_peer_certificate_sha256: None,
             transport: RuntimeLocalRewriteTransport::Tiny(request),
         }
     }
@@ -96,22 +98,17 @@ impl RuntimeLocalRewriteRequest {
         path_and_query: String,
         headers: Vec<(String, String)>,
         network_zone: prodex_domain::NetworkZone,
+        mtls_peer_certificate_sha256: Option<[u8; 32]>,
         body: RuntimeDirectRequestBody,
-        head: oneshot::Sender<GatewayHandlerResult>,
-        permit: Arc<tokio::sync::OwnedSemaphorePermit>,
+        reply: RuntimeDirectReply,
     ) -> Self {
         Self {
             method,
             path_and_query,
             headers,
             network_zone,
-            transport: RuntimeLocalRewriteTransport::Direct {
-                body,
-                reply: RuntimeDirectReply {
-                    head: Some(head),
-                    permit,
-                },
-            },
+            mtls_peer_certificate_sha256,
+            transport: RuntimeLocalRewriteTransport::Direct { body, reply },
         }
     }
 
@@ -129,6 +126,10 @@ impl RuntimeLocalRewriteRequest {
 
     pub(super) fn network_zone(&self) -> prodex_domain::NetworkZone {
         self.network_zone
+    }
+
+    pub(super) fn mtls_peer_certificate_sha256(&self) -> Option<[u8; 32]> {
+        self.mtls_peer_certificate_sha256
     }
 
     pub(super) fn is_websocket_upgrade(&self) -> bool {
@@ -230,6 +231,16 @@ impl RuntimeLocalRewriteRequest {
 }
 
 impl RuntimeDirectReply {
+    pub(super) fn new(
+        head: oneshot::Sender<GatewayHandlerResult>,
+        permit: Arc<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Self {
+        Self {
+            head: Some(head),
+            permit,
+        }
+    }
+
     fn respond(mut self, response: tiny_http::ResponseBox) -> io::Result<()> {
         let status = response.status_code().0;
         let headers = tiny_response_headers(&response);

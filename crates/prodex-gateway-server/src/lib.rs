@@ -12,6 +12,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, ensure};
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full, Limited, combinators::UnsyncBoxBody};
 use hyper::{
@@ -29,6 +30,8 @@ use prodex_gateway_http::{
     GatewayHttpPolicy, GatewayHttpRouteKind, GatewayHttpRoutePlane, classify_request_target,
     validate_gateway_edge_security,
 };
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     net::TcpListener,
@@ -92,6 +95,90 @@ pub struct GatewayServerConfig {
     pub max_connection_age: Duration,
     pub drain_timeout: Duration,
     pub edge_security: GatewayServerEdgeSecurity,
+    pub tls: Option<GatewayServerTlsConfig>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct GatewayServerTlsConfig {
+    identity_pem: Vec<u8>,
+    client_ca_pem: Option<Vec<u8>>,
+    require_client_certificate: bool,
+}
+
+impl fmt::Debug for GatewayServerTlsConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayServerTlsConfig")
+            .field("identity_pem", &"<redacted>")
+            .field(
+                "client_ca_pem",
+                &self.client_ca_pem.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "require_client_certificate",
+                &self.require_client_certificate,
+            )
+            .finish()
+    }
+}
+
+impl GatewayServerTlsConfig {
+    pub fn new(
+        identity_pem: Vec<u8>,
+        client_ca_pem: Option<Vec<u8>>,
+        require_client_certificate: bool,
+    ) -> Result<Self> {
+        ensure!(!identity_pem.is_empty(), "gateway TLS identity is empty");
+        ensure!(
+            !require_client_certificate || client_ca_pem.is_some(),
+            "gateway mTLS requires a client CA"
+        );
+        let config = Self {
+            identity_pem,
+            client_ca_pem,
+            require_client_certificate,
+        };
+        config.server_config()?;
+        Ok(config)
+    }
+
+    fn server_config(&self) -> Result<rustls::ServerConfig> {
+        let certificates = CertificateDer::pem_slice_iter(&self.identity_pem)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to parse gateway TLS certificate chain")?;
+        ensure!(
+            !certificates.is_empty(),
+            "gateway TLS certificate chain is empty"
+        );
+        let private_key = PrivateKeyDer::from_pem_slice(&self.identity_pem)
+            .context("failed to parse gateway TLS private key")?;
+        let builder = rustls::ServerConfig::builder();
+        let mut server = if let Some(client_ca_pem) = self.client_ca_pem.as_ref() {
+            let mut roots = rustls::RootCertStore::empty();
+            for certificate in CertificateDer::pem_slice_iter(client_ca_pem) {
+                roots
+                    .add(certificate.context("failed to parse gateway mTLS client CA")?)
+                    .context("failed to load gateway mTLS client CA")?;
+            }
+            ensure!(!roots.is_empty(), "gateway mTLS client CA is empty");
+            let verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(roots));
+            let verifier = if self.require_client_certificate {
+                verifier.build()
+            } else {
+                verifier.allow_unauthenticated().build()
+            }
+            .context("failed to build gateway mTLS client verifier")?;
+            builder
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(certificates, private_key)
+        } else {
+            builder
+                .with_no_client_auth()
+                .with_single_cert(certificates, private_key)
+        }
+        .context("failed to build gateway TLS server configuration")?;
+        server.alpn_protocols = vec![b"http/1.1".to_vec()];
+        Ok(server)
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -114,7 +201,58 @@ impl fmt::Debug for GatewayServerEdgeSecurity {
 #[derive(Clone, PartialEq, Eq)]
 pub struct GatewayServerBrowserSecurity {
     pub expected_origin: String,
-    pub expected_csrf_token: String,
+    pub expected_csrf_token: Option<String>,
+}
+
+struct GatewayServerRuntimeSecurity {
+    edge_security: Arc<GatewayServerEdgeSecurity>,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+}
+
+#[derive(Clone)]
+pub struct GatewayServerReloadHandle(Arc<ArcSwap<GatewayServerRuntimeSecurity>>);
+
+impl fmt::Debug for GatewayServerReloadHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GatewayServerReloadHandle")
+            .finish_non_exhaustive()
+    }
+}
+
+impl GatewayServerReloadHandle {
+    pub fn new(config: &GatewayServerConfig) -> Result<Self> {
+        config.validate()?;
+        Ok(Self(Arc::new(ArcSwap::from_pointee(
+            gateway_server_runtime_security(config)?,
+        ))))
+    }
+
+    pub fn reload(&self, config: &GatewayServerConfig) -> Result<()> {
+        config.validate()?;
+        self.0
+            .store(Arc::new(gateway_server_runtime_security(config)?));
+        Ok(())
+    }
+
+    fn load(&self) -> Arc<GatewayServerRuntimeSecurity> {
+        self.0.load_full()
+    }
+}
+
+fn gateway_server_runtime_security(
+    config: &GatewayServerConfig,
+) -> Result<GatewayServerRuntimeSecurity> {
+    let tls_acceptor = config
+        .tls
+        .as_ref()
+        .map(GatewayServerTlsConfig::server_config)
+        .transpose()?
+        .map(Arc::new)
+        .map(tokio_rustls::TlsAcceptor::from);
+    Ok(GatewayServerRuntimeSecurity {
+        edge_security: Arc::new(config.edge_security.clone()),
+        tls_acceptor,
+    })
 }
 
 impl fmt::Debug for GatewayServerBrowserSecurity {
@@ -131,6 +269,7 @@ pub struct GatewayHandlerRequest {
     pub peer_addr: SocketAddr,
     pub client_ip: IpAddr,
     pub peer_is_trusted_proxy: bool,
+    pub mtls_peer_certificate_sha256: Option<[u8; 32]>,
     pub target: CanonicalRequestTarget,
     pub route: GatewayHttpRouteKind,
     pub request: Request<GatewayRequestBody>,
@@ -266,6 +405,7 @@ impl GatewayServerConfig {
                 },
                 browser: None,
             },
+            tls: None,
         }
     }
 
@@ -311,9 +451,16 @@ impl GatewayServerConfig {
         );
         if let Some(browser) = &self.edge_security.browser {
             ensure!(
-                !browser.expected_origin.is_empty() && !browser.expected_csrf_token.is_empty(),
+                !browser.expected_origin.is_empty()
+                    && browser
+                        .expected_csrf_token
+                        .as_deref()
+                        .is_none_or(|token| !token.is_empty()),
                 "gateway browser edge policy must be complete"
             );
+        }
+        if let Some(tls) = &self.tls {
+            tls.server_config()?;
         }
         Ok(())
     }
@@ -347,6 +494,28 @@ where
     })
 }
 
+pub fn serve_with_handler_reloadable<H, Fut>(
+    config: GatewayServerConfig,
+    reload: GatewayServerReloadHandle,
+    handler: H,
+) -> Result<()>
+where
+    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
+{
+    config.validate()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to initialize gateway server runtime")?;
+    runtime.block_on(async move {
+        let listener = TcpListener::bind(config.listen_addr)
+            .await
+            .context("failed to bind gateway server listener")?;
+        run_with_handler_reloadable(listener, config, reload, handler, shutdown_signal()).await
+    })
+}
+
 #[derive(Clone)]
 struct LoopbackBackend {
     authority: hyper::http::uri::Authority,
@@ -372,6 +541,7 @@ impl LoopbackBackend {
             peer_addr: _,
             client_ip: _,
             peer_is_trusted_proxy: _,
+            mtls_peer_certificate_sha256: _,
             target,
             route: _,
             request,
@@ -448,9 +618,24 @@ where
     H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
 {
+    let reload = GatewayServerReloadHandle::new(&config)?;
+    run_with_handler_reloadable(listener, config, reload, handler, shutdown).await
+}
+
+async fn run_with_handler_reloadable<F, H, Fut>(
+    listener: TcpListener,
+    config: GatewayServerConfig,
+    reload: GatewayServerReloadHandle,
+    handler: H,
+    shutdown: F,
+) -> Result<()>
+where
+    F: Future<Output = Result<()>>,
+    H: Fn(GatewayHandlerRequest) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = GatewayHandlerResult> + Send + 'static,
+{
     config.validate()?;
     let handler = Arc::new(handler);
-    let edge_security = Arc::new(config.edge_security.clone());
     let connections = Arc::new(Semaphore::new(config.max_connections));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut tasks = JoinSet::new();
@@ -480,17 +665,42 @@ where
                 }
             }
         };
+        let security = reload.load();
         let state = ServerState {
             mode: config.mode,
             handler: Arc::clone(&handler),
-            edge_security: Arc::clone(&edge_security),
+            edge_security: Arc::clone(&security.edge_security),
             max_request_body_bytes: config.max_request_body_bytes,
             request_header_timeout: config.request_header_timeout,
             response_header_timeout: config.response_header_timeout,
             max_connection_age: config.max_connection_age,
             shutdown: shutdown_rx.clone(),
         };
-        tasks.spawn(serve_connection(stream, peer_addr, state, permit));
+        if let Some(tls_acceptor) = security.tls_acceptor.clone() {
+            tasks.spawn(async move {
+                let handshake =
+                    timeout(state.request_header_timeout, tls_acceptor.accept(stream)).await;
+                let Ok(Ok(stream)) = handshake else {
+                    return;
+                };
+                let mtls_peer_certificate_sha256 = stream
+                    .get_ref()
+                    .1
+                    .peer_certificates()
+                    .and_then(|certificates| certificates.first())
+                    .map(|certificate| Sha256::digest(certificate.as_ref()).into());
+                serve_connection(
+                    stream,
+                    peer_addr,
+                    mtls_peer_certificate_sha256,
+                    state,
+                    permit,
+                )
+                .await;
+            });
+        } else {
+            tasks.spawn(serve_connection(stream, peer_addr, None, state, permit));
+        }
     };
 
     drop(listener);
@@ -519,6 +729,7 @@ where
 async fn handle_ingress_request<H, Fut>(
     mut request: Request<Incoming>,
     peer_addr: SocketAddr,
+    mtls_peer_certificate_sha256: Option<[u8; 32]>,
     state: ServerState<H>,
     permit: Arc<OwnedSemaphorePermit>,
 ) -> Result<Response<GatewayResponseBody>, Infallible>
@@ -565,9 +776,13 @@ where
         } else {
             None
         };
+        let state_changing = state_changing_method(request.method());
+        let expected_origin = browser
+            .filter(|_| state_changing || request.headers().contains_key(hyper::header::ORIGIN))
+            .map(|browser| browser.expected_origin.as_str());
         let expected_csrf_token = browser
-            .filter(|_| state_changing_method(request.method()))
-            .map(|browser| browser.expected_csrf_token.as_str());
+            .filter(|_| state_changing)
+            .and_then(|browser| browser.expected_csrf_token.as_deref());
         if validate_gateway_edge_security(
             GatewayEdgeSecurityPolicy {
                 peer_is_trusted_proxy,
@@ -575,7 +790,7 @@ where
                     &state.edge_security.expected_host,
                     &headers,
                 ),
-                expected_origin: browser.map(|browser| browser.expected_origin.as_str()),
+                expected_origin,
                 expected_csrf_token,
             },
             &headers,
@@ -616,6 +831,7 @@ where
         peer_addr,
         client_ip,
         peer_is_trusted_proxy,
+        mtls_peer_certificate_sha256,
         target,
         route,
         request: Request::from_parts(parts, Limited::new(body, state.max_request_body_bytes)),

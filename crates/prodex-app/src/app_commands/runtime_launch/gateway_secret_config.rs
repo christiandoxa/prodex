@@ -137,6 +137,32 @@ impl GatewaySecretResolver {
         self.resolve_with_rotation_tracking(context, reference, env_name, direct, purpose, false)
     }
 
+    pub(crate) fn resolve_static_bytes(
+        &self,
+        context: &str,
+        reference: Option<&SecretRef>,
+        purpose: SecretPurpose,
+    ) -> Result<Option<Vec<u8>>> {
+        let Some(reference) = reference else {
+            return Ok(None);
+        };
+        let provider = self
+            .projected
+            .as_ref()
+            .context("projected secret provider is not configured")?;
+        if !reference.is_well_formed() || reference.provider() != provider.descriptor().name {
+            bail!("{context} secret reference is invalid");
+        }
+        let material = provider
+            .resolve(&SecretResolutionRequest::new(reference.clone(), purpose))
+            .map_err(|_| anyhow::anyhow!("{context} secret resolution failed"))?;
+        let value = material.with_exposed_secret(<[u8]>::to_vec);
+        if value.is_empty() {
+            bail!("{context} cannot be empty");
+        }
+        Ok(Some(value))
+    }
+
     pub(crate) fn resolve_environment_raw(&self, context: &str, env_name: &str) -> Result<String> {
         if self.production {
             bail!("{context} raw CLI/environment credentials are forbidden in production");
@@ -236,4 +262,30 @@ fn validate_secret_value(context: &str, value: String) -> Result<String> {
         bail!("{context} must not contain whitespace");
     }
     Ok(value)
+}
+
+pub(crate) fn gateway_tls_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+) -> Result<Option<prodex_gateway_server::GatewayServerTlsConfig>> {
+    let workload = &policy.workload_identity;
+    if workload.enabled != Some(true) || workload.mtls_required != Some(true) {
+        return Ok(None);
+    }
+    let resolver = GatewaySecretResolver::from_policy(secrets)?;
+    let identity = resolver
+        .resolve_static_bytes(
+            "gateway.workload_identity.tls_identity_ref",
+            workload.tls_identity_ref.as_ref(),
+            SecretPurpose::DataPlaneCredential,
+        )?
+        .context("gateway workload TLS identity is required")?;
+    let client_ca = resolver
+        .resolve_static_bytes(
+            "gateway.workload_identity.mtls_ca_ref",
+            workload.mtls_ca_ref.as_ref(),
+            SecretPurpose::DataPlaneCredential,
+        )?
+        .context("gateway workload mTLS client CA is required")?;
+    prodex_gateway_server::GatewayServerTlsConfig::new(identity, Some(client_ca), true).map(Some)
 }

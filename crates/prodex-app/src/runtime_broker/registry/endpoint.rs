@@ -58,5 +58,6 @@ pub(crate) fn runtime_proxy_endpoint_from_registry(
         }),
         _lease: Some(lease),
         _direct_proxy: None,
+        _kiro_connect_proxy: None,
     })
 }

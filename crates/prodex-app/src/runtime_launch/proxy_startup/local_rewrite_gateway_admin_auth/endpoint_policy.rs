@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::net::IpAddr;
 
 #[derive(Clone)]
-pub(super) enum RuntimeGatewayOidcEndpoint {
+pub(in super::super) enum RuntimeGatewayOidcEndpoint {
     Validated(ValidatedOidcEndpoint),
     #[cfg(test)]
     InsecureLoopback(String),
@@ -118,6 +118,29 @@ impl RuntimeGatewayOidcEndpointPolicy {
                 runtime_gateway_oidc_test_endpoint(jwks_uri)
                     .map(RuntimeGatewayOidcEndpoint::InsecureLoopback)
             }
+        }
+    }
+}
+
+pub(in super::super) fn runtime_gateway_oidc_browser_endpoint(
+    config: &RuntimeGatewayOidcConfig,
+    value: &str,
+) -> Result<RuntimeGatewayOidcEndpoint> {
+    match RuntimeGatewayOidcEndpointPolicy::from_config(config)? {
+        RuntimeGatewayOidcEndpointPolicy::Validated(policy) => policy
+            .validate_issuer_endpoint(value)
+            .map(RuntimeGatewayOidcEndpoint::Validated)
+            .context("gateway OIDC browser endpoint is not permitted"),
+        #[cfg(test)]
+        RuntimeGatewayOidcEndpointPolicy::InsecureLoopback { issuer, .. } => {
+            let endpoint = runtime_gateway_oidc_test_endpoint(value)?;
+            let issuer = reqwest::Url::parse(&issuer).context("test OIDC issuer is invalid")?;
+            let endpoint_url =
+                reqwest::Url::parse(&endpoint).context("test OIDC endpoint is invalid")?;
+            if issuer.origin() != endpoint_url.origin() {
+                bail!("test OIDC browser endpoint origin mismatch");
+            }
+            Ok(RuntimeGatewayOidcEndpoint::InsecureLoopback(endpoint))
         }
     }
 }

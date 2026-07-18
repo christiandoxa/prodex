@@ -384,7 +384,7 @@ fn runtime_gateway_bearer_principal() -> Principal {
     )
 }
 
-fn runtime_gateway_stable_id(namespace: &str, parts: &[&[u8]]) -> uuid::Uuid {
+pub(super) fn runtime_gateway_stable_id(namespace: &str, parts: &[&[u8]]) -> uuid::Uuid {
     let mut hasher = Sha256::new();
     hasher.update(namespace.as_bytes());
     for part in parts {

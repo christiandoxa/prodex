@@ -3,7 +3,7 @@ use super::local_rewrite_application_data_plane::runtime_gateway_application_pro
 use super::local_rewrite_transport::emit_runtime_gateway_spend_event;
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_gateway_cost_for_request,
-    runtime_provider_gateway_response_spend_event,
+    runtime_provider_gateway_pricing_model, runtime_provider_gateway_response_spend_event,
     runtime_provider_gateway_response_spend_event_from_tokens, runtime_provider_model_from_body,
 };
 use crate::RuntimeProxyRequest;
@@ -77,6 +77,17 @@ fn runtime_gateway_response_cost(
         .lock()
         .map(|load| load.clone())
         .unwrap_or_default();
+    let pricing_model = runtime_provider_gateway_pricing_model(
+        &shared.gateway_route_aliases,
+        &route_load,
+        request_id,
+        &captured.body,
+        model.unwrap_or("unknown"),
+    );
+    let governed_cost = shared
+        .governed_pricing
+        .as_ref()
+        .and_then(|pricing| pricing.cost_for_model(provider_kind.provider_id(), &pricing_model));
     runtime_provider_gateway_cost_for_request(
         provider_kind,
         &shared.gateway_route_aliases,
@@ -84,6 +95,7 @@ fn runtime_gateway_response_cost(
         request_id,
         &captured.body,
         model.unwrap_or("unknown"),
+        governed_cost,
     )
 }
 

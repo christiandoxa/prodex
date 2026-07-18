@@ -1,6 +1,6 @@
 use super::gateway_secret_config::GatewaySecretResolver;
 use super::*;
-use prodex_authn::{OidcEndpointPolicy, ValidatedOidcIssuer};
+use prodex_authn::{OidcEndpointPolicy, ValidatedOidcEndpoint, ValidatedOidcIssuer};
 use prodex_domain::SecretPurpose;
 
 #[cfg(test)]
@@ -17,6 +17,8 @@ pub(crate) fn gateway_sso_config_with_resolver(
 ) -> Result<RuntimeGatewaySsoConfig> {
     let proxy_token_hash = gateway_sso_secret_with_resolver(policy, resolver)?;
     let oidc = gateway_sso_oidc_config(policy)?;
+    let browser = gateway_sso_browser_config(policy, resolver, oidc.as_ref())?;
+    let workload_identity = gateway_workload_identity_config(policy)?;
     Ok(RuntimeGatewaySsoConfig {
         proxy_token_hash,
         require_tenant: policy.sso.require_tenant.unwrap_or(false),
@@ -46,7 +48,164 @@ pub(crate) fn gateway_sso_config_with_resolver(
             "x-prodex-sso-key-prefixes",
         )?,
         oidc,
+        browser,
+        workload_identity,
     })
+}
+
+fn gateway_sso_browser_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    resolver: &GatewaySecretResolver,
+    oidc: Option<&RuntimeGatewayOidcConfig>,
+) -> Result<Option<RuntimeGatewayBrowserConfig>> {
+    if policy.sso.browser_flow != Some(true) {
+        if policy.sso.pkce_method.is_some()
+            || policy.sso.oidc_authorization_url.is_some()
+            || policy.sso.oidc_token_url.is_some()
+            || policy.sso.oidc_client_id.is_some()
+            || policy.sso.oidc_client_secret_ref.is_some()
+            || policy.sso.oidc_redirect_uri.is_some()
+        {
+            bail!("gateway.sso browser settings require browser_flow=true");
+        }
+        return Ok(None);
+    }
+    if policy.sso.pkce_method.as_deref() != Some("S256") {
+        bail!("gateway.sso browser flow requires pkce_method=S256");
+    }
+    let oidc = oidc.context("gateway.sso browser flow requires OIDC")?;
+    let endpoints = OidcEndpointPolicy::new(&oidc.issuer, None)
+        .context("gateway.sso browser issuer is invalid")?;
+    let authorization_url = policy
+        .sso
+        .oidc_authorization_url
+        .as_deref()
+        .context("gateway.sso.oidc_authorization_url is required")?;
+    let authorization_url = endpoints
+        .validate_issuer_endpoint(authorization_url)
+        .context("gateway.sso.oidc_authorization_url is not permitted")?
+        .as_str()
+        .to_string();
+    let token_url = policy
+        .sso
+        .oidc_token_url
+        .as_deref()
+        .context("gateway.sso.oidc_token_url is required")?;
+    let token_url = endpoints
+        .validate_issuer_endpoint(token_url)
+        .context("gateway.sso.oidc_token_url is not permitted")?
+        .as_str()
+        .to_string();
+    let client_id = gateway_required_policy_identifier(
+        "gateway.sso.oidc_client_id",
+        policy
+            .sso
+            .oidc_client_id
+            .as_deref()
+            .context("gateway.sso.oidc_client_id is required")?,
+    )?;
+    let redirect_uri = policy
+        .sso
+        .oidc_redirect_uri
+        .as_deref()
+        .context("gateway.sso.oidc_redirect_uri is required")?;
+    let redirect_uri = ValidatedOidcEndpoint::parse(redirect_uri)
+        .context("gateway.sso.oidc_redirect_uri is not permitted")?
+        .as_str()
+        .to_string();
+    let redirect_path = reqwest::Url::parse(&redirect_uri)
+        .context("gateway.sso.oidc_redirect_uri is invalid")?
+        .path()
+        .to_string();
+    if !matches!(
+        redirect_path.as_str(),
+        "/prodex/gateway/auth/callback" | "/v1/prodex/gateway/auth/callback"
+    ) {
+        bail!("gateway.sso.oidc_redirect_uri must target the gateway OIDC callback");
+    }
+    let client_secret = resolver.runtime_secret(
+        "gateway.sso.oidc_client_secret_ref",
+        policy.sso.oidc_client_secret_ref.as_ref(),
+        None,
+        None,
+        SecretPurpose::OidcClientSecret,
+    )?;
+    Ok(Some(RuntimeGatewayBrowserConfig {
+        authorization_url,
+        token_url,
+        client_id,
+        client_secret,
+        redirect_uri,
+    }))
+}
+
+fn gateway_workload_identity_config(
+    policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+) -> Result<Option<RuntimeGatewayWorkloadIdentityConfig>> {
+    let workload = &policy.workload_identity;
+    if workload.enabled != Some(true) {
+        return Ok(None);
+    }
+    let issuer = workload
+        .issuer
+        .as_deref()
+        .context("gateway.workload_identity.issuer is required")?;
+    let issuer = ValidatedOidcIssuer::parse(issuer)
+        .context("gateway.workload_identity.issuer must be a permitted HTTPS issuer")?;
+    let audience = gateway_required_policy_identifier(
+        "gateway.workload_identity.audience",
+        workload
+            .audience
+            .as_deref()
+            .context("gateway.workload_identity.audience is required")?,
+    )?;
+    let endpoints = OidcEndpointPolicy::with_jwks_origin_allowlist(
+        issuer.as_str(),
+        workload.jwks_url.as_deref(),
+        workload.jwks_origin_allowlist.iter().map(String::as_str),
+    )
+    .context("gateway.workload_identity JWKS policy is invalid")?;
+    Ok(Some(RuntimeGatewayWorkloadIdentityConfig {
+        oidc: RuntimeGatewayOidcConfig {
+            issuer: endpoints.issuer().as_str().to_string(),
+            audience,
+            jwks_url: endpoints
+                .configured_jwks()
+                .map(|endpoint| endpoint.as_str().to_string()),
+            jwks_origin_allowlist: endpoints
+                .allowed_jwks_origins()
+                .map(str::to_string)
+                .collect(),
+            user_claim: workload
+                .subject_claim
+                .clone()
+                .unwrap_or_else(|| "sub".to_string()),
+            role_claim: String::new(),
+            tenant_claim: workload
+                .tenant_claim
+                .clone()
+                .unwrap_or_else(|| "prodex_tenant".to_string()),
+            key_prefixes_claim: String::new(),
+            authentication_strength: None,
+        },
+        subject_claim: workload
+            .subject_claim
+            .clone()
+            .unwrap_or_else(|| "sub".to_string()),
+        tenant_claim: workload
+            .tenant_claim
+            .clone()
+            .unwrap_or_else(|| "prodex_tenant".to_string()),
+        scope_claim: workload
+            .scope_claim
+            .clone()
+            .unwrap_or_else(|| "scope".to_string()),
+        required_scope: workload
+            .required_scope
+            .clone()
+            .unwrap_or_else(|| "data_plane".to_string()),
+        mtls_required: workload.mtls_required.unwrap_or(false),
+    }))
 }
 
 pub(crate) fn gateway_sso_secret_with_resolver(
@@ -73,9 +232,6 @@ pub(crate) fn gateway_sso_secret_with_resolver(
 fn gateway_sso_oidc_config(
     policy: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
 ) -> Result<Option<RuntimeGatewayOidcConfig>> {
-    if policy.sso.browser_flow == Some(true) {
-        bail!("gateway.sso.browser_flow is unsupported; use the OIDC bearer-token broker");
-    }
     if policy
         .sso
         .required_scope

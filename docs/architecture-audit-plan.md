@@ -518,11 +518,17 @@ Current state:
 - experimental stdio preview mode exists as a read-only line-by-line diagnostic stream
 - experimental passthrough-aware stdio preview exists as a read-only mirror plus side-channel diagnostics stream
 - experimental stdio validate mode exists as a read-only fail-closed protocol gate for replay/schema streams
-- live stdio relay/brokering is still not implemented
+- opt-in live stdio brokering launches the real `codex app-server`, relays both
+  directions, validates bounded JSON-RPC frames, and fails closed on malformed
+  traffic
 
-So Phase 2 is only partially started in production terms: diagnostic envelope parsing, preview streaming, passthrough-aware observation, and fail-closed validation exist, but live stdio brokering and routing/policy behavior are still not implemented.
+So Phase 2 now includes diagnostic envelope parsing, preview streaming,
+passthrough-aware observation, fail-closed validation, and an opt-in live broker.
+Cross-session multiplexing and broker-owned routing policy remain future work.
 
-`mcp-server`, `app-server`, and `exec-server` launch routes are still preserved for direct passthrough under runtime launch routing. The broker preview surface is useful, but it is not yet a policy-enforcing live broker.
+`mcp-server`, `app-server`, and `exec-server` launch routes remain direct
+passthrough by default. The opt-in broker enforces the protocol contract but
+does not invent broker-owned routing policy.
 
 ### 5. Where gateway state / auth / budgets / routing / audit are concentrated
 
@@ -872,7 +878,7 @@ Priority split targets:
    - re-scan; remaining provider/runtime >500-line entries in this list are tests
 2. gateway/config concentration:
    - re-scan after the OpenAPI path split; no remaining >500-line gateway OpenAPI path file
-3. future protocol broker:
+3. opt-in protocol broker:
    - `app_server_broker_protocol.rs` (~356)
    - `app_server_broker_preview.rs` (~310; stdio preview and contract after logging/report splits)
    - `app_server_broker_preview/logging.rs` (~332; runtime-log and audit emission for preview sessions)
@@ -891,7 +897,7 @@ High-value current coverage already exists and should be treated as characteriza
   - `crates/prodex-app/tests/src/runtime_proxy/*`
   - `crates/prodex-app/tests/support/main_internal/runtime_proxy_*`
 - gateway admin CRUD/security coverage now rejects generated runtime virtual keys on admin endpoints
-- app-server broker skeleton tests:
+- app-server broker contract, validation, and live-pump tests:
   - `crates/prodex-app/tests/support/main_internal_body/app_server_broker.rs`
 - runtime broker metrics / doctor / quota support tests
 

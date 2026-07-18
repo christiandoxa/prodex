@@ -13,12 +13,10 @@ path = "src/lib.rs"
 [dependencies]
 prodex_domain = { workspace = true }
 prodex_storage = { workspace = true }
+prodex_storage_sqlite = { workspace = true }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-
-[dev-dependencies]
-prodex_storage_sqlite = { workspace = true }
 
 [lints]
 workspace = true

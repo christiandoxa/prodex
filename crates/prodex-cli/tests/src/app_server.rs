@@ -57,6 +57,7 @@ fn app_server_broker_is_explicit_prodex_command_not_default_passthrough() {
     };
 
     assert!(args.json);
+    assert_eq!(args.profile, None);
     assert!(!args.experimental_stdio);
     assert!(!args.experimental_stdio_passthrough_preview);
     assert!(!args.experimental_stdio_validate);
@@ -97,6 +98,23 @@ fn app_server_broker_accepts_live_flag() {
     assert!(!args.experimental_stdio_validate);
     assert!(!args.experimental_stdio_validate_passthrough);
     assert!(args.experimental_stdio_live);
+}
+
+#[test]
+fn app_server_broker_live_accepts_profile() {
+    let command = parse_cli_command_from([
+        "prodex",
+        "app-server-broker",
+        "--experimental-stdio-live",
+        "--profile",
+        "work",
+    ])
+    .expect("app-server-broker live profile should parse");
+    let Commands::AppServerBroker(args) = command else {
+        panic!("expected app-server-broker command");
+    };
+
+    assert_eq!(args.profile.as_deref(), Some("work"));
 }
 
 #[test]

@@ -20,7 +20,7 @@ use super::local_rewrite_gateway_credentials::{
 use super::local_rewrite_options::RuntimeLocalRewriteProxyStartOptions;
 use super::local_rewrite_pipeline::run_runtime_local_rewrite_pipeline;
 use super::local_rewrite_request::{
-    RuntimeLocalRewriteRequest, runtime_direct_request_body_channel,
+    RuntimeDirectReply, RuntimeLocalRewriteRequest, runtime_direct_request_body_channel,
 };
 use crate::{
     RuntimeConfig, RuntimeProxyBodyTooLarge, runtime_proxy_flush_logs_for_path, runtime_proxy_log,
@@ -109,6 +109,7 @@ impl RuntimeGatewayApplication {
             peer_addr,
             client_ip,
             peer_is_trusted_proxy,
+            mtls_peer_certificate_sha256,
             target,
             route: _,
             request,
@@ -184,9 +185,9 @@ impl RuntimeGatewayApplication {
                 target.path_and_query().to_string(),
                 headers,
                 network_zone,
+                mtls_peer_certificate_sha256,
                 body,
-                head_sender,
-                Arc::clone(&_permit),
+                RuntimeDirectReply::new(head_sender, Arc::clone(&_permit)),
             );
             let result = crate::runtime_panic::catch_runtime_unwind_silently(|| {
                 run_runtime_local_rewrite_pipeline(request, target, &shared);

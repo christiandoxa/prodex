@@ -22,6 +22,16 @@ const USERINFO_CAPABILITY = new RegExp(
   `[a-z][a-z0-9+.-]*://[^\\s/:"']{1,256}:\\{[^}]*${SENSITIVE}[^}]*\\}@`,
   "giu",
 );
+const USERINFO_ALLOWLIST = new Map([
+  [
+    "crates/prodex-app/src/runtime_kiro_connect_proxy.rs",
+    {
+      match: "http://prodex:{token}@",
+      maxHits: 1,
+      reason: "ephemeral per-launch credential for the random loopback Kiro CONNECT proxy",
+    },
+  ],
+]);
 const DOCUMENTED_SECRET_ARG = new RegExp(
   `^\\s*(?:\\$\\s*)?prodex\\b[^\\n]*--${SENSITIVE}(?:=|\\s+\\S)`,
   "gimu",
@@ -151,6 +161,7 @@ export function validateFiles(files) {
   };
 
   for (const { filePath, contents } of files) {
+    let allowedUserinfoHits = 0;
     LONG_OPTION.lastIndex = 0;
     for (const match of contents.matchAll(LONG_OPTION)) {
       recordFlag(filePath, contents, match.index, match[1]);
@@ -176,6 +187,16 @@ export function validateFiles(files) {
     ]) {
       pattern.lastIndex = 0;
       for (const match of contents.matchAll(pattern)) {
+        const allowance = USERINFO_ALLOWLIST.get(filePath);
+        if (
+          pattern === USERINFO_CAPABILITY &&
+          allowance &&
+          match[0] === allowance.match &&
+          allowedUserinfoHits < allowance.maxHits
+        ) {
+          allowedUserinfoHits += 1;
+          continue;
+        }
         pushViolation(violations, filePath, contents, match.index, kind);
       }
     }
@@ -285,8 +306,22 @@ function selfTest() {
       filePath: "src/embedded.rs",
       contents: '#[cfg(test)]\nmod tests { fn redacts() { let _ = format!("/run/{capability}"); } }',
     },
+    {
+      filePath: "crates/prodex-app/src/runtime_kiro_connect_proxy.rs",
+      contents: 'let proxy_url = format!("http://prodex:{token}@{listen_addr}");',
+    },
   ]);
   assert.deepEqual(safe, []);
+  const repeatedKiroUserinfo = validateFiles([
+    {
+      filePath: "crates/prodex-app/src/runtime_kiro_connect_proxy.rs",
+      contents: [
+        'format!("http://prodex:{token}@{first}")',
+        'format!("http://prodex:{token}@{second}")',
+      ].join("\n"),
+    },
+  ]);
+  assert.equal(repeatedKiroUserinfo.length, 1, "Kiro URL userinfo allowance exceeded one hit");
 
   for (const [contents, expected] of [
     ['#[derive(Args)] struct Bad { #[arg(long = "secret")] pub secret: String }', "CLI flag"],

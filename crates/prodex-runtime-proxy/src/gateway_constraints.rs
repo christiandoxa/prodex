@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::gateway_policy::runtime_gateway_route_selected_model_from_models;
 use crate::{
+    RuntimeGatewayAdaptiveQualityWindow, RuntimeGatewayAdaptiveRoutingConfig,
+    RuntimeGatewayAdaptiveShadowDecision, RuntimeGatewayAdaptiveShadowInput,
     RuntimeGatewayRouteAlias, RuntimeGatewayRouteModelState, RuntimeGatewayRouteStrategy,
     RuntimeRouteAffinityKind, RuntimeRouteAffinityOutcome, RuntimeRouteCandidateClass,
     RuntimeRouteCandidateDecisionInput, RuntimeRouteCandidateEligibility,
@@ -56,6 +58,8 @@ pub struct RuntimeGatewayConstraintRoutePlan {
     pub truncated: bool,
     pub selection_pool_truncated: bool,
     pub omitted_candidates: usize,
+    #[serde(default, skip_deserializing)]
+    pub adaptive_decision: Option<RuntimeGatewayAdaptiveShadowDecision>,
 }
 
 pub struct RuntimeGatewayConstraintPlanInput<'a> {
@@ -67,6 +71,8 @@ pub struct RuntimeGatewayConstraintPlanInput<'a> {
     pub configured_reasoning_reserve_tokens: Option<u64>,
     pub hard_affinity_model: Option<&'a str>,
     pub hard_affinity_required: bool,
+    pub adaptive_config: RuntimeGatewayAdaptiveRoutingConfig,
+    pub adaptive_quality: &'a BTreeMap<String, RuntimeGatewayAdaptiveQualityWindow>,
 }
 
 pub fn runtime_gateway_plan_route_with_constraints(
@@ -87,6 +93,7 @@ pub fn runtime_gateway_plan_route_with_constraints(
             plan.body_rewrite_required = false;
             plan.adjustment = None;
             plan.no_route_reason = Some(reason);
+            plan.adaptive_decision = None;
             plan.trace = affinity_owner_unavailable_trace(endpoint, &plan.requested_model);
         }
         return Ok(plan);
@@ -100,6 +107,8 @@ pub fn runtime_gateway_plan_route_with_constraints(
         configured_reasoning_reserve_tokens,
         hard_affinity_model,
         hard_affinity_required,
+        adaptive_config,
+        adaptive_quality,
     } = input;
 
     let value = serde_json::from_slice::<serde_json::Value>(body).map_err(|_| {
@@ -138,6 +147,7 @@ pub fn runtime_gateway_plan_route_with_constraints(
             truncated: false,
             selection_pool_truncated: false,
             omitted_candidates: 0,
+            adaptive_decision: None,
         });
     }
     let alias = aliases
@@ -229,7 +239,7 @@ pub fn runtime_gateway_plan_route_with_constraints(
         .map(|candidate| candidate.model.clone())
         .collect::<Vec<_>>();
 
-    let selected_model = if eligible_models.is_empty() {
+    let baseline_selected_model = if eligible_models.is_empty() {
         None
     } else if hard_affinity || eligible_models.len() == 1 {
         eligible_models.first().cloned()
@@ -244,6 +254,24 @@ pub fn runtime_gateway_plan_route_with_constraints(
     } else {
         Some(format!("combo:{}", eligible_models.join(",")))
     };
+    let adaptive_decision = alias.and_then(|alias| {
+        adaptive_route_decision(
+            adaptive_config,
+            diagnostic_seed,
+            hard_affinity_model,
+            alias,
+            &eligible_models,
+            adaptive_quality,
+            baseline_selected_model.as_deref(),
+        )
+    });
+    let selected_model = adaptive_selected_model(
+        baseline_selected_model,
+        alias,
+        &eligible_models,
+        adaptive_config,
+        adaptive_decision.as_ref(),
+    );
     let selected_candidate_index = selected_model.as_deref().and_then(|selected| {
         let selected = selected
             .strip_prefix("combo:")
@@ -302,7 +330,94 @@ pub fn runtime_gateway_plan_route_with_constraints(
         truncated: omitted_candidates > 0 || alias_chain_truncated,
         selection_pool_truncated: selection_pool_omitted > 0,
         omitted_candidates,
+        adaptive_decision,
     })
+}
+
+fn adaptive_route_decision(
+    config: RuntimeGatewayAdaptiveRoutingConfig,
+    diagnostic_seed: u64,
+    continuation_owner_model: Option<&str>,
+    alias: &RuntimeGatewayRouteAlias,
+    eligible_models: &[String],
+    quality: &BTreeMap<String, RuntimeGatewayAdaptiveQualityWindow>,
+    baseline_selected_model: Option<&str>,
+) -> Option<RuntimeGatewayAdaptiveShadowDecision> {
+    if !config.enabled || eligible_models.is_empty() {
+        return None;
+    }
+    let actual_model = baseline_selected_model
+        .and_then(first_concrete_model)
+        .or_else(|| eligible_models.first().map(String::as_str))?;
+    Some(crate::runtime_gateway_adaptive_shadow_decision(
+        RuntimeGatewayAdaptiveShadowInput {
+            config,
+            diagnostic_seed,
+            actual_model: actual_model.to_string(),
+            continuation_owner_model: continuation_owner_model.map(str::to_string),
+            candidates: alias
+                .models
+                .iter()
+                .filter(|candidate| {
+                    eligible_models
+                        .iter()
+                        .any(|eligible| eligible.eq_ignore_ascii_case(candidate))
+                })
+                .cloned()
+                .collect(),
+            quota_blocked_models: Vec::new(),
+            quality: quality.clone(),
+        },
+    ))
+}
+
+fn adaptive_selected_model(
+    baseline: Option<String>,
+    alias: Option<&RuntimeGatewayRouteAlias>,
+    eligible_models: &[String],
+    config: RuntimeGatewayAdaptiveRoutingConfig,
+    decision: Option<&RuntimeGatewayAdaptiveShadowDecision>,
+) -> Option<String> {
+    if config.shadow_mode {
+        return baseline;
+    }
+    let Some(recommended) = decision.and_then(|decision| decision.recommended_model.as_deref())
+    else {
+        return baseline;
+    };
+    let Some(recommended) = eligible_models
+        .iter()
+        .find(|model| model.eq_ignore_ascii_case(recommended))
+    else {
+        return baseline;
+    };
+    if alias.is_some_and(|alias| alias.strategy == RuntimeGatewayRouteStrategy::Fallback) {
+        let mut ordered = vec![recommended.as_str()];
+        ordered.extend(
+            eligible_models
+                .iter()
+                .map(String::as_str)
+                .filter(|model| !model.eq_ignore_ascii_case(recommended)),
+        );
+        return Some(if ordered.len() == 1 {
+            recommended.clone()
+        } else {
+            format!("combo:{}", ordered.join(","))
+        });
+    }
+    Some(recommended.clone())
+}
+
+fn first_concrete_model(model: &str) -> Option<&str> {
+    model
+        .strip_prefix("combo:")
+        .and_then(|models| {
+            models
+                .split(',')
+                .map(str::trim)
+                .find(|model| !model.is_empty())
+        })
+        .or_else(|| (!model.is_empty()).then_some(model))
 }
 
 fn normalize_combo_output_adjustment(candidates: &mut [RuntimeGatewayConstraintCandidate]) {
@@ -464,25 +579,49 @@ fn legacy_route_plan(
     let alias = aliases
         .iter()
         .find(|alias| alias.alias == requested_model && !alias.models.is_empty());
-    let alias_model = alias.and_then(|alias| {
-        let models = alias
-            .models
-            .iter()
-            .map(|model| model.trim())
-            .filter(|model| !model.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        runtime_gateway_route_selected_model_from_models(
-            alias,
-            &models,
-            diagnostic_seed,
-            model_state,
-            crate::runtime_gateway_estimated_tokens(body),
-        )
+    let alias_models = alias
+        .map(|alias| {
+            alias
+                .models
+                .iter()
+                .map(|model| model.trim())
+                .filter(|model| !model.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let alias_model = input.hard_affinity_model.map(str::to_string).or_else(|| {
+        alias.and_then(|alias| {
+            runtime_gateway_route_selected_model_from_models(
+                alias,
+                &alias_models,
+                diagnostic_seed,
+                model_state,
+                crate::runtime_gateway_estimated_tokens(body),
+            )
+        })
     });
-    let selected_model = alias_model
+    let baseline_selected_model = alias_model
         .clone()
         .or_else(|| (!requested_model.is_empty()).then(|| requested_model.clone()));
+    let adaptive_decision = alias.and_then(|alias| {
+        adaptive_route_decision(
+            input.adaptive_config,
+            diagnostic_seed,
+            input.hard_affinity_model,
+            alias,
+            &alias_models,
+            input.adaptive_quality,
+            baseline_selected_model.as_deref(),
+        )
+    });
+    let selected_model = adaptive_selected_model(
+        baseline_selected_model,
+        alias,
+        &alias_models,
+        input.adaptive_config,
+        adaptive_decision.as_ref(),
+    );
     let requirements = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|value| {
@@ -540,7 +679,12 @@ fn legacy_route_plan(
         selected_model.as_deref(),
         hard_affinity,
     );
-    let body_rewrite_required = alias_model.is_some();
+    let body_rewrite_required = selected_model
+        .as_deref()
+        .is_some_and(|selected| selected != requested_model);
+    let upstream_attempt_model = body_rewrite_required
+        .then(|| selected_model.clone())
+        .flatten();
     RuntimeGatewayConstraintRoutePlan {
         requested_model: requested_model.clone(),
         alias_chain: alias_model
@@ -550,7 +694,7 @@ fn legacy_route_plan(
         concrete_candidates: candidates,
         requirements,
         selected_model,
-        upstream_attempt_model: alias_model,
+        upstream_attempt_model,
         body_rewrite_required,
         adjustment: None,
         no_route_reason: None,
@@ -558,6 +702,7 @@ fn legacy_route_plan(
         truncated: false,
         selection_pool_truncated: false,
         omitted_candidates: 0,
+        adaptive_decision,
     }
 }
 

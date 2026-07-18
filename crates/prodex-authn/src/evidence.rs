@@ -64,11 +64,9 @@ pub struct VerifiedMtlsPeerEvidence {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct VerifiedWorkloadCredentialEvidence {
-    pub issuer: Issuer,
-    pub audience: Audience,
+    pub credential: Box<VerifiedOidcCredentialEvidence>,
     pub expected_issuer: Issuer,
     pub expected_audience: Audience,
-    pub resolved_principal: Principal,
     pub mtls_required: bool,
     pub mtls_peer: Option<VerifiedMtlsPeerEvidence>,
 }
@@ -88,9 +86,7 @@ impl fmt::Debug for VerifiedMtlsPeerEvidence {
 impl fmt::Debug for VerifiedWorkloadCredentialEvidence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VerifiedWorkloadCredentialEvidence")
-            .field("issuer", &"<redacted>")
-            .field("audience", &"<redacted>")
-            .field("resolved_principal", &"<redacted>")
+            .field("credential", &"<redacted>")
             .field("mtls_required", &self.mtls_required)
             .field("mtls_peer", &self.mtls_peer)
             .finish()
@@ -195,10 +191,14 @@ pub fn authenticate_verified_credential(
 fn authenticate_verified_workload_evidence(
     evidence: VerifiedWorkloadCredentialEvidence,
 ) -> Result<Principal, VerifiedCredentialAuthenticationError> {
-    let principal = evidence.resolved_principal;
-    if evidence.issuer != evidence.expected_issuer
-        || evidence.audience != evidence.expected_audience
-        || principal.kind != PrincipalKind::ServiceAccount
+    if evidence.credential.claims.issuer != evidence.expected_issuer
+        || evidence.credential.claims.audience != evidence.expected_audience
+    {
+        return Err(VerifiedCredentialAuthenticationError::WorkloadIdentityMismatch);
+    }
+    let principal = authenticate_verified_oidc_evidence(*evidence.credential)?;
+    if principal.kind != PrincipalKind::ServiceAccount
+        || principal.credential_scope != CredentialScope::DataPlane
         || principal.tenant_id.is_none()
     {
         return Err(VerifiedCredentialAuthenticationError::WorkloadIdentityMismatch);
@@ -415,12 +415,40 @@ mod tests {
         );
         let issuer = Issuer::new("https://workload.example.com").unwrap();
         let audience = Audience::new("prodex-data-plane").unwrap();
-        let evidence = VerifiedWorkloadCredentialEvidence {
+        let workload_policy = OidcValidationPolicy::new(
+            issuer.clone(),
+            vec![audience.clone()],
+            vec![JwtAlgorithm::Rs256],
+        )
+        .unwrap();
+        let workload_claims = TokenClaims {
             issuer: issuer.clone(),
             audience: audience.clone(),
+            algorithm: JwtAlgorithm::Rs256,
+            key_id: "kid-1".to_string(),
+            key_known: true,
+            signature_verified: true,
+            principal_id: workload.id,
+            tenant_id,
+            principal_kind: PrincipalKind::ServiceAccount,
+            credential_scope: CredentialScope::DataPlane,
+            role_claim: None,
+            expires_at_unix_ms: 9_000,
+            not_before_unix_ms: Some(1_000),
+        };
+        let evidence = VerifiedWorkloadCredentialEvidence {
+            credential: Box::new(VerifiedOidcCredentialEvidence {
+                policy: workload_policy,
+                jwks_snapshot: jwks(),
+                claims: workload_claims,
+                role_evidence: VerifiedOidcRoleEvidence::TrustedMissingClaimFallback(
+                    Role::Operator,
+                ),
+                resolved_principal: workload.clone(),
+                now_unix_ms: 2_000,
+            }),
             expected_issuer: issuer,
             expected_audience: audience,
-            resolved_principal: workload.clone(),
             mtls_required: true,
             mtls_peer: Some(VerifiedMtlsPeerEvidence {
                 certificate_chain_verified: true,

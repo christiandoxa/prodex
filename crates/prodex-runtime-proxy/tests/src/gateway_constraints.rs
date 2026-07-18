@@ -48,6 +48,8 @@ fn plan(
             configured_reasoning_reserve_tokens: None,
             hard_affinity_model,
             hard_affinity_required,
+            adaptive_config: RuntimeGatewayAdaptiveRoutingConfig::default(),
+            adaptive_quality: &BTreeMap::new(),
         },
     )
 }
@@ -69,8 +71,56 @@ fn plan_with_reasoning_reserve(
             configured_reasoning_reserve_tokens: Some(configured_reasoning_reserve_tokens),
             hard_affinity_model: None,
             hard_affinity_required: false,
+            adaptive_config: RuntimeGatewayAdaptiveRoutingConfig::default(),
+            adaptive_quality: &BTreeMap::new(),
         },
     )
+}
+
+#[test]
+fn active_adaptive_routing_reorders_fallback_without_losing_precommit_fallbacks() {
+    let aliases = [alias(&["model-a", "model-b"])];
+    let mut poor = RuntimeGatewayAdaptiveQualityWindow::default();
+    let mut good = RuntimeGatewayAdaptiveQualityWindow::default();
+    for _ in 0..8 {
+        poor.record_outcome(false, 2_000);
+        good.record_outcome(true, 100);
+    }
+    let quality = BTreeMap::from([("model-a".to_string(), poor), ("model-b".to_string(), good)]);
+    let plan = runtime_gateway_plan_route_with_constraints(
+        ProviderId::OpenAi,
+        ProviderEndpoint::Responses,
+        br#"{"model":"route","input":"hello"}"#,
+        RuntimeGatewayConstraintPlanInput {
+            aliases: &aliases,
+            diagnostic_seed: 1,
+            model_state: &BTreeMap::new(),
+            policy: ProviderRequestConstraintPolicy::default(),
+            additional_features: &[],
+            configured_reasoning_reserve_tokens: None,
+            hard_affinity_model: None,
+            hard_affinity_required: false,
+            adaptive_config: RuntimeGatewayAdaptiveRoutingConfig {
+                enabled: true,
+                shadow_mode: false,
+                min_samples: 8,
+                ..RuntimeGatewayAdaptiveRoutingConfig::default()
+            },
+            adaptive_quality: &quality,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.selected_model.as_deref(),
+        Some("combo:model-b,model-a")
+    );
+    assert_eq!(
+        plan.adaptive_decision
+            .as_ref()
+            .and_then(|decision| decision.recommended_model.as_deref()),
+        Some("model-b")
+    );
 }
 
 #[test]

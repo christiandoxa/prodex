@@ -170,6 +170,7 @@ postgres = "0.19.12"
 redis = { version = "1.2.4", default-features = false }
 rustls = { version = "0.23.41", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-native-certs = "0.8.4"
+tokio-rustls = "0.26.4"
 runtime_anthropic_crate = { package = "prodex-runtime-anthropic", path = "crates/prodex-runtime-anthropic", version = "0.308.0" }
 runtime_log = { package = "prodex-runtime-log", path = "crates/prodex-runtime-log", version = "0.308.0" }
 runtime_metrics = { package = "prodex-runtime-metrics", path = "crates/prodex-runtime-metrics", version = "0.308.0" }
@@ -200,6 +201,8 @@ name = "runtime_allocator_trim_evidence"
 required-features = ["bench-support"]
 
 [dependencies]
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
 clap = { workspace = true }
 prodex_app = { workspace = true }
 prodex_application = { workspace = true }

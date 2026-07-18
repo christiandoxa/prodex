@@ -54,6 +54,7 @@ pub(super) use gateway_route_alias_config::{
     gateway_route_alias_model_metrics, gateway_route_aliases_config,
 };
 use gateway_secret_config::GatewaySecretResolver;
+pub(crate) use gateway_secret_config::gateway_tls_config;
 #[cfg(test)]
 pub(super) use gateway_sso_config::gateway_sso_config;
 use gateway_sso_config::gateway_sso_config_with_resolver;

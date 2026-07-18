@@ -5264,7 +5264,7 @@ fn app_server_broker_accepts_wire_format_requests_and_reports_disabled_contract(
     let contract = app_server_broker_contract_json();
     assert_eq!(contract["enabled_by_default"], serde_json::Value::Bool(false));
     assert_eq!(contract["default_mode"], "direct-passthrough");
-    assert_eq!(contract["status"], "diagnostic-envelope-parsing");
+    assert_eq!(contract["status"], "live-validated-broker");
     assert_eq!(contract["wire_omits_jsonrpc_header"], serde_json::Value::Bool(true));
     assert_eq!(contract["cli"]["json_contract"], serde_json::Value::Bool(true));
     assert_eq!(
@@ -5476,10 +5476,10 @@ fn app_server_broker_accepts_wire_format_requests_and_reports_disabled_contract(
 #[test]
 fn app_server_broker_status_line_matches_contract_defaults() {
     let status_line = app_server_broker_status_line();
-    assert!(status_line.contains("status=diagnostic-envelope-parsing"));
+    assert!(status_line.contains("status=live-validated-broker"));
     assert!(status_line.contains("transport=stdio-preview,stdio-passthrough-preview"));
     assert!(status_line.contains("mode=direct-passthrough"));
-    assert!(status_line.contains("passthrough-aware stdio preview is available"));
+    assert!(status_line.contains("bidirectional validated stdio live mode is available"));
     assert!(status_line.contains("passthrough remains active"));
 }
 

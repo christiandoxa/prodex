@@ -70,7 +70,7 @@ prodex_storage_sqlite_runtime = { workspace = true }
 postgres = { workspace = true, features = ["with-uuid-1"] }
 redaction = { workspace = true }
 redis = { workspace = true }
-reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
+reqwest = { workspace = true, features = ["blocking", "form", "json", "rustls", "system-proxy", "socks"] }
 ratatui = { workspace = true }
 rpassword = { workspace = true }
 rusqlite = { workspace = true }
@@ -103,7 +103,7 @@ prodex_update_notice = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
 tiny_http = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "sync"] }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
 jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
