@@ -83,6 +83,30 @@ pub(crate) fn prepare_runtime_overlay_home(
     )
 }
 
+pub(crate) fn prepare_desktop_overlay_home(
+    paths: &AppPaths,
+    base_codex_home: &Path,
+    configure_prodex: bool,
+) -> Result<PathBuf> {
+    let sessions_are_managed = prodex_core::same_path(
+        &base_codex_home.join("sessions"),
+        &paths.shared_codex_root.join("sessions"),
+    );
+    if sessions_are_managed {
+        prodex_shared_codex_fs::maintain_managed_codex_sessions(paths)?;
+        return prodex_caveman_assets::prepare_desktop_overlay_home_from_prepared_base(
+            &paths.managed_profiles_root,
+            base_codex_home,
+            configure_prodex,
+        );
+    }
+    prodex_caveman_assets::prepare_desktop_overlay_home(
+        &paths.managed_profiles_root,
+        base_codex_home,
+        configure_prodex,
+    )
+}
+
 fn desktop_config_assignments(args: &[OsString]) -> Result<Vec<&str>> {
     let mut assignments = Vec::new();
     let mut index = 0;
