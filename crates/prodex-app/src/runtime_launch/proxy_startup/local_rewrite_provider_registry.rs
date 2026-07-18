@@ -377,6 +377,7 @@ impl RuntimeGatewayGovernedProviderRegistrySnapshot {
         route: &GovernedRoute,
         endpoint: ProviderEndpoint,
     ) -> Option<RuntimeGatewayProviderPricing> {
+        self.authoritative_pricing.then_some(())?;
         let descriptor = self.route_descriptor(route, endpoint)?;
         (!descriptor.model_costs.is_empty()).then(|| RuntimeGatewayProviderPricing {
             provider: descriptor.provider,
@@ -658,7 +659,11 @@ pub(super) fn runtime_gateway_bootstrap_provider_registry_snapshot(
     };
     compile_runtime_gateway_provider_registry_artifact(
         &serde_json::to_vec(&RuntimeGatewayProviderRegistryArtifact {
-            schema_version: RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION,
+            schema_version: if runtime_gateway_provider_catalog_has_pricing(context.provider) {
+                RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
+            } else {
+                RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION
+            },
             revision: settings.provider_registry_revision.unwrap_or(1),
             pricing_revision: 1,
             descriptors: vec![RuntimeGatewayProviderRegistryDescriptorArtifact {
@@ -878,6 +883,13 @@ fn compile_runtime_gateway_provider_registry(
         attached_provider: context.provider,
         projected_credential: context.projected_credential.clone(),
         descriptors,
+    })
+}
+
+fn runtime_gateway_provider_catalog_has_pricing(provider: ProviderId) -> bool {
+    provider_model_catalog(provider).iter().any(|model| {
+        model.input_cost_per_million_microusd.is_some()
+            || model.output_cost_per_million_microusd.is_some()
     })
 }
 
@@ -1127,6 +1139,19 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn bootstrap_without_declared_catalog_prices_is_not_authoritative() {
+        let snapshot = runtime_gateway_bootstrap_provider_registry_snapshot(
+            &prodex_runtime_policy::RuntimePolicyGovernanceSettings::default(),
+            &provider(),
+            None,
+        )
+        .unwrap();
+
+        assert!(!snapshot.has_authoritative_pricing());
+        assert_eq!(snapshot.reservation_cost_for_model("unknown-model"), None);
     }
 
     #[test]

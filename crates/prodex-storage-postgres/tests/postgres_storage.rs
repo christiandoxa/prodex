@@ -695,11 +695,16 @@ fn postgres_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope
         return;
     };
     execute_postgres_batch(&url, "DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
-    execute_postgres_batch(&url, INITIAL_TENANT_ACCOUNTING_MIGRATION.sql);
+    for migration in POSTGRES_MIGRATIONS {
+        execute_postgres_batch(&url, migration.sql);
+    }
 
     let tenant_id = TenantId::new();
     let virtual_key_id = VirtualKeyId::new();
     let mut client = postgres::Client::connect(&url, NoTls).expect("postgres should connect");
+    client
+        .execute(SET_TENANT_STATEMENT.sql, &[&tenant_id.to_string()])
+        .expect("tenant context should set");
     client
         .execute(
             "INSERT INTO prodex_tenants (tenant_id, display_name, created_at_unix_ms, updated_at_unix_ms)
@@ -747,14 +752,16 @@ fn postgres_atomic_reservation_allows_only_one_concurrent_claim_per_budget_scope
             .iter()
             .filter(|result| matches!(result, Ok(true)))
             .count(),
-        1
+        1,
+        "unexpected reservation results: {results:?}"
     );
     assert_eq!(
         results
             .iter()
             .filter(|result| matches!(result, Ok(false)))
             .count(),
-        1
+        1,
+        "unexpected reservation results: {results:?}"
     );
 
     let reservation_rows: i64 = client

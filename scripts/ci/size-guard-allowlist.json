@@ -151,8 +151,8 @@
   },
   {
     "file": "crates/prodex-storage-postgres/tests/postgres_storage.rs",
-    "maxLines": 1667,
-    "reason": "PostgreSQL storage characterization includes actual usage above reservation and is capped while migration, tenant isolation, and accounting tests are split."
+    "maxLines": 1674,
+    "reason": "PostgreSQL storage characterization includes current-schema concurrent reservation proof and actual usage above reservation; capped while migration, tenant isolation, and accounting tests are split."
   },
   {
     "file": "crates/prodex-storage-sqlite/tests/sqlite_storage.rs",
@@ -246,8 +246,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1375,
-    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, and focused conformance tests; capped until adapter projection splits out."
+    "maxLines": 1400,
+    "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; capped until adapter projection splits out."
   },
   {
     "file": "crates/prodex-domain/src/governance/policy_decision.rs",
