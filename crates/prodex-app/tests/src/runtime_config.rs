@@ -85,6 +85,18 @@ fn runtime_config_reads_each_environment_key_once() {
 }
 
 #[test]
+fn runtime_config_default_allows_large_codex_turns() {
+    let policy_dir = with_test_policy_dir("version = 1\n");
+    let paths = test_app_paths(policy_dir.root.clone());
+    let environment = RuntimeConfigEnvironment::read_with(|_| None);
+
+    let config =
+        RuntimeConfig::from_environment(&paths, environment).expect("default config should parse");
+
+    assert_eq!(config.max_request_body_bytes, 64 * 1024 * 1024);
+}
+
+#[test]
 fn runtime_config_carries_validated_governance_mode() {
     let policy_dir = with_test_policy_dir(
         r#"
