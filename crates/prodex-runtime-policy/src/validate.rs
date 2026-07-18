@@ -30,7 +30,6 @@ mod runtime_proxy;
 #[path = "validate/service_mode.rs"]
 mod service_mode;
 
-pub use crate::validate_secrets::parse_secret_backend_kind;
 pub use errors::{
     RuntimePolicyValidationErrors, RuntimePolicyValidationIssue, RuntimePolicyValidationSection,
 };

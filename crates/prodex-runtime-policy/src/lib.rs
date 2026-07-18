@@ -40,9 +40,8 @@ pub use self::types::{
 };
 pub use self::validate::{
     MAX_GOVERNANCE_AUTHORITY_TENANTS, RuntimePolicyValidationErrors, RuntimePolicyValidationIssue,
-    RuntimePolicyValidationSection, parse_secret_backend_kind,
-    validate_runtime_governance_settings, validate_runtime_policy_file,
-    validate_runtime_proxy_policy,
+    RuntimePolicyValidationSection, validate_runtime_governance_settings,
+    validate_runtime_policy_file, validate_runtime_proxy_policy,
 };
 
 use anyhow::{Result, bail};

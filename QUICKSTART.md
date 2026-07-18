@@ -160,7 +160,7 @@ For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits
 
 `prodex gui` launches Codex Desktop through a temporary Prodex profile overlay and runtime proxy; `prodex s gui` adds the Super/Caveman optimizer overlay and full-access policy. On macOS/Windows, run `codex app` and complete installation of the official app. On Linux, install the `codex-desktop` command from [codex-desktop-linux](https://github.com/ilysenko/codex-desktop-linux). Close a running official app before launching through Prodex. Prodex does not download or redistribute these apps, and the launching terminal must remain open while the GUI runs.
 
-`prodex dashboard` is the separate localhost browser control plane. Use `prodex dashboard --open`, `--port 0` to bind a free port, or `--base-url` for a custom Codex-compatible backend. It shows configured profiles, provider setup commands and model metadata, quota, a bounded redacted runtime-log tail, and runtime/gateway commands. It generates commands for provider secrets instead of storing them. The dashboard has no password auth, so keep it bound to localhost unless the network is trusted.
+`prodex dashboard` is the separate localhost browser control plane. Use `prodex dashboard --open`, `--port 0` to bind a free port, or `--base-url` for a custom Codex-compatible backend. It shows configured profiles, provider setup commands and model metadata, quota, a bounded redacted runtime-log tail, and runtime/gateway commands. It generates commands for provider secrets instead of storing them. Prodex enforces a loopback bind; use an SSH tunnel when remote access is required.
 
 Use `prodex session list` to inspect shared Codex sessions, or `prodex session current` to show sessions started from the current directory. Add `--parent-only` when you only want resumable parent sessions.
 
@@ -424,10 +424,6 @@ version = 1
 log_format = "json"
 log_dir = "runtime-logs"
 
-[secrets]
-backend = "file"
-# keyring_service = "prodex"
-
 [runtime_proxy]
 worker_count = 16
 active_request_limit = 128
@@ -487,7 +483,7 @@ Environment variables still override `policy.toml`.
 Use `prodex info` to inspect the resulting effective runtime tuning values.
 See [docs/runtime-policy.md](./docs/runtime-policy.md) for all `runtime`, `gateway`, and `runtime_proxy` keys, env overrides, defaults, and meanings.
 Gateway adaptive routing is opt-in. Configure `[gateway.adaptive_routing] enabled = true`; the default `shadow_mode = true` records bounded per-model recommendations without changing selection. Set `shadow_mode = false` only when live fresh pre-commit fallback reordering is desired. Continuation affinity and post-commit no-rotation rules always win.
-Prodex's keyring secret backend uses the native macOS Keychain, Windows Credential Manager, or Linux Secret Service. Select it for Prodex secret-store consumers with `PRODEX_SECRET_BACKEND=keyring` or `[secrets].backend = "keyring"` plus `keyring_service`; unavailable or locked OS stores fail closed. Codex-managed profile `auth.json` files remain isolated files and are not migrated by this setting.
+Prodex runtime secrets are file-backed. The reusable `prodex-secret-store` crate contains a native keyring backend, but the Prodex CLI does not expose a selector until a production flow consumes it. Codex-managed profile `auth.json` files remain isolated files.
 
 ## Admin And Observability Notes
 
@@ -495,10 +491,10 @@ Prodex is still a local-first tool, even with the current admin and observabilit
 
 Current local hardening includes:
 
-- a secret-management abstraction for `auth.json` and export bundles, plus global secret-backend selection through policy or environment
+- a file-backed secret-management boundary for `auth.json` and export bundles
 - a stable broker metrics JSON endpoint at `/__prodex/runtime/metrics`
 - a Prometheus broker metrics endpoint at `/__prodex/runtime/metrics/prometheus`
-- `prodex info` and `prodex doctor --runtime --json` surfacing live metrics targets and the selected secret backend
+- `prodex info` and `prodex doctor --runtime --json` surfacing live metrics targets and the effective file secret backend
 - `prodex doctor --bundle PATH --redacted` for shareable local diagnostics without stored auth tokens
 - local structured audit logging for profile, rotation, and admin events, separate from runtime session output and discoverable through `prodex info` or `prodex doctor --runtime --json`
 - `prodex audit` for browsing the local append-only audit log without touching runtime proxy behavior
@@ -506,8 +502,8 @@ Current local hardening includes:
 
 Known gaps today:
 
-- local `auth.json` remains the compatibility source of truth for current Codex flows even when a non-file backend is selected
-- no keychain, Vault, or KMS-backed secret storage implementation yet
+- local `auth.json` remains the compatibility source of truth for current Codex flows
+- no production runtime integration for keychain, Vault, or KMS-backed secret storage yet; the native keyring backend is currently a library primitive
 - audit logs follow the resolved runtime log directory by default, or `PRODEX_AUDIT_LOG_DIR` when set
 - gateway admin RBAC currently supports admin/viewer bearer tokens, trusted reverse-proxy SSO headers, native OIDC/JWT bearer verification with discovery, SCIM-compatible user provisioning, tenant-scoped admin boundaries, and a built-in dashboard, but it is still not a hosted central SaaS control plane
 - runtime observability has local logs, `doctor --runtime --json`, gateway JSONL/HTTP event export, virtual-key usage reads, and Prometheus text metrics; it is still not a centralized admin plane
