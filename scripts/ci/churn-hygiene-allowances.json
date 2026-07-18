@@ -2,12 +2,14 @@
   {
     "id": "audited-client-gateway-integration-0.309.0",
     "requiredSubjects": [
-      "feat(integrations): harden clients and enterprise gateway"
+      "feat(integrations): harden clients and enterprise gateway",
+      "chore(ci): cover reviewed 0.309.0 release range",
+      "chore(release): release 0.309.0"
     ],
     "caps": {
-      "maxFiles": 150,
+      "maxFiles": 160,
       "maxBehaviorFiles": 130,
-      "maxLines": 10300,
+      "maxLines": 10600,
       "maxFileLines": 900
     },
     "reason": "Reviewed Codex, Gemini, Kiro, Copilot, and Claude launch/proxy compatibility; authenticated Kiro CONNECT tunneling and redacted child plans; live enterprise gateway configuration, browser/workload identity, reservation recovery, governed routing, PostgreSQL/SQLite durability, and operator documentation; CI test/release caching and deployment optimizations; boundary, size, hot-path, supply-chain, formatting, all-target workspace checks, the full all-features suite, optimized locked build, Gitleaks, and tracked-diff identifier scans before the 0.309.0 release."
