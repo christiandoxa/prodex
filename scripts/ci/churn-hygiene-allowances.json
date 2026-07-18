@@ -1,5 +1,21 @@
 [
   {
+    "id": "audited-gui-and-surface-hardening-0.312.0",
+    "requiredSubjects": [
+      "fix(gui): harden audited desktop and dashboard paths",
+      "fix: remove unimplemented audited surfaces",
+      "chore(release): release 0.312.0",
+      "chore(ci): allow reviewed 0.312.0 audit range"
+    ],
+    "caps": {
+      "maxFiles": 46,
+      "maxBehaviorFiles": 30,
+      "maxLines": 1200,
+      "maxFileLines": 185
+    },
+    "reason": "Reviewed the loopback-only same-origin dashboard boundary, bounded concurrent request handling, Linux symlink traversal guard, native macOS and Windows desktop launcher release tests, removal of the unconsumed runtime keyring selector, dead-surface cleanup, documentation corrections, and guard ratchets; verified with focused regressions, the full locked all-features suite, strict Clippy, dependency and advisory audits, Gitleaks, release preparation, and tracked-diff identifier scanning before the 0.312.0 release."
+  },
+  {
     "id": "opencodex-inspired-gui-0.310.0",
     "requiredSubjects": [
       "feat(gui): add OpenCodex-inspired control center",
