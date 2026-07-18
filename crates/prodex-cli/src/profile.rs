@@ -234,6 +234,12 @@ pub struct DashboardArgs {
     /// Override the ChatGPT backend base URL used for quota requests.
     #[arg(long, value_name = "URL")]
     pub base_url: Option<String>,
+    /// Open the dashboard in the system browser after binding.
+    #[arg(long, hide = true)]
+    pub open: bool,
+    /// Retry with an OS-assigned port when the requested port is busy.
+    #[arg(long, hide = true)]
+    pub fallback_port: bool,
 }
 
 impl fmt::Debug for DashboardArgs {
@@ -243,6 +249,8 @@ impl fmt::Debug for DashboardArgs {
             .field("host", &self.host)
             .field("port", &self.port)
             .field("base_url_configured", &self.base_url.is_some())
+            .field("open", &self.open)
+            .field("fallback_port", &self.fallback_port)
             .finish()
     }
 }
@@ -276,6 +284,8 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 8765,
             base_url,
+            open: false,
+            fallback_port: false,
         };
 
         for rendered in [
