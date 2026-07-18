@@ -2,11 +2,14 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.313.0 - 2026-07-18
+## 0.314.0 - 2026-07-18
+
+### CLI
+
+- Persist chat history index (`e56691b`)
 
 ### Misc
 
-- Sync fuzz dependency lock
 - Document adaptive route decision (`64daec0`)
 - Detect current legacy schema (`b0ec18a`)
 - Persist desktop chat history (`f8d814e`)
