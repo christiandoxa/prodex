@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.316.0 - 2026-07-19
+
+### Runtime
+
+- Allow large Codex request bodies (`303a1ac`)
+
 ## 0.315.0 - 2026-07-18
 
 ### CLI
@@ -76,9 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden accounting and broker reliability (`7356147`)
-
-## 0.304.0 - 2026-07-17
-
-### Misc
-
-- Add immutable implementation registry (`4591fbb`)
