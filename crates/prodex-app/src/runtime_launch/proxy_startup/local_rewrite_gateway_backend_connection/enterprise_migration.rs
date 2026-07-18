@@ -267,6 +267,12 @@ fn apply_postgres_migrations(client: &mut PostgresClient) -> Result<usize> {
 }
 
 fn infer_legacy_sqlite_version(conn: &Connection) -> Result<i64> {
+    if runtime_gateway_sqlite_table_exists(conn, "prodex_audit_legal_holds")? {
+        return Ok(10);
+    }
+    if runtime_gateway_sqlite_table_has_column(conn, "prodex_reservations", "storage_scope")? {
+        return Ok(9);
+    }
     if runtime_gateway_sqlite_table_has_column(conn, "prodex_tenants", "session_revocation_epoch")?
     {
         return Ok(8);
