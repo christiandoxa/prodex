@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.310.0 - 2026-07-18
+
+### Misc
+
+- Add OpenCodex-inspired control center (`29a1556`)
+
 ## 0.309.0 - 2026-07-18
 
 ### Misc
 
+- Preserve explicit route pricing (`b8563eb`)
 - Harden clients and enterprise gateway (`75568ba`)
 
 ## 0.308.0 - 2026-07-17
@@ -76,9 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Retry quota-ready transport fallback (`e45240e`)
-
-## 0.298.0 - 2026-07-16
-
-### Runtime
-
-- Rotate past weekly-exhausted profiles (`3490f5d`)
