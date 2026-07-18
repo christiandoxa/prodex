@@ -1657,6 +1657,11 @@ while moving legacy adapter code behind enterprise boundaries.
   and now provides one-shot retention compaction for fully acknowledged records,
   so separated control-plane and gateway processes no longer require manual
   per-replica fan-out or indefinite shared-storage growth for this path.
+  Both dedicated `serve` roots also accept a transport path and replica ID,
+  poll continuously, validate and build a replacement application, reload edge
+  and TLS state, atomically swap the live handler through `ArcSwap`, and
+  acknowledge only after activation succeeds. Failed candidates retain the
+  active instance and remain unacknowledged for retry.
 - **ADRs:** `docs/adr/0068-domain-policy-cache-refresh.md`,
   `docs/adr/0085-config-boundary-crate.md`,
   `docs/adr/0086-config-boundary-guard.md`,

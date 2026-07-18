@@ -304,6 +304,69 @@ ALTER TABLE prodex_tenants ADD COLUMN session_revocation_epoch INTEGER NOT NULL 
 "#,
 };
 
+pub const LOCAL_RESERVATION_STORAGE_SCOPE_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(9),
+    phase: SqliteMigrationPhase::Expand,
+    name: "009_reservation_storage_scope",
+    sql: r#"
+ALTER TABLE prodex_reservations
+    ADD COLUMN storage_scope TEXT NOT NULL DEFAULT 'tenant-default';
+
+UPDATE prodex_reservations
+SET storage_scope = COALESCE(
+    (
+        SELECT counter.storage_scope
+        FROM prodex_budget_counters counter
+        WHERE counter.tenant_id = prodex_reservations.tenant_id
+          AND counter.virtual_key_id IS prodex_reservations.virtual_key_id
+        ORDER BY counter.updated_at_unix_ms DESC, counter.storage_scope
+        LIMIT 1
+    ),
+    CASE
+        WHEN virtual_key_id IS NULL THEN 'tenant-default'
+        ELSE 'virtual_key:' || virtual_key_id
+    END
+);
+
+CREATE INDEX IF NOT EXISTS prodex_reservations_expired_active_idx
+    ON prodex_reservations (expires_at_unix_ms, tenant_id)
+    WHERE committed_at_unix_ms IS NULL AND released_at_unix_ms IS NULL;
+"#,
+};
+
+pub const LOCAL_AUDIT_LEGAL_HOLD_MIGRATION: SqliteMigration = SqliteMigration {
+    version: SqliteMigrationVersion(10),
+    phase: SqliteMigrationPhase::Expand,
+    name: "010_audit_legal_holds",
+    sql: r#"
+CREATE TABLE IF NOT EXISTS prodex_audit_legal_holds (
+    tenant_id TEXT NOT NULL REFERENCES prodex_tenants(tenant_id),
+    audit_event_id TEXT NOT NULL,
+    reason_code TEXT NOT NULL,
+    expires_at_unix_ms INTEGER,
+    created_by TEXT NOT NULL,
+    created_at_unix_ms INTEGER NOT NULL,
+    PRIMARY KEY (tenant_id, audit_event_id),
+    FOREIGN KEY (tenant_id, audit_event_id)
+        REFERENCES prodex_audit_log(tenant_id, audit_event_id),
+    CHECK (length(reason_code) BETWEEN 1 AND 128),
+    CHECK (expires_at_unix_ms IS NULL OR expires_at_unix_ms > 0),
+    CHECK (created_at_unix_ms >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS prodex_audit_legal_holds_active_idx
+    ON prodex_audit_legal_holds (tenant_id, expires_at_unix_ms, audit_event_id);
+
+CREATE TABLE IF NOT EXISTS prodex_audit_retention_anchors (
+    tenant_id TEXT PRIMARY KEY REFERENCES prodex_tenants(tenant_id),
+    last_purged_digest TEXT NOT NULL,
+    updated_at_unix_ms INTEGER NOT NULL,
+    CHECK (length(last_purged_digest) BETWEEN 1 AND 128),
+    CHECK (updated_at_unix_ms >= 0)
+);
+"#,
+};
+
 pub const LOCAL_GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION: SqliteMigration =
     SqliteMigration {
         version: SqliteMigrationVersion(6),

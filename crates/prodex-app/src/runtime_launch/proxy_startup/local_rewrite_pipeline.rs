@@ -43,6 +43,7 @@ use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_request_path_is_route_explain,
     runtime_gateway_request_path_requires_admin_auth,
 };
+use super::local_rewrite_gateway_browser::runtime_gateway_browser_auth_response;
 use super::local_rewrite_gateway_data_plane_audit::{
     runtime_gateway_audit_data_plane_auth_failed,
     runtime_gateway_audit_data_plane_guardrail_blocked,
@@ -59,6 +60,7 @@ use super::local_rewrite_gateway_keys::{
 };
 use super::local_rewrite_gateway_route_load::RuntimeGatewayRouteLoadGuard;
 use super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
+use super::local_rewrite_gateway_workload_identity::runtime_gateway_workload_credential;
 use super::local_rewrite_gemini_compact::respond_runtime_gemini_compact_request;
 use super::local_rewrite_gemini_live::handle_runtime_gemini_live_websocket_request;
 use super::local_rewrite_kiro::{
@@ -315,6 +317,9 @@ fn runtime_local_rewrite_authenticate<'target>(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAuthenticatedRequest<'target>> {
     let mut state = canonical.0;
+    if let Some(response) = runtime_gateway_browser_auth_response(&state.request, shared) {
+        return Err(state.respond(response));
+    }
     state.admin = match runtime_local_rewrite_preauthorize_admin(&state, shared) {
         Ok(admin) => admin,
         Err(response) => return Err(state.reject(response)),
@@ -437,11 +442,17 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
         .gateway_auth_token_hash
         .as_ref()
         .is_some_and(|hash| runtime_local_rewrite_request_is_authorized(&state.request, hash));
+    let workload_credential = runtime_gateway_workload_credential(&state.request, shared)
+        .map_err(|_| runtime_local_rewrite_data_auth_rejection(state, shared))?;
     let admin_configured = !shared.gateway_admin_tokens.is_empty()
         || shared.gateway_sso.proxy_token_hash.is_some()
-        || shared.gateway_sso.oidc.is_some();
-    let virtual_key =
-        runtime_local_rewrite_verified_virtual_key(state, shared, virtual_keys_empty)?;
+        || shared.gateway_sso.oidc.is_some()
+        || shared.gateway_sso.workload_identity.is_some();
+    let virtual_key = if workload_credential.is_some() {
+        None
+    } else {
+        runtime_local_rewrite_verified_virtual_key(state, shared, virtual_keys_empty)?
+    };
     if state.context.plane() != prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
         return Ok(None);
     }
@@ -450,6 +461,10 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
         legacy_authorized,
         shared.gateway_auth_token_hash.is_some() || admin_configured,
     );
+    if let Some(workload_credential) = workload_credential {
+        credential.evidence = Some(workload_credential);
+        credential.anonymous_allowed = false;
+    }
     credential.anonymous_allowed &= shared
         .runtime_shared
         .runtime_config

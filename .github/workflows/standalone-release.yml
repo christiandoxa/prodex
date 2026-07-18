@@ -14,7 +14,10 @@ permissions:
   artifact-metadata: write
 
 env:
+  CARGO_INCREMENTAL: "0"
   CARGO_HTTP_MULTIPLEXING: "false"
+  SCCACHE_CACHE_SIZE: 2G
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
   verify-ci:
@@ -156,11 +159,23 @@ jobs:
           toolchain: 1.97.0
           targets: ${{ matrix.target }}
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install sccache
+        if: ${{ matrix.use-cross == false }}
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
       - name: Install cross
         if: ${{ matrix.use-cross }}
         shell: bash
         run: |
           set -euo pipefail
+          if command -v cross >/dev/null 2>&1; then
+            exit 0
+          fi
           for attempt in 1 2 3; do
             if CARGO_HTTP_MULTIPLEXING=false cargo install cross --locked; then
               exit 0
@@ -191,7 +206,7 @@ jobs:
             if [ "${{ matrix.use-cross }}" = "true" ]; then
               cross build --release --locked --target "${{ matrix.target }}" && exit 0
             else
-              cargo build --release --locked --target "${{ matrix.target }}" && exit 0
+              RUSTC_WRAPPER=sccache cargo build --release --locked --target "${{ matrix.target }}" && exit 0
             fi
             if [ "${attempt}" = "3" ]; then
               exit 1
@@ -247,30 +262,15 @@ jobs:
           overwrite: true
           retention-days: 7
 
-  native-client-compat:
-    name: Probe current native clients
-    runs-on: ubuntu-latest
-    needs:
-      - build
-    timeout-minutes: 20
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-
-      - name: Install Node.js
+      - name: Install Node.js for native client probe
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           package-manager-cache: false
 
-      - name: Download Linux release binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: x86_64-unknown-linux-gnu
-          path: artifacts
-
       - name: Install current native clients
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
@@ -287,6 +287,7 @@ jobs:
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
 
       - name: Verify client discovery and direct-native guards
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -307,8 +308,9 @@ jobs:
           for variable in ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL; do
             grep -a -q -- "${variable}" "$(command -v claude)"
           done
-          chmod 0755 artifacts/prodex
-          PRODEX_HOME="${RUNNER_TEMP}/prodex-capability" artifacts/prodex capability list --json > "${RUNNER_TEMP}/capabilities.json"
+          prodex_binary="target/${{ matrix.target }}/release/${{ matrix.binary-name }}"
+          chmod 0755 "${prodex_binary}"
+          PRODEX_HOME="${RUNNER_TEMP}/prodex-capability" "${prodex_binary}" capability list --json > "${RUNNER_TEMP}/capabilities.json"
           CAPABILITIES="${RUNNER_TEMP}/capabilities.json" python - <<'PY'
           import json
           import os
@@ -318,8 +320,8 @@ jobs:
           for name in ("gemini", "kiro", "copilot", "claude"):
               assert rows[name]["status"] == "available", rows[name]
           PY
-          PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true artifacts/prodex s gemini --cli agy --no-presidio
-          if PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true artifacts/prodex s gemini --cli agy --presidio 2> "${RUNNER_TEMP}/presidio-error.txt"; then
+          PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true "${prodex_binary}" s gemini --cli agy --no-presidio
+          if PRODEX_HOME="${RUNNER_TEMP}/prodex-agy" PRODEX_AGY_BIN=/bin/true "${prodex_binary}" s gemini --cli agy --presidio 2> "${RUNNER_TEMP}/presidio-error.txt"; then
             echo "native Antigravity unexpectedly accepted --presidio" >&2
             exit 1
           fi
@@ -330,7 +332,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
-      - native-client-compat
 
     steps:
       - name: Check out repository

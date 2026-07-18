@@ -13,8 +13,8 @@ mod types;
 pub use governance::PostgresSiemOutboxClaim;
 pub use tls::{PostgresTlsConfig, PostgresTlsMode, connect_blocking};
 pub use types::{
-    IdempotentWriteOutcome, PostgresRuntimeError, ReserveOutcome, ReserveRejection,
-    StoredReservation, StoredReservationState,
+    ExpiredReservationCandidate, IdempotentWriteOutcome, PostgresRuntimeError, ReserveOutcome,
+    ReserveRejection, StoredReservation, StoredReservationState,
 };
 
 use deadpool_postgres::{
@@ -22,8 +22,8 @@ use deadpool_postgres::{
     Timeouts,
 };
 use prodex_domain::{
-    CallId, IdempotencyKey, RequestId, ReservationId, ReservationRecord, TenantId, UsageAmount,
-    VirtualKeyId,
+    BudgetSnapshot, CallId, IdempotencyKey, RequestId, ReservationId, ReservationRecord, TenantId,
+    UsageAmount, VirtualKeyId,
 };
 #[cfg(test)]
 use prodex_storage::TenantStorageKey;
@@ -42,6 +42,33 @@ use uuid::Uuid;
 
 const DEFAULT_MAX_SERIALIZATION_RETRIES: usize = 3;
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_EXPIRED_RESERVATION_BATCH: usize = 256;
+
+const LOAD_EXPIRED_RESERVATIONS_SQL: &str = r#"
+SELECT
+    reservation.reservation_id,
+    reservation.call_id,
+    reservation.virtual_key_id,
+    reservation.storage_scope,
+    reservation.reserved_tokens AS reservation_reserved_tokens,
+    reservation.reserved_cost_micros AS reservation_reserved_cost_micros,
+    reservation.created_at_unix_ms,
+    reservation.expires_at_unix_ms,
+    counter.reserved_tokens AS counter_reserved_tokens,
+    counter.reserved_cost_micros AS counter_reserved_cost_micros,
+    counter.committed_tokens AS counter_committed_tokens,
+    counter.committed_cost_micros AS counter_committed_cost_micros
+FROM prodex_reservations reservation
+JOIN prodex_budget_counters counter
+  ON counter.tenant_id = reservation.tenant_id
+ AND counter.storage_scope = reservation.storage_scope
+WHERE reservation.tenant_id = $1
+  AND reservation.committed_at_unix_ms IS NULL
+  AND reservation.released_at_unix_ms IS NULL
+  AND reservation.expires_at_unix_ms <= $2
+ORDER BY reservation.expires_at_unix_ms, reservation.reservation_id
+LIMIT $3
+"#;
 
 /// Read-only SQL required for cross-replica reservation reconciliation.
 ///
@@ -503,6 +530,58 @@ impl PostgresRepository {
         self.with_timeout(self.release_expired_inner(command)).await
     }
 
+    pub async fn load_expired_reservations(
+        &self,
+        tenant_id: TenantId,
+        now_unix_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<ExpiredReservationCandidate>, PostgresRuntimeError> {
+        if limit == 0 || limit > MAX_EXPIRED_RESERVATION_BATCH {
+            return Err(PostgresRuntimeError::Configuration);
+        }
+        self.with_timeout(self.load_expired_reservations_inner(tenant_id, now_unix_ms, limit))
+            .await
+    }
+
+    async fn load_expired_reservations_inner(
+        &self,
+        tenant_id: TenantId,
+        now_unix_ms: u64,
+        limit: usize,
+    ) -> Result<Vec<ExpiredReservationCandidate>, PostgresRuntimeError> {
+        let mut client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| PostgresRuntimeError::PoolUnavailable)?;
+        let transaction = client
+            .transaction()
+            .await
+            .map_err(|_| PostgresRuntimeError::Database)?;
+        set_tenant_context(&transaction, tenant_id)
+            .await
+            .map_err(|_| PostgresRuntimeError::Database)?;
+        let statement = transaction
+            .prepare_cached(LOAD_EXPIRED_RESERVATIONS_SQL)
+            .await
+            .map_err(|_| PostgresRuntimeError::Database)?;
+        let now_unix_ms = to_i64(now_unix_ms)?;
+        let limit = i64::try_from(limit).map_err(|_| PostgresRuntimeError::NumericOverflow)?;
+        let rows = transaction
+            .query(&statement, &[&tenant_id.as_uuid(), &now_unix_ms, &limit])
+            .await
+            .map_err(|_| PostgresRuntimeError::Database)?;
+        let candidates = rows
+            .into_iter()
+            .map(|row| expired_reservation_candidate_from_row(tenant_id, row))
+            .collect::<Result<Vec<_>, _>>()?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| PostgresRuntimeError::Database)?;
+        Ok(candidates)
+    }
+
     async fn release_expired_inner(
         &self,
         command: ExpiredReservationRecoveryCommand,
@@ -785,6 +864,46 @@ fn stored_reservation_from_row(row: Row) -> Result<StoredReservation, PostgresRu
         state,
         committed_usage,
         released_usage,
+    })
+}
+
+fn expired_reservation_candidate_from_row(
+    tenant_id: TenantId,
+    row: Row,
+) -> Result<ExpiredReservationCandidate, PostgresRuntimeError> {
+    let virtual_key_id = row
+        .get::<_, Option<Uuid>>("virtual_key_id")
+        .map(VirtualKeyId::from_uuid);
+    let storage_scope = row.get::<_, String>("storage_scope");
+    let storage_key = prodex_storage::TenantStorageKey::from_storage_scope(
+        tenant_id,
+        virtual_key_id,
+        &storage_scope,
+    )
+    .ok_or(PostgresRuntimeError::InvalidDatabaseState)?;
+    Ok(ExpiredReservationCandidate {
+        storage_key,
+        snapshot: BudgetSnapshot {
+            reserved: UsageAmount::new(
+                from_i64(row.get("counter_reserved_tokens"))?,
+                from_i64(row.get("counter_reserved_cost_micros"))?,
+            ),
+            committed: UsageAmount::new(
+                from_i64(row.get("counter_committed_tokens"))?,
+                from_i64(row.get("counter_committed_cost_micros"))?,
+            ),
+        },
+        record: ReservationRecord {
+            tenant_id,
+            reservation_id: ReservationId::from_uuid(row.get("reservation_id")),
+            call_id: CallId::from_uuid(row.get("call_id")),
+            reserved: UsageAmount::new(
+                from_i64(row.get("reservation_reserved_tokens"))?,
+                from_i64(row.get("reservation_reserved_cost_micros"))?,
+            ),
+            created_at_unix_ms: from_i64(row.get("created_at_unix_ms"))?,
+            expires_at_unix_ms: from_i64(row.get("expires_at_unix_ms"))?,
+        },
     })
 }
 

@@ -80,6 +80,7 @@ mod runtime_gemini_config;
 mod runtime_governance;
 #[allow(dead_code)]
 mod runtime_kiro_acp;
+mod runtime_kiro_connect_proxy;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_local_provider_config;
@@ -141,6 +142,7 @@ use runtime_external_provider_config::*;
 use runtime_gemini_auth::*;
 use runtime_gemini_cli_compat::*;
 use runtime_gemini_config::*;
+use runtime_kiro_connect_proxy::*;
 use runtime_launch::*;
 use runtime_launch_shared::*;
 use runtime_local_provider_config::*;
@@ -152,6 +154,7 @@ pub use runtime_policy::{
     clear_runtime_policy_cache, compact_config_publication_transport,
     deliver_config_publication_event_to_gateway_runtime,
     deliver_pending_config_publication_events_to_gateway_runtime,
+    deliver_pending_config_publication_events_with_activation,
     publish_config_publication_event_to_gateway_transport,
 };
 pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result<()> {
@@ -181,6 +184,17 @@ pub use gateway_backend::{
     GatewayBackend, start_policy_gateway_backend, start_policy_gateway_backend_for_mode,
 };
 pub use prodex_runtime_policy::{RuntimePolicyServiceMode, runtime_policy_gateway};
+
+pub fn runtime_policy_root() -> anyhow::Result<std::path::PathBuf> {
+    Ok(AppPaths::discover()?.root)
+}
+
+pub fn runtime_policy_gateway_tls_config()
+-> anyhow::Result<Option<prodex_gateway_server::GatewayServerTlsConfig>> {
+    let gateway = prodex_runtime_policy::runtime_policy_gateway().unwrap_or_default();
+    let secrets = prodex_runtime_policy::runtime_policy_secrets().unwrap_or_default();
+    app_commands::runtime_launch::gateway_config::gateway_tls_config(&gateway, &secrets)
+}
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;

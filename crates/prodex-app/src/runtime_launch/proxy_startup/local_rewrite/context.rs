@@ -4,6 +4,7 @@ use super::super::deepseek_rewrite::{
 use super::super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet;
 use super::super::local_rewrite_copilot::RuntimeCopilotOAuthPool;
 use super::super::local_rewrite_gateway_admin_auth::RuntimeGatewayOidcJwksSnapshot;
+use super::super::local_rewrite_gateway_browser::RuntimeGatewayBrowserState;
 use super::super::local_rewrite_gateway_config::{
     RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
     RuntimeGatewayObservabilityConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
@@ -11,6 +12,7 @@ use super::super::local_rewrite_gateway_config::{
 use super::super::local_rewrite_gateway_credentials::{
     RuntimeGatewayCredentialSnapshot, RuntimeGatewayCredentialState,
 };
+use super::super::local_rewrite_gateway_route_load::RuntimeGatewayAdaptiveQualityState;
 use super::super::local_rewrite_gateway_store_types::RuntimeGatewayVirtualKeyEntry;
 use super::super::local_rewrite_gemini::RuntimeGeminiOAuthPool;
 use super::super::local_rewrite_governance_audit::RuntimeGovernanceAuditWriter;
@@ -19,7 +21,8 @@ use super::super::local_rewrite_options::{
     RuntimeLocalRewriteProviderOptions, RuntimeProjectedProviderCredential,
 };
 use super::super::local_rewrite_provider_registry::{
-    RuntimeGatewayProviderRegistrySnapshotSet, RuntimeGatewayRoutingScoresSnapshotSet,
+    RuntimeGatewayProviderPricing, RuntimeGatewayProviderRegistrySnapshotSet,
+    RuntimeGatewayRoutingScoresSnapshotSet,
 };
 use super::{
     RuntimeGatewayOidcHttpCacheEntry, RuntimeGatewayRouteLoadState,
@@ -59,6 +62,9 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
         Arc<Mutex<BTreeMap<String, RuntimeGatewayOidcHttpCacheEntry>>>,
     pub(in super::super) gateway_oidc_jwks_snapshot:
         Arc<ArcSwapOption<RuntimeGatewayOidcJwksSnapshot>>,
+    pub(in super::super) gateway_workload_jwks_snapshot:
+        Arc<ArcSwapOption<RuntimeGatewayOidcJwksSnapshot>>,
+    pub(in super::super) gateway_browser: RuntimeGatewayBrowserState,
     pub(in super::super) gateway_credentials: RuntimeGatewayCredentialState,
     pub(in super::super) gateway_state_store: RuntimeGatewayStateStore,
     pub(in super::super) gateway_postgres_repository:
@@ -72,6 +78,9 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
     pub(in super::super) gateway_request_constraints:
         prodex_provider_core::ProviderRequestConstraintPolicy,
     pub(in super::super) gateway_route_load: RuntimeGatewayRouteLoadState,
+    pub(in super::super) gateway_adaptive_routing:
+        runtime_proxy_crate::RuntimeGatewayAdaptiveRoutingConfig,
+    pub(in super::super) gateway_adaptive_quality: RuntimeGatewayAdaptiveQualityState,
     pub(in super::super) gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig,
     pub(in super::super) gateway_call_id_header: Option<String>,
     pub(in super::super) gateway_observability_slots: Arc<tokio::sync::Semaphore>,
@@ -86,6 +95,7 @@ pub(in super::super) struct RuntimeLocalRewriteRequestContext {
     pub(in super::super) upstream_base_url: String,
     pub(in super::super) provider: RuntimeLocalRewriteProviderOptions,
     pub(in super::super) provider_credential: Option<RuntimeProjectedProviderCredential>,
+    pub(in super::super) governed_pricing: Option<RuntimeGatewayProviderPricing>,
     pub(in super::super) gateway_auth_token_hash:
         Option<runtime_proxy_crate::LocalBridgeBearerTokenHash>,
     pub(in super::super) gateway_admin_tokens: Vec<RuntimeGatewayAdminToken>,
@@ -115,6 +125,7 @@ impl RuntimeLocalRewriteRequestContext {
             upstream_base_url: self.upstream_base_url.clone(),
             provider: snapshot.provider.clone(),
             provider_credential: snapshot.provider_credential.clone(),
+            governed_pricing: self.governed_pricing.clone(),
             gateway_auth_token_hash: snapshot.auth_token_hash.clone(),
             gateway_admin_tokens: snapshot.admin_tokens.clone(),
             gateway_sso: snapshot.sso.clone(),
@@ -135,6 +146,7 @@ impl RuntimeLocalRewriteRequestContext {
             upstream_base_url,
             provider,
             provider_credential: Some(provider_credential),
+            governed_pricing: self.governed_pricing.clone(),
             gateway_auth_token_hash: self.gateway_auth_token_hash.clone(),
             gateway_admin_tokens: self.gateway_admin_tokens.clone(),
             gateway_sso: self.gateway_sso.clone(),
@@ -142,6 +154,15 @@ impl RuntimeLocalRewriteRequestContext {
             gateway_guardrail_webhook: self.gateway_guardrail_webhook.clone(),
             gateway_observability: self.gateway_observability.clone(),
         }
+    }
+
+    pub(in super::super) fn with_governed_pricing(
+        &self,
+        governed_pricing: Option<RuntimeGatewayProviderPricing>,
+    ) -> Self {
+        let mut selected = self.clone();
+        selected.governed_pricing = governed_pricing;
+        selected
     }
 }
 

@@ -18,9 +18,10 @@ pub(crate) use super::local_rewrite_constraints::{
 use super::local_rewrite_copilot::runtime_copilot_oauth_pool_from_provider;
 use super::local_rewrite_gateway_admin_auth::runtime_gateway_run_oidc_background_refresh_loop;
 pub(crate) use super::local_rewrite_gateway_config::{
-    RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayGuardrailWebhookConfig,
-    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig,
-    RuntimeGatewayStateStore, runtime_gateway_postgres_repository,
+    RuntimeGatewayAdminRole, RuntimeGatewayAdminToken, RuntimeGatewayBrowserConfig,
+    RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
+    RuntimeGatewayOidcConfig, RuntimeGatewaySsoConfig, RuntimeGatewayStateStore,
+    RuntimeGatewayWorkloadIdentityConfig, runtime_gateway_postgres_repository,
     runtime_gateway_redis_rate_limit_executor,
 };
 use super::local_rewrite_gateway_credentials::{
@@ -37,6 +38,7 @@ pub(super) use super::local_rewrite_gateway_ledger::runtime_gateway_billing_ledg
 pub(super) use super::local_rewrite_gateway_reconciliation_worker::{
     RuntimeGatewayReconciliationQueue, schedule_runtime_gateway_billing_ledger_reconcile,
 };
+use super::local_rewrite_gateway_reservation_recovery::spawn_runtime_gateway_reservation_recovery_worker;
 #[cfg(test)]
 pub(super) use super::local_rewrite_gateway_usage::runtime_gateway_virtual_key_usage_apply_deltas;
 pub(super) use super::local_rewrite_gateway_usage::{
@@ -172,10 +174,11 @@ impl RuntimeLocalRewriteRequestContext {
                 self.classification_rules.store(Arc::new(next));
             }
             prodex_storage::GovernanceArtifactKind::ProviderRegistry => {
-                let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
                     artifact,
                     &self.provider,
                     self.provider_credential.as_ref(),
+                    self.runtime_shared.runtime_config.governance.mode,
                 )?;
                 let next = self
                     .governed_provider_registry
@@ -598,6 +601,8 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         client: build_runtime_local_rewrite_http_client(&runtime_config)?,
         gateway_oidc_http_cache: Arc::new(Mutex::new(BTreeMap::new())),
         gateway_oidc_jwks_snapshot: Arc::new(arc_swap::ArcSwapOption::empty()),
+        gateway_workload_jwks_snapshot: Arc::new(arc_swap::ArcSwapOption::empty()),
+        gateway_browser: Default::default(),
         gateway_credentials,
         gateway_state_store,
         gateway_postgres_repository,
@@ -614,6 +619,8 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         gateway_route_aliases,
         gateway_request_constraints,
         gateway_route_load: Arc::new(Mutex::new(BTreeMap::new())),
+        gateway_adaptive_routing: runtime_config.gateway.adaptive_routing,
+        gateway_adaptive_quality: Default::default(),
         gateway_guardrails,
         gateway_call_id_header,
         gateway_observability_slots: Arc::new(tokio::sync::Semaphore::new(
@@ -628,6 +635,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         upstream_base_url,
         provider,
         provider_credential,
+        governed_pricing: None,
         gateway_auth_token_hash,
         gateway_admin_tokens,
         gateway_sso,
@@ -821,19 +829,21 @@ fn runtime_gateway_governance_authority(
             *tenant_id,
             prodex_storage::GovernanceArtifactKind::ProviderRegistry,
             |artifact| {
-                super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
                     artifact,
                     provider,
                     provider_credential,
+                    deployment_mode,
                 )
                 .is_ok()
             },
         )
         .and_then(|stored| {
-            let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+            let snapshot = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
                 &stored.compiled_artifact,
                 provider,
                 provider_credential,
+                deployment_mode,
             )?;
             anyhow::ensure!(
                 snapshot.revision().to_string() == stored.revision_id,
@@ -990,6 +1000,9 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
     spawn_gemini_sidecar_listener: bool,
 ) -> Result<RuntimeLocalRewriteWorkers> {
     let mut worker_threads = Vec::new();
+    if let Some(worker) = spawn_runtime_gateway_reservation_recovery_worker(shared, shutdown)? {
+        worker_threads.push(worker);
+    }
     if let Some(authority) = shared.governance_authority.clone() {
         worker_threads.push(
             shared
@@ -1092,17 +1105,19 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                         *tenant_id,
                         prodex_storage::GovernanceArtifactKind::ProviderRegistry,
                         |artifact| {
-                            super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                            super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
                                 artifact,
                                 &provider,
                                 provider_credential.as_ref(),
+                                deployment_mode,
                             )
                             .is_ok()
                         },
-                    ) && let Ok(snapshot) = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+                    ) && let Ok(snapshot) = super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
                         &stored.compiled_artifact,
                         &provider,
                         provider_credential.as_ref(),
+                        deployment_mode,
                     ) && snapshot.revision().to_string() == stored.revision_id
                         && let Ok(updated) = next_provider.with_tenant_snapshot(*tenant_id, snapshot)
                     {
@@ -1285,7 +1300,7 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
     {
         worker_threads.push(worker);
     }
-    if shared.gateway_sso.oidc.is_some() {
+    if shared.gateway_sso.oidc.is_some() || shared.gateway_sso.workload_identity.is_some() {
         let shared = shared.clone();
         let shutdown = Arc::clone(shutdown);
         worker_threads.push(thread::spawn(move || {

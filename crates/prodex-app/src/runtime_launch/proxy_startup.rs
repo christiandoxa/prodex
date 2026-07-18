@@ -42,6 +42,7 @@ mod local_rewrite_gateway_admin_store_mutation;
 mod local_rewrite_gateway_backend_connection;
 mod local_rewrite_gateway_billing_csv;
 mod local_rewrite_gateway_billing_summary;
+mod local_rewrite_gateway_browser;
 mod local_rewrite_gateway_config;
 mod local_rewrite_gateway_credentials;
 mod local_rewrite_gateway_dashboard;
@@ -61,6 +62,7 @@ mod local_rewrite_gateway_reconciliation_runtime;
 mod local_rewrite_gateway_reconciliation_worker;
 mod local_rewrite_gateway_redis_ledger;
 mod local_rewrite_gateway_reservation;
+mod local_rewrite_gateway_reservation_recovery;
 mod local_rewrite_gateway_route_load;
 mod local_rewrite_gateway_scim;
 mod local_rewrite_gateway_scope;
@@ -75,6 +77,7 @@ mod local_rewrite_gateway_store_types;
 mod local_rewrite_gateway_usage;
 mod local_rewrite_gateway_usage_backend;
 mod local_rewrite_gateway_util;
+mod local_rewrite_gateway_workload_identity;
 mod local_rewrite_gemini;
 mod local_rewrite_gemini_bindings;
 mod local_rewrite_gemini_compact;
@@ -116,11 +119,11 @@ pub(crate) use deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
 pub(crate) use gemini_rewrite::{RuntimeGeminiOAuthProfileAuth, RuntimeGeminiProviderAuth};
 pub(crate) use local_rewrite::{
     RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH, RuntimeGatewayAdminRole, RuntimeGatewayAdminToken,
-    RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
-    RuntimeGatewayOidcConfig, RuntimeGatewaySecret, RuntimeGatewaySsoConfig,
-    RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
-    RuntimeLocalRewriteProxyStartOptions, RuntimeProjectedProviderCredential,
-    start_runtime_gateway_rewrite_proxy_with_runtime_config,
+    RuntimeGatewayBrowserConfig, RuntimeGatewayGuardrailWebhookConfig,
+    RuntimeGatewayObservabilityConfig, RuntimeGatewayOidcConfig, RuntimeGatewaySecret,
+    RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeGatewayWorkloadIdentityConfig,
+    RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyStartOptions,
+    RuntimeProjectedProviderCredential, start_runtime_gateway_rewrite_proxy_with_runtime_config,
     start_runtime_local_rewrite_proxy_with_harness,
 };
 pub(crate) use local_rewrite_application_runtime::{

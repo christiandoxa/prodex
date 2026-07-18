@@ -96,6 +96,12 @@ fn emit_runtime_launch_progress(request: &RuntimeLaunchRequest<'_>) {
     if request.smart_context_enabled {
         print_launch_status("Smart Context runtime proxy requested.");
     }
+    if request
+        .external_provider
+        .is_some_and(|provider| provider.eq_ignore_ascii_case("kiro"))
+    {
+        print_launch_status("authenticated local Kiro transport tunnel requested.");
+    }
     let proxied_external_provider = request.external_provider.is_some_and(|provider| {
         !provider.eq_ignore_ascii_case("kiro") && !provider.eq_ignore_ascii_case("antigravity")
     });

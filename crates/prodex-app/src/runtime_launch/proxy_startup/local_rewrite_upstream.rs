@@ -37,6 +37,16 @@ pub(super) struct RuntimeLocalRewriteUpstreamResult {
     pub(super) copilot_context: Option<RuntimeCopilotRequestContext>,
 }
 
+impl RuntimeLocalRewriteUpstreamResult {
+    pub(super) fn status(&self) -> u16 {
+        match &self.response {
+            RuntimeLocalRewriteUpstreamResponse::Live(live) => live.response.status().as_u16(),
+            RuntimeLocalRewriteUpstreamResponse::Buffered(parts) => parts.status,
+            RuntimeLocalRewriteUpstreamResponse::Streaming(streaming) => streaming.status,
+        }
+    }
+}
+
 pub(super) enum RuntimeLocalRewriteUpstreamResponse {
     Live(RuntimeLocalRewriteLiveResponse),
     Buffered(RuntimeHeapTrimmedBufferedResponseParts),

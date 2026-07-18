@@ -1,7 +1,7 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 853,
+    "maxLines": 896,
     "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after live goal recovery moved to its focused module."
   },
   {
@@ -21,12 +21,12 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 1112,
+    "maxLines": 1145,
     "reason": "Kiro profile import and catalog refresh remain capped after data-directory discovery and environment compatibility moved to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
-    "maxLines": 1789,
+    "maxLines": 1797,
     "reason": "Data-plane authorization, dispatch, reconciliation, and provider runtime signals remain capped after governance context, policy, routing, session persistence, and audit phases moved to focused modules."
   },
   {
@@ -86,7 +86,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1187,
+    "maxLines": 1190,
     "reason": "Provider-aware runtime and gateway argument parsing remains capped after Super compatibility validation moved to a focused module."
   },
   {
@@ -181,7 +181,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1701,
+    "maxLines": 1725,
     "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh; canonical OIDC/SCIM evidence coverage moved to a focused nested fixture, and the remaining legacy matrix stays capped."
   },
   {
@@ -191,13 +191,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1407,
+    "maxLines": 1422,
     "reason": "Gateway launch composes governed snapshot authorities, durable audit/session workers, bounded accounting queues, immutable harness diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 1592,
-    "reason": "The four-artifact maker-checker lifecycle and payload-free execution-approval HTTP flow remain colocated to preserve tenant, idempotency, ETag, audit, activation, and rollback semantics."
+    "maxLines": 2427,
+    "reason": "The governed artifact lifecycle, execution approvals, audit legal holds, retention purge, and payload-free HTTP flow remain capped while retention operations split from maker-checker policy ownership."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
@@ -206,7 +206,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_policy_lifecycle.rs",
-    "maxLines": 1219,
+    "maxLines": 1225,
     "reason": "Lifecycle HTTP coverage exercises four governed artifact kinds plus execution-approval quorum, denial audit, idempotent replay, and content-free responses through shared fixtures."
   },
   {
@@ -221,17 +221,17 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 947,
+    "maxLines": 959,
     "reason": "Runtime policy types carry fixed gateway harness selection plus bounded PIP selectors, governance authority, lifecycle, session, audit, and retention configuration in one typed schema."
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",
-    "maxLines": 1145,
+    "maxLines": 1185,
     "reason": "Runtime-policy validation coverage keeps governance mode, PIP selector, unsupported workload identity, and dependency failure matrices with the gateway policy suite."
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
-    "maxLines": 1431,
+    "maxLines": 1564,
     "reason": "SQLite governance integration coverage proves lifecycle, approval idempotency and denial audit, session revisions/revocation, audit integrity, bounded export, and SIEM outbox behavior."
   },
   {
@@ -241,12 +241,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 937,
+    "maxLines": 955,
     "reason": "Gateway virtual-key admission carries trusted team, project, and user scope into the governed PIP and reserves bounded usage and reconciliation capacity before upstream dispatch."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1112,
+    "maxLines": 1375,
     "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, and focused conformance tests; capped until adapter projection splits out."
   },
   {
@@ -256,12 +256,27 @@
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",
-    "maxLines": 936,
-    "reason": "The async gateway server now owns transport peer trust, bounded forwarded-chain parsing, Host/Origin/CSRF enforcement, body limits, upgrades, and graceful drain; capped until edge transport splits out."
+    "maxLines": 1152,
+    "reason": "The async gateway server owns transport peer trust, bounded forwarded-chain parsing, browser edge enforcement, body limits, upgrades, and graceful drain; capped until edge request validation splits out."
   },
   {
     "file": "crates/prodex-gateway-server/src/tests.rs",
-    "maxLines": 904,
+    "maxLines": 924,
     "reason": "Gateway server integration coverage keeps canonical targets, streaming limits, overload, trusted proxy, forwarding privacy, Host/Origin/CSRF, and expected-host cases in one harness."
+  },
+  {
+    "file": "crates/prodex-storage-postgres-runtime/src/governance/repository_core.rs",
+    "maxLines": 1097,
+    "reason": "Transactional PostgreSQL governance revision, approval, legal-hold, purge, status, and snapshot operations remain capped until retention operations split from lifecycle persistence."
+  },
+  {
+    "file": "crates/prodex-storage-postgres-runtime/src/lib.rs",
+    "maxLines": 966,
+    "reason": "PostgreSQL runtime pool, TLS, accounting reservation, idempotency, recovery, and retry orchestration remain capped until accounting execution moves behind its focused repository module."
+  },
+  {
+    "file": "crates/prodex-storage-postgres/src/migration_catalog.rs",
+    "maxLines": 906,
+    "reason": "The ordered PostgreSQL migration catalog keeps immutable SQL revisions and schema-version planning together until historical migration constants move to versioned fixture files."
   }
 ]

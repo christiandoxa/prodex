@@ -178,6 +178,7 @@ fn gateway_cost_lookup_accepts_selected_model_after_alias_rewrite() {
         1,
         br#"{"model":"gpt-costly","input":"hello"}"#,
         "gpt-costly",
+        None,
     );
 
     assert_eq!(cost.input_cost_per_million_microusd, Some(1_000_000));
@@ -209,10 +210,29 @@ fn gateway_cost_lookup_accepts_combo_chain_after_fallback_rewrite() {
         1,
         br#"{"model":"combo:gpt-costly","input":"hello"}"#,
         "combo:gpt-costly",
+        None,
     );
 
     assert_eq!(cost.input_cost_per_million_microusd, Some(1_000_000));
     assert_eq!(cost.output_cost_per_million_microusd, Some(2_000_000));
+}
+
+#[test]
+fn governed_cost_overrides_route_alias_metrics() {
+    let cost = runtime_provider_gateway_cost_for_request(
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        &[],
+        &std::collections::BTreeMap::new(),
+        1,
+        br#"{"model":"gpt-costly","input":"hello"}"#,
+        "gpt-costly",
+        Some(prodex_provider_core::ProviderModelCost {
+            input_cost_per_million_microusd: Some(7),
+            output_cost_per_million_microusd: Some(9),
+        }),
+    );
+    assert_eq!(cost.input_cost_per_million_microusd, Some(7));
+    assert_eq!(cost.output_cost_per_million_microusd, Some(9));
 }
 
 #[test]

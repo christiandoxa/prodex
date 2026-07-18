@@ -296,17 +296,24 @@ fn handle_codex_command_server_direct_passthrough(args: RunArgs) -> Result<()> {
 }
 
 fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildProcessPlan> {
+    codex_command_server_child_plan(args.profile.as_deref(), args.codex_args, args.no_proxy)
+}
+
+pub(super) fn codex_app_server_broker_child_plan(
+    profile: Option<&str>,
+) -> Result<ChildProcessPlan> {
+    codex_command_server_child_plan(profile, vec![OsString::from("app-server")], false)
+}
+
+fn codex_command_server_child_plan(
+    profile: Option<&str>,
+    codex_args: Vec<OsString>,
+    no_proxy: bool,
+) -> Result<ChildProcessPlan> {
     let paths = AppPaths::discover()?;
     let state = AppState::load_and_repair(&paths)?;
-    let selection = RuntimeLaunchSelection::resolve(
-        &paths,
-        &state,
-        args.profile.as_deref(),
-        None,
-        None,
-        None,
-        None,
-    )?;
+    let selection =
+        RuntimeLaunchSelection::resolve(&paths, &state, profile, None, None, None, None)?;
 
     if !selection.profileless_local_home
         && state
@@ -319,10 +326,10 @@ fn codex_command_server_direct_passthrough_plan(args: RunArgs) -> Result<ChildPr
         prepare_managed_codex_home_for_runtime_launch(&paths, &selection.codex_home)?;
     }
 
-    let codex_args = prodex_runtime_launch::normalize_codex_profile_args(&args.codex_args);
+    let codex_args = prodex_runtime_launch::normalize_codex_profile_args(&codex_args);
     repair_resume_session_in_home(&selection.codex_home, &codex_args)?;
     let mut child = codex_child_plan(selection.codex_home, codex_args);
-    if args.no_proxy {
+    if no_proxy {
         remove_upstream_proxy_env(&mut child);
     }
     Ok(child)
@@ -496,6 +503,22 @@ impl RuntimeProxyStartupFactory {
         request: &RuntimeLaunchRequest<'_>,
         resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if request.external_provider == Some("kiro") {
+            let proxy = start_runtime_kiro_connect_proxy(paths, request.upstream_no_proxy)?;
+            return Ok(Some(RuntimeProxyEndpoint {
+                listen_addr: proxy.listen_addr(),
+                openai_mount_path: String::new(),
+                local_model_provider_id: None,
+                realtime_ws_base_url: None,
+                realtime_ws_model: None,
+                lease_dir: paths.root.join("runtime-kiro-connect-proxy-leases"),
+                broker_session_affinity_control: None,
+                _lease: None,
+                _direct_proxy: None,
+                _kiro_connect_proxy: Some(proxy),
+            }));
+        }
+
         if let Some(local_upstream_base_url) =
             local_rewrite_proxy_upstream_base_url(selection, request)?
         {
@@ -564,6 +587,22 @@ impl RuntimeProxyStartupFactory {
         selection: &RuntimeLaunchSelection,
         request: &RuntimeLaunchRequest<'_>,
     ) -> Result<Option<RuntimeProxyEndpoint>> {
+        if request.external_provider == Some("kiro") {
+            let proxy = RuntimeKiroConnectProxy::dry_run();
+            return Ok(Some(RuntimeProxyEndpoint {
+                listen_addr: proxy.listen_addr(),
+                openai_mount_path: String::new(),
+                local_model_provider_id: None,
+                realtime_ws_base_url: None,
+                realtime_ws_model: None,
+                lease_dir: paths.root.join("runtime-kiro-connect-proxy-dry-run-leases"),
+                broker_session_affinity_control: None,
+                _lease: None,
+                _direct_proxy: None,
+                _kiro_connect_proxy: Some(proxy),
+            }));
+        }
+
         if local_rewrite_proxy_upstream_base_url(selection, request)?.is_some() {
             return Ok(Some(runtime_local_rewrite_proxy_dry_run_endpoint(
                 paths, selection, request,
@@ -654,6 +693,7 @@ fn runtime_proxy_dry_run_endpoint(paths: &AppPaths) -> Result<RuntimeProxyEndpoi
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
+        _kiro_connect_proxy: None,
     })
 }
 
@@ -698,6 +738,7 @@ fn runtime_local_rewrite_proxy_dry_run_endpoint(
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
+        _kiro_connect_proxy: None,
     })
 }
 
@@ -739,6 +780,7 @@ fn start_runtime_proxy_endpoint(
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: Some(proxy),
+        _kiro_connect_proxy: None,
     })
 }
 
@@ -790,6 +832,7 @@ fn start_local_rewrite_proxy_endpoint(
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: Some(proxy),
+        _kiro_connect_proxy: None,
     })
 }
 

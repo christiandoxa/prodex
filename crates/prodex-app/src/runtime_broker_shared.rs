@@ -1,7 +1,7 @@
 use crate::runtime_broker::{
     create_runtime_broker_lease_in_dir_for_pid, release_runtime_broker_session_affinity,
 };
-use crate::{AppPaths, RuntimeRotationProxy};
+use crate::{AppPaths, RuntimeKiroConnectProxy, RuntimeRotationProxy};
 use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
@@ -54,6 +54,7 @@ pub(super) struct RuntimeProxyEndpoint {
     pub(super) broker_session_affinity_control: Option<RuntimeBrokerSessionAffinityControl>,
     pub(super) _lease: Option<RuntimeBrokerLease>,
     pub(super) _direct_proxy: Option<RuntimeRotationProxy>,
+    pub(super) _kiro_connect_proxy: Option<RuntimeKiroConnectProxy>,
 }
 
 impl std::fmt::Debug for RuntimeProxyEndpoint {
@@ -71,6 +72,10 @@ impl std::fmt::Debug for RuntimeProxyEndpoint {
             )
             .field("has_lease", &self._lease.is_some())
             .field("has_direct_proxy", &self._direct_proxy.is_some())
+            .field(
+                "has_kiro_connect_proxy",
+                &self._kiro_connect_proxy.is_some(),
+            )
             .finish()
     }
 }
@@ -89,6 +94,12 @@ impl Drop for RuntimeBrokerLease {
 }
 
 impl RuntimeProxyEndpoint {
+    pub(super) fn kiro_connect_proxy_url(&self) -> Option<&str> {
+        self._kiro_connect_proxy
+            .as_ref()
+            .map(RuntimeKiroConnectProxy::proxy_url)
+    }
+
     pub(super) fn create_child_lease(&self, pid: u32) -> Result<RuntimeBrokerLease> {
         create_runtime_broker_lease_in_dir_for_pid(&self.lease_dir, pid)
     }

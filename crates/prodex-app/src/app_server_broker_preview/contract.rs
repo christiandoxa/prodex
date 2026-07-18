@@ -30,7 +30,7 @@ pub(crate) fn app_server_broker_status_line() -> String {
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     format!(
-        "app-server broker: status={status}; transport={transport}; mode={default_mode}; passthrough-aware stdio preview is available; default Codex app-server passthrough remains active"
+        "app-server broker: status={status}; transport={transport}; mode={default_mode}; bidirectional validated stdio live mode is available; default Codex app-server passthrough remains active"
     )
 }
 
@@ -48,7 +48,7 @@ pub(crate) fn app_server_broker_contract_json() -> serde_json::Value {
     serde_json::json!({
         "object": "app_server_broker.contract",
         "enabled_by_default": false,
-        "status": "diagnostic-envelope-parsing",
+        "status": "live-validated-broker",
         "transport": ["stdio-preview", "stdio-passthrough-preview", "stdio-validate", "stdio-validate-passthrough", "stdio-live"],
         "jsonrpc": "2.0",
         "wire_omits_jsonrpc_header": true,
@@ -128,6 +128,9 @@ pub(crate) fn app_server_broker_contract_json() -> serde_json::Value {
             "stdio_validate_fail_closed": true,
             "stdio_validate_passthrough_fail_closed": true,
             "stdio_validate_passthrough_preserves_valid_input": true,
+            "stdio_live_child_process": true,
+            "stdio_live_bidirectional": true,
+            "stdio_live_fail_closed": true,
             "request_response_id_validation": true,
             "request_response_validation_reasons": [
                 "request_missing_id",

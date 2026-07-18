@@ -122,6 +122,7 @@ pub(super) fn runtime_gateway_prepare_constraint_plan<'a>(
     let Some(plan) = plan else {
         return Ok(None);
     };
+    emit_adaptive_route_decision(request_id, &plan, shared);
     if plan.selected_model.is_none() && plan.no_route_reason.is_some() {
         emit_route_trace(request_id, &plan.trace, shared);
         return Err(build_runtime_proxy_json_error_response(
@@ -205,6 +206,8 @@ impl RuntimeGatewayPendingConstraintPlan<'_> {
                 Arc::clone(&self.shared.gateway_route_load),
                 model,
                 &request.body,
+                Arc::clone(&self.shared.gateway_adaptive_quality),
+                self.shared.gateway_adaptive_routing,
             )
         });
         if let Some((alias, model)) = alias.zip(model) {
@@ -377,27 +380,33 @@ pub(super) fn runtime_gateway_constraint_plan(
         return Ok(None);
     };
     let provider = shared.provider.bridge_kind().provider_id();
-    let (owner_model, continuation_required) = if policy.enabled {
-        let remembered_owner = runtime_local_rewrite_model_scope(
-            shared.provider.bridge_kind(),
-            request,
-            &request.body,
-        )
-        .and_then(|scope| shared.model_memory.lock().ok()?.selected_model(&scope));
-        let continuation_required =
-            runtime_proxy_crate::runtime_request_previous_response_id(request).is_some()
-                || request.headers.iter().any(|(name, value)| {
-                    name.eq_ignore_ascii_case("x-codex-turn-state") && !value.trim().is_empty()
-                });
-        let owner_model = remembered_owner.or_else(|| {
-            continuation_required
-                .then(|| exact_request_model(provider, request, &shared.gateway_route_aliases))
-                .flatten()
-        });
-        (owner_model, continuation_required)
-    } else {
-        (None, false)
-    };
+    let (owner_model, continuation_required) =
+        if policy.enabled || shared.gateway_adaptive_routing.enabled {
+            let remembered_owner = runtime_local_rewrite_model_scope(
+                shared.provider.bridge_kind(),
+                request,
+                &request.body,
+            )
+            .and_then(|scope| shared.model_memory.lock().ok()?.selected_model(&scope));
+            let continuation_required =
+                runtime_proxy_crate::runtime_request_previous_response_id(request).is_some()
+                    || request.headers.iter().any(|(name, value)| {
+                        name.eq_ignore_ascii_case("x-codex-turn-state") && !value.trim().is_empty()
+                    });
+            let owner_model = remembered_owner.or_else(|| {
+                continuation_required
+                    .then(|| exact_request_model(provider, request, &shared.gateway_route_aliases))
+                    .flatten()
+            });
+            (owner_model, continuation_required)
+        } else {
+            (None, false)
+        };
+    let adaptive_quality = shared
+        .gateway_adaptive_quality
+        .lock()
+        .map(|quality| quality.snapshot())
+        .unwrap_or_default();
     runtime_proxy_crate::runtime_gateway_plan_route_with_constraints(
         provider,
         endpoint,
@@ -413,9 +422,50 @@ pub(super) fn runtime_gateway_constraint_plan(
                 .configured_reasoning_reserve_tokens(),
             hard_affinity_model: owner_model.as_deref(),
             hard_affinity_required: continuation_required,
+            adaptive_config: shared.gateway_adaptive_routing,
+            adaptive_quality: &adaptive_quality,
         },
     )
     .map(Some)
+}
+
+fn emit_adaptive_route_decision(
+    request_id: u64,
+    plan: &runtime_proxy_crate::RuntimeGatewayConstraintRoutePlan,
+    shared: &RuntimeLocalRewriteProxyShared,
+) {
+    let Some(decision) = plan.adaptive_decision.as_ref() else {
+        return;
+    };
+    runtime_proxy_log(
+        &shared.runtime_shared,
+        runtime_proxy_crate::runtime_proxy_structured_log_message(
+            "gateway_adaptive_route_decision",
+            [
+                runtime_proxy_crate::runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_crate::runtime_proxy_log_field(
+                    "shadow",
+                    shared.gateway_adaptive_routing.shadow_mode.to_string(),
+                ),
+                runtime_proxy_crate::runtime_proxy_log_field(
+                    "actual_model",
+                    decision.actual_model.as_str(),
+                ),
+                runtime_proxy_crate::runtime_proxy_log_field(
+                    "recommended_model",
+                    decision.recommended_model.as_deref().unwrap_or("none"),
+                ),
+                runtime_proxy_crate::runtime_proxy_log_field(
+                    "quality_score_bps",
+                    decision
+                        .quality_score_bps
+                        .map(|score| score.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                ),
+                runtime_proxy_crate::runtime_proxy_log_field("reason", decision.override_reason),
+            ],
+        ),
+    );
 }
 
 fn exact_request_model(

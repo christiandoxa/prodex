@@ -16,8 +16,9 @@ use std::str::FromStr;
 use deadpool_postgres::Transaction;
 use prodex_domain::{
     ApprovalAction, ApprovalFingerprint, ApprovalId, ApprovalReasonCode, ApprovalRecord,
-    ApprovalScope, ApprovalState, ApprovalVote, AuditDigest, AuditEventId,
-    IdempotencyReplayDecision, PolicyRevisionId, PrincipalId, TenantId, decide_idempotency_replay,
+    ApprovalScope, ApprovalState, ApprovalVote, AuditDigest, AuditEventId, AuditReasonCode,
+    AuditRetentionHold, AuditTimestamp, IdempotencyReplayDecision, PolicyRevisionId, PrincipalId,
+    TenantId, decide_idempotency_replay,
 };
 use prodex_storage::{
     ApprovalVoteIdempotency, ApprovalVoteMutationOutcome, ApprovalVoteRequest,
@@ -40,7 +41,8 @@ use prodex_storage::{
     },
     materialize_idempotency_record_lookup_row, plan_approval_revision_lifecycle_update,
     plan_approval_vote_transition, plan_audit_outbox_write, plan_governance_activation,
-    plan_governance_revision_write, plan_siem_outbox_delivery, verify_governance_audit_integrity,
+    plan_governance_revision_write, plan_siem_outbox_delivery,
+    verify_governance_audit_integrity_with_retention_anchor,
 };
 use prodex_storage_postgres::{
     APPEND_AUDIT_OUTBOX_ATOMIC_STATEMENT, INSERT_GOVERNANCE_REVISION_ARTIFACT_STATEMENT,

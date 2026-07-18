@@ -233,6 +233,30 @@ fn non_responses_supported_endpoint_statuses_follow_runtime_surface_more_closely
     assert!(compact.tested);
     assert!(!compact.streaming);
 
+    for provider in ["anthropic", "copilot", "deepseek", "gemini"] {
+        let contract = matrix
+            .iter()
+            .find(|spec| spec.provider == provider)
+            .expect("provider contract");
+        let models = contract
+            .endpoint_status
+            .iter()
+            .find(|endpoint| endpoint.endpoint == "models")
+            .expect("models endpoint");
+        assert_eq!(models.status, "emulated");
+    }
+
+    let gemini = matrix
+        .iter()
+        .find(|spec| spec.provider == "gemini")
+        .expect("gemini contract");
+    let compact = gemini
+        .endpoint_status
+        .iter()
+        .find(|endpoint| endpoint.endpoint == "responses/compact")
+        .expect("gemini responses/compact endpoint");
+    assert_eq!(compact.status, "emulated");
+
     let kiro = matrix
         .iter()
         .find(|spec| spec.provider == "kiro")

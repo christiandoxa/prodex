@@ -4,7 +4,8 @@ use crate::validate_helpers::{validate_gateway_admin_role, validate_optional_u64
 use crate::validate_secrets::validate_gateway_secret_source;
 use anyhow::{Context, Result, bail};
 use prodex_authn::{
-    OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES, OidcEndpointPolicy, ValidatedOidcIssuer,
+    OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES, OidcEndpointPolicy, ValidatedOidcEndpoint,
+    ValidatedOidcIssuer,
 };
 use std::path::Path;
 
@@ -128,6 +129,7 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
             "gateway.sso.authentication_strength",
             sso.authentication_strength.as_deref(),
         ),
+        ("gateway.sso.oidc_client_id", sso.oidc_client_id.as_deref()),
     ] {
         if let Some(value) = value {
             validate_gateway_exact_identifier(value, path, field)?;
@@ -136,6 +138,15 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
     for (field, value) in [
         ("gateway.sso.oidc_issuer", sso.oidc_issuer.as_deref()),
         ("gateway.sso.oidc_jwks_url", sso.oidc_jwks_url.as_deref()),
+        (
+            "gateway.sso.oidc_authorization_url",
+            sso.oidc_authorization_url.as_deref(),
+        ),
+        ("gateway.sso.oidc_token_url", sso.oidc_token_url.as_deref()),
+        (
+            "gateway.sso.oidc_redirect_uri",
+            sso.oidc_redirect_uri.as_deref(),
+        ),
     ] {
         if matches!(value.map(str::trim), Some("")) {
             bail!("{field} in {} cannot be empty", path.display());
@@ -171,15 +182,22 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
             path.display()
         );
     }
-    if sso.browser_flow == Some(true) {
+    let browser_configured = sso.browser_flow.is_some()
+        || sso.pkce_method.is_some()
+        || sso.oidc_authorization_url.is_some()
+        || sso.oidc_token_url.is_some()
+        || sso.oidc_client_id.is_some()
+        || sso.oidc_client_secret_ref.is_some()
+        || sso.oidc_redirect_uri.is_some();
+    if browser_configured && sso.browser_flow != Some(true) {
         bail!(
-            "gateway.sso.browser_flow in {} is unsupported; use the existing OIDC bearer-token broker",
+            "gateway.sso browser settings in {} require browser_flow=true",
             path.display()
         );
     }
-    if sso.pkce_method.is_some() && sso.browser_flow != Some(true) {
+    if sso.browser_flow == Some(true) && !oidc_enabled {
         bail!(
-            "gateway.sso.pkce_method in {} requires a supported browser flow",
+            "gateway.sso.browser_flow in {} requires exact OIDC issuer and audience",
             path.display()
         );
     }
@@ -241,7 +259,84 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
                 )
             })?;
         }
+        if sso.browser_flow == Some(true) {
+            if sso.remote_human != Some(true) {
+                bail!(
+                    "gateway.sso.browser_flow in {} requires remote_human=true",
+                    path.display()
+                );
+            }
+            if sso.pkce_method.as_deref() != Some("S256") {
+                bail!(
+                    "gateway.sso.browser_flow in {} requires pkce_method=S256",
+                    path.display()
+                );
+            }
+            let endpoints = OidcEndpointPolicy::new(issuer, None).with_context(|| {
+                format!(
+                    "gateway.sso browser issuer in {} is invalid",
+                    path.display()
+                )
+            })?;
+            for (field, value) in [
+                (
+                    "gateway.sso.oidc_authorization_url",
+                    sso.oidc_authorization_url.as_deref(),
+                ),
+                ("gateway.sso.oidc_token_url", sso.oidc_token_url.as_deref()),
+            ] {
+                let value = value.with_context(|| {
+                    format!("{field} in {} is required for browser OIDC", path.display())
+                })?;
+                endpoints
+                    .validate_issuer_endpoint(value)
+                    .with_context(|| format!("{field} in {} is not permitted", path.display()))?;
+            }
+            let redirect = sso.oidc_redirect_uri.as_deref().with_context(|| {
+                format!(
+                    "gateway.sso.oidc_redirect_uri in {} is required for browser OIDC",
+                    path.display()
+                )
+            })?;
+            ValidatedOidcEndpoint::parse(redirect).with_context(|| {
+                format!(
+                    "gateway.sso.oidc_redirect_uri in {} is not permitted",
+                    path.display()
+                )
+            })?;
+            let redirect_path = url::Url::parse(redirect)
+                .map(|redirect| redirect.path().to_string())
+                .with_context(|| {
+                    format!(
+                        "gateway.sso.oidc_redirect_uri in {} is invalid",
+                        path.display()
+                    )
+                })?;
+            if !matches!(
+                redirect_path.as_str(),
+                "/prodex/gateway/auth/callback" | "/v1/prodex/gateway/auth/callback"
+            ) {
+                bail!(
+                    "gateway.sso.oidc_redirect_uri in {} must target the gateway OIDC callback",
+                    path.display()
+                );
+            }
+            if sso.oidc_client_id.is_none() {
+                bail!(
+                    "gateway.sso.oidc_client_id in {} is required for browser OIDC",
+                    path.display()
+                );
+            }
+        }
     }
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.sso.oidc_client_secret",
+        None,
+        sso.oidc_client_secret_ref.as_ref(),
+        false,
+    )?;
     if let Some(role) = sso.default_role.as_deref() {
         validate_gateway_admin_role(role).with_context(|| {
             format!("gateway.sso.default_role in {} is invalid", path.display())
@@ -256,14 +351,113 @@ fn validate_gateway_workload_identity(policy: &RuntimePolicyFile, path: &Path) -
     let configured = workload.enabled.is_some()
         || workload.issuer.is_some()
         || workload.audience.is_some()
+        || workload.jwks_url.is_some()
+        || !workload.jwks_origin_allowlist.is_empty()
+        || workload.subject_claim.is_some()
+        || workload.tenant_claim.is_some()
+        || workload.scope_claim.is_some()
         || workload.required_scope.is_some()
         || workload.mtls_required.is_some()
-        || workload.mtls_ca_ref.is_some();
+        || workload.mtls_ca_ref.is_some()
+        || workload.tls_identity_ref.is_some();
     if !configured {
         return Ok(());
     }
-    bail!(
-        "gateway.workload_identity in {} is unsupported until the runtime verifies workload tokens and mTLS peer identity",
-        path.display()
+    if workload.enabled != Some(true) {
+        bail!(
+            "gateway.workload_identity.enabled in {} must be true when configured",
+            path.display()
+        );
+    }
+    let issuer = workload.issuer.as_deref().with_context(|| {
+        format!(
+            "gateway.workload_identity.issuer in {} is required",
+            path.display()
+        )
+    })?;
+    ValidatedOidcIssuer::parse(issuer).with_context(|| {
+        format!(
+            "gateway.workload_identity.issuer in {} must be a permitted HTTPS issuer",
+            path.display()
+        )
+    })?;
+    let audience = workload.audience.as_deref().with_context(|| {
+        format!(
+            "gateway.workload_identity.audience in {} is required",
+            path.display()
+        )
+    })?;
+    validate_gateway_exact_identifier(audience, path, "gateway.workload_identity.audience")?;
+    for (field, value) in [
+        ("subject_claim", workload.subject_claim.as_deref()),
+        ("tenant_claim", workload.tenant_claim.as_deref()),
+        ("scope_claim", workload.scope_claim.as_deref()),
+    ] {
+        if let Some(value) = value {
+            validate_gateway_exact_identifier(
+                value,
+                path,
+                &format!("gateway.workload_identity.{field}"),
+            )?;
+        }
+    }
+    if workload.required_scope.as_deref().unwrap_or("data_plane") != "data_plane" {
+        bail!(
+            "gateway.workload_identity.required_scope in {} must be data_plane",
+            path.display()
+        );
+    }
+    if workload.jwks_origin_allowlist.len() > OIDC_JWKS_ORIGIN_ALLOWLIST_MAX_ENTRIES {
+        bail!(
+            "gateway.workload_identity.jwks_origin_allowlist in {} is too large",
+            path.display()
+        );
+    }
+    OidcEndpointPolicy::with_jwks_origin_allowlist(
+        issuer,
+        workload.jwks_url.as_deref(),
+        workload.jwks_origin_allowlist.iter().map(String::as_str),
     )
+    .with_context(|| {
+        format!(
+            "gateway.workload_identity JWKS policy in {} is invalid",
+            path.display()
+        )
+    })?;
+    let mtls_required = workload.mtls_required.unwrap_or(false);
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.workload_identity.mtls_ca_ref",
+        None,
+        workload.mtls_ca_ref.as_ref(),
+        mtls_required,
+    )?;
+    validate_gateway_secret_source(
+        policy,
+        path,
+        "gateway.workload_identity.tls_identity_ref",
+        None,
+        workload.tls_identity_ref.as_ref(),
+        mtls_required,
+    )?;
+    if mtls_required && (workload.mtls_ca_ref.is_none() || workload.tls_identity_ref.is_none()) {
+        bail!(
+            "gateway.workload_identity mTLS in {} requires mtls_ca_ref and tls_identity_ref",
+            path.display()
+        );
+    }
+    if !mtls_required && workload.mtls_ca_ref.is_some() {
+        bail!(
+            "gateway.workload_identity.mtls_ca_ref in {} requires mtls_required=true",
+            path.display()
+        );
+    }
+    if workload.tls_identity_ref.is_some() != mtls_required {
+        bail!(
+            "gateway.workload_identity.tls_identity_ref in {} requires mtls_required=true",
+            path.display()
+        );
+    }
+    Ok(())
 }

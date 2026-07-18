@@ -16,8 +16,10 @@ pub(crate) use contract::app_server_broker_render_output;
 pub(crate) use contract::{app_server_broker_contract_json, app_server_broker_status_line};
 #[cfg(test)]
 pub(crate) use parse::{APP_SERVER_BROKER_MAX_PREVIEW_LINE_BYTES, app_server_broker_preview_line};
+#[cfg(test)]
+pub(crate) use stdio::app_server_broker_write_stdio_live_stream;
 pub(crate) use stdio::{
-    app_server_broker_write_stdio_live_stream,
+    AppServerBrokerLiveValidator, app_server_broker_pump_live_stream,
     app_server_broker_write_stdio_passthrough_preview_stream,
     app_server_broker_write_stdio_validate_passthrough_stream,
     app_server_broker_write_stdio_validate_stream,

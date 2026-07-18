@@ -47,6 +47,8 @@ pub(crate) struct RuntimeGatewaySsoConfig {
     pub(crate) tenant_header: String,
     pub(crate) key_prefixes_header: String,
     pub(crate) oidc: Option<RuntimeGatewayOidcConfig>,
+    pub(crate) browser: Option<RuntimeGatewayBrowserConfig>,
+    pub(crate) workload_identity: Option<RuntimeGatewayWorkloadIdentityConfig>,
 }
 
 impl fmt::Debug for RuntimeGatewaySsoConfig {
@@ -63,6 +65,55 @@ impl fmt::Debug for RuntimeGatewaySsoConfig {
             .field("tenant_header", &"<redacted>")
             .field("key_prefixes_header", &"<redacted>")
             .field("oidc", &self.oidc)
+            .field("browser", &self.browser)
+            .field("workload_identity", &self.workload_identity)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct RuntimeGatewayBrowserConfig {
+    pub(crate) authorization_url: String,
+    pub(crate) token_url: String,
+    pub(crate) client_id: String,
+    pub(crate) client_secret: Option<RuntimeGatewaySecret>,
+    pub(crate) redirect_uri: String,
+}
+
+impl fmt::Debug for RuntimeGatewayBrowserConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGatewayBrowserConfig")
+            .field("authorization_url", &"<redacted>")
+            .field("token_url", &"<redacted>")
+            .field("client_id", &"<redacted>")
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .field("redirect_uri", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct RuntimeGatewayWorkloadIdentityConfig {
+    pub(crate) oidc: RuntimeGatewayOidcConfig,
+    pub(crate) subject_claim: String,
+    pub(crate) tenant_claim: String,
+    pub(crate) scope_claim: String,
+    pub(crate) required_scope: String,
+    pub(crate) mtls_required: bool,
+}
+
+impl fmt::Debug for RuntimeGatewayWorkloadIdentityConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeGatewayWorkloadIdentityConfig")
+            .field("oidc", &self.oidc)
+            .field("subject_claim", &"<redacted>")
+            .field("tenant_claim", &"<redacted>")
+            .field("scope_claim", &"<redacted>")
+            .field("required_scope", &self.required_scope)
+            .field("mtls_required", &self.mtls_required)
             .finish()
     }
 }
@@ -494,6 +545,8 @@ mod tests {
                 key_prefixes_claim: "prodex_key_prefixes".to_string(),
                 authentication_strength: None,
             }),
+            browser: None,
+            workload_identity: None,
         };
         assert_redacted(
             &format!("{sso:?}"),

@@ -4,6 +4,7 @@ use crate::{GatewayControlPlaneOperation, GatewayHttpMethod};
 pub enum GatewayGovernanceResourceFamily {
     Policy,
     ExecutionApproval,
+    BreakGlassApproval,
     ClassificationRule,
     ProviderRegistry,
     RoutingScore,
@@ -28,6 +29,9 @@ pub enum GatewayGovernanceResourceRoute<'a> {
         resource_id: &'a str,
     },
     Rollback {
+        resource_id: &'a str,
+    },
+    Revoke {
         resource_id: &'a str,
     },
     Unknown(Vec<&'a str>),
@@ -72,6 +76,11 @@ pub enum GatewayAdminRoute<'a> {
     GovernanceOutboxClaim,
     GovernanceAuditIntegrity,
     AuditExports,
+    AuditRetentionHolds,
+    AuditRetentionHold {
+        audit_event_id: &'a str,
+    },
+    AuditRetentionPurge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +108,7 @@ pub struct GatewayAdminRouteMetadata {
 const GET: &[GatewayHttpMethod] = &[GatewayHttpMethod::Get];
 const POST: &[GatewayHttpMethod] = &[GatewayHttpMethod::Post];
 const GET_POST: &[GatewayHttpMethod] = &[GatewayHttpMethod::Get, GatewayHttpMethod::Post];
+const DELETE: &[GatewayHttpMethod] = &[GatewayHttpMethod::Delete];
 const KEY_RESOURCE: &[GatewayHttpMethod] = &[
     GatewayHttpMethod::Get,
     GatewayHttpMethod::Patch,
@@ -148,7 +158,8 @@ impl GatewayAdminRoute<'_> {
                 GatewayGovernanceResourceRoute::Submit { .. }
                 | GatewayGovernanceResourceRoute::Vote { .. }
                 | GatewayGovernanceResourceRoute::Activate { .. }
-                | GatewayGovernanceResourceRoute::Rollback { .. } => {
+                | GatewayGovernanceResourceRoute::Rollback { .. }
+                | GatewayGovernanceResourceRoute::Revoke { .. } => {
                     metadata(POST, false, true, Handler::Governance)
                 }
                 GatewayGovernanceResourceRoute::Unknown(_) => {
@@ -161,6 +172,9 @@ impl GatewayAdminRoute<'_> {
             Self::GovernanceOutboxClaim | Self::AuditExports => {
                 metadata(POST, false, false, Handler::Governance)
             }
+            Self::AuditRetentionHolds => metadata(GET_POST, false, false, Handler::Governance),
+            Self::AuditRetentionHold { .. } => metadata(DELETE, false, true, Handler::Governance),
+            Self::AuditRetentionPurge => metadata(DELETE, false, false, Handler::Governance),
             Self::SessionRevoke { .. } | Self::SessionUnknown(_) => {
                 metadata(POST, false, true, Handler::Session)
             }
@@ -200,6 +214,9 @@ impl GatewayAdminRoute<'_> {
                 GatewayControlPlaneOperation::BillingRead
             }
             Self::AuditExports => GatewayControlPlaneOperation::AuditExport,
+            Self::AuditRetentionHolds => GatewayControlPlaneOperation::PolicyPublish,
+            Self::AuditRetentionHold { .. } => GatewayControlPlaneOperation::AuditRetentionPurge,
+            Self::AuditRetentionPurge => GatewayControlPlaneOperation::AuditRetentionPurge,
             Self::Governance { .. }
             | Self::SessionRevoke { .. }
             | Self::GovernanceOutbox
@@ -286,6 +303,10 @@ pub fn parse_gateway_admin_route<'a>(
             family: GatewayGovernanceResourceFamily::ExecutionApproval,
             resource: execution_approval_route(rest),
         }),
+        ["break-glass-approvals", rest @ ..] => Some(GatewayAdminRoute::Governance {
+            family: GatewayGovernanceResourceFamily::BreakGlassApproval,
+            resource: break_glass_approval_route(rest),
+        }),
         ["sessions", session_id_hash, "revoke"] if !session_id_hash.is_empty() => {
             Some(GatewayAdminRoute::SessionRevoke { session_id_hash })
         }
@@ -294,6 +315,11 @@ pub fn parse_gateway_admin_route<'a>(
         ["governance", "outbox", "claim"] => Some(GatewayAdminRoute::GovernanceOutboxClaim),
         ["governance", "audit", "integrity"] => Some(GatewayAdminRoute::GovernanceAuditIntegrity),
         ["audit", "exports"] => Some(GatewayAdminRoute::AuditExports),
+        ["audit", "retention", "holds"] => Some(GatewayAdminRoute::AuditRetentionHolds),
+        ["audit", "retention", "holds", audit_event_id] if !audit_event_id.is_empty() => {
+            Some(GatewayAdminRoute::AuditRetentionHold { audit_event_id })
+        }
+        ["audit", "retention", "purge"] => Some(GatewayAdminRoute::AuditRetentionPurge),
         _ => None,
     }
 }
@@ -337,6 +363,26 @@ fn execution_approval_route<'a>(segments: &[&'a str]) -> GatewayGovernanceResour
             resource_id,
             approval_id: resource_id,
         },
+        _ => GatewayGovernanceResourceRoute::Unknown(segments.to_vec()),
+    }
+}
+
+fn break_glass_approval_route<'a>(segments: &[&'a str]) -> GatewayGovernanceResourceRoute<'a> {
+    match segments {
+        [] => GatewayGovernanceResourceRoute::Collection,
+        [resource_id] if !resource_id.is_empty() => {
+            GatewayGovernanceResourceRoute::Resource { resource_id }
+        }
+        [resource_id, "votes"] if !resource_id.is_empty() => GatewayGovernanceResourceRoute::Vote {
+            resource_id,
+            approval_id: resource_id,
+        },
+        [resource_id, "activate"] if !resource_id.is_empty() => {
+            GatewayGovernanceResourceRoute::Activate { resource_id }
+        }
+        [resource_id, "revoke"] if !resource_id.is_empty() => {
+            GatewayGovernanceResourceRoute::Revoke { resource_id }
+        }
         _ => GatewayGovernanceResourceRoute::Unknown(segments.to_vec()),
     }
 }
@@ -415,6 +461,7 @@ mod tests {
             ("/prodex/gateway/policies", Handler::Governance),
             ("/prodex/gateway/policies/rev-1", Handler::Governance),
             ("/prodex/gateway/execution-approvals", Handler::Governance),
+            ("/prodex/gateway/break-glass-approvals", Handler::Governance),
             ("/prodex/gateway/classification-rules", Handler::Governance),
             ("/prodex/gateway/provider-registries", Handler::Governance),
             ("/prodex/gateway/routing-scores", Handler::Governance),
@@ -429,6 +476,8 @@ mod tests {
                 Handler::Governance,
             ),
             ("/prodex/gateway/audit/exports", Handler::Governance),
+            ("/prodex/gateway/audit/retention/holds", Handler::Governance),
+            ("/prodex/gateway/audit/retention/purge", Handler::Governance),
         ] {
             let route = parse_gateway_admin_route("", path).expect(path);
             assert_eq!(route.metadata().handler, handler, "{path}");

@@ -1120,6 +1120,7 @@ pub(super) struct RuntimeGatewayApplicationProviderDispatch<'a> {
     kind: RuntimeGatewayApplicationProviderDispatchKind<'a>,
     inspection: &'a ApplicationInspectionPlan,
     execution: Option<super::local_rewrite_provider_registry::RuntimeGatewayProviderExecution>,
+    pricing: Option<super::local_rewrite_provider_registry::RuntimeGatewayProviderPricing>,
     provider_override: Option<ProviderId>,
 }
 
@@ -1173,14 +1174,16 @@ impl RuntimeGatewayApplicationProviderDispatch<'_> {
         &self,
         shared: &RuntimeLocalRewriteProxyShared,
     ) -> RuntimeLocalRewriteProxyShared {
-        let Some(execution) = self.execution.as_ref() else {
-            return shared.clone();
+        let selected = if let Some(execution) = self.execution.as_ref() {
+            shared.with_selected_upstream(
+                execution.provider.clone(),
+                execution.credential.clone(),
+                execution.upstream_base_url.clone(),
+            )
+        } else {
+            shared.clone()
         };
-        shared.with_selected_upstream(
-            execution.provider.clone(),
-            execution.credential.clone(),
-            execution.upstream_base_url.clone(),
-        )
+        selected.with_governed_pricing(self.pricing.clone())
     }
 }
 
@@ -1215,6 +1218,7 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
         RuntimeGatewayApplicationAdmissionKind::TenantBound { plan, routing, .. } => {
             let invocation = &plan.admission.provider_invocation;
             let mut execution = None;
+            let mut pricing = None;
             let mut provider_override = None;
             if let Some(routing) = routing.as_ref() {
                 let selected_route = std::iter::once(&routing.primary)
@@ -1250,6 +1254,8 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
                             .ok_or(RuntimeGatewayApplicationDataPlaneError::NoEligibleProvider)?,
                     );
                 }
+                pricing =
+                    provider_registry.pricing_for_route(selected_route, invocation.route.endpoint);
                 provider_override = Some(selected_route.provider);
             }
             if shared
@@ -1278,6 +1284,7 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
                 ),
                 inspection: admission.inspection(),
                 execution,
+                pricing,
                 provider_override,
             })
         }
@@ -1297,6 +1304,7 @@ pub(super) fn runtime_gateway_application_provider_dispatch_attempt<'a>(
                 ),
                 inspection: admission.inspection(),
                 execution: None,
+                pricing: None,
                 provider_override: None,
             })
         }

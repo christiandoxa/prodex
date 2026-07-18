@@ -148,19 +148,21 @@ original eligible set.
    deployment's Vault Agent, Secrets Store CSI driver or equivalent injector.
    Prodex's production adapter is the bounded projected-secret provider; a
    direct Vault HTTP client is intentionally not another secret authority.
-8. Browser Authorization Code plus PKCE is not a supported gateway-admin flow;
-   browser-originated administration remains disabled. Device/service identity
-   paths are the supported authenticated surfaces.
+8. Browser Authorization Code plus PKCE S256 is an opt-in gateway-admin flow
+   with state/nonce validation, bounded token exchange, secure cookies, and
+   logout. Shared browser-session storage and IdP back-channel logout remain
+   deployment gaps.
 9. Policy-selected execution approval is request-digest/revision bound,
    quorum-gated, atomically single-use, and exposed through content-free admin
-   HTTP. Governance break-glass activation remains disabled.
+   HTTP. Bounded break-glass approvals are separate, expiring, use-limited,
+   audited, and enforced for retention purge without becoming a generic bypass.
 10. Group/department ABAC attributes are not supplied by the current identity
     evidence contract. Tenant, principal, role, project, classification,
     provider and revision attributes are enforced.
-11. Configured `gateway.workload_identity` or `mtls_required` fails startup as
-    unsupported until runtime verifies the workload token and mTLS peer.
-    Trusted external termination and authenticated peer-evidence binding remain
-    unresolved acceptance work.
+11. Configured `gateway.workload_identity` verifies JWT/JWKS issuer, audience,
+    tenant, subject, and scope. With `mtls_required`, the direct Rustls listener
+    verifies the client chain and requires JWT `cnf.x5t#S256` binding to the
+    peer leaf certificate. Managed issuer/CA rotation remains acceptance work.
 12. `npm ci` is not an executable gate in this workspace: no lockfile is
     tracked, and a generated lockfile rejects the root's intentionally
     cross-platform workspace packages on one host. `npm test` is the supported
@@ -170,8 +172,8 @@ original eligible set.
 
 The table below is retained historical evidence from the earlier release
 candidate. It is not a release decision or full-gate claim for the current
-`8ca79a62` tranche. Current external deployment, SIEM, managed failover, mTLS
-peer verification and multi-replica acceptance blockers remain open.
+tranche. Current external deployment, SIEM, managed failover, PKI rotation,
+shared browser sessions, and multi-replica acceptance blockers remain open.
 
 | Gate | Status | Final evidence owner |
 | --- | --- | --- |

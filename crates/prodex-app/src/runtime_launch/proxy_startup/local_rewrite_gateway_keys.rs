@@ -25,7 +25,9 @@ use super::local_rewrite_gateway_store_types::{
 use super::local_rewrite_gateway_usage::runtime_gateway_try_reserve_usage_delta;
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_seconds;
-use super::provider_bridge::runtime_provider_gateway_cost_for_request;
+use super::provider_bridge::{
+    runtime_provider_gateway_cost_for_request, runtime_provider_gateway_pricing_model,
+};
 use super::*;
 use anyhow::Result;
 use prodex_application::{
@@ -394,6 +396,20 @@ pub(super) fn runtime_gateway_virtual_key_admission(
             );
         }
     };
+    let pricing_model = runtime_provider_gateway_pricing_model(
+        &shared.gateway_route_aliases,
+        &route_load,
+        request_id,
+        &captured.body,
+        &model,
+    );
+    let governed_cost = authorized_tenant.and_then(|tenant_id| {
+        shared
+            .governed_provider_registry
+            .load_full()
+            .snapshot_for(tenant_id)
+            .and_then(|snapshot| snapshot.reservation_cost_for_model(&pricing_model))
+    });
     let cost = runtime_provider_gateway_cost_for_request(
         shared.provider.bridge_kind(),
         &shared.gateway_route_aliases,
@@ -401,6 +417,7 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         request_id,
         &captured.body,
         &model,
+        governed_cost,
     );
     let estimated_cost_microusd =
         calculate_cost_microusd(Some(input_tokens), Some(reserved_output_tokens), cost);
@@ -877,15 +894,16 @@ fn runtime_gateway_sqlite_reserve_usage(
     tx.execute(
         r#"
         INSERT OR IGNORE INTO prodex_reservations (
-            tenant_id, reservation_id, call_id, virtual_key_id, idempotency_key,
+            tenant_id, reservation_id, call_id, virtual_key_id, storage_scope, idempotency_key,
             reserved_tokens, reserved_cost_micros, created_at_unix_ms, expires_at_unix_ms
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         "#,
         rusqlite::params![
             tenant_id,
             reservation_id,
             call_id,
             virtual_key_id,
+            storage_scope,
             idempotency_key,
             runtime_gateway_sqlite_u64_to_i64(reserved.tokens),
             runtime_gateway_sqlite_u64_to_i64(reserved.cost_micros),

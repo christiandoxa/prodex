@@ -735,6 +735,116 @@ END $migration$;
 "#,
 };
 
+pub const RESERVATION_STORAGE_SCOPE_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(12),
+    phase: PostgresMigrationPhase::Expand,
+    name: "012_reservation_storage_scope",
+    sql: r#"
+ALTER TABLE prodex_reservations
+    ADD COLUMN IF NOT EXISTS storage_scope TEXT NOT NULL DEFAULT 'tenant-default';
+
+UPDATE prodex_reservations reservation
+SET storage_scope = COALESCE(
+    (
+        SELECT counter.storage_scope
+        FROM prodex_budget_counters counter
+        WHERE counter.tenant_id = reservation.tenant_id
+          AND counter.virtual_key_id IS NOT DISTINCT FROM reservation.virtual_key_id
+        ORDER BY counter.updated_at_unix_ms DESC, counter.storage_scope
+        LIMIT 1
+    ),
+    CASE
+        WHEN reservation.virtual_key_id IS NULL THEN 'tenant-default'
+        ELSE 'virtual_key:' || reservation.virtual_key_id::TEXT
+    END
+);
+
+CREATE INDEX IF NOT EXISTS prodex_reservations_expired_active_idx
+    ON prodex_reservations (expires_at_unix_ms, tenant_id)
+    WHERE committed_at_unix_ms IS NULL AND released_at_unix_ms IS NULL;
+"#,
+};
+
+pub const AUDIT_LEGAL_HOLD_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(13),
+    phase: PostgresMigrationPhase::Expand,
+    name: "013_audit_legal_holds",
+    sql: r#"
+CREATE TABLE IF NOT EXISTS prodex_audit_legal_holds (
+    tenant_id UUID NOT NULL REFERENCES prodex_tenants(tenant_id),
+    audit_event_id UUID NOT NULL,
+    reason_code TEXT NOT NULL,
+    expires_at_unix_ms BIGINT,
+    created_by UUID NOT NULL,
+    created_at_unix_ms BIGINT NOT NULL,
+    PRIMARY KEY (tenant_id, audit_event_id),
+    FOREIGN KEY (tenant_id, audit_event_id)
+        REFERENCES prodex_audit_log(tenant_id, audit_event_id),
+    CHECK (char_length(reason_code) BETWEEN 1 AND 128),
+    CHECK (expires_at_unix_ms IS NULL OR expires_at_unix_ms > 0),
+    CHECK (created_at_unix_ms >= 0)
+);
+
+ALTER TABLE prodex_audit_legal_holds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE prodex_audit_legal_holds FORCE ROW LEVEL SECURITY;
+
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = current_schema()
+          AND tablename = 'prodex_audit_legal_holds'
+          AND policyname = 'prodex_audit_legal_holds_tenant_isolation'
+    ) THEN
+        CREATE POLICY prodex_audit_legal_holds_tenant_isolation
+            ON prodex_audit_legal_holds
+            USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
+            WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
+    END IF;
+END $migration$;
+
+CREATE INDEX IF NOT EXISTS prodex_audit_legal_holds_active_idx
+    ON prodex_audit_legal_holds (tenant_id, expires_at_unix_ms, audit_event_id);
+
+CREATE TABLE IF NOT EXISTS prodex_audit_retention_anchors (
+    tenant_id UUID PRIMARY KEY REFERENCES prodex_tenants(tenant_id),
+    last_purged_digest TEXT NOT NULL,
+    updated_at_unix_ms BIGINT NOT NULL,
+    CHECK (char_length(last_purged_digest) BETWEEN 1 AND 128),
+    CHECK (updated_at_unix_ms >= 0)
+);
+
+ALTER TABLE prodex_audit_retention_anchors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE prodex_audit_retention_anchors FORCE ROW LEVEL SECURITY;
+
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = current_schema()
+          AND tablename = 'prodex_audit_retention_anchors'
+          AND policyname = 'prodex_audit_retention_anchors_tenant_isolation'
+    ) THEN
+        CREATE POLICY prodex_audit_retention_anchors_tenant_isolation
+            ON prodex_audit_retention_anchors
+            USING (tenant_id = current_setting('prodex.tenant_id', true)::uuid)
+            WITH CHECK (tenant_id = current_setting('prodex.tenant_id', true)::uuid);
+    END IF;
+END $migration$;
+
+CREATE OR REPLACE FUNCTION prodex_reject_audit_mutation()
+RETURNS trigger LANGUAGE plpgsql AS $function$
+BEGIN
+    IF TG_OP = 'DELETE'
+       AND current_setting('prodex.audit_retention_purge_tenant', true) = OLD.tenant_id::text
+    THEN
+        RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'audit events are immutable';
+END $function$;
+"#,
+};
+
 pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     INITIAL_TENANT_ACCOUNTING_MIGRATION,
     GROUPED_REQUEST_BUDGET_MIGRATION,
@@ -747,8 +857,10 @@ pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     GOVERNANCE_SESSION_PROVIDER_REVISIONS_MIGRATION,
     APPROVAL_TERMINATION_REASON_MIGRATION,
     SESSION_REVOCATION_EPOCH_MIGRATION,
+    RESERVATION_STORAGE_SCOPE_MIGRATION,
+    AUDIT_LEGAL_HOLD_MIGRATION,
 ];
-pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(11);
+pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(13);
 
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,

@@ -61,9 +61,24 @@ fn duration_millis(duration: Duration) -> u64 {
 pub(in super::super) fn runtime_gateway_prefetch_oidc_cache(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Result<()> {
-    let Some(config) = shared.gateway_sso.oidc.as_ref() else {
-        return Ok(());
-    };
+    if let Some(config) = shared.gateway_sso.oidc.as_ref() {
+        runtime_gateway_prefetch_oidc_config(shared, config, &shared.gateway_oidc_jwks_snapshot)?;
+    }
+    if let Some(workload) = shared.gateway_sso.workload_identity.as_ref() {
+        runtime_gateway_prefetch_oidc_config(
+            shared,
+            &workload.oidc,
+            &shared.gateway_workload_jwks_snapshot,
+        )?;
+    }
+    Ok(())
+}
+
+fn runtime_gateway_prefetch_oidc_config(
+    shared: &RuntimeLocalRewriteProxyShared,
+    config: &RuntimeGatewayOidcConfig,
+    target: &arc_swap::ArcSwapOption<RuntimeGatewayOidcJwksSnapshot>,
+) -> Result<()> {
     let jwks_url = runtime_gateway_oidc_fetch_jwks_url(config, shared)?;
     let jwks_value = runtime_gateway_oidc_fetch_json(shared, &jwks_url, "JWKS")?;
     runtime_gateway_oidc_validate_jwks_key_count(&jwks_value)?;
@@ -92,9 +107,7 @@ pub(in super::super) fn runtime_gateway_prefetch_oidc_cache(
                 .last_known_good_window,
         ),
     };
-    shared
-        .gateway_oidc_jwks_snapshot
-        .store(Some(Arc::new(snapshot)));
+    target.store(Some(Arc::new(snapshot)));
     Ok(())
 }
 

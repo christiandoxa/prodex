@@ -2692,6 +2692,7 @@ dependencies = [
 name = "prodex"
 version = "0.308.0"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "base64",
  "clap",
@@ -2980,12 +2981,16 @@ name = "prodex-gateway-server"
 version = "0.308.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "bytes",
  "http-body-util",
  "hyper",
  "hyper-util",
  "prodex-gateway-http",
+ "rustls",
+ "sha2 0.11.0",
  "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]
@@ -3236,6 +3241,7 @@ dependencies = [
  "prodex-secret-store",
  "serde",
  "toml",
+ "url",
 ]
 
 [[package]]
@@ -3740,6 +3746,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -3847,6 +3854,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c54fcab019b409d04215d3a17cb438fd7fbf192ee61461f20f4fe18704bc138"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "rustls-pki-types",
  "rustls-webpki",
@@ -4060,6 +4068,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "serde_urlencoded"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd"
+dependencies = [
+ "form_urlencoded",
+ "itoa",
+ "ryu",
+ "serde",
 ]
 
 [[package]]

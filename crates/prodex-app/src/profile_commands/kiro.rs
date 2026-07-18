@@ -564,9 +564,21 @@ pub(crate) fn write_kiro_cli_data_dir(data_dir: &Path, secret: &KiroAuthSecret) 
             key TEXT PRIMARY KEY,
             value TEXT
         );
+        CREATE TABLE IF NOT EXISTS conversations_v2 (
+            key TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            value TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (key, conversation_id)
+        );
+        CREATE TABLE IF NOT EXISTS extracted_kas_versions (
+            version TEXT PRIMARY KEY,
+            last_used_at INTEGER NOT NULL
+        );
         "#,
     )?;
-    for version in 0..=7_i64 {
+    for version in 0..=9_i64 {
         connection.execute(
             "INSERT OR IGNORE INTO migrations (version, migration_time) VALUES (?1, strftime('%s', 'now'))",
             params![version],
@@ -1058,6 +1070,27 @@ sys.exit(1)
                 .expect("region should exist"),
             "us-east-1"
         );
+        assert_eq!(
+            connection
+                .query_row("SELECT MAX(version) FROM migrations", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("latest migration should exist"),
+            9
+        );
+        for table in ["conversations_v2", "extracted_kas_versions"] {
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                        params![table],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .expect("Kiro compatibility table should be queryable"),
+                1,
+                "missing Kiro compatibility table {table}"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(data_dir);
     }

@@ -217,6 +217,7 @@ fn runtime_proxy_endpoint_child_lease_uses_requested_pid_and_cleans_up() {
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
+        _kiro_connect_proxy: None,
     };
 
     let child_pid = 424242u32;

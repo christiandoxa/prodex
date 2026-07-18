@@ -165,7 +165,7 @@ Notes:
   Use `deepseek` or `--provider deepseek` to keep Codex/Super and route through a local Responses-to-DeepSeek adapter. Supply `--api-key`, DEEPSEEK_API_KEY, or DEEPSEEK_API_KEYS.
   Use `gemini` or `--provider gemini` to route through Gemini. Supply `--api-key`, GEMINI_API_KEY, GEMINI_API_KEYS, GOOGLE_API_KEY, or GOOGLE_API_KEYS; or sign in with Google via `prodex login --with-google`.
   Add `--cli gemini` to launch Gemini CLI with its native tools in YOLO mode through Prodex OAuth profile routing. Override the binary with PRODEX_GEMINI_BIN.
-  Add `--cli kiro` to launch Kiro CLI from an imported Kiro profile snapshot. Native Kiro uses its proprietary service directly; `--provider kiro` is the proxied Codex-to-Kiro ACP direction. Override the binary with PRODEX_KIRO_BIN.
+  Add `--cli kiro` to launch Kiro CLI from an imported Kiro profile snapshot through an authenticated loopback CONNECT tunnel. Kiro's TLS payload stays opaque; `--provider kiro` is the application-level Codex-to-Kiro ACP bridge. Override the binary with PRODEX_KIRO_BIN.
   Add `--cli agy` to launch Antigravity CLI with `--dangerously-skip-permissions`. Antigravity owns its keyring auth and currently cannot use Prodex account rotation. Override the binary with PRODEX_AGY_BIN.
   Local mode defaults to a 16k context window; use `--context-window` and `--auto-compact-token-limit` if your server is configured larger.
   Additional Codex args are appended after the implied optimizer prefixes.";

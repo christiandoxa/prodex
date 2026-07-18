@@ -172,6 +172,11 @@ fn provider_endpoint_contract_status(
     if !supported {
         return ProviderCapabilityStatus::Unsupported;
     }
+    // Emulated endpoints terminate inside Prodex instead of crossing the provider
+    // translator boundary, so upstream request/response fixtures do not apply.
+    if base == ProviderCapabilityStatus::Emulated {
+        return ProviderCapabilityStatus::Emulated;
+    }
     if !coverage.any() {
         return ProviderCapabilityStatus::Untested;
     }

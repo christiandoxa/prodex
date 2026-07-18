@@ -76,7 +76,11 @@ serving; secret files are not read on the request hot path.
 | `gateway.require_auth` | none | `false` | Require gateway bearer auth even on loopback. Token value comes from non-empty, whitespace-free `--auth-token`, non-empty, whitespace-free `PRODEX_GATEWAY_TOKEN`, or configured virtual key env vars. |
 | `gateway.auth_token_ref` | none | empty | Projected data-plane bearer-token reference. Required in production unless at least one `gateway.virtual_keys[].token_ref` exists. |
 | `gateway.provider_api_key_ref` | none | empty | Projected upstream provider API-key reference. Required in production. |
-| `gateway.adaptive_routing.*` | none | unset | Reserved. Any configured adaptive-routing value fails validation until adaptive decisions are wired into live gateway routing. |
+| `gateway.adaptive_routing.enabled` | none | `false` | Enable bounded adaptive recommendations for configured route aliases. At least one `gateway.route_aliases` entry is required. |
+| `gateway.adaptive_routing.shadow_mode` | none | `true` | When enabled, compute and log recommendations without changing live selection. When `false`, a recommendation may reorder only fresh pre-commit fallback candidates. |
+| `gateway.adaptive_routing.window_size` | none | `128` | Maximum recent outcome/latency observations retained per model, from `1` through `4096`. |
+| `gateway.adaptive_routing.min_samples` | none | `8` | Minimum observations required before quality-based recommendation; it cannot exceed `window_size`. |
+| `gateway.adaptive_routing.exploration_rate` | none | `0.0` | Deterministic bounded exploration probability from `0.0` through `1.0`. Hard affinity and quota exclusions still win. |
 | `gateway.state.backend` | none | `file` | Gateway admin/usage state backend. Valid values: `file`, `sqlite`, `postgres`, `redis`. `postgres` stores admin-managed virtual keys, cumulative per-key/grouped request counts, token/cost reservations, usage counters, and billing ledger rows in a shared Postgres database. `redis` stores compatibility state and is not a durable production accounting backend. |
 | `gateway.state.sqlite_path` | none | `gateway-state.sqlite` under the Prodex root when `backend=sqlite` | Optional non-empty SQLite database path for admin-managed virtual keys, usage counters, and schema migrations. Relative paths are resolved under the Prodex root and non-blank values are preserved exactly. |
 | `gateway.state.postgres_url_env` | none | empty | Environment variable containing a non-empty, whitespace-free Postgres connection URL. Required when `backend="postgres"`. |
@@ -109,6 +113,22 @@ serving; secret files are not read on the request hot path.
 | `gateway.sso.oidc_tenant_claim` | none | `prodex_tenant` | Exact whitespace-free optional claim carrying the admin tenant id; missing values fall back to an active matching SCIM user's tenant. |
 | `gateway.sso.oidc_key_prefixes_claim` | none | `prodex_key_prefixes` | Exact whitespace-free optional string or string-array claim carrying visible virtual-key prefixes; missing values fall back to SCIM user prefixes. |
 | `gateway.sso.default_role` | none | `viewer` | Compatibility setting retained for existing policy files. Missing or invalid role claims resolve to `viewer`; configure an explicit SSO/OIDC or SCIM admin role instead. |
+| `gateway.sso.remote_human` | none | `false` | Declare remote human administration. When enabled, the policy requires the control-plane OIDC scope and complete browser-edge settings. |
+| `gateway.sso.required_scope` | none | `control_plane` for human OIDC | Exact credential scope for human OIDC. Values other than `control_plane` fail closed. |
+| `gateway.sso.authentication_strength` | none | empty | Optional required authentication strength: `mfa` or `phishing_resistant`. |
+| `gateway.sso.browser_flow` | none | `false` | Enable OIDC Authorization Code browser login at `/v1/prodex/gateway/auth/login`, callback, and logout routes. The bounded in-memory state/session store issues Secure, HttpOnly, SameSite cookies. |
+| `gateway.sso.pkce_method` | none | required with browser flow | Must be exact `S256`; weaker or missing PKCE fails closed. |
+| `gateway.sso.oidc_authorization_url` / `oidc_token_url` | none | required with browser flow | Exact issuer-origin HTTPS endpoints. Redirects, userinfo, query/fragment policy violations, and unsafe origins are rejected. |
+| `gateway.sso.oidc_client_id` | none | required with browser flow | Exact non-empty OIDC client identifier. |
+| `gateway.sso.oidc_client_secret_ref` | none | empty | Optional projected confidential-client secret. The token exchange uses a bounded no-redirect/no-proxy transport and never places the secret in a URL or log. |
+| `gateway.sso.oidc_redirect_uri` | none | required with browser flow | Exact HTTPS callback URI whose path is `/prodex/gateway/auth/callback` or `/v1/prodex/gateway/auth/callback`. |
+| `gateway.workload_identity.enabled` | none | `false` | Enable service JWT verification before data-plane authorization. |
+| `gateway.workload_identity.issuer` / `audience` | none | required when enabled | Exact permitted HTTPS issuer and whitespace-free audience for workload tokens. |
+| `gateway.workload_identity.jwks_url` | none | issuer discovery | Optional exact HTTPS JWKS endpoint; cross-origin keys require the explicit bounded `jwks_origin_allowlist`. Redirects remain disabled. |
+| `gateway.workload_identity.subject_claim` / `tenant_claim` / `scope_claim` | none | `sub` / `prodex_tenant` / `scope` | Exact claims used to construct the service principal, tenant, and credential scope. |
+| `gateway.workload_identity.required_scope` | none | `data_plane` | Exact required service-token scope; other values fail validation. |
+| `gateway.workload_identity.mtls_required` | none | `false` | Require a verified client certificate and JWT `cnf.x5t#S256` binding. |
+| `gateway.workload_identity.mtls_ca_ref` / `tls_identity_ref` | none | required when mTLS is enabled | Projected client trust bundle and server TLS identity. The Rustls listener verifies the client chain and passes only the SHA-256 peer-certificate fingerprint to workload authentication. |
 | `gateway.route_aliases` | none | empty | Declarative exact model aliases. Matching request `model` values are rewritten according to each alias `strategy`; alias names and model IDs must be non-empty and whitespace-free. |
 | `gateway.route_aliases[].strategy` | none | `fallback` | Routing strategy for the alias: `fallback` rewrites to `combo:...`, `round-robin` selects one target by request id, `least-busy` selects the target with the fewest in-flight gateway requests, `first` always picks the first target. |
 | `gateway.route_aliases[].model_metrics` | none | catalog defaults where known | Optional per-model routing hints for metric strategies: cost, latency, RPM limit, and TPM limit. Metric model IDs must exactly match one configured alias model. Policy values override the embedded provider/model catalog. |
@@ -174,6 +194,15 @@ valid unsigned values are bounded, HTTP cache TTL and last-known-good may be zer
 for diagnostics, and malformed values use the default while logging only the
 affected key name. Values are snapshotted before the listener is bound and do
 not change until restart.
+
+Dedicated `prodex-gateway serve` and `prodex-control-plane serve` processes can
+consume the replicated file publication transport continuously with
+`--config-publication-transport <PATH> --config-publication-replica <ID>`.
+Each replica polls once per second, validates and loads the candidate policy,
+constructs a replacement application, reloads edge/TLS configuration, swaps
+the live application atomically, and drains the previous instance. A replica
+acknowledgement is written only after all activation steps succeed; failures
+preserve the active application and remain eligible for retry.
 
 Example:
 

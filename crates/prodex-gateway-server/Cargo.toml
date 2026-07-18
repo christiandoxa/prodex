@@ -12,12 +12,16 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+arc-swap = { workspace = true }
 bytes = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["client", "http1", "server"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "tokio"] }
 prodex_gateway_http = { workspace = true }
+rustls = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls = { workspace = true }
 
 [lints]
 workspace = true

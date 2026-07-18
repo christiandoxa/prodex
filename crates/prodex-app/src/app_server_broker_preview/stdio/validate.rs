@@ -29,6 +29,7 @@ pub(crate) fn app_server_broker_write_stdio_validate_stream<R: BufRead, W: Write
     )
 }
 
+#[cfg(test)]
 pub(crate) fn app_server_broker_write_stdio_live_stream<R: BufRead, W: Write, D: Write>(
     reader: R,
     passthrough_writer: W,

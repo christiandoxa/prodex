@@ -130,7 +130,7 @@ impl fmt::Debug for ValidatedOidcEndpoint {
 }
 
 impl ValidatedOidcEndpoint {
-    fn parse(value: &str) -> Result<Self, OidcEndpointValidationError> {
+    pub fn parse(value: &str) -> Result<Self, OidcEndpointValidationError> {
         let url = parse_oidc_https_url(value)?;
         let canonical = url.as_str().to_string();
         let origin = OidcOrigin::from_url(&url)?;
@@ -290,6 +290,17 @@ impl OidcEndpointPolicy {
         if endpoint.origin != self.issuer.origin
             && !self.allowed_jwks_origins.contains(&endpoint.origin)
         {
+            return Err(OidcEndpointValidationError::OriginForbidden);
+        }
+        Ok(endpoint)
+    }
+
+    pub fn validate_issuer_endpoint(
+        &self,
+        value: &str,
+    ) -> Result<ValidatedOidcEndpoint, OidcEndpointValidationError> {
+        let endpoint = ValidatedOidcEndpoint::parse(value)?;
+        if endpoint.origin != self.issuer.origin {
             return Err(OidcEndpointValidationError::OriginForbidden);
         }
         Ok(endpoint)

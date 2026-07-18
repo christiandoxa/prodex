@@ -45,11 +45,12 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
 const ALLOWED_RUNTIME_DEPENDENCIES = new Set([
   "prodex_domain",
   "prodex_storage",
+  "prodex_storage_sqlite",
   "rusqlite",
   "serde_json",
   "sha2",
 ]);
-const ALLOWED_RUNTIME_DEV_DEPENDENCIES = new Set(["prodex_storage_sqlite"]);
+const ALLOWED_RUNTIME_DEV_DEPENDENCIES = new Set();
 const FORBIDDEN_RUNTIME_SOURCE_PATTERNS = Object.freeze([
   { name: "environment", pattern: /\bstd\s*::\s*env\b/u },
   { name: "network", pattern: /\bstd\s*::\s*net\b/u },
@@ -216,12 +217,10 @@ name = "prodex-storage-sqlite-runtime"
 [dependencies]
 prodex_domain = { workspace = true }
 prodex_storage = { workspace = true }
+prodex_storage_sqlite = { workspace = true }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-
-[dev-dependencies]
-prodex_storage_sqlite = { workspace = true }
 `;
   assertSelfTest(
     validateRuntimeManifest(validRuntime, "valid-runtime/Cargo.toml").length === 0,

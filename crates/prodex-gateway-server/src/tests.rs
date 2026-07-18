@@ -29,7 +29,8 @@ use tokio::{
 
 use super::{
     GatewayHandlerRequest, GatewayHandlerResponse, GatewayServerBrowserSecurity,
-    GatewayServerConfig, GatewayServerMode, LoopbackBackend, run_with_handler,
+    GatewayServerConfig, GatewayServerMode, GatewayServerReloadHandle, LoopbackBackend,
+    run_with_handler,
 };
 use prodex_gateway_http::GatewayHttpRouteKind;
 
@@ -43,6 +44,25 @@ type TestFrontend = (
     oneshot::Sender<()>,
     JoinHandle<anyhow::Result<()>>,
 );
+
+#[test]
+fn reload_handle_swaps_edge_security_for_new_connections() {
+    let mut config = GatewayServerConfig::production(
+        "127.0.0.1:4000".parse().unwrap(),
+        GatewayServerMode::DataPlane,
+    );
+    let reload = GatewayServerReloadHandle::new(&config).unwrap();
+    config.edge_security.expected_host = "gateway.example.com".to_string();
+    config.edge_security.trusted_proxies = vec!["192.0.2.10".parse().unwrap()];
+    reload.reload(&config).unwrap();
+
+    let security = reload.load();
+    assert_eq!(security.edge_security.expected_host, "gateway.example.com");
+    assert_eq!(
+        security.edge_security.trusted_proxies,
+        vec!["192.0.2.10".parse::<std::net::IpAddr>().unwrap()]
+    );
+}
 #[tokio::test]
 async fn route_isolation_keeps_data_and_control_planes_separate() {
     let calls = Arc::new(AtomicUsize::new(0));
@@ -715,7 +735,7 @@ async fn production_edge_security_uses_peer_trust_and_rejects_host_origin_csrf_s
             config.edge_security.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
             config.edge_security.browser = Some(GatewayServerBrowserSecurity {
                 expected_origin: format!("http://{}", config.edge_security.expected_host),
-                expected_csrf_token: "synthetic-csrf-token".to_string(),
+                expected_csrf_token: Some("synthetic-csrf-token".to_string()),
             });
         },
         move |request| {

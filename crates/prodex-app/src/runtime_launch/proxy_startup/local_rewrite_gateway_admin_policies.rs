@@ -1,23 +1,31 @@
 use prodex_application::{
+    ApplicationAuditRetentionPurgeRequest, ApplicationBreakGlassAuditRequest,
     ApplicationExecutionApprovalService, ApplicationGovernanceLifecycleError,
-    ApplicationGovernanceRepository,
+    ApplicationGovernanceRepository, plan_application_audit_retention_purge,
+    plan_application_break_glass_with_audit_storage,
 };
-use prodex_control_plane::{ControlPlaneActionPlan, ControlPlaneOperation};
+use prodex_control_plane::{
+    BreakGlassAuthorization, ControlPlaneActionPlan, ControlPlaneDecision, ControlPlaneOperation,
+};
 use prodex_domain::{
     ApprovalAction, ApprovalFingerprint, ApprovalId, ApprovalKind, ApprovalReasonCode,
-    ApprovalRecord, ApprovalScope, AuditAction, AuditEventId, AuditResource, CredentialScope,
-    Principal, PrincipalKind, Role, compute_audit_chain_digest,
+    ApprovalRecord, ApprovalScope, AuditAction, AuditEventId, AuditQueryScope, AuditReasonCode,
+    AuditResource, AuditRetentionBatchLimit, AuditRetentionHold, AuditRetentionPolicy,
+    AuditRetentionPurgeBatch, AuditRetentionPurgeKey, AuditTimestamp, CredentialScope, Principal,
+    PrincipalKind, ResourceKind, Role, TenantContext, compute_audit_chain_digest,
 };
 use prodex_storage::{
     AppendOnlyAuditCommand, ApprovalVoteIdempotency, ApprovalVoteMutationOutcome,
-    ApprovalVoteRequest, ApprovalVoteSnapshot, AuditOutboxWriteCommand, GovernanceActivationAction,
-    GovernanceActivationRequest, GovernanceActivationResult, GovernanceArtifactKind,
-    GovernanceAuditExportRecord, GovernanceAuditIntegrityHealth, GovernanceOutboxHealth,
-    GovernanceRepositoryError, GovernanceRevisionSummary, GovernanceRevisionWriteCommand,
-    GovernanceSnapshot, GovernanceStatus, GovernanceWriteOutcome, TenantStorageKey,
+    ApprovalVoteRequest, ApprovalVoteSnapshot, AuditOutboxWriteCommand, AuditRetentionPurgeCommand,
+    DurableStoreKind, GovernanceActivationAction, GovernanceActivationRequest,
+    GovernanceActivationResult, GovernanceArtifactKind, GovernanceAuditExportRecord,
+    GovernanceAuditIntegrityHealth, GovernanceOutboxHealth, GovernanceRepositoryError,
+    GovernanceRevisionSummary, GovernanceRevisionWriteCommand, GovernanceSnapshot,
+    GovernanceStatus, GovernanceWriteOutcome, TenantStorageKey,
 };
 use prodex_storage_sqlite_runtime::GovernanceSqliteRepository;
 use sha2::{Digest, Sha256};
+use std::str::FromStr;
 
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
 use super::local_rewrite_application_boundary::{
@@ -99,6 +107,25 @@ pub(super) fn runtime_gateway_admin_policy_response(
     if path == audit_export {
         return Some(audit_export_response(captured, shared, base_action));
     }
+    let audit_retention = format!("{admin_prefix}/audit/retention");
+    if path == format!("{audit_retention}/holds")
+        || path.starts_with(&(format!("{audit_retention}/holds/")))
+        || path == format!("{audit_retention}/purge")
+    {
+        let repository = match repository(shared) {
+            Ok(repository) => repository,
+            Err(response) => return Some(response),
+        };
+        return Some(audit_retention_response(
+            captured,
+            path,
+            &audit_retention,
+            shared,
+            admin_auth,
+            base_action,
+            &repository,
+        ));
+    }
     if path == audit_integrity {
         return Some(audit_integrity_response(captured, shared, base_action));
     }
@@ -122,6 +149,21 @@ pub(super) fn runtime_gateway_admin_policy_response(
             captured,
             path,
             &execution_approvals,
+            admin_auth,
+            base_action,
+            &repository,
+        ));
+    }
+    let break_glass_approvals = format!("{admin_prefix}/break-glass-approvals");
+    if path == break_glass_approvals || path.starts_with(&(break_glass_approvals.clone() + "/")) {
+        let repository = match repository(shared) {
+            Ok(repository) => repository,
+            Err(response) => return Some(response),
+        };
+        return Some(break_glass_approval_response(
+            captured,
+            path,
+            &break_glass_approvals,
             admin_auth,
             base_action,
             &repository,
@@ -354,6 +396,104 @@ impl RuntimeGovernanceRepository<'_> {
                 repository,
                 runtime,
             } => runtime.block_on(repository.governance_list_execution_approvals(tenant_id)),
+        }
+    }
+
+    fn list_approvals(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+        kind: ApprovalKind,
+    ) -> Result<Vec<ApprovalRecord>, GovernanceRepositoryError> {
+        match self {
+            Self::Sqlite(repository) => repository.list_approvals(tenant_id, kind),
+            Self::Postgres {
+                repository,
+                runtime,
+            } => runtime.block_on(repository.governance_list_approvals(tenant_id, kind)),
+        }
+    }
+
+    fn upsert_audit_legal_hold(
+        &self,
+        hold: &AuditRetentionHold,
+        created_by: prodex_domain::PrincipalId,
+        created_at_unix_ms: u64,
+        audit: AuditOutboxWriteCommand,
+    ) -> Result<(), GovernanceRepositoryError> {
+        match self {
+            Self::Sqlite(repository) => {
+                repository.upsert_audit_legal_hold(hold, created_by, created_at_unix_ms, audit)
+            }
+            Self::Postgres {
+                repository,
+                runtime,
+            } => runtime.block_on(repository.governance_upsert_audit_legal_hold(
+                hold.clone(),
+                created_by,
+                created_at_unix_ms,
+                audit,
+            )),
+        }
+    }
+
+    fn list_audit_legal_holds(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+    ) -> Result<Vec<AuditRetentionHold>, GovernanceRepositoryError> {
+        match self {
+            Self::Sqlite(repository) => repository.list_audit_legal_holds(tenant_id),
+            Self::Postgres {
+                repository,
+                runtime,
+            } => runtime.block_on(repository.governance_list_audit_legal_holds(tenant_id)),
+        }
+    }
+
+    fn delete_audit_legal_hold(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+        event_id: AuditEventId,
+        audit: AuditOutboxWriteCommand,
+    ) -> Result<bool, GovernanceRepositoryError> {
+        match self {
+            Self::Sqlite(repository) => {
+                repository.delete_audit_legal_hold(tenant_id, event_id, audit)
+            }
+            Self::Postgres {
+                repository,
+                runtime,
+            } => runtime.block_on(
+                repository.governance_delete_audit_legal_hold(tenant_id, event_id, audit),
+            ),
+        }
+    }
+
+    fn purge_audit_events(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+        event_ids: &[AuditEventId],
+        now_unix_ms: u64,
+        cutoff_unix_ms: u64,
+        audit: AuditOutboxWriteCommand,
+    ) -> Result<Vec<AuditEventId>, GovernanceRepositoryError> {
+        match self {
+            Self::Sqlite(repository) => repository.purge_audit_events(
+                tenant_id,
+                event_ids,
+                now_unix_ms,
+                cutoff_unix_ms,
+                audit,
+            ),
+            Self::Postgres {
+                repository,
+                runtime,
+            } => runtime.block_on(repository.governance_purge_audit_events(
+                tenant_id,
+                event_ids.to_vec(),
+                now_unix_ms,
+                cutoff_unix_ms,
+                audit,
+            )),
         }
     }
 
@@ -598,10 +738,11 @@ fn governance_artifact_is_valid(
                     snapshot.classification_rules().revision().as_str() == expected
                 })
             }),
-        RuntimeGovernanceResource::ProviderRegistry => super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact(
+        RuntimeGovernanceResource::ProviderRegistry => super::local_rewrite_provider_registry::compile_runtime_gateway_provider_registry_artifact_for_deployment(
                 artifact,
                 &shared.provider,
                 shared.provider_credential.as_ref(),
+                shared.runtime_shared.runtime_config.governance.mode,
             )
             .is_ok_and(|snapshot| {
                 expected_revision_id
@@ -953,6 +1094,672 @@ fn execution_approval_response(
             "HTTP method is not allowed for this governance route",
         ),
     }
+}
+
+fn break_glass_approval_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    base_path: &str,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+    repository: &RuntimeGovernanceRepository<'_>,
+) -> tiny_http::ResponseBox {
+    let method = captured.method.to_ascii_uppercase();
+    let segments = path
+        .strip_prefix(&(base_path.to_string() + "/"))
+        .map(|suffix| {
+            suffix
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let tenant_id = base_action.tenant.tenant_id;
+    match (method.as_str(), segments.as_slice()) {
+        ("GET", []) => match repository.list_approvals(tenant_id, ApprovalKind::BreakGlass) {
+            Ok(approvals) => runtime_gateway_admin_json_response(
+                200,
+                serde_json::json!({
+                    "object": "governance.break_glass_approval.list",
+                    "data": approvals.into_iter().map(break_glass_approval_json).collect::<Vec<_>>(),
+                }),
+            ),
+            Err(error) => repository_error(error),
+        },
+        ("POST", []) => {
+            let body = match runtime_gateway_admin_json_body(captured) {
+                Ok(body) => body,
+                Err(response) => return response,
+            };
+            let Some(approval_id) = body.get("approval_id").and_then(serde_json::Value::as_str)
+            else {
+                return invalid_request();
+            };
+            let reason = match body
+                .get("reason_code")
+                .and_then(serde_json::Value::as_str)
+                .map(ApprovalReasonCode::new)
+            {
+                Some(Ok(reason)) => reason,
+                _ => return invalid_request(),
+            };
+            let Some(expires_at_unix_ms) = body
+                .get("expires_at_unix_ms")
+                .and_then(serde_json::Value::as_u64)
+            else {
+                return invalid_request();
+            };
+            let required_quorum = body
+                .get("required_quorum")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u8::try_from(value).ok())
+                .unwrap_or(ApprovalKind::BreakGlass.minimum_quorum());
+            let now = runtime_gateway_now_unix_ms();
+            if expires_at_unix_ms <= now || expires_at_unix_ms > now.saturating_add(3_600_000) {
+                return invalid_request();
+            }
+            let approval_id = match ApprovalId::new(approval_id.to_string()) {
+                Ok(approval_id) => approval_id,
+                Err(_) => return invalid_request(),
+            };
+            let scope = match ApprovalScope::new(format!("audit_retention:{}", reason.as_str())) {
+                Ok(scope) => scope,
+                Err(_) => return invalid_request(),
+            };
+            let fingerprint = match ApprovalFingerprint::new(artifact_fingerprint(
+                format!("{}:{}:{}", tenant_id, scope.as_str(), expires_at_unix_ms).as_bytes(),
+            )) {
+                Ok(fingerprint) => fingerprint,
+                Err(_) => return invalid_request(),
+            };
+            let execution = match execution(captured, path, admin_auth, base_action) {
+                Ok(execution) => execution,
+                Err(response) => return response,
+            };
+            let approval = match ApprovalRecord::pending(
+                approval_id.clone(),
+                tenant_id,
+                ApprovalKind::BreakGlass,
+                scope,
+                fingerprint,
+                execution.authorized_action.audit_event.principal_id,
+                required_quorum,
+                expires_at_unix_ms,
+            ) {
+                Ok(approval) => approval,
+                Err(_) => return invalid_request(),
+            };
+            let audit = match control_plane_audit_command(
+                repository,
+                &execution.authorized_action,
+                "governance.break_glass_approval.create",
+                "break_glass_approval",
+                Some(approval_id.as_str()),
+            ) {
+                Ok(audit) => audit,
+                Err(error) => return repository_error(error),
+            };
+            match repository.create_approval(approval.clone(), audit) {
+                Ok(outcome) => runtime_gateway_admin_json_response(
+                    if outcome == GovernanceWriteOutcome::Applied {
+                        201
+                    } else {
+                        200
+                    },
+                    serde_json::json!({
+                        "approval": break_glass_approval_json(approval),
+                        "replayed": outcome == GovernanceWriteOutcome::Replayed,
+                    }),
+                ),
+                Err(error) => repository_error(error),
+            }
+        }
+        ("GET", [approval_id]) => {
+            let approval_id = match ApprovalId::new((*approval_id).to_string()) {
+                Ok(approval_id) => approval_id,
+                Err(_) => return invalid_request(),
+            };
+            match repository.get_approval(tenant_id, &approval_id) {
+                Ok(approval) if approval.kind == ApprovalKind::BreakGlass => {
+                    runtime_gateway_admin_json_response(200, break_glass_approval_json(approval))
+                }
+                Ok(_) => repository_error(GovernanceRepositoryError::NotFound),
+                Err(error) => repository_error(error),
+            }
+        }
+        ("POST", [approval_id, action @ ("votes" | "activate" | "revoke")]) => {
+            break_glass_transition_response(
+                captured,
+                path,
+                approval_id,
+                action,
+                admin_auth,
+                base_action,
+                repository,
+            )
+        }
+        ("GET" | "POST", _) => build_runtime_proxy_json_error_response(
+            404,
+            "break_glass_approval_not_found",
+            "break-glass approval was not found",
+        ),
+        _ => build_runtime_proxy_json_error_response(
+            405,
+            "control_plane_method_not_allowed",
+            "HTTP method is not allowed for this break-glass route",
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn break_glass_transition_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    approval_id: &str,
+    transition: &str,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+    repository: &RuntimeGovernanceRepository<'_>,
+) -> tiny_http::ResponseBox {
+    let body = match runtime_gateway_admin_json_body(captured) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let Some(expected_version) = body
+        .get("expected_version")
+        .and_then(serde_json::Value::as_u64)
+    else {
+        return invalid_request();
+    };
+    let action = match transition {
+        "votes" => match body.get("decision").and_then(serde_json::Value::as_str) {
+            Some("approve") => ApprovalAction::Approve,
+            Some("reject") => ApprovalAction::Reject,
+            Some("cancel") => ApprovalAction::Cancel,
+            _ => return invalid_request(),
+        },
+        "activate" => ApprovalAction::Activate,
+        "revoke" => ApprovalAction::Supersede,
+        _ => return invalid_request(),
+    };
+    let approval_id = match ApprovalId::new(approval_id.to_string()) {
+        Ok(approval_id) => approval_id,
+        Err(_) => return invalid_request(),
+    };
+    let execution = match execution(captured, path, admin_auth, base_action) {
+        Ok(execution) => execution,
+        Err(response) => return response,
+    };
+    let tenant_id = execution.authorized_action.tenant.tenant_id;
+    match repository.get_approval(tenant_id, &approval_id) {
+        Ok(approval) if approval.kind == ApprovalKind::BreakGlass => {}
+        Ok(_) => return repository_error(GovernanceRepositoryError::NotFound),
+        Err(error) => return repository_error(error),
+    }
+    let action_label = match action {
+        ApprovalAction::Approve => "approve",
+        ApprovalAction::Reject => "reject",
+        ApprovalAction::Cancel => "cancel",
+        ApprovalAction::Activate => "activate",
+        ApprovalAction::Supersede => "revoke",
+        ApprovalAction::RollBack => return invalid_request(),
+    };
+    let audit = match control_plane_audit_command(
+        repository,
+        &execution.authorized_action,
+        &format!("governance.break_glass_approval.{action_label}"),
+        "break_glass_approval",
+        Some(approval_id.as_str()),
+    ) {
+        Ok(audit) => audit,
+        Err(error) => return repository_error(error),
+    };
+    let reason = match action {
+        ApprovalAction::Reject => Some(ApprovalReasonCode::new("approval.rejected").unwrap()),
+        ApprovalAction::Cancel => Some(ApprovalReasonCode::new("approval.cancelled").unwrap()),
+        _ => None,
+    };
+    match repository.transition_approval_idempotent(
+        ApprovalVoteRequest {
+            tenant_id,
+            approval_id: approval_id.clone(),
+            actor: actor(&execution.authorized_action),
+            expected_version,
+            now_unix_ms: execution.atomic_write.completed_at_unix_ms,
+            reason,
+            audit_outbox: audit,
+        },
+        action,
+        ApprovalVoteIdempotency {
+            operation: execution.atomic_write.operation,
+            started_at_unix_ms: execution.atomic_write.started_at_unix_ms,
+        },
+    ) {
+        Ok(ApprovalVoteMutationOutcome::Applied(approval)) => {
+            runtime_gateway_admin_json_response(200, break_glass_approval_json(approval))
+        }
+        Ok(ApprovalVoteMutationOutcome::Replayed(snapshot)) => runtime_gateway_admin_json_response(
+            200,
+            break_glass_approval_snapshot_json(&approval_id, snapshot),
+        ),
+        Err(error) => repository_error(error),
+    }
+}
+
+fn break_glass_approval_json(approval: ApprovalRecord) -> serde_json::Value {
+    let reason_code = approval.scope.as_str().strip_prefix("audit_retention:");
+    serde_json::json!({
+        "object": "governance.break_glass_approval",
+        "approval_id": approval.id.as_str(),
+        "scope": "audit_retention",
+        "reason_code": reason_code,
+        "state": approval_state(approval.state),
+        "version": approval.version,
+        "required_quorum": approval.effective_required_quorum(),
+        "vote_count": approval.votes.len(),
+        "expires_at_unix_ms": approval.expires_at_unix_ms,
+        "activated_at_unix_ms": approval.activated_at_unix_ms,
+    })
+}
+
+fn break_glass_approval_snapshot_json(
+    approval_id: &ApprovalId,
+    snapshot: ApprovalVoteSnapshot,
+) -> serde_json::Value {
+    serde_json::json!({
+        "object": "governance.break_glass_approval",
+        "approval_id": approval_id.as_str(),
+        "state": approval_state(snapshot.state),
+        "version": snapshot.version,
+        "required_quorum": snapshot.required_quorum,
+        "vote_count": snapshot.vote_count,
+        "expires_at_unix_ms": snapshot.expires_at_unix_ms,
+        "activated_at_unix_ms": snapshot.activated_at_unix_ms,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn audit_retention_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    base_path: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+    repository: &RuntimeGovernanceRepository<'_>,
+) -> tiny_http::ResponseBox {
+    let holds_path = format!("{base_path}/holds");
+    let purge_path = format!("{base_path}/purge");
+    let tenant_id = base_action.tenant.tenant_id;
+
+    if path == holds_path && captured.method.eq_ignore_ascii_case("GET") {
+        return match repository.list_audit_legal_holds(tenant_id) {
+            Ok(holds) => runtime_gateway_admin_json_response(
+                200,
+                serde_json::json!({
+                    "object": "governance.audit_legal_hold.list",
+                    "data": holds.into_iter().map(audit_legal_hold_json).collect::<Vec<_>>(),
+                }),
+            ),
+            Err(error) => repository_error(error),
+        };
+    }
+
+    if path == holds_path && captured.method.eq_ignore_ascii_case("POST") {
+        let body = match runtime_gateway_admin_json_body(captured) {
+            Ok(body) => body,
+            Err(response) => return response,
+        };
+        let event_id = match body
+            .get("audit_event_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| AuditEventId::from_str(value).ok())
+        {
+            Some(event_id) => event_id,
+            None => return invalid_request(),
+        };
+        let reason_code = match body
+            .get("reason_code")
+            .and_then(serde_json::Value::as_str)
+            .map(AuditReasonCode::new)
+        {
+            Some(Ok(reason_code)) => reason_code,
+            _ => return invalid_request(),
+        };
+        let expires_at = match body.get("expires_at_unix_ms") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => match value
+                .as_u64()
+                .filter(|expires| *expires > runtime_gateway_now_unix_ms())
+                .and_then(|expires| AuditTimestamp::new(expires).ok())
+            {
+                Some(expires_at) => Some(expires_at),
+                None => return invalid_request(),
+            },
+        };
+        let execution = match execution(captured, path, admin_auth, base_action) {
+            Ok(execution) => execution,
+            Err(response) => return response,
+        };
+        let hold = AuditRetentionHold::new(
+            TenantContext { tenant_id },
+            event_id,
+            reason_code,
+            expires_at,
+        );
+        let audit = match control_plane_audit_command(
+            repository,
+            &execution.authorized_action,
+            "governance.audit_legal_hold.upsert",
+            "audit_legal_hold",
+            Some(&event_id.to_string()),
+        ) {
+            Ok(audit) => audit,
+            Err(error) => return repository_error(error),
+        };
+        return match repository.upsert_audit_legal_hold(
+            &hold,
+            execution.authorized_action.audit_event.principal_id,
+            execution.atomic_write.completed_at_unix_ms,
+            audit,
+        ) {
+            Ok(()) => runtime_gateway_admin_json_response(200, audit_legal_hold_json(hold)),
+            Err(error) => repository_error(error),
+        };
+    }
+
+    if let Some(event_id) = path.strip_prefix(&(holds_path.clone() + "/")) {
+        if !captured.method.eq_ignore_ascii_case("DELETE") {
+            return build_runtime_proxy_json_error_response(
+                405,
+                "control_plane_method_not_allowed",
+                "HTTP method is not allowed for this legal-hold route",
+            );
+        }
+        let event_id = match AuditEventId::from_str(event_id) {
+            Ok(event_id) => event_id,
+            Err(_) => return invalid_request(),
+        };
+        let execution = match super::local_rewrite_gateway_admin_execution::runtime_gateway_admin_mutation_execution(
+            captured,
+            path,
+            admin_auth,
+            base_action,
+            ControlPlaneOperation::AuditRetentionPurge,
+        ) {
+            Ok(execution) => execution,
+            Err(response) => return response,
+        };
+        let audit = match control_plane_audit_command(
+            repository,
+            &execution.authorized_action,
+            "governance.audit_legal_hold.delete",
+            "audit_legal_hold",
+            Some(&event_id.to_string()),
+        ) {
+            Ok(audit) => audit,
+            Err(error) => return repository_error(error),
+        };
+        return match repository.delete_audit_legal_hold(tenant_id, event_id, audit) {
+            Ok(true) => runtime_gateway_admin_json_response(
+                200,
+                serde_json::json!({
+                    "object": "governance.audit_legal_hold.deleted",
+                    "audit_event_id": event_id,
+                }),
+            ),
+            Ok(false) => repository_error(GovernanceRepositoryError::NotFound),
+            Err(error) => repository_error(error),
+        };
+    }
+
+    if path == purge_path && captured.method.eq_ignore_ascii_case("DELETE") {
+        return audit_retention_purge_response(
+            captured,
+            path,
+            shared,
+            admin_auth,
+            base_action,
+            repository,
+        );
+    }
+
+    if path == holds_path || path == purge_path {
+        build_runtime_proxy_json_error_response(
+            405,
+            "control_plane_method_not_allowed",
+            "HTTP method is not allowed for this audit-retention route",
+        )
+    } else {
+        build_runtime_proxy_json_error_response(
+            404,
+            "audit_retention_not_found",
+            "audit-retention resource was not found",
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn audit_retention_purge_response(
+    captured: &RuntimeProxyRequest,
+    path: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+    admin_auth: &RuntimeGatewayAdminAuth,
+    base_action: &ControlPlaneActionPlan,
+    repository: &RuntimeGovernanceRepository<'_>,
+) -> tiny_http::ResponseBox {
+    let body = match runtime_gateway_admin_json_body(captured) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let approval_id = match body
+        .get("approval_id")
+        .and_then(serde_json::Value::as_str)
+        .map(|value| ApprovalId::new(value.to_string()))
+    {
+        Some(Ok(approval_id)) => approval_id,
+        _ => return invalid_request(),
+    };
+    let mut event_ids = match body
+        .get("audit_event_ids")
+        .and_then(serde_json::Value::as_array)
+    {
+        Some(values)
+            if !values.is_empty() && values.len() <= usize::from(AuditRetentionBatchLimit::MAX) =>
+        {
+            let mut ids = Vec::with_capacity(values.len());
+            for value in values {
+                let Some(value) = value.as_str() else {
+                    return invalid_request();
+                };
+                let Ok(event_id) = AuditEventId::from_str(value) else {
+                    return invalid_request();
+                };
+                ids.push(event_id);
+            }
+            ids
+        }
+        _ => return invalid_request(),
+    };
+    event_ids.sort_unstable();
+    event_ids.dedup();
+    let retention_days = match body.get("retention_days") {
+        None => None,
+        Some(value) => match value.as_u64().and_then(|value| u16::try_from(value).ok()) {
+            Some(value) => Some(value),
+            None => return invalid_request(),
+        },
+    };
+    let retention_policy = match AuditRetentionPolicy::new(retention_days) {
+        Ok(policy) => policy,
+        Err(_) => return invalid_request(),
+    };
+    let batch_limit = match AuditRetentionBatchLimit::new(u16::try_from(event_ids.len()).ok()) {
+        Ok(limit) => limit,
+        Err(_) => return invalid_request(),
+    };
+    let scope = AuditQueryScope::tenant(TenantContext {
+        tenant_id: base_action.tenant.tenant_id,
+    });
+    let keys = event_ids
+        .iter()
+        .copied()
+        .map(|event_id| AuditRetentionPurgeKey {
+            tenant_id: base_action.tenant.tenant_id,
+            event_id,
+        });
+    let batch = match AuditRetentionPurgeBatch::new(scope, keys, batch_limit) {
+        Ok(batch) => batch,
+        Err(_) => return invalid_request(),
+    };
+    let durable_store = match shared.gateway_state_store {
+        RuntimeGatewayStateStore::Sqlite { .. } => DurableStoreKind::Sqlite,
+        RuntimeGatewayStateStore::Postgres { .. } => DurableStoreKind::Postgres,
+        RuntimeGatewayStateStore::File { .. } | RuntimeGatewayStateStore::Redis { .. } => {
+            return storage_unavailable();
+        }
+    };
+    if plan_application_audit_retention_purge(ApplicationAuditRetentionPurgeRequest {
+        durable_store,
+        purge: AuditRetentionPurgeCommand {
+            storage_key: TenantStorageKey::tenant(base_action.tenant.tenant_id),
+            batch,
+        },
+    })
+    .is_err()
+    {
+        return invalid_request();
+    }
+
+    let execution =
+        match super::local_rewrite_gateway_admin_execution::runtime_gateway_admin_mutation_execution(
+            captured,
+            path,
+            admin_auth,
+            base_action,
+            ControlPlaneOperation::AuditRetentionPurge,
+        ) {
+            Ok(execution) => execution,
+            Err(response) => return response,
+        };
+    let tenant_id = execution.authorized_action.tenant.tenant_id;
+    let approval = match repository.get_approval(tenant_id, &approval_id) {
+        Ok(approval)
+            if approval.kind == ApprovalKind::BreakGlass
+                && approval.state == prodex_domain::ApprovalState::Active =>
+        {
+            approval
+        }
+        Ok(_) => return break_glass_denied(),
+        Err(GovernanceRepositoryError::NotFound) => return break_glass_denied(),
+        Err(error) => return repository_error(error),
+    };
+    let Some(reason) = approval.scope.as_str().strip_prefix("audit_retention:") else {
+        return break_glass_denied();
+    };
+    let http = runtime_gateway_http_request_meta(captured, path);
+    let Some(mut action) = runtime_gateway_admin_control_plane_action_for_operation(
+        &http,
+        admin_auth,
+        ControlPlaneOperation::AuditRetentionPurge,
+    ) else {
+        return invalid_request();
+    };
+    action.principal = Principal::new(
+        action.principal.id,
+        Some(tenant_id),
+        PrincipalKind::BreakGlass,
+        Role::Admin,
+        CredentialScope::BreakGlass,
+    );
+    action.resource.kind = ResourceKind::AuditLog;
+    let authorization = BreakGlassAuthorization {
+        reason: reason.to_string(),
+        expires_at_unix_ms: approval.expires_at_unix_ms,
+    };
+    let previous_digest = match repository.latest_audit_digest(tenant_id) {
+        Ok(previous_digest) => previous_digest,
+        Err(error) => return repository_error(error),
+    };
+    let preview =
+        prodex_control_plane::decide_break_glass_action(action.clone(), authorization.clone());
+    let preview_event = match &preview {
+        ControlPlaneDecision::Authorized(plan) => &plan.audit_event,
+        ControlPlaneDecision::Denied { audit_event, .. } => audit_event,
+    };
+    let event_digest = compute_audit_chain_digest(previous_digest.as_ref(), preview_event);
+    let plan =
+        match plan_application_break_glass_with_audit_storage(ApplicationBreakGlassAuditRequest {
+            durable_store,
+            action,
+            authorization,
+            previous_digest,
+            event_digest,
+        }) {
+            Ok(plan) => plan,
+            Err(_) => return storage_unavailable(),
+        };
+    let (authorized, audit_event) = match plan.decision {
+        ControlPlaneDecision::Authorized(plan) => (true, plan.audit_event),
+        ControlPlaneDecision::Denied { audit_event, .. } => (false, audit_event),
+    };
+    if super::local_rewrite_governance_audit::persist_runtime_control_plane_audit_event(
+        shared,
+        audit_event,
+    )
+    .is_err()
+    {
+        return storage_unavailable();
+    }
+    if !authorized {
+        return break_glass_denied();
+    }
+
+    let now_unix_ms = execution.atomic_write.completed_at_unix_ms;
+    let cutoff_unix_ms =
+        now_unix_ms.saturating_sub(u64::from(retention_policy.days()).saturating_mul(86_400_000));
+    let audit = match control_plane_audit_command(
+        repository,
+        &execution.authorized_action,
+        "governance.audit_retention.purge",
+        "audit_log",
+        Some(approval_id.as_str()),
+    ) {
+        Ok(audit) => audit,
+        Err(error) => return repository_error(error),
+    };
+    match repository.purge_audit_events(tenant_id, &event_ids, now_unix_ms, cutoff_unix_ms, audit) {
+        Ok(purged) => runtime_gateway_admin_json_response(
+            200,
+            serde_json::json!({
+                "object": "governance.audit_retention_purge",
+                "requested": event_ids.len(),
+                "purged": purged.len(),
+                "protected_or_ineligible": event_ids.len().saturating_sub(purged.len()),
+                "audit_event_ids": purged,
+                "retention_days": retention_policy.days(),
+                "approval_id": approval_id.as_str(),
+            }),
+        ),
+        Err(error) => repository_error(error),
+    }
+}
+
+fn audit_legal_hold_json(hold: AuditRetentionHold) -> serde_json::Value {
+    serde_json::json!({
+        "object": "governance.audit_legal_hold",
+        "audit_event_id": hold.event_id,
+        "reason_code": hold.reason_code.as_str(),
+        "expires_at_unix_ms": hold.expires_at.map(AuditTimestamp::unix_ms),
+    })
+}
+
+fn break_glass_denied() -> tiny_http::ResponseBox {
+    build_runtime_proxy_json_error_response(
+        403,
+        "break_glass_not_authorized",
+        "active break-glass approval is required for audit retention purge",
+    )
 }
 
 fn execution_approval_json(approval: ApprovalRecord) -> serde_json::Value {
@@ -1445,6 +2252,34 @@ fn audit_command(
     event.action = AuditAction::new(audit_action);
     event.resource = AuditResource::new(
         format!("governance_{}_revision", resource.label()),
+        resource_id.map(str::to_string),
+        Some(event.tenant_id),
+    );
+    let previous_digest = repository.latest_audit_digest(event.tenant_id)?;
+    let event_digest = compute_audit_chain_digest(previous_digest.as_ref(), &event);
+    Ok(AuditOutboxWriteCommand {
+        outbox_event_id: AuditEventId::new(),
+        audit: AppendOnlyAuditCommand {
+            storage_key: TenantStorageKey::tenant(event.tenant_id),
+            event,
+            previous_digest,
+            event_digest,
+        },
+    })
+}
+
+fn control_plane_audit_command(
+    repository: &RuntimeGovernanceRepository<'_>,
+    action: &ControlPlaneActionPlan,
+    audit_action: &str,
+    resource_kind: &str,
+    resource_id: Option<&str>,
+) -> Result<AuditOutboxWriteCommand, GovernanceRepositoryError> {
+    let mut event = action.audit_event.clone();
+    event.action =
+        AuditAction::try_new(audit_action).map_err(|_| GovernanceRepositoryError::InvalidInput)?;
+    event.resource = AuditResource::new(
+        resource_kind,
         resource_id.map(str::to_string),
         Some(event.tenant_id),
     );

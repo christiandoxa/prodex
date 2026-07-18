@@ -110,6 +110,18 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("gpt-5.4-mini".to_string())
     );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_DEFAULT_FABLE_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5.4".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_SMALL_FAST_MODEL")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("gpt-5.4-mini".to_string())
+    );
     assert!(
         env.iter()
             .all(|(key, _)| *key != "ANTHROPIC_CUSTOM_MODEL_OPTION")
@@ -119,17 +131,25 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
         runtime_proxy_claude_removed_env(),
         [
             "ANTHROPIC_API_KEY",
+            "ANTHROPIC_CONFIG_DIR",
+            "ANTHROPIC_CUSTOM_HEADERS",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
             "CLAUDE_CODE_USE_BEDROCK",
             "CLAUDE_CODE_USE_VERTEX",
             "CLAUDE_CODE_USE_FOUNDRY",
             "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+            "CLAUDE_CODE_USE_GATEWAY",
+            "CLAUDE_CODE_USE_MANTLE",
             "ANTHROPIC_BEDROCK_BASE_URL",
+            "ANTHROPIC_BEDROCK_MANTLE_API_KEY",
+            "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+            "ANTHROPIC_BEDROCK_SERVICE_TIER",
             "ANTHROPIC_VERTEX_BASE_URL",
             "ANTHROPIC_FOUNDRY_BASE_URL",
             "ANTHROPIC_AWS_BASE_URL",
             "ANTHROPIC_FOUNDRY_RESOURCE",
+            "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
             "ANTHROPIC_VERTEX_PROJECT_ID",
             "ANTHROPIC_AWS_WORKSPACE_ID",
             "CLOUD_ML_REGION",
@@ -139,6 +159,9 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             "CLAUDE_CODE_SKIP_VERTEX_AUTH",
             "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
             "CLAUDE_CODE_SKIP_ANTHROPIC_AWS_AUTH",
+            "CLAUDE_CODE_SKIP_MANTLE_AUTH",
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
             "ANTHROPIC_DEFAULT_OPUS_MODEL",
             "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
             "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
@@ -151,9 +174,14 @@ fn runtime_proxy_claude_launch_env_uses_foundry_compat_with_profile_config_dir()
             "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
             "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
             "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
             "ANTHROPIC_CUSTOM_MODEL_OPTION",
             "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
-            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES"
         ]
     );
 }
@@ -205,6 +233,12 @@ fn runtime_proxy_claude_launch_env_keeps_custom_picker_entry_for_unknown_overrid
             .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION")
             .map(|(_, value)| value.to_string_lossy().into_owned()),
         Some("my-gateway-model".to_string())
+    );
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| *key == "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES")
+            .map(|(_, value)| value.to_string_lossy().into_owned()),
+        Some("effort,thinking,adaptive_thinking,interleaved_thinking".to_string())
     );
 }
 
@@ -274,6 +308,14 @@ fn runtime_proxy_claude_target_model_maps_builtin_aliases_to_pinned_gpt_models()
     assert_eq!(
         runtime_proxy_claude_target_model("haiku"),
         "gpt-5.4-mini".to_string()
+    );
+    assert_eq!(
+        runtime_proxy_claude_target_model("fable"),
+        "gpt-5.4".to_string()
+    );
+    assert_eq!(
+        runtime_proxy_claude_target_model("claude-fable-5"),
+        "gpt-5.4".to_string()
     );
     assert_eq!(
         runtime_proxy_claude_target_model("claude-opus-4-5"),

@@ -240,7 +240,7 @@ export function validateProductionBoundary(sources) {
     serve,
     [
       "start_policy_gateway_application_for_mode(policy_mode)",
-      "serve_with_handler(",
+      "serve_with_handler_reloadable(",
       "application.handle(request).await",
       "application.shutdown_and_drain(drain_timeout)",
     ],
@@ -1492,7 +1492,7 @@ function runSelfTest() {
     }`,
     serve: `fn run_enterprise_serve() {
       start_policy_gateway_application_for_mode(policy_mode);
-      serve_with_handler(config, move |request| async move {
+      serve_with_handler_reloadable(config, reload, move |request| async move {
         application.handle(request).await
       });
       application.shutdown_and_drain(drain_timeout);

@@ -582,12 +582,13 @@ INSERT OR IGNORE INTO prodex_reservations (
     reservation_id,
     call_id,
     virtual_key_id,
+    storage_scope,
     idempotency_key,
     reserved_tokens,
     reserved_cost_micros,
     created_at_unix_ms,
     expires_at_unix_ms
-) VALUES (?1, ?9, ?10, ?3, ?11, ?4, ?5, ?6, ?12);
+) VALUES (?1, ?9, ?10, ?3, ?2, ?11, ?4, ?5, ?6, ?12);
 
 INSERT OR IGNORE INTO prodex_usage_ledger (
     tenant_id,
@@ -687,7 +688,8 @@ WHERE tenant_id = ?1
   AND call_id = ?3
   AND committed_at_unix_ms IS NULL
   AND released_at_unix_ms IS NULL
-  AND expires_at_unix_ms <= ?4;
+  AND expires_at_unix_ms <= ?4
+  AND changes() = 1;
 
 INSERT OR IGNORE INTO prodex_usage_ledger (
     tenant_id,
@@ -698,7 +700,8 @@ INSERT OR IGNORE INTO prodex_usage_ledger (
     tokens,
     cost_micros,
     occurred_at_unix_ms
-) VALUES (?1, ?8, ?2, ?3, 'released', ?5, ?6, ?4);
+) SELECT ?1, ?8, ?2, ?3, 'released', ?5, ?6, ?4
+WHERE changes() = 1;
 "#,
 };
 

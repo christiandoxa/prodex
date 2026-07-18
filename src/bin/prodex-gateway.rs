@@ -20,7 +20,7 @@ USAGE:
     prodex-gateway migrate --backend sqlite --path <PATH>
     prodex-gateway migrate --backend postgres --url-ref <NAME> --secret-provider <PROVIDER> --secret-root <PATH> [--tls-mode verify-full|disable] [--tls-ca <PATH>]
     prodex-gateway migrate --backend postgres --url-env <ENV> [--tls-mode verify-full|disable] [--tls-ca <PATH>]
-    prodex-gateway serve [--listen <ADDR>]
+    prodex-gateway serve [--listen <ADDR>] [--config-publication-transport <PATH> --config-publication-replica <ID>]
     prodex-gateway consume-config-publication --transport <PATH> --replica <ID> --root <PATH>
 
 STATUS:

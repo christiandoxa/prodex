@@ -220,4 +220,4 @@ The conformance fixture set acts as a canary. When Codex adds a new parameter to
 2. If a translator silently drops it, the conformance case should fail or report `degraded`
 3. The capability matrix regenerates, making drift visible in `docs/provider-capabilities.md`
 
-This is intentionally out of scope for v1 implementation — the broker skeleton stays as-is — but the design direction is locked in so future changes slot cleanly into the conformance layer.
+The opt-in live broker now launches `codex app-server` and applies this validation bidirectionally with one shared lifecycle state before forwarding each frame. Default `prodex app-server` remains direct passthrough, and the live broker still does not invent provider routing or weaken continuation affinity.

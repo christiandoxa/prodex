@@ -552,13 +552,14 @@ WITH existing AS (
         reservation_id,
         call_id,
         virtual_key_id,
+        storage_scope,
         idempotency_key,
         reserved_tokens,
         reserved_cost_micros,
         created_at_unix_ms,
         expires_at_unix_ms
     )
-    SELECT $1, $11, $12, $4, $2, $5, $6, $7, $13
+    SELECT $1, $11, $12, $4, $3, $2, $5, $6, $7, $13
     WHERE EXISTS (SELECT 1 FROM upsert_counter)
     ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
     RETURNING tenant_id

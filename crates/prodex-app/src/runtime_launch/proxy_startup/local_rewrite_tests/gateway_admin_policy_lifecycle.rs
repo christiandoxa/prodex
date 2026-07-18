@@ -1010,7 +1010,7 @@ fn gateway_governance_artifacts_use_generic_maker_checker_lifecycle() {
         })
         .collect::<Vec<_>>();
     let provider_artifact = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "revision": 7,
         "pricing_revision": 4,
         "descriptors": [{
@@ -1029,6 +1029,12 @@ fn gateway_governance_artifacts_use_generic_maker_checker_lifecycle() {
             "maximum_classification": "confidential",
             "retention_seconds": 0,
             "training_use": false,
+            "model_costs": {
+                "*": {
+                    "input_cost_per_million_microusd": 1_000_000,
+                    "output_cost_per_million_microusd": 2_000_000
+                }
+            },
             "cost": 2_000,
             "latency": 3_000,
             "risk": 1_000,

@@ -77,6 +77,65 @@ pub(super) fn runtime_gateway_oidc_send(
     }
 }
 
+pub(in super::super) fn runtime_gateway_oidc_post_form(
+    endpoint: &RuntimeGatewayOidcEndpoint,
+    form: &[(String, String)],
+    timing: &RuntimeOidcTimingConfig,
+) -> Result<reqwest::blocking::Response> {
+    match endpoint {
+        RuntimeGatewayOidcEndpoint::Validated(endpoint) => {
+            let timeout = timing.prefetch_timeout;
+            let resolved_addresses = runtime_gateway_oidc_resolve(endpoint, timeout)?;
+            let client = reqwest::blocking::Client::builder()
+                .https_only(true)
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(timeout)
+                .timeout(timeout)
+                .no_proxy()
+                .resolve_to_addrs(endpoint.host(), &resolved_addresses)
+                .build()
+                .context("failed to build gateway OIDC token client")?;
+            let response = client
+                .post(endpoint.as_str())
+                .form(form)
+                .send()
+                .context("gateway OIDC token exchange failed")?;
+            let remote = response
+                .remote_addr()
+                .ok_or_else(|| anyhow::anyhow!("gateway OIDC peer address is unavailable"))?;
+            if !runtime_gateway_oidc_peer_is_allowed(remote, &resolved_addresses)
+                || response.url().as_str() != endpoint.as_str()
+                || response.status().is_redirection()
+            {
+                bail!("gateway OIDC token endpoint transport is not permitted");
+            }
+            response
+                .error_for_status()
+                .context("gateway OIDC token endpoint returned an error")
+        }
+        #[cfg(test)]
+        RuntimeGatewayOidcEndpoint::InsecureLoopback(endpoint) => {
+            let response = reqwest::blocking::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(timing.prefetch_timeout)
+                .timeout(timing.prefetch_timeout)
+                .no_proxy()
+                .build()
+                .context("failed to build test OIDC token client")?
+                .post(endpoint)
+                .form(form)
+                .send()
+                .context("test OIDC token exchange failed")?;
+            if response.status().is_redirection() || response.url().as_str() != endpoint {
+                bail!("test OIDC token endpoint redirects are forbidden");
+            }
+            response
+                .error_for_status()
+                .context("test OIDC token endpoint returned an error")
+        }
+    }
+}
+
 pub(super) fn runtime_gateway_oidc_resolve(
     endpoint: &ValidatedOidcEndpoint,
     timeout: Duration,

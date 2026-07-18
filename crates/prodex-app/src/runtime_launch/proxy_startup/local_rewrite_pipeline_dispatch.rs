@@ -147,7 +147,7 @@ fn runtime_local_rewrite_log_builtin_response(
 }
 
 pub(super) fn runtime_local_rewrite_dispatch_provider(
-    request: RuntimeLocalRewriteDispatchReadyRequest<'_>,
+    mut request: RuntimeLocalRewriteDispatchReadyRequest<'_>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<()> {
     runtime_local_rewrite_log_governance_decision(&request, shared);
@@ -216,6 +216,9 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
                 last_error = Some(anyhow::anyhow!("provider precommit fallback"));
             }
             Ok(response) => {
+                if let Some(guard) = request.state.guards.route_load.as_mut() {
+                    guard.mark_status(response.status());
+                }
                 selected_response = Some((response, selected_shared));
                 break;
             }
@@ -236,6 +239,9 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         }
     }
     let Some((response, selected_shared)) = selected_response else {
+        if let Some(guard) = request.state.guards.route_load.as_mut() {
+            guard.mark_error();
+        }
         runtime_proxy_log(
             &shared.runtime_shared,
             runtime_proxy_structured_log_message(

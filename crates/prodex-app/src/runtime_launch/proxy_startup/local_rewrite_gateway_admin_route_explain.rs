@@ -125,6 +125,15 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
     } else {
         (BTreeMap::new(), false)
     };
+    let adaptive_quality = if input.include_current_state {
+        shared
+            .gateway_adaptive_quality
+            .lock()
+            .map(|quality| quality.snapshot())
+            .unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
     let plan = match runtime_proxy_crate::runtime_gateway_plan_route_with_constraints(
         shared.provider.bridge_kind().provider_id(),
         input.endpoint,
@@ -140,6 +149,8 @@ pub(super) fn runtime_gateway_admin_route_explain_response(
                 .configured_reasoning_reserve_tokens(),
             hard_affinity_model: input.owner_model.as_deref(),
             hard_affinity_required: input.hard_affinity_required,
+            adaptive_config: shared.gateway_adaptive_routing,
+            adaptive_quality: &adaptive_quality,
         },
     ) {
         Ok(plan) => plan,
@@ -265,6 +276,7 @@ fn runtime_gateway_route_explain_response_body(
         "health_quota_included": false,
         "warnings": warnings,
         "final_no_route_reason": plan.no_route_reason.map(|reason| reason.as_str()),
+        "adaptive_decision": plan.adaptive_decision.as_ref(),
         "truncated": truncated,
         "omitted_candidates": plan.omitted_candidates,
         "trace": plan.trace.clone(),
@@ -554,6 +566,7 @@ mod tests {
             truncated: false,
             selection_pool_truncated: false,
             omitted_candidates: 0,
+            adaptive_decision: None,
         }
     }
 

@@ -100,6 +100,15 @@ const ALLOWLIST = Object.freeze([
       "single bounded projected-secret refresh worker created during gateway launch, outside request and stream paths",
   },
   {
+    name: "gateway-reservation-recovery-worker",
+    file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_reservation_recovery.rs",
+    id: "blocking-thread-spawn",
+    pattern: /\bthread::spawn\s*\(/,
+    maxHits: 2,
+    reason:
+      "single bounded backend-specific reservation recovery worker created during gateway launch, outside request and stream paths",
+  },
+  {
     name: "local-rewrite-gateway-openoptions-import",
     file: "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
     id: "blocking-file-open",

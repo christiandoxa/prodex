@@ -493,7 +493,7 @@ fn bank_governance_deployment_matrix_fails_closed() {
 }
 
 #[test]
-fn identity_edge_config_rejects_untrusted_proxy_and_unsupported_browser_flow() {
+fn identity_edge_config_rejects_incomplete_or_untrusted_configuration() {
     for (input, expected) in [
         (
             "version = 1\n[gateway]\ntrusted_proxies = [\"proxy.example.com\"]\n",
@@ -501,7 +501,7 @@ fn identity_edge_config_rejects_untrusted_proxy_and_unsupported_browser_flow() {
         ),
         (
             "version = 1\n[gateway.workload_identity]\nenabled = true\nissuer = \"https://workload.example.com\"\naudience = \"prodex-data-plane\"\nrequired_scope = \"data_plane\"\nmtls_required = true\nmtls_ca_ref = { provider = \"file\", name = \"WORKLOAD_CA\" }\n",
-            "unsupported until the runtime verifies workload tokens and mTLS peer identity",
+            "tls_identity_ref",
         ),
         (
             "version = 1\n[gateway]\nlisten_addr = \"10.0.0.10:4317\"\n",
@@ -513,13 +513,53 @@ fn identity_edge_config_rejects_untrusted_proxy_and_unsupported_browser_flow() {
         ),
         (
             "version = 1\n[gateway.sso]\nbrowser_flow = true\npkce_method = \"S256\"\n",
-            "unsupported",
+            "requires exact OIDC",
         ),
     ] {
         let error = validate_runtime_policy_file(&parse_policy(input), Path::new("policy.toml"))
             .expect_err("unsafe identity edge configuration must fail closed");
         assert!(error.to_string().contains(expected), "{error:#}");
     }
+}
+
+#[test]
+fn identity_edge_accepts_workload_mtls_and_browser_pkce() {
+    let workload = parse_policy(
+        r#"
+version = 1
+
+[gateway.workload_identity]
+enabled = true
+issuer = "https://workload.example.com"
+audience = "prodex-data-plane"
+required_scope = "data_plane"
+mtls_required = true
+mtls_ca_ref = { provider = "file", name = "WORKLOAD_CA" }
+tls_identity_ref = { provider = "file", name = "GATEWAY_TLS" }
+"#,
+    );
+    validate_runtime_policy_file(&workload, Path::new("policy.toml"))
+        .expect("verified workload JWT plus mTLS binding should be supported");
+
+    let browser = parse_policy(
+        r#"
+version = 1
+
+[gateway.sso]
+remote_human = true
+required_scope = "control_plane"
+oidc_issuer = "https://identity.example.com"
+oidc_audience = "prodex-console"
+browser_flow = true
+pkce_method = "S256"
+oidc_authorization_url = "https://identity.example.com/oauth2/authorize"
+oidc_token_url = "https://identity.example.com/oauth2/token"
+oidc_client_id = "prodex-console"
+oidc_redirect_uri = "https://gateway.example.com/v1/prodex/gateway/auth/callback"
+"#,
+    );
+    validate_runtime_policy_file(&browser, Path::new("policy.toml"))
+        .expect("authorization-code browser OIDC with PKCE S256 should be supported");
 }
 
 #[test]

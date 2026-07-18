@@ -45,6 +45,8 @@ fn gateway_oidc_missing_scope_claims_preserves_scim_role_and_tenant_fallback() {
                 key_prefixes_claim: "prodex_key_prefixes".to_string(),
                 authentication_strength: None,
             }),
+            browser: None,
+            workload_identity: None,
         },
         gateway_state_store: RuntimeGatewayStateStore::file(&paths),
         gateway_virtual_keys: Vec::new(),

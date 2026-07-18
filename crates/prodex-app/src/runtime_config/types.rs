@@ -63,6 +63,7 @@ pub(crate) struct RuntimeGeminiConfig {
 pub(crate) struct RuntimeGatewayConfig {
     pub(crate) replica_count: u16,
     pub(crate) require_multi_replica_accounting_checks: bool,
+    pub(crate) adaptive_routing: runtime_proxy_crate::RuntimeGatewayAdaptiveRoutingConfig,
     pub(crate) launch: RuntimeGatewayLaunchEnvironment,
 }
 
@@ -237,6 +238,15 @@ pub(crate) struct RuntimeWebsocketEnvironment {
 }
 
 impl RuntimeWebsocketEnvironment {
+    #[cfg(test)]
+    pub(crate) fn direct() -> Self {
+        Self {
+            https_proxy: None,
+            http_proxy: None,
+            no_proxy: Vec::new(),
+        }
+    }
+
     pub(crate) fn proxy_url(&self, scheme: &str) -> Option<reqwest::Url> {
         if matches!(scheme, "wss" | "https") {
             self.https_proxy.clone()

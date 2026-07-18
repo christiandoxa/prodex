@@ -5,10 +5,10 @@ Generated from `prodex_provider_core::provider_contract_catalog()`, `crates/prod
 | Provider | Models | Transform | Streaming | Fallback | Fixtures req/resp/stream | responses | responses/compact | chat-completions | messages | models | embeddings | images | audio | batches | rerank | a2a |
 |---|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | openai | 5 | passthrough | true | false | 10/10/1 | native | unsupported | native | native | native | native | native | native | native | native | native |
-| anthropic | 9 | translated | true | true | 12/5/4 | translated | unsupported | passthrough | passthrough | untested | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| copilot | 25 | translated | true | true | 10/6/2 | translated | passthrough | passthrough | passthrough | untested | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| deepseek | 4 | translated | true | true | 16/4/3 | translated | unsupported | passthrough | passthrough | untested | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| gemini | 19 | translated | true | true | 18/14/3 | translated | untested | passthrough | passthrough | untested | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
+| anthropic | 9 | translated | true | true | 12/5/4 | translated | unsupported | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| copilot | 25 | translated | true | true | 10/6/2 | translated | passthrough | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| deepseek | 4 | translated | true | true | 16/4/3 | translated | unsupported | passthrough | passthrough | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| gemini | 19 | translated | true | true | 18/14/3 | translated | emulated | passthrough | passthrough | emulated | passthrough | unsupported | unsupported | unsupported | unsupported | unsupported |
 | kiro | 1 | translated | true | false | 9/6/1 | translated | emulated | translated | translated | emulated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | local | 1 | passthrough | true | false | 10/10/1 | passthrough | unsupported | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough | passthrough |
 
