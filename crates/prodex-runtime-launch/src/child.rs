@@ -91,26 +91,6 @@ impl ChildProcessPlan {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ChildProcessPlan;
-    use std::ffi::OsString;
-    use std::path::PathBuf;
-
-    #[test]
-    fn debug_redacts_arguments_environment_values_and_home() {
-        let plan = ChildProcessPlan::new("client".into(), PathBuf::from("/private/home"))
-            .with_args(vec![OsString::from("secret-argument")])
-            .with_extra_env([(OsString::from("HTTPS_PROXY"), OsString::from("secret-url"))]);
-        let debug = format!("{plan:?}");
-
-        assert!(debug.contains("HTTPS_PROXY"));
-        assert!(!debug.contains("secret-argument"));
-        assert!(!debug.contains("secret-url"));
-        assert!(!debug.contains("/private/home"));
-    }
-}
-
 pub fn codex_child_plan(
     binary: OsString,
     codex_home: PathBuf,
@@ -308,4 +288,24 @@ pub fn remove_upstream_proxy_env(plan: &mut ChildProcessPlan) {
     let mut removed = BTreeSet::<OsString>::from_iter(plan.removed_env.iter().cloned());
     removed.extend(upstream_proxy_removed_env());
     plan.removed_env = removed.into_iter().collect();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChildProcessPlan;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn debug_redacts_arguments_environment_values_and_home() {
+        let plan = ChildProcessPlan::new("client".into(), PathBuf::from("/private/home"))
+            .with_args(vec![OsString::from("secret-argument")])
+            .with_extra_env([(OsString::from("HTTPS_PROXY"), OsString::from("secret-url"))]);
+        let debug = format!("{plan:?}");
+
+        assert!(debug.contains("HTTPS_PROXY"));
+        assert!(!debug.contains("secret-argument"));
+        assert!(!debug.contains("secret-url"));
+        assert!(!debug.contains("/private/home"));
+    }
 }

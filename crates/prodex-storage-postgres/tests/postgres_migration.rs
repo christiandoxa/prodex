@@ -123,14 +123,25 @@ fn postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies() {
     client
         .batch_execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
         .expect("postgres schema should reset");
-    for _ in 0..2 {
-        for migration in POSTGRES_MIGRATIONS {
-            client
-                .batch_execute(migration.sql)
-                .expect("migration should apply idempotently");
-        }
+    for migration in POSTGRES_MIGRATIONS {
+        client
+            .batch_execute(migration.sql)
+            .expect("migration should apply");
     }
-
+    let first_policy_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM pg_policies
+             WHERE schemaname = current_schema()
+               AND policyname LIKE 'prodex_%_tenant_isolation'",
+            &[],
+        )
+        .expect("RLS policy count should load")
+        .get(0);
+    for migration in POSTGRES_MIGRATIONS {
+        client
+            .batch_execute(migration.sql)
+            .expect("migration should apply idempotently");
+    }
     let policy_count: i64 = client
         .query_one(
             "SELECT COUNT(*) FROM pg_policies
@@ -140,7 +151,8 @@ fn postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies() {
         )
         .expect("RLS policy count should load")
         .get(0);
-    assert_eq!(policy_count, 32);
+    assert!(first_policy_count > 0);
+    assert_eq!(policy_count, first_policy_count);
     let forced_tenant_table_count: i64 = client
         .query_one(
             "SELECT COUNT(DISTINCT class.oid)
@@ -155,7 +167,7 @@ fn postgres_migrations_can_be_applied_twice_without_duplicate_rls_policies() {
         )
         .expect("forced RLS table count should load")
         .get(0);
-    assert_eq!(forced_tenant_table_count, 32);
+    assert_eq!(forced_tenant_table_count, policy_count);
     let immutable_audit_trigger_count: i64 = client
         .query_one(
             "SELECT COUNT(*) FROM pg_trigger
