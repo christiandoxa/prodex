@@ -128,6 +128,31 @@ fn prepare_prodex_overlay_home_drops_inherited_codex_apps_cache() {
     let _ = fs::remove_dir_all(base);
 }
 
+#[test]
+fn prepare_runtime_overlay_home_does_not_install_caveman_assets() {
+    let managed = temp_dir("runtime-overlay-managed");
+    let base = temp_dir("runtime-overlay-base");
+    fs::create_dir_all(&base).expect("base home");
+    fs::write(base.join("config.toml"), "model = 'gpt-5'\n").expect("base config");
+
+    let overlay =
+        prepare_runtime_overlay_home(&managed, &base).expect("runtime overlay should be prepared");
+
+    assert_eq!(
+        fs::read_to_string(overlay.join("config.toml")).expect("overlay config"),
+        "model = 'gpt-5'\n"
+    );
+    assert!(!overlay.join(".tmp/marketplaces/prodex-caveman").exists());
+    assert!(
+        !overlay
+            .join("plugins/cache/prodex-caveman/caveman")
+            .exists()
+    );
+
+    let _ = fs::remove_dir_all(managed);
+    let _ = fs::remove_dir_all(base);
+}
+
 #[cfg(unix)]
 #[test]
 fn prepare_prodex_overlay_home_rejects_symlink_managed_root() {

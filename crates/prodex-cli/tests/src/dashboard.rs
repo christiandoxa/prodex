@@ -46,38 +46,29 @@ fn dashboard_parse_defaults() {
 }
 
 #[test]
-fn gui_shortcuts_open_dashboard_with_port_fallback() {
-    for argv in [
-        vec!["prodex", "gui"],
-        vec!["prodex", "s", "gui"],
-        vec!["prodex", "super", "gui"],
-    ] {
-        let command = parse_cli_command_from(argv).expect("GUI shortcut should parse");
-        let Commands::Dashboard(args) = command else {
-            panic!("expected dashboard command");
-        };
-        assert_eq!(args.host, "127.0.0.1");
-        assert_eq!(args.port, 8765);
-        assert!(args.open);
-        assert!(args.fallback_port);
-    }
+fn gui_parses_as_desktop_command() {
+    let command =
+        parse_cli_command_from(["prodex", "gui", "--profile", "main", "--skip-quota-check"])
+            .expect("GUI command should parse");
+    let Commands::Gui(args) = command else {
+        panic!("expected GUI command");
+    };
 
+    assert_eq!(args.profile.as_deref(), Some("main"));
+    assert!(args.skip_quota_check);
+    assert!(!args.no_auto_rotate);
     assert!(!should_default_cli_invocation_to_run(&os_args(&[
         "prodex", "gui",
     ])));
 }
 
 #[test]
-fn gui_shortcut_preserves_dashboard_options() {
-    let command =
-        parse_cli_command_from(["prodex", "s", "gui", "--host", "localhost", "--port", "0"])
-            .expect("GUI options should parse");
-    let Commands::Dashboard(args) = command else {
-        panic!("expected dashboard command");
-    };
-
-    assert_eq!(args.host, "localhost");
-    assert_eq!(args.port, 0);
-    assert!(args.open);
-    assert!(args.fallback_port);
+fn super_gui_stays_on_the_super_runtime_path() {
+    for argv in [vec!["prodex", "s", "gui"], vec!["prodex", "super", "gui"]] {
+        let command = parse_cli_command_from(argv).expect("Super GUI should parse");
+        let Commands::Super(args) = command else {
+            panic!("expected Super command");
+        };
+        assert_eq!(args.codex_args, [OsString::from("gui")]);
+    }
 }

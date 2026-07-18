@@ -19,20 +19,35 @@ pub fn prepare_prodex_overlay_home(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true)
 }
 
 pub fn prepare_prodex_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, true)
+}
+
+pub fn prepare_runtime_overlay_home(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+) -> Result<PathBuf> {
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, false)
+}
+
+pub fn prepare_runtime_overlay_home_from_prepared_base(
+    managed_profiles_root: &Path,
+    base_codex_home: &Path,
+) -> Result<PathBuf> {
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, false)
 }
 
 fn prepare_prodex_overlay_home_internal(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
     maintain_session_attachments: bool,
+    configure_prodex: bool,
 ) -> Result<PathBuf> {
     let overlay_home = create_temporary_prodex_overlay_home(managed_profiles_root)?;
     if let Err(err) = prodex_shared_codex_fs::copy_codex_home(base_codex_home, &overlay_home)
@@ -48,7 +63,13 @@ fn prepare_prodex_overlay_home_internal(
         .and_then(|_| {
             localize_prodex_overlay_rollout_state_symlinks_from_base(base_codex_home, &overlay_home)
         })
-        .and_then(|_| configure_prodex_overlay_home(&overlay_home))
+        .and_then(|_| {
+            if configure_prodex {
+                configure_prodex_overlay_home(&overlay_home)
+            } else {
+                localize_text_file(&overlay_home.join("config.toml"))
+            }
+        })
     {
         let _ = fs::remove_dir_all(&overlay_home);
         return Err(err);

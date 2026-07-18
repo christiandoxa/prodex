@@ -121,7 +121,7 @@ impl DashboardServer {
                 "managedProfilesRoot": self.paths.managed_profiles_root.display().to_string(),
             },
             "commands": {
-                "open": "prodex gui",
+                "open": "prodex dashboard",
                 "login": "prodex login --profile <name>",
                 "addManagedProfile": "prodex profile add <name> --activate",
                 "importCurrent": "prodex profile import-current <name>",
@@ -762,7 +762,7 @@ mod tests {
         );
 
         let commands = &value["commands"];
-        assert_eq!(commands["open"], "prodex gui");
+        assert_eq!(commands["open"], "prodex dashboard");
         assert!(commands["quota"].as_str().is_some());
     }
 
