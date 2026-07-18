@@ -90,3 +90,44 @@ fn desktop_plan_persists_proxy_config_and_shares_chat_state() {
     prodex_runtime_launch::cleanup_runtime_launch_plan(&plan);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn super_overlay_shares_profile_chat_state() {
+    let root = env::temp_dir().join(format!(
+        "prodex-super-chat-state-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let base_home = root.join("shared-codex");
+    create_codex_home_if_missing(&base_home).expect("base home should exist");
+    std::fs::write(base_home.join("state_5.sqlite"), "shared chat index")
+        .expect("base chat index should write");
+    let paths = AppPaths {
+        root: root.clone(),
+        state_file: root.join("state.json"),
+        managed_profiles_root: root.join("profiles"),
+        shared_codex_root: base_home.clone(),
+        legacy_shared_codex_root: root.join("legacy-shared"),
+    };
+
+    let overlay =
+        prepare_prodex_overlay_home(&paths, &base_home).expect("Super overlay should prepare");
+    let overlay_state = overlay.join("state_5.sqlite");
+    assert!(
+        std::fs::symlink_metadata(&overlay_state)
+            .expect("Super chat index metadata")
+            .file_type()
+            .is_symlink()
+    );
+    std::fs::write(&overlay_state, "Super update").expect("Super chat index should write");
+    assert_eq!(
+        std::fs::read_to_string(base_home.join("state_5.sqlite"))
+            .expect("base chat index should persist"),
+        "Super update"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
