@@ -190,7 +190,7 @@ fn dashboard_can_fall_back_when_the_requested_gui_port_is_busy() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn gui_shortcut_opens_xdg_browser_and_keeps_serving() {
+fn dashboard_open_flag_invokes_xdg_browser_and_keeps_serving() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = temp_root("dashboard-linux-gui");
@@ -217,7 +217,14 @@ fn gui_shortcut_opens_xdg_browser_and_keeps_serving() {
         std::env::var("PATH").unwrap_or_default()
     );
     let child = Command::new(env!("CARGO_BIN_EXE_prodex"))
-        .args(["gui", "--host", "127.0.0.1", "--port", &port.to_string()])
+        .args([
+            "dashboard",
+            "--open",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+        ])
         .env("PATH", path)
         .env("PRODEX_HOME", &root)
         .env("PRODEX_RUNTIME_LOG_DIR", &runtime_logs)
@@ -226,7 +233,7 @@ fn gui_shortcut_opens_xdg_browser_and_keeps_serving() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("GUI shortcut should spawn");
+        .expect("dashboard should spawn");
     let server = DashboardChild { child };
 
     let health = wait_for_json(port, "/healthz");
@@ -241,7 +248,7 @@ fn gui_shortcut_opens_xdg_browser_and_keeps_serving() {
         thread::sleep(Duration::from_millis(50));
     }
 
-    panic!("GUI shortcut did not invoke xdg-open");
+    panic!("dashboard did not invoke xdg-open");
 }
 
 fn spawn_dashboard(
