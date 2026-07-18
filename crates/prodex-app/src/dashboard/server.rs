@@ -3,15 +3,19 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::io::Read;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
 use terminal_ui::print_panel;
-use tiny_http::{Header, Request, Response, Server, StatusCode};
+use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use super::DashboardServer;
 use crate::{AppPaths, DashboardArgs};
 
 const DASHBOARD_MAX_JSON_BODY_BYTES: usize = 64 * 1024;
+const DASHBOARD_REQUEST_QUEUE_CAPACITY: usize = 32;
+const DASHBOARD_WORKER_COUNT: usize = 4;
 
 #[derive(Debug)]
 struct DashboardJsonBodyTooLarge {
@@ -31,6 +35,11 @@ impl std::fmt::Display for DashboardJsonBodyTooLarge {
 impl std::error::Error for DashboardJsonBodyTooLarge {}
 
 pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()> {
+    if !is_local_dashboard_host(args.host.trim()) {
+        anyhow::bail!(
+            "dashboard only accepts loopback --host values; use an SSH tunnel for remote access"
+        );
+    }
     let bind = format!("{}:{}", args.host.trim(), args.port);
     let (server, fallback_warning) = match Server::http(&bind) {
         Ok(server) => (server, None),
@@ -52,29 +61,57 @@ pub(crate) fn serve_dashboard(paths: AppPaths, args: DashboardArgs) -> Result<()
         Err(err) => return Err(anyhow!("failed to bind {bind}: {err}")),
     };
     let url = dashboard_url(server.server_addr());
-    let warning = if !is_local_dashboard_host(args.host.trim()) {
-        Some(
-            "dashboard has no password auth; bind localhost unless the network is trusted"
-                .to_string(),
-        )
-    } else {
-        fallback_warning
-    };
-    print_dashboard_status(&url, warning.as_deref())?;
+    print_dashboard_status(&url, fallback_warning.as_deref())?;
     if args.open
         && let Err(err) = open_dashboard_browser(&url)
     {
         eprintln!("failed to open the dashboard browser: {err:#}\nOpen {url} manually.");
     }
 
-    let dashboard = DashboardServer {
+    let dashboard = Arc::new(DashboardServer {
         paths,
         base_url: args.base_url,
-    };
+    });
+    let (request_tx, request_rx) = mpsc::sync_channel(DASHBOARD_REQUEST_QUEUE_CAPACITY);
+    let request_rx = Arc::new(Mutex::new(request_rx));
+    let mut workers = Vec::with_capacity(DASHBOARD_WORKER_COUNT);
+    for worker_index in 0..DASHBOARD_WORKER_COUNT {
+        let dashboard = Arc::clone(&dashboard);
+        let request_rx = Arc::clone(&request_rx);
+        workers.push(
+            thread::Builder::new()
+                .name(format!("prodex-dashboard-{worker_index}"))
+                .spawn(move || {
+                    loop {
+                        let request = request_rx
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .recv();
+                        let Ok(request) = request else {
+                            break;
+                        };
+                        let result = match dashboard_request_rejection(&request) {
+                            Some((status, body)) => {
+                                respond_status(request, status, "application/json", body.to_vec())
+                            }
+                            None => dashboard.handle(request),
+                        };
+                        if let Err(err) = result {
+                            eprintln!("dashboard request failed: {err:#}");
+                        }
+                    }
+                })
+                .context("failed to start dashboard worker")?,
+        );
+    }
     for request in server.incoming_requests() {
-        if let Err(err) = dashboard.handle(request) {
-            eprintln!("dashboard request failed: {err:#}");
+        if request_tx.send(request).is_err() {
+            break;
         }
+    }
+    drop(request_tx);
+    for worker in workers {
+        let _ = worker.join();
     }
     Ok(())
 }
@@ -115,7 +152,66 @@ fn dashboard_url(addr: tiny_http::ListenAddr) -> String {
 }
 
 fn is_local_dashboard_host(host: &str) -> bool {
-    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    host.eq_ignore_ascii_case("localhost")
+        || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+pub(super) fn dashboard_request_rejection(
+    request: &Request,
+) -> Option<(StatusCode, &'static [u8])> {
+    let Some(host) = dashboard_request_header(request, "host") else {
+        return Some((StatusCode(403), br#"{"error":"forbidden_host"}"#));
+    };
+    if !dashboard_authority_is_local(host) {
+        return Some((StatusCode(403), br#"{"error":"forbidden_host"}"#));
+    }
+
+    if matches!(request.method(), Method::Post | Method::Delete) {
+        let Some(origin_authority) = dashboard_request_header(request, "origin")
+            .and_then(|origin| origin.strip_prefix("http://"))
+        else {
+            return Some((StatusCode(403), br#"{"error":"forbidden_origin"}"#));
+        };
+        if !origin_authority.eq_ignore_ascii_case(host) {
+            return Some((StatusCode(403), br#"{"error":"forbidden_origin"}"#));
+        }
+    }
+
+    if request.method() == &Method::Post
+        && !dashboard_request_header(request, "content-type").is_some_and(|value| {
+            value
+                .split(';')
+                .next()
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
+        })
+    {
+        return Some((StatusCode(415), br#"{"error":"unsupported_media_type"}"#));
+    }
+    None
+}
+
+fn dashboard_request_header<'a>(request: &'a Request, name: &'static str) -> Option<&'a str> {
+    request
+        .headers()
+        .iter()
+        .find(|header| header.field.equiv(name))
+        .map(|header| header.value.as_str().trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn dashboard_authority_is_local(authority: &str) -> bool {
+    authority
+        .parse::<SocketAddr>()
+        .is_ok_and(|addr| addr.ip().is_loopback())
+        || authority.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        || authority.rsplit_once(':').is_some_and(|(host, port)| {
+            port.parse::<u16>().is_ok() && is_local_dashboard_host(host)
+        })
+        || is_local_dashboard_host(authority)
 }
 
 fn open_dashboard_browser(url: &str) -> Result<()> {

@@ -327,6 +327,50 @@ mod tests {
         let _ = fs::remove_dir_all(bin);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_desktop_resolves_the_official_codex_bundle() {
+        let root = temp_dir("macos-bundle");
+        let app = root.join("Codex.app");
+        let macos = app.join("Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(
+            app.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.openai.codex</string>
+<key>CFBundleExecutable</key><string>Codex</string>
+</dict></plist>"#,
+        )
+        .unwrap();
+        let executable = macos.join("Codex");
+        fs::write(&executable, "fixture").unwrap();
+
+        assert_eq!(macos_bundle_executable(&app), Some(executable));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_desktop_uses_the_official_msix_launcher() {
+        let command = desktop_gui_command_for_platform().unwrap();
+        let binary = PathBuf::from(command.binary);
+
+        assert!(binary.file_name().is_some_and(|name| {
+            name.to_string_lossy()
+                .eq_ignore_ascii_case("powershell.exe")
+        }));
+        assert_eq!(
+            command.args,
+            [
+                OsString::from("-NoProfile"),
+                OsString::from("-NonInteractive"),
+                OsString::from("-Command"),
+                OsString::from(WINDOWS_DESKTOP_LAUNCH_SCRIPT),
+            ]
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn desktop_config_rejects_symlink_target() {
