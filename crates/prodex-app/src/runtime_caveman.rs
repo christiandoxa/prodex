@@ -1,7 +1,7 @@
 use super::*;
 use crate::runtime_desktop::{
     DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
-    prepare_desktop_overlay_home, prepare_runtime_overlay_home,
+    prepare_desktop_overlay_home, prepare_runtime_overlay_home, repair_desktop_thread_index,
 };
 #[cfg(test)]
 pub(crate) use prodex_caveman_assets::PRODEX_CAVEMAN_FULL_ASSETS_ENV;
@@ -136,7 +136,20 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             )?;
         }
         let mut child = if let Some(desktop) = self.desktop_command.as_ref() {
-            configure_desktop_codex_home(&overlay_home, &runtime_args, self.args.full_access)?;
+            let sqlite_home = prepared
+                .managed
+                .then_some(prepared.paths.shared_codex_root.as_path());
+            configure_desktop_codex_home(
+                &overlay_home,
+                &runtime_args,
+                self.args.full_access,
+                sqlite_home,
+            )?;
+            if !self.args.dry_run
+                && let Some(sqlite_home) = sqlite_home
+            {
+                repair_desktop_thread_index(&crate::codex_bin(), &overlay_home, sqlite_home)?;
+            }
             let mut child = codex_child_plan(overlay_home.clone(), Vec::new());
             child.binary = desktop.binary.clone();
             child.args = desktop.args.clone();
