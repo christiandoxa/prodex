@@ -1,5 +1,21 @@
 [
   {
+    "id": "opencodex-inspired-gui-0.310.0",
+    "requiredSubjects": [
+      "feat(gui): add OpenCodex-inspired control center",
+      "chore(release): release 0.310.0",
+      "refactor(gui): split dashboard server transport",
+      "chore(ci): allow reviewed 0.310.0 GUI range"
+    ],
+    "caps": {
+      "maxFiles": 25,
+      "maxBehaviorFiles": 9,
+      "maxLines": 1420,
+      "maxFileLines": 300
+    },
+    "reason": "Reviewed the OpenCodex-inspired dependency-free control center, exact GUI shortcuts, Linux browser launch and free-port fallback, bounded redacted runtime-log API, CSP and attribution, serialized refresh behavior, responsive browser flows, and the size-guard-required dashboard server extraction; verified with focused CLI/dashboard/Linux regressions, desktop/mobile Playwright checks, strict Clippy, the full locked all-features suite, optimized locked build, size guard, and tracked-diff secret and identifier scans before the 0.310.0 release."
+  },
+  {
     "id": "audited-client-gateway-integration-0.309.0",
     "requiredSubjects": [
       "feat(integrations): harden clients and enterprise gateway"
