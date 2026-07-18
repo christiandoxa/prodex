@@ -4,7 +4,6 @@ use super::{
     plan_runtime_policy_cache_invalidation, reload_runtime_policy_cached_with_invalidation,
     resolve_runtime_policy_path, runtime_policy_path, runtime_policy_proxy_from_root,
 };
-use secret_store::SecretBackendKind;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -70,9 +69,6 @@ version = 1
 log_format = "json"
 log_dir = "runtime-logs"
 
-[secrets]
-backend = "file"
-
 [runtime_proxy]
 worker_count = 12
 active_request_limit = 96
@@ -86,7 +82,6 @@ profile_inflight_hard_limit = 9
     assert_eq!(loaded.version, 1);
     assert_eq!(loaded.runtime.log_format, Some(RuntimeLogFormat::Json));
     assert_eq!(loaded.runtime.log_dir, Some(root.join("runtime-logs")));
-    assert_eq!(loaded.secrets.backend, Some(SecretBackendKind::File));
     assert_eq!(loaded.runtime_proxy.worker_count, Some(12));
     assert_eq!(loaded.runtime_proxy.active_request_limit, Some(96));
     assert_eq!(loaded.runtime_proxy.profile_inflight_soft_limit, Some(5));

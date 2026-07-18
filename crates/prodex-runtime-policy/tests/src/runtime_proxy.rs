@@ -230,79 +230,9 @@ log_format = "json"
 }
 
 #[test]
-fn load_runtime_policy_from_root_parses_secret_settings() {
+fn load_runtime_policy_from_root_rejects_obsolete_secret_backend_selection() {
     clear_runtime_policy_cache();
-    let root = temp_root("secrets");
-    let path = runtime_policy_path(&root);
-    fs::write(
-        &path,
-        r#"
-version = 1
-
-[secrets]
-backend = "keyring"
-keyring_service = "prodex"
-"#,
-    )
-    .unwrap();
-
-    let loaded = load_runtime_policy_from_root(&root).unwrap().unwrap();
-    assert_eq!(loaded.secrets.backend, Some(SecretBackendKind::Keyring));
-    assert_eq!(loaded.secrets.keyring_service.as_deref(), Some("prodex"));
-
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn load_runtime_policy_from_root_rejects_padded_keyring_service() {
-    clear_runtime_policy_cache();
-    let root = temp_root("secrets-keyring-service-exact");
-    let path = runtime_policy_path(&root);
-    fs::write(
-        &path,
-        r#"
-version = 1
-
-[secrets]
-backend = "keyring"
-keyring_service = " prodex "
-"#,
-    )
-    .unwrap();
-
-    let err = load_runtime_policy_from_root(&root).unwrap_err();
-    assert!(err.to_string().contains("secrets.keyring_service"));
-
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn load_runtime_policy_from_root_rejects_padded_secret_backend_kind() {
-    clear_runtime_policy_cache();
-    let root = temp_root("secrets-backend-kind-exact");
-    let path = runtime_policy_path(&root);
-    fs::write(
-        &path,
-        r#"
-version = 1
-
-[secrets]
-backend = " keyring "
-keyring_service = "prodex"
-"#,
-    )
-    .unwrap();
-
-    let err = load_runtime_policy_from_root(&root).unwrap_err();
-    assert!(err.to_string().contains("invalid secrets.backend"));
-
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn load_runtime_policy_from_root_rejects_keyring_backend_without_service() {
-    clear_runtime_policy_cache();
-    let root = temp_root("secrets-missing-service");
+    let root = temp_root("obsolete-secret-backend");
     let path = runtime_policy_path(&root);
     fs::write(
         &path,
@@ -316,7 +246,7 @@ backend = "keyring"
     .unwrap();
 
     let err = load_runtime_policy_from_root(&root).unwrap_err();
-    assert!(err.to_string().contains("secrets.keyring_service"));
+    assert!(err.to_string().contains("failed to parse"));
 
     let _ = fs::remove_dir_all(root);
 }

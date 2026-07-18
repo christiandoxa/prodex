@@ -135,7 +135,7 @@ impl Default for RuntimeDeepSeekToolCall {
 }
 
 impl RuntimeDeepSeekSseState {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn new(
         request_id: u64,
         conversation_messages: Vec<serde_json::Value>,

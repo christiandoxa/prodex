@@ -1,7 +1,6 @@
 use crate::{
     FileSecretBackend, KeyringSecretBackend, SecretBackend, SecretBackendKind,
     SecretBackendSelection, SecretError, SecretLocation, SecretManager,
-    auth_json_location_for_backend, describe_secret_location,
 };
 
 #[test]
@@ -70,21 +69,4 @@ fn selectable_backend_from_kind_requires_keyring_service() {
 fn secret_backend_kind_rejects_padded_values() {
     let err = " keyring ".parse::<SecretBackendKind>().unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
-}
-
-#[test]
-fn auth_json_location_for_keyring_backend_uses_deterministic_account() {
-    let selection = SecretBackendSelection::Keyring(KeyringSecretBackend::new("prodex").unwrap());
-    let location = auth_json_location_for_backend("/tmp/codex-home", &selection);
-    assert_eq!(
-        location,
-        SecretLocation::Keyring {
-            service: "prodex".to_string(),
-            account: "auth-json:/tmp/codex-home".to_string(),
-        }
-    );
-    assert_eq!(
-        describe_secret_location(&location),
-        "keyring://prodex/auth-json:/tmp/codex-home"
-    );
 }

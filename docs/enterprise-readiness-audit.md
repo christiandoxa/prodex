@@ -1423,14 +1423,11 @@ while moving legacy adapter code behind enterprise boundaries.
   policy debug output redacts timing values while preserving audit-event
   requirement shape; see
   `docs/adr/0837-domain-secret-rotation-policy-debug-redaction.md`. Runtime
-  policy validation
-  treats `secrets.keyring_service` as an exact non-empty identifier instead
-  of trimming it into a different secret namespace; see
-  `docs/adr/0690-keyring-service-exact-policy-identifier.md`. The secret-store
-  keyring backend constructor enforces the same exact service-name boundary; see
-  `docs/adr/0691-keyring-service-backend-exact-identifier.md`. Secret backend
-  kind parsing also rejects whitespace-padded backend names before policy
-  activation; see
+  policy validation keeps production projected-secret provider identifiers
+  exact. The secret-store keyring backend constructor enforces an exact
+  service-name boundary; see
+  `docs/adr/0691-keyring-service-backend-exact-identifier.md`. Secret-store
+  backend kind parsing also rejects whitespace-padded backend names; see
   `docs/adr/0692-secret-backend-kind-whitespace-boundary.md`. Keyring location
   accounts must also be non-empty at the secret-store boundary; see
   `docs/adr/0693-keyring-location-account-nonempty.md`. File secret locations

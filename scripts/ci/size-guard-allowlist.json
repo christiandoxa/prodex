@@ -141,7 +141,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/lib.rs",
-    "maxLines": 1907,
+    "maxLines": 1902,
     "reason": "Runtime policy compatibility coverage remains capped after inactive adaptive-routing validation moved to a focused test module."
   },
   {
@@ -221,7 +221,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 959,
+    "maxLines": 954,
     "reason": "Runtime policy types carry fixed gateway harness selection plus bounded PIP selectors, governance authority, lifecycle, session, audit, and retention configuration in one typed schema."
   },
   {

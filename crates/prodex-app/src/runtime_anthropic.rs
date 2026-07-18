@@ -145,16 +145,6 @@ fn buffered_parts_to_anthropic(
     )
 }
 
-fn buffered_parts_ref_to_anthropic(
-    parts: &RuntimeHeapTrimmedBufferedResponseParts,
-) -> anthropic::RuntimeBufferedResponseParts {
-    anthropic::RuntimeBufferedResponseParts::from_body_slice(
-        parts.status,
-        parts.headers.clone(),
-        &parts.body,
-    )
-}
-
 fn buffered_parts_from_anthropic(
     parts: anthropic::RuntimeBufferedResponseParts,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
@@ -205,7 +195,7 @@ pub(super) fn translate_runtime_anthropic_messages_request(
         .map(messages_request_from_anthropic)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     body: &[u8],
     requested_model: &str,
@@ -223,7 +213,7 @@ pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(
     .map(buffered_parts_from_anthropic)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(
     value: serde_json::Value,
 ) -> RuntimeHeapTrimmedBufferedResponseParts {
@@ -232,7 +222,7 @@ pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(super) fn runtime_request_for_anthropic_server_tool_followup(
     request: &RuntimeProxyRequest,
     previous_response_id: &str,
@@ -242,13 +232,6 @@ pub(super) fn runtime_request_for_anthropic_server_tool_followup(
         previous_response_id,
     )
     .map(runtime_request_from_anthropic)
-}
-
-#[allow(dead_code)]
-pub(super) fn runtime_anthropic_error_message_from_parts(
-    parts: &RuntimeHeapTrimmedBufferedResponseParts,
-) -> String {
-    anthropic::runtime_anthropic_error_message_from_parts(&buffered_parts_ref_to_anthropic(parts))
 }
 
 pub(super) fn build_runtime_anthropic_error_parts(

@@ -353,7 +353,7 @@ where
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn runtime_prompt_cache_affinity_sort_key(
     prompt_cache_key: Option<&str>,
     profile_name: &str,

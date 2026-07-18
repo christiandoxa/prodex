@@ -447,7 +447,7 @@ For OpenAI/Codex profiles, quota views also show earned rate-limit reset credits
 
 Prodex does not download, build, or redistribute either desktop app. Keep the launching terminal open while the GUI runs; that process owns the temporary profile overlay and local proxy.
 
-The browser control plane remains available separately through `prodex dashboard`. Use `prodex dashboard --open` to open it, `prodex dashboard --port 0` for an OS-selected free port, or `--base-url` for quota checks against a custom Codex-compatible backend. The responsive dashboard shows profile/account settings, provider presets, model metadata, quota, a bounded redacted runtime-log tail, theme selection, and runtime/gateway commands. It generates safe provider setup commands instead of storing provider secrets. The dashboard has no password auth; keep it on localhost unless the network is trusted.
+The browser control plane remains available separately through `prodex dashboard`. Use `prodex dashboard --open` to open it, `prodex dashboard --port 0` for an OS-selected free port, or `--base-url` for quota checks against a custom Codex-compatible backend. The responsive dashboard shows profile/account settings, provider presets, model metadata, quota, a bounded redacted runtime-log tail, theme selection, and runtime/gateway commands. It generates safe provider setup commands instead of storing provider secrets. Prodex enforces a loopback bind; use an SSH tunnel when remote access is required.
 
 </details>
 
@@ -948,7 +948,7 @@ In practice, profile `history.jsonl`, `sessions`, `archived_sessions`, `config.t
 
 Codex 0.140.0 defaults CLI auth credentials to the file store, so managed Prodex profiles continue to keep `auth.json` isolated per profile, including OpenAI, API-key, and Bedrock API-key auth JSON. MCP OAuth defaults to Codex `auto`; when it falls back to the file store, `.credentials.json` is shared with direct Codex. OS keyring-backed MCP OAuth credentials remain Codex/OS-owned and are not part of Prodex profile export bundles.
 
-Prodex's `prodex-secret-store` keyring backend uses the native macOS Keychain, Windows Credential Manager, or Linux Secret Service. Select it for Prodex secret-store consumers with `PRODEX_SECRET_BACKEND=keyring` or `[secrets].backend = "keyring"` plus an exact `keyring_service`; unavailable or locked OS stores fail closed without exposing secret values. This setting does not migrate Codex-managed profile `auth.json` files, which remain isolated in each profile home.
+Prodex runtime secrets are file-backed. The reusable `prodex-secret-store` crate contains a native macOS Keychain, Windows Credential Manager, and Linux Secret Service backend, but the Prodex CLI does not expose a selector until a production flow consumes it. Codex-managed profile `auth.json` files remain isolated in each profile home.
 
 Prodex strips dynamic-loader injection variables such as `LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`, and `DYLD_*` from Codex child processes by default. Set `PRODEX_ALLOW_UNSAFE_CHILD_ENV=1` only when intentionally debugging a custom local runtime environment.
 

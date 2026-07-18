@@ -449,7 +449,7 @@ fn file_backend_rejects_empty_file_path() {
 fn selectable_backend_file_round_trips_text_values() {
     let root = temp_dir("selection-text");
     let path = root.join("nested/auth.json");
-    let store = SecretBackendSelection::file().into_manager();
+    let store = SecretManager::new(SecretBackendSelection::file());
     let location = SecretLocation::file(&path);
 
     store
@@ -622,7 +622,7 @@ fn refresh_lease_debug_output_is_stable_and_redacted() {
 fn file_backend_probe_revision_tracks_metadata() {
     let root = temp_dir("revision");
     let path = root.join("secret.bin");
-    let store = SecretBackendSelection::file().into_manager();
+    let store = SecretManager::new(SecretBackendSelection::file());
     let location = SecretLocation::file(&path);
 
     store

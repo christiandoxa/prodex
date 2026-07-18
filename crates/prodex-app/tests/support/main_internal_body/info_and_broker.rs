@@ -179,16 +179,13 @@ fn format_info_provider_capabilities_summary_reports_routes_and_quota_shapes() {
 }
 
 #[test]
-fn secret_backend_summary_reports_native_keyring_backend() {
-    let _backend = TestEnvVarGuard::set(PRODEX_SECRET_BACKEND_ENV, "keyring");
-    let _service = TestEnvVarGuard::set(PRODEX_SECRET_KEYRING_SERVICE_ENV, "prodex");
-
+fn secret_backend_summary_reports_the_file_backend_used_by_prodex() {
     let summary = format_secret_backend_summary();
     let json = secret_backend_json_value();
 
-    assert_eq!(summary, "keyring (prodex)");
-    assert_eq!(json["backend"], "keyring");
-    assert_eq!(json["keyring_service"], "prodex");
+    assert_eq!(summary, "file");
+    assert_eq!(json["backend"], "file");
+    assert!(json["keyring_service"].is_null());
 }
 
 #[test]

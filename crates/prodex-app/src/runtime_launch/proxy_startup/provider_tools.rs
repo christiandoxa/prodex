@@ -1,9 +1,10 @@
+#[cfg(test)]
+use prodex_provider_core::provider_core_flatten_namespace_tool_name;
 use prodex_provider_core::{
     provider_core_chat_request_body_without_web_search_options,
     provider_core_chat_tool_choice_from_responses_request,
     provider_core_chat_tools_from_responses_request,
     provider_core_chat_web_search_options_from_responses_request,
-    provider_core_flatten_namespace_tool_name,
 };
 
 pub(super) fn runtime_provider_chat_tools_from_responses_request(
@@ -31,7 +32,7 @@ pub(super) fn runtime_provider_chat_tool_choice_from_responses_request(
     provider_core_chat_tool_choice_from_responses_request(value, thinking_enabled)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn runtime_provider_flatten_namespace_tool_name(namespace: &str, name: &str) -> String {
     provider_core_flatten_namespace_tool_name(namespace, name)
 }
