@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.311.0 - 2026-07-18
+
+### Misc
+
+- Launch platform Codex desktop apps (`7a04e0f`)
+
 ## 0.310.0 - 2026-07-18
 
 ### Misc
@@ -77,9 +83,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.300.0 - 2026-07-16
 
 - No grouped changes.
-
-## 0.299.0 - 2026-07-16
-
-### Runtime
-
-- Retry quota-ready transport fallback (`e45240e`)
