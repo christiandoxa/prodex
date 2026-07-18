@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Sync fuzz dependency lock
 - Document adaptive route decision (`64daec0`)
 - Detect current legacy schema (`b0ec18a`)
 - Persist desktop chat history (`f8d814e`)
