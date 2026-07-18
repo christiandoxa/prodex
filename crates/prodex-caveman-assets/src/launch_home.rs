@@ -19,14 +19,14 @@ pub fn prepare_prodex_overlay_home(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true, false)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, true, true, true)
 }
 
 pub fn prepare_prodex_overlay_home_from_prepared_base(
     managed_profiles_root: &Path,
     base_codex_home: &Path,
 ) -> Result<PathBuf> {
-    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, true, false)
+    prepare_prodex_overlay_home_internal(managed_profiles_root, base_codex_home, false, true, true)
 }
 
 pub fn prepare_runtime_overlay_home(
