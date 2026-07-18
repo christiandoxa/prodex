@@ -394,7 +394,7 @@ fn prepare_caveman_home_shares_base_chat_history() {
 
 #[cfg(unix)]
 #[test]
-fn prepare_caveman_home_keeps_rollout_state_local_to_launch_home() {
+fn prepare_caveman_home_shares_rollout_state_with_base() {
     let base = temp_dir("state-base");
     let managed_root = temp_dir("state-managed");
     fs::create_dir_all(&base).expect("base dir");
@@ -406,13 +406,21 @@ fn prepare_caveman_home_keeps_rollout_state_local_to_launch_home() {
     let overlay = prepare_caveman_launch_home(&managed_root, &base)
         .expect("caveman launch home should prepare");
 
-    assert!(!overlay.join("state_5.sqlite").exists());
-    assert!(!overlay.join("state_5.sqlite-shm").exists());
-    assert!(!overlay.join("state_5.sqlite-wal").exists());
-    assert_eq!(
-        fs::read_to_string(base.join("state_5.sqlite")).expect("base state should remain"),
-        "shared rollout state"
-    );
+    for name in ["state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal"] {
+        let link = overlay.join(name);
+        assert!(
+            fs::symlink_metadata(&link)
+                .expect("overlay state metadata")
+                .file_type()
+                .is_symlink(),
+            "{name} should stay shared with the base profile"
+        );
+        fs::write(&link, format!("updated {name}")).expect("overlay state write should reach base");
+        assert_eq!(
+            fs::read_to_string(base.join(name)).expect("base state should persist update"),
+            format!("updated {name}")
+        );
+    }
     assert_eq!(
         fs::read_to_string(overlay.join("logs_5.sqlite"))
             .expect("non-rollout state remains copied"),
@@ -429,7 +437,7 @@ fn prepare_caveman_home_keeps_rollout_state_local_to_launch_home() {
 
 #[cfg(unix)]
 #[test]
-fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
+fn prepare_runtime_home_localizes_shared_rollout_state_symlinks() {
     let base = temp_dir("state-symlink-base");
     let shared = temp_dir("state-symlink-shared");
     let managed_root = temp_dir("state-symlink-managed");
@@ -451,8 +459,8 @@ fn prepare_caveman_home_localizes_shared_rollout_state_symlinks() {
     std::os::unix::fs::symlink(&state_wal, base.join("state_5.sqlite-wal"))
         .expect("state wal symlink");
 
-    let overlay = prepare_caveman_launch_home(&managed_root, &base)
-        .expect("caveman launch home should prepare");
+    let overlay = prepare_runtime_overlay_home(&managed_root, &base)
+        .expect("runtime launch home should prepare");
 
     for (name, target) in [
         ("state_5.sqlite", state_db),
