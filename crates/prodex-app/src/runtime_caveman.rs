@@ -1,4 +1,8 @@
 use super::*;
+use crate::runtime_desktop::{
+    DesktopGuiCommand, configure_desktop_codex_home, desktop_gui_command,
+    prepare_runtime_overlay_home,
+};
 #[cfg(test)]
 pub(crate) use prodex_caveman_assets::PRODEX_CAVEMAN_FULL_ASSETS_ENV;
 
@@ -14,6 +18,8 @@ pub(crate) struct CavemanLaunchStrategy {
     profile_v2_name: Option<String>,
     model_context_window_tokens: Option<u64>,
     gemini_thinking_budget_tokens: Option<u64>,
+    desktop_command: Option<DesktopGuiCommand>,
+    configure_prodex_overlay: bool,
 }
 
 impl CavemanLaunchStrategy {
@@ -43,7 +49,16 @@ impl CavemanLaunchStrategy {
             profile_v2_name,
             model_context_window_tokens,
             gemini_thinking_budget_tokens,
+            desktop_command: None,
+            configure_prodex_overlay: true,
         }
+    }
+
+    pub(crate) fn new_desktop(args: CavemanArgs, configure_prodex_overlay: bool) -> Result<Self> {
+        let mut strategy = Self::new(args);
+        strategy.desktop_command = Some(desktop_gui_command()?);
+        strategy.configure_prodex_overlay = configure_prodex_overlay;
+        Ok(strategy)
     }
 }
 
@@ -65,7 +80,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             presidio_redaction_enabled: self.presidio_enabled,
             model_context_window_tokens: self.model_context_window_tokens,
             gemini_thinking_budget_tokens: self.gemini_thinking_budget_tokens,
-            force_runtime_proxy: false,
+            force_runtime_proxy: self.desktop_command.is_some(),
             model_provider_override: self.model_provider_override.as_deref(),
             profile_v2_name: self.profile_v2_name.as_deref(),
             external_provider: self
@@ -84,7 +99,11 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
         if self.presidio_enabled {
             ensure_presidio_services_for_super_launch(&prepared.paths)?;
         }
-        let overlay_home = prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?;
+        let overlay_home = if self.configure_prodex_overlay {
+            prepare_prodex_overlay_home(&prepared.paths, &prepared.codex_home)?
+        } else {
+            prepare_runtime_overlay_home(&prepared.paths, &prepared.codex_home)?
+        };
         if self.provider_runtime_uses_local_proxy_auth() {
             write_provider_runtime_codex_auth(&overlay_home)?;
         }
@@ -110,7 +129,15 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
                 self.presidio_enabled,
             )?;
         }
-        let mut child = codex_child_plan(overlay_home.clone(), runtime_args);
+        let mut child = if let Some(desktop) = self.desktop_command.as_ref() {
+            configure_desktop_codex_home(&overlay_home, &runtime_args, self.args.full_access)?;
+            let mut child = codex_child_plan(overlay_home.clone(), Vec::new());
+            child.binary = desktop.binary.clone();
+            child.args = desktop.args.clone();
+            child
+        } else {
+            codex_child_plan(overlay_home.clone(), runtime_args)
+        };
         if self.provider_runtime_uses_local_proxy_auth() {
             force_codex_api_key_auth_for_provider_runtime(&mut child);
             remove_provider_secret_env(&mut child);
@@ -205,6 +232,16 @@ pub(super) fn handle_caveman(args: CavemanArgs) -> Result<()> {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
     }
     execute_runtime_launch(CavemanLaunchStrategy::new(args))
+}
+
+pub(super) fn handle_desktop_gui(args: CavemanArgs, configure_prodex_overlay: bool) -> Result<()> {
+    if let Some(base_url) = args.base_url.as_deref() {
+        validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
+    }
+    execute_runtime_launch(CavemanLaunchStrategy::new_desktop(
+        args,
+        configure_prodex_overlay,
+    )?)
 }
 
 pub(super) fn prepare_prodex_overlay_home(
@@ -334,6 +371,100 @@ mod tests {
                 OsString::from("hi")
             ]
         );
+    }
+
+    #[test]
+    fn desktop_strategy_forces_runtime_proxy() {
+        let command =
+            parse_cli_command_from(["prodex", "caveman"]).expect("caveman command should parse");
+        let Commands::Caveman(args) = command else {
+            panic!("expected caveman command");
+        };
+        let mut strategy = CavemanLaunchStrategy::new(args);
+        assert!(!strategy.runtime_request().force_runtime_proxy);
+
+        strategy.desktop_command = Some(DesktopGuiCommand {
+            binary: OsString::from("desktop"),
+            args: Vec::new(),
+        });
+
+        assert!(strategy.runtime_request().force_runtime_proxy);
+    }
+
+    #[test]
+    fn desktop_plan_persists_runtime_proxy_config_for_native_app() {
+        let root = env::temp_dir().join(format!(
+            "prodex-desktop-plan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let base_home = root.join("base");
+        create_codex_home_if_missing(&base_home).expect("base home should exist");
+        std::fs::write(base_home.join("config.toml"), "model = 'gpt-5'\n")
+            .expect("base config should write");
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared-codex"),
+            legacy_shared_codex_root: root.join("legacy-shared"),
+        };
+        let command =
+            parse_cli_command_from(["prodex", "caveman"]).expect("caveman command should parse");
+        let Commands::Caveman(args) = command else {
+            panic!("expected caveman command");
+        };
+        let mut strategy = CavemanLaunchStrategy::new(args);
+        strategy.desktop_command = Some(DesktopGuiCommand {
+            binary: OsString::from("desktop"),
+            args: vec![OsString::from("--new-instance")],
+        });
+        strategy.configure_prodex_overlay = false;
+        let prepared = PreparedRuntimeLaunch {
+            paths,
+            codex_home: base_home,
+            managed: false,
+            runtime_proxy: None,
+        };
+        let endpoint = RuntimeProxyEndpoint {
+            listen_addr: "127.0.0.1:2455".parse().unwrap(),
+            openai_mount_path: "/openai/v1".to_string(),
+            local_model_provider_id: None,
+            realtime_ws_base_url: None,
+            realtime_ws_model: None,
+            lease_dir: root.join("leases"),
+            broker_session_affinity_control: None,
+            _lease: None,
+            _direct_proxy: None,
+            _kiro_connect_proxy: None,
+        };
+
+        let plan = strategy
+            .build_plan(&prepared, Some(&endpoint))
+            .expect("desktop plan should build");
+
+        assert_eq!(plan.child.binary, OsString::from("desktop"));
+        assert_eq!(plan.child.args, [OsString::from("--new-instance")]);
+        let config: toml::Value = toml::from_str(
+            &std::fs::read_to_string(plan.child.codex_home.join("config.toml"))
+                .expect("desktop config should exist"),
+        )
+        .expect("desktop config should be valid");
+        assert_eq!(config["model"].as_str(), Some("gpt-5"));
+        assert_eq!(
+            config["chatgpt_base_url"].as_str(),
+            Some("http://127.0.0.1:2455/backend-api")
+        );
+        assert_eq!(
+            config["openai_base_url"].as_str(),
+            Some("http://127.0.0.1:2455/openai/v1")
+        );
+        assert!(config.get("approval_policy").is_none());
+        prodex_runtime_launch::cleanup_runtime_launch_plan(&plan);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

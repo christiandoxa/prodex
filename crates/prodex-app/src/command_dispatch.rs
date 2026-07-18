@@ -41,7 +41,8 @@ impl CommandDispatchExt for Commands {
     fn requires_valid_runtime_policy(&self) -> bool {
         matches!(
             self,
-            Commands::Run(_)
+            Commands::Gui(_)
+                | Commands::Run(_)
                 | Commands::Caveman(_)
                 | Commands::Rtk(_)
                 | Commands::Playwright(_)
@@ -88,6 +89,7 @@ fn execute_command(command: Commands) -> Result<()> {
         Commands::Quota(args) => handle_quota(args),
         Commands::Redeem(args) => handle_redeem(args),
         Commands::Ping(command) => handle_ping(command),
+        Commands::Gui(args) => handle_gui(args),
         Commands::Dashboard(args) => handle_dashboard(args),
         Commands::Run(args) => handle_run(args),
         Commands::Caveman(args) => execute_caveman(args),
@@ -141,6 +143,13 @@ fn execute_super(mut args: SuperArgs) -> Result<()> {
     args.extract_provider_overrides_from_codex_args()
         .map_err(anyhow::Error::msg)?;
     args.validate_urls().map_err(anyhow::Error::msg)?;
+    if args.codex_args.first().is_some_and(|arg| arg == "gui") {
+        args.codex_args.remove(0);
+        if !args.codex_args.is_empty() {
+            bail!("`prodex s gui` does not accept Codex CLI arguments")
+        }
+        return handle_super_gui(args);
+    }
     if args.dry_run || prodex_dry_run_requested(&args.codex_args) {
         if matches!(
             args.cli,

@@ -71,6 +71,7 @@ mod runtime_claude_auth;
 mod runtime_config;
 mod runtime_core_shared;
 mod runtime_deepseek_config;
+mod runtime_desktop;
 mod runtime_doctor;
 mod runtime_external_provider_config;
 mod runtime_gemini_auth;

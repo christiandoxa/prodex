@@ -224,6 +224,46 @@ impl fmt::Debug for RedeemArgs {
 }
 
 #[derive(Args)]
+pub struct GuiArgs {
+    /// Starting profile for the desktop app. If omitted, Prodex uses the active profile.
+    #[arg(short, long, value_name = "NAME")]
+    pub profile: Option<String>,
+    /// Allow eligible pre-commit rotation. This is the default behavior.
+    #[arg(long, conflicts_with = "no_auto_rotate")]
+    pub auto_rotate: bool,
+    /// Keep the selected profile fixed and fail instead of rotating.
+    #[arg(long)]
+    pub no_auto_rotate: bool,
+    /// Allow Prodex to redeem one earned reset credit when every profile is exhausted.
+    #[arg(long)]
+    pub auto_redeem: bool,
+    /// Skip the preflight quota gate before launching Codex Desktop.
+    #[arg(long)]
+    pub skip_quota_check: bool,
+    /// Override the upstream ChatGPT base URL used by the runtime proxy.
+    #[arg(long, value_name = "URL")]
+    pub base_url: Option<String>,
+    /// Disable system and environment proxy settings for upstream requests.
+    #[arg(long)]
+    pub no_proxy: bool,
+}
+
+impl fmt::Debug for GuiArgs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GuiArgs")
+            .field("profile_configured", &self.profile.is_some())
+            .field("auto_rotate", &self.auto_rotate)
+            .field("no_auto_rotate", &self.no_auto_rotate)
+            .field("auto_redeem", &self.auto_redeem)
+            .field("skip_quota_check", &self.skip_quota_check)
+            .field("base_url_configured", &self.base_url.is_some())
+            .field("no_proxy", &self.no_proxy)
+            .finish()
+    }
+}
+
+#[derive(Args)]
 pub struct DashboardArgs {
     /// Interface to bind. Defaults to localhost only.
     #[arg(long, default_value = "127.0.0.1", value_name = "HOST")]

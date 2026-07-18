@@ -1,10 +1,10 @@
 # Prodex Local Control Plane
 
-OpenCodex makes provider routing obvious by putting setup, provider health, model discovery, usage, and logs behind one local dashboard. Prodex adapts that interaction model while retaining its own profile isolation, quota-aware rotation, continuation affinity, runtime diagnostics, and proxy ownership. It does not run an OpenCodex daemon or let another process mutate Prodex/Codex profile state.
+OpenCodex makes provider routing obvious by putting setup, provider health, model discovery, usage, and logs behind one local dashboard. Prodex adapts that interaction model while retaining its own profile isolation, quota-aware rotation, continuation affinity, runtime diagnostics, and proxy ownership. It does not run an OpenCodex daemon or let another process mutate Prodex/Codex profile state. The `prodex gui` and `prodex s gui` commands launch Codex Desktop instead; they are not aliases for this browser control plane.
 
 Current design:
 
-- expose the static, dependency-free control center through `prodex gui`, `prodex s gui`, and the non-opening `prodex dashboard` form;
+- expose the static, dependency-free control center through `prodex dashboard`, with explicit `--open` browser launch;
 - open the native browser without a shell (`xdg-open` on Linux) and keep serving when browser launch fails;
 - expose read-only provider presets, provider contracts, model catalog rows, profile/account summaries, quota summaries, and runtime/gateway pointers;
 - expose only a bounded, path-validated, secret-redacted tail of the latest runtime log;

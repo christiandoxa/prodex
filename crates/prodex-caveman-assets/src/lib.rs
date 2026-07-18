@@ -15,6 +15,7 @@ pub use embedded_tree::install_claude_caveman_plugin;
 pub use launch_home::{
     configure_caveman_launch_home, configure_prodex_overlay_home, prepare_caveman_launch_home,
     prepare_prodex_overlay_home, prepare_prodex_overlay_home_from_prepared_base,
+    prepare_runtime_overlay_home, prepare_runtime_overlay_home_from_prepared_base,
 };
 pub use marketplace::{
     caveman_marketplace_root, install_caveman_marketplace, install_caveman_plugin_cache,
