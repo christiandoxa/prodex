@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.313.0 - 2026-07-18
+
+### Misc
+
+- Persist desktop chat history (`f8d814e`)
+
 ## 0.312.0 - 2026-07-18
 
 ### Misc
@@ -76,13 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ## 0.302.0 - 2026-07-16
 
 - No grouped changes.
-
-## 0.301.0 - 2026-07-16
-
-### Runtime
-
-- Resume quota-rejected goals across profiles (`7657089`)
-
-### Misc
-
-- Avoid unauthenticated GitHub API requests (`c1caf4d`)
