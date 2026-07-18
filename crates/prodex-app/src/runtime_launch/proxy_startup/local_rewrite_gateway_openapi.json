@@ -1480,9 +1480,55 @@
         ],
         "type": "object"
       },
+      "GatewayRouteAdaptiveDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "actual_model": {
+            "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
+          },
+          "override_reason": {
+            "enum": [
+              "continuation_affinity",
+              "adaptive_disabled",
+              "shadow_exploration",
+              "adaptive_exploration",
+              "insufficient_samples",
+              "shadow_only",
+              "adaptive_enabled"
+            ],
+            "type": "string"
+          },
+          "quality_score_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "recommended_model": {
+            "$ref": "#/components/schemas/GatewayNullableRouteModelIdentifier"
+          }
+        },
+        "required": [
+          "actual_model",
+          "recommended_model",
+          "quality_score_bps",
+          "override_reason"
+        ],
+        "type": "object"
+      },
       "GatewayRouteExplainResponse": {
         "additionalProperties": false,
         "properties": {
+          "adaptive_decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatewayRouteAdaptiveDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "alias_resolution_chain": {
             "items": {
               "$ref": "#/components/schemas/GatewayRouteModelIdentifier"
@@ -1581,6 +1627,7 @@
         "required": [
           "object",
           "schema_version",
+          "adaptive_decision",
           "diagnostic_seed",
           "hard_affinity_required",
           "hard_affinity_applied",
