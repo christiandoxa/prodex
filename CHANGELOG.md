@@ -8,6 +8,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Persist chat history index (`e56691b`)
 
+## 0.313.0 - 2026-07-18
+
 ### Misc
 
 - Document adaptive route decision (`64daec0`)
@@ -84,7 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Deps
 
 - Remove unused postgres dependency (`e4e2684`)
-
-## 0.302.0 - 2026-07-16
-
-- No grouped changes.
