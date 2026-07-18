@@ -248,7 +248,13 @@ fn prepare_runtime_launch_uses_active_kiro_profile_for_kiro_cli_routing() {
     .expect("Kiro runtime launch should resolve imported Kiro profile");
 
     assert_eq!(prepared.codex_home, kiro_home);
-    assert!(prepared.runtime_proxy.is_none());
+    assert!(
+        prepared
+            .runtime_proxy
+            .as_ref()
+            .and_then(RuntimeProxyEndpoint::kiro_connect_proxy_url)
+            .is_some()
+    );
 }
 
 #[test]
