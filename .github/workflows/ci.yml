@@ -97,8 +97,12 @@ jobs:
         run: cargo fmt --check
 
   fuzz-build:
+    needs: changes
+    if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -111,6 +115,15 @@ jobs:
 
       - name: Install pinned fuzz toolchain
         run: rustup toolchain install nightly-2026-07-11 --profile minimal
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ runner.os }}-fuzz-nightly-2026-07-11
+          workspaces: fuzz -> target
 
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked --version 0.13.2
@@ -161,6 +174,8 @@ jobs:
     if: ${{ needs.changes.outputs.heavy == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
 
     steps:
       - name: Check out repository
@@ -170,6 +185,9 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.97.0
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -808,6 +826,7 @@ jobs:
         run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
 
       - name: Measure bounded governance hot paths
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: cargo bench --locked --bench governance_hot_paths
 
   runtime-load-smoke:

@@ -17,7 +17,7 @@ Control-plane entrypoint.
 USAGE:
     prodex-control-plane --help
     prodex-control-plane --version
-    prodex-control-plane serve [--listen <ADDR>]
+    prodex-control-plane serve [--listen <ADDR>] [--config-publication-transport <PATH> --config-publication-replica <ID>]
     prodex-control-plane plan-config-publication --request <path>
     prodex-control-plane plan-http-control-plane --request <path>
     prodex-control-plane deliver-config-publication --event <path> --root <path>
@@ -55,11 +55,24 @@ pub(super) fn main() {
 fn dispatch(command: Command) {
     let result = match command {
         Command::Serve(args) => {
-            let args = args
-                .listen
-                .map(|listen| vec!["--listen".to_string(), listen])
-                .unwrap_or_default();
-            run_enterprise_serve_or_exit(DedicatedServerMode::ControlPlane, args.into_iter(), HELP);
+            let mut serve_args = Vec::new();
+            if let Some(listen) = args.listen {
+                serve_args.extend(["--listen".to_string(), listen]);
+            }
+            if let Some(transport) = args.config_publication_transport {
+                serve_args.extend([
+                    "--config-publication-transport".to_string(),
+                    transport.to_string_lossy().into_owned(),
+                ]);
+            }
+            if let Some(replica) = args.config_publication_replica {
+                serve_args.extend(["--config-publication-replica".to_string(), replica]);
+            }
+            run_enterprise_serve_or_exit(
+                DedicatedServerMode::ControlPlane,
+                serve_args.into_iter(),
+                HELP,
+            );
             return;
         }
         Command::PlanConfigPublication(args) => publication::plan(&args.request),

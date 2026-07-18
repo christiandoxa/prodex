@@ -143,6 +143,7 @@ fn runtime_proxy_passthrough_args_follow_endpoint_mount_path() {
         broker_session_affinity_control: None,
         _lease: None,
         _direct_proxy: None,
+        _kiro_connect_proxy: None,
     };
 
     let rendered = runtime_proxy_codex_passthrough_args(

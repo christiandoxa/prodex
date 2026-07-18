@@ -93,6 +93,13 @@ impl RuntimeGovernanceAuditWriter {
     }
 }
 
+pub(super) fn persist_runtime_control_plane_audit_event(
+    shared: &RuntimeLocalRewriteProxyShared,
+    event: AuditEvent,
+) -> Result<(), GovernanceRepositoryError> {
+    shared.governance_audit_writer.append(event)
+}
+
 pub(super) fn persist_runtime_governance_decision_audit(
     shared: &RuntimeLocalRewriteProxyShared,
     tenant: TenantContext,

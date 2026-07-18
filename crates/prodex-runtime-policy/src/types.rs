@@ -546,6 +546,11 @@ pub struct RuntimePolicyGatewaySsoSettings {
     pub authentication_strength: Option<String>,
     pub browser_flow: Option<bool>,
     pub pkce_method: Option<String>,
+    pub oidc_authorization_url: Option<String>,
+    pub oidc_token_url: Option<String>,
+    pub oidc_client_id: Option<String>,
+    pub oidc_client_secret_ref: Option<SecretRef>,
+    pub oidc_redirect_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -554,9 +559,16 @@ pub struct RuntimePolicyGatewayWorkloadIdentitySettings {
     pub enabled: Option<bool>,
     pub issuer: Option<String>,
     pub audience: Option<String>,
+    pub jwks_url: Option<String>,
+    #[serde(default)]
+    pub jwks_origin_allowlist: Vec<String>,
+    pub subject_claim: Option<String>,
+    pub tenant_claim: Option<String>,
+    pub scope_claim: Option<String>,
     pub required_scope: Option<String>,
     pub mtls_required: Option<bool>,
     pub mtls_ca_ref: Option<SecretRef>,
+    pub tls_identity_ref: Option<SecretRef>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]

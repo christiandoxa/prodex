@@ -146,6 +146,8 @@ impl RuntimeProxyResponsesModelDescriptor {
             || self
                 .claude_picker_value()
                 .eq_ignore_ascii_case(picker_model)
+            || (self.claude_alias == Some(RuntimeProxyClaudeModelAlias::Opus)
+                && picker_model.to_ascii_lowercase().contains("fable"))
     }
 }
 
@@ -365,6 +367,26 @@ pub fn runtime_proxy_claude_pinned_alias_env() -> Vec<(&'static str, OsString)> 
             OsString::from(runtime_proxy_responses_model_capabilities(descriptor.id)),
         ));
     }
+    let fable = runtime_proxy_claude_alias_model(RuntimeProxyClaudeModelAlias::Opus);
+    env.extend([
+        ("ANTHROPIC_DEFAULT_FABLE_MODEL", OsString::from(fable.id)),
+        (
+            "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+            OsString::from(fable.id),
+        ),
+        (
+            "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
+            OsString::from(fable.description),
+        ),
+        (
+            "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
+            OsString::from(runtime_proxy_responses_model_capabilities(fable.id)),
+        ),
+    ]);
+    env.push((
+        "ANTHROPIC_SMALL_FAST_MODEL",
+        OsString::from(runtime_proxy_claude_alias_model(RuntimeProxyClaudeModelAlias::Haiku).id),
+    ));
     env
 }
 
@@ -388,13 +410,8 @@ pub fn runtime_proxy_claude_custom_model_option_env(
         return Vec::new();
     }
 
-    let descriptor = runtime_proxy_responses_model_descriptor(target_model);
-    let display_name = descriptor
-        .map(|descriptor| descriptor.display_name)
-        .unwrap_or(target_model);
-    let description = descriptor
-        .map(|descriptor| descriptor.description.to_string())
-        .unwrap_or_else(|| format!("Custom OpenAI model routed through prodex ({target_model})"));
+    let display_name = target_model;
+    let description = format!("Custom OpenAI model routed through prodex ({target_model})");
 
     vec![
         (
@@ -408,6 +425,10 @@ pub fn runtime_proxy_claude_custom_model_option_env(
         (
             "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
             OsString::from(description),
+        ),
+        (
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES",
+            OsString::from(runtime_proxy_responses_model_capabilities(target_model)),
         ),
     ]
 }
@@ -456,7 +477,11 @@ pub fn runtime_proxy_claude_target_model(requested_model: &str) -> String {
         || lower.contains("codex")
     {
         normalized.to_string()
-    } else if lower == "best" || lower == "default" || lower.contains("opus") {
+    } else if lower == "best"
+        || lower == "default"
+        || lower.contains("opus")
+        || lower.contains("fable")
+    {
         runtime_proxy_claude_alias_model(RuntimeProxyClaudeModelAlias::Opus)
             .id
             .to_string()

@@ -241,7 +241,7 @@ pub struct SuperArgs {
         requires = "provider_or_url"
     )]
     pub harness: Option<prodex_provider_core::HarnessMode>,
-    /// Agent CLI to launch. Gemini and Copilot use their matching provider; Kiro uses an imported profile.
+    /// Agent CLI to launch. Gemini and Copilot use their matching provider; Kiro uses an imported profile through a local transport tunnel.
     #[arg(long, value_name = "CLI", value_enum)]
     pub cli: Option<SuperCliAgent>,
     /// API key for --provider. Prefer the provider-specific environment variable for shells/history.
@@ -366,10 +366,13 @@ pub struct ExposeArgs {
 
 #[derive(Args, Debug)]
 pub struct AppServerBrokerArgs {
+    /// Codex profile used by the live broker child process.
+    #[arg(long, value_name = "NAME", requires = "experimental_stdio_live")]
+    pub profile: Option<String>,
     /// Print the broker capability contract as JSON.
     #[arg(long)]
     pub json: bool,
-    /// Experimental live stdio broker that validates protocol frames and preserves input.
+    /// Experimental live broker that launches Codex app-server and validates both stdio directions.
     #[arg(
         long,
         conflicts_with_all = [

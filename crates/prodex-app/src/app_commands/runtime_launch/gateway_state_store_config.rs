@@ -309,6 +309,7 @@ mod deployment_policy_tests {
         RuntimeGatewayConfig {
             replica_count: replicas,
             require_multi_replica_accounting_checks: checks,
+            adaptive_routing: Default::default(),
             launch: RuntimeGatewayLaunchEnvironment::default(),
         }
     }

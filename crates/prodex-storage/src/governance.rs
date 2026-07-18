@@ -487,6 +487,14 @@ pub fn verify_governance_audit_integrity(
     tenant_id: TenantId,
     records: &[GovernanceAuditExportRecord],
 ) -> GovernanceAuditIntegrityHealth {
+    verify_governance_audit_integrity_with_retention_anchor(tenant_id, records, None)
+}
+
+pub fn verify_governance_audit_integrity_with_retention_anchor(
+    tenant_id: TenantId,
+    records: &[GovernanceAuditExportRecord],
+    retention_anchor: Option<&AuditDigest>,
+) -> GovernanceAuditIntegrityHealth {
     use std::collections::{HashMap, HashSet};
 
     let event_count = u64::try_from(records.len()).unwrap_or(u64::MAX);
@@ -500,6 +508,13 @@ pub fn verify_governance_audit_integrity(
             valid = false;
         }
         match record.previous_digest.as_ref() {
+            Some(previous)
+                if retention_anchor.is_some_and(|anchor| anchor.as_str() == previous) =>
+            {
+                if root.replace(record.event_digest.clone()).is_some() {
+                    valid = false;
+                }
+            }
             Some(previous) => {
                 if child_by_previous
                     .insert(previous.clone(), record.event_digest.clone())

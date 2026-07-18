@@ -244,7 +244,10 @@ fn runtime_gateway_admin_dispatch(
         | GatewayAdminRoute::GovernanceOutbox
         | GatewayAdminRoute::GovernanceOutboxClaim
         | GatewayAdminRoute::GovernanceAuditIntegrity
-        | GatewayAdminRoute::AuditExports => match authorized_action {
+        | GatewayAdminRoute::AuditExports
+        | GatewayAdminRoute::AuditRetentionHolds
+        | GatewayAdminRoute::AuditRetentionHold { .. }
+        | GatewayAdminRoute::AuditRetentionPurge => match authorized_action {
             Some(base_action) => runtime_gateway_admin_policy_response(
                 captured,
                 path,

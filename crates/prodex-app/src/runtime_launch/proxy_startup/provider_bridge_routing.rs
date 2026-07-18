@@ -108,7 +108,11 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_gateway_cost_fo
     request_id: u64,
     body: &[u8],
     model: &str,
+    governed_cost: Option<ProviderModelCost>,
 ) -> ProviderModelCost {
+    if let Some(cost) = governed_cost {
+        return cost;
+    }
     let model = model.trim();
     let direct_metric_model = model
         .strip_prefix("combo:")
@@ -156,6 +160,32 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_gateway_cost_fo
         }
     }
     provider_model_cost(kind.provider_id(), model)
+}
+
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_gateway_pricing_model(
+    aliases: &[runtime_proxy_crate::RuntimeGatewayRouteAlias],
+    model_state: &BTreeMap<String, runtime_proxy_crate::RuntimeGatewayRouteModelState>,
+    request_id: u64,
+    body: &[u8],
+    model: &str,
+) -> String {
+    let model = model.trim();
+    if let Some(combo) = model.strip_prefix("combo:")
+        && let Some(first) = combo
+            .split(',')
+            .map(str::trim)
+            .find(|part| !part.is_empty())
+    {
+        return first.to_string();
+    }
+    runtime_proxy_crate::runtime_gateway_rewrite_route_alias_with_state(
+        body,
+        aliases,
+        request_id,
+        model_state,
+    )
+    .map(|rewrite| rewrite.model)
+    .unwrap_or_else(|| model.to_string())
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_ledger_message(

@@ -4,6 +4,8 @@ mod app_server_broker_preview;
 mod app_server_broker_protocol;
 
 #[cfg(test)]
+pub(crate) use self::app_server_broker_preview::app_server_broker_write_stdio_live_stream;
+#[cfg(test)]
 pub(crate) use self::app_server_broker_preview::{
     APP_SERVER_BROKER_MAX_PREVIEW_LINE_BYTES, app_server_broker_contract_json,
     app_server_broker_preview_line, app_server_broker_preview_lines,
@@ -12,8 +14,8 @@ pub(crate) use self::app_server_broker_preview::{
     app_server_broker_write_stdio_preview_stream,
 };
 pub(crate) use self::app_server_broker_preview::{
-    app_server_broker_render_output, app_server_broker_write_stdio_live_stream,
-    app_server_broker_write_stdio_passthrough_preview_stream,
+    AppServerBrokerLiveValidator, app_server_broker_pump_live_stream,
+    app_server_broker_render_output, app_server_broker_write_stdio_passthrough_preview_stream,
     app_server_broker_write_stdio_validate_passthrough_stream,
     app_server_broker_write_stdio_validate_stream,
 };

@@ -26,13 +26,31 @@ const DANGEROUS_CHILD_ENV_KEYS: [&str; 7] = [
     "DYLD_FRAMEWORK_PATH",
 ];
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChildProcessPlan {
     pub binary: OsString,
     pub args: Vec<OsString>,
     pub codex_home: PathBuf,
     pub extra_env: Vec<(OsString, OsString)>,
     pub removed_env: Vec<OsString>,
+}
+
+impl std::fmt::Debug for ChildProcessPlan {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let extra_env_keys = self
+            .extra_env
+            .iter()
+            .map(|(key, _)| key)
+            .collect::<Vec<_>>();
+        formatter
+            .debug_struct("ChildProcessPlan")
+            .field("binary", &self.binary)
+            .field("args_len", &self.args.len())
+            .field("codex_home", &"<redacted>")
+            .field("extra_env_keys", &extra_env_keys)
+            .field("removed_env", &self.removed_env)
+            .finish()
+    }
 }
 
 impl ChildProcessPlan {
@@ -70,6 +88,26 @@ impl ChildProcessPlan {
     {
         self.removed_env = removed_env.into_iter().map(Into::into).collect();
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChildProcessPlan;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn debug_redacts_arguments_environment_values_and_home() {
+        let plan = ChildProcessPlan::new("client".into(), PathBuf::from("/private/home"))
+            .with_args(vec![OsString::from("secret-argument")])
+            .with_extra_env([(OsString::from("HTTPS_PROXY"), OsString::from("secret-url"))]);
+        let debug = format!("{plan:?}");
+
+        assert!(debug.contains("HTTPS_PROXY"));
+        assert!(!debug.contains("secret-argument"));
+        assert!(!debug.contains("secret-url"));
+        assert!(!debug.contains("/private/home"));
     }
 }
 

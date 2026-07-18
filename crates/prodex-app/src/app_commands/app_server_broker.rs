@@ -3,6 +3,9 @@ use anyhow::Context;
 use std::io::{BufRead, BufReader, Write, stdout};
 use terminal_ui::print_stdout_line;
 
+#[path = "app_server_broker_live.rs"]
+mod live;
+
 pub(crate) fn handle_app_server_broker(args: AppServerBrokerArgs) -> Result<()> {
     if args.experimental_stdio_validate_passthrough {
         let stdin = std::io::stdin();
@@ -44,14 +47,7 @@ pub(crate) fn handle_app_server_broker(args: AppServerBrokerArgs) -> Result<()> 
     }
 
     if args.experimental_stdio_live {
-        let stdin = std::io::stdin();
-        let reader = BufReader::new(stdin.lock());
-        let stdout = stdout();
-        let passthrough_writer = stdout.lock();
-        let stderr = std::io::stderr();
-        let diagnostics_writer = stderr.lock();
-        run_app_server_broker_stdio_live(reader, passthrough_writer, diagnostics_writer)?;
-        return Ok(());
+        return live::run_app_server_broker_process(args.profile.as_deref());
     }
 
     if args.experimental_stdio {
@@ -113,6 +109,7 @@ pub(crate) fn run_app_server_broker_stdio_passthrough_preview<R: BufRead, W: Wri
     .context("failed to stream app-server broker stdio preview")
 }
 
+#[cfg(test)]
 pub(crate) fn run_app_server_broker_stdio_live<R: BufRead, W: Write, D: Write>(
     reader: R,
     passthrough_writer: W,

@@ -26,9 +26,24 @@ pub(super) fn validate_gateway_routing(policy: &RuntimePolicyFile, path: &Path) 
             path.display()
         );
     }
-    if policy.gateway.adaptive_routing != Default::default() {
+    let adaptive = &policy.gateway.adaptive_routing;
+    let window_size = adaptive.window_size.unwrap_or(128);
+    let min_samples = adaptive.min_samples.unwrap_or(8);
+    if window_size > 4_096 {
         bail!(
-            "gateway.adaptive_routing in {} is reserved and unsupported until adaptive decisions are wired into live gateway routing",
+            "gateway.adaptive_routing.window_size in {} must be at most 4096",
+            path.display()
+        );
+    }
+    if min_samples > window_size as u64 {
+        bail!(
+            "gateway.adaptive_routing.min_samples in {} must not exceed gateway.adaptive_routing.window_size",
+            path.display()
+        );
+    }
+    if adaptive.enabled == Some(true) && policy.gateway.route_aliases.is_empty() {
+        bail!(
+            "gateway.adaptive_routing.enabled in {} requires at least one gateway.route_aliases entry",
             path.display()
         );
     }

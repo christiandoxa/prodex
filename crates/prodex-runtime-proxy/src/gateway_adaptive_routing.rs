@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use serde::Serialize;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeGatewayAdaptiveRoutingConfig {
     pub enabled: bool,
@@ -98,6 +100,16 @@ impl RuntimeGatewayAdaptiveQualityWindow {
     pub fn has_min_samples(&self, min_samples: u64) -> bool {
         self.samples >= min_samples
     }
+
+    pub fn record_outcome(&mut self, success: bool, latency_ms: u64) {
+        self.samples = self.samples.saturating_add(1);
+        if success {
+            self.task_completed = self.task_completed.saturating_add(1);
+        } else {
+            self.errors = self.errors.saturating_add(1);
+        }
+        self.latency_ms_total = self.latency_ms_total.saturating_add(latency_ms);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +168,7 @@ impl RuntimeGatewayAdaptiveFeedbackQueue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeGatewayAdaptiveShadowInput {
     pub config: RuntimeGatewayAdaptiveRoutingConfig,
+    pub diagnostic_seed: u64,
     pub actual_model: String,
     pub continuation_owner_model: Option<String>,
     pub candidates: Vec<String>,
@@ -163,7 +176,7 @@ pub struct RuntimeGatewayAdaptiveShadowInput {
     pub quality: BTreeMap<String, RuntimeGatewayAdaptiveQualityWindow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RuntimeGatewayAdaptiveShadowDecision {
     pub actual_model: String,
     pub recommended_model: Option<String>,
@@ -196,11 +209,34 @@ pub fn runtime_gateway_adaptive_shadow_decision(
         .iter()
         .map(|model| model.as_str())
         .collect::<BTreeSet<_>>();
-    let mut best: Option<(&str, i64)> = None;
-    for candidate in &input.candidates {
-        if blocked.contains(candidate.as_str()) {
-            continue;
+    let candidates = input
+        .candidates
+        .iter()
+        .filter(|candidate| !blocked.contains(candidate.as_str()))
+        .collect::<Vec<_>>();
+    if input.config.exploration_rate_bps > 0
+        && !candidates.is_empty()
+        && adaptive_seed(input.diagnostic_seed) % 10_000
+            < u64::from(input.config.exploration_rate_bps)
+    {
+        let mut index = adaptive_seed(input.diagnostic_seed ^ 0x9e37_79b9_7f4a_7c15) as usize
+            % candidates.len();
+        if candidates.len() > 1 && candidates[index].as_str() == input.actual_model {
+            index = (index + 1) % candidates.len();
         }
+        return RuntimeGatewayAdaptiveShadowDecision {
+            actual_model: input.actual_model,
+            recommended_model: Some(candidates[index].to_string()),
+            quality_score_bps: None,
+            override_reason: if input.config.shadow_mode {
+                "shadow_exploration"
+            } else {
+                "adaptive_exploration"
+            },
+        };
+    }
+    let mut best: Option<(&str, i64)> = None;
+    for candidate in candidates {
         let Some(window) = input.quality.get(candidate) else {
             continue;
         };
@@ -232,6 +268,13 @@ pub fn runtime_gateway_adaptive_shadow_decision(
             "adaptive_enabled"
         },
     }
+}
+
+fn adaptive_seed(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
 }
 
 #[cfg(test)]
@@ -300,6 +343,7 @@ mod tests {
                     min_samples: 8,
                     ..RuntimeGatewayAdaptiveRoutingConfig::default()
                 },
+                diagnostic_seed: 1,
                 actual_model: "slow".to_string(),
                 continuation_owner_model: None,
                 candidates: vec!["slow".to_string(), "fast".to_string()],
@@ -322,6 +366,7 @@ mod tests {
                     shadow_mode: false,
                     ..RuntimeGatewayAdaptiveRoutingConfig::default()
                 },
+                diagnostic_seed: 1,
                 actual_model: "actual".to_string(),
                 continuation_owner_model: Some("owner".to_string()),
                 candidates: vec!["other".to_string()],
@@ -332,5 +377,27 @@ mod tests {
         assert_eq!(decision.actual_model, "actual");
         assert_eq!(decision.recommended_model.as_deref(), Some("owner"));
         assert_eq!(decision.override_reason, "continuation_affinity");
+    }
+
+    #[test]
+    fn adaptive_exploration_is_deterministic_and_can_route_unsampled_candidates() {
+        let decision =
+            runtime_gateway_adaptive_shadow_decision(RuntimeGatewayAdaptiveShadowInput {
+                config: RuntimeGatewayAdaptiveRoutingConfig {
+                    enabled: true,
+                    shadow_mode: false,
+                    exploration_rate_bps: 10_000,
+                    ..RuntimeGatewayAdaptiveRoutingConfig::default()
+                },
+                diagnostic_seed: 7,
+                actual_model: "a".to_string(),
+                continuation_owner_model: None,
+                candidates: vec!["a".to_string(), "b".to_string()],
+                quota_blocked_models: Vec::new(),
+                quality: BTreeMap::new(),
+            });
+
+        assert_eq!(decision.recommended_model.as_deref(), Some("b"));
+        assert_eq!(decision.override_reason, "adaptive_exploration");
     }
 }

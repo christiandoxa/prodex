@@ -1,6 +1,24 @@
 use std::{error::Error, fmt};
 
-use prodex_domain::{IdempotencyKey, ReservationRecord, UsageAmount, VirtualKeyId};
+use prodex_domain::{BudgetSnapshot, IdempotencyKey, ReservationRecord, UsageAmount, VirtualKeyId};
+use prodex_storage::TenantStorageKey;
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ExpiredReservationCandidate {
+    pub storage_key: TenantStorageKey,
+    pub snapshot: BudgetSnapshot,
+    pub record: ReservationRecord,
+}
+
+impl fmt::Debug for ExpiredReservationCandidate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExpiredReservationCandidate")
+            .field("storage_key", &"<redacted>")
+            .field("snapshot", &"<redacted>")
+            .field("record", &"<redacted>")
+            .finish()
+    }
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum ReserveOutcome {

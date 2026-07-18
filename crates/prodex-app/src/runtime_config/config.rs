@@ -85,6 +85,11 @@ impl runtime_config::RuntimeConfig {
         });
         proxy_policy = proxy_policy.with_effective_preset(preset);
         let mut config = Self::parse(&mut parser, runtime_policy.as_ref(), &proxy_policy);
+        config.gateway.adaptive_routing = runtime_gateway_adaptive_routing_config(
+            loaded_policy
+                .as_ref()
+                .map(|policy| &policy.gateway.adaptive_routing),
+        );
         config.governance_policy = loaded_policy
             .as_ref()
             .map(|policy| policy.governance.clone())
@@ -516,6 +521,7 @@ impl runtime_config::RuntimeConfig {
             replica_count: parser.positive_u16("PRODEX_GATEWAY_REPLICA_COUNT", 1),
             require_multi_replica_accounting_checks: parser
                 .strict_bool("PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS", false),
+            adaptive_routing: Default::default(),
             launch: runtime_config::RuntimeGatewayLaunchEnvironment::default(),
         };
         let gemini = Self::parse_gemini(parser);
@@ -763,5 +769,23 @@ impl runtime_config::RuntimeConfig {
             live_model,
             sticky_fresh_oauth,
         }
+    }
+}
+
+fn runtime_gateway_adaptive_routing_config(
+    settings: Option<&prodex_runtime_policy::RuntimePolicyAdaptiveRoutingSettings>,
+) -> runtime_proxy_crate::RuntimeGatewayAdaptiveRoutingConfig {
+    let Some(settings) = settings else {
+        return Default::default();
+    };
+    runtime_proxy_crate::RuntimeGatewayAdaptiveRoutingConfig {
+        enabled: settings.enabled.unwrap_or(false),
+        shadow_mode: settings.shadow_mode.unwrap_or(true),
+        window_size: settings.window_size.unwrap_or(128),
+        min_samples: settings.min_samples.unwrap_or(8),
+        exploration_rate_bps: settings
+            .exploration_rate
+            .map(|rate| (rate * 10_000.0).round() as u16)
+            .unwrap_or_default(),
     }
 }

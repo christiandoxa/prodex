@@ -214,6 +214,12 @@ pub fn classify_canonical_route(target: &CanonicalRequestTarget) -> GatewayHttpR
         return GatewayHttpRouteKind::ControlPlane;
     }
     let path = canonical_control_plane_path(target.path());
+    if matches!(
+        path.as_ref(),
+        "/admin/auth/login" | "/admin/auth/callback" | "/admin/auth/logout"
+    ) {
+        return GatewayHttpRouteKind::ControlPlane;
+    }
     match path.as_ref() {
         "/livez" => GatewayHttpRouteKind::HealthLive,
         "/readyz" => GatewayHttpRouteKind::HealthReady,
@@ -400,7 +406,8 @@ fn admin_operation_for_path(
             | "classification-rules"
             | "provider-registries"
             | "routing-scores"
-            | "execution-approvals",
+            | "execution-approvals"
+            | "break-glass-approvals",
             ..,
         ] => Some(GatewayControlPlaneOperation::PolicyPublish),
         ["sessions", _, "revoke"] => Some(GatewayControlPlaneOperation::PolicyPublish),
@@ -415,6 +422,10 @@ fn admin_operation_for_path(
         }
         ["audit", "exports"] | ["audit", "exports", ..] => {
             Some(GatewayControlPlaneOperation::AuditExport)
+        }
+        ["audit", "retention", "holds"] => Some(GatewayControlPlaneOperation::PolicyPublish),
+        ["audit", "retention", "holds", ..] if method == GatewayHttpMethod::Delete => {
+            Some(GatewayControlPlaneOperation::AuditRetentionPurge)
         }
         ["audit", "retention"] | ["audit", "retention", ..] => {
             Some(GatewayControlPlaneOperation::AuditRetentionPurge)

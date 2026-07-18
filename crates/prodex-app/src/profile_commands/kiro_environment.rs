@@ -5,6 +5,12 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub(super) fn discover_kiro_database_path() -> Result<PathBuf> {
+    if let Some(path) = env::var_os("KIRO_TEST_DB_PATH") {
+        let candidate = PathBuf::from(path);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
     for variable in ["KIRO_DATA_DIR", "Q_CLI_DATA_DIR"] {
         if let Some(path) = env::var_os(variable) {
             let candidate = PathBuf::from(path).join("data.sqlite3");
@@ -38,9 +44,15 @@ pub(super) fn discover_kiro_database_path() -> Result<PathBuf> {
 
 pub(crate) fn kiro_cli_data_dir_env(data_dir: &Path) -> Vec<(OsString, OsString)> {
     let value = data_dir.as_os_str().to_os_string();
+    // Native Kiro uses the direct database override; keep both directory variables for older
+    // Kiro and Amazon Q builds.
     vec![
         (OsString::from("KIRO_DATA_DIR"), value.clone()),
         (OsString::from("Q_CLI_DATA_DIR"), value),
+        (
+            OsString::from("KIRO_TEST_DB_PATH"),
+            data_dir.join("data.sqlite3").into_os_string(),
+        ),
     ]
 }
 
@@ -53,6 +65,8 @@ mod tests {
         let env = kiro_cli_data_dir_env(Path::new("/tmp/kiro-data"));
         assert_eq!(env[0].0, "KIRO_DATA_DIR");
         assert_eq!(env[1].0, "Q_CLI_DATA_DIR");
+        assert_eq!(env[2].0, "KIRO_TEST_DB_PATH");
         assert_eq!(env[0].1, env[1].1);
+        assert_eq!(env[2].1, "/tmp/kiro-data/data.sqlite3");
     }
 }

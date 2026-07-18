@@ -6,7 +6,8 @@ use super::local_rewrite_transport_copilot::{
 };
 use super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_gateway_cost_for_request,
-    runtime_provider_gateway_spend_event, runtime_provider_label, runtime_provider_model_from_body,
+    runtime_provider_gateway_pricing_model, runtime_provider_gateway_spend_event,
+    runtime_provider_label, runtime_provider_model_from_body,
     runtime_provider_request_ledger_message,
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
@@ -304,6 +305,17 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         .lock()
         .map(|load| load.clone())
         .unwrap_or_default();
+    let pricing_model = runtime_provider_gateway_pricing_model(
+        &shared.gateway_route_aliases,
+        &route_load,
+        request_id,
+        &request_body_for_spend,
+        model.as_deref().unwrap_or("unknown"),
+    );
+    let governed_cost = shared
+        .governed_pricing
+        .as_ref()
+        .and_then(|pricing| pricing.cost_for_model(provider_kind.provider_id(), &pricing_model));
     let cost = runtime_provider_gateway_cost_for_request(
         provider_kind,
         &shared.gateway_route_aliases,
@@ -311,6 +323,7 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
         request_id,
         &request_body_for_spend,
         model.as_deref().unwrap_or("unknown"),
+        governed_cost,
     );
     emit_runtime_gateway_spend_event(
         shared,
@@ -663,141 +676,5 @@ fn runtime_local_rewrite_authorization_is_gateway_credential(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn openai_standard_provider_upstream_url_uses_contract_formats() {
-        assert_eq!(
-            runtime_openai_standard_provider_upstream_url(
-                RuntimeProviderBridgeKind::OpenAiResponses,
-                "https://upstream.test/v1",
-                "/v1",
-                "/v1/responses"
-            ),
-            "https://upstream.test/v1/responses"
-        );
-        assert_eq!(
-            runtime_openai_standard_provider_upstream_url(
-                RuntimeProviderBridgeKind::DeepSeek,
-                "https://upstream.test/v1",
-                "/v1",
-                "/v1/responses"
-            ),
-            "https://upstream.test/v1/chat/completions"
-        );
-        assert_eq!(
-            runtime_openai_standard_provider_upstream_url(
-                RuntimeProviderBridgeKind::Copilot,
-                "https://upstream.test/v1",
-                "/v1",
-                "/v1/chat/completions"
-            ),
-            "https://upstream.test/v1/chat/completions"
-        );
-        for path in [
-            "/v1/embeddings",
-            "/v1/images/generations",
-            "/v1/audio/transcriptions",
-            "/v1/batches",
-            "/v1/rerank",
-            "/v1/a2a",
-            "/v1/messages",
-        ] {
-            assert_eq!(
-                runtime_openai_standard_provider_upstream_url(
-                    RuntimeProviderBridgeKind::OpenAiResponses,
-                    "https://upstream.test/v1",
-                    "/v1",
-                    path
-                ),
-                format!("https://upstream.test{path}")
-            );
-        }
-    }
-
-    #[test]
-    fn anthropic_messages_upstream_url_uses_native_endpoint() {
-        assert_eq!(
-            runtime_anthropic_messages_upstream_url("https://api.anthropic.com/v1", "/v1"),
-            "https://api.anthropic.com/v1/messages"
-        );
-    }
-
-    #[test]
-    fn local_rewrite_upstream_url_neutralizes_dot_segments_before_url_parsing_can_escape_base() {
-        assert_eq!(
-            runtime_local_rewrite_upstream_url(
-                "https://upstream.test/v1",
-                "/v1",
-                "/v1/../admin?x=1"
-            ),
-            "https://upstream.test/v1/%252e%252e/admin?x=1"
-        );
-        assert_eq!(
-            runtime_local_rewrite_upstream_url(
-                "https://upstream.test/v1",
-                "/v1",
-                "/v1/%2e%2e/admin"
-            ),
-            "https://upstream.test/v1/%252e%252e/admin"
-        );
-    }
-
-    #[test]
-    fn gemini_openai_compatible_url_uses_documented_chat_completions_endpoint() {
-        assert_eq!(
-            runtime_gemini_openai_compatible_upstream_url(
-                "https://generativelanguage.googleapis.com/v1beta"
-            ),
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-        );
-        assert_eq!(
-            runtime_gemini_openai_compatible_upstream_url(
-                "https://generativelanguage.googleapis.com/v1beta/openai/"
-            ),
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-        );
-    }
-
-    #[test]
-    fn api_key_attempts_rotate_start_and_include_all_keys() {
-        let api_keys = vec![
-            "first".to_string(),
-            "second".to_string(),
-            "third".to_string(),
-        ];
-
-        let attempts = runtime_local_rewrite_api_key_attempts_from_start(&api_keys, 1);
-
-        assert_eq!(
-            attempts,
-            vec![
-                ("api-key-2".to_string(), "second"),
-                ("api-key-3".to_string(), "third"),
-                ("api-key-1".to_string(), "first"),
-            ]
-        );
-    }
-
-    #[test]
-    fn single_api_key_attempt_uses_generic_label() {
-        let api_keys = vec!["only".to_string()];
-
-        let attempts = runtime_local_rewrite_api_key_attempts_from_start(&api_keys, 0);
-
-        assert_eq!(attempts, vec![("api-key".to_string(), "only")]);
-    }
-
-    #[test]
-    fn log_url_strips_query_fragment_and_userinfo() {
-        let url = runtime_local_rewrite_log_url(
-            "https://user:secret@example.test/v1/responses?access_token=secret#frag",
-        );
-        assert_eq!(url, "https://example.test/v1/responses");
-        assert_eq!(
-            runtime_local_rewrite_log_url("/v1/responses?key=secret"),
-            "/v1/responses"
-        );
-    }
-}
+#[path = "local_rewrite_transport/tests/url.rs"]
+mod tests;

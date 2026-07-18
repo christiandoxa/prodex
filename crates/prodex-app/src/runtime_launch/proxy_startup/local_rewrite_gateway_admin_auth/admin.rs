@@ -7,6 +7,7 @@ use super::super::local_rewrite_gateway_store_types::{
 use super::super::*;
 use super::token_claims::*;
 
+#[derive(Clone)]
 pub(in super::super) struct RuntimeGatewayAdminAuth {
     pub(in super::super) name: String,
     pub(in super::super) role: RuntimeGatewayAdminRole,
@@ -18,16 +19,19 @@ pub(in super::super) struct RuntimeGatewayAdminAuth {
     pub(in super::super) allowed_key_prefixes: Vec<String>,
 }
 
+#[derive(Clone)]
 pub(in super::super) struct RuntimeGatewayAdminAuthentication {
     pub(in super::super) auth: RuntimeGatewayAdminAuth,
     pub(in super::super) evidence: RuntimeGatewayAdminCredentialEvidence,
 }
 
+#[derive(Clone)]
 pub(in super::super) enum RuntimeGatewayAdminCredentialEvidence {
     Principal,
     Oidc(Box<RuntimeGatewayOidcAdminCredentialEvidence>),
 }
 
+#[derive(Clone)]
 pub(in super::super) struct RuntimeGatewayOidcAdminCredentialEvidence {
     pub(in super::super) token: RuntimeGatewayVerifiedOidcToken,
     pub(in super::super) subject_name: String,
@@ -48,6 +52,13 @@ pub(in super::super) fn runtime_gateway_admin_auth(
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> Option<RuntimeGatewayAdminAuthentication> {
+    if let Some(auth) =
+        super::super::local_rewrite_gateway_browser::runtime_gateway_browser_session_auth(
+            captured, shared,
+        )
+    {
+        return Some(auth);
+    }
     if let Some(auth) = runtime_gateway_oidc_admin_auth(captured, shared) {
         return Some(auth);
     }
@@ -86,6 +97,14 @@ pub(super) fn runtime_gateway_oidc_admin_auth(
     let authorization = runtime_gateway_header(captured, "authorization")?;
     let token = runtime_gateway_authorization_bearer_token(authorization)?;
     let token = runtime_gateway_verify_oidc_token(token, config, shared).ok()?;
+    runtime_gateway_oidc_admin_auth_from_verified(token, config, shared)
+}
+
+pub(in super::super) fn runtime_gateway_oidc_admin_auth_from_verified(
+    token: RuntimeGatewayVerifiedOidcToken,
+    config: &RuntimeGatewayOidcConfig,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Option<RuntimeGatewayAdminAuthentication> {
     let claims = &token.claims;
     let name = runtime_gateway_oidc_admin_name(claims, config)?;
     let claimed_tenant_id =

@@ -14,7 +14,8 @@ use prodex_domain::{
     TenantId,
 };
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderEndpoint, ProviderId, provider_adapter,
+    ProviderAdapterContract, ProviderEndpoint, ProviderId, ProviderModelCost, provider_adapter,
+    provider_model_catalog,
 };
 use prodex_provider_spi::{
     GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute, GovernedRoutingPlan,
@@ -25,7 +26,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-const RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION: u32 = 1;
+const RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION: u32 = 2;
+const RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION: u32 = 1;
+const RUNTIME_GATEWAY_ROUTING_SCORES_SCHEMA_VERSION: u32 = 1;
+const MAX_RUNTIME_GATEWAY_PROVIDER_PRICED_MODELS: usize = 1_024;
 pub(super) const MAX_RUNTIME_GATEWAY_PROVIDER_REGISTRY_ARTIFACT_BYTES: usize = 1024 * 1024;
 const MAX_RUNTIME_GATEWAY_PROVIDER_REGISTRY_TENANTS: usize = 64;
 
@@ -61,10 +65,28 @@ struct RuntimeGatewayProviderRegistryDescriptorArtifact {
     maximum_classification: DataClassification,
     retention_seconds: u32,
     training_use: bool,
+    #[serde(default)]
+    model_costs: BTreeMap<String, RuntimeGatewayProviderModelCostArtifact>,
     cost: u16,
     latency: u16,
     risk: u16,
     priority: u16,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeGatewayProviderModelCostArtifact {
+    input_cost_per_million_microusd: Option<u64>,
+    output_cost_per_million_microusd: Option<u64>,
+}
+
+impl RuntimeGatewayProviderModelCostArtifact {
+    fn runtime_cost(self) -> ProviderModelCost {
+        ProviderModelCost {
+            input_cost_per_million_microusd: self.input_cost_per_million_microusd,
+            output_cost_per_million_microusd: self.output_cost_per_million_microusd,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -103,6 +125,7 @@ struct RuntimeGatewayCompiledProviderDescriptor {
     maximum_classification: DataClassification,
     retention_seconds: u32,
     training_use: bool,
+    model_costs: Arc<BTreeMap<String, ProviderModelCost>>,
     cost: u16,
     latency: u16,
     risk: u16,
@@ -112,9 +135,30 @@ struct RuntimeGatewayCompiledProviderDescriptor {
 #[derive(Clone)]
 pub(super) struct RuntimeGatewayGovernedProviderRegistrySnapshot {
     revision: u64,
+    authoritative_pricing: bool,
     attached_provider: ProviderId,
     projected_credential: Option<RuntimeProjectedProviderCredential>,
     descriptors: Vec<RuntimeGatewayCompiledProviderDescriptor>,
+}
+
+#[derive(Clone)]
+pub(super) struct RuntimeGatewayProviderPricing {
+    provider: ProviderId,
+    revision: u64,
+    model_costs: Arc<BTreeMap<String, ProviderModelCost>>,
+}
+
+impl RuntimeGatewayProviderPricing {
+    pub(super) fn cost_for_model(
+        &self,
+        provider: ProviderId,
+        model: &str,
+    ) -> Option<ProviderModelCost> {
+        if provider != self.provider || self.revision == 0 {
+            return None;
+        }
+        runtime_gateway_model_cost(&self.model_costs, model)
+    }
 }
 
 #[derive(Clone)]
@@ -186,6 +230,19 @@ impl RuntimeGatewayGovernedProviderRegistrySnapshot {
         self.descriptors
             .iter()
             .map(|descriptor| descriptor.provider)
+    }
+
+    pub(super) fn has_authoritative_pricing(&self) -> bool {
+        self.authoritative_pricing
+    }
+
+    pub(super) fn reservation_cost_for_model(&self, model: &str) -> Option<ProviderModelCost> {
+        self.authoritative_pricing.then_some(())?;
+        self.descriptors
+            .iter()
+            .filter(|descriptor| descriptor.enabled && descriptor.executable && !descriptor.revoked)
+            .filter_map(|descriptor| runtime_gateway_model_cost(&descriptor.model_costs, model))
+            .reduce(max_provider_model_cost)
     }
 
     pub(super) fn runtime_profile_name(&self, provider: ProviderId) -> &str {
@@ -314,6 +371,54 @@ impl RuntimeGatewayGovernedProviderRegistrySnapshot {
             upstream_base_url,
         })
     }
+
+    pub(super) fn pricing_for_route(
+        &self,
+        route: &GovernedRoute,
+        endpoint: ProviderEndpoint,
+    ) -> Option<RuntimeGatewayProviderPricing> {
+        let descriptor = self.route_descriptor(route, endpoint)?;
+        (!descriptor.model_costs.is_empty()).then(|| RuntimeGatewayProviderPricing {
+            provider: descriptor.provider,
+            revision: descriptor.pricing_revision,
+            model_costs: Arc::clone(&descriptor.model_costs),
+        })
+    }
+}
+
+fn runtime_gateway_model_cost(
+    model_costs: &BTreeMap<String, ProviderModelCost>,
+    model: &str,
+) -> Option<ProviderModelCost> {
+    model_costs
+        .iter()
+        .find_map(|(configured, cost)| {
+            configured
+                .eq_ignore_ascii_case(model.trim())
+                .then_some(*cost)
+        })
+        .or_else(|| model_costs.get("*").copied())
+}
+
+fn max_provider_model_cost(left: ProviderModelCost, right: ProviderModelCost) -> ProviderModelCost {
+    ProviderModelCost {
+        input_cost_per_million_microusd: max_optional_cost(
+            left.input_cost_per_million_microusd,
+            right.input_cost_per_million_microusd,
+        ),
+        output_cost_per_million_microusd: max_optional_cost(
+            left.output_cost_per_million_microusd,
+            right.output_cost_per_million_microusd,
+        ),
+    }
+}
+
+fn max_optional_cost(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
 }
 
 fn runtime_gateway_projected_provider_options(
@@ -438,7 +543,7 @@ pub(super) fn compile_runtime_gateway_routing_scores_artifact(
     }
     let artifact = serde_json::from_slice::<RuntimeGatewayRoutingScoresArtifact>(artifact)
         .context("routing scores artifact schema is invalid")?;
-    if artifact.schema_version != RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
+    if artifact.schema_version != RUNTIME_GATEWAY_ROUTING_SCORES_SCHEMA_VERSION
         || artifact.revision == 0
     {
         anyhow::bail!("routing scores artifact header is invalid");
@@ -580,6 +685,7 @@ pub(super) fn runtime_gateway_bootstrap_provider_registry_snapshot(
                     .map(|settings| settings.retention_seconds)
                     .unwrap_or(u32::MAX),
                 training_use: provider_settings.is_none_or(|settings| settings.training_use),
+                model_costs: runtime_gateway_builtin_model_costs(context.provider),
                 cost: 5_000,
                 latency: 5_000,
                 risk: match trust_tier {
@@ -611,12 +717,29 @@ pub(super) fn compile_runtime_gateway_provider_registry_artifact(
     compile_runtime_gateway_provider_registry(artifact, &context)
 }
 
+pub(super) fn compile_runtime_gateway_provider_registry_artifact_for_deployment(
+    artifact: &[u8],
+    provider_options: &RuntimeLocalRewriteProviderOptions,
+    credential: Option<&RuntimeProjectedProviderCredential>,
+    deployment_mode: prodex_config::GovernanceMode,
+) -> Result<RuntimeGatewayGovernedProviderRegistrySnapshot> {
+    let snapshot =
+        compile_runtime_gateway_provider_registry_artifact(artifact, provider_options, credential)?;
+    if deployment_mode.is_enforcing() && !snapshot.has_authoritative_pricing() {
+        anyhow::bail!("enforcing provider registry requires authoritative model pricing");
+    }
+    Ok(snapshot)
+}
+
 fn compile_runtime_gateway_provider_registry(
     artifact: RuntimeGatewayProviderRegistryArtifact,
     context: &RuntimeGatewayAttachedProviderRegistryContext,
 ) -> Result<RuntimeGatewayGovernedProviderRegistrySnapshot> {
-    if artifact.schema_version != RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
-        || artifact.revision == 0
+    if !matches!(
+        artifact.schema_version,
+        RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION
+            | RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION
+    ) || artifact.revision == 0
         || artifact.pricing_revision == 0
         || artifact.descriptors.is_empty()
         || artifact.descriptors.len() > MAX_GOVERNED_ROUTING_CANDIDATES
@@ -624,6 +747,8 @@ fn compile_runtime_gateway_provider_registry(
         anyhow::bail!("provider registry artifact header is invalid");
     }
 
+    let authoritative_pricing =
+        artifact.schema_version == RUNTIME_GATEWAY_PROVIDER_REGISTRY_SCHEMA_VERSION;
     let mut descriptors = Vec::with_capacity(artifact.descriptors.len());
     for (index, descriptor) in artifact.descriptors.into_iter().enumerate() {
         if descriptor.revision == 0
@@ -644,6 +769,11 @@ fn compile_runtime_gateway_provider_registry(
             ]
             .into_iter()
             .any(|value| value > prodex_provider_spi::ROUTING_SCORE_SCALE)
+            || descriptor.model_costs.len() > MAX_RUNTIME_GATEWAY_PROVIDER_PRICED_MODELS
+            || (authoritative_pricing
+                && !runtime_gateway_model_costs_are_authoritative(&descriptor.model_costs))
+            || (!descriptor.model_costs.is_empty()
+                && !runtime_gateway_model_costs_are_authoritative(&descriptor.model_costs))
         {
             anyhow::bail!("provider registry descriptor is invalid");
         }
@@ -706,6 +836,11 @@ fn compile_runtime_gateway_provider_registry(
             }
             regions.push(region);
         }
+        let model_costs = descriptor
+            .model_costs
+            .into_iter()
+            .map(|(model, cost)| (model, cost.runtime_cost()))
+            .collect();
         descriptors.push(RuntimeGatewayCompiledProviderDescriptor {
             revision: descriptor.revision,
             pricing_revision: descriptor.pricing_revision,
@@ -723,6 +858,7 @@ fn compile_runtime_gateway_provider_registry(
             maximum_classification: descriptor.maximum_classification,
             retention_seconds: descriptor.retention_seconds,
             training_use: descriptor.training_use,
+            model_costs: Arc::new(model_costs),
             cost: descriptor.cost,
             latency: descriptor.latency,
             risk: descriptor.risk,
@@ -738,10 +874,82 @@ fn compile_runtime_gateway_provider_registry(
     }
     Ok(RuntimeGatewayGovernedProviderRegistrySnapshot {
         revision: artifact.revision,
+        authoritative_pricing,
         attached_provider: context.provider,
         projected_credential: context.projected_credential.clone(),
         descriptors,
     })
+}
+
+fn runtime_gateway_model_costs_are_authoritative(
+    model_costs: &BTreeMap<String, RuntimeGatewayProviderModelCostArtifact>,
+) -> bool {
+    !model_costs.is_empty()
+        && model_costs.contains_key("*")
+        && model_costs.iter().all(|(model, cost)| {
+            !model.trim().is_empty()
+                && model.len() <= 128
+                && (cost.input_cost_per_million_microusd.is_some()
+                    || cost.output_cost_per_million_microusd.is_some())
+        })
+        && !model_costs.keys().enumerate().any(|(index, model)| {
+            model_costs
+                .keys()
+                .take(index)
+                .any(|previous| previous.eq_ignore_ascii_case(model))
+        })
+}
+
+fn runtime_gateway_builtin_model_costs(
+    provider: ProviderId,
+) -> BTreeMap<String, RuntimeGatewayProviderModelCostArtifact> {
+    let mut model_costs = BTreeMap::new();
+    let fallback = provider_model_catalog(provider)
+        .iter()
+        .map(|model| model.cost())
+        .fold(ProviderModelCost::default(), max_provider_model_cost);
+    let fallback_input = fallback.input_cost_per_million_microusd.unwrap_or_default();
+    let fallback_output = fallback
+        .output_cost_per_million_microusd
+        .unwrap_or_default();
+    for model in provider_model_catalog(provider) {
+        let cost = model.cost();
+        let artifact = RuntimeGatewayProviderModelCostArtifact {
+            input_cost_per_million_microusd: Some(
+                cost.input_cost_per_million_microusd
+                    .unwrap_or(fallback_input),
+            ),
+            output_cost_per_million_microusd: Some(
+                cost.output_cost_per_million_microusd
+                    .unwrap_or(fallback_output),
+            ),
+        };
+        insert_case_insensitive_model_cost(&mut model_costs, model.id, artifact);
+        for alias in model.aliases {
+            insert_case_insensitive_model_cost(&mut model_costs, alias, artifact);
+        }
+    }
+    model_costs.insert(
+        "*".to_string(),
+        RuntimeGatewayProviderModelCostArtifact {
+            input_cost_per_million_microusd: Some(fallback_input),
+            output_cost_per_million_microusd: Some(fallback_output),
+        },
+    );
+    model_costs
+}
+
+fn insert_case_insensitive_model_cost(
+    model_costs: &mut BTreeMap<String, RuntimeGatewayProviderModelCostArtifact>,
+    model: &str,
+    cost: RuntimeGatewayProviderModelCostArtifact,
+) {
+    if !model_costs
+        .keys()
+        .any(|configured| configured.eq_ignore_ascii_case(model))
+    {
+        model_costs.insert(model.to_string(), cost);
+    }
 }
 
 fn artifact_descriptors_duplicate_provider(
@@ -794,6 +1002,7 @@ mod tests {
                 maximum_classification: DataClassification::Confidential,
                 retention_seconds: 0,
                 training_use: false,
+                model_costs: runtime_gateway_builtin_model_costs(context.provider),
                 cost: 2_000,
                 latency: 3_000,
                 risk: 1_000,
@@ -859,12 +1068,65 @@ mod tests {
                 maximum_classification: DataClassification::Confidential,
                 retention_seconds: 0,
                 training_use: false,
+                model_costs: runtime_gateway_builtin_model_costs(ProviderId::Anthropic),
                 cost: 5_000,
                 latency: 5_000,
                 risk: 5_000,
                 priority: 5_000,
             });
         assert!(compile(&unsupported).is_err());
+    }
+
+    #[test]
+    fn governed_pricing_is_revision_pinned_and_required_when_enforcing() {
+        let mut governed = artifact();
+        governed.descriptors[0].model_costs = BTreeMap::from([
+            (
+                "*".to_string(),
+                RuntimeGatewayProviderModelCostArtifact {
+                    input_cost_per_million_microusd: Some(90),
+                    output_cost_per_million_microusd: Some(100),
+                },
+            ),
+            (
+                "governed-model".to_string(),
+                RuntimeGatewayProviderModelCostArtifact {
+                    input_cost_per_million_microusd: Some(30),
+                    output_cost_per_million_microusd: Some(40),
+                },
+            ),
+        ]);
+        let snapshot = compile(&governed).unwrap();
+        assert!(snapshot.has_authoritative_pricing());
+        assert_eq!(
+            snapshot.reservation_cost_for_model("governed-model"),
+            Some(ProviderModelCost {
+                input_cost_per_million_microusd: Some(30),
+                output_cost_per_million_microusd: Some(40),
+            })
+        );
+        assert_eq!(
+            snapshot.reservation_cost_for_model("unknown-model"),
+            Some(ProviderModelCost {
+                input_cost_per_million_microusd: Some(90),
+                output_cost_per_million_microusd: Some(100),
+            })
+        );
+
+        let mut legacy = governed;
+        legacy.schema_version = RUNTIME_GATEWAY_PROVIDER_REGISTRY_LEGACY_SCHEMA_VERSION;
+        legacy.descriptors[0].model_costs.clear();
+        let encoded = serde_json::to_vec(&legacy).unwrap();
+        assert!(compile(&legacy).is_ok());
+        assert!(
+            compile_runtime_gateway_provider_registry_artifact_for_deployment(
+                &encoded,
+                &provider(),
+                None,
+                prodex_config::GovernanceMode::BankEnforce,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -894,6 +1156,7 @@ mod tests {
                 maximum_classification: DataClassification::Confidential,
                 retention_seconds: 0,
                 training_use: false,
+                model_costs: runtime_gateway_builtin_model_costs(ProviderId::Anthropic),
                 cost: 0,
                 latency: 0,
                 risk: 0,
