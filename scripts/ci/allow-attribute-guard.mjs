@@ -6,7 +6,7 @@ import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
-  dead_code: 10,
+  dead_code: 5,
   "unused_imports": 8,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
@@ -14,18 +14,13 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "clippy::type_complexity": 1,
 });
 
-export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 31;
+export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 24;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
-  "dead_code|crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_error_message_from_parts(",
-  "dead_code|crates/prodex-app/src/runtime_proxy/lifecycle.rs|pub(crate) fn try_acquire_runtime_proxy_active_request_slot(",
   "dead_code|crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) fn new(",
   "dead_code|crates/prodex-app/src/runtime_proxy/selection_plan.rs|provider_priority: usize,",
-  "dead_code|crates/prodex-app/src/runtime_proxy/selection_plan.rs|pub(crate) fn runtime_prompt_cache_affinity_sort_key(",
   "dead_code|crates/prodex-app/src/runtime_proxy/websocket_message/auth.rs|pub(in crate::runtime_proxy) fn runtime_profile_auth_summary_for_selection(",
-  "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_sse.rs|pub(super) fn new(",
   "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs|impl RuntimeLocalRewriteRequestContext {",
-  "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/provider_tools.rs|pub(super) fn runtime_provider_flatten_namespace_tool_name(namespace: &str, name: &str) -> String {",
   "dead_code|crates/prodex-app/src/lib.rs|mod runtime_kiro_acp;",
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
   "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use queue::note_runtime_probe_refresh_progress;",
@@ -86,9 +81,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-app/src/app_commands.rs|pub(crate) fn resolve_runtime_launch_profile_name(",
   "crates/prodex-app/src/app_commands/selection.rs|pub(crate) fn required_main_window_snapshot(",
   "crates/prodex-app/src/profile_commands/kiro.rs|pub(crate) fn read_kiro_auth_secret(codex_home: &Path) -> Result<KiroAuthSecret> {",
-  "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_sse_response_parts_from_responses_sse_bytes(",
-  "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_anthropic_sse_response_parts_from_message_value(",
-  "crates/prodex-app/src/runtime_anthropic.rs|pub(super) fn runtime_request_for_anthropic_server_tool_followup(",
   "crates/prodex-app/src/runtime_background/probe_refresh/worker.rs|pub(crate) fn runtime_probe_refresh_take_next_job(",
   "crates/prodex-app/src/runtime_persistence/continuation_store.rs|pub(crate) fn save_runtime_continuation_journal(",
   "crates/prodex-app/src/runtime_proxy/lineage/release.rs|pub(crate) fn clear_runtime_stale_previous_response_binding(",
@@ -101,9 +93,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-app/src/runtime_store/usage_snapshots.rs|pub(crate) fn save_runtime_usage_snapshots(",
   "crates/prodex-runtime-anthropic/src/output.rs|pub fn runtime_anthropic_response_from_json_value(",
   "crates/prodex-runtime-anthropic/src/output/buffered_sse.rs|pub fn runtime_anthropic_response_from_sse_bytes(",
-  "crates/prodex-secret-store/src/locations.rs|pub fn auth_json_keyring_account(codex_home: impl AsRef<Path>) -> String {",
-  "crates/prodex-secret-store/src/locations.rs|pub fn auth_json_location_for_backend(",
-  "crates/prodex-secret-store/src/locations.rs|pub fn describe_secret_location(location: &SecretLocation) -> String {",
   "crates/prodex-secret-store/src/model.rs|Keyring {",
   "crates/prodex-secret-store/src/model.rs|fn delete(&self, location: &SecretLocation) -> Result<(), SecretError>;",
   "crates/prodex-secret-store/src/model.rs|pub fn bytes(value: impl Into<Vec<u8>>) -> Self {",
@@ -113,7 +102,6 @@ export const TEST_ONLY_DEAD_CODE_ALLOW_LOCATION_KEYS = Object.freeze([
   "crates/prodex-secret-store/src/model.rs|pub fn read(&self, location: &SecretLocation) -> Result<Option<SecretValue>, SecretError> {",
   "crates/prodex-secret-store/src/model.rs|pub fn size_bytes(&self) -> u64 {",
   "crates/prodex-secret-store/src/model.rs|pub fn write(&self, location: &SecretLocation, value: SecretValue) -> Result<(), SecretError> {",
-  "crates/prodex-secret-store/src/selection.rs|pub fn into_manager(self) -> SecretManager<Self> {",
 ]);
 
 function parseArgs(argv) {

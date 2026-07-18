@@ -1017,7 +1017,7 @@ version = 2
 log_dir = " "
 
 [secrets]
-backend = "policy-secret-sentinel"
+projected_root = ""
 
 [runtime_proxy]
 worker_count = 0
@@ -1105,8 +1105,8 @@ fn runtime_policy_validation_single_error_rendering_stays_compatible() {
         ),
         (
             "secrets",
-            "version = 1\n[secrets]\nbackend = \"unknown\"",
-            "invalid secrets.backend in policy.toml",
+            "version = 1\n[secrets]\nprojected_root = \"\"\nprojected_provider = \"vault\"",
+            "secrets.projected_root in policy.toml cannot be empty",
         ),
         (
             "runtime proxy",
@@ -1167,7 +1167,7 @@ fn runtime_policy_validation_formatting_redacts_invalid_values() {
 version = 1
 
 [secrets]
-backend = "policy-secret-sentinel"
+projected_provider = "policy-secret-sentinel invalid"
 
 [gateway]
 base_url = "https://policy-secret-sentinel invalid"

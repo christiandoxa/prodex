@@ -49,7 +49,7 @@ fn runtime_proxy_join_workers_on_drop() -> bool {
     cfg!(test)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn try_acquire_runtime_proxy_active_request_slot(
     shared: &RuntimeRotationProxyShared,
     transport: &str,

@@ -11,7 +11,7 @@ use crate::types::{
     RuntimePolicyConfig, RuntimePolicyFile, RuntimePolicyRuntimeSettings,
     RuntimePolicySecretsSettings,
 };
-use crate::validate::{parse_secret_backend_kind, validate_runtime_policy_file};
+use crate::validate::validate_runtime_policy_file;
 
 pub fn load_runtime_policy_cached(root: &Path) -> Result<Option<RuntimePolicyConfig>> {
     if let Some(cached) = cached_policy_for(root) {
@@ -59,18 +59,6 @@ pub fn load_runtime_policy_from_root(root: &Path) -> Result<Option<RuntimePolicy
             .transpose()?,
     };
     let secrets = RuntimePolicySecretsSettings {
-        backend: parsed
-            .secrets
-            .backend
-            .as_deref()
-            .map(parse_secret_backend_kind)
-            .transpose()?,
-        keyring_service: parsed
-            .secrets
-            .keyring_service
-            .as_deref()
-            .filter(|value| !value.is_empty())
-            .map(str::to_string),
         production: parsed.secrets.production,
         projected_root: parsed
             .secrets

@@ -1,44 +1,10 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use prodex_domain::SecretRef;
-use secret_store::SecretBackendKind;
 use std::path::Path;
 
 use crate::types::RuntimePolicyFile;
 
-pub fn parse_secret_backend_kind(value: &str) -> Result<SecretBackendKind> {
-    value
-        .parse::<SecretBackendKind>()
-        .map_err(anyhow::Error::new)
-}
-
 pub(super) fn validate_secret_policy(policy: &RuntimePolicyFile, path: &Path) -> Result<()> {
-    let secret_backend = policy
-        .secrets
-        .backend
-        .as_deref()
-        .map(parse_secret_backend_kind)
-        .transpose()
-        .with_context(|| format!("invalid secrets.backend in {}", path.display()))?;
-    if secret_backend == Some(SecretBackendKind::Keyring)
-        && policy
-            .secrets
-            .keyring_service
-            .as_deref()
-            .is_none_or(str::is_empty)
-    {
-        bail!(
-            "secrets.keyring_service in {} is required when secrets.backend=keyring",
-            path.display()
-        );
-    }
-    if let Some(service) = policy.secrets.keyring_service.as_deref()
-        && (service.is_empty() || service.chars().any(char::is_whitespace))
-    {
-        bail!(
-            "secrets.keyring_service in {} must be non-empty without whitespace",
-            path.display()
-        );
-    }
     if let Some(root) = policy.secrets.projected_root.as_deref()
         && root.trim().is_empty()
     {

@@ -1,6 +1,6 @@
 use crate::{
     FileSecretBackend, KeyringSecretBackend, SecretBackend, SecretBackendKind, SecretError,
-    SecretLocation, SecretManager, SecretRevision, SecretRevisionBackend, SecretValue,
+    SecretLocation, SecretRevision, SecretRevisionBackend, SecretValue,
 };
 use std::fmt;
 
@@ -46,11 +46,6 @@ impl SecretBackendSelection {
             Self::File(_) => None,
             Self::Keyring(backend) => Some(backend.service()),
         }
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn into_manager(self) -> SecretManager<Self> {
-        SecretManager::new(self)
     }
 }
 

@@ -3238,7 +3238,6 @@ dependencies = [
  "prodex-core",
  "prodex-domain",
  "prodex-provider-core",
- "prodex-secret-store",
  "serde",
  "toml",
  "url",

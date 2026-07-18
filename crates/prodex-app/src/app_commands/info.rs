@@ -1,5 +1,4 @@
 use super::*;
-use redaction::redaction_redact_secret_like_text;
 
 #[cfg(test)]
 pub(crate) use prodex_app_reports::collect_info_runtime_load_summary_from_text;
@@ -297,82 +296,10 @@ pub(crate) fn runtime_logs_json_value() -> serde_json::Value {
     prodex_app_reports::runtime_logs_json_value(&directory, runtime_proxy_log_format().as_str())
 }
 
-pub(crate) fn configured_secret_backend_selection() -> Result<secret_store::SecretBackendSelection>
-{
-    let policy = runtime_policy_secrets();
-    let backend = env::var(PRODEX_SECRET_BACKEND_ENV)
-        .ok()
-        .map(|value| value.parse::<secret_store::SecretBackendKind>())
-        .transpose()
-        .map_err(anyhow::Error::new)?
-        .or_else(|| policy.as_ref().and_then(|policy| policy.backend))
-        .unwrap_or(secret_store::SecretBackendKind::File);
-    let keyring_service = env::var(PRODEX_SECRET_KEYRING_SERVICE_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            policy
-                .as_ref()
-                .and_then(|policy| policy.keyring_service.clone())
-        });
-    let selection = secret_store::SecretBackendSelection::from_kind(backend, keyring_service)
-        .map_err(anyhow::Error::new)?;
-    if let secret_store::SecretBackendSelection::Keyring(backend) = &selection
-        && !backend.is_supported()
-    {
-        anyhow::bail!("{}", backend.unsupported_reason());
-    }
-    Ok(selection)
-}
-
 pub(crate) fn format_secret_backend_summary() -> String {
-    match configured_secret_backend_selection() {
-        Ok(selection) => prodex_app_reports::format_secret_backend_summary_parts(
-            Some(selection.kind().as_str()),
-            selection.keyring_service(),
-            None,
-        ),
-        Err(err) => {
-            let error = secret_backend_redacted_error(&err);
-            prodex_app_reports::format_secret_backend_summary_parts(None, None, Some(&error))
-        }
-    }
+    prodex_app_reports::format_secret_backend_summary_parts(Some("file"), None, None)
 }
 
 pub(crate) fn secret_backend_json_value() -> serde_json::Value {
-    match configured_secret_backend_selection() {
-        Ok(selection) => prodex_app_reports::secret_backend_json_value_parts(
-            Some(selection.kind().as_str()),
-            selection.keyring_service(),
-            None,
-        ),
-        Err(err) => {
-            let error = secret_backend_redacted_error(&err);
-            prodex_app_reports::secret_backend_json_value_parts(None, None, Some(&error))
-        }
-    }
-}
-
-fn secret_backend_redacted_error(err: &anyhow::Error) -> String {
-    redaction_redact_secret_like_text(&err.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn secret_backend_error_redacts_secret_like_material() {
-        let err = anyhow::anyhow!(
-            "failed: Authorization: Bearer fixture-token-123 url=https://example.test?api_key=sk-fixture-123"
-        );
-
-        let message = secret_backend_redacted_error(&err);
-
-        assert!(message.contains("Authorization: Bearer <redacted>"));
-        assert!(message.contains("api_key=<redacted>"));
-        assert!(!message.contains("fixture-token-123"));
-        assert!(!message.contains("sk-fixture-123"));
-    }
+    prodex_app_reports::secret_backend_json_value_parts(Some("file"), None, None)
 }

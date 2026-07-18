@@ -16,7 +16,6 @@ prodex_authn = { workspace = true }
 prodex_core = { workspace = true }
 prodex_domain = { workspace = true }
 prodex_provider_core = { workspace = true }
-secret_store = { workspace = true }
 url = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
