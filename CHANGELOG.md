@@ -2,6 +2,13 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.312.0 - 2026-07-18
+
+### Misc
+
+- Remove unimplemented audited surfaces (`7636872`)
+- Harden audited desktop and dashboard paths (`d4b13cd`)
+
 ## 0.311.0 - 2026-07-18
 
 ### Misc
@@ -79,7 +86,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Avoid unauthenticated GitHub API requests (`c1caf4d`)
-
-## 0.300.0 - 2026-07-16
-
-- No grouped changes.
