@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.315.0 - 2026-07-18
+
+### CLI
+
+- Restore cross-profile desktop history (`6cb01a7`)
+
 ## 0.314.0 - 2026-07-18
 
 ### CLI
@@ -76,13 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add immutable implementation registry (`4591fbb`)
-
-## 0.303.0 - 2026-07-17
-
-### Runtime
-
-- Harden audited runtime and gateway features (`3171d4e`)
-
-### Deps
-
-- Remove unused postgres dependency (`e4e2684`)
