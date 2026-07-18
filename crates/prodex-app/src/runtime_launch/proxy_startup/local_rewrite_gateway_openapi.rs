@@ -78,9 +78,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     const COMPONENTS_DIGEST: &str =
-        "0793d38857e524a3a14fa77974ebaf7cc56d5a4b8afc9243de5faddbbbdbc3c0";
+        "e0991a23f7614724b050b2faeaebcb0065ad8f1e9a88449c374726ad983b8735";
     const DOCUMENT_DIGEST: &str =
-        "647257375d379cc0e5e9eb991dbe950f53317f16d446d615cb9d911f7ec5e2b4";
+        "19a58f1fe1476b31ffcd9f9ad23993d23d57d1b61f41f5581ef367b485da5d5f";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -225,6 +225,7 @@ mod tests {
             );
         }
         for schema in [
+            "GatewayRouteAdaptiveDecision",
             "GatewayRouteExplainRequest",
             "GatewayRouteExplainResponse",
             "GatewayRouteConstraintPolicy",
@@ -243,6 +244,7 @@ mod tests {
             .as_array()
             .unwrap();
         for field in [
+            "adaptive_decision",
             "diagnostic_seed",
             "hard_affinity_required",
             "hard_affinity_applied",
@@ -253,6 +255,10 @@ mod tests {
         ] {
             assert!(required.contains(&serde_json::json!(field)));
         }
+        assert_eq!(
+            schemas["GatewayRouteExplainResponse"]["properties"]["adaptive_decision"]["anyOf"][0]["$ref"],
+            "#/components/schemas/GatewayRouteAdaptiveDecision"
+        );
         assert_eq!(
             schemas["GatewayRouteExplainResponse"]["properties"]["policy_adjustments"]["items"]["$ref"],
             "#/components/schemas/GatewayRouteOutputAdjustment"
