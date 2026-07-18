@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.309.0 - 2026-07-18
+
+### Misc
+
+- Harden clients and enterprise gateway (`75568ba`)
+
 ## 0.308.0 - 2026-07-17
 
 ### CLI
@@ -76,13 +82,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Rotate past weekly-exhausted profiles (`3490f5d`)
-
-## 0.297.0 - 2026-07-16
-
-### CLI
-
-- Keep refresh lease records readable on Windows (`246a62b`)
-
-### Deps
-
-- Classify test-only dependencies (`54e3865`)
