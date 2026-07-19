@@ -125,6 +125,21 @@ pub(in super::super) fn runtime_gateway_verify_oidc_token(
         config,
         shared,
         &shared.gateway_oidc_jwks_snapshot,
+        true,
+    )
+}
+
+pub(in super::super) fn runtime_gateway_verify_oidc_logout_token(
+    token: &str,
+    config: &RuntimeGatewayOidcConfig,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<RuntimeGatewayVerifiedOidcToken> {
+    runtime_gateway_verify_oidc_token_with_snapshot(
+        token,
+        config,
+        shared,
+        &shared.gateway_oidc_jwks_snapshot,
+        false,
     )
 }
 
@@ -138,6 +153,7 @@ pub(in super::super) fn runtime_gateway_verify_workload_token(
         config,
         shared,
         &shared.gateway_workload_jwks_snapshot,
+        true,
     )
 }
 
@@ -146,6 +162,7 @@ fn runtime_gateway_verify_oidc_token_with_snapshot(
     config: &RuntimeGatewayOidcConfig,
     shared: &RuntimeLocalRewriteProxyShared,
     snapshot: &arc_swap::ArcSwapOption<super::RuntimeGatewayOidcJwksSnapshot>,
+    require_authentication_strength: bool,
 ) -> Result<RuntimeGatewayVerifiedOidcToken> {
     let header = decode_header(token).context("failed to decode gateway OIDC JWT header")?;
     let alg = runtime_gateway_oidc_algorithm(header.alg)?;
@@ -179,6 +196,7 @@ fn runtime_gateway_verify_oidc_token_with_snapshot(
         algorithm,
         kid,
         now_unix_ms,
+        require_authentication_strength,
     )
 }
 
@@ -189,6 +207,7 @@ fn runtime_gateway_verified_oidc_token(
     algorithm: JwtAlgorithm,
     key_id: String,
     now_unix_ms: u64,
+    require_authentication_strength: bool,
 ) -> Result<RuntimeGatewayVerifiedOidcToken> {
     let issuer = claims
         .get("iss")
@@ -196,10 +215,12 @@ fn runtime_gateway_verified_oidc_token(
         .ok_or_else(|| anyhow::anyhow!("gateway OIDC token is missing issuer"))?;
     let issuer = runtime_gateway_oidc_domain_issuer(issuer)?;
     runtime_gateway_require_oidc_audience(&claims, &config.audience)?;
-    runtime_gateway_require_oidc_authentication_strength(
-        &claims,
-        config.authentication_strength.as_deref(),
-    )?;
+    if require_authentication_strength {
+        runtime_gateway_require_oidc_authentication_strength(
+            &claims,
+            config.authentication_strength.as_deref(),
+        )?;
+    }
     let audience =
         Audience::new(config.audience.clone()).context("gateway OIDC token audience is invalid")?;
     let expires_at_unix_ms = runtime_gateway_oidc_numeric_date_ms(&claims, "exp")?

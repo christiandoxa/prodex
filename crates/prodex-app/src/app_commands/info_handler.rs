@@ -10,19 +10,20 @@ use terminal_ui::{
 };
 
 use crate::{
-    AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, RuntimeConfig,
+    AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, RuntimeConfig, codex_cli_version,
     collect_active_runtime_log_paths, collect_info_quota_aggregate,
     collect_info_runtime_load_summary, collect_info_token_usage_summary, collect_prodex_processes,
     collect_recent_runtime_log_paths, collect_runtime_broker_metrics_targets,
     collect_runtime_tuning_snapshot, estimate_info_runway, format_audit_logs_summary,
-    format_info_load_summary, format_info_pool_remaining, format_info_process_summary,
-    format_info_prodex_version, format_info_provider_capabilities_summary,
-    format_info_provider_summary, format_info_quota_data_summary, format_info_runway,
-    format_info_token_usage_summary, format_runtime_broker_metrics_targets,
-    format_runtime_logs_summary, format_runtime_policy_summary,
-    format_runtime_proxy_contract_summary, format_runtime_proxy_preset,
-    format_runtime_tuning_budgets, format_runtime_tuning_transport, format_runtime_tuning_workers,
-    format_secret_backend_summary, print_panel, runtime_policy_summary,
+    format_info_codex_version, format_info_load_summary, format_info_pool_remaining,
+    format_info_process_summary, format_info_prodex_version,
+    format_info_provider_capabilities_summary, format_info_provider_summary,
+    format_info_quota_data_summary, format_info_runway, format_info_token_usage_summary,
+    format_runtime_broker_metrics_targets, format_runtime_logs_summary,
+    format_runtime_policy_summary, format_runtime_proxy_contract_summary,
+    format_runtime_proxy_preset, format_runtime_tuning_budgets, format_runtime_tuning_transport,
+    format_runtime_tuning_workers, format_secret_backend_summary, print_panel,
+    runtime_policy_summary,
 };
 
 pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
@@ -33,7 +34,8 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
     let runtime_tuning = collect_runtime_tuning_snapshot(&runtime_config);
     let runtime_metrics_targets = collect_runtime_broker_metrics_targets(&paths);
     let now = Local::now().timestamp();
-    let version_summary = format_info_prodex_version(&paths)?;
+    let prodex_version_summary = format_info_prodex_version(&paths)?;
+    let codex_version_summary = format_info_codex_version(&paths, codex_cli_version())?;
     let quota = collect_info_quota_aggregate(&paths, &state, now);
     let processes = collect_prodex_processes();
     let runtime_logs = collect_active_runtime_log_paths(&processes);
@@ -101,7 +103,8 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             "Runtime transport".to_string(),
             format_runtime_tuning_transport(&runtime_tuning),
         ),
-        ("Prodex version".to_string(), version_summary),
+        ("Prodex version".to_string(), prodex_version_summary),
+        ("Codex version".to_string(), codex_version_summary),
         (
             "Prodex processes".to_string(),
             format_info_process_summary(&processes),

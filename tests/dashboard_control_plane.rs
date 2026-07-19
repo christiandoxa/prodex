@@ -376,6 +376,10 @@ fn dashboard_open_flag_invokes_xdg_browser_and_keeps_serving() {
     assert_eq!(health["status"], "ok");
     for _ in 0..80 {
         if let Ok(url) = fs::read_to_string(&opener_output) {
+            if url.trim().is_empty() {
+                thread::sleep(Duration::from_millis(50));
+                continue;
+            }
             assert_eq!(url.trim(), format!("http://127.0.0.1:{port}"));
             drop(server);
             let _ = fs::remove_dir_all(&root);

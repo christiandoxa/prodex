@@ -10,8 +10,10 @@ mod watch;
 
 pub(super) use self::adaptive_refresh::*;
 pub(super) use self::auth::*;
+pub(crate) use self::codex_openai_auth::codex_cli_version;
 use self::external_provider::{
     custom_model_provider_quota_info, fetch_agy_quota_info, fetch_anthropic_quota_info,
+    fetch_kiro_quota_info,
 };
 pub(super) use self::render::*;
 use self::virtual_provider::collect_virtual_quota_reports;
@@ -519,9 +521,9 @@ pub(crate) fn fetch_profile_quota(
         ProfileProvider::Copilot { host, login, .. } => Ok(ProviderQuotaSnapshot::Copilot(
             fetch_copilot_user_info_for_account(host, login)?,
         )),
-        ProfileProvider::Kiro { .. } => {
-            bail!("quota is not supported for imported Kiro profiles")
-        }
+        ProfileProvider::Kiro { .. } => Ok(ProviderQuotaSnapshot::External(fetch_kiro_quota_info(
+            codex_home,
+        )?)),
         ProfileProvider::Agy { account } => Ok(ProviderQuotaSnapshot::External(
             fetch_agy_quota_info(account.as_deref())?,
         )),
@@ -553,9 +555,8 @@ pub(crate) fn fetch_profile_quota_json(
         ProfileProvider::Copilot { host, login, .. } => {
             fetch_copilot_user_info_json_for_account(host, login)
         }
-        ProfileProvider::Kiro { .. } => {
-            bail!("quota is not supported for imported Kiro profiles")
-        }
+        ProfileProvider::Kiro { .. } => serde_json::to_value(fetch_kiro_quota_info(codex_home)?)
+            .context("failed to render Kiro quota JSON"),
         ProfileProvider::Agy { account } => {
             serde_json::to_value(fetch_agy_quota_info(account.as_deref())?)
                 .context("failed to render Agy quota JSON")

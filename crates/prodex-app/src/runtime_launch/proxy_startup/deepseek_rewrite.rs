@@ -31,12 +31,6 @@ pub(super) use self::tools::{
     runtime_deepseek_web_search_options_from_responses_request,
 };
 #[cfg(test)]
-#[allow(unused_imports)]
-pub(super) use super::deepseek_reasoning::{
-    runtime_deepseek_apply_reasoning_from_responses_request, runtime_deepseek_thinking_enabled,
-    runtime_deepseek_validate_reasoning_shape_for_provider,
-};
-#[cfg(test)]
 pub(super) use super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;

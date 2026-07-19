@@ -69,6 +69,18 @@ pub(super) fn runtime_gateway_request_path_requires_admin_auth(
     runtime_gateway_request_path_is_admin(request_path, shared)
 }
 
+pub(super) fn runtime_gateway_request_path_is_current_session_revoke(
+    request_path: &str,
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> bool {
+    matches!(
+        parse_gateway_admin_route(&shared.mount_path, request_path),
+        Some(GatewayAdminRoute::SessionRevoke {
+            session_id_hash: "current"
+        })
+    )
+}
+
 pub(super) fn runtime_gateway_admin_authorization_rejection_response(
     request_id: u64,
     method: &str,

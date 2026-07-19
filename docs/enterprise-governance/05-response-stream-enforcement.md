@@ -2,34 +2,33 @@
 
 ## Scope and Status
 
-This document defines the Phase 2 response policy-enforcement point for unary,
-SSE, and WebSocket output. The target is typed, classification-aware,
-obligation-driven inspection without weakening existing transport transparency,
-affinity, no-mid-stream-rotation, cancellation, or accounting behavior.
-
-The repository currently blocks configured output keywords in buffered HTTP
-responses and in several HTTP streaming paths. This is useful production
-guardrail behavior, but it is not yet typed response inspection and does not
-satisfy the Phase 2 exit gate.
+This document records the Phase 2 response policy-enforcement point for unary,
+SSE, and supported WebSocket output. Typed, classification-aware obligations
+now drive coverage checks, masking, output bounds, pre-commit denial, and
+post-commit termination without weakening affinity or no-mid-stream rotation.
 
 ## Current Production Evidence and Gaps
 
 | Path | Current behavior | Remaining gap |
 | --- | --- | --- |
-| Buffered HTTP response | A successful buffered body is checked before local response commit; a match returns a stable redacted `403 policy_violation` and emits content-free audit/log reasons | Keyword matching is not based on typed findings, coverage, classification, or a response obligation |
-| HTTP streaming response | A `Read` wrapper checks configured keywords using a tail bounded to 256 characters and returns EOF on a match; matched content is not returned from the detecting read | No normalized typed detector result, no explicit pre-commit hold, and no response coverage or revision |
-| Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, and passthrough response paths apply the keyword stream wrapper around their emitted body where configured | Matching transport bytes can confuse event/content semantics; tool-call argument inspection is not modeled |
-| Generic Codex WebSocket response | Existing response tracking preserves pre-commit retry and affinity semantics | Upstream-to-client frames do not pass through a typed response-inspection PEP |
-| Gemini Live WebSocket response | Client text frames are request-inspected before upstream translation | Translated server events are sent locally without response inspection |
-| Usage reconciliation | An outer spend reader commits after the first delivered byte and emits a terminal event | A guardrail-generated EOF is currently observed as normal completion, not a precise policy interruption |
-| Audit | Keyword denials use redacted reason metadata and tests assert that token/matched values are absent | Append is best effort and lacks policy/detector/obligation revisions and mandatory-audit mode behavior |
+| Buffered HTTP response | Successful bodies run typed inspection/masking and full-coverage/output-limit obligations before commit; denial is content-free and mandatory-audited when configured | Inspection remains bounded to supported response schemas and modalities |
+| HTTP streaming response | A 4 KiB pre-commit hold enforces coverage/output obligations, then an incremental bounded inspector handles split matches and output limits | A violation after commit terminates the stream; already released safe bytes cannot be recalled |
+| Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the governed stream wrapper | Structured tool-call semantics remain limited to the adapter's normalized emitted bytes |
+| Generic Codex WebSocket response | Request frames use typed inspection while native response tracking preserves retry and affinity | Native upstream-to-client frames do not yet use the local-rewrite response-obligation PEP |
+| Gemini Live WebSocket response | Client frames are classified/governed; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output remains unsupported inspection coverage |
+| Usage reconciliation | Commit state is tracked at first delivery; post-commit policy termination is audited and cannot trigger provider rotation | The client observes transport termination rather than a replacement upstream error event |
+| Audit | Pre-commit material denial uses durable governance audit in enforcing modes; post-commit events remain content-free and bounded | External SIEM outage behavior still depends on the selected deployment mode and outbox worker |
 
-The current HTTP stream guard can detect a configured literal split across two
-reads, but bytes preceding the detecting read may already be committed. That is
-post-commit termination, not proof of pre-commit response approval. Returning
-EOF also makes the accounting layer classify that termination as completed.
-Both limitations must be corrected when the typed response PEP replaces the
-keyword-only wrapper.
+The stream guard detects configured literals across arbitrary read boundaries.
+Its bounded pre-commit prefix can deny before any local byte is released;
+violations discovered later are explicit post-commit termination and never
+permit retry or rotation.
+
+Translated Responses adapters advertise `supports_websockets=false`, matching
+Codex's provider contract, and use HTTPS/SSE. A defensive WebSocket attempt gets
+an explicit HTTPS-fallback response; Gemini Live remains the translated
+WebSocket path. Native OpenAI auto-rotate WebSockets are handled by the separate
+transport-transparent runtime proxy.
 
 ## Response Enforcement Contract
 

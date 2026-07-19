@@ -341,7 +341,7 @@ fn runtime_gateway_admin_domain_role(role: RuntimeGatewayAdminRole) -> Role {
     }
 }
 
-fn runtime_gateway_virtual_key_principal(
+pub(super) fn runtime_gateway_virtual_key_principal(
     key: &runtime_proxy_crate::RuntimeGatewayVirtualKey,
 ) -> Principal {
     let tenant_id = key

@@ -6,12 +6,11 @@ This document defines the Phase 2 classification and obligation contract and
 records how much of it is in the production path as of 2026-07-13. It is not a
 certification claim.
 
-The repository currently has a typed, bounded request-inspection result and a
-monotonic four-level classification calculation. That plan is carried through
-the application admission boundary to provider dispatch for the migrated local
-rewrite paths. A revisioned classification-rule snapshot, a typed policy
-decision, obligation conflict resolution, and obligation-driven response
-enforcement are still planned.
+The repository has typed bounded request inspection, monotonic four-level
+classification, revisioned classification-rule snapshots, typed policy
+decisions, deterministic obligation conflict resolution, and obligation-driven
+response enforcement. Migrated HTTP, SSE, and supported WebSocket paths carry
+that plan through application admission and provider dispatch.
 
 ## Current Production Evidence
 
@@ -24,16 +23,16 @@ enforcement are still planned.
 | Finding-to-minimum-classification mapping | Implemented | PII and tenant-sensitive findings raise to `Confidential`; credentials, government IDs, cards, and accounts raise to `Restricted` |
 | Trusted and prior classification raising | Implemented in the pure application planner | `plan_application_request_inspection` takes optional trusted and prior classifications and only raises |
 | Request-path propagation | Implemented for migrated local rewrite HTTP and text WebSocket paths | The inspection plan reaches application admission and provider dispatch; coverage, classification, and finding count are logged without match content |
-| Versioned compiled classification rules and checksum | Planned | Runtime currently uses static detector revision `runtime-inspection-v1`; there is no classification-rule revision |
-| Route, capability, tenant, session, and risk rules | Planned | Current classification is derived from the default, trusted/prior labels, and finding minimums only |
+| Versioned compiled classification rules and checksum | Implemented | Tenant-scoped immutable classification artifacts compile to revision/checksum-bound snapshots with activation, rollback, and LKG loading |
+| Route, capability, tenant, session, and risk rules | Implemented | The application planner evaluates typed classification requests against the active compiled snapshot and carries session and environment context |
 | Authorized declassification operation | Planned | No production lowering path exists, which is safe but incomplete operationally |
-| Typed request and response obligations | Planned | Existing Presidio anonymization and keyword guardrails are configuration-driven behavior, not obligations returned by a PDP |
-| Observe/enforce/bank decision modes | Planned | Existing fail-open/fail-closed Presidio configuration is not the required typed deployment-mode matrix |
+| Typed request and response obligations | Implemented | The PDP returns typed masking, response-inspection, coverage, modality, provider, and output-limit obligations enforced by the application/runtime boundary |
+| Observe/enforce/bank decision modes | Implemented | Personal, enterprise-observe, enterprise-enforce, and bank-enforce modes have typed failure behavior and validation |
 
 The current runtime defaults migrated requests to `Internal`. It does not use
 an `Unknown` routeable placeholder and it cannot lower a prior classification.
-Those are useful safety properties, but they do not satisfy the Phase 2 exit
-gate without revisioned rules and policy-owned obligations.
+Those properties combine with revisioned rules and policy-owned obligations in
+the production application boundary.
 
 ## Classification Contract
 
