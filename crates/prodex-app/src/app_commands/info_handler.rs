@@ -6,7 +6,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use terminal_ui::{
-    text_width, tui_border_style, tui_connected_header_block, tui_secondary_style, tui_title_style,
+    format_field_lines_with_layout, text_width, tui_border_style, tui_connected_header_block,
+    tui_secondary_style, tui_title_style,
 };
 
 use crate::{
@@ -198,20 +199,28 @@ fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
 }
 
 fn info_panel_tui_height(fields: &[(String, String)]) -> u16 {
-    let rows = fields.len().saturating_add(5).max(8);
-    let terminal_height = terminal::size()
-        .map(|(_, height)| usize::from(height))
-        .unwrap_or(24);
-    rows.min(terminal_height).max(1) as u16
+    let terminal_width = terminal::size()
+        .map(|(width, _)| usize::from(width))
+        .unwrap_or(80);
+    info_panel_tui_height_for_width(fields, terminal_width)
+}
+
+fn info_panel_tui_height_for_width(fields: &[(String, String)], width: usize) -> u16 {
+    let label_width = info_panel_tui_label_width(fields);
+    let content_width = width.saturating_sub(2).max(1);
+    let rows = fields
+        .iter()
+        .map(|(label, value)| {
+            format_field_lines_with_layout(label, value, content_width, label_width).len()
+        })
+        .sum::<usize>()
+        .saturating_add(4)
+        .max(8);
+    rows.min(usize::from(u16::MAX)) as u16
 }
 
 fn info_panel_tui_text(fields: &[(String, String)]) -> Text<'static> {
-    let label_width = fields
-        .iter()
-        .map(|(label, _)| text_width(label))
-        .max()
-        .unwrap_or(0)
-        .min(24);
+    let label_width = info_panel_tui_label_width(fields);
     let mut lines = Vec::new();
     for (label, value) in fields {
         let color = info_panel_value_color(label, value);
@@ -227,6 +236,15 @@ fn info_panel_tui_text(fields: &[(String, String)]) -> Text<'static> {
         ]));
     }
     Text::from(lines)
+}
+
+fn info_panel_tui_label_width(fields: &[(String, String)]) -> usize {
+    fields
+        .iter()
+        .map(|(label, _)| text_width(label))
+        .max()
+        .unwrap_or(0)
+        .min(24)
 }
 
 fn info_panel_value_color(label: &str, value: &str) -> Color {
@@ -277,5 +295,16 @@ mod tests {
             info_panel_value_color("Active profile", "main"),
             Color::Green
         );
+    }
+
+    #[test]
+    fn info_panel_height_does_not_clip_fields_to_terminal_height() {
+        let fields = (0..23)
+            .map(|index| (format!("Field {index}"), "value ".repeat(10)))
+            .collect::<Vec<_>>();
+
+        let wide_height = info_panel_tui_height_for_width(&fields, 100);
+        assert!(wide_height > 24);
+        assert!(info_panel_tui_height_for_width(&fields, 20) > wide_height);
     }
 }

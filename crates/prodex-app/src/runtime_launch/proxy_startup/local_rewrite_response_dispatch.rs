@@ -64,6 +64,22 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         RuntimeProviderBridgeKind::DeepSeek,
     ) && (200..300).contains(&status)
     {
+        if native_anthropic_messages {
+            respond_runtime_anthropic_messages_rewrite(
+                request_id,
+                request,
+                response,
+                RuntimeAnthropicMessagesRewriteContext {
+                    status,
+                    content_type: &content_type,
+                    shared,
+                    captured,
+                    provider_kind: RuntimeProviderBridgeKind::DeepSeek,
+                    response_governance,
+                },
+            );
+            return;
+        }
         respond_runtime_chat_compatible_rewrite(
             request_id,
             request,
@@ -98,6 +114,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     content_type: &content_type,
                     shared,
                     captured,
+                    provider_kind: RuntimeProviderBridgeKind::Anthropic,
                     response_governance,
                 },
             );

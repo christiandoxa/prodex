@@ -37,6 +37,10 @@ const OPENAI_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
         ProviderCapabilityStatus::Native,
     ),
     (
+        ProviderEndpoint::ResponsesCompact,
+        ProviderCapabilityStatus::Emulated,
+    ),
+    (
         ProviderEndpoint::ChatCompletions,
         ProviderCapabilityStatus::Native,
     ),
@@ -56,6 +60,10 @@ const CHAT_TRANSLATED_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatu
     (
         ProviderEndpoint::Responses,
         ProviderCapabilityStatus::Translated,
+    ),
+    (
+        ProviderEndpoint::ResponsesCompact,
+        ProviderCapabilityStatus::Emulated,
     ),
     (
         ProviderEndpoint::ChatCompletions,
@@ -134,6 +142,10 @@ const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
         ProviderCapabilityStatus::Passthrough,
     ),
     (
+        ProviderEndpoint::ResponsesCompact,
+        ProviderCapabilityStatus::Emulated,
+    ),
+    (
         ProviderEndpoint::ChatCompletions,
         ProviderCapabilityStatus::Passthrough,
     ),
@@ -166,6 +178,18 @@ const LOCAL_CAPABILITIES: &[(ProviderEndpoint, ProviderCapabilityStatus)] = &[
         ProviderCapabilityStatus::Passthrough,
     ),
     (ProviderEndpoint::A2a, ProviderCapabilityStatus::Passthrough),
+];
+const OPENAI_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
+    ProviderEndpoint::Responses,
+    ProviderEndpoint::ChatCompletions,
+    ProviderEndpoint::Messages,
+    ProviderEndpoint::Models,
+    ProviderEndpoint::Embeddings,
+    ProviderEndpoint::Images,
+    ProviderEndpoint::Audio,
+    ProviderEndpoint::Batches,
+    ProviderEndpoint::Rerank,
+    ProviderEndpoint::A2a,
 ];
 const CHAT_PASSTHROUGH_ENDPOINTS: &[ProviderEndpoint] = &[
     ProviderEndpoint::ChatCompletions,
@@ -223,7 +247,7 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
         supports_model_fallback: false,
         supported_endpoints: OPENAI_ENDPOINTS,
         capabilities: OPENAI_CAPABILITIES,
-        passthrough_endpoints: OPENAI_ENDPOINTS,
+        passthrough_endpoints: OPENAI_PASSTHROUGH_ENDPOINTS,
         model_catalog: OPENAI_MODELS,
         runtime_metadata: None,
     },
@@ -325,7 +349,7 @@ const BUILTIN_REGISTRATIONS: &[ProviderImplementationRegistration] = &[
         supports_model_fallback: false,
         supported_endpoints: OPENAI_ENDPOINTS,
         capabilities: LOCAL_CAPABILITIES,
-        passthrough_endpoints: OPENAI_ENDPOINTS,
+        passthrough_endpoints: OPENAI_PASSTHROUGH_ENDPOINTS,
         model_catalog: LOCAL_MODELS,
         runtime_metadata: Some(&LOCAL_RUNTIME_METADATA),
     },

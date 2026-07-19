@@ -103,7 +103,6 @@ pub(crate) enum RuntimeDeepSeekWebSearchMode {
     Off,
     OpenAiChat,
     Anthropic,
-    FunctionProxy,
 }
 
 #[cfg(test)]

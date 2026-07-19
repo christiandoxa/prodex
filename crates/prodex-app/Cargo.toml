@@ -36,6 +36,7 @@ prodex_audit_log = { workspace = true }
 prodex_app_reports = { workspace = true }
 prodex_application = { workspace = true }
 prodex_authn = { workspace = true }
+prodex_authz = { workspace = true }
 prodex_bench_support = { workspace = true, optional = true }
 codex_config = { workspace = true }
 prodex_caveman_assets = { workspace = true }

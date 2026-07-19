@@ -1,5 +1,32 @@
 [
   {
+    "id": "audited-runtime-and-operations-feature-0.324.0",
+    "requiredSubjects": [
+      "fix: complete audited runtime and operations features"
+    ],
+    "caps": {
+      "maxFiles": 72,
+      "maxBehaviorFiles": 59,
+      "maxLines": 3030,
+      "maxFileLines": 355
+    },
+    "reason": "Reviewed the Prodex info process-list rendering fix, selectable runtime secret backend, live closed-label operational metrics and deployment artifacts, translated-provider compact emulation, native DeepSeek Anthropic web search, generated documentation guards, and focused module splits; verified with focused regressions, the full locked all-features suite, strict Clippy, boundary and size guards, an optimized locked build, tracked-diff secret and identifier scanning, and source review."
+  },
+  {
+    "id": "audited-runtime-and-operations-release-0.324.0",
+    "requiredSubjects": [
+      "fix: complete audited runtime and operations features",
+      "chore(release): release 0.324.0"
+    ],
+    "caps": {
+      "maxFiles": 85,
+      "maxBehaviorFiles": 70,
+      "maxLines": 3400,
+      "maxFileLines": 400
+    },
+    "reason": "Reviewed the complete 0.324.0 feature and GitHub-only release range, including synchronized Cargo/npm/docs metadata and changelog, after the locked full suite, strict Clippy, complete preflight guards, optimized release build, and tracked-diff secret and identifier review."
+  },
+  {
     "id": "audited-runtime-and-governance-feature-0.321.0",
     "requiredSubjects": [
       "fix: complete audited runtime and governance features"

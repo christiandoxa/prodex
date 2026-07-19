@@ -2,9 +2,11 @@ use super::{
     AppState, Duration, RuntimeGatewayGuardrailWebhookConfig, RuntimeGatewayObservabilityConfig,
     RuntimeGatewaySsoConfig, RuntimeGatewayStateStore, RuntimeLocalRewriteProviderOptions,
     RuntimeLocalRewriteProxyStartOptions, TestUpstream, app_paths_for_root,
-    start_runtime_local_rewrite_proxy_with_harness, temp_root,
+    start_runtime_local_rewrite_proxy, start_runtime_local_rewrite_proxy_with_harness, temp_root,
 };
-use crate::runtime_launch::proxy_startup::RuntimeAnthropicProviderAuth;
+use crate::runtime_launch::proxy_startup::{
+    RuntimeAnthropicProviderAuth, RuntimeDeepSeekWebSearchMode,
+};
 
 fn start_openai_harness_proxy(
     paths: &crate::AppPaths,
@@ -74,6 +76,39 @@ fn start_anthropic_harness_proxy(
         prodex_provider_core::resolve_harness_mode(Some(harness), None),
     )
     .expect("Anthropic harness proxy should start")
+}
+
+fn start_deepseek_proxy(
+    paths: &crate::AppPaths,
+    upstream_base_url: String,
+) -> crate::RuntimeRotationProxy {
+    start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
+        paths,
+        state: &AppState::default(),
+        upstream_base_url,
+        provider: RuntimeLocalRewriteProviderOptions::DeepSeek {
+            api_keys: vec!["fixture-deepseek-key".to_string()],
+            strict_tools: false,
+            beta_base_url: "https://api.deepseek.com/beta".to_string(),
+            web_search_mode: RuntimeDeepSeekWebSearchMode::Auto,
+        },
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        preferred_listen_addr: Some("127.0.0.1:0"),
+        gateway_auth_token_hash: None,
+        gateway_admin_tokens: Vec::new(),
+        gateway_sso: RuntimeGatewaySsoConfig::default(),
+        gateway_state_store: RuntimeGatewayStateStore::file(paths),
+        gateway_virtual_keys: Vec::new(),
+        gateway_route_aliases: Vec::new(),
+        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
+        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
+        gateway_call_id_header: None,
+        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
+    })
+    .expect("DeepSeek proxy should start")
 }
 
 #[test]
@@ -214,6 +249,102 @@ fn evaluated_anthropic_uses_native_messages_transport_and_translates_response() 
     assert_eq!(
         continued["messages"].as_array().unwrap().last().unwrap()["content"][0]["text"],
         "continue"
+    );
+}
+
+#[test]
+fn deepseek_auto_web_search_uses_native_anthropic_transport() {
+    let root = temp_root("deepseek-native-web-search");
+    let paths = app_paths_for_root(root);
+    let upstream = TestUpstream::start_with_response_body(
+        r#"{"id":"msg_search","type":"message","role":"assistant","model":"deepseek-chat","content":[{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"current release"}},{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[{"type":"web_search_result","url":"https://example.com/release","title":"Release"}]},{"type":"text","text":"Found it."}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2,"server_tool_use":{"web_search_requests":1}}}"#,
+    );
+    let proxy = start_deepseek_proxy(&paths, format!("http://{}/v1", upstream.addr));
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .json(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": "find the current release",
+            "tools": [{
+                "type": "web_search_preview",
+                "context_size": "high",
+                "allowed_domains": ["example.com"]
+            }],
+            "stream": false
+        }))
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 200);
+    let response: serde_json::Value = response.json().unwrap();
+    assert_eq!(response["output"][0]["type"], "web_search_call");
+    assert_eq!(
+        response["output"][0]["action"]["queries"][0],
+        "current release"
+    );
+    assert_eq!(response["output"][1]["content"][0]["text"], "Found it.");
+    assert_eq!(response["tool_usage"]["web_search"]["num_requests"], 1);
+
+    assert_eq!(
+        upstream
+            .path_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        "/anthropic/v1/messages"
+    );
+    let headers = upstream
+        .headers_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    assert!(
+        headers
+            .iter()
+            .any(|(name, value)| name == "x-api-key" && value == "fixture-deepseek-key")
+    );
+    assert!(
+        headers
+            .iter()
+            .any(|(name, value)| name == "anthropic-version" && value == "2023-06-01")
+    );
+    assert!(!headers.iter().any(|(name, _)| name == "authorization"));
+    let request: serde_json::Value = serde_json::from_slice(
+        &upstream
+            .body_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(request["tools"][0]["type"], "web_search_20250305");
+    assert_eq!(request["tools"][0]["allowed_domains"][0], "example.com");
+}
+
+#[test]
+fn deepseek_compact_uses_local_emulation_without_upstream_io() {
+    let root = temp_root("deepseek-local-compact");
+    let paths = app_paths_for_root(root);
+    let proxy = start_deepseek_proxy(&paths, "http://127.0.0.1:9/v1".to_string());
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://{}/v1/responses/compact", proxy.listen_addr))
+        .json(&serde_json::json!({
+            "model": "deepseek-chat",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "retain compact context"}]
+            }]
+        }))
+        .send()
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 200);
+    let response: serde_json::Value = response.json().unwrap();
+    assert!(
+        response["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("retain compact context")
     );
 }
 

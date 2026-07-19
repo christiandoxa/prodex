@@ -297,9 +297,29 @@ pub(crate) fn runtime_logs_json_value() -> serde_json::Value {
 }
 
 pub(crate) fn format_secret_backend_summary() -> String {
-    prodex_app_reports::format_secret_backend_summary_parts(Some("file"), None, None)
+    match configured_secret_backend_selection() {
+        Ok(selection) => prodex_app_reports::format_secret_backend_summary_parts(
+            Some(selection.kind().as_str()),
+            selection.keyring_service(),
+            None,
+        ),
+        Err(err) => {
+            let error = redaction_redact_secret_like_text(&err.to_string());
+            prodex_app_reports::format_secret_backend_summary_parts(None, None, Some(&error))
+        }
+    }
 }
 
 pub(crate) fn secret_backend_json_value() -> serde_json::Value {
-    prodex_app_reports::secret_backend_json_value_parts(Some("file"), None, None)
+    match configured_secret_backend_selection() {
+        Ok(selection) => prodex_app_reports::secret_backend_json_value_parts(
+            Some(selection.kind().as_str()),
+            selection.keyring_service(),
+            None,
+        ),
+        Err(err) => {
+            let error = redaction_redact_secret_like_text(&err.to_string());
+            prodex_app_reports::secret_backend_json_value_parts(None, None, Some(&error))
+        }
+    }
 }

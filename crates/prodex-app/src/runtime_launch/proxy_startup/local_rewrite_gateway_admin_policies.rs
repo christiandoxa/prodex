@@ -14,6 +14,7 @@ use prodex_domain::{
     AuditRetentionPurgeBatch, AuditRetentionPurgeKey, AuditTimestamp, CredentialScope, Principal,
     PrincipalKind, ResourceKind, Role, TenantContext, compute_audit_chain_digest,
 };
+use prodex_observability::{PolicyLifecycleOperation, PolicyLifecycleResult};
 use prodex_storage::{
     AppendOnlyAuditCommand, ApprovalVoteIdempotency, ApprovalVoteMutationOutcome,
     ApprovalVoteRequest, ApprovalVoteSnapshot, AuditOutboxWriteCommand, AuditRetentionPurgeCommand,
@@ -33,65 +34,15 @@ use super::local_rewrite_application_boundary::{
 };
 use super::local_rewrite_gateway_admin_auth::RuntimeGatewayAdminAuth;
 use super::local_rewrite_gateway_admin_execution::runtime_gateway_admin_mutation_execution;
+use super::local_rewrite_gateway_admin_policy_resource::{
+    RuntimeGovernanceResource, policy_activation_operation, record_policy_lifecycle,
+};
 use super::local_rewrite_gateway_admin_response::{
     runtime_gateway_admin_json_body, runtime_gateway_admin_json_response,
 };
 use super::local_rewrite_gateway_admin_router::runtime_gateway_http_request_meta;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
 use super::*;
-
-#[derive(Clone, Copy)]
-enum RuntimeGovernanceResource {
-    Policy,
-    ClassificationRules,
-    ProviderRegistry,
-    RoutingScores,
-}
-
-impl RuntimeGovernanceResource {
-    const ALL: [Self; 4] = [
-        Self::Policy,
-        Self::ClassificationRules,
-        Self::ProviderRegistry,
-        Self::RoutingScores,
-    ];
-
-    fn prefix_suffix(self) -> &'static str {
-        match self {
-            Self::Policy => "/policies",
-            Self::ClassificationRules => "/classification-rules",
-            Self::ProviderRegistry => "/provider-registries",
-            Self::RoutingScores => "/routing-scores",
-        }
-    }
-
-    fn kind(self) -> GovernanceArtifactKind {
-        match self {
-            Self::Policy => GovernanceArtifactKind::Policy,
-            Self::ClassificationRules => GovernanceArtifactKind::ClassificationRules,
-            Self::ProviderRegistry => GovernanceArtifactKind::ProviderRegistry,
-            Self::RoutingScores => GovernanceArtifactKind::RoutingScores,
-        }
-    }
-
-    fn approval_kind(self) -> ApprovalKind {
-        match self {
-            Self::Policy => ApprovalKind::PolicyRevision,
-            Self::ClassificationRules => ApprovalKind::ClassificationRuleRevision,
-            Self::ProviderRegistry => ApprovalKind::ProviderRegistryRevision,
-            Self::RoutingScores => ApprovalKind::RoutingScoreRevision,
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Policy => "policy",
-            Self::ClassificationRules => "classification_rules",
-            Self::ProviderRegistry => "provider_registry",
-            Self::RoutingScores => "routing_scores",
-        }
-    }
-}
 
 pub(super) fn runtime_gateway_admin_policy_response(
     captured: &RuntimeProxyRequest,
@@ -848,24 +799,45 @@ fn create_response(
         Some(revision_id),
     ) {
         Ok(audit) => audit,
-        Err(error) => return repository_error(error),
+        Err(error) => {
+            record_policy_lifecycle(
+                resource,
+                PolicyLifecycleOperation::Create,
+                PolicyLifecycleResult::Failed,
+            );
+            return repository_error(error);
+        }
     };
     match repository.write_revision(command, audit) {
-        Ok(outcome) => runtime_gateway_admin_json_response(
-            if outcome == GovernanceWriteOutcome::Applied {
-                201
-            } else {
-                200
-            },
-            serde_json::json!({
-                "object": format!("governance.{}_revision", resource.label()),
-                "revision_id": revision_id,
-                "fingerprint": fingerprint,
-                "state": "draft",
-                "replayed": outcome == GovernanceWriteOutcome::Replayed,
-            }),
-        ),
-        Err(error) => repository_error(error),
+        Ok(outcome) => {
+            record_policy_lifecycle(
+                resource,
+                PolicyLifecycleOperation::Create,
+                PolicyLifecycleResult::Persisted,
+            );
+            runtime_gateway_admin_json_response(
+                if outcome == GovernanceWriteOutcome::Applied {
+                    201
+                } else {
+                    200
+                },
+                serde_json::json!({
+                    "object": format!("governance.{}_revision", resource.label()),
+                    "revision_id": revision_id,
+                    "fingerprint": fingerprint,
+                    "state": "draft",
+                    "replayed": outcome == GovernanceWriteOutcome::Replayed,
+                }),
+            )
+        }
+        Err(error) => {
+            record_policy_lifecycle(
+                resource,
+                PolicyLifecycleOperation::Create,
+                PolicyLifecycleResult::Failed,
+            );
+            repository_error(error)
+        }
     }
 }
 
@@ -2005,7 +1977,14 @@ fn activation_response(
                 )
             }) {
                 Ok(snapshot) => snapshot,
-                Err(error) => return repository_error(error),
+                Err(error) => {
+                    record_policy_lifecycle(
+                        resource,
+                        policy_activation_operation(action),
+                        PolicyLifecycleResult::Failed,
+                    );
+                    return repository_error(error);
+                }
             };
             if shared
                 .swap_committed_governance_artifact_kind(
@@ -2015,8 +1994,18 @@ fn activation_response(
                 )
                 .is_err()
             {
+                record_policy_lifecycle(
+                    resource,
+                    policy_activation_operation(action),
+                    PolicyLifecycleResult::Failed,
+                );
                 return repository_error(GovernanceRepositoryError::SnapshotUnavailable);
             }
+            record_policy_lifecycle(
+                resource,
+                policy_activation_operation(action),
+                PolicyLifecycleResult::Published,
+            );
             json_response_with_etag(
                 200,
                 serde_json::json!({
@@ -2029,7 +2018,14 @@ fn activation_response(
                 &result.etag,
             )
         }
-        Err(error) => repository_error(error),
+        Err(error) => {
+            record_policy_lifecycle(
+                resource,
+                policy_activation_operation(action),
+                PolicyLifecycleResult::Failed,
+            );
+            repository_error(error)
+        }
     }
 }
 

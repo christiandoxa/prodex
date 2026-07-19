@@ -633,15 +633,6 @@ const REQUIRED_SOURCE_SNIPPETS = Object.freeze([
   "metric_name: \"prodex_quota_correctness_events_total\"",
   "\"quota_correctness_event\"",
   "quota_correctness_event_label(event)",
-  "pub enum SloAlertSli",
-  "pub enum SloAlertSeverity",
-  "pub struct SloAlertMetricPlan",
-  "pub fn plan_slo_alert_metric(",
-  "metric_name: \"prodex_slo_alert_events_total\"",
-  "\"slo_sli\"",
-  "\"slo_severity\"",
-  "slo_alert_sli_label(sli)",
-  "slo_alert_severity_label(severity)",
   "pub enum ShutdownLifecycleEvent",
   "pub enum ShutdownLifecycleResult",
   "pub struct ShutdownLifecycleMetricPlan",
@@ -1572,13 +1563,6 @@ pub fn plan_quota_correctness_metric() {
     metric_name: "prodex_quota_correctness_events_total";
 }
 fn quota_correctness_event_label(event: QuotaCorrectnessEvent) {}
-pub fn plan_slo_alert_metric() {
-    let sli = TelemetryAttribute::metric_label("slo_sli", slo_alert_sli_label(sli));
-    let severity = TelemetryAttribute::metric_label("slo_severity", slo_alert_severity_label(severity));
-    metric_name: "prodex_slo_alert_events_total";
-}
-fn slo_alert_sli_label(sli: SloAlertSli) {}
-fn slo_alert_severity_label(severity: SloAlertSeverity) {}
 pub fn plan_shutdown_lifecycle_metric() {
     let event = TelemetryAttribute::metric_label("shutdown_event", shutdown_lifecycle_event_label(event));
     let result = TelemetryAttribute::metric_label("shutdown_result", shutdown_lifecycle_result_label(result));

@@ -162,30 +162,6 @@ pub struct QuotaCorrectnessMetricPlan {
     pub event_label: TelemetryAttribute,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SloAlertSli {
-    Availability,
-    LatencyP95,
-    ErrorRate,
-    QuotaCorrectness,
-    ProviderDegradation,
-    PersistenceFailure,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SloAlertSeverity {
-    Warning,
-    Critical,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SloAlertMetricPlan {
-    pub metric_name: &'static str,
-    pub increment: u64,
-    pub sli_label: TelemetryAttribute,
-    pub severity_label: TelemetryAttribute,
-}
-
 pub fn plan_reservation_recovery_metric(
     operation: ReservationRecoveryOperation,
     result: ReservationRecoveryResult,
@@ -322,23 +298,6 @@ pub fn plan_quota_correctness_metric(
     })
 }
 
-pub fn plan_slo_alert_metric(
-    sli: SloAlertSli,
-    severity: SloAlertSeverity,
-) -> Result<SloAlertMetricPlan, TelemetryAttributeError> {
-    let sli_label = TelemetryAttribute::metric_label("slo_sli", slo_alert_sli_label(sli));
-    let severity_label =
-        TelemetryAttribute::metric_label("slo_severity", slo_alert_severity_label(severity));
-    sli_label.as_metric_label()?;
-    severity_label.as_metric_label()?;
-    Ok(SloAlertMetricPlan {
-        metric_name: "prodex_slo_alert_events_total",
-        increment: 1,
-        sli_label,
-        severity_label,
-    })
-}
-
 fn reservation_recovery_operation_label(operation: ReservationRecoveryOperation) -> &'static str {
     match operation {
         ReservationRecoveryOperation::ScanExpired => "scan_expired",
@@ -456,23 +415,5 @@ fn quota_correctness_event_label(event: QuotaCorrectnessEvent) -> &'static str {
         QuotaCorrectnessEvent::MissingCommitRecovered => "missing_commit_recovered",
         QuotaCorrectnessEvent::MissingReleaseRecovered => "missing_release_recovered",
         QuotaCorrectnessEvent::LedgerMismatchDetected => "ledger_mismatch_detected",
-    }
-}
-
-fn slo_alert_sli_label(sli: SloAlertSli) -> &'static str {
-    match sli {
-        SloAlertSli::Availability => "availability",
-        SloAlertSli::LatencyP95 => "latency_p95",
-        SloAlertSli::ErrorRate => "error_rate",
-        SloAlertSli::QuotaCorrectness => "quota_correctness",
-        SloAlertSli::ProviderDegradation => "provider_degradation",
-        SloAlertSli::PersistenceFailure => "persistence_failure",
-    }
-}
-
-fn slo_alert_severity_label(severity: SloAlertSeverity) -> &'static str {
-    match severity {
-        SloAlertSeverity::Warning => "warning",
-        SloAlertSeverity::Critical => "critical",
     }
 }

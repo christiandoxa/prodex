@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::super::{RuntimeDeepSeekRewriteOptions, RuntimeDeepSeekWebSearchMode};
 use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;
@@ -97,14 +95,9 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_apply_web_searc
     let provider_label = provider_kind.chat_compatible_adapter_label();
     let provider_config_key = provider_kind.provider_id().label();
     match options.web_search_mode {
-        RuntimeDeepSeekWebSearchMode::Auto => {
-            let _ = request;
-            let _ = web_search_options;
-            anyhow::bail!(
-                "{provider_label} web search auto mode has no documented native OpenAI Chat route yet; set {provider_config_key}.web_search_mode=openai_chat for best-effort forwarding"
-            )
-        }
-        RuntimeDeepSeekWebSearchMode::OpenAiChat => {
+        RuntimeDeepSeekWebSearchMode::Auto
+        | RuntimeDeepSeekWebSearchMode::OpenAiChat
+        | RuntimeDeepSeekWebSearchMode::Anthropic => {
             runtime_deepseek_validate_web_search_options(&web_search_options, provider_kind)?;
             request.insert("web_search_options".to_string(), web_search_options);
             Ok(())
@@ -112,16 +105,6 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_apply_web_searc
         RuntimeDeepSeekWebSearchMode::Off => {
             anyhow::bail!(
                 "{provider_label} web search mode is off; remove web_search tools or set {provider_config_key}.web_search_mode"
-            )
-        }
-        RuntimeDeepSeekWebSearchMode::Anthropic => {
-            anyhow::bail!(
-                "{provider_label} web search mode `anthropic` requires an Anthropic-compatible adapter, which this Responses adapter does not enable yet"
-            )
-        }
-        RuntimeDeepSeekWebSearchMode::FunctionProxy => {
-            anyhow::bail!(
-                "{provider_label} web search mode `function_proxy` requires a local search backend, which this adapter does not enable yet"
             )
         }
     }

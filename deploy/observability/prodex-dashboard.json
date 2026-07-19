@@ -1,0 +1,169 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum by (authn_validation_result) (rate(prodex_authn_token_validation_events_total[5m]))",
+          "legendFormat": "{{authn_validation_result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Authentication decisions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum by (authz_result) (rate(prodex_authz_decisions_total[5m]))",
+          "legendFormat": "{{authz_result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Authorization decisions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum by (tenant_isolation_result) (increase(prodex_tenant_isolation_events_total[1h]))",
+          "legendFormat": "{{tenant_isolation_result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Tenant isolation events (1h)",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum by (secret_backend, secret_result) (increase(prodex_secret_provider_operations_total[1h]))",
+          "legendFormat": "{{secret_backend}} / {{secret_result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Secret-provider operations (1h)",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum by (policy_lifecycle_operation, policy_lifecycle_result) (increase(prodex_policy_lifecycle_events_total[1h]))",
+          "legendFormat": "{{policy_lifecycle_operation}} / {{policy_lifecycle_result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Policy lifecycle (1h)",
+      "type": "barchart"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "prodex",
+    "gateway"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "label": "Prometheus",
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Prodex Gateway Operations",
+  "uid": "prodex-gateway-operations",
+  "version": 1
+}

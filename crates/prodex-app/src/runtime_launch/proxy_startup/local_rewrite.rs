@@ -57,8 +57,6 @@ pub(crate) use super::local_rewrite_options::{
     RuntimeProjectedProviderCredential,
 };
 use super::local_rewrite_pipeline::run_runtime_local_rewrite_pipeline;
-#[cfg(test)]
-pub(super) use super::local_rewrite_pipeline::runtime_local_rewrite_remote_compact_unsupported_message;
 use super::local_rewrite_request::RuntimeLocalRewriteRequest;
 pub(super) use super::local_rewrite_upstream::{
     RuntimeLocalRewriteLiveResponse, RuntimeLocalRewriteUpstreamResponse,

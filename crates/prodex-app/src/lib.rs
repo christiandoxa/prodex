@@ -85,12 +85,14 @@ mod runtime_kiro_connect_proxy;
 mod runtime_launch;
 mod runtime_launch_shared;
 mod runtime_local_provider_config;
+mod runtime_operational_metrics;
 mod runtime_panic;
 mod runtime_persistence;
 mod runtime_policy;
 mod runtime_proxy;
 mod runtime_proxy_shared;
 mod runtime_save_shared;
+mod runtime_secret_backend;
 mod runtime_state_shared;
 mod runtime_store;
 mod secret_store_support;
@@ -196,9 +198,11 @@ pub fn runtime_policy_gateway_tls_config()
     let secrets = prodex_runtime_policy::runtime_policy_secrets().unwrap_or_default();
     app_commands::runtime_launch::gateway_config::gateway_tls_config(&gateway, &secrets)
 }
+pub(crate) use runtime_operational_metrics::*;
 use runtime_proxy::*;
 use runtime_proxy_shared::*;
 pub(crate) use runtime_save_shared::*;
+pub(crate) use runtime_secret_backend::*;
 pub(crate) use runtime_state_shared::*;
 use runtime_store::*;
 use shared_codex_fs::*;
