@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.318.0 - 2026-07-19
+
+### Misc
+
+- Complete audited feature implementations (`dc03bb3`)
+
 ## 0.317.0 - 2026-07-19
 
 - No grouped changes.
@@ -74,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Launch Copilot through Prodex proxy (`2ac38df`)
-
-## 0.306.0 - 2026-07-17
-
-### CLI
-
-- Add playwright shortcut (`5855b89`)
