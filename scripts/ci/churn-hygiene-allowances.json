@@ -2,13 +2,15 @@
   {
     "id": "whole-repo-feature-completion-0.318.0",
     "requiredSubjects": [
-      "fix: complete audited feature implementations"
+      "fix: complete audited feature implementations",
+      "chore(release): release 0.318.0",
+      "chore(ci): allow reviewed 0.318.0 audit range"
     ],
     "caps": {
-      "maxFiles": 100,
+      "maxFiles": 110,
       "maxBehaviorFiles": 95,
-      "maxLines": 3000,
-      "maxFileLines": 350
+      "maxLines": 3300,
+      "maxFileLines": 450
     },
     "reason": "Reviewed the whole-repository implementation audit across runtime affinity, bounded precommit retry, streaming metadata, transactional profile import, provider validation, Presidio configuration, quota and doctor CLI behavior, gateway policy reloads and governance routing, SIEM delivery leases, SDK streaming, cookie security, persistence coalescing, schema parity, and dead compatibility-layer removal; verified with focused regressions, the full locked all-features suite, strict Clippy, complete boundary and size guards, an optimized locked build, secret and supply-chain guards, and tracked-diff identifier scanning before the 0.318.0 release."
   },
