@@ -170,3 +170,51 @@ pub(super) fn websocket_unused_local_addr() -> std::net::SocketAddr {
         .local_addr()
         .expect("unused local listener should expose address")
 }
+
+#[test]
+fn websocket_presidio_fail_open_preserves_text_when_local_inspection_hits_limits() {
+    let mut shared = websocket_test_shared("presidio-local-limit-fail-open");
+    shared.async_runtime = Arc::new(
+        TokioRuntimeBuilder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("async test runtime"),
+    );
+    let unavailable_addr = websocket_unused_local_addr();
+    crate::runtime_proxy::register_runtime_presidio_redaction_proxy_state(
+        &shared.log_path,
+        Some(crate::RuntimePresidioRedactionConfig {
+            analyzer_url: format!("http://{unavailable_addr}/analyze"),
+            anonymizer_url: format!("http://{unavailable_addr}/anonymize"),
+            languages: vec!["en".to_string()],
+            language_mode: crate::PresidioLanguageMode::Fixed,
+            fail_closed: false,
+            trusted_hosts: Vec::new(),
+            timeout_ms: 1_000,
+            max_response_bytes: 1_024,
+            max_concurrency: 1,
+        }),
+    )
+    .expect("Presidio state should register");
+
+    let mut deep_input = serde_json::json!("safe input");
+    for _ in 0..40 {
+        deep_input = serde_json::json!({"input": deep_input});
+    }
+    let text = serde_json::json!({
+        "type": "response.create",
+        "input": deep_input,
+    })
+    .to_string();
+
+    let inspected = crate::runtime_proxy::apply_runtime_presidio_redaction_to_websocket_text(
+        1, &text, &shared, false, None,
+    )
+    .expect("fail-open WebSocket inspection should preserve the request");
+
+    assert_eq!(inspected.text.as_ref(), text);
+    let log = read_websocket_test_log_after_marker(&shared.log_path, "presidio_redaction_error");
+    assert!(log.contains("fail_mode=open"));
+    crate::runtime_proxy::unregister_runtime_presidio_redaction_proxy_state(&shared.log_path);
+}

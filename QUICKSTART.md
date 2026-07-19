@@ -532,7 +532,7 @@ Useful markers:
 
 ### Presidio redaction
 
-When you enable Presidio with `prodex presidio enable` and use Super mode (e.g., `prodex s`), Prodex starts a dedicated runtime proxy that redacts sensitive information when the configured Presidio services are healthy; service failures follow `fail_mode`. Prodex now supports multi-language Presidio redaction.
+After configuring Presidio with `prodex presidio enable`, answer `y` at the Super prompt or pass `--presidio` to enable it for that launch. Prodex then starts a dedicated runtime proxy that redacts sensitive information when the configured Presidio services are healthy; inspection failures follow `fail_mode`. Prodex now supports multi-language Presidio redaction.
 
 The runtime uses `presidio.toml` endpoints and language configuration when available, falling back to `http://localhost:5002` and `http://localhost:5001` for Analyzer/Anonymizer URLs, and English (`en`) for language if not specified. It honors `fail_mode = "open"` or `"closed"`.
 

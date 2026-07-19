@@ -52,6 +52,18 @@ pub(super) const fn runtime_local_inspection_required(
         || configured_detector_enabled
 }
 
+pub(super) const fn runtime_local_inspection_fail_closed(
+    rollout: prodex_config::GovernanceRolloutMode,
+    legacy_local_enabled: bool,
+    tenant_detector_enabled: bool,
+    presidio_fail_closed: Option<bool>,
+) -> bool {
+    matches!(rollout, prodex_config::GovernanceRolloutMode::Enforce)
+        || legacy_local_enabled
+        || tenant_detector_enabled
+        || matches!(presidio_fail_closed, Some(true))
+}
+
 pub(super) async fn runtime_presidio_redact_body(
     body: Vec<u8>,
     state: Arc<RuntimePresidioRedactionState>,

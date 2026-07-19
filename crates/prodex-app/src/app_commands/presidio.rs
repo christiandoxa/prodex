@@ -55,11 +55,6 @@ pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
     }
 }
 
-pub(crate) fn stored_presidio_preference() -> Result<Option<bool>> {
-    let paths = AppPaths::discover()?;
-    Ok(load_presidio_config(&paths)?.map(|config| config.enabled))
-}
-
 pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Result<()> {
     let config = load_presidio_config(paths)?.unwrap_or_default();
     let analyzer_url = config.analyzer_url;
@@ -779,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_presidio_preference_preserves_runtime_safety_fields() {
+    fn stored_presidio_config_preserves_runtime_safety_fields() {
         let _lock = crate::TestEnvVarGuard::lock();
         let root = std::env::temp_dir().join(format!(
             "prodex-presidio-preference-{}-{}",
@@ -807,13 +802,13 @@ mod tests {
         };
         save_presidio_config(&paths, &config).unwrap();
 
-        assert_eq!(stored_presidio_preference().unwrap(), Some(true));
         let mut config = load_presidio_config(&paths).unwrap().unwrap();
+        assert!(config.enabled);
         config.enabled = false;
         save_presidio_config(&paths, &config).unwrap();
         let saved = load_presidio_config(&paths).unwrap().unwrap();
 
-        assert_eq!(stored_presidio_preference().unwrap(), Some(false));
+        assert!(!saved.enabled);
         assert_eq!(saved.trusted_hosts, vec!["presidio.example.com"]);
         assert_eq!(saved.timeout_ms, 12_345);
         assert_eq!(saved.max_response_bytes, 2 * 1024 * 1024);
