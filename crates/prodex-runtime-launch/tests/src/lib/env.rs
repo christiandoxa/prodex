@@ -84,6 +84,38 @@ fn codex_child_plan_applies_codex_sandbox_removed_env() {
 }
 
 #[test]
+fn codex_child_plan_disables_keyboard_enhancement_only_for_vte_without_override() {
+    let plan = |environment: Vec<(OsString, OsString)>| {
+        codex_child_plan_with_env(
+            OsString::from("codex"),
+            PathBuf::from("/tmp/prodex-codex-home"),
+            Vec::new(),
+            "prodex-local",
+            &environment,
+        )
+    };
+    let keyboard_override = |plan: &ChildProcessPlan| {
+        plan.extra_env
+            .iter()
+            .find(|(key, _)| key == "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT")
+            .map(|(_, value)| value.to_string_lossy().into_owned())
+    };
+
+    assert_eq!(
+        keyboard_override(&plan(environment(&[("VTE_VERSION", "7600")]))),
+        Some("1".to_string())
+    );
+    assert_eq!(keyboard_override(&plan(environment(&[]))), None);
+    assert_eq!(
+        keyboard_override(&plan(environment(&[
+            ("VTE_VERSION", "7600"),
+            ("CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT", "0"),
+        ]))),
+        None
+    );
+}
+
+#[test]
 fn child_process_hardening_strips_dynamic_loader_env_unless_allowed() {
     let removed = child_process_hardening_removed_env_from(&environment(&[
         ("LD_PRELOAD", "/tmp/inject.so"),
