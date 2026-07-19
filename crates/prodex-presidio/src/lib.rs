@@ -612,8 +612,10 @@ mod tests {
 
     #[test]
     fn runtime_presidio_config_rejects_unknown_fail_mode() {
-        let mut config = ProdexPresidioRuntimeFileConfig::default();
-        config.fail_mode = "clsoed".to_string();
+        let config = ProdexPresidioRuntimeFileConfig {
+            fail_mode: "clsoed".to_string(),
+            ..Default::default()
+        };
 
         let error = validate_presidio_file_config(&config).unwrap_err();
 
