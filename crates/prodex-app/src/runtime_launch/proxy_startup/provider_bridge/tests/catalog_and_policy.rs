@@ -4,7 +4,7 @@ use super::super::{
     runtime_provider_model_fallback_chain, runtime_provider_models_buffered_response,
     runtime_provider_native_passthrough, runtime_provider_route_kind,
 };
-use prodex_provider_core::{ProviderAdapterContract, ProviderWireFormat, provider_adapter};
+use prodex_provider_core::{ProviderWireFormat, provider_adapter};
 
 #[test]
 fn gemini_models_endpoint_exposes_catalog_from_gemini_cli() {

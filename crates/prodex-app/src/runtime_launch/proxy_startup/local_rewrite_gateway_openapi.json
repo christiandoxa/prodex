@@ -2724,12 +2724,13 @@
         "operationId": "claimGovernanceOutbox",
         "parameters": [{"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string"}}],
         "responses": {
-          "501": {"$ref": "#/components/responses/GatewayError"},
+          "200": {"description": "Configured SIEM worker completed one bounded outbox pass"},
           "401": {"$ref": "#/components/responses/GatewayError"},
-          "403": {"$ref": "#/components/responses/GatewayError"}
+          "403": {"$ref": "#/components/responses/GatewayError"},
+          "503": {"$ref": "#/components/responses/GatewayError"}
         },
         "security": [{"GatewayBearerAuth": []}],
-        "summary": "Claim tenant SIEM outbox work when lease-capable storage is available"
+        "summary": "Run one bounded tenant SIEM outbox export pass"
       }
     },
     "/v1/prodex/gateway/sessions/{session_id_hash}/revoke": {

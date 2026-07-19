@@ -147,8 +147,8 @@ pub struct DoctorArgs {
     /// Suggest policy.toml tuning snippets from recent runtime markers.
     #[arg(long, requires = "runtime")]
     pub suggest_policy: bool,
-    /// Emit machine-readable JSON output. Supported together with --runtime.
-    #[arg(long)]
+    /// Emit machine-readable JSON output for --runtime diagnostics.
+    #[arg(long, requires = "runtime", conflicts_with = "bundle")]
     pub json: bool,
     /// Emit a redacted diagnostic bundle as JSON. Omit PATH or use '-' for stdout.
     #[arg(

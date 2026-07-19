@@ -204,6 +204,9 @@ function readRustFiles(dir, predicate = () => true) {
     .flatMap((entry) => {
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name === "tests") {
+          return [];
+        }
         return readRustFiles(entryPath, predicate);
       }
       if (
@@ -218,6 +221,41 @@ function readRustFiles(dir, predicate = () => true) {
       return [fs.readFileSync(entryPath, "utf8")];
     })
     .join("\n");
+}
+
+function readRustModule(file, seen = new Set()) {
+  const resolved = path.resolve(file);
+  const basename = path.basename(resolved);
+  if (
+    seen.has(resolved) ||
+    basename === "tests.rs" ||
+    basename.endsWith("_tests.rs") ||
+    resolved.split(path.sep).includes("tests")
+  ) {
+    return "";
+  }
+  seen.add(resolved);
+  const source = fs.readFileSync(resolved, "utf8");
+  const sources = [source];
+  const modulePattern = /(?:#\[path\s*=\s*"([^"]+)"\]\s*)?(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z0-9_]+)\s*;/g;
+  for (const match of source.matchAll(modulePattern)) {
+    const [, explicitPath, moduleName] = match;
+    const dir = path.dirname(resolved);
+    const stem = path.basename(resolved, path.extname(resolved));
+    const candidates = explicitPath
+      ? [path.resolve(dir, explicitPath)]
+      : [
+          path.join(dir, `${moduleName}.rs`),
+          path.join(dir, moduleName, "mod.rs"),
+          path.join(dir, stem, `${moduleName}.rs`),
+          path.join(dir, stem, moduleName, "mod.rs"),
+        ];
+    const child = candidates.find((candidate) => fs.existsSync(candidate));
+    if (child) {
+      sources.push(readRustModule(child, seen));
+    }
+  }
+  return sources.join("\n");
 }
 
 function main() {
@@ -248,26 +286,25 @@ function main() {
   const requestSource = [
     readRustFiles(geminiBridgeDir),
     readRustFiles(geminiTranslatorDir),
-    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("gemini_request")),
+    readRustModule(path.join(proxyStartupDir, "gemini_request.rs")),
   ].join("\n");
   const responseSource = [
     readRustFiles(geminiBridgeDir),
     readRustFiles(geminiTranslatorDir),
-    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("gemini_sse")),
+    readRustModule(path.join(proxyStartupDir, "gemini_sse.rs")),
   ].join("\n");
   const sseSource = [
     readRustFiles(geminiBridgeDir),
-    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("gemini_sse")),
+    readRustModule(path.join(proxyStartupDir, "gemini_sse.rs")),
     fs.readFileSync(path.join(proxyStartupDir, "provider_sse_events.rs"), "utf8"),
   ].join("\n");
   const liveSource = [
-    readRustFiles(path.join(geminiBridgeDir, "live")),
-    fs.readFileSync(path.join(geminiBridgeDir, "live.rs"), "utf8"),
-    readRustFiles(proxyStartupDir, (file) => path.basename(file).startsWith("local_rewrite_gemini_live")),
+    readRustModule(path.join(geminiBridgeDir, "live.rs")),
+    readRustModule(path.join(proxyStartupDir, "local_rewrite_gemini_live.rs")),
   ].join("\n");
   const compactSource = [
-    fs.readFileSync(path.join(geminiBridgeDir, "compact.rs"), "utf8"),
-    fs.readFileSync(path.join(proxyStartupDir, "local_rewrite_gemini_compact.rs"), "utf8"),
+    readRustModule(path.join(geminiBridgeDir, "compact.rs")),
+    readRustModule(path.join(proxyStartupDir, "local_rewrite_gemini_compact.rs")),
   ].join("\n");
   const failures = validate(requestSource, responseSource, sseSource, liveSource, compactSource);
   if (failures.length > 0) {

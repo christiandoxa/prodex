@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ProdexGatewayClient, ProdexGatewayError } from "../index.mjs";
 
+test("createResponse returns the live body for streaming requests", async () => {
+  const calls = [];
+  const client = new ProdexGatewayClient({
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response("data: {\"type\":\"response.completed\"}\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+
+  const stream = await client.createResponse(
+    { model: "prodex-fast", input: "hello", stream: true },
+    { stream: true },
+  );
+
+  assert.equal(calls[0].init.headers.get("accept"), "text/event-stream");
+  assert.match(await new Response(stream).text(), /response\.completed/);
+});
+
 test("createKey sends bearer JSON request", async () => {
   const calls = [];
   const client = new ProdexGatewayClient({

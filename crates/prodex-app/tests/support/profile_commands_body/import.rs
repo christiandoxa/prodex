@@ -229,6 +229,52 @@ fn profile_import_rejects_provider_profile_missing_required_secret_file() {
     assert!(state.profiles.is_empty());
 }
 
+#[test]
+fn profile_import_rejects_same_name_cross_provider_update() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-provider-mismatch");
+    let target_paths = profile_commands_test_paths(&target_dir.path);
+    let existing_home = target_paths.managed_profiles_root.join("main");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    let mut state = AppState {
+        profiles: BTreeMap::from([(
+            "main".to_string(),
+            ProfileEntry {
+                codex_home: existing_home,
+                managed: true,
+                email: Some("gemini@example.com".to_string()),
+                provider: ProfileProvider::Gemini {
+                    email: "gemini@example.com".to_string(),
+                    project_id: None,
+                },
+            },
+        )]),
+        ..AppState::default()
+    };
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: Some("agy@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Agy {
+                account: Some("agy@example.com".to_string()),
+            },
+            auth_json: String::new(),
+            secret_files: Vec::new(),
+        }],
+    };
+
+    let error = import_profile_export_payload(&target_paths, &mut state, &payload)
+        .expect_err("same-name cross-provider update must fail");
+
+    assert!(error.to_string().contains("cannot be imported as 'agy'"));
+    assert_eq!(state.profiles["main"].provider.label(), "gemini");
+}
+
 #[cfg(unix)]
 #[test]
 fn profile_import_rejects_symlink_managed_profiles_root() {
@@ -365,6 +411,113 @@ fn profile_import_updates_existing_gemini_profile_when_name_matches() {
         fresh_secret
     );
     assert!(!existing_home.join("auth.json").exists());
+}
+
+#[test]
+fn profile_import_save_failure_rolls_back_existing_gemini_profile() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let paths = AppPaths::discover().expect("app paths should resolve");
+    let existing_home = paths.managed_profiles_root.join("gemini-main");
+    create_codex_home_if_missing(&existing_home).expect("existing home should exist");
+    let old_secret = serde_json::json!({
+        "auth_mode": "gemini_oauth",
+        "access_token": "old-gemini-access-token",
+        "refresh_token": "old-gemini-refresh-token",
+        "token_type": "Bearer",
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "expiry_date": 1800000000000_i64,
+        "email": "old-gemini@example.com",
+        "project_id": "old-project"
+    })
+    .to_string();
+    write_secret_text_file(
+        &existing_home.join(GEMINI_OAUTH_SECRET_FILE),
+        &old_secret,
+    )
+    .unwrap();
+    AppState {
+        profiles: BTreeMap::from([(
+            "gemini-main".to_string(),
+            ProfileEntry {
+                codex_home: existing_home.clone(),
+                managed: true,
+                email: Some("old-gemini@example.com".to_string()),
+                provider: ProfileProvider::Gemini {
+                    email: "old-gemini@example.com".to_string(),
+                    project_id: Some("old-project".to_string()),
+                },
+            },
+        )]),
+        ..AppState::default()
+    }
+    .save(&paths)
+    .unwrap();
+    let new_secret = serde_json::json!({
+        "auth_mode": "gemini_oauth",
+        "access_token": "new-gemini-access-token",
+        "refresh_token": "new-gemini-refresh-token",
+        "token_type": "Bearer",
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "expiry_date": 1900000000000_i64,
+        "email": "new-gemini@example.com",
+        "project_id": "new-project"
+    })
+    .to_string();
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: Some("gemini-main".to_string()),
+        profiles: vec![ExportedProfile {
+            name: "gemini-main".to_string(),
+            email: Some("new-gemini@example.com".to_string()),
+            source_managed: true,
+            provider: ProfileProvider::Gemini {
+                email: "new-gemini@example.com".to_string(),
+                project_id: Some("new-project".to_string()),
+            },
+            auth_json: String::new(),
+            secret_files: vec![prodex_profile_export::ExportedSecretFile {
+                path: GEMINI_OAUTH_SECRET_FILE.to_string(),
+                text: new_secret,
+            }],
+        }],
+    };
+    let bundle_path = sandbox_dir.path.join("gemini-import.json");
+    let bundle = serialize_profile_export_payload(&payload, None).unwrap();
+    prodex_profile_export::write_profile_export_bundle(&bundle_path, &bundle).unwrap();
+    let fault_count = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .rem_euclid(100_000)
+        .saturating_add(10)
+        .to_string();
+    let _fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_STATE_SAVE_ERROR_ONCE", &fault_count);
+
+    handle_import_profiles(ImportProfileArgs {
+        path: bundle_path,
+        name: None,
+        activate: false,
+    })
+    .expect_err("state save failure should fail Gemini import");
+
+    let state = AppState::load(&paths).unwrap();
+    assert_eq!(state.profiles["gemini-main"].email.as_deref(), Some("old-gemini@example.com"));
+    assert_eq!(state.profiles["gemini-main"].provider.label(), "gemini");
+    assert_eq!(
+        fs::read_to_string(existing_home.join(GEMINI_OAUTH_SECRET_FILE)).unwrap(),
+        old_secret
+    );
+    let journal = prodex_profile_export::read_profile_import_auth_update_journal(
+        profile_commands_import_auth_journal_paths(&paths)
+            .first()
+            .expect("rollback journal should remain"),
+    )
+    .unwrap();
+    assert!(!journal.restore_auth_json);
+    assert_eq!(journal.previous_secret_files.len(), 1);
+    assert!(journal.previous_provider_json.is_some());
 }
 
 #[test]

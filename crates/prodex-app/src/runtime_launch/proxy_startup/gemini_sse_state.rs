@@ -12,6 +12,7 @@ use super::super::provider_sse_events::{
 };
 use super::RuntimeGeminiBindingRecorder;
 use prodex_domain::RequestId;
+use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::{
     GeminiProviderCoreStreamToolCall, gemini_provider_core_citation_text,
     gemini_provider_core_conversation_requests_command_output_only as runtime_gemini_conversation_requests_command_output_only,
@@ -45,7 +46,6 @@ use prodex_provider_core::{
     gemini_provider_core_visible_text_from_part,
     gemini_provider_core_web_search_call_from_grounding, provider_core_chat_compatible_created_at,
 };
-use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 
 #[path = "gemini_sse_state/complete.rs"]

@@ -6,7 +6,7 @@ use super::local_rewrite_copilot::{
     RuntimeCopilotBindingRecorder, RuntimeCopilotResponsesSseBindingReader,
 };
 use super::provider_bridge::RuntimeProviderBridgeKind;
-use prodex_provider_core::{ProviderAdapterContract, ProviderWireFormat, provider_adapter};
+use prodex_provider_core::{ProviderWireFormat, provider_adapter};
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 

@@ -89,7 +89,7 @@ use crate::runtime_state_shared::{
 use crate::{RuntimeRotationProxy, runtime_proxy_log, runtime_proxy_request_sequence_seed};
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
-use prodex_provider_core::{ProviderAdapterContract, provider_adapter};
+use prodex_provider_core::provider_adapter;
 use prodex_runtime_state::{RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits};
 use runtime_proxy_crate::{
     RuntimeProxyRequest, runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -120,13 +120,72 @@ pub(super) const RUNTIME_GATEWAY_SCIM_PRODEX_SCHEMA: &str =
 pub(super) enum RuntimeGovernanceAuthority {
     Sqlite {
         path: PathBuf,
-        tenant_ids: Vec<prodex_domain::TenantId>,
+        tenant_ids: Arc<Mutex<BTreeSet<prodex_domain::TenantId>>>,
     },
     Postgres {
         repository: prodex_storage_postgres_runtime::PostgresRepository,
         runtime: Arc<tokio::runtime::Runtime>,
-        tenant_ids: Vec<prodex_domain::TenantId>,
+        tenant_ids: Arc<Mutex<BTreeSet<prodex_domain::TenantId>>>,
     },
+}
+
+impl RuntimeGovernanceAuthority {
+    pub(super) fn tenant_ids(
+        &self,
+    ) -> std::result::Result<Vec<prodex_domain::TenantId>, prodex_storage::GovernanceRepositoryError>
+    {
+        let tenant_ids = match self {
+            Self::Sqlite { tenant_ids, .. } | Self::Postgres { tenant_ids, .. } => tenant_ids,
+        };
+        tenant_ids
+            .lock()
+            .map(|tenant_ids| tenant_ids.iter().copied().collect())
+            .map_err(|_| prodex_storage::GovernanceRepositoryError::Database)
+    }
+
+    pub(super) fn commit_for_tenant<T>(
+        &self,
+        tenant_id: prodex_domain::TenantId,
+        operation: impl FnOnce() -> std::result::Result<T, prodex_storage::GovernanceRepositoryError>,
+    ) -> std::result::Result<T, prodex_storage::GovernanceRepositoryError> {
+        let tenant_ids = match self {
+            Self::Sqlite { tenant_ids, .. } | Self::Postgres { tenant_ids, .. } => tenant_ids,
+        };
+        let mut tenant_ids = tenant_ids
+            .lock()
+            .map_err(|_| prodex_storage::GovernanceRepositoryError::Database)?;
+        if !tenant_ids.contains(&tenant_id)
+            && tenant_ids.len()
+                >= crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS
+        {
+            return Err(prodex_storage::GovernanceRepositoryError::SnapshotUnavailable);
+        }
+        let result = operation()?;
+        tenant_ids.insert(tenant_id);
+        Ok(result)
+    }
+
+    fn merge_tenant_ids(
+        &self,
+        discovered: impl IntoIterator<Item = prodex_domain::TenantId>,
+    ) -> std::result::Result<(), prodex_storage::GovernanceRepositoryError> {
+        let tenant_ids = match self {
+            Self::Sqlite { tenant_ids, .. } | Self::Postgres { tenant_ids, .. } => tenant_ids,
+        };
+        let mut tenant_ids = tenant_ids
+            .lock()
+            .map_err(|_| prodex_storage::GovernanceRepositoryError::Database)?;
+        for tenant_id in discovered {
+            if !tenant_ids.contains(&tenant_id)
+                && tenant_ids.len()
+                    >= crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS
+            {
+                return Err(prodex_storage::GovernanceRepositoryError::SnapshotUnavailable);
+            }
+            tenant_ids.insert(tenant_id);
+        }
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -734,7 +793,12 @@ fn runtime_gateway_governance_authority(
             None,
         ));
     }
-    let mut tenants = runtime_config.governance_policy.authority_tenants.clone();
+    let mut tenants = runtime_config
+        .governance_policy
+        .authority_tenants
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     for value in admin_tokens
         .iter()
         .filter_map(|token| token.tenant_id.as_deref())
@@ -742,37 +806,55 @@ fn runtime_gateway_governance_authority(
         let tenant = value
             .parse::<prodex_domain::TenantId>()
             .context("gateway admin tenant is invalid for governance authority")?;
-        if !tenants.contains(&tenant) {
-            tenants.push(tenant);
-        }
+        tenants.insert(tenant);
     }
+    let sqlite_repository = match state_store {
+        RuntimeGatewayStateStore::Sqlite { path } => Some(
+            prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path)
+                .map_err(|_| anyhow::anyhow!("failed to open authoritative governance store"))?,
+        ),
+        _ => None,
+    };
+    let discovery_limit =
+        (crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS + 1) as u16;
+    let discovered = match state_store {
+        RuntimeGatewayStateStore::Sqlite { .. } => sqlite_repository
+            .as_ref()
+            .expect("SQLite governance repository must be initialized")
+            .governance_list_tenant_ids(discovery_limit),
+        RuntimeGatewayStateStore::Postgres { .. } => async_runtime.block_on(
+            postgres_repository
+                .context("authoritative PostgreSQL governance repository is unavailable")?
+                .governance_list_tenant_ids(discovery_limit),
+        ),
+        _ => unreachable!(),
+    }
+    .map_err(|_| anyhow::anyhow!("failed to discover authoritative governance tenants"))?;
+    tenants.extend(discovered);
     if tenants.len() > crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS {
         anyhow::bail!("governance authority tenant limit exceeded");
     }
     if tenants.is_empty() && enforcing {
         anyhow::bail!("enforcing governance requires configured authority tenants");
     }
+    let tenant_ids = Arc::new(Mutex::new(tenants));
     let authority = match state_store {
         RuntimeGatewayStateStore::Sqlite { path } => RuntimeGovernanceAuthority::Sqlite {
             path: path.clone(),
-            tenant_ids: tenants.clone(),
+            tenant_ids: Arc::clone(&tenant_ids),
         },
         RuntimeGatewayStateStore::Postgres { .. } => RuntimeGovernanceAuthority::Postgres {
             repository: postgres_repository
                 .context("authoritative PostgreSQL governance repository is unavailable")?
                 .clone(),
             runtime: Arc::clone(async_runtime),
-            tenant_ids: tenants.clone(),
+            tenant_ids,
         },
         _ => unreachable!(),
     };
-    let sqlite_repository = match &authority {
-        RuntimeGovernanceAuthority::Sqlite { path, .. } => Some(
-            prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path)
-                .map_err(|_| anyhow::anyhow!("failed to open authoritative governance store"))?,
-        ),
-        RuntimeGovernanceAuthority::Postgres { .. } => None,
-    };
+    let tenants = authority
+        .tenant_ids()
+        .map_err(|_| anyhow::anyhow!("failed to read authoritative governance tenants"))?;
     for tenant_id in &tenants {
         let policy = runtime_gateway_load_governance_snapshot(
             &authority,
@@ -1040,10 +1122,31 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                 RuntimeGovernanceAuthority::Postgres { .. } => None,
             };
             while !shutdown.load(Ordering::SeqCst) {
-                let tenant_ids = match &authority {
-                    RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. }
-                    | RuntimeGovernanceAuthority::Postgres { tenant_ids, .. } => tenant_ids,
+                let discovered = match &authority {
+                    RuntimeGovernanceAuthority::Sqlite { .. } => sqlite_repository
+                        .as_ref()
+                        .ok_or(prodex_storage::GovernanceRepositoryError::Database)
+                        .and_then(|repository| {
+                            repository.governance_list_tenant_ids(
+                                (crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS
+                                    + 1) as u16,
+                            )
+                        }),
+                    RuntimeGovernanceAuthority::Postgres {
+                        repository,
+                        runtime,
+                        ..
+                    } => runtime.block_on(repository.governance_list_tenant_ids(
+                        (crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS + 1)
+                            as u16,
+                    )),
                 };
+                let tenant_ids = discovered
+                    .and_then(|discovered| {
+                        authority.merge_tenant_ids(discovered)?;
+                        authority.tenant_ids()
+                    })
+                    .unwrap_or_default();
                 let mut next_policy = (*policy_snapshots.load_full()).clone();
                 let mut next_classification = (*classification_snapshots.load_full()).clone();
                 let mut next_provider = (*provider_snapshots.load_full()).clone();
@@ -1052,7 +1155,7 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                 let mut classification_refreshed = 0usize;
                 let mut provider_refreshed = 0usize;
                 let mut routing_refreshed = 0usize;
-                for tenant_id in tenant_ids {
+                for tenant_id in &tenant_ids {
                     if let Ok(stored) = runtime_gateway_load_governance_snapshot(
                         &authority,
                         sqlite_repository.as_ref(),
@@ -1184,13 +1287,7 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                     .gateway_postgres_repository
                     .clone()
                     .ok_or_else(|| anyhow::anyhow!("failed to open the SIEM governance outbox"))?;
-                let tenant_ids = match shared.governance_authority.as_ref() {
-                    Some(RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. })
-                    | Some(RuntimeGovernanceAuthority::Postgres { tenant_ids, .. }) => {
-                        tenant_ids.clone()
-                    }
-                    None => Vec::new(),
-                };
+                let governance_authority = shared.governance_authority.clone();
                 let runtime = shared.runtime_shared.async_runtime.handle().clone();
                 let shutdown = Arc::clone(shutdown);
                 let log_path = shared.runtime_shared.log_path.clone();
@@ -1202,6 +1299,10 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                             .as_millis()
                             .try_into()
                             .unwrap_or(u64::MAX);
+                        let tenant_ids = governance_authority
+                            .as_ref()
+                            .and_then(|authority| authority.tenant_ids().ok())
+                            .unwrap_or_default();
                         let status = if siem_worker
                             .run_once_postgres(&repository, &runtime, &tenant_ids, now_unix_ms)
                             .is_ok()
@@ -1393,7 +1494,10 @@ fn handle_runtime_local_rewrite_proxy_request(
 #[cfg(test)]
 mod request_guard_tests {
     use super::super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
-    use super::runtime_gateway_try_reserve_background_task;
+    use super::{RuntimeGovernanceAuthority, runtime_gateway_try_reserve_background_task};
+    use prodex_domain::TenantId;
+    use prodex_storage::GovernanceRepositoryError;
+    use std::cell::Cell;
     use std::collections::BTreeSet;
     use std::sync::{Arc, Mutex};
 
@@ -1418,5 +1522,26 @@ mod request_guard_tests {
         assert!(runtime_gateway_try_reserve_background_task(&slots).is_none());
         drop(permit);
         assert!(runtime_gateway_try_reserve_background_task(&slots).is_some());
+    }
+
+    #[test]
+    fn governance_tenant_capacity_is_reserved_before_commit() {
+        let configured = (0..crate::runtime_governance::MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS)
+            .map(|_| TenantId::new())
+            .collect();
+        let authority = RuntimeGovernanceAuthority::Sqlite {
+            path: "unused.sqlite".into(),
+            tenant_ids: Arc::new(Mutex::new(configured)),
+        };
+        let committed = Cell::new(false);
+
+        assert_eq!(
+            authority.commit_for_tenant(TenantId::new(), || {
+                committed.set(true);
+                Ok(())
+            }),
+            Err(GovernanceRepositoryError::SnapshotUnavailable)
+        );
+        assert!(!committed.get());
     }
 }

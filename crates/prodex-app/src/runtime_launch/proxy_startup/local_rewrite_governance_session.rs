@@ -566,12 +566,9 @@ fn runtime_gateway_governance_session_revocation_changed(
     sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
     epochs: &mut BTreeMap<TenantId, u64>,
 ) -> Result<bool, GovernanceRepositoryError> {
-    let tenant_ids = match authority {
-        RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. }
-        | RuntimeGovernanceAuthority::Postgres { tenant_ids, .. } => tenant_ids,
-    };
+    let tenant_ids = authority.tenant_ids()?;
     let mut changed = false;
-    for tenant_id in tenant_ids {
+    for tenant_id in &tenant_ids {
         let epoch = match authority {
             RuntimeGovernanceAuthority::Sqlite { .. } => sqlite
                 .ok_or(GovernanceRepositoryError::Database)
@@ -693,9 +690,8 @@ fn runtime_gateway_governance_session_refresh(
     authority: &RuntimeGovernanceAuthority,
     sqlite: Option<&prodex_storage_sqlite_runtime::GovernanceSqliteRepository>,
 ) {
-    let tenant_ids = match authority {
-        RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. }
-        | RuntimeGovernanceAuthority::Postgres { tenant_ids, .. } => tenant_ids,
+    let Ok(tenant_ids) = authority.tenant_ids() else {
+        return;
     };
     let now_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -703,7 +699,7 @@ fn runtime_gateway_governance_session_refresh(
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX);
-    for tenant_id in tenant_ids {
+    for tenant_id in &tenant_ids {
         let loaded = match authority {
             RuntimeGovernanceAuthority::Sqlite { .. } => sqlite
                 .ok_or(GovernanceRepositoryError::Database)
@@ -1070,7 +1066,7 @@ mod tests {
 
         let authority = RuntimeGovernanceAuthority::Sqlite {
             path: path.clone(),
-            tenant_ids: vec![tenant_id],
+            tenant_ids: Arc::new(Mutex::new(BTreeSet::from([tenant_id]))),
         };
         let repository =
             prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(&path).unwrap();

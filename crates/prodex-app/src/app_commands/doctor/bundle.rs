@@ -1,7 +1,8 @@
 use super::{
-    audit_logs_json_value, codex_bin, collect_live_runtime_broker_observations,
-    collect_profile_summaries, collect_runtime_doctor_summary_with_tail_bytes, first_line_of_error,
-    format_binary_resolution, format_runtime_policy_summary, kiro_bin,
+    audit_logs_json_value, codex_bin, collect_install_check_rows,
+    collect_live_runtime_broker_observations, collect_profile_summaries,
+    collect_runtime_doctor_summary_with_tail_bytes, doctor_quota_reports_json_value,
+    first_line_of_error, format_binary_resolution, format_runtime_policy_summary, kiro_bin,
     runtime_current_prodex_version, runtime_doctor_json_value,
     runtime_doctor_json_value_with_policy_suggestions, runtime_logs_json_value,
     runtime_policy_json_value, runtime_proxy_latest_log_pointer_path, secret_backend_json_value,
@@ -101,6 +102,17 @@ pub(super) fn doctor_redacted_bundle_json_value(
         },
         "runtime": runtime_json,
     });
+    if context.args.quota {
+        value["quota_probes"] = doctor_quota_reports_json_value(context.state);
+    }
+    if context.args.install {
+        value["install_checks"] = serde_json::Value::Array(
+            collect_install_check_rows(context.paths)
+                .into_iter()
+                .map(|(name, status)| serde_json::json!({ "name": name, "status": status }))
+                .collect(),
+        );
+    }
     doctor_redact_json_value(&mut value);
     value
 }

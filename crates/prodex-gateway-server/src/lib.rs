@@ -584,7 +584,7 @@ impl LoopbackBackend {
 struct ServerState<H> {
     mode: GatewayServerMode,
     handler: Arc<H>,
-    edge_security: Arc<GatewayServerEdgeSecurity>,
+    reload: GatewayServerReloadHandle,
     max_request_body_bytes: usize,
     request_header_timeout: Duration,
     response_header_timeout: Duration,
@@ -597,7 +597,7 @@ impl<H> Clone for ServerState<H> {
         Self {
             mode: self.mode,
             handler: Arc::clone(&self.handler),
-            edge_security: Arc::clone(&self.edge_security),
+            reload: self.reload.clone(),
             max_request_body_bytes: self.max_request_body_bytes,
             request_header_timeout: self.request_header_timeout,
             response_header_timeout: self.response_header_timeout,
@@ -669,7 +669,7 @@ where
         let state = ServerState {
             mode: config.mode,
             handler: Arc::clone(&handler),
-            edge_security: Arc::clone(&security.edge_security),
+            reload: reload.clone(),
             max_request_body_bytes: config.max_request_body_bytes,
             request_header_timeout: config.request_header_timeout,
             response_header_timeout: config.response_header_timeout,
@@ -757,19 +757,17 @@ where
         Some(headers) => headers,
         None => return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)),
     };
-    let peer_is_trusted_proxy = state
-        .edge_security
-        .trusted_proxies
-        .contains(&peer_addr.ip());
+    let edge_security = Arc::clone(&state.reload.load().edge_security);
+    let peer_is_trusted_proxy = edge_security.trusted_proxies.contains(&peer_addr.ip());
     let client_ip =
-        match derive_gateway_client_ip(peer_addr, &state.edge_security.trusted_proxies, &headers) {
+        match derive_gateway_client_ip(peer_addr, &edge_security.trusted_proxies, &headers) {
             Ok(client_ip) => client_ip,
             Err(_) => return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)),
         };
     if route.plane == GatewayHttpRoutePlane::ControlPlane {
         let browser_capable = browser_capable_request(&request);
         let browser = if browser_capable {
-            match state.edge_security.browser.as_ref() {
+            match edge_security.browser.as_ref() {
                 Some(browser) => Some(browser),
                 None => return Ok(json_error(StatusCode::FORBIDDEN, EDGE_REQUEST_DENIED)),
             }
@@ -787,7 +785,7 @@ where
             GatewayEdgeSecurityPolicy {
                 peer_is_trusted_proxy,
                 expected_host: loopback_compatible_expected_host(
-                    &state.edge_security.expected_host,
+                    &edge_security.expected_host,
                     &headers,
                 ),
                 expected_origin,

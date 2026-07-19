@@ -158,6 +158,9 @@ fn import_transaction_records_commit_order_and_previous_active() {
         previous_auth_json: Some("old-auth".to_string()),
         previous_email: Some("old@example.com".to_string()),
         journal_path: Some(PathBuf::from("/tmp/journal.json")),
+        restore_auth_json: true,
+        previous_provider_json: None,
+        previous_secret_files: Vec::new(),
     });
 
     let commit = transaction.into_commit();
@@ -225,6 +228,25 @@ fn import_plan_updates_same_name_non_runtime_profile() {
         plan.resolved_profile_names,
         BTreeMap::from([("gemini-main".to_string(), "gemini-main".to_string())])
     );
+}
+
+#[test]
+fn import_plan_rejects_same_name_runtime_provider_mismatch() {
+    let profiles = [PlanProfile {
+        name: "main",
+        supports_codex_runtime: true,
+        email: Some("main@example.com"),
+        account_id: Some("acct-main"),
+    }];
+
+    let error = plan_profile_import(
+        &profiles,
+        |name| (name == "main").then_some(false),
+        |_| Ok(None),
+    )
+    .expect_err("cross-provider import must be rejected");
+
+    assert!(error.to_string().contains("incompatible provider"));
 }
 
 #[test]

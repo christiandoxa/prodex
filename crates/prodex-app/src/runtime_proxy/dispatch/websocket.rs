@@ -8,7 +8,7 @@ pub(crate) fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bo
     })
 }
 
-pub(crate) fn capture_runtime_proxy_websocket_request(
+pub(super) fn capture_runtime_proxy_websocket_request(
     request: &tiny_http::Request,
 ) -> RuntimeProxyRequest {
     RuntimeProxyRequest {

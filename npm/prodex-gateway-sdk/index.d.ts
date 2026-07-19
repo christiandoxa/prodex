@@ -9,6 +9,10 @@ export interface ProdexGatewayRequestOptions {
   headers?: HeadersInit;
 }
 
+export interface ProdexGatewayResponseOptions extends ProdexGatewayRequestOptions {
+  stream?: boolean;
+}
+
 export interface GatewayKeyMutationOptions extends ProdexGatewayRequestOptions {}
 
 export interface GatewayKeyCreateRequest {
@@ -270,7 +274,18 @@ export class ProdexGatewayError extends Error {
 
 export class ProdexGatewayClient {
   constructor(options?: ProdexGatewayClientOptions);
-  createResponse<T = unknown>(body: unknown, options?: ProdexGatewayRequestOptions): Promise<T>;
+  createResponse(
+    body: { stream: true; [key: string]: unknown },
+    options?: ProdexGatewayResponseOptions & { stream?: true },
+  ): Promise<ReadableStream<Uint8Array>>;
+  createResponse<T = unknown>(
+    body: unknown,
+    options?: ProdexGatewayResponseOptions & { stream?: false },
+  ): Promise<T>;
+  createResponse(
+    body: unknown,
+    options: ProdexGatewayResponseOptions & { stream: true },
+  ): Promise<ReadableStream<Uint8Array>>;
   listKeys(options?: ProdexGatewayRequestOptions): Promise<GatewayKeyList>;
   createKey(body: GatewayKeyCreateRequest, options?: GatewayKeyMutationOptions): Promise<GatewayKeyResponse>;
   getKey(name: string, options?: ProdexGatewayRequestOptions): Promise<GatewayKeyResponse>;
@@ -301,7 +316,7 @@ export class ProdexGatewayClient {
       method?: string;
       body?: unknown;
       accept?: string;
-      parse?: "json" | "text";
+      parse?: "json" | "text" | "stream";
     },
-  ): Promise<T>;
+  ): Promise<T | ReadableStream<Uint8Array>>;
 }

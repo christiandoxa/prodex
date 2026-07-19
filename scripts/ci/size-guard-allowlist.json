@@ -5,9 +5,14 @@
     "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after live goal recovery moved to its focused module."
   },
   {
+    "file": "crates/prodex-app/src/app_commands/capability.rs",
+    "maxLines": 901,
+    "reason": "Capability setup and doctor routing keep passive dry-run discovery, platform probes, asset verification, and machine-readable reports together; capped until setup execution splits from capability inspection."
+  },
+  {
     "file": "crates/prodex-app/src/dashboard.rs",
-    "maxLines": 1107,
-    "reason": "The local control-plane JSON endpoints, provider/model catalog assembly, and dashboard tests remain capped after HTTP serving, browser launch, request parsing, and response transport moved to dashboard/server.rs."
+    "maxLines": 1133,
+    "reason": "The local control-plane JSON endpoints, provider/model catalog assembly, mutation audit emission, and dashboard tests remain capped after HTTP serving, browser launch, request parsing, and response transport moved to dashboard/server.rs."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
@@ -81,13 +86,18 @@
   },
   {
     "file": "crates/prodex-app/tests/support/profile_commands_body/import.rs",
-    "maxLines": 951,
-    "reason": "Profile import regression fixtures now cover bounded journal and credential recovery cases; capped until provider-specific import cases are split from shared helpers."
+    "maxLines": 1104,
+    "reason": "Profile import regression fixtures cover bounded journal recovery, cross-provider name rejection, and transactional non-OpenAI credential rollback; capped until provider-specific import cases split from shared helpers."
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
     "maxLines": 1190,
     "reason": "Provider-aware runtime and gateway argument parsing remains capped after Super compatibility validation moved to a focused module."
+  },
+  {
+    "file": "crates/prodex-quota/tests/src/render.rs",
+    "maxLines": 867,
+    "reason": "Quota renderer coverage keeps provider panels, compact/detail layouts, reset metadata, and error snapshots in one fixture matrix."
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
@@ -191,17 +201,17 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1422,
-    "reason": "Gateway launch composes governed snapshot authorities, durable audit/session workers, bounded accounting queues, immutable harness diagnostics, bounded refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
+    "maxLines": 1547,
+    "reason": "Gateway launch composes durable tenant discovery, governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 2427,
-    "reason": "The governed artifact lifecycle, execution approvals, audit legal holds, retention purge, and payload-free HTTP flow remain capped while retention operations split from maker-checker policy ownership."
+    "maxLines": 2489,
+    "reason": "The governed artifact lifecycle, execution approvals, SIEM outbox claims, audit legal holds, retention purge, and payload-free HTTP flow remain capped while retention operations split from maker-checker policy ownership."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_governance_session.rs",
-    "maxLines": 1147,
+    "maxLines": 1143,
     "reason": "The bounded session bank keeps admission, durable command handling, revision pinning, revocation epochs, bank fail-closed refresh, and monotonic classification invariants together."
   },
   {
@@ -231,8 +241,8 @@
   },
   {
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
-    "maxLines": 1564,
-    "reason": "SQLite governance integration coverage proves lifecycle, approval idempotency and denial audit, session revisions/revocation, audit integrity, bounded export, and SIEM outbox behavior."
+    "maxLines": 1580,
+    "reason": "SQLite governance integration coverage proves lifecycle, bounded durable tenant discovery, approval idempotency and denial audit, session revisions/revocation, audit integrity, export, and SIEM outbox behavior."
   },
   {
     "file": "crates/prodex-app/src/runtime_governance.rs",
@@ -246,7 +256,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
-    "maxLines": 1400,
+    "maxLines": 1399,
     "reason": "The runtime provider registry compiles approved descriptors, projected heterogeneous adapters, bounded dynamic signals, non-authoritative zero-price bootstrap handling, and focused conformance tests; capped until adapter projection splits out."
   },
   {
@@ -256,18 +266,18 @@
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",
-    "maxLines": 1152,
+    "maxLines": 1150,
     "reason": "The async gateway server owns transport peer trust, bounded forwarded-chain parsing, browser edge enforcement, body limits, upgrades, and graceful drain; capped until edge request validation splits out."
   },
   {
     "file": "crates/prodex-gateway-server/src/tests.rs",
-    "maxLines": 924,
-    "reason": "Gateway server integration coverage keeps canonical targets, streaming limits, overload, trusted proxy, forwarding privacy, Host/Origin/CSRF, and expected-host cases in one harness."
+    "maxLines": 983,
+    "reason": "Gateway server integration coverage keeps canonical targets, streaming limits, overload, trusted proxy, forwarding privacy, live edge-security reload, Host/Origin/CSRF, and expected-host cases in one harness."
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/governance/repository_core.rs",
-    "maxLines": 1097,
-    "reason": "Transactional PostgreSQL governance revision, approval, legal-hold, purge, status, and snapshot operations remain capped until retention operations split from lifecycle persistence."
+    "maxLines": 1128,
+    "reason": "Transactional PostgreSQL governance revision, bounded tenant discovery, approval, legal-hold, purge, status, and snapshot operations remain capped until retention operations split from lifecycle persistence."
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/lib.rs",

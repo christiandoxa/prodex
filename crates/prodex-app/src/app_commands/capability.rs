@@ -227,8 +227,20 @@ fn handle_super_doctor(args: SuperDoctorArgs) -> Result<()> {
 
 pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    let install_rows = collect_install_check_rows(&paths);
+    let install_rows = if args.dry_run {
+        collect_install_check_rows_passive(&paths)
+    } else {
+        collect_install_check_rows(&paths)
+    };
     let asset_report = prodex_caveman_assets::verify_embedded_caveman_assets();
+
+    if !args.dry_run {
+        fs::create_dir_all(&paths.root)
+            .with_context(|| format!("failed to create {}", paths.root.display()))?;
+        fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
+            format!("failed to create {}", paths.managed_profiles_root.display())
+        })?;
+    }
 
     if args.json {
         let value = serde_json::json!({
@@ -239,7 +251,7 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
                 .iter()
                 .map(|(name, status)| serde_json::json!({ "name": name, "status": status }))
                 .collect::<Vec<_>>(),
-            "asset_verification": match asset_report {
+            "asset_verification": match &asset_report {
                 Ok(report) => serde_json::json!({
                     "status": "ok",
                     "codex_plugin_files": report.codex_plugin_files,
@@ -255,6 +267,9 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
         print_stdout_line(
             &serde_json::to_string_pretty(&value).context("failed to serialize setup report")?,
         )?;
+        if args.verify_assets {
+            asset_report.context("embedded Caveman/Super asset verification failed")?;
+        }
         return Ok(());
     }
 
@@ -274,19 +289,57 @@ pub(crate) fn handle_setup(args: SetupArgs) -> Result<()> {
         },
     ])?;
 
-    if !args.dry_run {
-        fs::create_dir_all(&paths.root)
-            .with_context(|| format!("failed to create {}", paths.root.display()))?;
-        fs::create_dir_all(&paths.managed_profiles_root).with_context(|| {
-            format!("failed to create {}", paths.managed_profiles_root.display())
-        })?;
-    }
-
     if args.verify_assets {
         asset_report.context("embedded Caveman/Super asset verification failed")?;
     }
 
     Ok(())
+}
+
+fn collect_install_check_rows_passive(paths: &AppPaths) -> Vec<(String, String)> {
+    let mut rows = [
+        ("Codex CLI", codex_bin()),
+        ("Claude Code", claude_bin()),
+        ("Gemini CLI", gemini_bin()),
+        ("GitHub Copilot CLI", copilot_bin()),
+        ("Kiro CLI", kiro_bin()),
+        ("Antigravity CLI", agy_bin()),
+        ("RTK", OsString::from("rtk")),
+        ("Node.js", OsString::from("node")),
+        ("npx", OsString::from("npx")),
+        ("codebase-memory-mcp", OsString::from("codebase-memory-mcp")),
+    ]
+    .into_iter()
+    .map(|(name, command)| {
+        let status =
+            prodex_core::resolve_binary_path_in_path(&command, env::var_os("PATH").as_deref())
+                .map_or_else(
+                    || "missing".to_string(),
+                    |path| format!("available ({})", path.display()),
+                );
+        (name.to_string(), status)
+    })
+    .collect::<Vec<_>>();
+    rows.push((
+        "Codex auth".to_string(),
+        "not checked (dry-run)".to_string(),
+    ));
+    rows.push((
+        "Caveman assets".to_string(),
+        match prodex_caveman_assets::verify_embedded_caveman_assets() {
+            Ok(report) => format!(
+                "ok (codex files={}, claude files={}, skills={})",
+                report.codex_plugin_files, report.claude_plugin_files, report.skill_files
+            ),
+            Err(err) => capability_failed_status(&err),
+        },
+    ));
+    rows.push(("Prodex home".to_string(), paths.root.display().to_string()));
+    rows.push((
+        "Shared CODEX_HOME".to_string(),
+        paths.shared_codex_root.display().to_string(),
+    ));
+    rows
 }
 
 fn print_capability_panel(title: &str, fields: &[(String, String)]) -> Result<()> {

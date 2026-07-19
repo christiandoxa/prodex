@@ -1,6 +1,37 @@
 use super::*;
 
 impl PostgresRepository {
+    pub async fn governance_list_tenant_ids(
+        &self,
+        limit: u16,
+    ) -> Result<Vec<TenantId>, GovernanceRepositoryError> {
+        if limit == 0 {
+            return Err(GovernanceRepositoryError::InvalidInput);
+        }
+        self.governance_timeout(self.governance_list_tenant_ids_inner(limit))
+            .await
+    }
+
+    async fn governance_list_tenant_ids_inner(
+        &self,
+        limit: u16,
+    ) -> Result<Vec<TenantId>, GovernanceRepositoryError> {
+        let client = self.pool.get().await.map_err(database_error)?;
+        client
+            .query(
+                "SELECT tenant_id FROM prodex_tenants ORDER BY tenant_id ASC LIMIT $1",
+                &[&i64::from(limit)],
+            )
+            .await
+            .map_err(database_error)?
+            .into_iter()
+            .map(|row| {
+                let tenant_id = row.try_get::<_, uuid::Uuid>(0).map_err(database_error)?;
+                Ok(TenantId::from_uuid(tenant_id))
+            })
+            .collect()
+    }
+
     pub async fn governance_write_revision(
         &self,
         command: GovernanceRevisionWriteCommand,

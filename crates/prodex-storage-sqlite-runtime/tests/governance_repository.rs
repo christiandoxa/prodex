@@ -70,6 +70,22 @@ impl Drop for TestDatabase {
     }
 }
 
+#[test]
+fn governance_tenant_discovery_is_bounded_and_durable() {
+    let tenants = [TenantId::new(), TenantId::new()];
+    let database = TestDatabase::new(&tenants);
+    let repository = database.repository();
+
+    let mut expected = tenants.to_vec();
+    expected.sort();
+    assert_eq!(repository.governance_list_tenant_ids(3).unwrap(), expected);
+    assert_eq!(repository.governance_list_tenant_ids(1).unwrap().len(), 1);
+    assert_eq!(
+        repository.governance_list_tenant_ids(0),
+        Err(GovernanceRepositoryError::InvalidInput)
+    );
+}
+
 #[derive(Default)]
 struct AuditCursor {
     previous_digest: Option<String>,

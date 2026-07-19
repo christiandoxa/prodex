@@ -5,9 +5,8 @@ use crate::profile_commands::{KIRO_MODEL_CATALOG_FILE, parse_kiro_model_catalog_
 use crate::{AppPaths, AppState, AppStateIoExt, ProfileProvider};
 use anyhow::{Context, anyhow};
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderAdapterContractSpec, ProviderId, provider_adapter,
-    provider_adapter_contract_matrix, provider_contract_catalog, provider_model_catalog_json,
-    resolve_harness_mode,
+    ProviderAdapterContractSpec, ProviderId, provider_adapter, provider_adapter_contract_matrix,
+    provider_contract_catalog, provider_model_catalog_json, resolve_harness_mode,
 };
 use std::collections::BTreeSet;
 use std::fs;

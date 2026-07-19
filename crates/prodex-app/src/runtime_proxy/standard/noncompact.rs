@@ -426,6 +426,5 @@ pub(super) fn proxy_runtime_noncompact_request(
                 loop_state.excluded_profiles.insert(profile_name);
             }
         }
-        loop_state.restart_elapsed_budget();
     }
 }

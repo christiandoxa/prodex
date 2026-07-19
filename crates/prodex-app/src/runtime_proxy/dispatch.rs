@@ -41,6 +41,7 @@ impl std::error::Error for RuntimeProxyBodyTooLarge {}
 
 mod websocket;
 
+use websocket::capture_runtime_proxy_websocket_request;
 pub(crate) use websocket::{
     is_tiny_http_websocket_upgrade, proxy_runtime_responses_websocket_request,
 };
@@ -109,6 +110,7 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
 
     let request_path = request.url().to_string();
     let websocket = is_tiny_http_websocket_upgrade(&request);
+    let websocket_request = websocket.then(|| capture_runtime_proxy_websocket_request(&request));
     let request_transport = if websocket { "websocket" } else { "http" };
     let request_id = runtime_proxy_next_request_id(shared);
     if !websocket
@@ -119,66 +121,68 @@ pub(crate) fn handle_runtime_rotation_proxy_request(
         return;
     }
     let mut captured_after_lane_limit = None;
-    let _active_request_guard = match acquire_runtime_proxy_active_request_slot_with_wait(
-        shared,
-        request_transport,
-        &request_path,
-    ) {
-        Ok(guard) => guard,
-        Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
-            mark_runtime_proxy_local_overload(shared, "active_request_limit");
-            reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
-            return;
-        }
-        Err(RuntimeProxyAdmissionRejection::LaneLimit(_lane)) if !websocket => {
-            let captured = match capture_runtime_proxy_request(
-                &mut request,
-                shared.runtime_config.max_request_body_bytes,
-            ) {
-                Ok(captured) => captured,
-                Err(err) => {
-                    reject_runtime_proxy_capture_error(request, shared, request_id, &err);
-                    return;
-                }
-            };
-            match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
-                shared,
-                request_transport,
-                &request_path,
-                Some(&captured),
-            ) {
-                Ok(guard) => {
-                    captured_after_lane_limit = Some(captured);
-                    guard
-                }
-                Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
-                    mark_runtime_proxy_local_overload(shared, "active_request_limit");
-                    reject_runtime_proxy_overloaded_request(
-                        request,
-                        shared,
-                        "active_request_limit",
-                    );
-                    return;
-                }
-                Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
-                    let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-                    if runtime_proxy_lane_limit_marks_global_overload(lane) {
-                        mark_runtime_proxy_local_overload(shared, &reason);
+    let _active_request_guard =
+        match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+            shared,
+            request_transport,
+            &request_path,
+            websocket_request.as_ref(),
+        ) {
+            Ok(guard) => guard,
+            Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
+                mark_runtime_proxy_local_overload(shared, "active_request_limit");
+                reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
+                return;
+            }
+            Err(RuntimeProxyAdmissionRejection::LaneLimit(_lane)) if !websocket => {
+                let captured = match capture_runtime_proxy_request(
+                    &mut request,
+                    shared.runtime_config.max_request_body_bytes,
+                ) {
+                    Ok(captured) => captured,
+                    Err(err) => {
+                        reject_runtime_proxy_capture_error(request, shared, request_id, &err);
+                        return;
                     }
-                    reject_runtime_proxy_overloaded_request(request, shared, &reason);
-                    return;
+                };
+                match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+                    shared,
+                    request_transport,
+                    &request_path,
+                    Some(&captured),
+                ) {
+                    Ok(guard) => {
+                        captured_after_lane_limit = Some(captured);
+                        guard
+                    }
+                    Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
+                        mark_runtime_proxy_local_overload(shared, "active_request_limit");
+                        reject_runtime_proxy_overloaded_request(
+                            request,
+                            shared,
+                            "active_request_limit",
+                        );
+                        return;
+                    }
+                    Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
+                        let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
+                        if runtime_proxy_lane_limit_marks_global_overload(lane) {
+                            mark_runtime_proxy_local_overload(shared, &reason);
+                        }
+                        reject_runtime_proxy_overloaded_request(request, shared, &reason);
+                        return;
+                    }
                 }
             }
-        }
-        Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
-            let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-            if runtime_proxy_lane_limit_marks_global_overload(lane) {
-                mark_runtime_proxy_local_overload(shared, &reason);
+            Err(RuntimeProxyAdmissionRejection::LaneLimit(lane)) => {
+                let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
+                if runtime_proxy_lane_limit_marks_global_overload(lane) {
+                    mark_runtime_proxy_local_overload(shared, &reason);
+                }
+                reject_runtime_proxy_overloaded_request(request, shared, &reason);
+                return;
             }
-            reject_runtime_proxy_overloaded_request(request, shared, &reason);
-            return;
-        }
-    };
+        };
 
     if websocket {
         runtime_proxy_log(

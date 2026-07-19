@@ -18,6 +18,28 @@ impl GovernanceSqliteRepository {
         })
     }
 
+    pub fn governance_list_tenant_ids(
+        &self,
+        limit: u16,
+    ) -> Result<Vec<TenantId>, GovernanceRepositoryError> {
+        if limit == 0 {
+            return Err(GovernanceRepositoryError::InvalidInput);
+        }
+        let connection = self.connection()?;
+        let mut statement = connection
+            .prepare("SELECT tenant_id FROM prodex_tenants ORDER BY tenant_id ASC LIMIT ?1")
+            .map_err(database_error)?;
+        statement
+            .query_map([i64::from(limit)], |row| row.get::<_, String>(0))
+            .map_err(database_error)?
+            .map(|row| {
+                row.map_err(database_error)?
+                    .parse::<TenantId>()
+                    .map_err(|_| GovernanceRepositoryError::Database)
+            })
+            .collect()
+    }
+
     pub fn write_revision(
         &self,
         command: GovernanceRevisionWriteCommand,
