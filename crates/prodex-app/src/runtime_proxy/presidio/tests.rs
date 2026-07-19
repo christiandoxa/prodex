@@ -1,5 +1,6 @@
 use super::engine::{
-    InspectionExecutionOutcome, runtime_local_inspection_required, runtime_presidio_redact_body,
+    InspectionExecutionOutcome, runtime_local_inspection_fail_closed,
+    runtime_local_inspection_required, runtime_presidio_redact_body,
 };
 use super::findings::{
     PresidioAnalyzerResult, runtime_presidio_findings, runtime_presidio_inspection_plan,
@@ -337,6 +338,18 @@ fn disabled_personal_inspection_preserves_compatibility() {
         prodex_config::GovernanceRolloutMode::Observe,
         false,
         false,
+    ));
+    assert!(!runtime_local_inspection_fail_closed(
+        prodex_config::GovernanceRolloutMode::Off,
+        false,
+        false,
+        Some(false),
+    ));
+    assert!(runtime_local_inspection_fail_closed(
+        prodex_config::GovernanceRolloutMode::Enforce,
+        false,
+        false,
+        Some(false),
     ));
 }
 

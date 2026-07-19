@@ -2,7 +2,8 @@
 
 use super::super::await_runtime_proxy_async_task;
 use super::engine::{
-    InspectionExecutionOutcome, runtime_local_inspection_required, runtime_presidio_redact_body,
+    InspectionExecutionOutcome, runtime_local_inspection_fail_closed,
+    runtime_local_inspection_required, runtime_presidio_redact_body,
 };
 use super::findings::{
     runtime_local_inspection_source, runtime_presidio_inspection_plan,
@@ -82,45 +83,67 @@ pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(
     }
 
     let local_started = Instant::now();
-    let local = match runtime_local_inspect_and_mask_for_tenant(
+    let local_fail_closed = runtime_local_inspection_fail_closed(
+        governance.inspection,
+        legacy_local_enabled,
+        tenant_detector_patterns.has_for_tenant(tenant_id),
+        state.as_ref().map(|state| state.config.fail_closed),
+    );
+    let (mut body, mut sources) = match runtime_local_inspect_and_mask_for_tenant(
         text.as_bytes().to_vec(),
         tenant_detector_patterns,
         tenant_id,
     ) {
-        Ok(local) => local,
-        Err(error) => {
+        Ok(local) => {
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::Local,
+                local.coverage,
+                &local.findings,
+                if local.changed {
+                    InspectionMaskingAction::Masked
+                } else {
+                    InspectionMaskingAction::None
+                },
+                InspectionOutcome::Allowed,
+                runtime_inspection_duration_micros(local_started),
+            );
+            let source =
+                runtime_local_inspection_source(local.coverage, local.findings, local.changed)?;
+            (local.body, vec![source])
+        }
+        Err(failure) => {
             runtime_emit_inspection_metric(
                 shared,
                 InspectionStage::Local,
                 InspectionCoverage::Unsupported,
                 &[],
-                InspectionMaskingAction::Denied,
-                runtime_inspection_error_outcome(&error),
+                if local_fail_closed {
+                    InspectionMaskingAction::Denied
+                } else {
+                    InspectionMaskingAction::None
+                },
+                runtime_inspection_error_outcome(&failure.error),
                 runtime_inspection_duration_micros(local_started),
             );
-            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
-            return Err(error);
+            if state.is_some() {
+                runtime_log_presidio_redaction_error(
+                    request_id,
+                    "websocket",
+                    local_fail_closed,
+                    shared,
+                );
+            }
+            if local_fail_closed {
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+                return Err(failure.error);
+            }
+            (
+                failure.body,
+                vec![runtime_presidio_unavailable_source("local.unavailable")?],
+            )
         }
     };
-    runtime_emit_inspection_metric(
-        shared,
-        InspectionStage::Local,
-        local.coverage,
-        &local.findings,
-        if local.changed {
-            InspectionMaskingAction::Masked
-        } else {
-            InspectionMaskingAction::None
-        },
-        InspectionOutcome::Allowed,
-        runtime_inspection_duration_micros(local_started),
-    );
-    let mut body = local.body;
-    let mut sources = vec![runtime_local_inspection_source(
-        local.coverage,
-        local.findings,
-        local.changed,
-    )?];
     let Some(state) = state else {
         return runtime_local_websocket_inspection(
             request_id,

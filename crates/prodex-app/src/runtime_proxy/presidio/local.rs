@@ -2,7 +2,7 @@ use super::json_body::{
     MAX_PRESIDIO_JSON_TEXT_BYTES, PresidioJsonString, collect_json_content,
     replace_json_string_values,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use prodex_domain::{
     ContentLocation, DetectorId, FindingKind, InspectionCoverage, InspectionFinding,
     MAX_INSPECTION_FINDINGS, TenantId,
@@ -80,6 +80,19 @@ pub(crate) struct RuntimeLocalInspection {
     pub(crate) changed: bool,
 }
 
+#[derive(Debug)]
+pub(crate) struct RuntimeLocalInspectionFailure {
+    pub(crate) body: Vec<u8>,
+    pub(crate) error: anyhow::Error,
+}
+
+struct RuntimeLocalInspectionResult {
+    body: Option<Vec<u8>>,
+    coverage: InspectionCoverage,
+    findings: Vec<InspectionFinding>,
+    changed: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LocalMatch {
     start: usize,
@@ -89,15 +102,44 @@ struct LocalMatch {
 
 pub(crate) fn runtime_local_inspect_and_mask(body: Vec<u8>) -> Result<RuntimeLocalInspection> {
     runtime_local_inspect_and_mask_for_tenant(body, &RuntimeTenantDetectorPatterns::default(), None)
+        .map_err(|failure| failure.error)
 }
 
 pub(crate) fn runtime_local_inspect_and_mask_for_tenant(
     body: Vec<u8>,
     patterns: &RuntimeTenantDetectorPatterns,
     tenant_id: Option<TenantId>,
-) -> Result<RuntimeLocalInspection> {
-    let text = String::from_utf8(body).context("request body is not UTF-8")?;
-    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&text) {
+) -> std::result::Result<RuntimeLocalInspection, RuntimeLocalInspectionFailure> {
+    let text = match String::from_utf8(body) {
+        Ok(text) => text,
+        Err(error) => {
+            let source = error.utf8_error();
+            return Err(RuntimeLocalInspectionFailure {
+                body: error.into_bytes(),
+                error: anyhow!(source).context("request body is not UTF-8"),
+            });
+        }
+    };
+    match runtime_local_inspect_and_mask_text(&text, patterns, tenant_id) {
+        Ok(result) => Ok(RuntimeLocalInspection {
+            body: result.body.unwrap_or_else(|| text.into_bytes()),
+            coverage: result.coverage,
+            findings: result.findings,
+            changed: result.changed,
+        }),
+        Err(error) => Err(RuntimeLocalInspectionFailure {
+            body: text.into_bytes(),
+            error,
+        }),
+    }
+}
+
+fn runtime_local_inspect_and_mask_text(
+    text: &str,
+    patterns: &RuntimeTenantDetectorPatterns,
+    tenant_id: Option<TenantId>,
+) -> Result<RuntimeLocalInspectionResult> {
+    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(text) {
         let content = collect_json_content(&json)?;
         let mut findings = Vec::new();
         let mut masked_values = Vec::with_capacity(content.values.len());
@@ -110,8 +152,8 @@ pub(crate) fn runtime_local_inspect_and_mask_for_tenant(
             masked_values.push(masked);
         }
         if findings.is_empty() {
-            return Ok(RuntimeLocalInspection {
-                body: text.into_bytes(),
+            return Ok(RuntimeLocalInspectionResult {
+                body: None,
                 coverage: content.coverage,
                 findings,
                 changed: false,
@@ -119,8 +161,10 @@ pub(crate) fn runtime_local_inspect_and_mask_for_tenant(
         }
         let mut masked_values = masked_values.iter().map(String::as_str);
         replace_json_string_values(&mut json, false, &mut masked_values);
-        return Ok(RuntimeLocalInspection {
-            body: serde_json::to_vec(&json).context("failed to serialize masked JSON request")?,
+        return Ok(RuntimeLocalInspectionResult {
+            body: Some(
+                serde_json::to_vec(&json).context("failed to serialize masked JSON request")?,
+            ),
             coverage: content.coverage,
             findings,
             changed: true,
@@ -129,17 +173,18 @@ pub(crate) fn runtime_local_inspect_and_mask_for_tenant(
 
     let value = PresidioJsonString {
         path: "$".to_string(),
-        text,
+        text: text.to_string(),
         sensitive_kind: None,
     };
     if value.text.len() > MAX_PRESIDIO_JSON_TEXT_BYTES {
         anyhow::bail!("request content exceeds inspection limits");
     }
     let (text, findings) = inspect_and_mask_value(&value, patterns, tenant_id)?;
-    Ok(RuntimeLocalInspection {
-        body: text.into_bytes(),
+    let changed = !findings.is_empty();
+    Ok(RuntimeLocalInspectionResult {
+        body: changed.then(|| text.into_bytes()),
         coverage: InspectionCoverage::Full,
-        changed: !findings.is_empty(),
+        changed,
         findings,
     })
 }

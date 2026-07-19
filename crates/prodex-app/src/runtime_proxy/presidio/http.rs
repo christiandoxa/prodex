@@ -2,7 +2,8 @@
 
 use super::super::await_runtime_proxy_async_task;
 use super::engine::{
-    InspectionExecutionOutcome, runtime_local_inspection_required, runtime_presidio_redact_body,
+    InspectionExecutionOutcome, runtime_local_inspection_fail_closed,
+    runtime_local_inspection_required, runtime_presidio_redact_body,
 };
 use super::findings::{
     runtime_local_inspection_source, runtime_presidio_inspection_plan,
@@ -73,54 +74,72 @@ pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(
 
     let original_bytes = request.body.len();
     let local_started = Instant::now();
-    let local = match runtime_local_inspect_and_mask_for_tenant(
+    let local_fail_closed = runtime_local_inspection_fail_closed(
+        governance.inspection,
+        legacy_local_enabled,
+        tenant_detector_patterns.has_for_tenant(tenant_id),
+        state.as_ref().map(|state| state.config.fail_closed),
+    );
+    let mut sources = match runtime_local_inspect_and_mask_for_tenant(
         std::mem::take(&mut request.body),
         tenant_detector_patterns,
         tenant_id,
     ) {
-        Ok(local) => local,
-        Err(error) => {
+        Ok(local) => {
+            runtime_emit_inspection_metric(
+                shared,
+                InspectionStage::Local,
+                local.coverage,
+                &local.findings,
+                if local.changed {
+                    InspectionMaskingAction::Masked
+                } else {
+                    InspectionMaskingAction::None
+                },
+                InspectionOutcome::Allowed,
+                runtime_inspection_duration_micros(local_started),
+            );
+            request.body = local.body;
+            if local.changed {
+                runtime_log_local_masking_applied(
+                    request_id,
+                    "http",
+                    original_bytes,
+                    request.body.len(),
+                    shared,
+                );
+            }
+            vec![runtime_local_inspection_source(
+                local.coverage,
+                local.findings,
+                local.changed,
+            )?]
+        }
+        Err(failure) => {
+            request.body = failure.body;
             runtime_emit_inspection_metric(
                 shared,
                 InspectionStage::Local,
                 InspectionCoverage::Unsupported,
                 &[],
-                InspectionMaskingAction::Denied,
-                runtime_inspection_error_outcome(&error),
+                if local_fail_closed {
+                    InspectionMaskingAction::Denied
+                } else {
+                    InspectionMaskingAction::None
+                },
+                runtime_inspection_error_outcome(&failure.error),
                 runtime_inspection_duration_micros(local_started),
             );
-            runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
-            return Err(error);
+            if state.is_some() {
+                runtime_log_presidio_redaction_error(request_id, "http", local_fail_closed, shared);
+            }
+            if local_fail_closed {
+                runtime_emit_inspection_denied_metric(shared, InspectionStage::RequestEnforcement);
+                return Err(failure.error);
+            }
+            vec![runtime_presidio_unavailable_source("local.unavailable")?]
         }
     };
-    runtime_emit_inspection_metric(
-        shared,
-        InspectionStage::Local,
-        local.coverage,
-        &local.findings,
-        if local.changed {
-            InspectionMaskingAction::Masked
-        } else {
-            InspectionMaskingAction::None
-        },
-        InspectionOutcome::Allowed,
-        runtime_inspection_duration_micros(local_started),
-    );
-    request.body = local.body;
-    if local.changed {
-        runtime_log_local_masking_applied(
-            request_id,
-            "http",
-            original_bytes,
-            request.body.len(),
-            shared,
-        );
-    }
-    let mut sources = vec![runtime_local_inspection_source(
-        local.coverage,
-        local.findings,
-        local.changed,
-    )?];
     let Some(state) = state else {
         return runtime_presidio_inspection_plan(
             sources,
