@@ -103,8 +103,9 @@ fn collect_json_content_at(
             }
         }
         serde_json::Value::Object(fields) => {
+            let skip_tools = path == "$" || json_object_declares_tools(fields);
             for (key, value) in fields {
-                if path == "$" && key == "tools" {
+                if skip_tools && key == "tools" {
                     continue;
                 }
                 if unsupported_modality_field(key) && !value.is_null() {
@@ -163,6 +164,10 @@ fn inspectable_json_string_field(key: &str) -> bool {
     )
 }
 
+fn json_object_declares_tools(fields: &serde_json::Map<String, serde_json::Value>) -> bool {
+    fields.get("role").and_then(serde_json::Value::as_str) == Some("developer")
+}
+
 fn unsupported_modality_field(key: &str) -> bool {
     matches!(
         key,
@@ -203,8 +208,9 @@ fn replace_json_string_values_at<'a>(
             }
         }
         serde_json::Value::Object(fields) => {
+            let skip_tools = root || json_object_declares_tools(fields);
             for (key, value) in fields {
-                if root && key == "tools" {
+                if skip_tools && key == "tools" {
                     continue;
                 }
                 replace_json_string_values_at(
@@ -296,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn walker_skips_top_level_tool_schemas_but_not_user_content() {
+    fn walker_skips_tool_schemas_but_not_user_content() {
         let tools = (0..=MAX_PRESIDIO_JSON_VALUES)
             .map(|index| {
                 serde_json::json!({
@@ -305,16 +311,47 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut request = serde_json::json!({
-            "input": {"tools": {"content": "user@example.com"}},
+            "input": [
+                {"role": "developer", "tools": tools.clone()},
+                {"role": "user", "content": {"tools": {"content": "user@example.com"}}}
+            ],
             "tools": tools,
         });
         let content = collect_json_content(&request).unwrap();
 
-        assert_eq!(content.values.len(), 1);
-        assert_eq!(content.values[0].text, "user@example.com");
+        assert!(
+            content
+                .values
+                .iter()
+                .any(|value| value.text == "user@example.com")
+        );
+        assert!(
+            content
+                .values
+                .iter()
+                .all(|value| !value.text.starts_with("schema "))
+        );
 
-        replace_json_string_values(&mut request, false, &mut ["<redacted>"].into_iter());
-        assert_eq!(request["input"]["tools"]["content"], "<redacted>");
+        let redacted = content
+            .values
+            .iter()
+            .map(|value| {
+                if value.text == "user@example.com" {
+                    "<redacted>"
+                } else {
+                    value.text.as_str()
+                }
+            })
+            .collect::<Vec<_>>();
+        replace_json_string_values(&mut request, false, &mut redacted.into_iter());
+        assert_eq!(
+            request["input"][1]["content"]["tools"]["content"],
+            "<redacted>"
+        );
+        assert_eq!(
+            request["input"][0]["tools"][0]["parameters"]["properties"]["input"]["description"],
+            "schema 0"
+        );
         assert_eq!(
             request["tools"][0]["parameters"]["properties"]["input"]["description"],
             "schema 0"
