@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.323.0 - 2026-07-19
+
+### Runtime
+
+- Harden Codex input on VTE terminals (`5b10378`)
+
 ## 0.322.0 - 2026-07-19
 
 ### Runtime
@@ -68,9 +74,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Remove unimplemented audited surfaces (`7636872`)
 - Harden audited desktop and dashboard paths (`d4b13cd`)
-
-## 0.311.0 - 2026-07-18
-
-### Misc
-
-- Launch platform Codex desktop apps (`7a04e0f`)
