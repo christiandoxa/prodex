@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.319.0 - 2026-07-19
+
+### Runtime
+
+- Skip tool schemas during PII inspection (`f5403c3`)
+
 ## 0.318.0 - 2026-07-19
 
 ### Misc
@@ -74,9 +80,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Reject inactive adaptive routing (`f0f9199`)
 - Harden native client launches (`9dfe354`)
-
-## 0.307.0 - 2026-07-17
-
-### Runtime
-
-- Launch Copilot through Prodex proxy (`2ac38df`)
