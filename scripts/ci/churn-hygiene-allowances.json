@@ -1,5 +1,20 @@
 [
   {
+    "id": "audited-runtime-and-governance-features-0.321.0",
+    "requiredSubjects": [
+      "fix: complete audited runtime and governance features",
+      "chore(release): release 0.321.0",
+      "chore(ci): allow reviewed 0.321.0 audit range"
+    ],
+    "caps": {
+      "maxFiles": 50,
+      "maxBehaviorFiles": 30,
+      "maxLines": 2100,
+      "maxFileLines": 550
+    },
+    "reason": "Reviewed the whole-repository audit fixes for Kiro status reporting, translated-provider transport fallback, cross-replica browser identity and standards-aligned back-channel logout, governed current-session revocation, deterministic OpenAPI, dead DeepSeek compatibility removal, Codex update visibility, enterprise documentation, and dashboard test determinism; verified with focused regressions, the full locked all-features suite, strict Clippy, complete preflight and boundary guards, an optimized locked build, code-graph coverage and impact checks, secret scanning, and tracked-diff identifier review before the 0.321.0 release."
+  },
+  {
     "id": "whole-repo-feature-completion-0.318.0",
     "requiredSubjects": [
       "fix: complete audited feature implementations"
