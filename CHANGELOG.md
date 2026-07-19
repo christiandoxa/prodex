@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.321.0 - 2026-07-19
+
+### Runtime
+
+- Complete audited runtime and governance features (`c377446`)
+
 ## 0.320.0 - 2026-07-19
 
 ### Runtime
@@ -68,10 +74,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Add OpenCodex-inspired control center (`29a1556`)
-
-## 0.309.0 - 2026-07-18
-
-### Misc
-
-- Preserve explicit route pricing (`b8563eb`)
-- Harden clients and enterprise gateway (`75568ba`)
