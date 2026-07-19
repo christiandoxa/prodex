@@ -329,6 +329,10 @@ impl RuntimeProxyCookieChange {
             }
         }
 
+        if secure && !secure_origin {
+            return None;
+        }
+
         if delete {
             return Some(Self::Delete(RuntimeProxyCookieIdentity {
                 name: name.to_string(),
@@ -340,7 +344,7 @@ impl RuntimeProxyCookieChange {
             name: name.to_string(),
             value: value.to_string(),
             path,
-            secure: secure && secure_origin,
+            secure,
             expires_at,
             updated_at: now,
         }))

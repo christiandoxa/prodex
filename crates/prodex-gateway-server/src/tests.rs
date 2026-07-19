@@ -30,7 +30,7 @@ use tokio::{
 use super::{
     GatewayHandlerRequest, GatewayHandlerResponse, GatewayServerBrowserSecurity,
     GatewayServerConfig, GatewayServerMode, GatewayServerReloadHandle, LoopbackBackend,
-    run_with_handler,
+    run_with_handler, run_with_handler_reloadable,
 };
 use prodex_gateway_http::GatewayHttpRouteKind;
 
@@ -62,6 +62,49 @@ fn reload_handle_swaps_edge_security_for_new_connections() {
         security.edge_security.trusted_proxies,
         vec!["192.0.2.10".parse::<std::net::IpAddr>().unwrap()]
     );
+}
+
+#[tokio::test]
+async fn reload_applies_edge_security_to_existing_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut config = GatewayServerConfig::production(addr, GatewayServerMode::ControlPlane);
+    config.edge_security.expected_host = "old.example.com".to_string();
+    config.drain_timeout = Duration::from_secs(1);
+    let reload = GatewayServerReloadHandle::new(&config).unwrap();
+    let server_reload = reload.clone();
+    let (stop_tx, stop_rx) = oneshot::channel();
+    let server = tokio::spawn(run_with_handler_reloadable(
+        listener,
+        config.clone(),
+        server_reload,
+        |_| async { full_response(b"ok") },
+        async move { stop_rx.await.map_err(anyhow::Error::from) },
+    ));
+    let mut client = TcpStream::connect(addr).await.unwrap();
+
+    client
+        .write_all(b"GET /admin/keys HTTP/1.1\r\nHost: old.example.com\r\n\r\n")
+        .await
+        .unwrap();
+    let (headers, _) = read_response(&mut client).await;
+    assert!(headers.starts_with("HTTP/1.1 200"), "{headers}");
+
+    config.edge_security.expected_host = "new.example.com".to_string();
+    reload.reload(&config).unwrap();
+    client
+        .write_all(b"GET /admin/keys HTTP/1.1\r\nHost: old.example.com\r\n\r\n")
+        .await
+        .unwrap();
+    let (headers, _) = read_response(&mut client).await;
+    assert!(headers.starts_with("HTTP/1.1 403"), "{headers}");
+
+    stop_tx.send(()).unwrap();
+    timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 #[tokio::test]
 async fn route_isolation_keeps_data_and_control_planes_separate() {
@@ -837,6 +880,22 @@ async fn read_headers(stream: &mut TcpStream) -> String {
         bytes.push(byte[0]);
     }
     String::from_utf8(bytes).unwrap()
+}
+
+async fn read_response(stream: &mut TcpStream) -> (String, Vec<u8>) {
+    let headers = read_headers(stream).await;
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    let mut body = vec![0; content_length];
+    stream.read_exact(&mut body).await.unwrap();
+    (headers, body)
 }
 
 async fn spawn_frontend(

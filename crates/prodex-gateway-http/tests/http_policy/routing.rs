@@ -210,6 +210,22 @@ fn canonical_request_target_rejects_ambiguous_forms_and_preserves_exact_query() 
 }
 
 #[test]
+fn canonical_request_target_path_rewrite_preserves_the_validated_query() {
+    let target = CanonicalRequestTarget::parse("/admin/keys?limit=2").unwrap();
+    assert_eq!(
+        target
+            .with_path("/v1/prodex/gateway/keys")
+            .unwrap()
+            .path_and_query(),
+        "/v1/prodex/gateway/keys?limit=2"
+    );
+    assert_eq!(
+        target.with_path("/keys?other=1").unwrap_err(),
+        CanonicalRequestTargetError::ReplacementPathHasQuery
+    );
+}
+
+#[test]
 fn canonical_request_target_errors_remain_typed_and_redacted() {
     assert_eq!(
         CanonicalRequestTarget::parse("/v1/%").unwrap_err(),

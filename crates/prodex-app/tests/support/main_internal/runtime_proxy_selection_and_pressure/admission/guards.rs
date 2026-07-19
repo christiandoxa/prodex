@@ -321,6 +321,61 @@ fn compact_lane_limit_does_not_override_owned_turn_state_lineage() {
 }
 
 #[test]
+fn websocket_lane_limit_does_not_override_owned_turn_state_affinity() {
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .active_request_limit(4)
+    .build();
+    let shared = harness.shared();
+    shared
+        .runtime
+        .lock()
+        .expect("runtime state should lock")
+        .turn_state_bindings
+        .insert(
+            "turn-owned".to_string(),
+            ResponseProfileBinding {
+                profile_name: "main".to_string(),
+                bound_at: Local::now().timestamp(),
+            },
+        );
+    let limit = shared.lane_admission.limit(RuntimeRouteKind::Websocket);
+    shared
+        .lane_admission
+        .active_counter(RuntimeRouteKind::Websocket)
+        .store(limit, Ordering::SeqCst);
+    let request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![(
+            "x-codex-turn-state".to_string(),
+            "turn-owned".to_string(),
+        )],
+        body: Vec::new(),
+    };
+
+    let guard = acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+        shared,
+        "websocket",
+        "/backend-api/codex/responses",
+        Some(&request),
+    )
+    .expect("owned websocket turn state should bypass only the lane cap");
+
+    assert_eq!(
+        shared
+            .lane_admission
+            .active_counter(RuntimeRouteKind::Websocket)
+            .load(Ordering::SeqCst),
+        limit + 1
+    );
+    drop(guard);
+}
+
+#[test]
 fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
     let _budget_guard =
         TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_LONG_LIVED_QUEUE_WAIT_BUDGET_MS", "5");

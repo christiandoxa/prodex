@@ -157,7 +157,11 @@ impl QuotaProviderFilter {
                 _ => {}
             }
         }
-        false
+        match self {
+            Self::DeepSeek => report.auth.label.eq_ignore_ascii_case("deepseek-key"),
+            Self::Local => report.auth.label.eq_ignore_ascii_case("local"),
+            _ => false,
+        }
     }
 }
 

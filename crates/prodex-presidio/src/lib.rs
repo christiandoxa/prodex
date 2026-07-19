@@ -23,34 +23,37 @@ const MAX_PRESIDIO_LANGUAGES: usize = 16;
 const MAX_PRESIDIO_LANGUAGE_BYTES: usize = 32;
 const MAX_PRESIDIO_TRUSTED_HOSTS: usize = 64;
 
-#[derive(Clone, serde::Deserialize)]
-struct ProdexPresidioRuntimeFileConfig {
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ProdexPresidioRuntimeFileConfig {
+    #[serde(default)]
+    pub enabled: bool,
     #[serde(default = "default_presidio_analyzer_url")]
-    analyzer_url: String,
+    pub analyzer_url: String,
     #[serde(default = "default_presidio_anonymizer_url")]
-    anonymizer_url: String,
-    language: Option<String>,
-    languages: Option<Vec<String>>,
+    pub anonymizer_url: String,
+    pub language: Option<String>,
+    pub languages: Option<Vec<String>>,
     #[serde(
         default = "default_presidio_language_mode_str",
         deserialize_with = "deserialize_presidio_language_mode"
     )]
-    language_mode: PresidioLanguageMode,
+    pub language_mode: PresidioLanguageMode,
     #[serde(default = "default_presidio_fail_mode")]
-    fail_mode: String,
+    pub fail_mode: String,
     #[serde(default)]
-    trusted_hosts: Vec<String>,
+    pub trusted_hosts: Vec<String>,
     #[serde(default = "default_presidio_timeout_ms")]
-    timeout_ms: u64,
+    pub timeout_ms: u64,
     #[serde(default = "default_presidio_max_response_bytes")]
-    max_response_bytes: usize,
+    pub max_response_bytes: usize,
     #[serde(default = "default_presidio_max_concurrency")]
-    max_concurrency: usize,
+    pub max_concurrency: usize,
 }
 
 impl Default for ProdexPresidioRuntimeFileConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
             analyzer_url: default_presidio_analyzer_url(),
             anonymizer_url: default_presidio_anonymizer_url(),
             language: None,
@@ -177,6 +180,16 @@ pub fn runtime_presidio_redaction_config(
     } else {
         ProdexPresidioRuntimeFileConfig::default()
     };
+    runtime_presidio_redaction_config_from_file(file_config)
+}
+
+pub fn validate_presidio_file_config(config: &ProdexPresidioRuntimeFileConfig) -> Result<()> {
+    runtime_presidio_redaction_config_from_file(config.clone()).map(drop)
+}
+
+fn runtime_presidio_redaction_config_from_file(
+    file_config: ProdexPresidioRuntimeFileConfig,
+) -> Result<RuntimePresidioRedactionConfig> {
     validate_presidio_url(&file_config.analyzer_url, "analyzer_url")?;
     validate_presidio_url(&file_config.anonymizer_url, "anonymizer_url")?;
     if file_config.trusted_hosts.len() > MAX_PRESIDIO_TRUSTED_HOSTS
@@ -195,6 +208,12 @@ pub fn runtime_presidio_redaction_config(
     }
     if !(1..=MAX_PRESIDIO_CONCURRENCY).contains(&file_config.max_concurrency) {
         anyhow::bail!("invalid max_concurrency: expected 1..={MAX_PRESIDIO_CONCURRENCY}");
+    }
+    if !matches!(
+        file_config.fail_mode.to_ascii_lowercase().as_str(),
+        "open" | "closed"
+    ) {
+        anyhow::bail!("invalid fail_mode: expected 'open' or 'closed'");
     }
 
     let languages = file_config.languages.unwrap_or_else(|| {
@@ -589,6 +608,16 @@ mod tests {
             assert!(error.contains(field), "{error}");
             let _ = fs::remove_dir_all(root);
         }
+    }
+
+    #[test]
+    fn runtime_presidio_config_rejects_unknown_fail_mode() {
+        let mut config = ProdexPresidioRuntimeFileConfig::default();
+        config.fail_mode = "clsoed".to_string();
+
+        let error = validate_presidio_file_config(&config).unwrap_err();
+
+        assert!(error.to_string().contains("invalid fail_mode"));
     }
 
     #[test]

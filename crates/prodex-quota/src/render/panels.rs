@@ -53,6 +53,58 @@ pub fn render_profile_quota_snapshot(
     }
 }
 
+pub fn render_profile_quota_snapshot_with_detail(
+    profile_name: &str,
+    snapshot: &ProviderQuotaSnapshot,
+    detail: bool,
+) -> String {
+    match snapshot {
+        ProviderQuotaSnapshot::OpenAi(usage) => {
+            render_profile_quota_with_detail(profile_name, usage, detail)
+        }
+        _ => render_profile_quota_snapshot(profile_name, snapshot),
+    }
+}
+
+fn render_profile_quota_with_detail(
+    profile_name: &str,
+    usage: &UsageResponse,
+    detail: bool,
+) -> String {
+    if !detail {
+        return render_profile_quota(profile_name, usage);
+    }
+    let mut fields = vec![
+        ("Profile".to_string(), profile_name.to_string()),
+        (
+            "Account".to_string(),
+            display_optional(usage.email.as_deref()).to_string(),
+        ),
+        (
+            "Plan".to_string(),
+            display_optional(usage.plan_type.as_deref()).to_string(),
+        ),
+        ("Status".to_string(), format_openai_quota_status(usage)),
+        ("Main".to_string(), format_main_windows(usage)),
+        ("Reset".to_string(), format_main_reset_summary(usage)),
+    ];
+    if let Some(code_review) = usage.code_review_rate_limit.as_ref() {
+        fields.push(("Code review".to_string(), format_window_pair(code_review)));
+    }
+    if let Some(reset_credits) = usage.rate_limit_reset_credits.as_ref() {
+        fields.push((
+            "Reset credits".to_string(),
+            format!("{} available", reset_credits.available_count),
+        ));
+    }
+    fields.extend(format_additional_limits(usage));
+    render_panel_with_width(
+        &format!("Quota {profile_name}"),
+        &fields,
+        current_cli_width(),
+    )
+}
+
 pub fn render_profile_copilot_quota(profile_name: &str, info: &CopilotQuotaInfo) -> String {
     render_profile_copilot_quota_with_width(profile_name, info, current_cli_width())
 }

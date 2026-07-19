@@ -15,7 +15,7 @@ use super::local_rewrite_gemini_auth::{
 };
 use crate::{RuntimeProxyRequest, gemini_code_assist_endpoint};
 use anyhow::{Context, Result, bail};
-use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
+use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};

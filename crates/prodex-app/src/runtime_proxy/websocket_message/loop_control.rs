@@ -23,7 +23,7 @@ use crate::acquire_test_runtime_lock;
 
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn run(&mut self) -> Result<()> {
-        let mut selection_started_at = Instant::now();
+        let selection_started_at = Instant::now();
         let mut selection_attempts = 0usize;
         loop {
             let pressure_mode = runtime_proxy_pressure_mode_active_for_route(
@@ -63,7 +63,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             let attempt = self.attempt_profile(&candidate_name, turn_state_override.as_deref())?;
             match self.handle_candidate_attempt(attempt, turn_state_override.as_deref())? {
                 RuntimeWebsocketMessageLoopAction::Continue => {
-                    selection_started_at = Instant::now();
                     continue;
                 }
                 RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),

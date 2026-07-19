@@ -76,7 +76,6 @@ rpassword = { workspace = true }
 rusqlite = { workspace = true }
 runtime_anthropic_crate = { workspace = true }
 prodex_runtime_doctor = { workspace = true }
-prodex_runtime_gemini = { workspace = true }
 prodex_runtime_gemini_cli_compat = { workspace = true }
 prodex_runtime_broker = { workspace = true }
 prodex_runtime_broker_log = { workspace = true }

@@ -23,8 +23,8 @@ use super::super::provider_bridge::{
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Result, bail};
+use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_spi::ProviderRetryCause;
-use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 
 pub(super) fn send_runtime_gemini_openai_compatible_request(

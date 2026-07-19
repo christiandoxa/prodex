@@ -54,7 +54,7 @@ pub(in super::super) fn runtime_gemini_responses_value_from_generate_value(
     gemini_provider_core_runtime_responses_value_with_fallback_ids(
         value,
         prodex_provider_core::provider_core_chat_compatible_created_at(),
-        prodex_runtime_gemini::GEMINI_DEFAULT_MODEL,
+        prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL,
         runtime_gemini_blocked_tool_call_message,
         || format!("resp_gemini_{}", RequestId::new()),
         |_index| format!("call_gemini_{}", CallId::new()),

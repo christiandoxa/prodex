@@ -184,11 +184,7 @@ fn recovery_tenant_ids(
 ) -> Vec<TenantId> {
     let mut tenant_ids = BTreeSet::new();
     if let Some(authority) = governance_authority {
-        let configured = match authority {
-            RuntimeGovernanceAuthority::Sqlite { tenant_ids, .. }
-            | RuntimeGovernanceAuthority::Postgres { tenant_ids, .. } => tenant_ids,
-        };
-        tenant_ids.extend(configured.iter().copied());
+        tenant_ids.extend(authority.tenant_ids().unwrap_or_default());
     }
     let snapshot = gateway_credentials.current.load_full();
     if let Ok(keys) = snapshot.virtual_keys.lock() {

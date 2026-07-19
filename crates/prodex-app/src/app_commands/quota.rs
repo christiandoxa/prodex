@@ -4,9 +4,8 @@ use crate::{
     AppPaths, AppState, AppStateIoExt, QuotaArgs, QuotaAuthFilter, QuotaProviderFilter,
     collect_quota_reports, collect_quota_reports_with_filters, fetch_profile_quota,
     fetch_profile_quota_json, print_stdout_line, print_stdout_text, quota_watch_enabled,
-    render_all_quota_reports_once_tui, render_profile_quota_once_tui,
-    render_profile_quota_snapshot, render_quota_reports, repair_missing_active_profile_and_save,
-    resolve_profile_name, watch_all_quotas, watch_quota,
+    render_all_quota_reports_once_tui, render_profile_quota_once_tui, render_quota_reports,
+    repair_missing_active_profile_and_save, resolve_profile_name, watch_all_quotas, watch_quota,
 };
 
 pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
@@ -32,7 +31,9 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
         if state.profiles.is_empty()
             && !matches!(
                 provider_filter,
-                QuotaProviderFilter::DeepSeek | QuotaProviderFilter::Local
+                QuotaProviderFilter::DeepSeek
+                    | QuotaProviderFilter::Local
+                    | QuotaProviderFilter::Agy
             )
         {
             bail!("no profiles configured");
@@ -105,7 +106,13 @@ pub(crate) fn handle_quota(args: QuotaArgs) -> Result<()> {
             .draw(|frame| render_profile_quota_once_tui(frame, &profile_name, quota.clone()))?;
         let _ = terminal.show_cursor();
     } else {
-        print_stdout_text(&render_profile_quota_snapshot(&profile_name, &quota))?;
+        print_stdout_text(
+            &crate::quota_support::render_profile_quota_snapshot_with_detail(
+                &profile_name,
+                &quota,
+                args.detail,
+            ),
+        )?;
     }
     Ok(())
 }

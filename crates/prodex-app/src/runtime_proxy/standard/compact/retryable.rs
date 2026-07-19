@@ -145,21 +145,19 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
     );
     mark_runtime_profile_retry_backoff(shared, &profile_name)?;
 
-    if !overload
-        && runtime_compact_candidate_has_hard_affinity(
-            &profile_name,
-            compact_followup_profile
-                .as_ref()
-                .map(|(profile_name, _)| profile_name.as_str()),
-            session_profile.as_deref(),
-        )
-    {
+    if runtime_compact_candidate_has_hard_affinity(
+        &profile_name,
+        compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, _)| profile_name.as_str()),
+        session_profile.as_deref(),
+    ) {
         log_runtime_proxy_compact_attempt_final_failure(
             shared,
             RuntimeProxyCompactAttemptFailureLog {
                 request_id,
                 exit: "hard_affinity_retryable_failure",
-                reason: "quota",
+                reason: if overload { "overload" } else { "quota" },
                 selection_attempts,
                 selection_started_at,
                 pressure_mode,

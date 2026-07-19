@@ -330,6 +330,58 @@ fn scripted_responses_overload_rotates_fresh_request() {
 }
 
 #[test]
+fn sse_overload_does_not_bind_session_before_commit() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::sse_overloaded(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .build();
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("session_id".to_string(), "sess-new".to_string()),
+        ],
+        body: br#"{"input":[]}"#.to_vec(),
+    };
+
+    let response = proxy_runtime_responses_request(50, &request, harness.shared())
+        .expect("SSE overload should rotate to the healthy profile");
+    let RuntimeResponsesReply::Streaming(mut streaming) = response else {
+        panic!("healthy retry should stream");
+    };
+    let mut body = String::new();
+    streaming.body.read_to_string(&mut body).unwrap();
+
+    assert_eq!(streaming.status, 200, "{body}");
+    assert_eq!(
+        harness
+            .shared()
+            .runtime
+            .lock()
+            .unwrap()
+            .session_id_bindings
+            .get("sess-new")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("second")
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+}
+
+#[test]
 fn scripted_responses_overload_keeps_hard_affinity_owner() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([

@@ -42,6 +42,24 @@ fn import_auth_update_journal_reader_parses_current_version() {
 }
 
 #[test]
+fn import_auth_update_journal_reader_keeps_legacy_auth_rollback_semantics() {
+    let root = profile_export_private_temp_dir("journal-legacy");
+    let path = root.join("main.json");
+    secret_store::write_private_file_atomic(
+        &path,
+        br#"{"version":1,"profile_name":"main","codex_home":"/home/test-user/main","previous_email":null,"previous_auth_json":null,"created_at":"2026-05-02T00:00:00+00:00"}"#,
+    )
+    .unwrap();
+
+    let journal = read_profile_import_auth_update_journal(&path).unwrap();
+
+    assert!(journal.restore_auth_json);
+    assert!(journal.previous_provider_json.is_none());
+    assert!(journal.previous_secret_files.is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn import_auth_update_journal_reader_rejects_oversized_file() {
     let root = profile_export_private_temp_dir("journal-oversized");
     let path = root.join("main.json");

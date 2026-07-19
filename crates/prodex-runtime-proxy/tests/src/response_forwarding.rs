@@ -11,6 +11,7 @@ fn skips_runtime_response_headers_case_insensitively() {
     assert!(should_skip_runtime_response_header("Trailer"));
     assert!(should_skip_runtime_response_header("TRANSFER-ENCODING"));
     assert!(should_skip_runtime_response_header("Upgrade"));
+    assert!(!should_skip_runtime_response_header("content-encoding"));
     assert!(!should_skip_runtime_response_header("x-codex-turn-state"));
     assert!(!should_skip_runtime_response_header("content-type"));
 }
@@ -19,6 +20,7 @@ fn skips_runtime_response_headers_case_insensitively() {
 fn filters_text_response_headers_without_rewriting_values() {
     let headers = runtime_forward_text_response_headers([
         ("Content-Type", "text/event-stream"),
+        ("Content-Encoding", "gzip"),
         ("Server", "upstream"),
         ("x-codex-turn-state", " ts-1 "),
     ]);
@@ -27,6 +29,7 @@ fn filters_text_response_headers_without_rewriting_values() {
         headers,
         vec![
             ("Content-Type".to_string(), "text/event-stream".to_string()),
+            ("Content-Encoding".to_string(), "gzip".to_string()),
             ("x-codex-turn-state".to_string(), " ts-1 ".to_string()),
         ]
     );

@@ -158,19 +158,21 @@ fn collect_all_quota_watch_snapshot(
     provider_filter: QuotaProviderFilter,
 ) -> AllQuotaWatchSnapshot {
     match state_result {
-        Ok(state) if !state.profiles.is_empty() => AllQuotaWatchSnapshot::Reports {
-            updated: updated.to_string(),
-            profile_count: state.profiles.len(),
-            reports: collect_quota_reports_with_filters(
-                &state,
-                base_url,
-                auth_filter,
-                provider_filter,
-            ),
-        },
-        Ok(_) => AllQuotaWatchSnapshot::Empty {
-            updated: updated.to_string(),
-        },
+        Ok(state) => {
+            let reports =
+                collect_quota_reports_with_filters(&state, base_url, auth_filter, provider_filter);
+            if reports.is_empty() {
+                AllQuotaWatchSnapshot::Empty {
+                    updated: updated.to_string(),
+                }
+            } else {
+                AllQuotaWatchSnapshot::Reports {
+                    updated: updated.to_string(),
+                    profile_count: state.profiles.len(),
+                    reports,
+                }
+            }
+        }
         Err(err) => AllQuotaWatchSnapshot::Error {
             updated: updated.to_string(),
             message: err,

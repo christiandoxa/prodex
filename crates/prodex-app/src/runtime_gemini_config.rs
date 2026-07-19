@@ -5,9 +5,10 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use prodex_cli::SUPER_GEMINI_PROVIDER_ID;
-use prodex_runtime_gemini::{
-    GEMINI_DEFAULT_AUTO_COMPACT_LIMIT, GEMINI_DEFAULT_CONTEXT_WINDOW, GEMINI_DEFAULT_MODEL,
-    gemini_model_catalog,
+use prodex_provider_core::{
+    PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
+    PRODEX_GEMINI_DEFAULT_CONTEXT_WINDOW as GEMINI_DEFAULT_CONTEXT_WINDOW,
+    PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL, ProviderId, provider_model_catalog,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -365,7 +366,9 @@ fn gemini_catalog_models(
     auto_compact_token_limit: u64,
 ) -> Vec<serde_json::Value> {
     let mut models = Vec::with_capacity(
-        gemini_model_catalog().len() + model_resolution.catalog_models.len() + 1,
+        provider_model_catalog(ProviderId::Gemini).len()
+            + model_resolution.catalog_models.len()
+            + 1,
     );
     let mut seen = BTreeSet::new();
 
@@ -375,7 +378,11 @@ fn gemini_catalog_models(
                 .catalog_models()
                 .map(|model| model.slug.as_str()),
         )
-        .chain(gemini_model_catalog().iter().map(|spec| spec.id))
+        .chain(
+            provider_model_catalog(ProviderId::Gemini)
+                .iter()
+                .map(|spec| spec.id),
+        )
     {
         let slug = slug.trim();
         if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
@@ -406,7 +413,7 @@ fn gemini_catalog_model_metadata(
     {
         return (model.display_name.clone(), model.description.clone());
     }
-    gemini_model_catalog()
+    provider_model_catalog(ProviderId::Gemini)
         .iter()
         .find(|spec| model.eq_ignore_ascii_case(spec.id))
         .map(|spec| (spec.display_name.to_string(), spec.description.to_string()))

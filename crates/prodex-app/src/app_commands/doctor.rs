@@ -139,6 +139,12 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                     ),
                 );
             }
+            if args.quota {
+                object.insert(
+                    "quota_probes".to_string(),
+                    doctor_quota_reports_json_value(&state),
+                );
+            }
         }
         let json = serde_json::to_string_pretty(&value)
             .context("failed to serialize runtime doctor summary")?;
@@ -361,4 +367,43 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
 
     print_doctor_output(&panels, &suggestion_lines)?;
     Ok(())
+}
+
+fn doctor_quota_reports_json_value(state: &AppState) -> serde_json::Value {
+    serde_json::Value::Array(
+        collect_doctor_profile_reports(state, true)
+            .into_iter()
+            .map(|report| {
+                let quota = report.quota.map(|quota| match quota {
+                    Ok(ProviderQuotaSnapshot::OpenAi(usage)) => serde_json::json!({
+                        "status": if collect_blocked_limits(&usage, false).is_empty() { "ready" } else { "blocked" },
+                        "main": format_main_windows(&usage),
+                    }),
+                    Ok(ProviderQuotaSnapshot::Copilot(info)) => serde_json::json!({
+                        "status": format_copilot_quota_status(&info),
+                        "main": format_copilot_main_quota(&info),
+                        "reset": format_copilot_reset_summary(&info),
+                    }),
+                    Ok(ProviderQuotaSnapshot::Gemini(info)) => serde_json::json!({
+                        "status": format_gemini_quota_status(&info),
+                        "main": format_gemini_main_quota(&info),
+                        "reset": format_gemini_reset_summary(&info),
+                    }),
+                    Ok(ProviderQuotaSnapshot::External(info)) => serde_json::json!({
+                        "status": info.status,
+                        "main": info.main,
+                        "reset": info.reset,
+                    }),
+                    Err(error) => serde_json::json!({
+                        "error": doctor_quota_error_summary(&error),
+                    }),
+                });
+                serde_json::json!({
+                    "profile": report.summary.name,
+                    "provider": report.summary.provider.label(),
+                    "quota": quota,
+                })
+            })
+            .collect(),
+    )
 }

@@ -12,6 +12,9 @@ pub struct ImportedExistingProfileAuthUpdate {
     pub previous_auth_json: Option<String>,
     pub previous_email: Option<String>,
     pub journal_path: Option<PathBuf>,
+    pub restore_auth_json: bool,
+    pub previous_provider_json: Option<String>,
+    pub previous_secret_files: Vec<ImportedExistingProfileFileRollback>,
 }
 
 impl fmt::Debug for ImportedExistingProfileAuthUpdate {
@@ -23,6 +26,25 @@ impl fmt::Debug for ImportedExistingProfileAuthUpdate {
             .field("previous_auth_json", &"<redacted>")
             .field("previous_email", &self.previous_email)
             .field("journal_path", &self.journal_path)
+            .field("restore_auth_json", &self.restore_auth_json)
+            .field("previous_provider_json", &"<redacted>")
+            .field("previous_secret_files", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedExistingProfileFileRollback {
+    pub path: String,
+    pub previous_text: Option<String>,
+}
+
+impl fmt::Debug for ImportedExistingProfileFileRollback {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImportedExistingProfileFileRollback")
+            .field("path", &self.path)
+            .field("previous_text", &"<redacted>")
             .finish()
     }
 }
@@ -89,6 +111,12 @@ pub struct ImportedExistingProfileAuthUpdateJournal {
     pub codex_home: String,
     pub previous_email: Option<String>,
     pub previous_auth_json: Option<String>,
+    #[serde(default = "journal_restore_auth_json_default")]
+    pub restore_auth_json: bool,
+    #[serde(default)]
+    pub previous_provider_json: Option<String>,
+    #[serde(default)]
+    pub previous_secret_files: Vec<ImportedExistingProfileFileRollback>,
     pub created_at: String,
 }
 
@@ -101,6 +129,9 @@ impl fmt::Debug for ImportedExistingProfileAuthUpdateJournal {
             .field("codex_home", &self.codex_home)
             .field("previous_email", &self.previous_email)
             .field("previous_auth_json", &"<redacted>")
+            .field("restore_auth_json", &self.restore_auth_json)
+            .field("previous_provider_json", &"<redacted>")
+            .field("previous_secret_files", &"<redacted>")
             .field("created_at", &self.created_at)
             .finish()
     }
@@ -120,7 +151,14 @@ impl ImportedExistingProfileAuthUpdateJournal {
             codex_home,
             previous_email,
             previous_auth_json,
+            restore_auth_json: true,
+            previous_provider_json: None,
+            previous_secret_files: Vec::new(),
             created_at,
         }
     }
+}
+
+fn journal_restore_auth_json_default() -> bool {
+    true
 }

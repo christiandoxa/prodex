@@ -1963,24 +1963,37 @@ fn activation_response(
         Err(error) => return repository_error(error),
     };
     let expected_etag = (entity_tag.as_str() != "*").then(|| entity_tag.as_str().to_string());
-    match repository.activate_revision(
-        GovernanceActivationRequest {
-            tenant_id,
-            kind: resource.kind(),
-            revision_id: revision_id.to_string(),
-            approval_id,
-            actor: actor(&execution.authorized_action),
-            action: activation_action,
-            expected_etag,
-            idempotency_key: execution.atomic_write.operation.key.clone(),
-            request_fingerprint: execution.atomic_write.operation.request_fingerprint.clone(),
-            audit_outbox: audit,
-            activated_at_unix_ms: execution.atomic_write.completed_at_unix_ms,
-        },
-        |artifact| {
-            governance_artifact_is_valid(shared, tenant_id, resource, Some(revision_id), artifact)
-        },
-    ) {
+    let activate = || {
+        repository.activate_revision(
+            GovernanceActivationRequest {
+                tenant_id,
+                kind: resource.kind(),
+                revision_id: revision_id.to_string(),
+                approval_id,
+                actor: actor(&execution.authorized_action),
+                action: activation_action,
+                expected_etag,
+                idempotency_key: execution.atomic_write.operation.key.clone(),
+                request_fingerprint: execution.atomic_write.operation.request_fingerprint.clone(),
+                audit_outbox: audit,
+                activated_at_unix_ms: execution.atomic_write.completed_at_unix_ms,
+            },
+            |artifact| {
+                governance_artifact_is_valid(
+                    shared,
+                    tenant_id,
+                    resource,
+                    Some(revision_id),
+                    artifact,
+                )
+            },
+        )
+    };
+    let activation = match shared.governance_authority.as_ref() {
+        Some(authority) => authority.commit_for_tenant(tenant_id, activate),
+        None => activate(),
+    };
+    match activation {
         Ok(result) => {
             let snapshot = match repository.load_snapshot(tenant_id, resource.kind(), |artifact| {
                 governance_artifact_is_valid(
@@ -2055,11 +2068,60 @@ fn outbox_response(
             if let Err(response) = execution(captured, path, admin_auth, base_action) {
                 return response;
             }
-            build_runtime_proxy_json_error_response(
-                501,
-                "governance_outbox_claim_unavailable",
-                "SIEM outbox claiming requires a lease-capable worker backend",
-            )
+            let Some(worker) = shared.gateway_observability.siem_worker.as_ref() else {
+                return build_runtime_proxy_json_error_response(
+                    503,
+                    "governance_outbox_exporter_unavailable",
+                    "SIEM outbox exporter is not configured",
+                );
+            };
+            let tenant_id = base_action.tenant.tenant_id;
+            let now_unix_ms = runtime_gateway_now_unix_ms();
+            match &shared.gateway_state_store {
+                RuntimeGatewayStateStore::Postgres { .. } => {
+                    let Some(repository) = shared.gateway_postgres_repository.as_ref() else {
+                        return repository_error(GovernanceRepositoryError::Database);
+                    };
+                    match worker.run_once_postgres(
+                        repository,
+                        shared.runtime_shared.async_runtime.handle(),
+                        &[tenant_id],
+                        now_unix_ms,
+                    ) {
+                        Ok(()) => runtime_gateway_admin_json_response(
+                            200,
+                            serde_json::json!({
+                                "object": "governance.siem_outbox_claim",
+                                "status": "completed",
+                            }),
+                        ),
+                        Err(error) => repository_error(error),
+                    }
+                }
+                RuntimeGatewayStateStore::Sqlite { path } => {
+                    let repository =
+                        match prodex_storage_sqlite_runtime::GovernanceSqliteRepository::open(path)
+                        {
+                            Ok(repository) => repository,
+                            Err(error) => return repository_error(error),
+                        };
+                    match worker.run_once(&repository, now_unix_ms) {
+                        Ok(report) => runtime_gateway_admin_json_response(
+                            200,
+                            serde_json::json!({
+                                "object": "governance.siem_outbox_claim",
+                                "status": "completed",
+                                "selected": report.selected,
+                                "delivered": report.delivered,
+                                "retried": report.retried,
+                                "dead_lettered": report.dead_lettered,
+                            }),
+                        ),
+                        Err(error) => repository_error(error),
+                    }
+                }
+                _ => repository_error(GovernanceRepositoryError::Unsupported),
+            }
         } else {
             build_runtime_proxy_json_error_response(
                 405,

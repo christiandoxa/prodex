@@ -144,7 +144,7 @@ fn watch_all_quotas_tui(
     let mut scroll_offset = 0_usize;
     let mut sort = QuotaReportSort::Current;
     let mut provider_filter = provider_filter;
-    let collection_provider_filter = if provider_filter_locked {
+    let mut collection_provider_filter = if provider_filter_locked {
         provider_filter
     } else {
         QuotaProviderFilter::All
@@ -285,8 +285,18 @@ fn watch_all_quotas_tui(
                         QuotaWatchCommandOutcome::Filter => {
                             if !provider_filter_locked {
                                 provider_filter = provider_filter.next();
+                                collection_provider_filter = provider_filter;
                                 scroll_offset = 0;
                                 redraw_needed = true;
+                                if start_all_quota_watch_refresh(
+                                    &mut refresh,
+                                    paths,
+                                    base_url,
+                                    &auth_filter,
+                                    collection_provider_filter,
+                                ) {
+                                    next_refresh_at = None;
+                                }
                             }
                         }
                         QuotaWatchCommandOutcome::Update => {

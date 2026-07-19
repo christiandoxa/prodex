@@ -7,6 +7,7 @@ use std::{
 };
 
 use http_body_util::{BodyExt as _, LengthLimitError};
+use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpRouteKind};
 use prodex_gateway_server::{GatewayHandlerError, GatewayHandlerRequest, GatewayHandlerResult};
 use tokio::sync::{Semaphore, TryAcquireError, oneshot};
 
@@ -111,9 +112,10 @@ impl RuntimeGatewayApplication {
             peer_is_trusted_proxy,
             mtls_peer_certificate_sha256,
             target,
-            route: _,
+            route,
             request,
         } = handler_request;
+        let target = runtime_gateway_application_target(route, target)?;
         let method = request.method().as_str().to_string();
         let network_zone =
             runtime_gateway_network_zone(peer_addr, client_ip, peer_is_trusted_proxy);
@@ -244,6 +246,52 @@ impl RuntimeGatewayApplication {
         }
         runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path);
         workers_finished
+    }
+}
+
+fn runtime_gateway_application_target(
+    route: GatewayHttpRouteKind,
+    target: CanonicalRequestTarget,
+) -> Result<CanonicalRequestTarget, GatewayHandlerError> {
+    if route != GatewayHttpRouteKind::ControlPlane {
+        return Ok(target);
+    }
+    let path = target.path();
+    let rewritten_path = ["/v1/admin", "/admin"]
+        .into_iter()
+        .find_map(|mount| control_plane_alias_suffix(path, mount))
+        .map(|suffix| {
+            if suffix.is_empty() {
+                "/v1/prodex/gateway/admin".to_string()
+            } else {
+                format!("/v1/prodex/gateway/{suffix}")
+            }
+        })
+        .or_else(|| {
+            ["/v1/scim", "/scim"]
+                .into_iter()
+                .find_map(|mount| control_plane_alias_suffix(path, mount))
+                .map(|suffix| {
+                    if suffix.is_empty() {
+                        "/v1/prodex/gateway/scim".to_string()
+                    } else {
+                        format!("/v1/prodex/gateway/scim/{suffix}")
+                    }
+                })
+        });
+    let Some(rewritten) = rewritten_path else {
+        return Ok(target);
+    };
+    target
+        .with_path(rewritten)
+        .map_err(|_| GatewayHandlerError::InvalidRequest)
+}
+
+fn control_plane_alias_suffix<'a>(path: &'a str, mount: &str) -> Option<&'a str> {
+    if path == mount {
+        Some("")
+    } else {
+        path.strip_prefix(mount)?.strip_prefix('/')
     }
 }
 
@@ -427,6 +475,37 @@ mod tests {
                 false,
             ),
             prodex_domain::NetworkZone::Unknown
+        );
+    }
+
+    #[test]
+    fn in_process_control_plane_aliases_reach_the_gateway_admin_router() {
+        for (raw, expected) in [
+            ("/admin", "/v1/prodex/gateway/admin"),
+            ("/v1/admin/keys?limit=2", "/v1/prodex/gateway/keys?limit=2"),
+            ("/scim/v2/Users", "/v1/prodex/gateway/scim/v2/Users"),
+            (
+                "/v1/scim/v2/Users/user-1?active=true",
+                "/v1/prodex/gateway/scim/v2/Users/user-1?active=true",
+            ),
+            ("/admin/auth/login", "/v1/prodex/gateway/auth/login"),
+        ] {
+            let target = runtime_gateway_application_target(
+                GatewayHttpRouteKind::ControlPlane,
+                raw.parse::<CanonicalRequestTarget>().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(target.path_and_query(), expected);
+        }
+
+        let canonical = "/v1/prodex/gateway/keys"
+            .parse::<CanonicalRequestTarget>()
+            .unwrap();
+        assert_eq!(
+            runtime_gateway_application_target(GatewayHttpRouteKind::ControlPlane, canonical)
+                .unwrap()
+                .path_and_query(),
+            "/v1/prodex/gateway/keys"
         );
     }
 }

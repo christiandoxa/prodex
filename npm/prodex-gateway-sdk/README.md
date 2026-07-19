@@ -15,6 +15,13 @@ const response = await gateway.createResponse({
   model: "prodex-fast",
   input: "hello",
 });
+const stream = await gateway.createResponse(
+  { model: "prodex-fast", input: "hello", stream: true },
+  { stream: true },
+);
+for await (const chunk of stream) {
+  process.stdout.write(new TextDecoder().decode(chunk));
+}
 const ledger = await gateway.ledger();
 const summary = await gateway.billingSummary();
 const summaryCsv = await gateway.billingSummaryCsv();

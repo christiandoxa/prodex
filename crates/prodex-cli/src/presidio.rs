@@ -10,7 +10,7 @@ pub enum PresidioCommands {
     Status,
     /// Analyze and anonymize text using Presidio.
     Redact(PresidioRedactArgs),
-    /// Enable the local Presidio integration for future Prodex features.
+    /// Enable Presidio redaction for Super launches unless overridden by a launch flag.
     Enable(PresidioEnableArgs),
     /// Disable the local Presidio integration.
     Disable,

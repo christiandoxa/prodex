@@ -50,10 +50,6 @@ impl<F> RuntimePrecommitLoopState<F> {
     pub fn record_inflight_saturation(&mut self) {
         self.saw_inflight_saturation = true;
     }
-
-    pub fn restart_elapsed_budget(&mut self) {
-        self.selection_started_at = Instant::now();
-    }
 }
 
 #[cfg(test)]
@@ -61,12 +57,12 @@ mod tests {
     use super::RuntimePrecommitLoopState;
 
     #[test]
-    fn attempt_and_elapsed_budget_state_reset_independently() {
+    fn attempts_share_one_elapsed_budget() {
         let mut state = RuntimePrecommitLoopState::<()>::new();
-        state.record_attempt();
         let started_at = state.selection_started_at;
-        state.restart_elapsed_budget();
-        assert_eq!(state.selection_attempts, 1);
-        assert!(state.selection_started_at >= started_at);
+        state.record_attempt();
+        state.record_attempt();
+        assert_eq!(state.selection_attempts, 2);
+        assert_eq!(state.selection_started_at, started_at);
     }
 }

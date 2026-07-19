@@ -13,7 +13,7 @@ use super::provider_bridge::{
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
 use prodex_domain::RequestId;
-use prodex_provider_core::{ProviderAdapterContract, ProviderWireFormat, provider_adapter};
+use prodex_provider_core::{ProviderWireFormat, provider_adapter};
 use runtime_proxy_crate::{
     local_bridge_authorization_bearer_token, path_without_query, runtime_proxy_log_field,
     runtime_proxy_structured_log_message,

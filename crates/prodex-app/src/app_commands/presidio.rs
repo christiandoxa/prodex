@@ -4,8 +4,9 @@ use crate::{
 };
 use anyhow::{Context, Result, bail};
 use prodex_presidio::{
-    PresidioAnalyzerResult, PresidioHealth, presidio_analyze, presidio_anonymize,
-    presidio_http_client, probe_presidio_health, validate_presidio_url,
+    PresidioAnalyzerResult, PresidioHealth, ProdexPresidioRuntimeFileConfig, presidio_analyze,
+    presidio_anonymize, presidio_http_client, probe_presidio_health, validate_presidio_file_config,
+    validate_presidio_url,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 #[cfg(test)]
@@ -42,30 +43,7 @@ struct PresidioPanel {
     fields: Vec<(String, String)>,
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
-struct ProdexPresidioConfig {
-    enabled: bool,
-    analyzer_url: String,
-    anonymizer_url: String,
-    language: Option<String>, // Deprecated: use languages instead.
-    languages: Option<Vec<String>>,
-    language_mode: PresidioLanguageMode,
-    fail_mode: String,
-}
-
-impl Default for ProdexPresidioConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            analyzer_url: DEFAULT_PRESIDIO_ANALYZER_URL.to_string(),
-            anonymizer_url: DEFAULT_PRESIDIO_ANONYMIZER_URL.to_string(),
-            language: Some(DEFAULT_PRESIDIO_LANGUAGE.to_string()),
-            languages: None,
-            language_mode: PresidioLanguageMode::Fixed,
-            fail_mode: "open".to_string(),
-        }
-    }
-}
+type ProdexPresidioConfig = ProdexPresidioRuntimeFileConfig;
 
 pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
     match command {
@@ -75,6 +53,11 @@ pub(crate) fn handle_presidio(command: PresidioCommands) -> Result<()> {
         PresidioCommands::Enable(args) => handle_presidio_enable(args),
         PresidioCommands::Disable => handle_presidio_disable(),
     }
+}
+
+pub(crate) fn stored_presidio_preference() -> Result<Option<bool>> {
+    let paths = AppPaths::discover()?;
+    Ok(load_presidio_config(&paths)?.map(|config| config.enabled))
 }
 
 pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Result<()> {
@@ -260,15 +243,15 @@ fn handle_presidio_enable(args: PresidioEnableArgs) -> Result<()> {
     validate_language_config(&languages, language_mode)?;
 
     let paths = AppPaths::discover()?;
-    let config = ProdexPresidioConfig {
-        enabled: true,
-        analyzer_url: args.analyzer_url,
-        anonymizer_url: args.anonymizer_url,
-        language: None, // Deprecated, always set to None for new saves
-        languages: Some(languages.clone()),
-        language_mode,
-        fail_mode: args.fail_mode.as_str().to_string(),
-    };
+    let mut config = load_presidio_config(&paths)?.unwrap_or_default();
+    config.enabled = true;
+    config.analyzer_url = args.analyzer_url;
+    config.anonymizer_url = args.anonymizer_url;
+    config.language = None;
+    config.languages = Some(languages.clone());
+    config.language_mode = language_mode;
+    config.fail_mode = args.fail_mode.as_str().to_string();
+    validate_presidio_file_config(&config)?;
     save_presidio_config(&paths, &config)?;
     print_presidio_panel(
         "Presidio",
@@ -553,17 +536,18 @@ fn load_presidio_config(paths: &AppPaths) -> Result<Option<ProdexPresidioConfig>
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let config = toml::from_str::<ProdexPresidioConfig>(&raw)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    validate_presidio_url(&config.analyzer_url, "analyzer_url")?;
-    validate_presidio_url(&config.anonymizer_url, "anonymizer_url")?;
+    validate_presidio_file_config(&config)?;
     Ok(Some(config))
 }
 
 fn save_presidio_config(paths: &AppPaths, config: &ProdexPresidioConfig) -> Result<()> {
+    validate_presidio_file_config(config)?;
     fs::create_dir_all(&paths.root)
         .with_context(|| format!("failed to create {}", paths.root.display()))?;
     let path = presidio_config_path(paths);
     let raw = toml::to_string_pretty(config).context("failed to render Presidio config")?;
-    fs::write(&path, raw).with_context(|| format!("failed to write {}", path.display()))
+    secret_store::write_private_file_atomic(&path, raw.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))
 }
 
 fn presidio_config_path(paths: &AppPaths) -> PathBuf {
@@ -791,6 +775,47 @@ mod tests {
             "{error}"
         );
         assert!(!error.contains("secret-sentinel"), "{error}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stored_presidio_preference_preserves_runtime_safety_fields() {
+        let _lock = crate::TestEnvVarGuard::lock();
+        let root = std::env::temp_dir().join(format!(
+            "prodex-presidio-preference-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let _home = crate::TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let paths = AppPaths::discover().unwrap();
+        let mut config = ProdexPresidioConfig::default();
+        config.enabled = true;
+        config.trusted_hosts = vec!["presidio.example.com".to_string()];
+        config.timeout_ms = 12_345;
+        config.max_response_bytes = 2 * 1024 * 1024;
+        config.max_concurrency = 17;
+        save_presidio_config(&paths, &config).unwrap();
+
+        assert_eq!(stored_presidio_preference().unwrap(), Some(true));
+        let mut config = load_presidio_config(&paths).unwrap().unwrap();
+        config.enabled = false;
+        save_presidio_config(&paths, &config).unwrap();
+        let saved = load_presidio_config(&paths).unwrap().unwrap();
+
+        assert_eq!(stored_presidio_preference().unwrap(), Some(false));
+        assert_eq!(saved.trusted_hosts, vec!["presidio.example.com"]);
+        assert_eq!(saved.timeout_ms, 12_345);
+        assert_eq!(saved.max_response_bytes, 2 * 1024 * 1024);
+        assert_eq!(saved.max_concurrency, 17);
         let _ = fs::remove_dir_all(root);
     }
 }

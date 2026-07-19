@@ -6,8 +6,8 @@ use super::super::local_rewrite_gemini_oauth_pool::{
     runtime_gemini_model_cache_endpoint,
 };
 use crate::runtime_proxy_log;
+use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::provider_gemini_retain_code_assist_models;
-use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 
 pub(super) fn runtime_gemini_model_chain_for_selected_auth(

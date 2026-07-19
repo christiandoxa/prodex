@@ -4,10 +4,9 @@ use serde::Serialize;
 
 use crate::{
     ALL_PROVIDER_ENDPOINTS, EffectiveHarnessMode, HarnessMode, HarnessModeSpec,
-    ProviderAdapterContract, ProviderCapabilityStatus, ProviderConformanceOperation,
-    ProviderEndpoint, ProviderId, harness_mode_catalog, provider_adapter,
-    provider_conformance_cases, provider_implementation_registry, provider_replay_case_count,
-    provider_translator,
+    ProviderCapabilityStatus, ProviderConformanceOperation, ProviderEndpoint, ProviderId,
+    harness_mode_catalog, provider_adapter, provider_conformance_cases,
+    provider_implementation_registry, provider_replay_case_count, provider_translator,
 };
 
 #[path = "contract/markdown.rs"]

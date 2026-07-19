@@ -12,7 +12,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 pub(crate) struct RuntimeSiemWorkerConfig {
@@ -92,14 +92,28 @@ impl RuntimeSiemWorkerConfig {
             .exporter
             .lock()
             .map_err(|_| GovernanceRepositoryError::Database)?;
+        let started_at = Instant::now();
         for tenant_id in tenant_ids {
-            let claims = runtime.block_on(repository.governance_claim_siem_outbox_batch(
-                *tenant_id,
-                now_unix_ms,
-                self.batch_limit,
-                CLAIM_LEASE_MS,
-            ))?;
-            for claim in claims {
+            for _ in 0..self.batch_limit {
+                let claim_now = now_unix_ms.saturating_add(
+                    started_at
+                        .elapsed()
+                        .as_millis()
+                        .try_into()
+                        .unwrap_or(u64::MAX),
+                );
+                let Some(claim) = runtime
+                    .block_on(repository.governance_claim_siem_outbox_batch(
+                        *tenant_id,
+                        claim_now,
+                        1,
+                        CLAIM_LEASE_MS,
+                    ))?
+                    .into_iter()
+                    .next()
+                else {
+                    break;
+                };
                 let delivered = SiemExportBatch::bounded(
                     vec![SiemExportEvent {
                         event_id: claim.event_id,
@@ -110,10 +124,17 @@ impl RuntimeSiemWorkerConfig {
                 .ok()
                 .and_then(|batch| exporter.export_batch(&batch).ok())
                 .is_some_and(|receipt| receipt.accepted_events == 1);
+                let finalize_now = now_unix_ms.saturating_add(
+                    started_at
+                        .elapsed()
+                        .as_millis()
+                        .try_into()
+                        .unwrap_or(u64::MAX),
+                );
                 runtime.block_on(repository.governance_finalize_siem_outbox_claim(
                     &claim,
                     delivered,
-                    now_unix_ms,
+                    finalize_now,
                     self.retry_policy,
                 ))?;
             }

@@ -14,8 +14,7 @@ use prodex_domain::{
     TenantId,
 };
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderEndpoint, ProviderId, ProviderModelCost, provider_adapter,
-    provider_model_catalog,
+    ProviderEndpoint, ProviderId, ProviderModelCost, provider_adapter, provider_model_catalog,
 };
 use prodex_provider_spi::{
     GovernedProviderDescriptor, GovernedProviderRegistry, GovernedRoute, GovernedRoutingPlan,

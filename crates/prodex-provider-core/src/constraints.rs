@@ -5,8 +5,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ProviderAdapterContract, ProviderCapabilityStatus, ProviderCatalogEntry, ProviderEndpoint,
-    ProviderId, estimate_request_input_tokens_value, provider_adapter, provider_catalog_entry,
+    ProviderCapabilityStatus, ProviderCatalogEntry, ProviderEndpoint, ProviderId,
+    estimate_request_input_tokens_value, provider_adapter, provider_catalog_entry,
 };
 
 #[path = "constraints/features.rs"]

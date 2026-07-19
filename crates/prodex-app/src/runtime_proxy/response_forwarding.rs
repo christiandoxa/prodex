@@ -67,18 +67,6 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
 
     let response_header_turn_state =
         runtime_proxy_header_value(response.headers(), "x-codex-turn-state");
-    remember_runtime_successful_previous_response_owner(
-        shared,
-        profile_name,
-        request_previous_response_id,
-        RuntimeRouteKind::Responses,
-    )?;
-    remember_runtime_session_id(
-        shared,
-        profile_name,
-        request_session_id,
-        RuntimeRouteKind::Responses,
-    )?;
     let response_content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -94,6 +82,18 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
     if !is_sse {
         let buffered_started_at = Instant::now();
         let parts = buffer_runtime_proxy_async_response_parts(response, Vec::new()).await?;
+        remember_runtime_successful_previous_response_owner(
+            shared,
+            profile_name,
+            request_previous_response_id,
+            RuntimeRouteKind::Responses,
+        )?;
+        remember_runtime_session_id(
+            shared,
+            profile_name,
+            request_session_id,
+            RuntimeRouteKind::Responses,
+        )?;
         let response_turn_state = response_header_turn_state
             .or_else(|| turn_state_override.map(str::to_string))
             .or_else(|| extract_runtime_turn_state_from_body_bytes(&parts.body));
@@ -258,6 +258,18 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
             });
         }
     };
+    remember_runtime_successful_previous_response_owner(
+        shared,
+        profile_name,
+        request_previous_response_id,
+        RuntimeRouteKind::Responses,
+    )?;
+    remember_runtime_session_id(
+        shared,
+        profile_name,
+        request_session_id,
+        RuntimeRouteKind::Responses,
+    )?;
     let response_turn_state = response_header_turn_state
         .or_else(|| turn_state_override.map(str::to_string))
         .or(lookahead_turn_state);

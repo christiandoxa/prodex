@@ -19,9 +19,12 @@ export class ProdexGatewayClient {
   }
 
   async createResponse(body, options = {}) {
+    const stream = options.stream ?? body?.stream === true;
     return this.request("/v1/responses", {
       method: "POST",
       body,
+      accept: stream ? "text/event-stream" : undefined,
+      parse: stream ? "stream" : undefined,
       signal: options.signal,
     });
   }
@@ -173,6 +176,14 @@ export class ProdexGatewayClient {
     }
 
     const response = await this.fetch(url, init);
+    if (options.parse === "stream" && response.ok) {
+      if (!response.body) {
+        throw new ProdexGatewayError("Prodex gateway returned an empty response stream", {
+          status: response.status,
+        });
+      }
+      return response.body;
+    }
     const responseBody = await readResponseBody(response, options.parse);
     if (!response.ok) {
       const error = responseBody?.error ?? {};

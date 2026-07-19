@@ -5,8 +5,8 @@ use super::{RuntimeProviderBridgeKind, runtime_provider_label};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
 use prodex_gateway_http::{GatewayHttpRouteKind, classify_route};
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderCapabilityStatus, ProviderEndpoint, ProviderModelCost,
-    provider_adapter, provider_model_cost, provider_model_fallback_chain,
+    ProviderCapabilityStatus, ProviderEndpoint, ProviderModelCost, provider_adapter,
+    provider_model_cost, provider_model_fallback_chain,
 };
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,

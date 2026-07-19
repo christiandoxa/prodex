@@ -57,6 +57,7 @@ use local_rewrite_gemini_send_model_chain::{
 use local_rewrite_gemini_send_short_circuit::{
     runtime_gemini_exact_output_short_circuit, runtime_gemini_thinking_budget_tokens,
 };
+use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::{
     GEMINI_PROVIDER_CORE_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS as RUNTIME_GEMINI_MAX_INLINE_RATE_LIMIT_RETRY_DELAY_MS,
     ProviderEndpoint,
@@ -69,7 +70,6 @@ use prodex_provider_core::{
     gemini_provider_core_simple_request, gemini_provider_core_unsupported_tool_fallback_body,
 };
 use prodex_provider_spi::{ProviderRetryCause, ProviderStreamMode};
-use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
 use redaction::redaction_redact_secret_like_text;
 use std::thread;
 use std::time::Duration;

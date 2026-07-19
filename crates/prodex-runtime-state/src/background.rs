@@ -142,6 +142,24 @@ impl RuntimeStateSaveSections {
             backoffs: true,
         }
     }
+
+    pub fn union(self, other: Self) -> Self {
+        let state =
+            match (self.state, other.state) {
+                (RuntimeStateSaveStateSection::Full, _)
+                | (_, RuntimeStateSaveStateSection::Full) => RuntimeStateSaveStateSection::Full,
+                (RuntimeStateSaveStateSection::Core, _)
+                | (_, RuntimeStateSaveStateSection::Core) => RuntimeStateSaveStateSection::Core,
+                _ => RuntimeStateSaveStateSection::None,
+            };
+        Self {
+            state,
+            continuations: self.continuations || other.continuations,
+            profile_scores: self.profile_scores || other.profile_scores,
+            usage_snapshots: self.usage_snapshots || other.usage_snapshots,
+            backoffs: self.backoffs || other.backoffs,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

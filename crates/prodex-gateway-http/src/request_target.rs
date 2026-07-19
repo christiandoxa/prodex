@@ -27,6 +27,22 @@ impl CanonicalRequestTarget {
     pub fn path_and_query(&self) -> &str {
         &self.raw
     }
+
+    pub fn with_path(
+        &self,
+        replacement_path: impl Into<String>,
+    ) -> Result<Self, CanonicalRequestTargetError> {
+        let replacement = Self::parse(replacement_path)?;
+        if replacement.query().is_some() {
+            return Err(CanonicalRequestTargetError::ReplacementPathHasQuery);
+        }
+        let mut raw = replacement.raw;
+        if let Some(query) = self.query() {
+            raw.push('?');
+            raw.push_str(query);
+        }
+        Self::parse(raw)
+    }
 }
 
 impl fmt::Debug for CanonicalRequestTarget {
@@ -61,6 +77,7 @@ pub enum CanonicalRequestTargetError {
     MalformedPercentEncoding,
     EncodedNonAscii,
     EncodedDelimiter,
+    ReplacementPathHasQuery,
 }
 
 impl fmt::Display for CanonicalRequestTargetError {

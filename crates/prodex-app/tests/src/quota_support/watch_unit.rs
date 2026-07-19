@@ -608,6 +608,17 @@
     }
 
     #[test]
+    fn virtual_provider_filter_keeps_failed_quota_reports_visible() {
+        let mut deepseek = test_quota_report("deepseek", Err("unavailable".to_string()));
+        deepseek.auth.label = "deepseek-key".to_string();
+        let mut local = test_quota_report("local", Err("unavailable".to_string()));
+        local.auth.label = "local".to_string();
+
+        assert!(QuotaProviderFilter::DeepSeek.matches_report(&deepseek));
+        assert!(QuotaProviderFilter::Local.matches_report(&local));
+    }
+
+    #[test]
     fn all_quota_watch_output_filters_reports_by_provider() {
         let reports = vec![
             test_quota_report_with_provider(

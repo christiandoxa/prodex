@@ -324,17 +324,40 @@ pub(crate) fn schedule_runtime_state_save_from_runtime(
 fn enqueue_runtime_state_save_job(
     shared: &RuntimeRotationProxyShared,
     state_file: PathBuf,
-    payload: RuntimeStateSavePayload,
+    mut payload: RuntimeStateSavePayload,
     revision: u64,
     reason: &str,
-    queued_at: Instant,
-    ready_at: Instant,
+    mut queued_at: Instant,
+    mut ready_at: Instant,
 ) -> prodex_runtime_state::RuntimeBackgroundQueueEnqueuePlan {
     let queue = runtime_state_save_queue();
     let mut pending = queue
         .pending
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(previous) = pending.remove(&state_file) {
+        queued_at = queued_at.min(previous.queued_at);
+        ready_at = ready_at.min(previous.ready_at);
+        payload = match (previous.payload, payload) {
+            (
+                RuntimeStateSavePayload::Live {
+                    sections: previous, ..
+                },
+                RuntimeStateSavePayload::Live { shared, sections },
+            ) => RuntimeStateSavePayload::Live {
+                shared,
+                sections: previous.union(sections),
+            },
+            (
+                RuntimeStateSavePayload::Snapshot(_),
+                RuntimeStateSavePayload::Live { shared, .. },
+            ) => RuntimeStateSavePayload::Live {
+                shared,
+                sections: RuntimeStateSaveSections::full(),
+            },
+            (_, latest) => latest,
+        };
+    }
     pending.insert(
         state_file,
         RuntimeStateSaveJob {

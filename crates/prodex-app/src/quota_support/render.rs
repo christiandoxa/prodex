@@ -230,6 +230,18 @@ pub(crate) fn render_profile_quota_snapshot(
     prodex_quota::render_profile_quota_snapshot(profile_name, &render_quota_snapshot(snapshot))
 }
 
+pub(crate) fn render_profile_quota_snapshot_with_detail(
+    profile_name: &str,
+    snapshot: &ProviderQuotaSnapshot,
+    detail: bool,
+) -> String {
+    prodex_quota::render_profile_quota_snapshot_with_detail(
+        profile_name,
+        &render_quota_snapshot(snapshot),
+        detail,
+    )
+}
+
 pub(crate) fn first_line_of_error(input: &str) -> String {
     prodex_quota::first_line_of_error(input)
 }

@@ -147,6 +147,43 @@ fn session_affined_compact_transport_failure_does_not_rotate() {
 }
 
 #[test]
+fn session_affined_compact_overload_does_not_rotate() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+        ]));
+    let harness = two_ready_profiles(&backend);
+    bind_session(&harness, "sess-main", "main");
+    let shared = harness.shared();
+
+    let response = proxy_runtime_standard_request(49, &compact_request(Some("sess-main")), shared)
+        .expect("session-affined compact overload should pass through");
+    let (status, _) = tiny_http_response_status_and_body(response);
+    let accounts = backend.responses_accounts();
+    let log = fs::read_to_string(&shared.log_path).expect("runtime log should be readable");
+
+    assert_eq!(status, 503, "{log}");
+    assert_eq!(
+        accounts,
+        vec!["main-account".to_string(), "main-account".to_string()]
+    );
+    assert!(
+        log.contains(
+            "compact_final_failure exit=hard_affinity_retryable_failure reason=overload"
+        ),
+        "{log}"
+    );
+    assert!(!log.contains("compact_committed profile=second"), "{log}");
+}
+
+#[test]
 fn session_affined_compact_auth_failure_does_not_rotate() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
