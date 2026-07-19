@@ -86,10 +86,7 @@ pub(super) fn handle_super(args: SuperArgs) -> Result<()> {
     } else {
         match args.presidio_preference() {
             Some(use_presidio) => use_presidio,
-            None => match stored_presidio_preference()? {
-                Some(use_presidio) => use_presidio,
-                None => prompt_super_presidio_opt_in()?,
-            },
+            None => prompt_super_presidio_opt_in()?,
         }
     };
     if matches!(

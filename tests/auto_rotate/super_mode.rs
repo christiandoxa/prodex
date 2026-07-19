@@ -36,8 +36,13 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
 
 #[cfg(unix)]
 #[test]
-fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
+fn super_interactive_pty_enter_skips_stored_presidio_redaction() {
     let fixture = setup_fixture();
+    fs::write(
+        fixture.prodex_home.join("presidio.toml"),
+        "enabled = true\n",
+    )
+    .expect("failed to seed enabled Presidio config");
     let args_log = fixture.codex_args_log.display().to_string();
     let runtime_log_dir = fixture._temp_dir.path.join("runtime-logs");
     fs::create_dir_all(&runtime_log_dir).expect("failed to create runtime log dir");
@@ -52,7 +57,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
             ("PRODEX_PRESIDIO_AUTO_START", "0"),
         ],
         "Use Presidio for data safety?",
-        "y\n",
+        "\r",
     );
 
     assert!(
@@ -110,7 +115,7 @@ fn super_interactive_pty_prompt_y_enables_presidio_redaction() {
     );
     let log = fs::read_to_string(latest_log).expect("failed to read runtime log");
     assert!(
-        log.contains("presidio_redaction_enabled=true"),
-        "answering y should enable runtime Presidio redaction, log: {log}"
+        log.contains("presidio_redaction_enabled=false"),
+        "enter should keep runtime Presidio redaction disabled, log: {log}"
     );
 }
