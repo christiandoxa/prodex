@@ -78,7 +78,8 @@ mod tests {
             "tools": [{
                 "type": "web_search_preview",
                 "context_size": "medium",
-                "allowed_domains": ["example.com"],
+                "blocked_domains": ["blocked.example"],
+                "max_uses": 2,
                 "location": {"country": "US"}
             }],
             "tool_choice": {
@@ -90,7 +91,8 @@ mod tests {
 
         let options = provider_core_chat_web_search_options_from_responses_request(&value).unwrap();
         assert_eq!(options["search_context_size"], "medium");
-        assert_eq!(options["allowed_domains"][0], "example.com");
+        assert_eq!(options["blocked_domains"][0], "blocked.example");
+        assert_eq!(options["max_uses"], 2);
         assert_eq!(options["user_location"]["country"], "US");
 
         let choice = provider_core_chat_tool_choice_from_responses_request(&value, false).unwrap();

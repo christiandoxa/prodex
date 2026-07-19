@@ -43,6 +43,7 @@ pub(super) struct RuntimeDeepSeekSseState {
     usage: Option<serde_json::Value>,
     logprobs: Option<serde_json::Value>,
     annotations: Vec<serde_json::Value>,
+    external_output_items: Vec<serde_json::Value>,
     finish_reason: Option<String>,
     system_fingerprint: Option<String>,
     response_metadata: Option<serde_json::Value>,
@@ -80,6 +81,10 @@ impl fmt::Debug for RuntimeDeepSeekSseState {
             .field("usage", &self.usage.as_ref().map(|_| "<redacted>"))
             .field("logprobs", &self.logprobs.as_ref().map(|_| "<redacted>"))
             .field("annotations", &redacted_len(self.annotations.len()))
+            .field(
+                "external_output_items",
+                &redacted_len(self.external_output_items.len()),
+            )
             .field(
                 "finish_reason",
                 &self.finish_reason.as_ref().map(|_| "<redacted>"),
@@ -179,6 +184,7 @@ impl RuntimeDeepSeekSseState {
             usage: None,
             logprobs: None,
             annotations: Vec::new(),
+            external_output_items: Vec::new(),
             finish_reason: None,
             system_fingerprint: None,
             response_metadata,

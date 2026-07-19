@@ -44,6 +44,7 @@ fn catalog_covers_gateway_providers() {
         provider_supported_endpoints(ProviderId::OpenAi),
         [
             ProviderEndpoint::Responses,
+            ProviderEndpoint::ResponsesCompact,
             ProviderEndpoint::ChatCompletions,
             ProviderEndpoint::Messages,
             ProviderEndpoint::Models,
@@ -75,6 +76,7 @@ fn catalog_covers_gateway_providers() {
             provider_supported_endpoints(provider),
             [
                 ProviderEndpoint::Responses,
+                ProviderEndpoint::ResponsesCompact,
                 ProviderEndpoint::ChatCompletions,
                 ProviderEndpoint::Messages,
                 ProviderEndpoint::Models,

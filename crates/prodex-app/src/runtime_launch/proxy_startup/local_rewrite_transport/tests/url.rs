@@ -2,6 +2,7 @@
 
 use super::{
     RuntimeProviderBridgeKind, runtime_anthropic_messages_upstream_url,
+    runtime_deepseek_anthropic_messages_upstream_url,
     runtime_gemini_openai_compatible_upstream_url,
     runtime_local_rewrite_api_key_attempts_from_start, runtime_local_rewrite_log_url,
     runtime_local_rewrite_upstream_url, runtime_openai_standard_provider_upstream_url,
@@ -63,6 +64,22 @@ fn anthropic_messages_upstream_url_uses_native_endpoint() {
         runtime_anthropic_messages_upstream_url("https://api.anthropic.com/v1", "/v1"),
         "https://api.anthropic.com/v1/messages"
     );
+}
+
+#[test]
+fn deepseek_anthropic_messages_upstream_url_uses_documented_native_endpoint() {
+    for base_url in [
+        "https://api.deepseek.com",
+        "https://api.deepseek.com/v1",
+        "https://api.deepseek.com/beta",
+        "https://api.deepseek.com/anthropic",
+        "https://api.deepseek.com/anthropic/v1",
+    ] {
+        assert_eq!(
+            runtime_deepseek_anthropic_messages_upstream_url(base_url),
+            "https://api.deepseek.com/anthropic/v1/messages"
+        );
+    }
 }
 
 #[test]

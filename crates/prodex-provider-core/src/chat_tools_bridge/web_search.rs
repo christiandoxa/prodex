@@ -24,6 +24,12 @@ pub fn provider_core_chat_web_search_options_from_responses_request(
     if let Some(allowed_domains) = object.get("allowed_domains") {
         options.insert("allowed_domains".to_string(), allowed_domains.clone());
     }
+    if let Some(blocked_domains) = object.get("blocked_domains") {
+        options.insert("blocked_domains".to_string(), blocked_domains.clone());
+    }
+    if let Some(max_uses) = object.get("max_uses") {
+        options.insert("max_uses".to_string(), max_uses.clone());
+    }
     if let Some(user_location) = object
         .get("user_location")
         .or_else(|| object.get("location"))

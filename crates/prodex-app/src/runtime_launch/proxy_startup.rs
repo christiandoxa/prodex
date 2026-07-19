@@ -32,6 +32,7 @@ mod local_rewrite_gateway_admin_keys;
 mod local_rewrite_gateway_admin_ledger;
 mod local_rewrite_gateway_admin_payloads;
 mod local_rewrite_gateway_admin_policies;
+mod local_rewrite_gateway_admin_policy_resource;
 mod local_rewrite_gateway_admin_response;
 mod local_rewrite_gateway_admin_route_explain;
 mod local_rewrite_gateway_admin_router;

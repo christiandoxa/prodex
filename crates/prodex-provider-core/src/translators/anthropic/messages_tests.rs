@@ -108,6 +108,34 @@ fn chat_request_accepts_benign_ignored_transport_fields() {
 }
 
 #[test]
+fn chat_request_maps_native_web_search_tool_and_reports_context_degradation() {
+    let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "find it"}],
+            "web_search_options": {
+                "search_context_size": "high",
+                "allowed_domains": ["example.com"],
+                "max_uses": 3,
+                "user_location": {"type": "approximate", "country": "US"}
+            }
+        }))
+        .unwrap(),
+    ));
+    assert!(matches!(
+        result.loss,
+        ProviderTransformLoss::DegradedButSafe { .. }
+    ));
+    let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["tools"][0]["type"], "web_search_20250305");
+    assert_eq!(body["tools"][0]["name"], "web_search");
+    assert_eq!(body["tools"][0]["allowed_domains"][0], "example.com");
+    assert_eq!(body["tools"][0]["max_uses"], 3);
+    assert!(body["tools"][0].get("search_context_size").is_none());
+}
+
+#[test]
 fn chat_request_rejects_disabled_parallel_tool_calls() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -150,6 +178,40 @@ fn response_maps_text_tools_and_usage_to_responses() {
     assert_eq!(body["output"][1]["namespace"], "functions");
     assert_eq!(body["output"][1]["name"], "read_file");
     assert_eq!(body["usage"]["total_tokens"], 13);
+}
+
+#[test]
+fn response_maps_native_web_search_call_sources_and_usage() {
+    let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "id": "msg_search",
+            "model": "deepseek-chat",
+            "content": [
+                {"type": "server_tool_use", "id": "srv_1", "name": "web_search", "input": {"query": "current release"}},
+                {"type": "web_search_tool_result", "tool_use_id": "srv_1", "content": [
+                    {"type": "web_search_result", "url": "https://example.com/release", "title": "Release"}
+                ]},
+                {"type": "text", "text": "Found it."}
+            ],
+            "usage": {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "server_tool_use": {"web_search_requests": 1}
+            }
+        }))
+        .unwrap(),
+    ));
+    assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+    let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["output"][0]["type"], "web_search_call");
+    assert_eq!(body["output"][0]["action"]["queries"][0], "current release");
+    assert_eq!(
+        body["output"][0]["action"]["sources"][0]["url"],
+        "https://example.com/release"
+    );
+    assert_eq!(body["tool_usage"]["web_search"]["num_requests"], 1);
+    assert_eq!(body["output"][1]["content"][0]["text"], "Found it.");
 }
 
 #[test]

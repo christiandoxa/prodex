@@ -139,6 +139,8 @@ pub(crate) const RUNTIME_PROXY_ANTHROPIC_WEB_SEARCH_FOLLOWUP_LIMIT: usize =
 pub(crate) const RUNTIME_PROXY_LOG_FILE_PREFIX: &str = "prodex-runtime";
 pub(crate) const RUNTIME_PROXY_LATEST_LOG_POINTER: &str = "prodex-runtime-latest.path";
 pub(crate) const CODEX_REFRESH_TOKEN_URL_OVERRIDE_ENV: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
+pub(crate) const PRODEX_SECRET_BACKEND_ENV: &str = "PRODEX_SECRET_BACKEND";
+pub(crate) const PRODEX_SECRET_KEYRING_SERVICE_ENV: &str = "PRODEX_SECRET_KEYRING_SERVICE";
 pub(crate) const INFO_RUNTIME_LOG_TAIL_BYTES: usize =
     if cfg!(test) { 64 * 1024 } else { 512 * 1024 };
 pub(crate) const INFO_FORECAST_LOOKBACK_SECONDS: i64 = if cfg!(test) { 3_600 } else { 3 * 60 * 60 };

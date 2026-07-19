@@ -17,6 +17,7 @@ use prodex_domain::{
     TenantId,
 };
 use prodex_gateway_http::{CanonicalRequestTarget, GatewayHttpHeader, GatewayHttpRequestMeta};
+use prodex_observability::{AuthnTokenValidationResult, AuthnTokenValidationStage};
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -80,11 +81,22 @@ pub(super) fn runtime_gateway_application_authentication<'a>(
     request: &ApplicationRequestContext<'a>,
     credential: RuntimeGatewayVerifiedCredential,
 ) -> Result<ApplicationAuthenticatedRequestContext<'a>, VerifiedCredentialAuthenticationError> {
-    plan_application_request_authentication_from_evidence(
+    let should_record = credential.evidence.is_some() || !credential.anonymous_allowed;
+    let result = plan_application_request_authentication_from_evidence(
         request.clone(),
         credential.evidence,
         credential.anonymous_allowed,
-    )
+    );
+    if should_record {
+        match &result {
+            Ok(_) => crate::record_runtime_authn_metric(
+                AuthnTokenValidationStage::Claims,
+                AuthnTokenValidationResult::Accepted,
+            ),
+            Err(error) => crate::record_runtime_authentication_error(error),
+        }
+    }
+    result
 }
 
 pub(super) fn runtime_gateway_application_data_plane_authorization<'a>(
@@ -93,8 +105,12 @@ pub(super) fn runtime_gateway_application_data_plane_authorization<'a>(
 ) -> Result<ApplicationAuthorizedRequestContext<'a>, RuntimeGatewayApplicationBoundaryError> {
     let authenticated = runtime_gateway_application_authentication(request, credential)
         .map_err(RuntimeGatewayApplicationBoundaryError::Authentication)?;
-    plan_application_data_plane_authorization(authenticated)
-        .map_err(RuntimeGatewayApplicationBoundaryError::Authorization)
+    let authorized = plan_application_data_plane_authorization(authenticated);
+    crate::record_runtime_authorization(
+        prodex_observability::AuthzBoundaryKind::DataPlaneInference,
+        &authorized,
+    );
+    authorized.map_err(RuntimeGatewayApplicationBoundaryError::Authorization)
 }
 
 pub(super) fn runtime_gateway_application_control_plane_authorization<'a>(
@@ -110,8 +126,12 @@ pub(super) fn runtime_gateway_application_control_plane_authorization<'a>(
         runtime_gateway_control_plane_credential(authentication),
     )
     .map_err(RuntimeGatewayApplicationBoundaryError::Authentication)?;
-    plan_application_control_plane_authorization(authenticated, action)
-        .map_err(RuntimeGatewayApplicationBoundaryError::Authorization)
+    let authorized = plan_application_control_plane_authorization(authenticated, action);
+    crate::record_runtime_authorization(
+        crate::runtime_control_plane_authz_boundary(http),
+        &authorized,
+    );
+    authorized.map_err(RuntimeGatewayApplicationBoundaryError::Authorization)
 }
 
 pub(super) fn runtime_gateway_admin_preauthorization<'a>(

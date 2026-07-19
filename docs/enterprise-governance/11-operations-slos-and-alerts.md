@@ -5,18 +5,22 @@
 This document defines the minimum operational contract for the governed
 gateway. Values marked **initial target** are proposed release objectives that
 must be approved and measured per environment; they are not claims about an
-existing deployment. Existing metric-plan types are not equivalent to a live
-exporter, alert rule, dashboard, pager integration, or achieved SLO.
+existing deployment. Metric-plan types alone are not live telemetry. The
+gateway now exports closed-label authn, authz, tenant-isolation,
+policy-lifecycle, and runtime secret-provider counters, with versioned
+Prometheus rules and a Grafana dashboard under `deploy/observability/`. These
+artifacts are not pager integration or evidence of an achieved SLO.
 
-Repository evidence observed on 2026-07-13 includes:
+Repository evidence observed on 2026-07-19 includes:
 
 - bounded runtime broker Prometheus output for request/lane pressure,
   continuation state, profile health, backoff, allocation when enabled, queue
   waits, and runtime-state lock waits;
-- `prodex-observability` plans for API RED signals, authn/authz, tenant
-  isolation, policy/JWKS/config refresh, provider/circuit/routing, accounting,
-  audit chain, secret rotation, backup/restore, rollout, migration, health, and
-  shutdown events;
+- live gateway counters for authentication, authorization, tenant isolation,
+  policy lifecycle, and runtime secret-provider operations, plus broader
+  `prodex-observability` plans for API RED signals, policy/JWKS/config refresh,
+  provider/circuit/routing, accounting, audit chain, secret rotation,
+  backup/restore, rollout, migration, health, and shutdown events;
 - runtime logs plus `prodex doctor --runtime` diagnostics for proxy selection,
   admission pressure, transport failures, affinity, and state-save behavior;
 - Kubernetes health probes, bounded resources, multiple gateway replicas,
@@ -24,10 +28,10 @@ Repository evidence observed on 2026-07-13 includes:
   scaffolding;
 - a PostgreSQL backup/restore drill script for the current storage subset.
 
-Material gaps include live end-to-end emission of several planned metric
-families, governance inspection/PDP/approval/SIEM/Vault metrics, checked-in
-alert rules and dashboards, durable outbox exporter health, production RPO/RTO
-evidence, and an approved pager/runbook ownership map.
+Material gaps include live end-to-end emission of the remaining planned metric
+families, governance inspection/PDP/approval/SIEM/Vault metrics, durable outbox
+exporter health, production RPO/RTO evidence, and an approved pager/runbook
+ownership map.
 
 Candidate implementation evidence adds bounded inspection, policy, routing,
 session, audit and SIEM health plans plus enforcing data-plane audit. The

@@ -2468,10 +2468,9 @@ while moving legacy adapter code behind enterprise boundaries.
   responses. Domain SLO debug output redacts objective names, observed values,
   and targets while preserving alert shape; see
   `docs/adr/0833-domain-slo-debug-redaction.md`.
-- Use `plan_slo_alert_metric` before publishing SLO alert counters so only
-  closed low-cardinality `slo_sli` and `slo_severity` labels appear while
-  objective names, observed values, targets, tenants, request IDs, and raw alert
-  routing details stay out of metric labels.
+- Deploy `deploy/observability/prodex-alerts.yaml` so Prometheus evaluates SLO
+  and security alerts from live low-cardinality Prodex metrics. Alert state is
+  owned by Prometheus instead of being duplicated as an application counter.
 - Use `plan_health_probe_response` for public `/livez`, `/readyz`, and
   `/startupz` responses so the active policy revision is exposed as typed
   metadata while dependency messages, backend endpoints, revision values, and
