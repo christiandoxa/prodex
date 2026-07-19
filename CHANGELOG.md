@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.322.0 - 2026-07-19
+
+### Runtime
+
+- Honor Presidio opt-in and fail-open (`30d6694`)
+
 ## 0.321.0 - 2026-07-19
 
 ### Runtime
@@ -68,9 +74,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Launch platform Codex desktop apps (`7a04e0f`)
-
-## 0.310.0 - 2026-07-18
-
-### Misc
-
-- Add OpenCodex-inspired control center (`29a1556`)
