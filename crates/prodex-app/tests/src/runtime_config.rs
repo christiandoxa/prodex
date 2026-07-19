@@ -217,7 +217,7 @@ fn gateway_runtime_config_aggregates_selected_provider_errors_without_secrets() 
          PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS must be one of true,false,1,0,yes,no,on,off; \
          PRODEX_DEEPSEEK_STRICT_TOOLS must be true or false; \
          PRODEX_DEEPSEEK_BETA_BASE_URL must be an http(s) URL with host and no credentials, query, or fragment; \
-         PRODEX_DEEPSEEK_WEB_SEARCH_MODE must be auto, off, openai_chat, anthropic, or function_proxy"
+         PRODEX_DEEPSEEK_WEB_SEARCH_MODE must be auto, off, openai_chat, or anthropic"
     );
     assert!(!rendered.contains("secret-sentinel"), "{rendered}");
 }

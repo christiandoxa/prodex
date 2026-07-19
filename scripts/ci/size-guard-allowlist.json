@@ -146,7 +146,7 @@
   },
   {
     "file": "crates/prodex-observability/tests/observability_boundary.rs",
-    "maxLines": 5593,
+    "maxLines": 5526,
     "reason": "Observability boundary characterization is capped while metric, trace, log, SLO, and redaction tests are split."
   },
   {
@@ -201,12 +201,12 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1547,
+    "maxLines": 1545,
     "reason": "Gateway launch composes durable tenant discovery, governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_admin_policies.rs",
-    "maxLines": 2489,
+    "maxLines": 2485,
     "reason": "The governed artifact lifecycle, execution approvals, SIEM outbox claims, audit legal holds, retention purge, and payload-free HTTP flow remain capped while retention operations split from maker-checker policy ownership."
   },
   {
@@ -231,8 +231,8 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 954,
-    "reason": "Runtime policy types carry fixed gateway harness selection plus bounded PIP selectors, governance authority, lifecycle, session, audit, and retention configuration in one typed schema."
+    "maxLines": 958,
+    "reason": "Runtime policy types carry fixed gateway harness selection plus bounded PIP selectors, governance authority, lifecycle, session, audit, retention, and runtime secret-backend configuration in one typed schema."
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",

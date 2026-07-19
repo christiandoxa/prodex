@@ -74,6 +74,7 @@ pub(super) fn runtime_gateway_prometheus_text(
         "prodex_gateway_virtual_key_minute_tokens {}\n",
         totals.tokens_this_minute
     ));
+    body.push_str(&runtime_operational_prometheus_text());
     body
 }
 
@@ -170,5 +171,18 @@ mod tests {
         assert!(body.contains("prodex_gateway_virtual_key_spend_microusd_total 24\n"));
         assert!(body.contains("prodex_gateway_virtual_key_minute_requests 6\n"));
         assert!(body.contains("prodex_gateway_virtual_key_minute_tokens 9\n"));
+    }
+
+    #[test]
+    fn prometheus_text_includes_live_operational_counters() {
+        record_runtime_authz_metric(
+            prodex_observability::AuthzBoundaryKind::DataPlaneInference,
+            prodex_observability::AuthzDecisionResult::Allowed,
+        );
+
+        let body = runtime_gateway_prometheus_text(&BTreeMap::new());
+
+        assert!(body.contains("prodex_authz_decisions_total"));
+        assert!(body.contains("authz_result=\"allowed\""));
     }
 }

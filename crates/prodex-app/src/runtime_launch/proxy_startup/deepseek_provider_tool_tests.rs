@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_request_translation_auto_web_search_rejects_without_documented_route() {
+    fn deepseek_request_translation_auto_web_search_preserves_native_options() {
         let request = serde_json::json!({
             "model": "deepseek-v4-pro",
             "stream": true,
@@ -302,17 +302,20 @@ mod tests {
             ]
         });
 
-        let error = runtime_deepseek_chat_request_body(
+        let translated = runtime_deepseek_chat_request_body(
             &serde_json::to_vec(&request).unwrap(),
             &conversation_store(),
         )
-        .expect_err("auto web search should reject until a documented route exists");
+        .expect("auto mode should preserve options for the native Anthropic route");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
 
-        assert!(
-            error
-                .to_string()
-                .contains("no documented native OpenAI Chat route")
+        assert_eq!(body["web_search_options"]["search_context_size"], "high");
+        assert_eq!(
+            body["web_search_options"]["allowed_domains"][0],
+            "example.com"
         );
+        assert_eq!(body["web_search_options"]["user_location"]["country"], "US");
+        assert_eq!(body["tools"][0]["function"]["name"], "shell");
     }
 
     #[test]
@@ -337,35 +340,25 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_request_translation_rejects_unimplemented_web_search_modes() {
+    fn deepseek_request_translation_anthropic_mode_preserves_options() {
         let request = serde_json::json!({
             "model": "deepseek-v4-pro",
             "input": "search",
             "tools": [{"type": "web_search_preview"}]
         });
 
-        for (mode, expected) in [
-            (
-                RuntimeDeepSeekWebSearchMode::Anthropic,
-                "requires an Anthropic-compatible adapter",
-            ),
-            (
-                RuntimeDeepSeekWebSearchMode::FunctionProxy,
-                "requires a local search backend",
-            ),
-        ] {
-            let error = runtime_deepseek_chat_request_body_with_options(
-                &serde_json::to_vec(&request).unwrap(),
-                &conversation_store(),
-                RuntimeDeepSeekRewriteOptions {
-                    strict_tools: false,
-                    web_search_mode: mode,
-                },
-            )
-            .expect_err("unimplemented web search mode should fail");
+        let translated = runtime_deepseek_chat_request_body_with_options(
+            &serde_json::to_vec(&request).unwrap(),
+            &conversation_store(),
+            RuntimeDeepSeekRewriteOptions {
+                strict_tools: false,
+                web_search_mode: RuntimeDeepSeekWebSearchMode::Anthropic,
+            },
+        )
+        .expect("anthropic mode should preserve native web search options");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
 
-            assert!(error.to_string().contains(expected));
-        }
+        assert!(body["web_search_options"].is_object());
     }
 
     #[test]
@@ -394,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_request_translation_auto_rejects_top_level_web_search_options() {
+    fn deepseek_request_translation_auto_preserves_top_level_web_search_options() {
         let request = serde_json::json!({
             "model": "deepseek-v4-pro",
             "input": "search",
@@ -403,17 +396,14 @@ mod tests {
             }
         });
 
-        let error = runtime_deepseek_chat_request_body(
+        let translated = runtime_deepseek_chat_request_body(
             &serde_json::to_vec(&request).unwrap(),
             &conversation_store(),
         )
-        .expect_err("auto mode should reject top-level web search options");
+        .expect("auto mode should preserve top-level native web search options");
+        let body: serde_json::Value = serde_json::from_slice(&translated.body).unwrap();
 
-        assert!(
-            error
-                .to_string()
-                .contains("no documented native OpenAI Chat route")
-        );
+        assert_eq!(body["web_search_options"]["search_context_size"], "medium");
     }
 
     #[test]

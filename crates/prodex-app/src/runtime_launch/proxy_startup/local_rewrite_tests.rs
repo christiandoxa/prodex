@@ -735,7 +735,7 @@ fn kiro_remote_compact_uses_kiro_semantic_summary_when_available() {
         .as_str()
         .expect("compact summary text should exist");
     assert!(summary.contains("kiro says hi"));
-    assert!(!summary.contains("Local Gemini compact fallback summary."));
+    assert!(!summary.contains("Local Prodex compact fallback summary."));
     assert!(!summary.contains("tool call read_file (call_1)"));
 }
 

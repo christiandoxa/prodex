@@ -4,7 +4,18 @@ use crate::{
     ProviderTransformResult, ProviderWireFormat,
 };
 use serde_json::{Map, Value, json};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::BTreeMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+#[path = "messages/web_search.rs"]
+mod web_search;
+
+use web_search::{
+    anthropic_tool_usage, anthropic_web_search_call, anthropic_web_search_tool,
+    merge_anthropic_web_search_result,
+};
 
 const DEFAULT_MAX_TOKENS: u64 = 4096;
 
@@ -114,13 +125,30 @@ pub(super) fn translate_chat_request_to_anthropic(
             },
         );
     }
-    if let Some(tools) = chat.get("tools") {
-        match anthropic_tools(tools) {
-            Ok(tools) => {
-                request.insert("tools".to_string(), Value::Array(tools));
+    let mut degradation_details = BTreeMap::new();
+    let mut tools = match chat.get("tools") {
+        Some(tools) => match anthropic_tools(tools) {
+            Ok(tools) => tools,
+            Err(reason) => return rejected_chat(reason),
+        },
+        None => Vec::new(),
+    };
+    if let Some(options) = chat.get("web_search_options") {
+        match anthropic_web_search_tool(options) {
+            Ok((tool, ignored_context_size)) => {
+                tools.push(tool);
+                if let Some(context_size) = ignored_context_size {
+                    degradation_details.insert(
+                        "web_search_options.search_context_size".to_string(),
+                        json!({"from": context_size, "to": "provider_default"}),
+                    );
+                }
             }
             Err(reason) => return rejected_chat(reason),
         }
+    }
+    if !tools.is_empty() {
+        request.insert("tools".to_string(), Value::Array(tools));
     }
     if let Some(tool_choice) = chat.get("tool_choice") {
         match anthropic_tool_choice(tool_choice) {
@@ -129,25 +157,39 @@ pub(super) fn translate_chat_request_to_anthropic(
             }
             Ok(None) => {
                 request.remove("tools");
+                degradation_details.clear();
             }
             Err(reason) => return rejected_chat(reason),
         }
     }
 
-    ProviderTransformResult::lossless(
-        ProviderId::Anthropic,
-        ProviderEndpoint::Responses,
-        ProviderWireFormat::OpenAiChatCompletions,
-        ProviderWireFormat::AnthropicMessages,
-        serde_json::to_vec(&Value::Object(request)).expect("Anthropic request serializes"),
-    )
+    let body = serde_json::to_vec(&Value::Object(request)).expect("Anthropic request serializes");
+    if degradation_details.is_empty() {
+        ProviderTransformResult::lossless(
+            ProviderId::Anthropic,
+            ProviderEndpoint::Responses,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::AnthropicMessages,
+            body,
+        )
+    } else {
+        ProviderTransformResult::degraded(
+            ProviderId::Anthropic,
+            ProviderEndpoint::Responses,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::AnthropicMessages,
+            body,
+            "Anthropic Messages uses the provider default web-search context size",
+            degradation_details,
+        )
+    }
 }
 
 fn validate_anthropic_chat_fields(chat: &Map<String, Value>) -> Result<(), String> {
     for field in chat.keys() {
         match field.as_str() {
             "model" | "messages" | "max_tokens" | "stream" | "temperature" | "top_p" | "stop"
-            | "tools" | "tool_choice" | "stream_options" => {}
+            | "tools" | "tool_choice" | "stream_options" | "web_search_options" => {}
             "parallel_tool_calls" if chat.get(field).and_then(Value::as_bool) == Some(true) => {}
             "parallel_tool_calls" => {
                 return Err(
@@ -220,6 +262,17 @@ pub(super) fn translate_anthropic_response_to_responses(
                 }
                 output.push(item);
             }
+            Some("server_tool_use") => {
+                flush_text_output(&mut output, &mut text);
+                match anthropic_web_search_call(block) {
+                    Ok(item) => output.push(item),
+                    Err(reason) => return rejected_response(reason),
+                }
+            }
+            Some("web_search_tool_result") => {
+                flush_text_output(&mut output, &mut text);
+                merge_anthropic_web_search_result(&mut output, block);
+            }
             Some("thinking") => {
                 flush_text_output(&mut output, &mut text);
                 if let Some(thinking) = block.get("thinking").and_then(Value::as_str) {
@@ -248,6 +301,9 @@ pub(super) fn translate_anthropic_response_to_responses(
     });
     if let Some(usage) = anthropic_usage(value.get("usage")) {
         response["usage"] = usage;
+    }
+    if let Some(tool_usage) = anthropic_tool_usage(value.get("usage")) {
+        response["tool_usage"] = tool_usage;
     }
     if let Some(stop_reason) = value.get("stop_reason") {
         response["metadata"] = json!({"anthropic": {"stop_reason": stop_reason}});
@@ -332,6 +388,24 @@ pub(super) fn translate_anthropic_stream_event_to_responses(
                         },
                     }),
                 ),
+                Some("server_tool_use")
+                    if block.get("name").and_then(Value::as_str) == Some("web_search") =>
+                {
+                    let mut item = match anthropic_web_search_call(block) {
+                        Ok(item) => item,
+                        Err(reason) => return rejected_stream(reason),
+                    };
+                    item["status"] = Value::String("in_progress".to_string());
+                    responses_sse_event(
+                        "response.output_item.added",
+                        json!({
+                            "type": "response.output_item.added",
+                            "output_index": index,
+                            "item": item,
+                        }),
+                    )
+                }
+                Some("web_search_tool_result") => return empty_lossless_stream(),
                 Some("thinking") => responses_sse_event(
                     "response.output_item.added",
                     json!({

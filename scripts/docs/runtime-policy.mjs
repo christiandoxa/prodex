@@ -446,12 +446,17 @@ function validatePrometheusMetricLabelDocs(contents, label = "runtime policy doc
       `${label} must not document raw tenant/team/project/user/budget Prometheus labels`,
     );
   }
-  for (const required of ["`key_hash`", "`tenant_scoped`", "`budget_scoped`"]) {
-    if (!contents.includes(required)) {
-      errors.push(
-        `${label} is missing Prometheus label contract phrase ${required}`,
-      );
-    }
+  const safeLabelContract =
+    "they do not expose virtual-key hashes, names, or tenant, team, project, user, or budget identifiers as labels";
+  if (!contents.includes(safeLabelContract)) {
+    errors.push(`${label} is missing the identifier-free Prometheus label contract`);
+  }
+  if (
+    contents.includes(
+      "Prometheus virtual-key metrics expose a stable `key_hash` plus low-cardinality scope booleans",
+    )
+  ) {
+    errors.push(`${label} must not document legacy virtual-key identity labels`);
   }
   return errors;
 }
@@ -462,30 +467,30 @@ function assertSelfTest(condition, message) {
 
 function runSelfTest() {
   const validMetricsDoc =
-    "Prometheus virtual-key metrics expose a stable `key_hash` plus " +
-    "low-cardinality scope booleans such as `tenant_scoped` and `budget_scoped`.";
+    "Prometheus virtual-key metrics are aggregate counters; they do not expose virtual-key hashes, names, or tenant, team, project, user, or budget identifiers as labels.";
   assertSelfTest(
     validatePrometheusMetricLabelDocs(validMetricsDoc, "valid.md").length === 0,
     "valid Prometheus label docs rejected",
   );
   assertSelfTest(
     validatePrometheusMetricLabelDocs(
-      "Prometheus virtual-key metrics include `tenant_id`, `team_id`, `project_id`, `user_id`, and `budget_id` labels. `key_hash` `tenant_scoped` `budget_scoped`",
+      "Prometheus virtual-key metrics include `tenant_id`, `team_id`, `project_id`, `user_id`, and `budget_id` labels. They do not expose virtual-key hashes, names, or tenant, team, project, user, or budget identifiers as labels.",
       "raw-labels.md",
     ).some((error) => error.includes("raw tenant/team/project/user/budget")),
     "raw Prometheus governance labels accepted",
   );
   assertSelfTest(
-    validatePrometheusMetricLabelDocs("`key_hash` `budget_scoped`", "missing-scope.md").some(
-      (error) => error.includes("`tenant_scoped`"),
-    ),
-    "missing tenant scope label contract accepted",
+    validatePrometheusMetricLabelDocs(
+      "Prometheus virtual-key metrics expose a stable `key_hash` plus low-cardinality scope booleans such as `tenant_scoped` and `budget_scoped`. They do not expose virtual-key hashes, names, or tenant, team, project, user, or budget identifiers as labels.",
+      "legacy-labels.md",
+    ).some((error) => error.includes("legacy virtual-key identity labels")),
+    "legacy Prometheus identity labels accepted",
   );
   assertSelfTest(
-    validatePrometheusMetricLabelDocs("`tenant_scoped` `budget_scoped`", "missing-hash.md").some(
-      (error) => error.includes("`key_hash`"),
+    validatePrometheusMetricLabelDocs("aggregate counters", "missing-contract.md").some((error) =>
+      error.includes("identifier-free Prometheus label contract"),
     ),
-    "missing key hash label contract accepted",
+    "missing identifier-free Prometheus label contract accepted",
   );
 }
 

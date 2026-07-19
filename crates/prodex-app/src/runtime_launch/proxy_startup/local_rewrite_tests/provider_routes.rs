@@ -1,21 +1,17 @@
-use super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
-use super::super::local_rewrite::{
-    RuntimeLocalRewriteProviderOptions, runtime_local_rewrite_remote_compact_unsupported_message,
-};
+use super::super::local_rewrite_gemini_compact::runtime_gemini_local_compact_response_parts;
 
 #[test]
-fn deepseek_remote_compact_reports_clear_unsupported_message() {
-    let message = runtime_local_rewrite_remote_compact_unsupported_message(
-        &RuntimeLocalRewriteProviderOptions::DeepSeek {
-            api_keys: vec!["deepseek-key".to_string()],
-            strict_tools: false,
-            beta_base_url: "https://api.deepseek.com/beta".to_string(),
-            web_search_mode: RuntimeDeepSeekWebSearchMode::Auto,
-        },
+fn translated_provider_remote_compact_uses_local_emulation() {
+    let parts = runtime_gemini_local_compact_response_parts(
+        br#"{"model":"test-model","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"retain this context"}]}]}"#,
     );
+    let body: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
 
-    assert_eq!(
-        message,
-        "DeepSeek provider does not support Codex remote compact yet"
+    assert_eq!(parts.status, 200);
+    assert!(
+        body["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("retain this context")
     );
 }

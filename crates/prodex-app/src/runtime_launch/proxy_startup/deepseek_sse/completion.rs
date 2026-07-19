@@ -181,7 +181,7 @@ impl RuntimeDeepSeekSseState {
     }
 
     fn output_items(&self) -> Vec<serde_json::Value> {
-        let mut output = Vec::new();
+        let mut output = self.external_output_items.clone();
         if !self.output_text.is_empty() {
             output.push(deepseek_provider_core_stream_output_text_item(
                 &self.output_text,
@@ -209,12 +209,23 @@ impl RuntimeDeepSeekSseState {
         output
     }
 
-    pub(super) fn event(&self, event: &str, data: serde_json::Value) -> String {
+    pub(in crate::runtime_launch::proxy_startup) fn record_external_output_item(
+        &mut self,
+        item: serde_json::Value,
+    ) {
+        self.external_output_items.push(item);
+    }
+
+    pub(in crate::runtime_launch::proxy_startup) fn event(
+        &self,
+        event: &str,
+        data: serde_json::Value,
+    ) -> String {
         let data = serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string());
         format!("event: {event}\r\ndata: {data}\r\n\r\n")
     }
 
-    pub(super) fn next_sequence_number(&mut self) -> u64 {
+    pub(in crate::runtime_launch::proxy_startup) fn next_sequence_number(&mut self) -> u64 {
         let next = self.sequence_number;
         self.sequence_number = self.sequence_number.saturating_add(1);
         next

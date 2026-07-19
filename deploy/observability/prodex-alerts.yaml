@@ -1,0 +1,59 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: prodex-gateway
+  namespace: prodex
+  labels:
+    app.kubernetes.io/name: prodex-gateway
+spec:
+  groups:
+    - name: prodex-gateway-security
+      rules:
+        - alert: ProdexGatewayTargetDown
+          expr: up{namespace="prodex", service="prodex-gateway"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex gateway metrics target is down
+            description: Prometheus has failed to scrape a Prodex gateway target for five minutes.
+        - alert: ProdexAuthenticationFailures
+          expr: sum(rate(prodex_authn_token_validation_events_total{authn_validation_result!="accepted"}[5m])) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Prodex authentication failures are sustained
+            description: Token validation failures exceed 0.1 events per second for ten minutes.
+        - alert: ProdexAuthorizationDenials
+          expr: sum(rate(prodex_authz_decisions_total{authz_result!="allowed"}[5m])) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Prodex authorization denials are sustained
+            description: Authorization denials exceed 0.1 events per second for ten minutes.
+        - alert: ProdexTenantIsolationViolation
+          expr: sum(increase(prodex_tenant_isolation_events_total{tenant_isolation_result!="enforced"}[5m])) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex rejected a tenant-isolation violation
+            description: At least one missing-tenant, cross-tenant, or tenant-mismatch request was rejected.
+        - alert: ProdexSecretProviderFailures
+          expr: sum(increase(prodex_secret_provider_operations_total{secret_result="failed"}[10m])) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex secret-provider operation failed
+            description: A runtime secret read, write, or delete failed during the last ten minutes.
+        - alert: ProdexPolicyLifecycleFailures
+          expr: sum(increase(prodex_policy_lifecycle_events_total{policy_lifecycle_result="failed"}[10m])) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: Prodex policy lifecycle operation failed
+            description: A governed policy persist, publish, or invalidation operation failed.

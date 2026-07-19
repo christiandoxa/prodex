@@ -2088,7 +2088,7 @@ fn gemini_provider_core_builds_compact_summaries() {
     .unwrap();
 
     let summary = gemini_provider_core_local_compact_summary(&body);
-    assert!(summary.contains("Local Gemini compact fallback summary."));
+    assert!(summary.contains("Local Prodex compact fallback summary."));
     assert!(summary.contains("Fix compact fallback."));
     assert!(summary.contains("tool call shell (call_1)"));
     assert!(summary.contains("tool output call_1: tests passed"));

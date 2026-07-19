@@ -135,10 +135,7 @@ fn production_catalog_compact_and_embedding_constraints_follow_runtime_capabilit
         &openai_compact,
         strict_policy(),
     );
-    assert_eq!(
-        compact.decision,
-        ProviderRequestConstraintDecision::EndpointUnsupported
-    );
+    assert!(compact.eligible);
 
     for (provider, model) in [
         (ProviderId::OpenAi, "gpt-5.4"),

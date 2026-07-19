@@ -3,8 +3,6 @@ mod dispatch;
 #[path = "local_rewrite_pipeline_governance.rs"]
 mod governance;
 
-#[cfg(test)]
-pub(super) use dispatch::runtime_local_rewrite_remote_compact_unsupported_message;
 use dispatch::{
     runtime_gateway_operational_probe_response, runtime_local_rewrite_dispatch_builtin_models,
     runtime_local_rewrite_dispatch_compact, runtime_local_rewrite_dispatch_provider,

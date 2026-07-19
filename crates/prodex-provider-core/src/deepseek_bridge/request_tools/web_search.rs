@@ -21,10 +21,13 @@ pub fn deepseek_provider_core_validate_web_search_options(
             ));
         }
     }
-    if let Some(allowed_domains) = object.get("allowed_domains") {
-        let Some(domains) = allowed_domains.as_array() else {
+    for field in ["allowed_domains", "blocked_domains"] {
+        let Some(domains) = object.get(field) else {
+            continue;
+        };
+        let Some(domains) = domains.as_array() else {
             return Err(format!(
-                "{provider_label} web_search allowed_domains must be an array of strings"
+                "{provider_label} web_search {field} must be an array of strings"
             ));
         };
         if domains.iter().any(|domain| {
@@ -33,9 +36,17 @@ pub fn deepseek_provider_core_validate_web_search_options(
                 .is_none_or(|domain| domain.trim().is_empty())
         }) {
             return Err(format!(
-                "{provider_label} web_search allowed_domains entries must be non-empty strings"
+                "{provider_label} web_search {field} entries must be non-empty strings"
             ));
         }
+    }
+    if object
+        .get("max_uses")
+        .is_some_and(|value| value.as_u64().is_none_or(|value| value == 0))
+    {
+        return Err(format!(
+            "{provider_label} web_search max_uses must be a positive integer"
+        ));
     }
     if object
         .get("user_location")
@@ -85,4 +96,24 @@ pub fn deepseek_provider_core_validate_web_search_tool_context_size(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_uses_must_be_positive() {
+        deepseek_provider_core_validate_web_search_options(
+            &serde_json::json!({"max_uses": 3}),
+            "DeepSeek",
+        )
+        .unwrap();
+        let error = deepseek_provider_core_validate_web_search_options(
+            &serde_json::json!({"max_uses": 0}),
+            "DeepSeek",
+        )
+        .unwrap_err();
+        assert!(error.contains("DeepSeek web_search max_uses must be a positive integer"));
+    }
 }

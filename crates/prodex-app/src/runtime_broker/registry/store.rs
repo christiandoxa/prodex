@@ -6,13 +6,13 @@ use std::path::Path;
 use zeroize::Zeroizing;
 
 use crate::{
-    AppPaths, RuntimeBrokerRegistry, load_json_file_with_backup,
-    runtime_broker_capability_file_path, runtime_broker_registry_file_path,
-    runtime_broker_registry_last_good_file_path, terminate_runtime_process,
-    write_json_file_with_backup,
+    AppPaths, RuntimeBrokerRegistry, delete_runtime_secret, load_json_file_with_backup,
+    read_runtime_secret_bounded, runtime_broker_capability_file_path,
+    runtime_broker_registry_file_path, runtime_broker_registry_last_good_file_path,
+    terminate_runtime_process, write_json_file_with_backup, write_runtime_secret_bounded,
 };
 use prodex_runtime_broker::{RuntimeBrokerCapability, RuntimeBrokerSecret};
-use secret_store::{FileSecretBackend, SecretBackend as _, SecretLocation, SecretValue};
+use secret_store::SecretValue;
 
 const RUNTIME_BROKER_CAPABILITY_MAX_BYTES: u64 =
     prodex_runtime_broker::RUNTIME_BROKER_CAPABILITY_MAX_BYTES as u64;
@@ -152,17 +152,16 @@ pub(crate) fn save_runtime_broker_capability(
     capability: &RuntimeBrokerSecret,
 ) -> Result<()> {
     let path = runtime_broker_capability_file_path(paths, broker_key);
-    let location = SecretLocation::file(&path);
     let mut payload = Zeroizing::new(Vec::new());
     prodex_runtime_broker::write_runtime_broker_capability(&mut *payload, instance_id, capability)
         .context("failed to encode runtime broker capability")?;
-    FileSecretBackend::new()
-        .write_bounded(
-            &location,
-            SecretValue::bytes(std::mem::take(&mut *payload)),
-            RUNTIME_BROKER_CAPABILITY_MAX_BYTES,
-        )
-        .with_context(|| format!("failed to write {}", path.display()))
+    write_runtime_secret_bounded(
+        paths,
+        &path,
+        SecretValue::bytes(std::mem::take(&mut *payload)),
+        RUNTIME_BROKER_CAPABILITY_MAX_BYTES,
+    )
+    .with_context(|| format!("failed to write {}", path.display()))
 }
 
 pub(crate) fn load_runtime_broker_capability(
@@ -182,11 +181,7 @@ fn load_runtime_broker_capability_record(
     broker_key: &str,
 ) -> Result<RuntimeBrokerCapability> {
     let path = runtime_broker_capability_file_path(paths, broker_key);
-    let value = FileSecretBackend::new()
-        .read_bounded(
-            &SecretLocation::file(&path),
-            RUNTIME_BROKER_CAPABILITY_MAX_BYTES,
-        )
+    let value = read_runtime_secret_bounded(paths, &path, RUNTIME_BROKER_CAPABILITY_MAX_BYTES)
         .with_context(|| format!("failed to read {}", path.display()))?
         .context("runtime broker capability is missing")?;
     value
@@ -243,11 +238,7 @@ pub(crate) fn remove_runtime_broker_capability_if_matches(
 
 pub(crate) fn remove_runtime_broker_capability(paths: &AppPaths, broker_key: &str) {
     let path = runtime_broker_capability_file_path(paths, broker_key);
-    let location = SecretLocation::file(&path);
-    let backend = FileSecretBackend::new();
-    if backend.delete(&location).is_err() {
-        let _ = backend.remove_untrusted_entry(&location);
-    }
+    delete_runtime_secret(paths, &path);
 }
 
 fn remove_runtime_broker_registry_files(paths: &AppPaths, broker_key: &str) {

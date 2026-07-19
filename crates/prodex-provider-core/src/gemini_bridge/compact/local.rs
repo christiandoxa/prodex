@@ -17,7 +17,7 @@ const GEMINI_PROVIDER_CORE_LOCAL_COMPACT_MAX_SUMMARY_BYTES: usize = 24 * 1024;
 
 pub fn gemini_provider_core_local_compact_summary(body: &[u8]) -> String {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return "Local Gemini compact fallback could not parse the compact request body."
+        return "Local Prodex compact fallback could not parse the compact request body."
             .to_string();
     };
 
@@ -43,7 +43,7 @@ pub fn gemini_provider_core_local_compact_summary(body: &[u8]) -> String {
     }
 
     let mut summary = String::new();
-    summary.push_str("Local Gemini compact fallback summary.\n\n");
+    summary.push_str("Local Prodex compact fallback summary.\n\n");
     summary.push_str(&format!("Model: {model}\n"));
     summary.push_str(&format!("Original input items: {}\n", input.len()));
     summary.push_str(&format!("Retained recent items: {}\n\n", snippets.len()));

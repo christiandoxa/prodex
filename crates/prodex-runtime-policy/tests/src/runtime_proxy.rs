@@ -230,9 +230,39 @@ log_format = "json"
 }
 
 #[test]
-fn load_runtime_policy_from_root_rejects_obsolete_secret_backend_selection() {
+fn load_runtime_policy_from_root_accepts_keyring_secret_backend() {
     clear_runtime_policy_cache();
-    let root = temp_root("obsolete-secret-backend");
+    let root = temp_root("keyring-secret-backend");
+    let path = runtime_policy_path(&root);
+    fs::write(
+        &path,
+        r#"
+version = 1
+
+[secrets]
+backend = "keyring"
+keyring_service = "prodex-test"
+"#,
+    )
+    .unwrap();
+
+    let policy = load_runtime_policy_from_root(&root).unwrap().unwrap();
+    assert_eq!(
+        policy.secrets.backend,
+        Some(secret_store::SecretBackendKind::Keyring)
+    );
+    assert_eq!(
+        policy.secrets.keyring_service.as_deref(),
+        Some("prodex-test")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn load_runtime_policy_from_root_rejects_incomplete_keyring_secret_backend() {
+    clear_runtime_policy_cache();
+    let root = temp_root("incomplete-keyring-secret-backend");
     let path = runtime_policy_path(&root);
     fs::write(
         &path,
@@ -246,7 +276,7 @@ backend = "keyring"
     .unwrap();
 
     let err = load_runtime_policy_from_root(&root).unwrap_err();
-    assert!(err.to_string().contains("failed to parse"));
+    assert!(err.to_string().contains("keyring_service"));
 
     let _ = fs::remove_dir_all(root);
 }

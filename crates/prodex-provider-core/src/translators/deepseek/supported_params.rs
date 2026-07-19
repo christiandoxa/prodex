@@ -10,6 +10,7 @@ pub(super) fn deepseek_supported_params(endpoint: ProviderEndpoint) -> ProviderP
     if matches!(
         endpoint,
         ProviderEndpoint::Responses
+            | ProviderEndpoint::ResponsesCompact
             | ProviderEndpoint::ChatCompletions
             | ProviderEndpoint::Messages
     ) {

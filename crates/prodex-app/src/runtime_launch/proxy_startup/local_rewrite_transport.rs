@@ -49,6 +49,7 @@ pub(super) enum RuntimeLocalRewritePreparedAuth<'a> {
     OpenAiProjected,
     DeepSeek {
         api_key: Option<&'a str>,
+        native_messages: bool,
     },
     Gemini {
         auth: &'a RuntimeGeminiAuth,
@@ -191,13 +192,32 @@ pub(super) fn send_runtime_local_rewrite_prepared_request(
             upstream_request =
                 runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?;
         }
-        RuntimeLocalRewritePreparedAuth::DeepSeek { api_key } => {
+        RuntimeLocalRewritePreparedAuth::DeepSeek {
+            api_key,
+            native_messages,
+        } => {
             upstream_request = upstream_request
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .header(reqwest::header::ACCEPT_ENCODING, "identity");
-            upstream_request = match api_key {
-                Some(api_key) => upstream_request.bearer_auth(api_key),
-                None => runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?,
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                .header(
+                    reqwest::header::ACCEPT,
+                    "text/event-stream, application/json",
+                );
+            if native_messages {
+                upstream_request =
+                    upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
+            }
+            upstream_request = match (api_key, native_messages) {
+                (Some(api_key), true) => upstream_request.header("x-api-key", api_key),
+                (Some(api_key), false) => upstream_request.bearer_auth(api_key),
+                (None, true) => runtime_local_rewrite_apply_projected_header(
+                    shared,
+                    upstream_request,
+                    "x-api-key",
+                )?,
+                (None, false) => {
+                    runtime_local_rewrite_apply_projected_bearer(shared, upstream_request)?
+                }
             };
             if let Some(user_agent) = runtime_local_rewrite_header(request, "user-agent") {
                 upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
@@ -509,6 +529,23 @@ pub(super) fn runtime_deepseek_upstream_url(
         mount_path,
         path_and_query,
     )
+}
+
+pub(super) fn runtime_deepseek_anthropic_messages_upstream_url(base_url: &str) -> String {
+    let mut base_url = base_url.trim_end_matches('/');
+    if base_url.ends_with("/anthropic/v1") {
+        return format!("{base_url}/messages");
+    }
+    if base_url.ends_with("/anthropic") {
+        return format!("{base_url}/v1/messages");
+    }
+    for suffix in ["/v1", "/beta"] {
+        if let Some(root) = base_url.strip_suffix(suffix) {
+            base_url = root;
+            break;
+        }
+    }
+    format!("{base_url}/anthropic/v1/messages")
 }
 
 pub(super) fn runtime_openai_standard_provider_upstream_url(

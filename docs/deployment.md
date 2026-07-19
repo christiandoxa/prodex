@@ -81,6 +81,15 @@ arguments.
 
 Recent billing ledger records are available at `/v1/prodex/gateway/ledger`, aggregated billing totals are available at `/v1/prodex/gateway/ledger/summary`, billing CSV exports are available at `/v1/prodex/gateway/ledger.csv` and `/v1/prodex/gateway/ledger/summary.csv`, Prometheus-compatible virtual-key usage metrics are available to the same admin token at `/v1/prodex/gateway/metrics`, SCIM-compatible SSO user provisioning is available at `/v1/prodex/gateway/scim/v2/Users`, and the built-in single-node gateway admin dashboard is available at `/v1/prodex/gateway/admin`.
 
+The metrics endpoint also exports live, closed-label authentication,
+authorization, tenant-isolation, policy-lifecycle, and runtime secret-provider
+counters. With Prometheus Operator installed, apply
+`deploy/observability/prodex-alerts.yaml`; import
+`deploy/observability/prodex-dashboard.json` into Grafana for the matching
+operations dashboard. The checked-in `ServiceMonitor` uses the dedicated viewer
+token and does not expose raw tenant, principal, request, or secret identifiers
+as metric labels.
+
 ## Operational Limits
 
 The gateway supports file-backed state by default, SQLite-backed state after explicit external migration, and Postgres-backed shared gateway state:

@@ -172,8 +172,7 @@ fn runtime_deepseek_gateway_web_search_value(
         "off" | "disabled" | "disable" => Ok(RuntimeDeepSeekWebSearchMode::Off),
         "openai_chat" | "openai-chat" | "chat" => Ok(RuntimeDeepSeekWebSearchMode::OpenAiChat),
         "anthropic" => Ok(RuntimeDeepSeekWebSearchMode::Anthropic),
-        "function_proxy" | "function-proxy" => Ok(RuntimeDeepSeekWebSearchMode::FunctionProxy),
-        _ => bail!("{name} must be auto, off, openai_chat, anthropic, or function_proxy"),
+        _ => bail!("{name} must be auto, off, openai_chat, or anthropic"),
     }
 }
 

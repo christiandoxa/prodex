@@ -425,6 +425,8 @@ pub struct RuntimePolicyRuntimeSettings {
 
 #[derive(Debug, Clone, Default)]
 pub struct RuntimePolicySecretsSettings {
+    pub backend: Option<secret_store::SecretBackendKind>,
+    pub keyring_service: Option<String>,
     pub production: bool,
     pub projected_root: Option<PathBuf>,
     pub projected_provider: Option<String>,
@@ -947,6 +949,8 @@ pub struct RuntimePolicyRuntimeFile {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicySecretsFile {
+    pub backend: Option<String>,
+    pub keyring_service: Option<String>,
     #[serde(default)]
     pub production: bool,
     pub projected_root: Option<String>,

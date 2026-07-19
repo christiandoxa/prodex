@@ -278,7 +278,7 @@ mod tests {
             ),
             (
                 "enabled",
-                "PRODEX_DEEPSEEK_WEB_SEARCH_MODE must be auto, off, openai_chat, anthropic, or function_proxy",
+                "PRODEX_DEEPSEEK_WEB_SEARCH_MODE must be auto, off, openai_chat, or anthropic",
             ),
         ] {
             let _search = TestEnvVarGuard::set("PRODEX_DEEPSEEK_WEB_SEARCH_MODE", value);
@@ -315,14 +315,14 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(
             root.join("config.toml"),
-            "[deepseek]\nstrict_tools = true\nweb_search_mode = \"function_proxy\"\n",
+            "[deepseek]\nstrict_tools = true\nweb_search_mode = \"anthropic\"\n",
         )
         .unwrap();
 
         assert!(runtime_deepseek_strict_tools_enabled(&root).unwrap());
         assert_eq!(
             runtime_deepseek_web_search_mode(&root).unwrap(),
-            RuntimeDeepSeekWebSearchMode::FunctionProxy
+            RuntimeDeepSeekWebSearchMode::Anthropic
         );
 
         let _ = fs::remove_dir_all(&root);

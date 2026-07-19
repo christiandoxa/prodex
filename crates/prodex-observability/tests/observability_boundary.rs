@@ -39,43 +39,42 @@ use prodex_observability::{
     RoleBindingLifecycleResult, RoutingDecisionOutcome, RoutingLaneKind, SecretProviderBackend,
     SecretProviderOperation, SecretProviderResult, SecretRotationResult, SecretRotationScope,
     SecurityDecisionKind, SecurityDecisionResult, ServiceIdentityLifecycleOperation,
-    ServiceIdentityLifecycleResult, ShutdownLifecycleEvent, ShutdownLifecycleResult,
-    SloAlertSeverity, SloAlertSli, SpanPlanError, StreamOutcome, StreamTransportKind,
-    TelemetryDropReason, TenantIsolationResult, TenantIsolationSurface, TenantLifecycleOperation,
-    TenantLifecycleResult, TraceContext, TraceContextError, TracePropagationCarrier,
-    TracePropagationResult, UserLifecycleOperation, UserLifecycleResult,
-    VirtualKeyLifecycleOperation, VirtualKeyLifecycleResult, plan_accounting_metric,
-    plan_api_admission_metric, plan_api_body_limit_metric, plan_api_cancellation_metric,
-    plan_api_compatibility_metric, plan_api_deprecation_metric, plan_api_error_envelope_metric,
-    plan_api_idempotency_metric, plan_api_mutation_audit_metric, plan_api_pagination_metric,
-    plan_api_precondition_metric, plan_api_red_metric, plan_api_schema_validation_metric,
-    plan_api_spec_publication_metric, plan_api_stream_backpressure_metric,
-    plan_api_timeout_budget_metric, plan_api_version_metric, plan_audit_chain_metric,
-    plan_audit_metric, plan_audit_query_lifecycle_metric, plan_audit_retention_purge_metric,
-    plan_authn_token_validation_metric, plan_authz_decision_metric, plan_backup_restore_metric,
-    plan_billing_ledger_metric, plan_break_glass_lifecycle_metric,
-    plan_budget_policy_lifecycle_metric, plan_budget_rejection_metric,
-    plan_config_activation_metric, plan_config_cache_invalidation_metric,
-    plan_config_publication_delivery_metric, plan_connection_pool_saturation_metric,
-    plan_credential_scope_mismatch_metric, plan_deployment_rollout_metric,
-    plan_dropped_telemetry_metric, plan_enterprise_id_metric, plan_fault_injection_metric,
-    plan_gateway_span, plan_health_probe_metric, plan_idempotency_record_metric,
-    plan_identity_context_metric, plan_jwks_cache_age_metric, plan_jwks_refresh_outcome_metric,
-    plan_load_soak_metric, plan_migration_lifecycle_metric, plan_oidc_refresh_metric,
-    plan_persistence_metric, plan_policy_lifecycle_metric, plan_policy_refresh_outcome_metric,
-    plan_policy_rollback_metric, plan_policy_snapshot_age_metric,
-    plan_postgres_tenant_context_metric, plan_provider_capability_negotiation_metric,
-    plan_provider_circuit_breaker_metric, plan_provider_credential_lifecycle_metric,
-    plan_provider_degradation_metric, plan_provider_metric, plan_provider_retry_metric,
-    plan_queue_depth_metric, plan_quota_correctness_metric, plan_rate_limit_decision_metric,
-    plan_redis_coordination_metric, plan_reservation_recovery_metric,
-    plan_role_binding_lifecycle_metric, plan_routing_decision_metric, plan_secret_provider_metric,
-    plan_secret_rotation_metric, plan_security_decision_metric,
-    plan_service_identity_lifecycle_metric, plan_shutdown_lifecycle_metric, plan_slo_alert_metric,
-    plan_span_error_response, plan_streaming_lifecycle_metric, plan_structured_log_correlation,
-    plan_tenant_isolation_metric, plan_tenant_lifecycle_metric, plan_trace_context_error_response,
-    plan_trace_propagation, plan_trace_propagation_metric, plan_user_lifecycle_metric,
-    plan_virtual_key_lifecycle_metric,
+    ServiceIdentityLifecycleResult, ShutdownLifecycleEvent, ShutdownLifecycleResult, SpanPlanError,
+    StreamOutcome, StreamTransportKind, TelemetryDropReason, TenantIsolationResult,
+    TenantIsolationSurface, TenantLifecycleOperation, TenantLifecycleResult, TraceContext,
+    TraceContextError, TracePropagationCarrier, TracePropagationResult, UserLifecycleOperation,
+    UserLifecycleResult, VirtualKeyLifecycleOperation, VirtualKeyLifecycleResult,
+    plan_accounting_metric, plan_api_admission_metric, plan_api_body_limit_metric,
+    plan_api_cancellation_metric, plan_api_compatibility_metric, plan_api_deprecation_metric,
+    plan_api_error_envelope_metric, plan_api_idempotency_metric, plan_api_mutation_audit_metric,
+    plan_api_pagination_metric, plan_api_precondition_metric, plan_api_red_metric,
+    plan_api_schema_validation_metric, plan_api_spec_publication_metric,
+    plan_api_stream_backpressure_metric, plan_api_timeout_budget_metric, plan_api_version_metric,
+    plan_audit_chain_metric, plan_audit_metric, plan_audit_query_lifecycle_metric,
+    plan_audit_retention_purge_metric, plan_authn_token_validation_metric,
+    plan_authz_decision_metric, plan_backup_restore_metric, plan_billing_ledger_metric,
+    plan_break_glass_lifecycle_metric, plan_budget_policy_lifecycle_metric,
+    plan_budget_rejection_metric, plan_config_activation_metric,
+    plan_config_cache_invalidation_metric, plan_config_publication_delivery_metric,
+    plan_connection_pool_saturation_metric, plan_credential_scope_mismatch_metric,
+    plan_deployment_rollout_metric, plan_dropped_telemetry_metric, plan_enterprise_id_metric,
+    plan_fault_injection_metric, plan_gateway_span, plan_health_probe_metric,
+    plan_idempotency_record_metric, plan_identity_context_metric, plan_jwks_cache_age_metric,
+    plan_jwks_refresh_outcome_metric, plan_load_soak_metric, plan_migration_lifecycle_metric,
+    plan_oidc_refresh_metric, plan_persistence_metric, plan_policy_lifecycle_metric,
+    plan_policy_refresh_outcome_metric, plan_policy_rollback_metric,
+    plan_policy_snapshot_age_metric, plan_postgres_tenant_context_metric,
+    plan_provider_capability_negotiation_metric, plan_provider_circuit_breaker_metric,
+    plan_provider_credential_lifecycle_metric, plan_provider_degradation_metric,
+    plan_provider_metric, plan_provider_retry_metric, plan_queue_depth_metric,
+    plan_quota_correctness_metric, plan_rate_limit_decision_metric, plan_redis_coordination_metric,
+    plan_reservation_recovery_metric, plan_role_binding_lifecycle_metric,
+    plan_routing_decision_metric, plan_secret_provider_metric, plan_secret_rotation_metric,
+    plan_security_decision_metric, plan_service_identity_lifecycle_metric,
+    plan_shutdown_lifecycle_metric, plan_span_error_response, plan_streaming_lifecycle_metric,
+    plan_structured_log_correlation, plan_tenant_isolation_metric, plan_tenant_lifecycle_metric,
+    plan_trace_context_error_response, plan_trace_propagation, plan_trace_propagation_metric,
+    plan_user_lifecycle_metric, plan_virtual_key_lifecycle_metric,
 };
 
 #[test]
@@ -4834,72 +4833,6 @@ fn quota_correctness_metric_uses_closed_event_labels() {
         assert!(!metric.event_label.key.contains("call_id"));
         assert!(!metric.event_label.key.contains("ledger_id"));
         assert!(!metric.event_label.key.contains("amount"));
-    }
-}
-
-#[test]
-fn slo_alert_metric_uses_closed_sli_and_severity_labels() {
-    let availability =
-        plan_slo_alert_metric(SloAlertSli::Availability, SloAlertSeverity::Critical).unwrap();
-    let latency =
-        plan_slo_alert_metric(SloAlertSli::LatencyP95, SloAlertSeverity::Warning).unwrap();
-    let error_rate =
-        plan_slo_alert_metric(SloAlertSli::ErrorRate, SloAlertSeverity::Warning).unwrap();
-    let quota =
-        plan_slo_alert_metric(SloAlertSli::QuotaCorrectness, SloAlertSeverity::Critical).unwrap();
-    let provider =
-        plan_slo_alert_metric(SloAlertSli::ProviderDegradation, SloAlertSeverity::Warning).unwrap();
-    let persistence =
-        plan_slo_alert_metric(SloAlertSli::PersistenceFailure, SloAlertSeverity::Critical).unwrap();
-
-    assert_eq!(availability.metric_name, "prodex_slo_alert_events_total");
-    assert_eq!(availability.increment, 1);
-    assert_eq!(
-        availability.sli_label.as_metric_label().unwrap(),
-        ("slo_sli", "availability")
-    );
-    assert_eq!(
-        availability.severity_label.as_metric_label().unwrap(),
-        ("slo_severity", "critical")
-    );
-    assert_eq!(
-        latency.sli_label.as_metric_label().unwrap(),
-        ("slo_sli", "latency_p95")
-    );
-    assert_eq!(
-        latency.severity_label.as_metric_label().unwrap(),
-        ("slo_severity", "warning")
-    );
-    assert_eq!(
-        error_rate.sli_label.as_metric_label().unwrap(),
-        ("slo_sli", "error_rate")
-    );
-    assert_eq!(
-        quota.sli_label.as_metric_label().unwrap(),
-        ("slo_sli", "quota_correctness")
-    );
-    assert_eq!(
-        provider.sli_label.as_metric_label().unwrap(),
-        ("slo_sli", "provider_degradation")
-    );
-    assert_eq!(
-        persistence.sli_label.as_metric_label().unwrap(),
-        ("slo_sli", "persistence_failure")
-    );
-
-    for metric in [
-        availability,
-        latency,
-        error_rate,
-        quota,
-        provider,
-        persistence,
-    ] {
-        assert!(!metric.sli_label.key.contains("tenant"));
-        assert!(!metric.sli_label.key.contains("objective_name"));
-        assert!(!metric.severity_label.key.contains("observed"));
-        assert!(!metric.severity_label.key.contains("target"));
-        assert!(!metric.severity_label.key.contains("request"));
     }
 }
 

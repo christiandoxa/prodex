@@ -1,3 +1,4 @@
+use super::super::local_rewrite_gemini_compact::runtime_gemini_local_compact_response_parts;
 use super::{
     RUNTIME_LOCAL_REWRITE_UPSTREAM_REQUEST_FAILED_MESSAGE, RuntimeLocalRewriteDispatchReadyRequest,
     RuntimeLocalRewritePipelineExit, RuntimeLocalRewritePipelineResult,
@@ -75,9 +76,10 @@ pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
     ) {
         return Ok(request);
     }
-    let response = build_runtime_proxy_text_response(
-        501,
-        &runtime_local_rewrite_remote_compact_unsupported_message(&selected_shared.provider),
+    let response = runtime_local_rewrite_response_with_call_id(
+        runtime_gemini_local_compact_response_parts(&request.captured.body),
+        request.state.request_id,
+        &selected_shared,
     );
     Err(request.state.respond(response))
 }
@@ -416,24 +418,6 @@ mod error_log_tests {
             Some(ProviderErrorClass::Transient),
         );
     }
-}
-
-pub(in super::super) fn runtime_local_rewrite_remote_compact_unsupported_message(
-    provider: &RuntimeLocalRewriteProviderOptions,
-) -> String {
-    let provider_name = match provider {
-        RuntimeLocalRewriteProviderOptions::ProjectedCredential { provider, .. } => {
-            return runtime_local_rewrite_remote_compact_unsupported_message(provider);
-        }
-        RuntimeLocalRewriteProviderOptions::Anthropic { .. } => "Anthropic",
-        RuntimeLocalRewriteProviderOptions::Copilot { .. } => "GitHub Copilot",
-        RuntimeLocalRewriteProviderOptions::OpenAiResponses { .. } => "OpenAI",
-        RuntimeLocalRewriteProviderOptions::LocalEmbeddingsOnly { .. } => "Prodex local embeddings",
-        RuntimeLocalRewriteProviderOptions::Gemini { .. } => "Gemini",
-        RuntimeLocalRewriteProviderOptions::DeepSeek { .. } => "DeepSeek",
-        RuntimeLocalRewriteProviderOptions::Kiro { .. } => "Kiro",
-    };
-    format!("{provider_name} provider does not support Codex remote compact yet")
 }
 
 pub(super) fn runtime_gateway_operational_probe_response(

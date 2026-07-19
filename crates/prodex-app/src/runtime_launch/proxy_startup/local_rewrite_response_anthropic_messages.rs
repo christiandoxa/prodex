@@ -35,6 +35,7 @@ pub(super) struct RuntimeAnthropicMessagesRewriteContext<'a> {
     pub(super) content_type: &'a str,
     pub(super) shared: &'a RuntimeLocalRewriteProxyShared,
     pub(super) captured: &'a RuntimeProxyRequest,
+    pub(super) provider_kind: RuntimeProviderBridgeKind,
     pub(super) response_governance: RuntimeGatewayResponseGovernance,
 }
 
@@ -49,12 +50,11 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
         content_type,
         shared,
         captured,
+        provider_kind,
         response_governance,
     } = context;
-    let rate_limit_headers = runtime_provider_codex_rate_limit_headers(
-        RuntimeProviderBridgeKind::Anthropic,
-        response.headers(),
-    );
+    let rate_limit_headers =
+        runtime_provider_codex_rate_limit_headers(provider_kind, response.headers());
     let pending =
         runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
 
@@ -65,13 +65,15 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
         )];
         append_text_rate_limit_headers(&mut headers, rate_limit_headers);
         runtime_local_rewrite_append_call_id_header(&mut headers, request_id, shared);
-        let body: Box<dyn Read + Send> = Box::new(RuntimeAnthropicMessagesSseReader::new(
-            response,
-            request_id,
-            pending.messages,
-            pending.response_metadata,
-            shared.deepseek_conversations.clone(),
-        ));
+        let body: Box<dyn Read + Send> =
+            Box::new(RuntimeAnthropicMessagesSseReader::new_with_provider(
+                response,
+                provider_kind,
+                request_id,
+                pending.messages,
+                pending.response_metadata,
+                shared.deepseek_conversations.clone(),
+            ));
         let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
         respond_runtime_local_rewrite_stream(
             request,
@@ -102,7 +104,7 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
         runtime_provider_log_response_conformance(
             &shared.runtime_shared,
             request_id,
-            RuntimeProviderBridgeKind::Anthropic,
+            provider_kind,
             &result,
         );
         let mut value = provider_core_rewritten_json_value(Some(&result))
