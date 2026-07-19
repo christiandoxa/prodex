@@ -43,7 +43,6 @@ pub fn should_skip_runtime_response_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "connection"
-            | "content-encoding"
             | "content-length"
             | "date"
             | "keep-alive"

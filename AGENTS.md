@@ -278,7 +278,7 @@ cargo fmt
 Run the focused runtime proxy tests:
 
 ```bash
-cargo test -q runtime_proxy_ -- --test-threads=1
+cargo test -q -p prodex-app --lib 'main_internal_tests::runtime_proxy_' -- --test-threads=1
 ```
 
 Run the full test suite:

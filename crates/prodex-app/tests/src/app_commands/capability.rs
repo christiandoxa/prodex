@@ -111,3 +111,27 @@ fn capabilities_use_runtime_binary_overrides_and_include_antigravity() {
         assert_eq!(capability.status, "available");
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn setup_dry_run_uses_passive_binary_discovery() {
+    let _codex = TestEnvVarGuard::set("PRODEX_CODEX_BIN", "/bin/true");
+    let paths = AppPaths {
+        root: PathBuf::from("/tmp/prodex-dry-run-test"),
+        state_file: PathBuf::from("/tmp/prodex-dry-run-test/state.json"),
+        managed_profiles_root: PathBuf::from("/tmp/prodex-dry-run-test/profiles"),
+        shared_codex_root: PathBuf::from("/tmp/prodex-dry-run-test/shared-codex"),
+        legacy_shared_codex_root: PathBuf::from("/tmp/prodex-dry-run-test/shared"),
+    };
+
+    let rows = collect_install_check_rows_passive(&paths);
+
+    assert!(
+        rows.iter()
+            .any(|(name, status)| { name == "Codex CLI" && status.starts_with("available (") })
+    );
+    assert!(
+        rows.iter()
+            .any(|(name, status)| { name == "Codex auth" && status == "not checked (dry-run)" })
+    );
+}

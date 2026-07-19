@@ -135,7 +135,10 @@ fn runtime_proxy_request_has_owned_lane_affinity(
     let binding_profile_exists =
         |binding: &ResponseProfileBinding| profile_exists(binding.profile_name.as_str());
 
-    if lane == RuntimeRouteKind::Responses {
+    if matches!(
+        lane,
+        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
+    ) {
         if runtime_request_previous_response_id(request)
             .as_deref()
             .and_then(|response_id| runtime.state.response_profile_bindings.get(response_id))

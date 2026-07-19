@@ -410,6 +410,20 @@ fn profile_quota_render_contains_core_fields() {
 }
 
 #[test]
+fn profile_quota_detail_renders_precise_reset_windows() {
+    let usage = main_windows(82, 1_700_001_800, 91, 1_700_259_200);
+    let snapshot = ProviderQuotaSnapshot::OpenAi(usage);
+
+    let compact = render_profile_quota_snapshot_with_detail("main", &snapshot, false);
+    let detail = render_profile_quota_snapshot_with_detail("main", &snapshot, true);
+
+    assert!(!compact.contains("Reset"));
+    assert!(detail.contains("Reset"));
+    assert!(detail.contains("5h"));
+    assert!(detail.contains("weekly"));
+}
+
+#[test]
 fn profile_quota_render_shows_monthly_workspace_limits() {
     let mut usage = main_windows(82, 1_700_001_800, 91, 1_700_259_200);
     usage.additional_rate_limits.push(AdditionalRateLimit {

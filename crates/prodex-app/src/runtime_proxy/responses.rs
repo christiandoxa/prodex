@@ -504,6 +504,5 @@ pub(crate) fn proxy_runtime_responses_request(
                 }
             }
         }
-        loop_state.restart_elapsed_budget();
     }
 }

@@ -53,7 +53,7 @@ pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_
 pub(in super::super) use gemini_request_tools::runtime_gemini_blocked_tool_call_message_with_config;
 use gemini_request_tools::runtime_gemini_tools_from_requests;
 use history::{runtime_gemini_assistant_content, runtime_gemini_tool_response_content};
-use prodex_runtime_gemini::GEMINI_DEFAULT_MODEL;
+use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use std::collections::BTreeMap;
 use std::path::Path;
 

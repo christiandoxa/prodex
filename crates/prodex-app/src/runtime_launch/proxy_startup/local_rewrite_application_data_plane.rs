@@ -41,8 +41,8 @@ use prodex_gateway_core::{GatewayAdmissionRequest, GatewayUsageReconciliationReq
 use prodex_gateway_http::{GatewayHttpExecutionPlan, GatewayHttpPolicy, GatewayHttpRouteKind};
 use prodex_observability::{TraceContext, TraceContextError};
 use prodex_provider_core::{
-    ProviderAdapterContract, ProviderCapabilityStatus, ProviderEndpoint, ProviderErrorClass,
-    ProviderId, provider_adapter, provider_catalog_entries_for,
+    ProviderCapabilityStatus, ProviderEndpoint, ProviderErrorClass, ProviderId, provider_adapter,
+    provider_catalog_entries_for,
 };
 use prodex_provider_spi::{
     GovernedRoutingError, GovernedRoutingPlan, GovernedRoutingRequest,

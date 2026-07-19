@@ -55,6 +55,24 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
+    pub(crate) fn sse_overloaded(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        Self {
+            route,
+            account_id: Some(account_id.to_string()),
+            status_line: "HTTP/1.1 200 OK",
+            content_type: "text/event-stream",
+            body: concat!(
+                "event: response.failed\r\n",
+                "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"Server is overloaded\"}}}\r\n",
+                "\r\n"
+            )
+            .to_string(),
+            response_turn_state: None,
+            initial_body_stall: None,
+            chunk_delay: None,
+        }
+    }
+
     pub(crate) fn plain_429(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,

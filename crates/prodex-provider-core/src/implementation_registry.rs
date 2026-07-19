@@ -16,9 +16,9 @@ use crate::translators::{
 };
 use crate::{
     ALL_PROVIDER_ENDPOINTS, COPILOT_TEXT_ENDPOINTS, CORE_TEXT_ENDPOINTS, GEMINI_ENDPOINTS,
-    KIRO_ENDPOINTS, OPENAI_ENDPOINTS, ProviderAdapterContract, ProviderCapabilityStatus,
-    ProviderEndpoint, ProviderId, ProviderModelSpec, ProviderRuntimeMetadata, ProviderTranslator,
-    ProviderWireFormat, StaticProviderAdapter,
+    KIRO_ENDPOINTS, OPENAI_ENDPOINTS, ProviderCapabilityStatus, ProviderEndpoint, ProviderId,
+    ProviderModelSpec, ProviderRuntimeMetadata, ProviderTranslator, ProviderWireFormat,
+    StaticProviderAdapter,
 };
 
 pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[

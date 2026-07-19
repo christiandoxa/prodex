@@ -1,7 +1,7 @@
 use super::*;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
 use prodex_domain::{DataClassification, PrincipalId, SecretRef, TenantId};
-use prodex_provider_core::{ProviderAdapterContract, ProviderId, provider_adapter};
+use prodex_provider_core::{ProviderId, provider_adapter};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
@@ -476,7 +476,7 @@ fn gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg() {
         .header("Idempotency-Key", "claim-unsupported")
         .send()
         .unwrap();
-    assert_eq!(claim.status().as_u16(), 501);
+    assert_eq!(claim.status().as_u16(), 503);
 
     let connection = Connection::open(&database_path).unwrap();
     connection

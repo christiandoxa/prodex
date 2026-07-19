@@ -120,6 +120,24 @@ fn save_sections_follow_typed_mutation_scope() {
 }
 
 #[test]
+fn save_section_union_preserves_every_pending_mutation() {
+    let binding =
+        runtime_state_save_sections(&RuntimeStateMutation::PreviousResponseOwner("main".into()));
+    let health = runtime_state_save_sections(&RuntimeStateMutation::ProfileHealth("main".into()));
+
+    assert_eq!(
+        binding.union(health),
+        RuntimeStateSaveSections {
+            state: RuntimeStateSaveStateSection::Core,
+            continuations: true,
+            profile_scores: true,
+            usage_snapshots: false,
+            backoffs: true,
+        }
+    );
+}
+
+#[test]
 fn debounce_only_applies_to_hot_continuation_reasons() {
     let debounce = Duration::from_millis(150);
 

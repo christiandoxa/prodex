@@ -21,11 +21,11 @@ use server::{
 use crate::dashboard_html::DASHBOARD_HTML;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, ProviderQuotaSnapshot,
-    QuotaProviderFilter, collect_profile_summaries, collect_quota_reports_with_filters,
-    create_codex_home_if_missing, ensure_path_is_unique, format_copilot_main_quota,
-    format_copilot_quota_status, format_copilot_reset_summary, format_gemini_main_quota,
-    format_gemini_quota_status, format_gemini_reset_summary, format_main_windows,
-    managed_profile_home_path, prepare_managed_codex_home,
+    QuotaProviderFilter, audit_log_event_best_effort, collect_profile_summaries,
+    collect_quota_reports_with_filters, create_codex_home_if_missing, ensure_path_is_unique,
+    format_copilot_main_quota, format_copilot_quota_status, format_copilot_reset_summary,
+    format_gemini_main_quota, format_gemini_quota_status, format_gemini_reset_summary,
+    format_main_windows, managed_profile_home_path, prepare_managed_codex_home,
     runtime_proxy_latest_log_path_from_pointer, runtime_proxy_log_dir,
 };
 
@@ -334,6 +334,12 @@ impl DashboardServer {
         if let Err(err) = state.save(&self.paths) {
             return respond_error(request, StatusCode(500), err);
         }
+        audit_log_event_best_effort(
+            "dashboard",
+            "profile_activate",
+            "success",
+            json!({ "profile_name": state.active_profile }),
+        );
         respond_json(
             request,
             json!({ "status": "ok", "activeProfile": state.active_profile }),
@@ -388,6 +394,16 @@ impl DashboardServer {
         if let Err(err) = state.save(&self.paths) {
             return respond_error(request, StatusCode(500), err);
         }
+        audit_log_event_best_effort(
+            "dashboard",
+            "profile_add",
+            "success",
+            json!({
+                "profile_name": name,
+                "managed": true,
+                "activated": state.active_profile.as_deref() == Some(name.as_str()),
+            }),
+        );
         respond_json(
             request,
             json!({
@@ -416,9 +432,19 @@ impl DashboardServer {
         if state.active_profile.as_deref() == Some(name.as_str()) {
             state.active_profile = state.profiles.keys().next().cloned();
         }
-        if let Err(err) = state.save_with_removed_profiles(&self.paths, &[name]) {
+        if let Err(err) = state.save_with_removed_profiles(&self.paths, std::slice::from_ref(&name))
+        {
             return respond_error(request, StatusCode(500), err);
         }
+        audit_log_event_best_effort(
+            "dashboard",
+            "profile_remove",
+            "success",
+            json!({
+                "profile_name": name,
+                "active_profile": state.active_profile,
+            }),
+        );
         respond_json(
             request,
             json!({ "status": "ok", "activeProfile": state.active_profile }),

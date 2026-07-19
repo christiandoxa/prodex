@@ -55,6 +55,29 @@ fn cookie_jar_replays_profile_and_host_scoped_cookie() {
 }
 
 #[test]
+fn cookie_jar_rejects_secure_cookie_from_insecure_origin() {
+    let jar = RuntimeProxyCookieJar::new();
+    jar.capture_set_cookie_headers(
+        "",
+        "alpha",
+        "chatgpt.com",
+        "/backend-api/responses",
+        false,
+        ["cf_clearance=token; Path=/; Secure"],
+    );
+
+    assert_eq!(
+        merged(
+            &jar,
+            "alpha",
+            "https://chatgpt.com/backend-api/responses",
+            &[],
+        ),
+        None
+    );
+}
+
+#[test]
 fn cookie_jar_merges_caller_cookie_without_duplicate_name() {
     let jar = RuntimeProxyCookieJar::new();
     capture(
