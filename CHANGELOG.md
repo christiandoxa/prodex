@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.324.0 - 2026-07-20
+
+### Runtime
+
+- Complete audited runtime and operations features (`7f2c17d`)
+
 ## 0.323.0 - 2026-07-19
 
 ### Runtime
@@ -67,10 +73,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Document adaptive route decision (`64daec0`)
 - Detect current legacy schema (`b0ec18a`)
 - Persist desktop chat history (`f8d814e`)
-
-## 0.312.0 - 2026-07-18
-
-### Misc
-
-- Remove unimplemented audited surfaces (`7636872`)
-- Harden audited desktop and dashboard paths (`d4b13cd`)
