@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
 const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
+const CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV: &str = "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT";
+const VTE_VERSION_ENV: &str = "VTE_VERSION";
 const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -116,12 +118,22 @@ pub fn codex_child_plan_with_env(
 ) -> ChildProcessPlan {
     let args = crate::scope_codex_exec_config_args(&args);
     let local_provider_hosts = local_proxy_bypass_hosts_from_args(&args, local_provider_id);
+    let mut extra_env =
+        local_proxy_bypass_env_for_hosts_and_env(&local_provider_hosts, environment);
+    // VTE terminals can surface phantom input when Codex enables enhanced key reporting.
+    if environment.iter().any(|(key, _)| key == VTE_VERSION_ENV)
+        && !environment
+            .iter()
+            .any(|(key, _)| key == CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV)
+    {
+        extra_env.push((
+            CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV,
+            OsString::from("1"),
+        ));
+    }
     ChildProcessPlan::new(binary, codex_home)
         .with_args(args)
-        .with_extra_env(local_proxy_bypass_env_for_hosts_and_env(
-            &local_provider_hosts,
-            environment,
-        ))
+        .with_extra_env(extra_env)
         .with_removed_env(default_child_removed_env_from(environment))
 }
 
