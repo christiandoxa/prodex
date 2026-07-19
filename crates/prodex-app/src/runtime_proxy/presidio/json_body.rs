@@ -104,6 +104,9 @@ fn collect_json_content_at(
         }
         serde_json::Value::Object(fields) => {
             for (key, value) in fields {
+                if path == "$" && key == "tools" {
+                    continue;
+                }
                 if unsupported_modality_field(key) && !value.is_null() {
                     state.unsupported_modality = true;
                 }
@@ -179,6 +182,15 @@ pub(super) fn replace_json_string_values<'a>(
     inspect_strings: bool,
     values: &mut impl Iterator<Item = &'a str>,
 ) {
+    replace_json_string_values_at(value, inspect_strings, values, true);
+}
+
+fn replace_json_string_values_at<'a>(
+    value: &mut serde_json::Value,
+    inspect_strings: bool,
+    values: &mut impl Iterator<Item = &'a str>,
+    root: bool,
+) {
     match value {
         serde_json::Value::String(text) if inspect_strings => {
             if let Some(redacted) = values.next() {
@@ -187,15 +199,19 @@ pub(super) fn replace_json_string_values<'a>(
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                replace_json_string_values(item, inspect_strings, values);
+                replace_json_string_values_at(item, inspect_strings, values, false);
             }
         }
         serde_json::Value::Object(fields) => {
             for (key, value) in fields {
-                replace_json_string_values(
+                if root && key == "tools" {
+                    continue;
+                }
+                replace_json_string_values_at(
                     value,
                     inspect_strings || inspectable_json_string_field(key),
                     values,
+                    false,
                 );
             }
         }
@@ -219,7 +235,7 @@ mod tests {
     fn walker_inspects_supported_nested_fields_without_retaining_argument_keys() {
         let value = serde_json::json!({
             "model": "example-model",
-            "tools": [{
+            "input": [{
                 "arguments": {
                     "customer_email": "user@example.com",
                     "nested": ["token-value"]
@@ -276,6 +292,32 @@ mod tests {
         assert_eq!(
             collect_json_content(&serde_json::json!({"input": oversized})).unwrap_err(),
             PresidioJsonContentError::TextBudgetExhausted
+        );
+    }
+
+    #[test]
+    fn walker_skips_top_level_tool_schemas_but_not_user_content() {
+        let tools = (0..=MAX_PRESIDIO_JSON_VALUES)
+            .map(|index| {
+                serde_json::json!({
+                    "parameters": {"properties": {"input": {"description": format!("schema {index}")}}}
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut request = serde_json::json!({
+            "input": {"tools": {"content": "user@example.com"}},
+            "tools": tools,
+        });
+        let content = collect_json_content(&request).unwrap();
+
+        assert_eq!(content.values.len(), 1);
+        assert_eq!(content.values[0].text, "user@example.com");
+
+        replace_json_string_values(&mut request, false, &mut ["<redacted>"].into_iter());
+        assert_eq!(request["input"]["tools"]["content"], "<redacted>");
+        assert_eq!(
+            request["tools"][0]["parameters"]["properties"]["input"]["description"],
+            "schema 0"
         );
     }
 }

@@ -515,12 +515,15 @@ mod tests {
         );
         let body = serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5",
-            "input": ["héllo user@example.com", "Bearer access-token-value"],
-            "tools": [{"arguments": {
-                "api_key": "tenant-api-key-value",
-                "private_key": private_key,
-                "note": "sk-proj-1234567890 card 4111-1111-1111-1111"
-            }}]
+            "input": [
+                "héllo user@example.com",
+                "Bearer access-token-value",
+                {"arguments": {
+                    "api_key": "tenant-api-key-value",
+                    "private_key": private_key,
+                    "note": "sk-proj-1234567890 card 4111-1111-1111-1111"
+                }}
+            ]
         }))
         .unwrap();
 
