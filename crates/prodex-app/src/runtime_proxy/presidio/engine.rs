@@ -112,7 +112,13 @@ async fn runtime_presidio_redact_text_body(
             .map(|value| value.text.as_str())
             .collect::<Vec<_>>()
             .join(&separator);
-        let redacted = runtime_presidio_redact_text(client, &combined, config).await?;
+        let redacted = runtime_presidio_redact_text(
+            client,
+            &combined,
+            config,
+            Some((&content.values, &separator)),
+        )
+        .await?;
         let findings = runtime_presidio_findings(&content.values, &separator, &redacted.findings)?;
         if redacted.text == combined {
             return Ok(RedactionOutcome {
@@ -138,7 +144,7 @@ async fn runtime_presidio_redact_text_body(
         });
     }
 
-    let redacted = runtime_presidio_redact_text(client, text, config).await?;
+    let redacted = runtime_presidio_redact_text(client, text, config, None).await?;
     let findings = runtime_presidio_findings(
         &[PresidioJsonString {
             path: "$".to_string(),
@@ -159,6 +165,7 @@ async fn runtime_presidio_redact_text(
     client: &reqwest::Client,
     text: &str,
     config: &RuntimePresidioRedactionConfig,
+    json_content: Option<(&[PresidioJsonString], &str)>,
 ) -> Result<RuntimePresidioTextRedaction> {
     let languages = &config.languages;
     let language_mode = config.language_mode;
@@ -209,6 +216,9 @@ async fn runtime_presidio_redact_text(
         }
     }
 
+    if let Some((values, separator)) = json_content {
+        retain_findings_within_json_values(&mut all_analyzer_results, values, separator);
+    }
     if all_analyzer_results.is_empty() {
         return Ok(RuntimePresidioTextRedaction {
             text: text.to_string(),
@@ -244,6 +254,29 @@ async fn runtime_presidio_redact_text(
     })
 }
 
+fn retain_findings_within_json_values(
+    findings: &mut Vec<PresidioAnalyzerResult>,
+    values: &[PresidioJsonString],
+    separator: &str,
+) {
+    let separator_chars = separator.chars().count();
+    let mut cursor = 0usize;
+    let ranges = values
+        .iter()
+        .map(|value| {
+            let start = cursor;
+            let end = start.saturating_add(value.text.chars().count());
+            cursor = end.saturating_add(separator_chars);
+            (start, end)
+        })
+        .collect::<Vec<_>>();
+    findings.retain(|finding| {
+        ranges
+            .iter()
+            .any(|(start, end)| finding.start >= *start && finding.end <= *end)
+    });
+}
+
 async fn presidio_analyze_async(
     client: &reqwest::Client,
     analyzer_url: &str,
@@ -275,4 +308,48 @@ async fn presidio_analyze_async(
 
 fn presidio_endpoint(base_url: &str, path: &str) -> String {
     format!("{}/{}", base_url.trim_end_matches('/'), path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cross_field_findings_are_removed_before_anonymization() {
+        let values = [
+            PresidioJsonString {
+                path: "$.input[0]".to_string(),
+                text: "alpha".to_string(),
+                sensitive_kind: None,
+            },
+            PresidioJsonString {
+                path: "$.input[1]".to_string(),
+                text: "user@example.com".to_string(),
+                sensitive_kind: None,
+            },
+        ];
+        let separator = presidio_json_value_separator(&values);
+        let second_start = values[0].text.chars().count() + separator.chars().count();
+        let mut findings = vec![
+            PresidioAnalyzerResult {
+                start: 3,
+                end: second_start + 4,
+                score: 0.9,
+                entity_type: "PERSON".to_string(),
+                language: "en".to_string(),
+            },
+            PresidioAnalyzerResult {
+                start: second_start,
+                end: second_start + values[1].text.chars().count(),
+                score: 0.9,
+                entity_type: "EMAIL_ADDRESS".to_string(),
+                language: "en".to_string(),
+            },
+        ];
+
+        retain_findings_within_json_values(&mut findings, &values, &separator);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].entity_type, "EMAIL_ADDRESS");
+    }
 }
