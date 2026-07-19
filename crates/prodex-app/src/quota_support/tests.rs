@@ -35,7 +35,59 @@ fn test_runtime_log_path(name: &str) -> PathBuf {
         .as_nanos();
     let dir = env::temp_dir().join(format!("prodex-quota-test-{}-{nanos}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    }
     dir.join(name)
+}
+
+#[test]
+fn imported_kiro_profile_has_status_and_json_quota_snapshots() {
+    let auth_path = test_runtime_log_path("kiro_auth.json");
+    let codex_home = auth_path.parent().unwrap();
+    secret_store::SecretManager::new(secret_store::FileSecretBackend::new())
+        .write_text(
+            &secret_store::SecretLocation::file(&auth_path),
+            serde_json::to_string(&serde_json::json!({
+            "auth_key": "kirocli:fixture:token",
+            "auth_kind": "social",
+            "auth_json": "{\"accessToken\":\"fixture-token\"}",
+            "email": "developer@example.com",
+            "profile_name": "example-profile",
+            "region": "us-east-1"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    fs::write(
+        codex_home.join(KIRO_MODEL_CATALOG_FILE),
+        br#"{"models":[{"id":"model-a"},{"id":"model-b"}]}"#,
+    )
+    .unwrap();
+    let provider = ProfileProvider::Kiro {
+        auth_key: "kirocli:fixture:token".to_string(),
+        auth_kind: Some("social".to_string()),
+        profile_arn: None,
+        profile_name: Some("example-profile".to_string()),
+        start_url: None,
+        region: Some("us-east-1".to_string()),
+    };
+
+    let snapshot = fetch_profile_quota(&provider, codex_home, None).unwrap();
+    let ProviderQuotaSnapshot::External(info) = snapshot else {
+        panic!("expected external Kiro status snapshot");
+    };
+    assert_eq!(info.provider, "Kiro CLI");
+    assert_eq!(info.main, "2 imported models");
+    assert_eq!(info.account.as_deref(), Some("developer@example.com"));
+
+    let json = fetch_profile_quota_json(&provider, codex_home, None).unwrap();
+    assert_eq!(json["provider"], "Kiro CLI");
+    assert_eq!(json["main"], "2 imported models");
+
+    fs::remove_dir_all(codex_home).unwrap();
 }
 
 #[test]

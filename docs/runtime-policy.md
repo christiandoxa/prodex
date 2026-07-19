@@ -116,7 +116,7 @@ serving; secret files are not read on the request hot path.
 | `gateway.sso.remote_human` | none | `false` | Declare remote human administration. When enabled, the policy requires the control-plane OIDC scope and complete browser-edge settings. |
 | `gateway.sso.required_scope` | none | `control_plane` for human OIDC | Exact credential scope for human OIDC. Values other than `control_plane` fail closed. |
 | `gateway.sso.authentication_strength` | none | empty | Optional required authentication strength: `mfa` or `phishing_resistant`. |
-| `gateway.sso.browser_flow` | none | `false` | Enable OIDC Authorization Code browser login at `/v1/prodex/gateway/auth/login`, callback, and logout routes. The bounded in-memory state/session store issues Secure, HttpOnly, SameSite cookies. |
+| `gateway.sso.browser_flow` | none | `false` | Enable OIDC Authorization Code browser login at `/v1/prodex/gateway/auth/login`, callback, logout, and signed POST-only back-channel logout routes. State/session records are bounded in-process for local mode and shared through coordination Redis in the accepted multi-replica topology; cookies are Secure, HttpOnly, and SameSite. |
 | `gateway.sso.pkce_method` | none | required with browser flow | Must be exact `S256`; weaker or missing PKCE fails closed. |
 | `gateway.sso.oidc_authorization_url` / `oidc_token_url` | none | required with browser flow | Exact issuer-origin HTTPS endpoints. Redirects, userinfo, query/fragment policy violations, and unsafe origins are rejected. |
 | `gateway.sso.oidc_client_id` | none | required with browser flow | Exact non-empty OIDC client identifier. |

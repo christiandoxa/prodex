@@ -1,4 +1,4 @@
-//! Bounded, content-free governance session metadata.
+mod self_service;
 
 use crate::RuntimeProxyRequest;
 use prodex_domain::{

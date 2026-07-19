@@ -216,7 +216,10 @@ pub fn classify_canonical_route(target: &CanonicalRequestTarget) -> GatewayHttpR
     let path = canonical_control_plane_path(target.path());
     if matches!(
         path.as_ref(),
-        "/admin/auth/login" | "/admin/auth/callback" | "/admin/auth/logout"
+        "/admin/auth/login"
+            | "/admin/auth/callback"
+            | "/admin/auth/logout"
+            | "/admin/auth/backchannel-logout"
     ) {
         return GatewayHttpRouteKind::ControlPlane;
     }

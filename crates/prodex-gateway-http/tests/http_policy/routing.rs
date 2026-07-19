@@ -58,6 +58,10 @@ fn route_classifier_separates_data_control_and_health_surfaces() {
         classify_route("/v1/prodex/gateway/metrics"),
         GatewayHttpRouteKind::ControlPlane
     );
+    assert_eq!(
+        classify_route("/v1/prodex/gateway/auth/backchannel-logout"),
+        GatewayHttpRouteKind::ControlPlane
+    );
     assert_eq!(classify_route("/admin"), GatewayHttpRouteKind::ControlPlane);
     assert_eq!(
         classify_route("/v1/admin"),

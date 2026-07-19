@@ -4,10 +4,13 @@ use super::{
     first_line_of_error, format_response_body, quota_error_message,
     refresh_claude_oauth_secret_if_needed,
 };
+use crate::{KIRO_MODEL_CATALOG_FILE, parse_kiro_model_catalog_text, read_kiro_auth_secret};
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
 use std::env;
+use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::Command;
 
@@ -30,6 +33,59 @@ pub(super) fn fetch_agy_quota_info(account: Option<&str>) -> Result<ExternalQuot
         serde_json::from_slice(&output.stdout).context("failed to parse agy quota JSON output")?;
 
     parse_agy_quota_json(value, account)
+}
+
+pub(super) fn fetch_kiro_quota_info(codex_home: &Path) -> Result<ExternalQuotaInfo> {
+    let secret = read_kiro_auth_secret(codex_home)?;
+    let catalog_path = codex_home.join(KIRO_MODEL_CATALOG_FILE);
+    let model_count = match fs::read_to_string(&catalog_path) {
+        Ok(text) => Some(
+            parse_kiro_model_catalog_text(&text)
+                .with_context(|| format!("failed to parse {}", catalog_path.display()))?
+                .len(),
+        ),
+        Err(err) if err.kind() == ErrorKind::NotFound => None,
+        Err(err) => {
+            return Err(err).with_context(|| format!("failed to read {}", catalog_path.display()));
+        }
+    };
+    let account = secret
+        .email
+        .clone()
+        .or_else(|| secret.profile_name.clone())
+        .or_else(|| secret.profile_arn.clone());
+    let mut details = vec![ExternalQuotaDetail {
+        label: "Auth method".to_string(),
+        value: secret.auth_kind.clone(),
+    }];
+    for (label, value) in [("Profile", secret.profile_name), ("Region", secret.region)] {
+        if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+            details.push(ExternalQuotaDetail {
+                label: label.to_string(),
+                value,
+            });
+        }
+    }
+    details.push(ExternalQuotaDetail {
+        label: "Models".to_string(),
+        value: model_count
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "catalog unavailable".to_string()),
+    });
+
+    Ok(ExternalQuotaInfo {
+        provider: "Kiro CLI".to_string(),
+        account,
+        plan: Some(secret.auth_kind),
+        status: "Ready (imported)".to_string(),
+        main: model_count.map_or_else(
+            || "credential snapshot available".to_string(),
+            |count| format!("{count} imported models"),
+        ),
+        reset: None,
+        available: Some(true),
+        details,
+    })
 }
 
 fn parse_agy_quota_json(

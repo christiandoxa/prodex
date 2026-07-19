@@ -26,6 +26,10 @@ struct UpdateCheckCache {
     source: ProdexReleaseSource,
     latest_version: String,
     checked_at: i64,
+    #[serde(default)]
+    codex_latest_version: Option<String>,
+    #[serde(default)]
+    codex_checked_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +173,22 @@ pub fn format_info_prodex_version(paths: &AppPaths) -> Result<String> {
     })
 }
 
+pub fn format_info_codex_version(
+    paths: &AppPaths,
+    current_version: Option<&str>,
+) -> Result<String> {
+    let latest_version = latest_codex_version(paths, current_version.unwrap_or("0.0.0"))?;
+    Ok(match (current_version, latest_version) {
+        (Some(current), Some(latest)) if version_is_newer(&latest, current) => {
+            format!("{current} (update available: {latest})")
+        }
+        (Some(current), Some(_)) => format!("{current} (up to date)"),
+        (Some(current), None) => format!("{current} (update check unavailable)"),
+        (None, Some(latest)) => format!("not detected (latest release: {latest})"),
+        (None, None) => "not detected (update check unavailable)".to_string(),
+    })
+}
+
 fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
     let source = current_prodex_release_source();
     if let Some(latest_version) = cached_latest_prodex_version(paths, source) {
@@ -184,14 +204,14 @@ fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
         Ok(version) => version,
         Err(_) => return Ok(None),
     };
-    let _ = save_update_check_cache(
-        paths,
-        &UpdateCheckCache {
-            source,
-            latest_version: latest_version.clone(),
-            checked_at: Local::now().timestamp(),
-        },
-    );
+    let mut cache = load_update_check_cache(paths)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    cache.source = source;
+    cache.latest_version = latest_version.clone();
+    cache.checked_at = Local::now().timestamp();
+    let _ = save_update_check_cache(paths, &cache);
     Ok(Some(latest_version))
 }
 
@@ -206,6 +226,39 @@ fn cached_latest_prodex_version(paths: &AppPaths, source: ProdexReleaseSource) -
         Local::now().timestamp(),
     )
     .then_some(cached.latest_version)
+}
+
+fn latest_codex_version(paths: &AppPaths, current_version: &str) -> Result<Option<String>> {
+    if let Some(latest_version) = cached_latest_codex_version(paths, current_version) {
+        return Ok(Some(latest_version));
+    }
+
+    let _lock = acquire_update_check_lock(paths);
+    if let Some(latest_version) = cached_latest_codex_version(paths, current_version) {
+        return Ok(Some(latest_version));
+    }
+
+    let latest_version = match fetch_latest_codex_github_version() {
+        Ok(version) => version,
+        Err(_) => return Ok(None),
+    };
+    let mut cache = load_update_check_cache(paths)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    cache.codex_latest_version = Some(latest_version.clone());
+    cache.codex_checked_at = Some(Local::now().timestamp());
+    let _ = save_update_check_cache(paths, &cache);
+    Ok(Some(latest_version))
+}
+
+fn cached_latest_codex_version(paths: &AppPaths, current_version: &str) -> Option<String> {
+    let cached = load_update_check_cache(paths).ok().flatten()?;
+    let latest_version = cached.codex_latest_version?;
+    let checked_at = cached.codex_checked_at?;
+    (Local::now().timestamp().saturating_sub(checked_at)
+        < update_check_cache_ttl_seconds(&latest_version, current_version))
+    .then_some(latest_version)
 }
 
 pub fn should_use_cached_update_version(
@@ -383,13 +436,30 @@ fn fetch_latest_prodex_version(_source: ProdexReleaseSource) -> Result<String> {
 }
 
 fn fetch_latest_prodex_github_version() -> Result<String> {
+    fetch_latest_github_version(
+        "https://github.com/christiandoxa/prodex/releases/latest",
+        latest_release_version_from_url,
+    )
+}
+
+fn fetch_latest_codex_github_version() -> Result<String> {
+    fetch_latest_github_version(
+        "https://github.com/openai/codex/releases/latest",
+        latest_codex_release_version_from_url,
+    )
+}
+
+fn fetch_latest_github_version(
+    latest_release_url: &str,
+    version_from_url: fn(&reqwest::Url) -> Result<String>,
+) -> Result<String> {
     let client = Client::builder()
         .connect_timeout(Duration::from_millis(UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS))
         .timeout(Duration::from_millis(UPDATE_CHECK_HTTP_READ_TIMEOUT_MS))
         .build()
         .context("failed to build update-check HTTP client")?;
     let response = client
-        .head("https://github.com/christiandoxa/prodex/releases/latest")
+        .head(latest_release_url)
         .header(
             "User-Agent",
             format!("prodex/{}", env!("CARGO_PKG_VERSION")),
@@ -400,7 +470,7 @@ fn fetch_latest_prodex_github_version() -> Result<String> {
     if !status.is_success() {
         bail!("GitHub releases returned HTTP {}", status.as_u16());
     }
-    latest_release_version_from_url(response.url())
+    version_from_url(response.url())
 }
 
 fn latest_release_version_from_url(url: &reqwest::Url) -> Result<String> {
@@ -410,6 +480,15 @@ fn latest_release_version_from_url(url: &reqwest::Url) -> Result<String> {
         .context("GitHub latest release redirect did not contain a version")?;
     let version = tag.strip_prefix('v').unwrap_or(tag);
     parse_release_version(version).context("invalid GitHub release version")?;
+    Ok(version.to_string())
+}
+
+fn latest_codex_release_version_from_url(url: &reqwest::Url) -> Result<String> {
+    let version = url
+        .path()
+        .strip_prefix("/openai/codex/releases/tag/rust-v")
+        .context("GitHub latest Codex release redirect did not contain a version")?;
+    parse_release_version(version).context("invalid GitHub Codex release version")?;
     Ok(version.to_string())
 }
 
@@ -516,12 +595,48 @@ mod tests {
     }
 
     #[test]
+    fn latest_codex_release_version_comes_from_rust_tag() {
+        let url = reqwest::Url::parse("https://github.com/openai/codex/releases/tag/rust-v0.144.6")
+            .unwrap();
+
+        assert_eq!(
+            latest_codex_release_version_from_url(&url).unwrap(),
+            "0.144.6"
+        );
+    }
+
+    #[test]
+    fn codex_info_version_uses_cached_github_release() {
+        let paths = test_paths("codex-version-cache");
+        let cache = UpdateCheckCache {
+            source: ProdexReleaseSource::GitHub,
+            latest_version: current_prodex_version().to_string(),
+            checked_at: Local::now().timestamp(),
+            codex_latest_version: Some("0.144.6".to_string()),
+            codex_checked_at: Some(Local::now().timestamp()),
+        };
+        save_update_check_cache(&paths, &cache).unwrap();
+
+        assert_eq!(
+            format_info_codex_version(&paths, Some("0.144.5")).unwrap(),
+            "0.144.5 (update available: 0.144.6)"
+        );
+        assert_eq!(
+            format_info_codex_version(&paths, Some("0.144.6")).unwrap(),
+            "0.144.6 (up to date)"
+        );
+
+        let _ = fs::remove_dir_all(paths.root);
+    }
+
+    #[test]
     fn update_cache_write_is_private_and_bounded() {
         let paths = test_paths("private-cache");
         let cache = UpdateCheckCache {
             source: ProdexReleaseSource::GitHub,
             latest_version: "0.297.0".to_string(),
             checked_at: 1,
+            ..UpdateCheckCache::default()
         };
         save_update_check_cache(&paths, &cache).unwrap();
         assert_eq!(

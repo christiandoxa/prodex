@@ -54,7 +54,7 @@ pub(super) fn codex_openai_auth_originator() -> String {
 }
 
 fn codex_openai_auth_user_agent(originator: &str) -> Option<String> {
-    let build_version = codex_openai_auth_codex_version()?;
+    let build_version = codex_cli_version()?;
     Some(codex_openai_auth_user_agent_for_version(
         originator,
         build_version,
@@ -77,7 +77,7 @@ pub(super) fn codex_openai_auth_user_agent_for_version(
     sanitize_codex_user_agent(prefix.clone(), &prefix)
 }
 
-fn codex_openai_auth_codex_version() -> Option<&'static str> {
+pub(crate) fn codex_cli_version() -> Option<&'static str> {
     static CODEX_VERSION: OnceLock<Option<String>> = OnceLock::new();
     CODEX_VERSION
         .get_or_init(resolve_codex_cli_version)

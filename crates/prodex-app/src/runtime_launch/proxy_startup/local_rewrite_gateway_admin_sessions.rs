@@ -8,6 +8,68 @@ use super::local_rewrite_gateway_admin_execution::runtime_gateway_admin_mutation
 use super::local_rewrite_gateway_admin_response::runtime_gateway_admin_json_body;
 use super::*;
 
+pub(super) fn runtime_gateway_self_service_session_response(
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeLocalRewriteProxyShared,
+    principal: &Principal,
+) -> tiny_http::ResponseBox {
+    if !request.method.eq_ignore_ascii_case("POST") {
+        return session_error(
+            405,
+            "method_not_allowed",
+            "current-session revocation requires POST",
+        );
+    }
+    if !request.body.is_empty()
+        || request.headers.iter().any(|(name, value)| {
+            (name.eq_ignore_ascii_case("content-length") && value.trim() != "0")
+                || name.eq_ignore_ascii_case("transfer-encoding")
+        })
+    {
+        return session_error(
+            400,
+            "governance_session_body_invalid",
+            "current-session self-revocation does not accept a request body",
+        );
+    }
+    let Some(tenant_id) = principal.tenant_id else {
+        return session_error(
+            401,
+            "governance_session_identity_invalid",
+            "current-session revocation requires a tenant-bound identity",
+        );
+    };
+    let now_seconds =
+        super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis() / 1_000;
+    match shared.governance_sessions.revoke_current(
+        request,
+        TenantContext { tenant_id },
+        principal,
+        now_seconds,
+    ) {
+        Ok(GovernanceWriteOutcome::Applied | GovernanceWriteOutcome::Replayed) => {
+            build_runtime_proxy_response_from_parts(RuntimeHeapTrimmedBufferedResponseParts {
+                status: 204,
+                headers: vec![("cache-control".to_string(), b"no-store".to_vec())],
+                body: Vec::new().into(),
+            })
+        }
+        Err(GovernanceRepositoryError::NotFound) => {
+            session_error(404, "governance_session_not_found", "session was not found")
+        }
+        Err(GovernanceRepositoryError::InvalidInput) => session_error(
+            400,
+            "governance_session_revoke_invalid",
+            "session revocation request is invalid",
+        ),
+        Err(_) => session_error(
+            503,
+            "governance_session_storage_unavailable",
+            "session governance storage is unavailable",
+        ),
+    }
+}
+
 pub(super) fn runtime_gateway_admin_session_response(
     captured: &RuntimeProxyRequest,
     path: &str,
