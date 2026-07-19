@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.320.0 - 2026-07-19
+
+### Runtime
+
+- Preserve Presidio JSON field boundaries (`6bf71dc`)
+
 ## 0.319.0 - 2026-07-19
 
 ### Runtime
@@ -69,14 +75,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Preserve explicit route pricing (`b8563eb`)
 - Harden clients and enterprise gateway (`75568ba`)
-
-## 0.308.0 - 2026-07-17
-
-### CLI
-
-- Enable native keyring storage (`98c89ad`)
-
-### Misc
-
-- Reject inactive adaptive routing (`f0f9199`)
-- Harden native client launches (`9dfe354`)
