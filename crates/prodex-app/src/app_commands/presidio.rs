@@ -797,12 +797,14 @@ mod tests {
         }
         let _home = crate::TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
         let paths = AppPaths::discover().unwrap();
-        let mut config = ProdexPresidioConfig::default();
-        config.enabled = true;
-        config.trusted_hosts = vec!["presidio.example.com".to_string()];
-        config.timeout_ms = 12_345;
-        config.max_response_bytes = 2 * 1024 * 1024;
-        config.max_concurrency = 17;
+        let config = ProdexPresidioConfig {
+            enabled: true,
+            trusted_hosts: vec!["presidio.example.com".to_string()],
+            timeout_ms: 12_345,
+            max_response_bytes: 2 * 1024 * 1024,
+            max_concurrency: 17,
+            ..Default::default()
+        };
         save_presidio_config(&paths, &config).unwrap();
 
         assert_eq!(stored_presidio_preference().unwrap(), Some(true));
