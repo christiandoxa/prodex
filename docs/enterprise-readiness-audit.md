@@ -645,8 +645,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0714-storage-billing-ledger-range-error-redaction.md`, and
   `docs/adr/0715-storage-billing-ledger-limit-error-redaction.md`, and
   `docs/adr/0905-storage-billing-ledger-limit-display-redaction.md`.
-- **Remaining gap:** PostgreSQL transport still needs verified TLS before the
-  accepted shared topology is production-ready.
+- **Current status:** The accepted shared topology uses the Rustls-backed
+  `verify-full` PostgreSQL configuration across pooled accounting, compatibility
+  clients, and migrations. Managed-database failover and deployed CA rotation
+  remain environment acceptance work.
 
 ### 5. Read-Modify-Write Budget Updates Can Lose Usage
 
@@ -790,9 +792,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0717-domain-reservation-reconciliation-error-redaction.md`, and
   `docs/adr/0718-domain-budget-rejection-error-redaction.md`, and
   `docs/adr/1066-grouped-request-budget-accounting.md`.
-- **Remaining gap:** Expired reservation recovery still needs production worker
-  wiring. PostgreSQL transport still needs verified TLS before production
-  readiness is complete.
+- **Current status:** Bounded five-second SQLite/PostgreSQL recovery workers are
+  started by the gateway composition root, and PostgreSQL uses the configured
+  verified-TLS connector. Multi-replica soak and managed-database failover
+  remain deployment evidence, not missing runtime wiring.
 
 ### 6. Admission Must Not Use Only Local In-Memory Usage
 
@@ -858,8 +861,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0979-application-atomic-reservation-storage-boundary.md`, and
   `docs/adr/0672-budget-group-id-exact-boundary.md`, and
   `docs/adr/1066-grouped-request-budget-accounting.md`.
-- **Remaining gap:** Production PostgreSQL connections still require verified
-  TLS wiring across pooled accounting, compatibility clients, and migrations.
+- **Current status:** Pooled accounting, compatibility clients, migrations, and
+  recovery all consume the same explicit PostgreSQL TLS configuration. The
+  production profile requires verified TLS; managed CA rotation remains a
+  deployment responsibility.
 
 ### 7. Tenant ID Must Be Mandatory and Keyed
 

@@ -23,6 +23,7 @@ use super::local_rewrite_application_boundary::{
     RuntimeGatewayAdminPreauthorization, RuntimeGatewayApplicationBoundaryError,
     runtime_gateway_admin_preauthorization, runtime_gateway_application_data_plane_authorization,
     runtime_gateway_application_request_context, runtime_gateway_data_plane_credential,
+    runtime_gateway_virtual_key_principal,
 };
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationAdmission, runtime_gateway_application_http_policy,
@@ -40,9 +41,11 @@ use super::local_rewrite_gateway_admin_dispatch::runtime_gateway_respond_route_e
 use super::local_rewrite_gateway_admin_router::{
     runtime_gateway_admin_authorization_rejection_response, runtime_gateway_admin_response,
     runtime_gateway_http_request_meta, runtime_gateway_request_path_is_admin,
+    runtime_gateway_request_path_is_current_session_revoke,
     runtime_gateway_request_path_is_route_explain,
     runtime_gateway_request_path_requires_admin_auth,
 };
+use super::local_rewrite_gateway_admin_sessions::runtime_gateway_self_service_session_response;
 use super::local_rewrite_gateway_browser::runtime_gateway_browser_auth_response;
 use super::local_rewrite_gateway_data_plane_audit::{
     runtime_gateway_audit_data_plane_auth_failed,
@@ -317,7 +320,39 @@ fn runtime_local_rewrite_authenticate<'target>(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAuthenticatedRequest<'target>> {
     let mut state = canonical.0;
-    if let Some(response) = runtime_gateway_browser_auth_response(&state.request, shared) {
+    if let Some(response) = runtime_gateway_browser_auth_response(&mut state.request, shared) {
+        return Err(state.respond(response));
+    }
+    if runtime_gateway_request_path_is_current_session_revoke(&state.path, shared)
+        && runtime_gateway_admin_auth(&state.request.header_request(), shared).is_none()
+    {
+        let virtual_key = match runtime_gateway_request_header_virtual_key(
+            state.request_id,
+            &state.request,
+            shared,
+        ) {
+            Ok(virtual_key) => virtual_key,
+            Err(rejection) => {
+                return Err(state.reject(build_runtime_proxy_json_error_response(
+                    rejection.status(),
+                    rejection.code(),
+                    "gateway virtual key policy rejected this request",
+                )));
+            }
+        };
+        let Some(virtual_key) = virtual_key else {
+            return Err(state.reject(build_runtime_proxy_json_error_response(
+                401,
+                "missing_or_invalid_token",
+                "current-session revocation requires a gateway virtual key",
+            )));
+        };
+        let principal = runtime_gateway_virtual_key_principal(&virtual_key);
+        let response = runtime_gateway_self_service_session_response(
+            &state.request.header_request(),
+            shared,
+            &principal,
+        );
         return Err(state.respond(response));
     }
     state.admin = match runtime_local_rewrite_preauthorize_admin(&state, shared) {
@@ -618,7 +653,7 @@ fn runtime_local_rewrite_dispatch_websocket<'target>(
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(
-            "local_rewrite_websocket_rejected",
+            "local_rewrite_websocket_https_fallback",
             [
                 runtime_proxy_log_field("request", state.request_id.to_string()),
                 runtime_proxy_log_field("transport", "websocket"),
@@ -628,7 +663,7 @@ fn runtime_local_rewrite_dispatch_websocket<'target>(
     );
     Err(state.reject(build_runtime_proxy_text_response(
         501,
-        "runtime local rewrite proxy does not support websocket upstreams",
+        "provider adapter requires the HTTPS Responses transport",
     )))
 }
 

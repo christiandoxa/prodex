@@ -18,8 +18,8 @@ pub(super) use endpoint_policy::runtime_gateway_oidc_browser_endpoint;
 #[cfg(test)]
 pub(super) use token_claims::runtime_gateway_test_verified_oidc_token;
 pub(super) use token_claims::{
-    RuntimeGatewayVerifiedOidcToken, runtime_gateway_verify_oidc_token,
-    runtime_gateway_verify_workload_token,
+    RuntimeGatewayVerifiedOidcToken, runtime_gateway_verify_oidc_logout_token,
+    runtime_gateway_verify_oidc_token, runtime_gateway_verify_workload_token,
 };
 pub(super) use transport::runtime_gateway_oidc_post_form;
 

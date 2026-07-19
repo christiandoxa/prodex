@@ -140,18 +140,20 @@ original eligible set.
    250 milliseconds before refreshing cached sessions. The epoch path has a
    focused shared-authority regression; a deployed two-gateway chaos proof is
    not recorded.
-6. Both hash-targeted and current-session revoke routes are authenticated
-   control-plane routes. The current route hashes the raw `session_id` header
-   server-side; a separate ordinary data-plane self-service logout route is not
-   implemented.
+6. Hash-targeted revoke remains an authenticated control-plane operation. The
+   `current` route also accepts a data-plane virtual key, hashes the raw
+   `session_id` header server-side, verifies tenant/principal/scope ownership,
+   and atomically revokes only that caller's governed session.
 7. Vault protocol authentication and lease renewal are delegated to the
    deployment's Vault Agent, Secrets Store CSI driver or equivalent injector.
    Prodex's production adapter is the bounded projected-secret provider; a
    direct Vault HTTP client is intentionally not another secret authority.
 8. Browser Authorization Code plus PKCE S256 is an opt-in gateway-admin flow
    with state/nonce validation, bounded token exchange, secure cookies, and
-   logout. Shared browser-session storage and IdP back-channel logout remain
-   deployment gaps.
+   logout. PostgreSQL+Redis deployments share one-time transactions and
+   sessions across replicas; session lookup revalidates the OIDC token. Signed,
+   recent OIDC back-channel logout tokens revoke bounded hashed `sid`/`sub`
+   session indexes across replicas.
 9. Policy-selected execution approval is request-digest/revision bound,
    quorum-gated, atomically single-use, and exposed through content-free admin
    HTTP. Bounded break-glass approvals are separate, expiring, use-limited,
@@ -173,7 +175,7 @@ original eligible set.
 The table below is retained historical evidence from the earlier release
 candidate. It is not a release decision or full-gate claim for the current
 tranche. Current external deployment, SIEM, managed failover, PKI rotation,
-shared browser sessions, and multi-replica acceptance blockers remain open.
+multi-replica acceptance blockers remain open.
 
 | Gate | Status | Final evidence owner |
 | --- | --- | --- |

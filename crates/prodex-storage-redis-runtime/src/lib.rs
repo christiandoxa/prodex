@@ -12,6 +12,11 @@ use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 
 const DEFAULT_CONNECTION_TIMEOUT: Duration = Duration::from_secs(2);
 const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_EPHEMERAL_KEY_BYTES: usize = 256;
+const MAX_EPHEMERAL_VALUE_BYTES: usize = 64 * 1_024;
+const MAX_EPHEMERAL_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const MAX_EPHEMERAL_SET_MEMBERS: usize = 4_096;
+const MAX_EPHEMERAL_MEMBER_BYTES: usize = 128;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct RedisRuntimeConfig {
@@ -92,9 +97,9 @@ impl fmt::Display for RedisRuntimeError {
         f.write_str(match self {
             Self::Configuration => "Redis runtime configuration is invalid",
             Self::Connection => "Redis connection is unavailable",
-            Self::NumericOverflow => "Redis rate-limit value is out of range",
-            Self::Command => "Redis rate-limit operation failed",
-            Self::InvalidResponse => "Redis rate-limit response is invalid",
+            Self::NumericOverflow => "Redis numeric value is out of range",
+            Self::Command => "Redis operation failed",
+            Self::InvalidResponse => "Redis response is invalid",
         })
     }
 }
@@ -175,6 +180,123 @@ impl RedisRateLimitExecutor {
         plan_redis_dual_rate_limit_result(result.0, result.1, result.2, result.3, result.4)
             .map_err(|_| RedisRuntimeError::InvalidResponse)
     }
+
+    pub async fn put_ephemeral(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: Duration,
+    ) -> Result<bool, RedisRuntimeError> {
+        let ttl_ms = validate_ephemeral_entry(key, value, ttl)?;
+        let mut connection = self.connection.clone();
+        let result: Option<String> = redis::cmd("SET")
+            .arg(key)
+            .arg(value)
+            .arg("NX")
+            .arg("PX")
+            .arg(ttl_ms)
+            .query_async(&mut connection)
+            .await
+            .map_err(|_| RedisRuntimeError::Command)?;
+        Ok(result.as_deref() == Some("OK"))
+    }
+
+    pub async fn get_ephemeral(&self, key: &str) -> Result<Option<String>, RedisRuntimeError> {
+        validate_ephemeral_key(key)?;
+        let mut connection = self.connection.clone();
+        redis::cmd("GET")
+            .arg(key)
+            .query_async(&mut connection)
+            .await
+            .map_err(|_| RedisRuntimeError::Command)
+    }
+
+    pub async fn take_ephemeral(&self, key: &str) -> Result<Option<String>, RedisRuntimeError> {
+        validate_ephemeral_key(key)?;
+        let mut connection = self.connection.clone();
+        redis::cmd("EVAL")
+            .arg("local value = redis.call('GET', KEYS[1]); if value then redis.call('DEL', KEYS[1]); end; return value")
+            .arg(1)
+            .arg(key)
+            .query_async(&mut connection)
+            .await
+            .map_err(|_| RedisRuntimeError::Command)
+    }
+
+    pub async fn delete_ephemeral(&self, key: &str) -> Result<(), RedisRuntimeError> {
+        validate_ephemeral_key(key)?;
+        let mut connection = self.connection.clone();
+        let _: i64 = redis::cmd("DEL")
+            .arg(key)
+            .query_async(&mut connection)
+            .await
+            .map_err(|_| RedisRuntimeError::Command)?;
+        Ok(())
+    }
+
+    pub async fn add_ephemeral_member(
+        &self,
+        key: &str,
+        member: &str,
+        ttl: Duration,
+    ) -> Result<(), RedisRuntimeError> {
+        validate_ephemeral_member(key, member, ttl)?;
+        let ttl_ms =
+            i64::try_from(ttl.as_millis()).map_err(|_| RedisRuntimeError::NumericOverflow)?;
+        let mut connection = self.connection.clone();
+        let _: i64 = redis::cmd("EVAL")
+            .arg("if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 0 and redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[3]) then return redis.error_reply('ephemeral set limit exceeded') end; redis.call('SADD', KEYS[1], ARGV[1]); redis.call('PEXPIRE', KEYS[1], ARGV[2]); return 1")
+            .arg(1)
+            .arg(key)
+            .arg(member)
+            .arg(ttl_ms)
+            .arg(MAX_EPHEMERAL_SET_MEMBERS)
+            .query_async(&mut connection)
+            .await
+            .map_err(|_| RedisRuntimeError::Command)?;
+        Ok(())
+    }
+
+    pub async fn remove_ephemeral_member(
+        &self,
+        key: &str,
+        member: &str,
+    ) -> Result<(), RedisRuntimeError> {
+        validate_ephemeral_key(key)?;
+        validate_ephemeral_member_value(member)?;
+        let mut connection = self.connection.clone();
+        let _: i64 = redis::cmd("SREM")
+            .arg(key)
+            .arg(member)
+            .query_async(&mut connection)
+            .await
+            .map_err(|_| RedisRuntimeError::Command)?;
+        Ok(())
+    }
+
+    pub async fn take_ephemeral_members(
+        &self,
+        key: &str,
+    ) -> Result<Vec<String>, RedisRuntimeError> {
+        validate_ephemeral_key(key)?;
+        let mut connection = self.connection.clone();
+        let members: Vec<String> = redis::cmd("EVAL")
+            .arg("if redis.call('SCARD', KEYS[1]) > tonumber(ARGV[1]) then return redis.error_reply('ephemeral set limit exceeded') end; local values = redis.call('SMEMBERS', KEYS[1]); redis.call('DEL', KEYS[1]); return values")
+            .arg(1)
+            .arg(key)
+            .arg(MAX_EPHEMERAL_SET_MEMBERS)
+            .query_async(&mut connection)
+            .await
+            .map_err(|_| RedisRuntimeError::Command)?;
+        if members.len() > MAX_EPHEMERAL_SET_MEMBERS
+            || members
+                .iter()
+                .any(|member| validate_ephemeral_member_value(member).is_err())
+        {
+            return Err(RedisRuntimeError::InvalidResponse);
+        }
+        Ok(members)
+    }
 }
 
 impl fmt::Debug for RedisRateLimitExecutor {
@@ -221,6 +343,59 @@ fn to_lua_integer(value: u64) -> Result<i64, RedisRuntimeError> {
         return Err(RedisRuntimeError::NumericOverflow);
     }
     i64::try_from(value).map_err(|_| RedisRuntimeError::NumericOverflow)
+}
+
+fn validate_ephemeral_entry(
+    key: &str,
+    value: &str,
+    ttl: Duration,
+) -> Result<i64, RedisRuntimeError> {
+    validate_ephemeral_key(key)?;
+    if value.is_empty()
+        || value.len() > MAX_EPHEMERAL_VALUE_BYTES
+        || ttl.is_zero()
+        || ttl > MAX_EPHEMERAL_TTL
+    {
+        return Err(RedisRuntimeError::Configuration);
+    }
+    i64::try_from(ttl.as_millis()).map_err(|_| RedisRuntimeError::NumericOverflow)
+}
+
+fn validate_ephemeral_key(key: &str) -> Result<(), RedisRuntimeError> {
+    if key.is_empty()
+        || key.len() > MAX_EPHEMERAL_KEY_BYTES
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-' | b'.'))
+    {
+        return Err(RedisRuntimeError::Configuration);
+    }
+    Ok(())
+}
+
+fn validate_ephemeral_member(
+    key: &str,
+    member: &str,
+    ttl: Duration,
+) -> Result<(), RedisRuntimeError> {
+    validate_ephemeral_key(key)?;
+    validate_ephemeral_member_value(member)?;
+    if ttl.is_zero() || ttl > MAX_EPHEMERAL_TTL {
+        return Err(RedisRuntimeError::Configuration);
+    }
+    Ok(())
+}
+
+fn validate_ephemeral_member_value(member: &str) -> Result<(), RedisRuntimeError> {
+    if member.is_empty()
+        || member.len() > MAX_EPHEMERAL_MEMBER_BYTES
+        || !member
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(RedisRuntimeError::Configuration);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -284,6 +459,54 @@ mod tests {
             to_lua_integer(REDIS_LUA_SAFE_INTEGER + 1),
             Err(RedisRuntimeError::NumericOverflow)
         );
+    }
+
+    #[test]
+    fn ephemeral_entries_are_strictly_bounded() {
+        assert_eq!(
+            validate_ephemeral_entry("prodex:browser:session_1", "value", Duration::from_secs(1)),
+            Ok(1_000)
+        );
+        for key in ["", "contains space", "contains/slash"] {
+            assert_eq!(
+                validate_ephemeral_entry(key, "value", Duration::from_secs(1)),
+                Err(RedisRuntimeError::Configuration)
+            );
+        }
+        assert_eq!(
+            validate_ephemeral_entry("valid", "", Duration::from_secs(1)),
+            Err(RedisRuntimeError::Configuration)
+        );
+        assert_eq!(
+            validate_ephemeral_entry("valid", "value", Duration::ZERO),
+            Err(RedisRuntimeError::Configuration)
+        );
+        assert_eq!(
+            validate_ephemeral_entry(
+                "valid",
+                "value",
+                MAX_EPHEMERAL_TTL + Duration::from_millis(1)
+            ),
+            Err(RedisRuntimeError::Configuration)
+        );
+        assert!(
+            validate_ephemeral_member(
+                "prodex:browser:index:abc",
+                "session_1",
+                Duration::from_secs(1)
+            )
+            .is_ok()
+        );
+        for member in ["", "contains space", "contains/slash"] {
+            assert_eq!(
+                validate_ephemeral_member(
+                    "prodex:browser:index:abc",
+                    member,
+                    Duration::from_secs(1)
+                ),
+                Err(RedisRuntimeError::Configuration)
+            );
+        }
     }
 
     #[test]

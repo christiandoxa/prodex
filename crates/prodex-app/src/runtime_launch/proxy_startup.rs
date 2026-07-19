@@ -4,7 +4,6 @@ mod anthropic_messages_sse_reader;
 mod anthropic_rewrite;
 mod chat_compatible_request;
 mod chat_compatible_rewrite;
-mod deepseek_reasoning;
 pub(super) mod deepseek_rewrite;
 mod deepseek_sse;
 mod deepseek_sse_reader;

@@ -7,7 +7,7 @@ import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   dead_code: 5,
-  "unused_imports": 8,
+  "unused_imports": 7,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
   "clippy::too_many_arguments": 35,
@@ -28,7 +28,6 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "unused_imports|crates/prodex-app/src/runtime_claude/config.rs|pub(crate) use prodex_runtime_claude::{",
   "unused_imports|crates/prodex-app/src/runtime_claude/state_merge.rs|pub(crate) use prodex_runtime_claude::{",
   "unused_imports|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs|pub(super) use self::request_validation::{",
-  "unused_imports|crates/prodex-app/src/runtime_launch/proxy_startup/deepseek_rewrite.rs|pub(super) use super::deepseek_reasoning::{",
   "unused_imports|crates/prodex-app/src/runtime_proxy/smart_context/static_context.rs|pub(super) use self::sections::{",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_proxy_shared.rs|pub(super) enum RuntimeResponsesReply {",
   "clippy::large_enum_variant|crates/prodex-app/src/runtime_proxy_shared.rs|pub(super) enum RuntimeUpstreamFailureResponse {",
