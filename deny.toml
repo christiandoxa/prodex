@@ -52,6 +52,7 @@ skip = [
     { name = "nix", version = "0.28.0", reason = "portable-pty transitive dependency" },
     { name = "rand_core", version = "0.6.4", reason = "password-hash compatibility stack" },
     { name = "sha2", version = "0.10.9", reason = "Secret Service keyring backend compatibility stack" },
+    { name = "syn", version = "2.0.119", reason = "serde_derive has moved to syn 3 while the remaining proc-macro ecosystem still uses syn 2" },
     { name = "thiserror", version = "1.0.69", reason = "filedescriptor has not converged on thiserror 2" },
     { name = "thiserror-impl", version = "1.0.69", reason = "paired with the retained thiserror 1 line" },
     { name = "untrusted", version = "0.7.1", reason = "aws-lc-rs compatibility line" },

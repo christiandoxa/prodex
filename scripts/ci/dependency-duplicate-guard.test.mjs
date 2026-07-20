@@ -94,6 +94,12 @@ sha2 v0.10.9
 sha2 v0.11.0
     prodex-secret-store v0.307.0
 
+syn v2.0.119
+    tokio-macros v2.6.0
+
+syn v3.0.0
+    serde_derive v1.0.229
+
 thiserror v1.0.69
     filedescriptor v0.8.3
 
@@ -136,6 +142,7 @@ test("default budget accepts current duplicate families", () => {
       ["nix", 2],
       ["rand_core", 2],
       ["sha2", 2],
+      ["syn", 2],
       ["thiserror", 2],
       ["thiserror-impl", 2],
       ["untrusted", 2],
