@@ -21,10 +21,9 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_messages_from_r
     if let Some(previous_response_id) = value
         .get("previous_response_id")
         .and_then(serde_json::Value::as_str)
-        && let Ok(conversations) = conversations.lock()
-        && let Some(history) = conversations.get(previous_response_id)
+        && let Some(history) = conversations.history(previous_response_id)
     {
-        history_messages.extend(history.iter().cloned());
+        history_messages.extend(history);
         has_history = true;
     }
     if !has_history

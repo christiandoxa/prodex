@@ -1,3 +1,4 @@
+use super::deepseek_rewrite::RuntimeDeepSeekPendingRequest;
 use super::local_rewrite::{RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared};
 use super::local_rewrite_anthropic::send_runtime_anthropic_upstream_request;
 use super::local_rewrite_application_data_plane::RuntimeGatewayApplicationProviderDispatch;
@@ -57,6 +58,7 @@ pub(super) struct RuntimeLocalRewriteLiveResponse {
     pub(super) response: reqwest::blocking::Response,
     pub(super) prefix: Vec<u8>,
     pub(super) native_anthropic_messages: bool,
+    pub(super) chat_compatible_request: Option<RuntimeDeepSeekPendingRequest>,
 }
 
 pub(super) struct RuntimeLocalRewriteStreamingResponse {
@@ -72,6 +74,7 @@ impl RuntimeLocalRewriteLiveResponse {
             response,
             prefix: Vec::new(),
             native_anthropic_messages: false,
+            chat_compatible_request: None,
         }
     }
 
@@ -80,6 +83,7 @@ impl RuntimeLocalRewriteLiveResponse {
             response,
             prefix,
             native_anthropic_messages: false,
+            chat_compatible_request: None,
         }
     }
 
@@ -88,7 +92,16 @@ impl RuntimeLocalRewriteLiveResponse {
             response,
             prefix: Vec::new(),
             native_anthropic_messages: true,
+            chat_compatible_request: None,
         }
+    }
+
+    pub(super) fn with_chat_compatible_request(
+        mut self,
+        request: RuntimeDeepSeekPendingRequest,
+    ) -> Self {
+        self.chat_compatible_request = Some(request);
+        self
     }
 }
 

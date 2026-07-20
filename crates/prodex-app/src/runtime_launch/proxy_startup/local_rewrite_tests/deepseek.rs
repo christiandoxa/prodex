@@ -2335,8 +2335,8 @@ fn deepseek_request_translation_flattens_namespace_tool_choice() {
 #[test]
 fn deepseek_request_translation_prepends_previous_response_history() {
     let conversations = deepseek_conversation_store();
-    conversations.lock().unwrap().insert(
-        "resp_prev".to_string(),
+    conversations.insert(
+        "resp_prev",
         vec![
             serde_json::json!({"role": "user", "content": "old prompt"}),
             serde_json::json!({"role": "assistant", "content": "old answer"}),

@@ -1,7 +1,7 @@
 use super::super::anthropic_messages_sse_reader::RuntimeAnthropicMessagesSseReader;
 use super::super::deepseek_rewrite::{
-    runtime_deepseek_merge_response_metadata, runtime_deepseek_store_conversation,
-    runtime_deepseek_take_pending_messages,
+    RuntimeDeepSeekPendingRequest, runtime_deepseek_merge_response_metadata,
+    runtime_deepseek_store_conversation,
 };
 use super::super::local_rewrite::{RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared};
 use super::super::local_rewrite_rate_limits::{
@@ -36,6 +36,7 @@ pub(super) struct RuntimeAnthropicMessagesRewriteContext<'a> {
     pub(super) shared: &'a RuntimeLocalRewriteProxyShared,
     pub(super) captured: &'a RuntimeProxyRequest,
     pub(super) provider_kind: RuntimeProviderBridgeKind,
+    pub(super) pending_request: RuntimeDeepSeekPendingRequest,
     pub(super) response_governance: RuntimeGatewayResponseGovernance,
 }
 
@@ -51,13 +52,12 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
         shared,
         captured,
         provider_kind,
+        pending_request: pending,
         response_governance,
     } = context;
+    let conversations = shared.deepseek_conversations_for_request(captured);
     let rate_limit_headers =
         runtime_provider_codex_rate_limit_headers(provider_kind, response.headers());
-    let pending =
-        runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
-
     if content_type.contains("text/event-stream") {
         let mut headers = vec![(
             "content-type".to_string(),
@@ -72,7 +72,7 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
                 request_id,
                 pending.messages,
                 pending.response_metadata,
-                shared.deepseek_conversations.clone(),
+                conversations.clone(),
             ));
         let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
         respond_runtime_local_rewrite_stream(
@@ -112,7 +112,7 @@ pub(super) fn respond_runtime_anthropic_messages_rewrite(
         runtime_deepseek_merge_response_metadata(&mut value, pending.response_metadata);
         if let Some(response_id) = value.get("id").and_then(Value::as_str) {
             runtime_deepseek_store_conversation(
-                &shared.deepseek_conversations,
+                &conversations,
                 response_id,
                 pending.messages,
                 anthropic_chat_assistant_messages(&native),

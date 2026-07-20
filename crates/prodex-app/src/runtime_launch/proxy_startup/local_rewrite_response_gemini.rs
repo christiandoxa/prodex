@@ -53,6 +53,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
         gemini_context,
         response_governance,
     } = context;
+    let conversations = shared.gemini_conversations_for_request(captured);
     let RuntimeGeminiRequestContext {
         profile_name,
         model,
@@ -108,7 +109,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
             body,
             request_id,
             conversation_messages,
-            shared.gemini_conversations.clone(),
+            conversations.clone(),
             binding_recorder,
             RuntimeGeminiSseReaderConfig {
                 observer: Some(observer),
@@ -139,7 +140,7 @@ pub(super) fn respond_runtime_gemini_rewrite(
         request_id,
         conversation_messages,
         RuntimeGeminiBufferedResponseContext {
-            conversations: &shared.gemini_conversations,
+            conversations: &conversations,
             runtime_shared: &shared.runtime_shared,
             harness_mode: shared.resolved_harness.effective,
             harness_model: (!model.is_empty()).then_some(model.as_str()),

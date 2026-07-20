@@ -114,6 +114,7 @@ enum AnthropicAttemptOutcome {
     SuccessfulLive {
         response: reqwest::blocking::Response,
         native_messages: bool,
+        pending_request: RuntimeDeepSeekPendingRequest,
     },
     InternalFailure(anyhow::Error),
 }
@@ -218,6 +219,7 @@ fn send_responses_attempts(
     } = plan;
     let auth_count = auth_attempts.len();
     let mut cursor = AnthropicAttemptCursor::new(auth_count, model_chain.len());
+    let conversations = shared.deepseek_conversations_for_request(request);
     while let Some(attempt) = cursor.current() {
         let selected_auth = &auth_attempts[attempt.auth_index];
         let model = &model_chain[attempt.model_index];
@@ -230,7 +232,7 @@ fn send_responses_attempts(
         let native_messages = harness_policy.is_some_and(|policy| policy.native_anthropic_messages);
         let translated = runtime_provider_chat_compatible_request_body(
             &model_body,
-            &shared.deepseek_conversations,
+            &conversations,
             RuntimeProviderBridgeKind::Anthropic,
             prodex_cli::SUPER_ANTHROPIC_DEFAULT_MODEL,
             false,
@@ -274,15 +276,6 @@ fn send_responses_attempts(
             None if !native_messages => translated.body.clone(),
             None => return Ok(incompatible_native_translation()),
         };
-        if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-            pending.insert(
-                request_id,
-                RuntimeDeepSeekPendingRequest {
-                    messages: translated.messages,
-                    response_metadata: translated.response_metadata,
-                },
-            );
-        }
         let upstream_url = if native_messages {
             &messages_upstream_url
         } else {
@@ -309,6 +302,10 @@ fn send_responses_attempts(
                 AnthropicAttemptOutcome::SuccessfulLive {
                     response,
                     native_messages,
+                    pending_request: RuntimeDeepSeekPendingRequest {
+                        messages: translated.messages,
+                        response_metadata: translated.response_metadata,
+                    },
                 }
             }
             Ok(RuntimeLocalRewritePreparedSendResult::Error {
@@ -345,7 +342,8 @@ fn send_responses_attempts(
             AnthropicAttemptOutcome::SuccessfulLive {
                 response,
                 native_messages,
-            } => return Ok(live(response, native_messages)),
+                pending_request,
+            } => return Ok(live(response, native_messages, pending_request)),
             AnthropicAttemptOutcome::InternalFailure(error) => return Err(error),
         }
     }
@@ -421,7 +419,11 @@ fn send_passthrough_attempts(
         )?;
         let status = response.status().as_u16();
         if status < 400 {
-            return Ok(live(response, false));
+            return Ok(live(
+                response,
+                false,
+                RuntimeDeepSeekPendingRequest::default(),
+            ));
         }
         let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
         let class =
@@ -472,13 +474,16 @@ fn buffered(parts: RuntimeHeapTrimmedBufferedResponseParts) -> RuntimeLocalRewri
 fn live(
     response: reqwest::blocking::Response,
     native_messages: bool,
+    pending_request: RuntimeDeepSeekPendingRequest,
 ) -> RuntimeLocalRewriteUpstreamResult {
+    let live_response = if native_messages {
+        RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
+    } else {
+        RuntimeLocalRewriteLiveResponse::new(response)
+    }
+    .with_chat_compatible_request(pending_request);
     RuntimeLocalRewriteUpstreamResult {
-        response: RuntimeLocalRewriteUpstreamResponse::Live(if native_messages {
-            RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
-        } else {
-            RuntimeLocalRewriteLiveResponse::new(response)
-        }),
+        response: RuntimeLocalRewriteUpstreamResponse::Live(live_response),
         gemini_context: None,
         copilot_context: None,
     }

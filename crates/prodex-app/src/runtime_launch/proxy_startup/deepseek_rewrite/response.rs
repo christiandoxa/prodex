@@ -2,9 +2,7 @@ use super::super::provider_bridge::{
     RuntimeProviderBridgeKind, runtime_provider_label, runtime_provider_log_response_conformance,
     runtime_provider_response_conformance_result,
 };
-use super::{
-    RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages, RuntimeDeepSeekPendingRequest,
-};
+use super::RuntimeDeepSeekConversationStore;
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
     read_blocking_response_body_with_limit,
@@ -101,17 +99,6 @@ fn runtime_chat_compatible_responses_value(
     )
 }
 
-pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_take_pending_messages(
-    pending: &RuntimeDeepSeekPendingMessages,
-    request_id: u64,
-) -> RuntimeDeepSeekPendingRequest {
-    pending
-        .lock()
-        .ok()
-        .and_then(|mut pending| pending.remove(&request_id))
-        .unwrap_or_default()
-}
-
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_store_conversation(
     conversations: &RuntimeDeepSeekConversationStore,
     response_id: &str,
@@ -126,9 +113,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_store_conversat
             .into_iter()
             .map(deepseek_provider_core_normalize_assistant_tool_call_content),
     );
-    if let Ok(mut conversations) = conversations.lock() {
-        conversations.insert(response_id.to_string(), messages);
-    }
+    conversations.insert(response_id, messages);
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_merge_response_metadata(

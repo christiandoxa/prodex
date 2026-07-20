@@ -103,6 +103,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
             RuntimeGeminiProviderAuth::OAuthProfiles { .. } => {}
         }
     }
+    let conversations = shared.gemini_conversations_for_request(request);
     let thinking_budget_tokens = runtime_gemini_thinking_budget_tokens(&shared.provider);
     let model_scope = shared
         .gemini_oauth_pool
@@ -180,7 +181,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
             let mut translated = if responses_route {
                 runtime_gemini_generate_request_body_with_config(
                     &model_body,
-                    &shared.gemini_conversations,
+                    &conversations,
                     matches!(selected.auth, RuntimeGeminiAuth::OAuth { .. }),
                     runtime_gemini_project_id(&selected.auth),
                     thinking_budget_tokens,
@@ -214,6 +215,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
             if let Some(result) = runtime_gemini_exact_output_short_circuit(
                 request_id,
                 shared,
+                &conversations,
                 &selected,
                 &translated,
             )? {

@@ -3,6 +3,7 @@ use super::local_rewrite::{
     RuntimeGatewayVirtualKeyUsageDelta, RuntimeLocalRewriteProxyShared,
     schedule_runtime_gateway_virtual_key_usage_save,
 };
+use super::local_rewrite_application_boundary::runtime_gateway_stable_id;
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError,
     runtime_gateway_application_data_plane_admission,
@@ -49,6 +50,23 @@ use rusqlite::OptionalExtension;
 use std::path::Path;
 
 const RUNTIME_GATEWAY_RESERVATION_TTL_MS: u64 = 60_000;
+
+fn runtime_gateway_conversation_namespace(
+    tenant_id: &TenantId,
+    identity_kind: &str,
+    identity: &str,
+) -> String {
+    let tenant_id = tenant_id.to_string();
+    runtime_gateway_stable_id(
+        "prodex:gateway-conversation:v1",
+        &[
+            tenant_id.as_bytes(),
+            identity_kind.as_bytes(),
+            identity.as_bytes(),
+        ],
+    )
+    .to_string()
+}
 
 pub(super) enum RuntimeGatewayDurableReservationError {
     Rejected(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection),
@@ -668,7 +686,11 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         ),
     );
     Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
-        namespace: Some(admission.key_name),
+        namespace: Some(runtime_gateway_conversation_namespace(
+            &tenant_id,
+            "virtual-key",
+            &admission.key_name,
+        )),
         application,
     })
 }
@@ -740,8 +762,16 @@ fn runtime_gateway_application_admission_without_virtual_key(
         );
         rejection
     })?;
+    let principal_id = authorized
+        .principal()
+        .map(|principal| principal.id.to_string())
+        .unwrap_or_default();
     Ok(RuntimeGatewayVirtualKeyAdmissionOutcome {
-        namespace: None,
+        namespace: Some(runtime_gateway_conversation_namespace(
+            &tenant.tenant_id,
+            "principal",
+            &principal_id,
+        )),
         application,
     })
 }
