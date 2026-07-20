@@ -60,7 +60,7 @@
         "governance_sessions_are_monotonic_bounded_and_revocable",
         "gateway_policy_http_enforces_maker_checker_replay_cas_tenant_and_lkg hash/current-session revoke assertions",
         "cross_replica_revocation_epoch_invalidates_cached_sessions_promptly",
-        "deployed two-gateway chaos validation pending"
+        "deployed two-gateway chaos acceptance is tracked separately from source verification"
       ]
     },
     {
@@ -146,7 +146,10 @@
       "evidence": [
         "explicit_deny_wins_and_drops_obligations",
         "missing_or_cross_tenant_attributes_fail_closed",
-        "policy_compilation_is_bounded_and_rejects_duplicate_ids"
+        "policy_compilation_is_bounded_and_rejects_duplicate_ids",
+        "typed_attribute_selectors_match_and_missing_values_fail_closed",
+        "scim_policy_attributes_require_one_active_same_tenant_identity",
+        "serialized_organization_selectors_map_to_domain_policy"
       ]
     },
     {
@@ -190,13 +193,14 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "state_machine_concurrency",
       "expected": "Self, stale, replayed, expired and conflicting approvals fail; one valid activation is audited.",
-      "implementation_status": "implemented",
+      "implementation_status": "tested",
       "evidence_required": "Model/state-machine and real-database concurrency tests.",
       "evidence": [
         "maker_checker_quorum_and_activation_are_enforced",
         "approval_replay_is_idempotent_and_stale_versions_fail",
         "concurrent_activation_uses_etag_compare_and_swap",
-        "PostgreSQL validation pending"
+        "gateway_governance_artifacts_use_generic_maker_checker_lifecycle",
+        "postgres_governance_lifecycle_supports_all_artifact_kinds"
       ]
     },
     {
@@ -218,16 +222,19 @@
     {
       "id": "SEC-APR-003",
       "phase": 3,
-      "threat": "Break-glass becomes a broad persistent bypass or escapes review.",
-      "control": "Narrow independently approved scope, TTL, use cap, revocation and mandatory after-action review.",
+      "threat": "Break-glass becomes a broad persistent bypass or exceeds its retention scope.",
+      "control": "Retention-purge-only independent approval with a one-hour TTL ceiling, explicit revocation, bounded purge batches and mandatory audit.",
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "state_machine_security",
-      "expected": "Over-scope/expired/exhausted grants deny and non-bypassable invariants remain enforced.",
-      "implementation_status": "planned",
-      "evidence_required": "Grant lifecycle and every forbidden-override test.",
+      "expected": "Non-active, expired, revoked or out-of-scope approvals deny; tenant, credential-scope, retention and audit invariants remain enforced.",
+      "implementation_status": "implemented",
+      "evidence_required": "Approval lifecycle, exact scope/expiry authorization, durable storage and mandatory-audit tests.",
       "evidence": [
-        "Generic bounded break-glass primitives exist",
-        "governance-specific forbidden-override matrix pending"
+        "break_glass_requires_separate_scope_reason_expiry_and_audit",
+        "application_break_glass_action_selects_append_only_audit_storage_plan",
+        "application_break_glass_denial_is_audited_when_expired",
+        "break_glass_approval_round_trips_as_non_revision_approval",
+        "resource_action_authorization_denies_break_glass_scope_bypass"
       ]
     },
     {
@@ -365,16 +372,19 @@
     {
       "id": "SEC-SEC-002",
       "phase": 5,
-      "threat": "Wrong tenant/purpose resolves a secret or stale lease survives rotation/revocation/Vault outage.",
-      "control": "Namespace authorization, bounded leases and explicit invalidation/failure behavior.",
+      "threat": "A projected secret escapes its configured provider namespace, survives a requested-version mismatch, or is read through an unsafe filesystem path.",
+      "control": "Purpose-owned configuration selects the provider namespace; the bounded projected-secret adapter enforces provider name, exact version, anchored private files and atomic projection generations.",
       "modes": ["enterprise_enforce", "bank_enforce"],
-      "test_type": "integration_chaos",
-      "expected": "Cross-namespace access and expired/revoked leases deny; bank never falls back to raw local secrets.",
-      "implementation_status": "planned",
-      "evidence_required": "External secret manager namespace, rotation, revocation and outage tests.",
+      "test_type": "integration_security",
+      "expected": "Provider mismatch, traversal, symlink escape, unsafe permissions and stale versions deny; atomic injector rotation is observed without restart.",
+      "implementation_status": "tested",
+      "evidence_required": "Projected-secret namespace, version rotation and filesystem-boundary tests.",
       "evidence": [
-        "SecretRef/projected-secret boundary exists",
-        "production Vault-compatible lease adapter validation pending"
+        "production_projected_provider_is_external_versioned_and_rotation_aware",
+        "projected_provider_rejects_traversal_and_provider_mismatch",
+        "projected_provider_rejects_symlink_escape_and_world_readable_files",
+        "projected_provider_follows_atomic_kubernetes_projection_rotation",
+        "projected_provider_anchors_value_and_version_to_one_kubernetes_generation"
       ]
     },
     {

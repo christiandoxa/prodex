@@ -7,11 +7,12 @@ use super::local_rewrite_gateway_config::{
     RuntimeGatewayObservabilityConfig, RuntimeGatewaySsoConfig,
 };
 use super::local_rewrite_gateway_store_types::{
-    RuntimeGatewayVirtualKeyEntry, RuntimeGatewayVirtualKeySource,
+    RuntimeGatewayScimUser, RuntimeGatewayVirtualKeyEntry, RuntimeGatewayVirtualKeySource,
+    runtime_gateway_apply_scim_policy_attributes,
 };
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use crate::{runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use arc_swap::ArcSwap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -129,14 +130,32 @@ fn runtime_gateway_run_secret_refresh_loop(
                 continue;
             }
         };
-        match runtime_gateway_apply_secret_refresh(
+        match runtime_gateway_apply_secret_refresh_with_scim_loader(
             &shared.gateway_credentials,
             shared.provider.bridge_kind(),
             candidate,
+            || {
+                super::local_rewrite_gateway_keys::runtime_gateway_virtual_key_store_load_strict(
+                    &shared.gateway_state_store,
+                    &shared.runtime_shared.log_path,
+                )
+                .map(|store| store.scim_users)
+                .context("gateway identity state reload failed")
+            },
         ) {
             Ok(true) => runtime_gateway_log_secret_refresh(&shared, "applied"),
             Ok(false) => {}
-            Err(_) => runtime_gateway_log_secret_refresh(&shared, "validation_failed"),
+            Err(error) => runtime_gateway_log_secret_refresh(
+                &shared,
+                if error
+                    .chain()
+                    .any(|cause| cause.to_string() == "gateway identity state reload failed")
+                {
+                    "state_reload_failed"
+                } else {
+                    "validation_failed"
+                },
+            ),
         }
     }
 }
@@ -154,10 +173,26 @@ fn runtime_gateway_wait_for_secret_refresh(shutdown: &AtomicBool, interval: Dura
     !shutdown.load(Ordering::SeqCst)
 }
 
+#[cfg(test)]
 fn runtime_gateway_apply_secret_refresh(
     credentials: &RuntimeGatewayCredentialState,
     expected_provider: RuntimeProviderBridgeKind,
     candidate: RuntimeGatewayCredentialRefreshCandidate,
+    scim_users: &[RuntimeGatewayScimUser],
+) -> Result<bool> {
+    runtime_gateway_apply_secret_refresh_with_scim_loader(
+        credentials,
+        expected_provider,
+        candidate,
+        || Ok(scim_users.to_vec()),
+    )
+}
+
+fn runtime_gateway_apply_secret_refresh_with_scim_loader(
+    credentials: &RuntimeGatewayCredentialState,
+    expected_provider: RuntimeProviderBridgeKind,
+    candidate: RuntimeGatewayCredentialRefreshCandidate,
+    load_scim_users: impl FnOnce() -> Result<Vec<RuntimeGatewayScimUser>>,
 ) -> Result<bool> {
     if candidate.provider.bridge_kind() != expected_provider {
         bail!("gateway provider kind cannot change during secret refresh");
@@ -174,6 +209,7 @@ fn runtime_gateway_apply_secret_refresh(
     if current.fingerprint == candidate.fingerprint {
         return Ok(false);
     }
+    let scim_users = load_scim_users()?;
     let current_keys = current
         .virtual_keys
         .lock()
@@ -183,6 +219,7 @@ fn runtime_gateway_apply_secret_refresh(
         current_keys
             .iter()
             .filter(|entry| entry.source == RuntimeGatewayVirtualKeySource::Admin),
+        &scim_users,
     );
     drop(current_keys);
 
@@ -205,6 +242,7 @@ fn runtime_gateway_apply_secret_refresh(
 fn runtime_gateway_merge_refreshed_virtual_keys<'a>(
     policy_keys: Vec<runtime_proxy_crate::RuntimeGatewayVirtualKey>,
     admin_keys: impl Iterator<Item = &'a RuntimeGatewayVirtualKeyEntry>,
+    scim_users: &[RuntimeGatewayScimUser],
 ) -> Vec<RuntimeGatewayVirtualKeyEntry> {
     let mut entries = policy_keys
         .into_iter()
@@ -213,6 +251,8 @@ fn runtime_gateway_merge_refreshed_virtual_keys<'a>(
             tenant_id: key.tenant_id.clone(),
             key,
             source: RuntimeGatewayVirtualKeySource::Policy,
+            group_ids: Vec::new(),
+            department_id: None,
             created_at_epoch: None,
             updated_at_epoch: None,
             disabled: false,
@@ -229,6 +269,7 @@ fn runtime_gateway_merge_refreshed_virtual_keys<'a>(
             entries.push(entry.clone());
         }
     }
+    runtime_gateway_apply_scim_policy_attributes(&mut entries, scim_users);
     entries
 }
 
@@ -246,7 +287,9 @@ fn runtime_gateway_log_secret_refresh(shared: &RuntimeLocalRewriteProxyShared, o
 mod tests {
     use super::{
         RuntimeGatewayCredentialRefreshCandidate, RuntimeGatewayCredentialState,
-        runtime_gateway_apply_secret_refresh, runtime_gateway_initial_credential_snapshot,
+        runtime_gateway_apply_secret_refresh,
+        runtime_gateway_apply_secret_refresh_with_scim_loader,
+        runtime_gateway_initial_credential_snapshot,
     };
     use crate::runtime_launch::proxy_startup::deepseek_rewrite::RuntimeDeepSeekWebSearchMode;
     use crate::runtime_launch::proxy_startup::local_rewrite::RuntimeGatewaySecret;
@@ -256,7 +299,7 @@ mod tests {
         RuntimeGatewaySsoConfig,
     };
     use crate::runtime_launch::proxy_startup::local_rewrite_gateway_store_types::{
-        RuntimeGatewayVirtualKeyEntry, RuntimeGatewayVirtualKeySource,
+        RuntimeGatewayScimUser, RuntimeGatewayVirtualKeyEntry, RuntimeGatewayVirtualKeySource,
     };
     use crate::runtime_launch::proxy_startup::provider_bridge::RuntimeProviderBridgeKind;
     use std::sync::{Arc, Mutex};
@@ -329,6 +372,27 @@ mod tests {
         }
     }
 
+    fn scim_user() -> RuntimeGatewayScimUser {
+        RuntimeGatewayScimUser {
+            id: "user-record".to_string(),
+            user_name: "user@example.com".to_string(),
+            external_id: None,
+            display_name: None,
+            active: true,
+            role: None,
+            tenant_id: Some("tenant-a".to_string()),
+            team_id: None,
+            project_id: None,
+            user_id: Some("user-a".to_string()),
+            group_ids: vec!["engineering".to_string()],
+            department_id: Some("research".to_string()),
+            budget_id: None,
+            allowed_key_prefixes: Vec::new(),
+            created_at_epoch: 1,
+            updated_at_epoch: 1,
+        }
+    }
+
     #[test]
     fn request_credentials_are_loaded_once_before_pinning() {
         let source = include_str!("local_rewrite_gateway_credentials.rs");
@@ -354,6 +418,7 @@ mod tests {
                 &state,
                 RuntimeProviderBridgeKind::OpenAiResponses,
                 candidate(2, "new-secret"),
+                &[],
             )
             .unwrap()
         );
@@ -371,6 +436,7 @@ mod tests {
                 &state,
                 RuntimeProviderBridgeKind::OpenAiResponses,
                 candidate(2, "new-secret"),
+                &[],
             )
             .unwrap()
         );
@@ -392,6 +458,7 @@ mod tests {
                 &state,
                 RuntimeProviderBridgeKind::OpenAiResponses,
                 invalid,
+                &[],
             )
             .is_err()
         );
@@ -406,6 +473,8 @@ mod tests {
             tenant_id: admin_key.tenant_id.clone(),
             key: admin_key,
             source: RuntimeGatewayVirtualKeySource::Admin,
+            group_ids: Vec::new(),
+            department_id: None,
             created_at_epoch: Some(1),
             updated_at_epoch: Some(1),
             disabled: false,
@@ -419,6 +488,7 @@ mod tests {
                 &state,
                 RuntimeProviderBridgeKind::OpenAiResponses,
                 refreshed,
+                &[],
             )
             .unwrap()
         );
@@ -431,5 +501,35 @@ mod tests {
         assert!(entries.iter().any(|entry| {
             entry.key.name == "policy-key" && entry.source == RuntimeGatewayVirtualKeySource::Policy
         }));
+    }
+
+    #[test]
+    fn refresh_loads_scim_attributes_while_holding_the_update_lock() {
+        let state = state(candidate(1, "old-secret"), Vec::new());
+        let update = Arc::clone(&state.update);
+        let mut refreshed = candidate(2, "new-secret");
+        let mut policy_key = virtual_key("policy-key", "policy-secret");
+        policy_key.user_id = Some("user-a".to_string());
+        refreshed.virtual_keys = vec![policy_key];
+
+        assert!(
+            runtime_gateway_apply_secret_refresh_with_scim_loader(
+                &state,
+                RuntimeProviderBridgeKind::OpenAiResponses,
+                refreshed,
+                || {
+                    assert!(matches!(
+                        update.try_lock(),
+                        Err(std::sync::TryLockError::WouldBlock)
+                    ));
+                    Ok(vec![scim_user()])
+                },
+            )
+            .unwrap()
+        );
+        let current = state.current.load_full();
+        let entries = current.virtual_keys.lock().unwrap();
+        assert_eq!(entries[0].group_ids, ["engineering"]);
+        assert_eq!(entries[0].department_id.as_deref(), Some("research"));
     }
 }

@@ -130,6 +130,7 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
     };
 
     let health = probe_runtime_broker_health(&client, &paths, broker_key, &registry)
@@ -148,6 +149,35 @@ fn runtime_broker_client_ignores_proxy_env_for_local_control_requests() {
     assert!(
         !proxy_hit.load(Ordering::SeqCst),
         "local runtime broker control request should not use http_proxy"
+    );
+}
+
+#[test]
+fn runtime_broker_realtime_endpoint_requires_loopback_and_preserves_mount() {
+    let mut registry = RuntimeBrokerRegistry {
+        pid: 42,
+        listen_addr: "127.0.0.1:4567".to_string(),
+        started_at: 100,
+        upstream_base_url: "https://upstream.example".to_string(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        current_profile: "work".to_string(),
+        instance_id: "instance".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: Some("127.0.0.1:7654".to_string()),
+    };
+
+    assert_eq!(
+        runtime_broker_realtime_ws_base_url(&registry, RUNTIME_PROXY_OPENAI_MOUNT_PATH).unwrap(),
+        Some("http://127.0.0.1:7654/backend-api/prodex/realtime".to_string())
+    );
+    registry.realtime_ws_addr = Some("192.0.2.10:7654".to_string());
+    assert!(
+        runtime_broker_realtime_ws_base_url(&registry, RUNTIME_PROXY_OPENAI_MOUNT_PATH).is_err()
     );
 }
 
@@ -190,6 +220,7 @@ fn runtime_broker_openai_mount_path_falls_back_to_running_legacy_broker_version(
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: None,
+        realtime_ws_addr: None,
     };
 
     let mount_path = runtime_broker_openai_mount_path(&registry)
@@ -341,6 +372,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_replaces_mismatched_live_br
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("mismatched broker registry should save");
@@ -451,6 +483,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_mismatched_live_brok
         executable_path: Some(script_path.display().to_string()),
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("busy mismatched broker registry should save");
@@ -547,6 +580,7 @@ fn find_compatible_runtime_broker_registry_discovers_other_broker_key() {
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some("/backend-api/prodex/v0.2.99".to_string()),
+        realtime_ws_addr: None,
     };
     save_runtime_broker_registry(&paths, "legacy-key", &registry)
         .expect("legacy broker registry should save");
@@ -643,6 +677,7 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_yields_after_live_unhealthy
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("registry should save for wait test");

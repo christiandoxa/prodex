@@ -15,7 +15,7 @@ const DEFAULT_EXCLUDED_PATH_PREFIXES = Object.freeze([
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/",
 ]);
 
-const DEFAULT_EXCLUDED_PATH_SUFFIXES = Object.freeze(["/tests.rs"]);
+const DEFAULT_EXCLUDED_PATH_SUFFIXES = Object.freeze(["/tests.rs", "_tests.rs"]);
 
 const FORBIDDEN_PATTERNS = Object.freeze([
   {
@@ -929,6 +929,10 @@ mod tests {
     scanContents("strings.rs", 'fn f() { let _ = "std::fs::read("; } // thread::spawn(\n')
       .violations.length === 0,
     "comments or strings were scanned",
+  );
+  assertSelfTest(
+    DEFAULT_EXCLUDED_PATH_SUFFIXES.some((suffix) => "split_fixture_tests.rs".endsWith(suffix)),
+    "split test files were not excluded",
   );
 
   const firstAllowlist = ALLOWLIST[0];

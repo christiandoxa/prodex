@@ -288,6 +288,7 @@ fn perform_prodex_cleanup_removes_safe_local_artifacts() {
             executable_path: None,
             executable_sha256: None,
             openai_mount_path: None,
+            realtime_ws_addr: None,
         },
     )
     .expect("stale runtime broker registry should save");

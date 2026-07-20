@@ -4,9 +4,10 @@ The target has two separate workflows: approval of policy revisions and
 approval of a particular high-risk execution. Break-glass is a third, narrower
 emergency grant. They must not share a broad bypass flag. The current tranche
 implements durable maker-checker, policy-selected execution approval, and a
-bounded break-glass approval/use/revoke/review path. Retention purge consumes
-that grant only after exact tenant, principal, operation, expiry, and use-limit
-validation plus mandatory audit. The fuller persistence design is in
+bounded break-glass approval/activate/revoke path. Retention purge accepts only
+an independently approved active grant with exact tenant and audit-retention
+scope, a maximum one-hour lifetime, bounded purge batches, and mandatory audit.
+The fuller persistence design is in
 [`07-policy-approval-and-store.md`](07-policy-approval-and-store.md).
 
 ## Policy revision workflow
@@ -83,6 +84,6 @@ approval. `enterprise_enforce` and `bank_enforce` enforce the workflow;
 
 - state-machine, concurrency and transaction tests;
 - maker-checker separation and quorum property tests;
-- stale, replayed, self-approved, revoked and exhausted token tests;
-- break-glass scope/expiry/review tests; and
+- stale, replayed, self-approved, revoked and exhausted execution-token tests;
+- break-glass independent-approval, scope, expiry and revocation tests; and
 - audit/outbox failure tests proving no successful mutation escapes evidence.

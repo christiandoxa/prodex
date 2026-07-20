@@ -1,5 +1,6 @@
 use super::*;
 mod commit;
+mod duplex;
 mod failure;
 mod frame;
 mod precommit;
@@ -9,6 +10,7 @@ mod session;
 mod terminal;
 mod upstream_send;
 use commit::*;
+pub(in crate::runtime_proxy) use duplex::*;
 use failure::*;
 use frame::*;
 pub(crate) use precommit::*;
@@ -38,7 +40,7 @@ pub(crate) fn attempt_runtime_websocket_request(
     } = attempt;
     let request_model_name = runtime_smart_context_model_name_from_body(request_text.as_bytes());
 
-    let realtime_websocket = is_runtime_realtime_websocket_path(&handshake_request.path_and_query);
+    let realtime_websocket = websocket_session.is_realtime_duplex();
     if let Some(attempt) =
         runtime_websocket_pre_send_quota_gate(RuntimeWebsocketPreSendQuotaGateRequest {
             request_id,
@@ -94,6 +96,34 @@ pub(crate) fn attempt_runtime_websocket_request(
         })?
     {
         return Ok(attempt);
+    }
+
+    if realtime_websocket {
+        let mut buffered_precommit_text_frames = Vec::new();
+        let mut previous_response_owner_recorded = false;
+        commit_runtime_websocket_attempt(RuntimeWebsocketCommitRequest {
+            request_id,
+            local_socket,
+            upstream_socket: &mut upstream_socket,
+            shared,
+            profile_name,
+            request_previous_response_id,
+            request_session_id,
+            request_turn_state,
+            response_turn_state: upstream_turn_state.as_deref(),
+            promote_committed_profile,
+            request_prompt_cache_key,
+            buffered_precommit_text_frames: &mut buffered_precommit_text_frames,
+            previous_response_owner_recorded: &mut previous_response_owner_recorded,
+            log_event: "committed_realtime",
+        })?;
+        websocket_session.store(
+            upstream_socket,
+            profile_name,
+            upstream_turn_state,
+            inflight_guard.take(),
+        );
+        return Ok(RuntimeWebsocketAttempt::Delivered);
     }
 
     let mut committed = false;

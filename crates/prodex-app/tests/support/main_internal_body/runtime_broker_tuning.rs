@@ -283,6 +283,7 @@ fn runtime_broker_version_replacement_defers_while_child_lease_is_live() {
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
     };
 
     let outcome =

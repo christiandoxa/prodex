@@ -17,6 +17,8 @@ pub struct ApplicationGatewayScimUserRecord {
     pub team_id: Option<String>,
     pub project_id: Option<String>,
     pub user_id: Option<String>,
+    pub group_ids: Vec<String>,
+    pub department_id: Option<String>,
     pub budget_id: Option<String>,
     pub allowed_key_prefixes: Vec<String>,
     pub created_at_unix_ms: u64,
@@ -52,6 +54,8 @@ pub struct ApplicationGatewayScimUserPatch {
     pub team_id: ApplicationPatchValue<String>,
     pub project_id: ApplicationPatchValue<String>,
     pub user_id: ApplicationPatchValue<String>,
+    pub group_ids: ApplicationPatchValue<Vec<String>>,
+    pub department_id: ApplicationPatchValue<String>,
     pub budget_id: ApplicationPatchValue<String>,
     pub allowed_key_prefixes: ApplicationPatchValue<Vec<String>>,
 }
@@ -199,6 +203,8 @@ fn plan_create(
                 .unwrap_or(resource_id.as_str())
                 .to_string(),
         ),
+        group_ids: Vec::new(),
+        department_id: None,
         budget_id: governance.budget_id().map(str::to_string),
         allowed_key_prefixes: governance.allowed_resource_prefixes().to_vec(),
         created_at_unix_ms: now_unix_ms,
@@ -361,6 +367,11 @@ fn apply_scim_patch(
     apply_optional(&mut record.team_id, patch.team_id, reset_unchanged);
     apply_optional(&mut record.project_id, patch.project_id, reset_unchanged);
     apply_optional(&mut record.user_id, patch.user_id, reset_unchanged);
+    apply_optional(
+        &mut record.department_id,
+        patch.department_id,
+        reset_unchanged,
+    );
     apply_optional(&mut record.budget_id, patch.budget_id, reset_unchanged);
     match patch.active {
         ApplicationPatchValue::Unchanged if !reset_unchanged => {}
@@ -378,6 +389,13 @@ fn apply_scim_patch(
             record.allowed_key_prefixes.clear();
         }
         ApplicationPatchValue::Set(prefixes) => record.allowed_key_prefixes = prefixes,
+    }
+    match patch.group_ids {
+        ApplicationPatchValue::Unchanged if !reset_unchanged => {}
+        ApplicationPatchValue::Unchanged | ApplicationPatchValue::Clear => {
+            record.group_ids.clear();
+        }
+        ApplicationPatchValue::Set(group_ids) => record.group_ids = group_ids,
     }
     Ok(())
 }
@@ -422,10 +440,32 @@ fn validate_scim_user_record(
         &record.team_id,
         &record.project_id,
         &record.user_id,
+        &record.department_id,
         &record.budget_id,
     ]
     .into_iter()
     .any(|value| !validate_scope_value(value))
+    {
+        return Err(ApplicationGatewayIdentityMutationError::InvalidScopeValue);
+    }
+    if record.group_ids.len() > prodex_domain::MAX_POLICY_PRINCIPAL_GROUPS
+        || record
+            .group_ids
+            .iter()
+            .any(|group_id| !valid_policy_attribute(group_id))
+        || record
+            .group_ids
+            .iter()
+            .enumerate()
+            .any(|(index, group_id)| {
+                record.group_ids[index + 1..]
+                    .iter()
+                    .any(|other| group_id.eq_ignore_ascii_case(other))
+            })
+        || record
+            .department_id
+            .as_deref()
+            .is_some_and(|value| !valid_policy_attribute(value))
     {
         return Err(ApplicationGatewayIdentityMutationError::InvalidScopeValue);
     }
@@ -480,4 +520,12 @@ fn valid_key_prefix(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn valid_policy_attribute(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/')
+        })
 }

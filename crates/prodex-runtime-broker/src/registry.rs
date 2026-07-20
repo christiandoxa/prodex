@@ -33,6 +33,8 @@ pub struct RuntimeBrokerRegistry {
     pub executable_sha256: Option<String>,
     #[serde(default)]
     pub openai_mount_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realtime_ws_addr: Option<String>,
 }
 
 impl RuntimeBrokerRegistry {

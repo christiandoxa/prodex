@@ -144,11 +144,12 @@ pub use governance::{
     MAX_CLASSIFICATION_RULES, MAX_CONTENT_LOCATION_PATH_BYTES, MAX_GOVERNANCE_POLICY_RULES,
     MAX_INSPECTION_DETECTORS, MAX_INSPECTION_FINDINGS, MAX_INSPECTION_REASON_CODES,
     MAX_INSPECTION_TAGS, MAX_INSPECTION_TOKEN_BYTES, MAX_POLICY_OBLIGATIONS,
-    MAX_POLICY_REASON_CODES, NetworkZone, PolicyDecision, PolicyEffect, PolicyInput,
-    PolicyReasonCode, PolicyRuleCondition, PolicySelector, PrincipalPolicyAttributes,
-    ProviderTrustTier, QuotaContext, RequestPolicyAttributes, RequestRisk, SessionPolicyContext,
-    classify_inspection, compile_classification_rule_set, compile_governance_policy,
-    evaluate_governance_policy, execution_approval_id, transition_approval,
+    MAX_POLICY_PRINCIPAL_GROUPS, MAX_POLICY_REASON_CODES, NetworkZone, PolicyDecision,
+    PolicyEffect, PolicyInput, PolicyReasonCode, PolicyRuleCondition, PolicySelector,
+    PrincipalPolicyAttributes, ProviderTrustTier, QuotaContext, RequestPolicyAttributes,
+    RequestRisk, SessionPolicyContext, classify_inspection, compile_classification_rule_set,
+    compile_governance_policy, evaluate_governance_policy, execution_approval_id,
+    transition_approval,
 };
 
 pub use rate_limit::{

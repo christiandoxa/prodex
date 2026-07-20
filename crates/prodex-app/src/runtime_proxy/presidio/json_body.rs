@@ -40,7 +40,14 @@ pub(super) fn collect_json_content(
     value: &serde_json::Value,
 ) -> Result<PresidioJsonContent, PresidioJsonContentError> {
     let mut state = PresidioJsonWalkState::default();
-    collect_json_content_at(value, false, None, "$", 0, &mut state)?;
+    collect_json_content_at(
+        value,
+        PresidioJsonInspectMode::SchemaOnly,
+        None,
+        "$",
+        0,
+        &mut state,
+    )?;
     let coverage = if state.values.is_empty() {
         InspectionCoverage::Unsupported
     } else if state.unsupported_modality {
@@ -61,9 +68,16 @@ struct PresidioJsonWalkState {
     unsupported_modality: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PresidioJsonInspectMode {
+    SchemaOnly,
+    DirectStrings,
+    AllStrings,
+}
+
 fn collect_json_content_at(
     value: &serde_json::Value,
-    inspect_strings: bool,
+    inspect_mode: PresidioJsonInspectMode,
     sensitive_kind: Option<FindingKind>,
     path: &str,
     depth: usize,
@@ -73,7 +87,7 @@ fn collect_json_content_at(
         return Err(PresidioJsonContentError::TooDeep);
     }
     match value {
-        serde_json::Value::String(text) if inspect_strings => {
+        serde_json::Value::String(text) if inspect_mode != PresidioJsonInspectMode::SchemaOnly => {
             if state.values.len() >= MAX_PRESIDIO_JSON_VALUES {
                 return Err(PresidioJsonContentError::TooManyValues);
             }
@@ -94,7 +108,7 @@ fn collect_json_content_at(
             for (index, item) in items.iter().enumerate() {
                 collect_json_content_at(
                     item,
-                    inspect_strings,
+                    inspect_mode,
                     sensitive_kind,
                     &format!("{path}[{index}]"),
                     depth + 1,
@@ -104,26 +118,32 @@ fn collect_json_content_at(
         }
         serde_json::Value::Object(fields) => {
             let skip_tools = path == "$" || json_object_declares_tools(fields);
+            let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
             for (key, value) in fields {
                 if skip_tools && key == "tools" {
                     continue;
                 }
                 if unsupported_modality_field(key) && !value.is_null() {
                     state.unsupported_modality = true;
+                    continue;
                 }
-                let schema_field = inspectable_json_string_field(key);
-                let inspect_child = inspect_strings || schema_field;
+                let field_mode = json_string_inspection_mode(key);
+                let child_mode = if inspect_all_strings {
+                    PresidioJsonInspectMode::AllStrings
+                } else {
+                    field_mode
+                };
                 let child_sensitive_kind = sensitive_json_key_kind(key).or(sensitive_kind);
-                let child_path = if schema_field {
+                let child_path = if field_mode != PresidioJsonInspectMode::SchemaOnly {
                     format!("{path}.{key}")
-                } else if inspect_strings {
+                } else if inspect_all_strings {
                     format!("{path}.*")
                 } else {
                     path.to_string()
                 };
                 collect_json_content_at(
                     value,
-                    inspect_child,
+                    child_mode,
                     child_sensitive_kind,
                     &child_path,
                     depth + 1,
@@ -157,11 +177,14 @@ fn sensitive_json_key_kind(key: &str) -> Option<FindingKind> {
     })
 }
 
-fn inspectable_json_string_field(key: &str) -> bool {
-    matches!(
-        key,
-        "arguments" | "content" | "input" | "instructions" | "output" | "prompt" | "text"
-    )
+fn json_string_inspection_mode(key: &str) -> PresidioJsonInspectMode {
+    match key {
+        "arguments" | "output" => PresidioJsonInspectMode::AllStrings,
+        "content" | "input" | "instructions" | "prompt" | "text" => {
+            PresidioJsonInspectMode::DirectStrings
+        }
+        _ => PresidioJsonInspectMode::SchemaOnly,
+    }
 }
 
 fn json_object_declares_tools(fields: &serde_json::Map<String, serde_json::Value>) -> bool {
@@ -172,6 +195,7 @@ fn unsupported_modality_field(key: &str) -> bool {
     matches!(
         key,
         "audio"
+            | "audio_url"
             | "file"
             | "image"
             | "image_url"
@@ -187,35 +211,53 @@ pub(super) fn replace_json_string_values<'a>(
     inspect_strings: bool,
     values: &mut impl Iterator<Item = &'a str>,
 ) {
-    replace_json_string_values_at(value, inspect_strings, values, true);
+    replace_json_string_values_at(
+        value,
+        if inspect_strings {
+            PresidioJsonInspectMode::AllStrings
+        } else {
+            PresidioJsonInspectMode::SchemaOnly
+        },
+        values,
+        true,
+    );
 }
 
 fn replace_json_string_values_at<'a>(
     value: &mut serde_json::Value,
-    inspect_strings: bool,
+    inspect_mode: PresidioJsonInspectMode,
     values: &mut impl Iterator<Item = &'a str>,
     root: bool,
 ) {
     match value {
-        serde_json::Value::String(text) if inspect_strings => {
+        serde_json::Value::String(text) if inspect_mode != PresidioJsonInspectMode::SchemaOnly => {
             if let Some(redacted) = values.next() {
                 *text = redacted.to_string();
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                replace_json_string_values_at(item, inspect_strings, values, false);
+                replace_json_string_values_at(item, inspect_mode, values, false);
             }
         }
         serde_json::Value::Object(fields) => {
             let skip_tools = root || json_object_declares_tools(fields);
+            let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
             for (key, value) in fields {
                 if skip_tools && key == "tools" {
                     continue;
                 }
+                if unsupported_modality_field(key) {
+                    continue;
+                }
+                let field_mode = json_string_inspection_mode(key);
                 replace_json_string_values_at(
                     value,
-                    inspect_strings || inspectable_json_string_field(key),
+                    if inspect_all_strings {
+                        PresidioJsonInspectMode::AllStrings
+                    } else {
+                        field_mode
+                    },
                     values,
                     false,
                 );
@@ -284,6 +326,40 @@ mod tests {
             collect_json_content(&value).unwrap_err(),
             PresidioJsonContentError::TooDeep
         );
+    }
+
+    #[test]
+    fn walker_preserves_codex_audio_payload_and_protocol_metadata() {
+        let audio_url = "data:audio/wav;base64,AAAA";
+        let mut request = serde_json::json!({
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "user@example.com"},
+                    {"type": "input_audio", "audio_url": audio_url},
+                ],
+            }],
+        });
+
+        let content = collect_json_content(&request).unwrap();
+        assert_eq!(content.coverage, InspectionCoverage::Partial);
+        assert_eq!(
+            content
+                .values
+                .iter()
+                .map(|value| value.text.as_str())
+                .collect::<Vec<_>>(),
+            ["user@example.com"]
+        );
+
+        replace_json_string_values(&mut request, false, &mut ["<redacted>"].into_iter());
+        assert_eq!(request["input"][0]["type"], "message");
+        assert_eq!(request["input"][0]["role"], "user");
+        assert_eq!(request["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(request["input"][0]["content"][0]["text"], "<redacted>");
+        assert_eq!(request["input"][0]["content"][1]["type"], "input_audio");
+        assert_eq!(request["input"][0]["content"][1]["audio_url"], audio_url);
     }
 
     #[test]

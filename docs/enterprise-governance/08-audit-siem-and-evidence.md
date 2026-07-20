@@ -98,7 +98,8 @@ Stable actions cover at least:
   rollback, invalidation, and LKG promotion;
 - provider registry changes, routing selection, fallback, revocation, and
   dispatch authorization;
-- execution approval and break-glass grant, use, revocation, and review;
+- execution approval lifecycle and break-glass creation, approval, activation,
+  revocation, authorization and retention purge;
 - reservation, reconciliation, and failure recovery links;
 - audit query, export, verification, retention, hold, purge, and dead-letter
   operations; and

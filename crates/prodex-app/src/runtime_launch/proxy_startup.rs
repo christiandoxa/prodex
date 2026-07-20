@@ -61,6 +61,7 @@ mod local_rewrite_gateway_reconciliation_audit;
 mod local_rewrite_gateway_reconciliation_runtime;
 mod local_rewrite_gateway_reconciliation_worker;
 mod local_rewrite_gateway_redis_ledger;
+mod local_rewrite_gateway_request_auth;
 mod local_rewrite_gateway_reservation;
 mod local_rewrite_gateway_reservation_recovery;
 mod local_rewrite_gateway_route_load;
@@ -73,6 +74,7 @@ use local_rewrite_gateway_side_effect_snapshot::gateway_snapshot_handle;
 mod local_rewrite_gateway_sql_ledger;
 mod local_rewrite_gateway_sqlite_utils;
 mod local_rewrite_gateway_store_file;
+mod local_rewrite_gateway_store_scim;
 mod local_rewrite_gateway_store_types;
 mod local_rewrite_gateway_usage;
 mod local_rewrite_gateway_usage_backend;
@@ -536,7 +538,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
             lane_admission.limits().standard
         ),
     );
-    let worker_threads = spawn_runtime_rotation_proxy_workers(
+    let mut worker_threads = spawn_runtime_rotation_proxy_workers(
         &server,
         &shutdown,
         &shared,
@@ -544,6 +546,21 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         long_lived_worker_count,
         long_lived_queue_capacity,
     )?;
+    let realtime_ws_sidecar_addr = match spawn_runtime_realtime_websocket_sidecar(
+        &shared,
+        &shutdown,
+        &mut worker_threads,
+        long_lived_worker_count,
+    ) {
+        Ok(addr) => addr,
+        Err(error) => {
+            shutdown.store(true, Ordering::SeqCst);
+            for _ in 0..worker_count {
+                server.unblock();
+            }
+            return Err(error);
+        }
+    };
 
     Ok(RuntimeRotationProxy {
         runtime_config: Arc::clone(&runtime_config),
@@ -552,8 +569,8 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
         worker_threads,
         accept_worker_count: worker_count,
         listen_addr,
-        gemini_live_sidecar_addr: None,
-        gemini_live_sidecar_model: None,
+        realtime_ws_sidecar_addr: Some(realtime_ws_sidecar_addr),
+        realtime_ws_model: None,
         log_path,
         active_request_count: Arc::clone(&shared.active_request_count),
         #[cfg(test)]

@@ -33,6 +33,8 @@ fn record(id: PrincipalId, user_name: &str) -> ApplicationGatewayScimUserRecord 
         team_id: Some("team-a".to_string()),
         project_id: Some("project-a".to_string()),
         user_id: Some("delegated-user".to_string()),
+        group_ids: vec!["engineering".to_string()],
+        department_id: Some("research".to_string()),
         budget_id: Some("budget-a".to_string()),
         allowed_key_prefixes: vec!["team-a-".to_string()],
         created_at_unix_ms: 1_000,
@@ -90,6 +92,8 @@ fn create_owns_defaults_inherits_delegation_and_retains_action() {
     assert_eq!(record.team_id.as_deref(), Some("team-a"));
     assert_eq!(record.project_id.as_deref(), Some("project-a"));
     assert_eq!(record.user_id.as_deref(), Some("delegated-user"));
+    assert!(record.group_ids.is_empty());
+    assert_eq!(record.department_id, None);
     assert_eq!(record.budget_id.as_deref(), Some("budget-a"));
     assert_eq!(record.allowed_key_prefixes, ["team-a-"]);
     assert!(record.active);
@@ -248,6 +252,11 @@ fn patch_preserves_unchanged_and_applies_set_and_clear() {
                 display_name: ApplicationPatchValue::Clear,
                 active: ApplicationPatchValue::Set(true),
                 role: ApplicationPatchValue::Set("VIEWER".to_string()),
+                group_ids: ApplicationPatchValue::Set(vec![
+                    "platform".to_string(),
+                    "ml".to_string(),
+                ]),
+                department_id: ApplicationPatchValue::Set("science".to_string()),
                 ..Default::default()
             },
         },
@@ -261,6 +270,8 @@ fn patch_preserves_unchanged_and_applies_set_and_clear() {
     assert_eq!(record.display_name, None);
     assert!(record.active);
     assert_eq!(record.role.as_deref(), Some("viewer"));
+    assert_eq!(record.group_ids, ["platform", "ml"]);
+    assert_eq!(record.department_id.as_deref(), Some("science"));
 }
 
 #[test]
@@ -305,6 +316,8 @@ fn replace_requires_name_and_resets_unchanged_optional_fields() {
     assert_eq!(record.display_name, None);
     assert!(record.active);
     assert_eq!(record.role, None);
+    assert!(record.group_ids.is_empty());
+    assert_eq!(record.department_id, None);
     assert!(record.allowed_key_prefixes.is_empty());
 }
 
@@ -405,6 +418,23 @@ fn roles_prefixes_and_scope_values_are_validated() {
                 ..Default::default()
             },
             ApplicationGatewayIdentityMutationError::DuplicateKeyPrefix,
+        ),
+        (
+            ApplicationGatewayScimUserPatch {
+                group_ids: ApplicationPatchValue::Set(vec![
+                    "engineering".to_string(),
+                    "ENGINEERING".to_string(),
+                ]),
+                ..Default::default()
+            },
+            ApplicationGatewayIdentityMutationError::InvalidScopeValue,
+        ),
+        (
+            ApplicationGatewayScimUserPatch {
+                department_id: ApplicationPatchValue::Set("research@invalid".to_string()),
+                ..Default::default()
+            },
+            ApplicationGatewayIdentityMutationError::InvalidScopeValue,
         ),
     ] {
         assert_eq!(

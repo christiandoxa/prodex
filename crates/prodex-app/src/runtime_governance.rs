@@ -13,6 +13,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+mod runtime_governance_selectors;
+use runtime_governance_selectors::runtime_governance_principal_selectors;
+
 pub(crate) const MAX_RUNTIME_GOVERNANCE_ARTIFACT_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_RUNTIME_GOVERNANCE_AUTHORITY_TENANTS: usize = 64;
 
@@ -350,6 +353,7 @@ fn runtime_governance_policy_rule(
     {
         anyhow::bail!("gateway governance policy channel selector must be api");
     }
+    let selectors = runtime_governance_principal_selectors(&rule.condition)?;
 
     Ok(GovernancePolicyRule {
         id: GovernancePolicyRuleId::new(&rule.id).context("invalid governance policy rule id")?,
@@ -362,27 +366,11 @@ fn runtime_governance_policy_rule(
                 ChannelDto::InternalService => Channel::InternalService,
             }),
             principal_kind: rule.condition.principal_kind,
-            team_id: rule
-                .condition
-                .team_id
-                .as_deref()
-                .map(PolicySelector::new)
-                .transpose()
-                .context("invalid governance policy team selector")?,
-            project_id: rule
-                .condition
-                .project_id
-                .as_deref()
-                .map(PolicySelector::new)
-                .transpose()
-                .context("invalid governance policy project selector")?,
-            user_id: rule
-                .condition
-                .user_id
-                .as_deref()
-                .map(PolicySelector::new)
-                .transpose()
-                .context("invalid governance policy user selector")?,
+            team_id: selectors.team_id,
+            project_id: selectors.project_id,
+            user_id: selectors.user_id,
+            group_id: selectors.group_id,
+            department_id: selectors.department_id,
             minimum_role: rule.condition.minimum_role,
             credential_scope: rule.condition.credential_scope,
             action: rule.condition.action.map(|value| match value {

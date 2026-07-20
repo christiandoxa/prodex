@@ -397,6 +397,13 @@
         "pattern": "^\\S+$",
         "type": "string"
       },
+      "GatewayPolicyAttributeIdentifier": {
+        "description": "Exact bounded SCIM policy attribute; wildcard values are not accepted.",
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9._:/-]+$",
+        "type": "string"
+      },
       "GatewayGuardrails": {
         "properties": {
           "allowed_models": {
@@ -866,6 +873,16 @@
         "anyOf": [
           {
             "$ref": "#/components/schemas/GatewayExactIdentifier"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "GatewayNullablePolicyAttributeIdentifier": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/GatewayPolicyAttributeIdentifier"
           },
           {
             "type": "null"
@@ -1806,6 +1823,9 @@
           "budget_id": {
             "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
           },
+          "department_id": {
+            "$ref": "#/components/schemas/GatewayNullablePolicyAttributeIdentifier"
+          },
           "displayName": {
             "type": [
               "string",
@@ -1817,6 +1837,13 @@
               "string",
               "null"
             ]
+          },
+          "group_ids": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayPolicyAttributeIdentifier"
+            },
+            "maxItems": 128,
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -1901,6 +1928,9 @@
           "budget_id": {
             "$ref": "#/components/schemas/GatewayNullableExactIdentifier"
           },
+          "department_id": {
+            "$ref": "#/components/schemas/GatewayNullablePolicyAttributeIdentifier"
+          },
           "displayName": {
             "type": [
               "string",
@@ -1912,6 +1942,13 @@
               "string",
               "null"
             ]
+          },
+          "group_ids": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayPolicyAttributeIdentifier"
+            },
+            "maxItems": 128,
+            "type": "array"
           },
           "project_id": {
             "$ref": "#/components/schemas/GatewayNullableExactIdentifier"

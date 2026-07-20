@@ -19,7 +19,8 @@ use super::local_rewrite_gateway_sqlite_utils::runtime_gateway_sqlite_u64_to_i64
 use super::local_rewrite_gateway_store_file::runtime_gateway_virtual_key_store_file_load;
 use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayVirtualKeyEntry, RuntimeGatewayVirtualKeySource,
-    RuntimeGatewayVirtualKeyStoreFile, runtime_gateway_virtual_key_effective_id,
+    RuntimeGatewayVirtualKeyStoreFile, runtime_gateway_apply_scim_policy_attributes,
+    runtime_gateway_principal_policy_attributes, runtime_gateway_virtual_key_effective_id,
     runtime_gateway_virtual_key_entry_from_stored,
 };
 use super::local_rewrite_gateway_usage::runtime_gateway_try_reserve_usage_delta;
@@ -125,6 +126,8 @@ pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
             tenant_id: key.tenant_id.clone(),
             key,
             source: RuntimeGatewayVirtualKeySource::Policy,
+            group_ids: Vec::new(),
+            department_id: None,
             created_at_epoch: None,
             updated_at_epoch: None,
             disabled: false,
@@ -134,7 +137,8 @@ pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
         .iter()
         .map(|entry| entry.key.name.to_ascii_lowercase())
         .collect::<Vec<_>>();
-    for record in runtime_gateway_virtual_key_store_load_strict(state_store, log_path)?.keys {
+    let store = runtime_gateway_virtual_key_store_load_strict(state_store, log_path)?;
+    for record in &store.keys {
         let key_name = record.name.trim().to_string();
         if key_name.is_empty() {
             continue;
@@ -150,7 +154,7 @@ pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
             );
             continue;
         }
-        let Some(entry) = runtime_gateway_virtual_key_entry_from_stored(&record) else {
+        let Some(entry) = runtime_gateway_virtual_key_entry_from_stored(record) else {
             runtime_proxy_log_to_path(
                 log_path,
                 &runtime_proxy_structured_log_message(
@@ -163,6 +167,7 @@ pub(super) fn runtime_gateway_virtual_key_entries_from_sources(
         seen.push(normalized);
         entries.push(entry);
     }
+    runtime_gateway_apply_scim_policy_attributes(&mut entries, &store.scim_users);
     Ok(entries)
 }
 
@@ -475,12 +480,10 @@ pub(super) fn runtime_gateway_virtual_key_admission(
         virtual_key_plan.gateway.reservation.clone().ok_or(
             runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable,
         )?;
-    let principal_attributes = PrincipalPolicyAttributes::new(
-        key.team_id.as_deref(),
-        key.project_id.as_deref(),
-        key.user_id.as_deref(),
-    )
-    .map_err(|_| runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable)?;
+    let principal_attributes = runtime_gateway_principal_policy_attributes(key, entry.as_ref())
+        .map_err(|_| {
+            runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection::PolicyStateUnavailable
+        })?;
     let application = runtime_gateway_application_data_plane_admission(
         authorized,
         captured,
@@ -932,22 +935,6 @@ fn runtime_gateway_sqlite_reserve_usage(
     tx.commit()
         .map_err(|_| RuntimeGatewayDurableReservationError::Failed)?;
     Ok(())
-}
-
-pub(super) fn runtime_local_rewrite_request_is_authorized(
-    request: &super::local_rewrite_request::RuntimeLocalRewriteRequest,
-    auth_token_hash: &runtime_proxy_crate::LocalBridgeBearerTokenHash,
-) -> bool {
-    let path = path_without_query(request.url());
-    if path == runtime_proxy_crate::LOCAL_BRIDGE_HEALTH_PATH
-        || path.ends_with("/prodex/gateway/admin")
-    {
-        return true;
-    }
-    request.headers().iter().any(|(name, value)| {
-        name.eq_ignore_ascii_case("authorization")
-            && auth_token_hash.verify_authorization_header(value)
-    })
 }
 
 #[cfg(test)]

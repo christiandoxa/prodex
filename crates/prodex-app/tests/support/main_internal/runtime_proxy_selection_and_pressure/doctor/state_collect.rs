@@ -35,6 +35,7 @@ fn runtime_doctor_collect_state_flags_runtime_broker_binary_mismatch() {
             executable_path: None,
             executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+            realtime_ws_addr: None,
         },
     )
     .expect("doctor mismatch registry should save");
@@ -125,6 +126,7 @@ fn runtime_doctor_collect_state_surfaces_dead_broker_registry_and_stale_leases()
             executable_path: Some("/tmp/old-prodex".to_string()),
             executable_sha256: Some("deadbeef".to_string()),
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+            realtime_ws_addr: None,
         },
     )
     .expect("dead broker registry should save");
@@ -201,6 +203,7 @@ fn runtime_doctor_collect_state_surfaces_unreachable_live_broker_health() {
                 .map(|path| path.display().to_string()),
             executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+            realtime_ws_addr: None,
         },
     )
     .expect("timeout broker registry should save");

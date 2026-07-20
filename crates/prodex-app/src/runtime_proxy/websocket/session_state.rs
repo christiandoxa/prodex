@@ -9,6 +9,7 @@ use super::{
 #[derive(Default)]
 pub(in crate::runtime_proxy) struct RuntimeWebsocketSessionState {
     upstream_socket: Option<RuntimeUpstreamWebSocket>,
+    realtime_duplex: bool,
     pub(in crate::runtime_proxy) profile_name: Option<String>,
     pub(in crate::runtime_proxy) turn_state: Option<String>,
     inflight_guard: Option<RuntimeProfileInFlightGuard>,
@@ -16,6 +17,17 @@ pub(in crate::runtime_proxy) struct RuntimeWebsocketSessionState {
 }
 
 impl RuntimeWebsocketSessionState {
+    pub(in crate::runtime_proxy) fn with_realtime_duplex(realtime_duplex: bool) -> Self {
+        Self {
+            realtime_duplex,
+            ..Self::default()
+        }
+    }
+
+    pub(in crate::runtime_proxy) fn is_realtime_duplex(&self) -> bool {
+        self.realtime_duplex
+    }
+
     pub(in crate::runtime_proxy) fn can_reuse(
         &self,
         profile_name: &str,
@@ -28,6 +40,10 @@ impl RuntimeWebsocketSessionState {
 
     pub(in crate::runtime_proxy) fn take_socket(&mut self) -> Option<RuntimeUpstreamWebSocket> {
         self.upstream_socket.take()
+    }
+
+    pub(in crate::runtime_proxy) fn has_socket(&self) -> bool {
+        self.upstream_socket.is_some()
     }
 
     pub(in crate::runtime_proxy) fn last_terminal_elapsed(&self) -> Option<Duration> {

@@ -78,9 +78,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     const COMPONENTS_DIGEST: &str =
-        "e0991a23f7614724b050b2faeaebcb0065ad8f1e9a88449c374726ad983b8735";
+        "c2400ae0ae697f55ecdb969515aad49ebe4a6c28b5ad361934ebf88f41ed6326";
     const DOCUMENT_DIGEST: &str =
-        "fd507a869fc3bf71edde4cf95dbb9038327875ae529087203ce55b1e39e05b96";
+        "dceb89cc36d9b6303c04d8fb208c793ce1240e49eeca9e3ec460b36b66d111fd";
 
     fn digest(value: &Value) -> String {
         Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -197,6 +197,18 @@ mod tests {
         assert_eq!(
             schemas["GatewayScimUserWrite"]["properties"]["allowed_key_prefixes"]["items"]["$ref"],
             "#/components/schemas/GatewayExactIdentifier"
+        );
+        assert_eq!(
+            schemas["GatewayScimUserWrite"]["properties"]["group_ids"]["items"]["$ref"],
+            "#/components/schemas/GatewayPolicyAttributeIdentifier"
+        );
+        assert_eq!(
+            schemas["GatewayScimUserWrite"]["properties"]["department_id"]["$ref"],
+            "#/components/schemas/GatewayNullablePolicyAttributeIdentifier"
+        );
+        assert_eq!(
+            schemas["GatewayPolicyAttributeIdentifier"]["maxLength"],
+            128
         );
     }
 

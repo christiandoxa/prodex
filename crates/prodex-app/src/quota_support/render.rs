@@ -59,19 +59,6 @@ pub(crate) fn render_quota_reports(reports: &[QuotaReport], detail: bool) -> Str
 }
 
 #[cfg(test)]
-pub(crate) fn render_quota_reports_with_line_limit(
-    reports: &[QuotaReport],
-    detail: bool,
-    max_lines: Option<usize>,
-) -> String {
-    prodex_quota::render_quota_reports_with_line_limit(
-        &render_quota_report_inputs(reports),
-        detail,
-        max_lines,
-    )
-}
-
-#[cfg(test)]
 pub(crate) fn render_quota_reports_with_layout(
     reports: &[QuotaReport],
     detail: bool,

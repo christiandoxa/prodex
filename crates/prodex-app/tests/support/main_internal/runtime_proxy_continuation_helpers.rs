@@ -227,6 +227,20 @@ impl RuntimeContinuationFixture {
         self.connect_websocket_with_headers(route, &[])
     }
 
+    pub(super) fn connect_realtime_websocket(
+        &self,
+        route: &str,
+    ) -> RuntimeContinuationClientWebSocket {
+        let addr = self
+            .proxy
+            .realtime_ws_sidecar_addr
+            .expect("runtime realtime websocket sidecar should start");
+        let (mut socket, _response) =
+            ws_connect(format!("ws://{addr}/{route}")).expect("realtime websocket should connect");
+        set_test_websocket_io_timeout(&mut socket, ci_timing_upper_bound_ms(1_000, 3_000));
+        socket
+    }
+
     pub(super) fn connect_websocket_with_headers(
         &self,
         route: &str,

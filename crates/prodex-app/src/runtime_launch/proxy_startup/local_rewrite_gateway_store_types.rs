@@ -1,4 +1,8 @@
 use super::local_rewrite_gateway_admin_fields::runtime_gateway_validate_virtual_key_name;
+pub(super) use super::local_rewrite_gateway_store_scim::{
+    RuntimeGatewayScimUser, runtime_gateway_apply_scim_policy_attributes,
+    runtime_gateway_principal_policy_attributes, runtime_gateway_scim_user_auth_entry_from_stored,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -10,6 +14,8 @@ pub(super) struct RuntimeGatewayVirtualKeyEntry {
     pub(super) key: runtime_proxy_crate::RuntimeGatewayVirtualKey,
     pub(super) source: RuntimeGatewayVirtualKeySource,
     pub(super) tenant_id: Option<String>,
+    pub(super) group_ids: Vec<String>,
+    pub(super) department_id: Option<String>,
     pub(super) created_at_epoch: Option<u64>,
     pub(super) updated_at_epoch: Option<u64>,
     pub(super) disabled: bool,
@@ -46,6 +52,8 @@ impl fmt::Debug for RuntimeGatewayVirtualKeyEntry {
             .field("key", &"<redacted>")
             .field("source", &self.source)
             .field("tenant_id", &redacted_option(&self.tenant_id))
+            .field("group_ids", &"<redacted>")
+            .field("department_id", &redacted_option(&self.department_id))
             .field("created_at_epoch", &redacted_option(&self.created_at_epoch))
             .field("updated_at_epoch", &redacted_option(&self.updated_at_epoch))
             .field("disabled", &self.disabled)
@@ -140,55 +148,6 @@ impl fmt::Debug for RuntimeGatewayAdminIdempotencyRecord {
         f.debug_struct("RuntimeGatewayAdminIdempotencyRecord")
             .field("entry", &"<redacted>")
             .field("completed_at_unix_ms", &"<redacted>")
-            .finish()
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(super) struct RuntimeGatewayScimUser {
-    pub(super) id: String,
-    pub(super) user_name: String,
-    #[serde(default)]
-    pub(super) external_id: Option<String>,
-    #[serde(default)]
-    pub(super) display_name: Option<String>,
-    #[serde(default = "runtime_gateway_scim_user_active_default")]
-    pub(super) active: bool,
-    #[serde(default)]
-    pub(super) role: Option<String>,
-    #[serde(default)]
-    pub(super) tenant_id: Option<String>,
-    #[serde(default)]
-    pub(super) team_id: Option<String>,
-    #[serde(default)]
-    pub(super) project_id: Option<String>,
-    #[serde(default)]
-    pub(super) user_id: Option<String>,
-    #[serde(default)]
-    pub(super) budget_id: Option<String>,
-    #[serde(default)]
-    pub(super) allowed_key_prefixes: Vec<String>,
-    pub(super) created_at_epoch: u64,
-    pub(super) updated_at_epoch: u64,
-}
-
-impl fmt::Debug for RuntimeGatewayScimUser {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RuntimeGatewayScimUser")
-            .field("id", &"<redacted>")
-            .field("user_name", &"<redacted>")
-            .field("external_id", &redacted_option(&self.external_id))
-            .field("display_name", &redacted_option(&self.display_name))
-            .field("active", &self.active)
-            .field("role", &redacted_option(&self.role))
-            .field("tenant_id", &redacted_option(&self.tenant_id))
-            .field("team_id", &redacted_option(&self.team_id))
-            .field("project_id", &redacted_option(&self.project_id))
-            .field("user_id", &redacted_option(&self.user_id))
-            .field("budget_id", &redacted_option(&self.budget_id))
-            .field("allowed_key_prefixes", &"<redacted>")
-            .field("created_at_epoch", &"<redacted>")
-            .field("updated_at_epoch", &"<redacted>")
             .finish()
     }
 }
@@ -292,7 +251,7 @@ impl fmt::Debug for RuntimeGatewayStoredVirtualKey {
     }
 }
 
-fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
+pub(super) fn redacted_option<T>(value: &Option<T>) -> Option<&'static str> {
     value.as_ref().map(|_| "<redacted>")
 }
 
@@ -418,45 +377,11 @@ pub(super) fn runtime_gateway_virtual_key_entry_from_stored(
         },
         source: RuntimeGatewayVirtualKeySource::Admin,
         tenant_id,
+        group_ids: Vec::new(),
+        department_id: None,
         created_at_epoch: Some(record.created_at_epoch),
         updated_at_epoch: Some(record.updated_at_epoch),
         disabled: record.disabled.unwrap_or(false),
-    })
-}
-
-pub(super) fn runtime_gateway_scim_user_auth_entry_from_stored(
-    user: &RuntimeGatewayScimUser,
-) -> Option<RuntimeGatewayScimUser> {
-    runtime_gateway_exact_stored_string(&user.id)?;
-    runtime_gateway_exact_stored_string(&user.user_name)?;
-    let role = runtime_gateway_exact_optional_stored_scope(&user.role)?;
-    let tenant_id = runtime_gateway_exact_optional_stored_scope(&user.tenant_id)?;
-    let team_id = runtime_gateway_exact_optional_stored_scope(&user.team_id)?;
-    let project_id = runtime_gateway_exact_optional_stored_scope(&user.project_id)?;
-    let user_id = runtime_gateway_exact_optional_stored_scope(&user.user_id)?;
-    let budget_id = runtime_gateway_exact_optional_stored_scope(&user.budget_id)?;
-    if !user
-        .allowed_key_prefixes
-        .iter()
-        .all(|prefix| runtime_gateway_exact_stored_string(prefix).is_some())
-    {
-        return None;
-    }
-    Some(RuntimeGatewayScimUser {
-        id: user.id.clone(),
-        user_name: user.user_name.clone(),
-        external_id: user.external_id.clone(),
-        display_name: user.display_name.clone(),
-        active: user.active,
-        role,
-        tenant_id,
-        team_id,
-        project_id,
-        user_id,
-        budget_id,
-        allowed_key_prefixes: user.allowed_key_prefixes.clone(),
-        created_at_epoch: user.created_at_epoch,
-        updated_at_epoch: user.updated_at_epoch,
     })
 }
 
@@ -465,11 +390,13 @@ fn runtime_gateway_exact_virtual_key_id(value: &str) -> Option<prodex_domain::Vi
     (id.to_string() == value).then_some(id)
 }
 
-fn runtime_gateway_exact_stored_string(value: &str) -> Option<&str> {
+pub(super) fn runtime_gateway_exact_stored_string(value: &str) -> Option<&str> {
     (!value.is_empty() && !value.chars().any(char::is_whitespace)).then_some(value)
 }
 
-fn runtime_gateway_exact_optional_stored_scope(value: &Option<String>) -> Option<Option<String>> {
+pub(super) fn runtime_gateway_exact_optional_stored_scope(
+    value: &Option<String>,
+) -> Option<Option<String>> {
     match value.as_deref() {
         None | Some("") => Some(None),
         Some(value) => {
@@ -479,11 +406,7 @@ fn runtime_gateway_exact_optional_stored_scope(value: &Option<String>) -> Option
 }
 
 pub(super) fn runtime_gateway_virtual_key_store_version() -> u32 {
-    2
-}
-
-fn runtime_gateway_scim_user_active_default() -> bool {
-    true
+    3
 }
 
 #[cfg(test)]
@@ -502,11 +425,62 @@ mod tests {
             team_id: None,
             project_id: None,
             user_id: Some("user-1".to_string()),
+            group_ids: vec!["engineering".to_string()],
+            department_id: Some("research".to_string()),
             budget_id: None,
             allowed_key_prefixes: vec!["tenant-a-".to_string()],
             created_at_epoch: 1,
             updated_at_epoch: 2,
         }
+    }
+
+    fn policy_entry_for_scim_tests() -> RuntimeGatewayVirtualKeyEntry {
+        RuntimeGatewayVirtualKeyEntry {
+            virtual_key_id: None,
+            key: runtime_proxy_crate::RuntimeGatewayVirtualKey {
+                name: "policy-key".to_string(),
+                tenant_id: Some("tenant-a".to_string()),
+                team_id: None,
+                project_id: None,
+                user_id: Some("user-1".to_string()),
+                budget_id: None,
+                token_hash: runtime_proxy_crate::LocalBridgeBearerTokenHash::from_token("secret"),
+                allowed_models: Vec::new(),
+                budget_microusd: None,
+                request_budget: None,
+                rpm_limit: None,
+                tpm_limit: None,
+            },
+            source: RuntimeGatewayVirtualKeySource::Policy,
+            tenant_id: Some("tenant-a".to_string()),
+            group_ids: Vec::new(),
+            department_id: None,
+            created_at_epoch: None,
+            updated_at_epoch: None,
+            disabled: false,
+        }
+    }
+
+    #[test]
+    fn scim_policy_attributes_require_one_active_same_tenant_identity() {
+        let user = stored_scim_user_for_tests();
+        let mut entries = vec![policy_entry_for_scim_tests()];
+        runtime_gateway_apply_scim_policy_attributes(&mut entries, std::slice::from_ref(&user));
+        assert_eq!(entries[0].group_ids, ["engineering"]);
+        assert_eq!(entries[0].department_id.as_deref(), Some("research"));
+
+        let mut cross_tenant = user.clone();
+        cross_tenant.tenant_id = Some("tenant-b".to_string());
+        runtime_gateway_apply_scim_policy_attributes(
+            &mut entries,
+            std::slice::from_ref(&cross_tenant),
+        );
+        assert!(entries[0].group_ids.is_empty());
+        assert_eq!(entries[0].department_id, None);
+
+        runtime_gateway_apply_scim_policy_attributes(&mut entries, &[user.clone(), user]);
+        assert!(entries[0].group_ids.is_empty());
+        assert_eq!(entries[0].department_id, None);
     }
 
     #[test]
@@ -530,6 +504,8 @@ mod tests {
             },
             source: RuntimeGatewayVirtualKeySource::Policy,
             tenant_id: Some(tenant_id.to_string()),
+            group_ids: Vec::new(),
+            department_id: None,
             created_at_epoch: None,
             updated_at_epoch: None,
             disabled: false,
@@ -765,6 +741,8 @@ mod tests {
             team_id: Some("team-user-secret".to_string()),
             project_id: Some("project-user-secret".to_string()),
             user_id: Some("user-user-secret".to_string()),
+            group_ids: vec!["group-user-secret".to_string()],
+            department_id: Some("department-user-secret".to_string()),
             budget_id: Some("budget-user-secret".to_string()),
             allowed_key_prefixes: vec!["prefix-secret".to_string()],
             created_at_epoch: 70,
@@ -790,6 +768,8 @@ mod tests {
             },
             source: RuntimeGatewayVirtualKeySource::Admin,
             tenant_id: Some("tenant-entry-secret".to_string()),
+            group_ids: vec!["group-entry-secret".to_string()],
+            department_id: Some("department-entry-secret".to_string()),
             created_at_epoch: Some(130),
             updated_at_epoch: Some(140),
             disabled: false,
@@ -825,6 +805,8 @@ mod tests {
             "team-user-secret",
             "project-user-secret",
             "user-user-secret",
+            "group-user-secret",
+            "department-user-secret",
             "budget-user-secret",
             "prefix-secret",
             "sk-entry-secret",
@@ -832,6 +814,8 @@ mod tests {
             "team-entry-secret",
             "project-entry-secret",
             "user-entry-secret",
+            "group-entry-secret",
+            "department-entry-secret",
             "budget-entry-secret",
             "entry-token-secret",
             "model-entry-secret",

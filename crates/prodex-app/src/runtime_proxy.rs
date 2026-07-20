@@ -20,6 +20,7 @@ mod previous_response_log;
 mod previous_response_orchestration;
 mod profile_state;
 mod quota;
+mod realtime_sidecar;
 mod response_forwarding;
 mod responses;
 mod selection;
@@ -52,6 +53,7 @@ pub(crate) use self::previous_response_log::*;
 pub(crate) use self::previous_response_orchestration::*;
 pub(super) use self::profile_state::*;
 pub(super) use self::quota::*;
+pub(crate) use self::realtime_sidecar::*;
 pub(crate) use self::response_forwarding::*;
 #[cfg(test)]
 pub(crate) use self::responses::attempt_runtime_responses_request;

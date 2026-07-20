@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn websocket_read_poll_timeout_preserves_write_timeout() {
+    let (_local_socket, mut upstream_socket) = websocket_test_local_pair();
+    let write_timeout = Duration::from_secs(3);
+    let read_timeout = Duration::from_millis(20);
+
+    runtime_set_upstream_websocket_io_timeout(&mut upstream_socket, Some(write_timeout)).unwrap();
+    runtime_set_upstream_websocket_read_timeout(&mut upstream_socket, Some(read_timeout)).unwrap();
+
+    let MaybeTlsStream::Plain(stream) = upstream_socket.get_ref() else {
+        panic!("test websocket should use a plain local TCP stream");
+    };
+    assert_eq!(stream.read_timeout().unwrap(), Some(read_timeout));
+    assert_eq!(stream.write_timeout().unwrap(), Some(write_timeout));
+}
+
+#[test]
 fn websocket_upstream_handshake_rejection_preserves_status() {
     let _guard = acquire_test_runtime_lock();
     let listener =

@@ -2,9 +2,10 @@
 
 ## Status
 
-This document defines the target Phase 1 and Phase 2 contract. It does not
-claim that the contract is implemented. Current implementation gaps are listed
-explicitly below.
+This document records the implemented Phase 1 and Phase 2 contract. The source
+boundaries, policy behavior, and repository evidence are summarized below.
+Environment-specific detector capacity and latency certification remains a
+deployment acceptance responsibility.
 
 ## Control Objectives
 
@@ -409,24 +410,30 @@ Unicode, structured masking, stream boundary detection, snapshot refresh, and
 external-detector saturation. External Presidio latency is reported separately
 from local classification and policy latency.
 
-## Current Repository Gaps
+## Current Repository State
 
-At this baseline:
+The repository implements the source-owned controls in this contract:
 
-- there is no domain `InspectionResult`, coverage type, four-level data
-  classification, bounded finding model, or detector/classification revision;
-- Presidio execution and schema-key walking are owned by `prodex-app`, and
-  findings are discarded after anonymization;
-- local PII redaction is a second independent request mutation path;
-- Presidio defaults to fail-open configuration and validates URL shape but not
-  enterprise/bank trust membership or egress;
-- non-UTF-8 HTTP bodies can skip current Presidio processing;
-- the Gemini Live branch dispatches before current body inspection;
-- current response protection is keyword/webhook based, not typed
-  classification-aware inspection;
-- governance deployment modes, tenant rollout revisions, and the required test
-  matrix and benchmarks are not implemented.
+- `prodex-domain` owns bounded `InspectionResult`, coverage, four-level
+  classification, content-free findings, reason codes, and revision types;
+- `prodex-application` owns inspection, classification, policy, and obligation
+  decisions independently of transport adapters;
+- runtime request paths use schema-aware local/Presidio inspection and carry
+  explicit coverage into governance decisions; unsupported content remains
+  explicit and fails according to deployment mode;
+- response paths provide unary and bounded incremental enforcement, including
+  pre-commit denial and post-commit termination without retry or rotation;
+- Gemini Live and WebSocket paths enter governance before provider dispatch and
+  apply bounded incremental response inspection;
+- Presidio is opt-in, bounded, and subject to mode-specific trust and egress
+  validation; its findings are normalized into the typed inspection boundary;
+- immutable policy/classification revisions, tenant rollout modes, last-known-
+  good activation, and content-free audit evidence are wired through the
+  gateway runtime;
+- the machine-readable security matrix, domain/application/runtime integration
+  tests, and `benches/governance_hot_paths.rs` provide repository evidence.
 
-These gaps are migration inputs. Existing transport transparency, affinity,
-bounded admission, response commit, and reconciliation invariants remain in
-force while the inspection boundary is introduced.
+Production Presidio saturation, network latency, and organization-specific
+unsupported-modality adapters must still be certified in the target deployment.
+That external acceptance work does not change the fail-closed source behavior
+or create an unimplemented source-code bypass.

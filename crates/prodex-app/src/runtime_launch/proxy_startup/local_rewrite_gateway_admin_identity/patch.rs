@@ -123,6 +123,14 @@ fn scim_fields_patch(
         team_id: optional_string_patch(prodex_field(body, &["team_id", "teamId"]))?,
         project_id: optional_string_patch(prodex_field(body, &["project_id", "projectId"]))?,
         user_id: optional_string_patch(prodex_field(body, &["user_id", "userId"]))?,
+        group_ids: string_array_patch(
+            prodex_field(body, &["group_ids", "groupIds"]),
+            invalid_scim_field,
+        )?,
+        department_id: optional_string_patch(prodex_field(
+            body,
+            &["department_id", "departmentId"],
+        ))?,
         budget_id: optional_string_patch(prodex_field(body, &["budget_id", "budgetId"]))?,
         allowed_key_prefixes: string_array_patch(
             prodex_field(body, &["allowed_key_prefixes", "allowedKeyPrefixes"]),
@@ -173,6 +181,18 @@ fn apply_scim_operation(
         "user_id" | "userid" | "urn:prodex:params:scim:schemas:gateway:2.0:user.user_id" => {
             patch.user_id = scim_string_operation(value, remove)?;
         }
+        "group_ids" | "groupids" | "urn:prodex:params:scim:schemas:gateway:2.0:user.group_ids" => {
+            patch.group_ids = if remove {
+                ApplicationPatchValue::Clear
+            } else {
+                string_array_patch(Some(value), invalid_scim_field)?
+            };
+        }
+        "department_id"
+        | "departmentid"
+        | "urn:prodex:params:scim:schemas:gateway:2.0:user.department_id" => {
+            patch.department_id = scim_string_operation(value, remove)?;
+        }
         "budget_id" | "budgetid" | "urn:prodex:params:scim:schemas:gateway:2.0:user.budget_id" => {
             patch.budget_id = scim_string_operation(value, remove)?;
         }
@@ -210,6 +230,8 @@ fn merge_scim_patch(
     merge!(team_id);
     merge!(project_id);
     merge!(user_id);
+    merge!(group_ids);
+    merge!(department_id);
     merge!(budget_id);
     merge!(allowed_key_prefixes);
 }
