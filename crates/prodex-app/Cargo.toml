@@ -106,6 +106,7 @@ tiny_http = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "sync"] }
 toml = { workspace = true }
 tungstenite = { workspace = true, features = ["rustls-tls-native-roots", "url"] }
+zstd = "0.13.3"
 jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
 
 [lints]
