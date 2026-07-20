@@ -306,7 +306,7 @@ fn open_private_regular(path: &Path) -> io::Result<File> {
     options
         .read(true)
         .write(true)
-        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE)
+        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
