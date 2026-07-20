@@ -37,6 +37,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
         prefix,
         response,
         native_anthropic_messages,
+        mut chat_compatible_request,
     } = live_response;
     let status = response.status().as_u16();
     let headers = runtime_proxy_crate::runtime_forward_binary_response_headers(
@@ -75,6 +76,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     shared,
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::DeepSeek,
+                    pending_request: chat_compatible_request.take().unwrap_or_default(),
                     response_governance,
                 },
             );
@@ -92,6 +94,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 provider_kind: RuntimeProviderBridgeKind::DeepSeek,
                 profile_name: None,
                 binding_recorder: None,
+                pending_request: chat_compatible_request.take().unwrap_or_default(),
                 response_governance,
             },
         );
@@ -115,6 +118,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     shared,
                     captured,
                     provider_kind: RuntimeProviderBridgeKind::Anthropic,
+                    pending_request: chat_compatible_request.take().unwrap_or_default(),
                     response_governance,
                 },
             );
@@ -132,6 +136,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                 provider_kind: RuntimeProviderBridgeKind::Anthropic,
                 profile_name: None,
                 binding_recorder: None,
+                pending_request: chat_compatible_request.take().unwrap_or_default(),
                 response_governance,
             },
         );
@@ -157,6 +162,7 @@ pub(super) fn respond_runtime_local_rewrite_live_response(
                     provider_kind: RuntimeProviderBridgeKind::Gemini,
                     profile_name: None,
                     binding_recorder: None,
+                    pending_request: chat_compatible_request.take().unwrap_or_default(),
                     response_governance,
                 },
             );

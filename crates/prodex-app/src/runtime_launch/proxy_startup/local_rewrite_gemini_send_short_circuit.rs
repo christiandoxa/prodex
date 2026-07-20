@@ -1,3 +1,4 @@
+use super::super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::super::super::gemini_rewrite::RuntimeGeminiTranslatedRequest;
 use super::super::super::gemini_sse::{
     RuntimeGeminiGenerateSseReader, RuntimeGeminiSseReaderConfig,
@@ -19,6 +20,7 @@ use std::io::Read;
 pub(super) fn runtime_gemini_exact_output_short_circuit(
     request_id: u64,
     shared: &RuntimeLocalRewriteProxyShared,
+    conversations: &RuntimeDeepSeekConversationStore,
     selected: &RuntimeGeminiSelectedAuth,
     translated: &RuntimeGeminiTranslatedRequest,
 ) -> Result<Option<RuntimeLocalRewriteUpstreamResult>> {
@@ -38,7 +40,7 @@ pub(super) fn runtime_gemini_exact_output_short_circuit(
         std::io::Cursor::new(fake_stream.into_bytes()),
         request_id,
         translated.messages.clone(),
-        shared.gemini_conversations.clone(),
+        conversations.clone(),
         binding_recorder,
         RuntimeGeminiSseReaderConfig {
             observer: None,

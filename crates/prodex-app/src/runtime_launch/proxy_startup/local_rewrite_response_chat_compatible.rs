@@ -1,6 +1,6 @@
 use super::super::chat_compatible_rewrite::RuntimeChatCompatibleSseReader;
 use super::super::deepseek_rewrite::{
-    runtime_deepseek_chat_buffered_response_parts, runtime_deepseek_take_pending_messages,
+    RuntimeDeepSeekPendingRequest, runtime_deepseek_chat_buffered_response_parts,
 };
 use super::super::local_rewrite::{RUNTIME_LOCAL_REWRITE_PROFILE, RuntimeLocalRewriteProxyShared};
 use super::super::local_rewrite_copilot::{
@@ -37,6 +37,7 @@ pub(super) struct RuntimeChatCompatibleRewriteContext<'a> {
     pub(super) provider_kind: RuntimeProviderBridgeKind,
     pub(super) profile_name: Option<String>,
     pub(super) binding_recorder: Option<RuntimeCopilotBindingRecorder>,
+    pub(super) pending_request: RuntimeDeepSeekPendingRequest,
     pub(super) response_governance: RuntimeGatewayResponseGovernance,
 }
 
@@ -54,16 +55,16 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         provider_kind,
         profile_name,
         binding_recorder,
+        pending_request,
         response_governance,
     } = context;
     let profile_name = profile_name.unwrap_or_else(|| RUNTIME_LOCAL_REWRITE_PROFILE.to_string());
+    let conversations = shared.deepseek_conversations_for_request(captured);
     let rate_limit_headers = if provider_kind == RuntimeProviderBridgeKind::DeepSeek {
         runtime_deepseek_codex_rate_limit_headers(response.headers())
     } else {
         runtime_provider_codex_rate_limit_headers(provider_kind, response.headers())
     };
-    let pending_request =
-        runtime_deepseek_take_pending_messages(&shared.deepseek_pending_messages, request_id);
     let conversation_messages = pending_request.messages;
     let response_metadata = pending_request.response_metadata;
     if content_type.contains("text/event-stream") {
@@ -92,7 +93,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
             request_id,
             conversation_messages,
             response_metadata,
-            shared.deepseek_conversations.clone(),
+            conversations.clone(),
             Some(observer),
         );
         let body: Box<dyn Read + Send> = if let Some(binding_recorder) = binding_recorder {
@@ -126,7 +127,7 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         request_id,
         conversation_messages,
         response_metadata,
-        &shared.deepseek_conversations,
+        &conversations,
         &shared.runtime_shared,
     )
     .map(|mut parts| {

@@ -70,6 +70,7 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
             ],
         ),
     );
+    let conversations = shared.deepseek_conversations_for_request(request);
 
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
@@ -88,21 +89,12 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
             }
             let translated = runtime_provider_chat_compatible_request_body(
                 &model_body,
-                &shared.deepseek_conversations,
+                &conversations,
                 RuntimeProviderBridgeKind::Gemini,
                 GEMINI_DEFAULT_MODEL,
                 true,
                 RuntimeDeepSeekRewriteOptions::default(),
             )?;
-            if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                pending.insert(
-                    request_id,
-                    RuntimeDeepSeekPendingRequest {
-                        messages: translated.messages,
-                        response_metadata: translated.response_metadata,
-                    },
-                );
-            }
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                     RuntimeLocalRewriteSearchFallbackRequest {
@@ -121,7 +113,11 @@ pub(super) fn send_runtime_gemini_openai_compatible_request(
                 RuntimeLocalRewritePreparedSendResult::Live(response) => {
                     return Ok(RuntimeLocalRewriteUpstreamResult {
                         response: RuntimeLocalRewriteUpstreamResponse::Live(
-                            RuntimeLocalRewriteLiveResponse::new(response),
+                            RuntimeLocalRewriteLiveResponse::new(response)
+                                .with_chat_compatible_request(RuntimeDeepSeekPendingRequest {
+                                    messages: translated.messages,
+                                    response_metadata: translated.response_metadata,
+                                }),
                         ),
                         gemini_context: None,
                         copilot_context: None,

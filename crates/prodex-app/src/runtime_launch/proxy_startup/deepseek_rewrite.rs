@@ -3,27 +3,10 @@ pub(super) use self::request_validation::{
     runtime_deepseek_apply_web_search_mode, runtime_deepseek_dedup_and_validate_function_tools,
 };
 #[cfg(test)]
-#[allow(unused_imports)]
-pub(super) use self::request_validation::{
-    runtime_deepseek_ensure_json_prompt_instruction, runtime_deepseek_function_tool_name,
-    runtime_deepseek_insert_primitive_request_fields,
-    runtime_deepseek_note_thinking_tool_choice_omission,
-    runtime_deepseek_reject_beta_completion_fields,
-    runtime_deepseek_reject_unsupported_request_fields,
-    runtime_deepseek_response_format_from_responses_request,
-    runtime_deepseek_response_metadata_from_responses_request,
-    runtime_deepseek_stop_from_responses_request,
-    runtime_deepseek_top_logprobs_from_responses_request,
-    runtime_deepseek_user_id_from_responses_request, runtime_deepseek_validate_tool_choice_name,
-    runtime_deepseek_validate_tool_choice_shape, runtime_deepseek_validate_tool_choice_target,
-    runtime_deepseek_validate_tools_shape,
-};
-#[cfg(test)]
 pub(in crate::runtime_launch::proxy_startup) use self::response::runtime_deepseek_chat_assistant_messages_from_response_value;
 pub(in crate::runtime_launch::proxy_startup) use self::response::runtime_deepseek_merge_response_metadata;
 pub(in crate::runtime_launch::proxy_startup) use self::response::{
     runtime_deepseek_chat_buffered_response_parts, runtime_deepseek_store_conversation,
-    runtime_deepseek_take_pending_messages,
 };
 pub(super) use self::tools::{
     runtime_deepseek_tool_choice_from_responses_request,
@@ -35,9 +18,7 @@ pub(super) use super::deepseek_sse_reader::RuntimeDeepSeekChatSseReader;
 use super::provider_bridge::RuntimeProviderBridgeKind;
 use anyhow::Result;
 use prodex_cli::SUPER_DEEPSEEK_DEFAULT_MODEL;
-use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
 
 mod conversation_store;
 mod input_items;
@@ -46,8 +27,6 @@ mod response;
 mod tools;
 
 pub(super) use conversation_store::RuntimeDeepSeekConversationStore;
-pub(super) type RuntimeDeepSeekPendingMessages =
-    Arc<Mutex<BTreeMap<u64, RuntimeDeepSeekPendingRequest>>>;
 
 #[derive(Clone, Default)]
 pub(super) struct RuntimeDeepSeekPendingRequest {

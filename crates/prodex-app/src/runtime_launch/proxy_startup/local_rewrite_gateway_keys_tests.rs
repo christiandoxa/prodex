@@ -4,14 +4,37 @@ use super::{
     BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey, RUNTIME_GATEWAY_RESERVATION_TTL_MS,
     RequestId, ReservationRequest, RuntimeGatewayDurableReservationError, RuntimeGatewayStateStore,
     RuntimeGatewayVirtualKeyStoreFile, TenantId, UsageAmount, calculate_cost_microusd,
-    estimate_request_input_tokens, runtime_gateway_sqlite_open,
-    runtime_gateway_sqlite_reserve_usage, runtime_gateway_virtual_key_store_load_strict,
+    estimate_request_input_tokens, runtime_gateway_conversation_namespace,
+    runtime_gateway_sqlite_open, runtime_gateway_sqlite_reserve_usage,
+    runtime_gateway_virtual_key_store_load_strict,
 };
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_create_current_schema_for_tests;
 use crate::runtime_launch::proxy_startup::local_rewrite_gateway_store_types::{
     RuntimeGatewayScimUser, runtime_gateway_virtual_key_store_version,
 };
 use std::sync::{Arc, Barrier};
+
+#[test]
+fn conversation_namespace_is_stable_opaque_and_tenant_bound() {
+    let tenant_a = TenantId::new();
+    let tenant_b = TenantId::new();
+    let namespace = runtime_gateway_conversation_namespace(&tenant_a, "virtual-key", "shared-key");
+
+    assert_eq!(
+        namespace,
+        runtime_gateway_conversation_namespace(&tenant_a, "virtual-key", "shared-key")
+    );
+    assert_ne!(
+        namespace,
+        runtime_gateway_conversation_namespace(&tenant_b, "virtual-key", "shared-key")
+    );
+    assert_ne!(
+        namespace,
+        runtime_gateway_conversation_namespace(&tenant_a, "principal", "shared-key")
+    );
+    assert!(!namespace.contains("shared-key"));
+    assert!(!namespace.contains(&tenant_a.to_string()));
+}
 
 #[test]
 fn key_store_load_failure_is_fail_closed_and_logs_without_path_details() {

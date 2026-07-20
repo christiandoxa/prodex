@@ -78,9 +78,8 @@ fn deepseek_sse_reader_stores_reasoning_content_for_tool_call_replay() {
 
     assert!(output.contains("\"reasoning_content\":\"Need package metadata.\""));
     assert!(output.contains("event: response.completed"));
-    let stored = conversations.lock().unwrap();
-    let messages = stored
-        .get("chatcmpl_1")
+    let messages = conversations
+        .history("chatcmpl_1")
         .expect("stream should store conversation");
     assert_eq!(messages[1]["reasoning_content"], "Need package metadata.");
     assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
@@ -131,9 +130,8 @@ fn deepseek_sse_state_stores_tool_call_snapshot_before_done_event() {
         }]
     }));
 
-    let stored = conversations.lock().unwrap();
-    let messages = stored
-        .get("chatcmpl_1")
+    let messages = conversations
+        .history("chatcmpl_1")
         .expect("tool-call finish should store conversation before stream done");
     assert_eq!(messages[1]["reasoning_content"], "Need commit history.");
     assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
@@ -266,11 +264,10 @@ fn deepseek_sse_missing_tool_call_id_fallback_uses_call_id_uuidv7() {
     assert_eq!(generated_call_ids.len(), 1);
     assert_eq!(uuid.as_uuid().get_version_num(), 7);
     assert!(!output.contains("\"call_id\":\"call_deepseek_7_0\""));
-    let stored = conversations.lock().unwrap();
-    assert_eq!(
-        stored["chatcmpl_no_call_id"][0]["tool_calls"][0]["id"],
-        call_id.as_str()
-    );
+    let stored = conversations
+        .history("chatcmpl_no_call_id")
+        .expect("stream should store conversation");
+    assert_eq!(stored[0]["tool_calls"][0]["id"], call_id.as_str());
 }
 
 #[test]
@@ -296,9 +293,8 @@ fn deepseek_sse_reader_wraps_noisy_shell_call_with_rtk() {
 
     assert!(output.contains(r#""delta":"{\"cmd\":\"rtk cargo test -q login\"}""#));
     assert!(output.contains(r#""arguments":"{\"cmd\":\"rtk cargo test -q login\"}""#));
-    let stored = conversations.lock().unwrap();
-    let messages = stored
-        .get("chatcmpl_3")
+    let messages = conversations
+        .history("chatcmpl_3")
         .expect("stream should store conversation");
     assert_eq!(
         messages[1]["tool_calls"][0]["function"]["arguments"],
@@ -326,10 +322,11 @@ fn deepseek_sse_reader_maps_flat_mcp_call_to_namespace_function_call() {
     assert!(output.contains("\"namespace\":\"mcp__prodex_sqz\""));
     assert!(output.contains("\"name\":\"compress\""));
     assert!(output.contains("\"arguments\":\"{\\\"text\\\":\\\"hello\\\"}\""));
-    let store = conversations.lock().unwrap();
-    let assistant = store
-        .get("chatcmpl_mcp")
-        .and_then(|messages| messages.last())
+    let history = conversations
+        .history("chatcmpl_mcp")
+        .expect("conversation should be stored");
+    let assistant = history
+        .last()
         .expect("conversation should retain provider tool name");
     assert_eq!(
         assistant["tool_calls"][0]["function"]["name"],

@@ -132,6 +132,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
             copilot_context: None,
         });
     }
+    let conversations = shared.deepseek_conversations_for_request(request);
     let anthropic_request = if messages_route {
         match translate_runtime_anthropic_messages_request(request) {
             Ok(translated) => Some(translated),
@@ -173,7 +174,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
 
     let translated = runtime_provider_chat_compatible_request_body(
         &body,
-        &shared.deepseek_conversations,
+        &conversations,
         RuntimeProviderBridgeKind::Kiro,
         "",
         false,
@@ -210,6 +211,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
                     requested_effort,
                     chat_completions_route,
                     shared,
+                    conversations.clone(),
                 )?),
                 profile_name: auth.profile_name.clone(),
             });
@@ -269,7 +271,7 @@ pub(super) fn send_runtime_kiro_upstream_request(
             && let Some(response_id) = response.get("id").and_then(Value::as_str)
         {
             runtime_deepseek_store_conversation(
-                &shared.deepseek_conversations,
+                &conversations,
                 response_id,
                 translated.messages,
                 runtime_kiro_acp_chat_assistant_messages_from_prompt_turn(&turn),
@@ -525,6 +527,7 @@ fn runtime_kiro_streaming_reader(
     requested_effort: Option<String>,
     chat_completions_route: bool,
     shared: &RuntimeLocalRewriteProxyShared,
+    conversations: RuntimeDeepSeekConversationStore,
 ) -> Result<RuntimeKiroStreamingReader> {
     let secret = read_kiro_auth_secret(&auth.codex_home)?;
     let overlay_root = create_private_kiro_temp_root("runtime")?;
@@ -546,7 +549,6 @@ fn runtime_kiro_streaming_reader(
         .clone()
         .unwrap_or_else(|| PathBuf::from(default_command));
     let profile_name = auth.profile_name.clone();
-    let conversations = shared.deepseek_conversations.clone();
     let async_runtime = shared.runtime_shared.async_runtime.clone();
     let (sender, receiver) = mpsc::channel();
     let error_sender = sender.clone();

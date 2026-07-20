@@ -24,10 +24,7 @@ mod tests {
         conversations: &super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore,
     ) -> bool {
         deepseek_provider_core_simple_request(body, |previous_response_id| {
-            conversations
-                .lock()
-                .ok()
-                .is_some_and(|store| store.contains_key(previous_response_id))
+            conversations.contains(previous_response_id)
         })
     }
 
@@ -198,8 +195,8 @@ mod tests {
         assert!(simple_request(&continuation, &empty));
 
         let bound = conversation_store();
-        bound.lock().unwrap().insert(
-            "resp_1".to_string(),
+        bound.insert(
+            "resp_1",
             vec![serde_json::json!({
                 "role": "assistant",
                 "content": "stored history"

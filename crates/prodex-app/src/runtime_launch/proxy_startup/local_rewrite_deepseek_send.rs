@@ -120,6 +120,7 @@ fn send_runtime_deepseek_responses_request(
     );
     let messages_upstream_url =
         runtime_deepseek_anthropic_messages_upstream_url(&shared.upstream_base_url);
+    let conversations = shared.deepseek_conversations_for_request(request);
     for (api_key_index, (api_key_label, api_key)) in api_key_attempts.into_iter().enumerate() {
         for (model_index, model) in model_chain.iter().enumerate() {
             let model_body = runtime_provider_request_body_with_model(&model_selection.body, model);
@@ -138,18 +139,14 @@ fn send_runtime_deepseek_responses_request(
             }
             let mut translated = runtime_deepseek_chat_request_body_with_options(
                 &model_body,
-                &shared.deepseek_conversations,
+                &conversations,
                 RuntimeDeepSeekRewriteOptions {
                     strict_tools,
                     web_search_mode,
                 },
             )?;
             if deepseek_provider_core_simple_request(&model_body, |previous_response_id| {
-                shared
-                    .deepseek_conversations
-                    .lock()
-                    .ok()
-                    .is_some_and(|store| store.contains_key(previous_response_id))
+                conversations.contains(previous_response_id)
             }) && let Some(body) = conformance
                 .as_ref()
                 .and_then(core_deepseek_provider_core_request_body)
@@ -180,15 +177,6 @@ fn send_runtime_deepseek_responses_request(
             } else {
                 translated.body
             };
-            if let Ok(mut pending) = shared.deepseek_pending_messages.lock() {
-                pending.insert(
-                    request_id,
-                    RuntimeDeepSeekPendingRequest {
-                        messages: translated.messages,
-                        response_metadata: translated.response_metadata,
-                    },
-                );
-            }
             let send_result =
                 send_runtime_local_rewrite_prepared_request_with_chat_search_fallback(
                     RuntimeLocalRewriteSearchFallbackRequest {
@@ -212,7 +200,14 @@ fn send_runtime_deepseek_responses_request(
                 )?;
             let (status, parts, class) = match send_result {
                 RuntimeLocalRewritePreparedSendResult::Live(response) => {
-                    return Ok(runtime_deepseek_live_result(response, native_messages));
+                    return Ok(runtime_deepseek_live_result(
+                        response,
+                        native_messages,
+                        RuntimeDeepSeekPendingRequest {
+                            messages: translated.messages,
+                            response_metadata: translated.response_metadata,
+                        },
+                    ));
                 }
                 RuntimeLocalRewritePreparedSendResult::Error {
                     status,
@@ -313,7 +308,11 @@ fn send_runtime_deepseek_passthrough_request(
             }
             return Ok(runtime_deepseek_buffered_result(parts));
         }
-        return Ok(runtime_deepseek_live_result(response, false));
+        return Ok(runtime_deepseek_live_result(
+            response,
+            false,
+            RuntimeDeepSeekPendingRequest::default(),
+        ));
     }
     anyhow::bail!("no DeepSeek API key attempts were available")
 }
@@ -356,13 +355,16 @@ fn runtime_deepseek_buffered_result(
 fn runtime_deepseek_live_result(
     response: reqwest::blocking::Response,
     native_messages: bool,
+    pending_request: RuntimeDeepSeekPendingRequest,
 ) -> RuntimeLocalRewriteUpstreamResult {
+    let live_response = if native_messages {
+        RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
+    } else {
+        RuntimeLocalRewriteLiveResponse::new(response)
+    }
+    .with_chat_compatible_request(pending_request);
     RuntimeLocalRewriteUpstreamResult {
-        response: RuntimeLocalRewriteUpstreamResponse::Live(if native_messages {
-            RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response)
-        } else {
-            RuntimeLocalRewriteLiveResponse::new(response)
-        }),
+        response: RuntimeLocalRewriteUpstreamResponse::Live(live_response),
         gemini_context: None,
         copilot_context: None,
     }

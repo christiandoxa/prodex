@@ -642,7 +642,6 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         resolved_harness,
         deepseek_conversations: RuntimeDeepSeekConversationStore::default(),
-        deepseek_pending_messages: Arc::new(Mutex::new(BTreeMap::new())),
         gemini_conversations: RuntimeDeepSeekConversationStore::default(),
         gemini_oauth_pool,
         copilot_oauth_pool,

@@ -521,10 +521,11 @@ fn gemini_sse_reader_maps_flat_mcp_call_to_namespace_function_call() {
     assert!(output.contains("\"namespace\":\"mcp__prodex_sqz\""));
     assert!(output.contains("\"name\":\"compress\""));
     assert!(output.contains("\"arguments\":\"{\\\"text\\\":\\\"hello\\\"}\""));
-    let store = conversations.lock().unwrap();
-    let assistant = store
-        .get("resp_mcp")
-        .and_then(|messages| messages.last())
+    let history = conversations
+        .history("resp_mcp")
+        .expect("conversation should be stored");
+    let assistant = history
+        .last()
         .expect("conversation should retain provider tool name");
     assert_eq!(
         assistant["tool_calls"][0]["function"]["name"],
@@ -597,9 +598,8 @@ fn gemini_sse_reader_preserves_function_call_thought_signature_in_history() {
     let mut output = String::new();
     reader.read_to_string(&mut output).unwrap();
 
-    let store = conversations.lock().unwrap();
-    let history = store
-        .get("resp_sig")
+    let history = conversations
+        .history("resp_sig")
         .expect("conversation should be stored");
     let assistant = history.last().expect("assistant message should be stored");
 

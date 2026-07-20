@@ -1,6 +1,4 @@
-use super::super::deepseek_rewrite::{
-    RuntimeDeepSeekConversationStore, RuntimeDeepSeekPendingMessages,
-};
+use super::super::deepseek_rewrite::RuntimeDeepSeekConversationStore;
 use super::super::local_rewrite_classification_rules::RuntimeClassificationRulesSnapshotSet;
 use super::super::local_rewrite_copilot::RuntimeCopilotOAuthPool;
 use super::super::local_rewrite_gateway_admin_auth::RuntimeGatewayOidcJwksSnapshot;
@@ -41,7 +39,6 @@ pub(in super::super) struct RuntimeLocalRewriteProcessServices {
     pub(in super::super) mount_path: String,
     pub(in super::super) resolved_harness: prodex_provider_core::ResolvedHarnessMode,
     pub(in super::super) deepseek_conversations: RuntimeDeepSeekConversationStore,
-    pub(in super::super) deepseek_pending_messages: RuntimeDeepSeekPendingMessages,
     pub(in super::super) gemini_conversations: RuntimeDeepSeekConversationStore,
     pub(in super::super) gemini_oauth_pool: Option<RuntimeGeminiOAuthPool>,
     pub(in super::super) copilot_oauth_pool: Option<RuntimeCopilotOAuthPool>,

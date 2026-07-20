@@ -28,8 +28,10 @@ is not stored in approval records.
 
 ## Implementation status
 
-Typed approval effects, bounded content-free approval records and policy
-approval lifecycle primitives exist. Request-bound execution-token atomic
-consumption is not yet an authoritative production path. The feature remains
-optional and must not be advertised as complete until its store, PEP, API/CLI
-and replay/race matrix pass.
+The optional execution-approval effect is enforced in the gateway before
+provider dispatch. The production PEP derives a content-free fingerprint from
+the tenant, principal, governance session, action, model, requested tools,
+request-body digest and active policy revision. The governance repository owns
+quorum approval, expiry, revocation and atomic single-use consumption together
+with create/consume audit-outbox writes. Tenant-scoped administration routes
+and regression tests cover exact binding, quorum, replay and one-use behavior.

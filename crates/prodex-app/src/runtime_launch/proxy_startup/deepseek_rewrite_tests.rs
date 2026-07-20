@@ -24,7 +24,7 @@ mod tests {
             "tool_calls": [{"id": "call-shared"}],
         })];
 
-        tenant_a.insert_bounded("resp-shared", history.clone(), 32);
+        tenant_a.insert("resp-shared", history.clone());
 
         assert_eq!(tenant_a.history("resp-shared"), Some(history));
         assert!(tenant_b.history("resp-shared").is_none());
@@ -36,7 +36,7 @@ mod tests {
                 ))
                 .is_none()
         );
-        assert_eq!(conversations.lock().unwrap().len(), 1);
+        assert_eq!(conversations.len(), 1);
     }
 
     #[test]
