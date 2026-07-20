@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn runtime_proxy_realtime_forwards_multiple_client_frames_before_upstream_output() {
+    let _test_guard = crate::acquire_test_runtime_lock();
+    let fixture = start_runtime_continuation_fixture(
+        RuntimeProxyBackend::start_websocket_realtime_sideband(),
+        "main",
+        &["main"],
+        &[],
+        Vec::new(),
+    );
+    let mut socket = fixture.connect_realtime_websocket("backend-api/prodex/live");
+
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({"type": "session.update"}),
+    );
+    let (_, session) = read_runtime_websocket_until(&mut socket, |text| {
+        text.contains("\"type\":\"session.updated\"")
+    });
+    assert!(session.contains("sess-realtime"), "{session}");
+
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({"type": "input_audio.append", "audio": "chunk-one"}),
+    );
+    socket
+        .send(WsMessage::Ping("realtime-ping".into()))
+        .expect("realtime ping should send while upstream is silent");
+    send_runtime_websocket_json(
+        &mut socket,
+        serde_json::json!({"type": "input_audio.append", "audio": "chunk-two"}),
+    );
+
+    let mut saw_pong = false;
+    let output = loop {
+        match socket.read().expect("realtime frame should arrive") {
+            WsMessage::Pong(payload) => saw_pong |= payload.as_ref() == b"realtime-ping",
+            WsMessage::Text(text) if text.contains("\"type\":\"output_audio.delta\"") => {
+                break text.to_string();
+            }
+            _ => {}
+        }
+    };
+    let _ = socket.close(None);
+
+    assert!(saw_pong, "local ping must not wait for upstream output");
+    assert!(output.contains("fixture-audio"), "{output}");
+    let requests = fixture.backend.websocket_requests();
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    assert!(requests[1].contains("chunk-one"), "{requests:?}");
+    assert!(requests[2].contains("chunk-two"), "{requests:?}");
+    let log = fixture.wait_for_log(|log| {
+        log.contains("upstream_connect_start") && log.contains("/backend-api/codex/live")
+    });
+    assert!(log.contains("/backend-api/codex/live"), "{log}");
+}
+
+#[test]
 fn runtime_proxy_websocket_fresh_request_rotates_past_usage_limit_account() {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =

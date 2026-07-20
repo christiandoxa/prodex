@@ -180,19 +180,9 @@
     "reason": "External provider catalog generation now imports Kiro model metadata alongside Copilot while preserving exact secret/config validation; capped until provider-specific catalog loading splits out."
   },
   {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_backend_connection.rs",
-    "maxLines": 990,
-    "reason": "Gateway SQLite, PostgreSQL, and Redis compatibility migration handling remains capped after enterprise migrations moved to a focused module."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_key_store_backend.rs",
-    "maxLines": 1388,
-    "reason": "Gateway key-store compatibility, exact decoding, backend persistence, and explicit local PostgreSQL TLS fixtures remain capped until backend implementations are split."
-  },
-  {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1725,
-    "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh; canonical OIDC/SCIM evidence coverage moved to a focused nested fixture, and the remaining legacy matrix stays capped."
+    "maxLines": 1580,
+    "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh; SCIM organization and canonical OIDC evidence now live in focused nested fixtures, and the remaining legacy matrix stays capped."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
@@ -231,8 +221,8 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 958,
-    "reason": "Runtime policy types carry fixed gateway harness selection plus bounded PIP selectors, governance authority, lifecycle, session, audit, retention, and runtime secret-backend configuration in one typed schema."
+    "maxLines": 925,
+    "reason": "Runtime policy types carry gateway harness selection, governance authority, lifecycle, session, audit, retention, and secret-backend configuration after rule-condition schema ownership moved to its focused module."
   },
   {
     "file": "crates/prodex-runtime-policy/tests/src/validate.rs",
@@ -246,13 +236,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_governance.rs",
-    "maxLines": 970,
-    "reason": "Runtime governance compiles built-in and tenant policy snapshots plus bounded PIP selectors and compiler regressions; capped until DTO translation moves to a focused module."
+    "maxLines": 958,
+    "reason": "Runtime governance compiles built-in and tenant policy snapshots plus compiler regressions after principal-selector DTO translation moved to its focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 955,
-    "reason": "Gateway virtual-key admission carries trusted team, project, and user scope into the governed PIP and reserves bounded usage and reconciliation capacity before upstream dispatch."
+    "maxLines": 942,
+    "reason": "Gateway virtual-key admission carries trusted team, project, user, group, and department scope into the governed PIP after request-auth and SCIM linkage moved to focused modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",
@@ -261,8 +251,8 @@
   },
   {
     "file": "crates/prodex-domain/src/governance/policy_decision.rs",
-    "maxLines": 959,
-    "reason": "The pure governance PDP keeps bounded PIP attributes, typed conditions and obligations, conflict analysis, deterministic evaluation, and redacted contracts together."
+    "maxLines": 940,
+    "reason": "The pure governance PDP keeps typed conditions, obligations, conflict analysis, and deterministic evaluation together after bounded principal attributes moved to a focused module."
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",

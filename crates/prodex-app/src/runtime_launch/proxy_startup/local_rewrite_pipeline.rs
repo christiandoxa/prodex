@@ -57,8 +57,9 @@ use super::local_rewrite_gateway_data_plane_audit::{
 use super::local_rewrite_gateway_guardrail_webhook::runtime_gateway_guardrail_webhook_block;
 use super::local_rewrite_gateway_keys::{
     runtime_gateway_request_header_virtual_key, runtime_gateway_virtual_key_admission,
-    runtime_gateway_virtual_key_entries_is_empty, runtime_local_rewrite_request_is_authorized,
+    runtime_gateway_virtual_key_entries_is_empty,
 };
+use super::local_rewrite_gateway_request_auth::runtime_local_rewrite_request_is_authorized;
 use super::local_rewrite_gateway_route_load::RuntimeGatewayRouteLoadGuard;
 use super::local_rewrite_gateway_usage::RuntimeGatewayUsageRequestGuard;
 use super::local_rewrite_gateway_workload_identity::runtime_gateway_workload_credential;

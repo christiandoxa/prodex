@@ -276,6 +276,8 @@ fn validate_governance_policy_rules(
             rule.condition.team_id.as_deref(),
             rule.condition.project_id.as_deref(),
             rule.condition.user_id.as_deref(),
+            rule.condition.group_id.as_deref(),
+            rule.condition.department_id.as_deref(),
             rule.condition.requested_model.as_deref(),
             rule.condition.requested_tool.as_deref(),
             rule.condition.break_glass_scope.as_deref(),

@@ -29,6 +29,26 @@ pub(crate) fn runtime_broker_openai_mount_path(registry: &RuntimeBrokerRegistry)
     Ok(legacy_runtime_proxy_openai_mount_path(&version))
 }
 
+pub(crate) fn runtime_broker_realtime_ws_base_url(
+    registry: &RuntimeBrokerRegistry,
+    openai_mount_path: &str,
+) -> Result<Option<String>> {
+    registry
+        .realtime_ws_addr
+        .as_deref()
+        .map(|value| {
+            let addr = value
+                .parse::<std::net::SocketAddr>()
+                .with_context(|| format!("invalid runtime realtime websocket address {value}"))?;
+            anyhow::ensure!(
+                addr.ip().is_loopback(),
+                "runtime realtime websocket address must be loopback: {addr}"
+            );
+            Ok(format!("http://{addr}{openai_mount_path}/realtime"))
+        })
+        .transpose()
+}
+
 pub(crate) fn runtime_proxy_endpoint_from_registry(
     paths: &AppPaths,
     broker_key: &str,
@@ -43,11 +63,13 @@ pub(crate) fn runtime_proxy_endpoint_from_registry(
             registry.listen_addr
         )
     })?;
+    let openai_mount_path = runtime_broker_openai_mount_path(registry)?;
+    let realtime_ws_base_url = runtime_broker_realtime_ws_base_url(registry, &openai_mount_path)?;
     Ok(RuntimeProxyEndpoint {
         listen_addr,
-        openai_mount_path: runtime_broker_openai_mount_path(registry)?,
+        realtime_ws_base_url,
+        openai_mount_path,
         local_model_provider_id: None,
-        realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir,
         broker_session_affinity_control: Some(RuntimeBrokerSessionAffinityControl {

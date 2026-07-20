@@ -152,6 +152,7 @@ pub(crate) fn runtime_broker_publish_start(
             .map(|path| path.display().to_string()),
         executable_sha256: current_identity.executable_sha256.clone(),
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: proxy.realtime_ws_sidecar_addr.map(|addr| addr.to_string()),
     };
     save_runtime_broker_capability(
         paths,

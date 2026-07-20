@@ -12,6 +12,9 @@ use crate::{
 
 use super::{DataClassification, FindingKind, InspectionCoverage};
 
+mod principal_attributes;
+pub use principal_attributes::{MAX_POLICY_PRINCIPAL_GROUPS, PrincipalPolicyAttributes};
+
 pub const MAX_GOVERNANCE_POLICY_RULES: usize = 256;
 pub const MAX_POLICY_OBLIGATIONS: usize = 64;
 pub const MAX_POLICY_REASON_CODES: usize = 32;
@@ -141,52 +144,6 @@ pub struct EnvironmentContext {
     pub network_zone: NetworkZone,
     pub authentication_strength: u8,
     pub mfa_satisfied: bool,
-}
-
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct PrincipalPolicyAttributes {
-    team_id: Option<PolicySelector>,
-    project_id: Option<PolicySelector>,
-    user_id: Option<PolicySelector>,
-}
-
-impl PrincipalPolicyAttributes {
-    pub fn new(
-        team_id: Option<&str>,
-        project_id: Option<&str>,
-        user_id: Option<&str>,
-    ) -> Result<Self, GovernancePolicyError> {
-        Ok(Self {
-            team_id: team_id.map(PolicySelector::new).transpose()?,
-            project_id: project_id.map(PolicySelector::new).transpose()?,
-            user_id: user_id.map(PolicySelector::new).transpose()?,
-        })
-    }
-
-    pub fn team_id(&self) -> Option<&str> {
-        self.team_id.as_ref().map(PolicySelector::as_str)
-    }
-
-    pub fn project_id(&self) -> Option<&str> {
-        self.project_id.as_ref().map(PolicySelector::as_str)
-    }
-
-    pub fn user_id(&self) -> Option<&str> {
-        self.user_id.as_ref().map(PolicySelector::as_str)
-    }
-}
-
-impl fmt::Debug for PrincipalPolicyAttributes {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PrincipalPolicyAttributes")
-            .field("team_id", &self.team_id.as_ref().map(|_| "<redacted>"))
-            .field(
-                "project_id",
-                &self.project_id.as_ref().map(|_| "<redacted>"),
-            )
-            .field("user_id", &self.user_id.as_ref().map(|_| "<redacted>"))
-            .finish()
-    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -444,6 +401,8 @@ pub struct PolicyRuleCondition {
     pub team_id: Option<PolicySelector>,
     pub project_id: Option<PolicySelector>,
     pub user_id: Option<PolicySelector>,
+    pub group_id: Option<PolicySelector>,
+    pub department_id: Option<PolicySelector>,
     pub minimum_role: Option<Role>,
     pub credential_scope: Option<CredentialScope>,
     pub action: Option<GovernedAction>,
@@ -491,6 +450,18 @@ impl PolicyRuleCondition {
                 input
                     .principal_attributes
                     .user_id()
+                    .is_some_and(|value| selector_matches(selector, value))
+            })
+            && self.group_id.as_ref().is_none_or(|selector| {
+                input
+                    .principal_attributes
+                    .group_ids()
+                    .any(|value| selector_matches(selector, value))
+            })
+            && self.department_id.as_ref().is_none_or(|selector| {
+                input
+                    .principal_attributes
+                    .department_id()
                     .is_some_and(|value| selector_matches(selector, value))
             })
             && self
@@ -588,6 +559,11 @@ impl fmt::Debug for PolicyRuleCondition {
                 &self.project_id.as_ref().map(|_| "<redacted>"),
             )
             .field("user_id", &self.user_id.as_ref().map(|_| "<redacted>"))
+            .field("group_id", &self.group_id.as_ref().map(|_| "<redacted>"))
+            .field(
+                "department_id",
+                &self.department_id.as_ref().map(|_| "<redacted>"),
+            )
             .field("minimum_role", &self.minimum_role)
             .field("credential_scope", &self.credential_scope)
             .field("action", &self.action)
@@ -797,6 +773,7 @@ fn policy_rule_conditions_overlap(left: &PolicyRuleCondition, right: &PolicyRule
         && policy_selectors_overlap(&left.team_id, &right.team_id)
         && policy_selectors_overlap(&left.project_id, &right.project_id)
         && policy_selectors_overlap(&left.user_id, &right.user_id)
+        && policy_selectors_overlap(&left.department_id, &right.department_id)
         && optional_policy_attributes_overlap(&left.credential_scope, &right.credential_scope)
         && optional_policy_attributes_overlap(&left.action, &right.action)
         && optional_policy_attributes_overlap(&left.route, &right.route)
@@ -924,6 +901,10 @@ fn policy_required_attributes_present(
             && (rule.condition.project_id.is_none()
                 || input.principal_attributes.project_id().is_some())
             && (rule.condition.user_id.is_none() || input.principal_attributes.user_id().is_some())
+            && (rule.condition.group_id.is_none()
+                || input.principal_attributes.group_ids().next().is_some())
+            && (rule.condition.department_id.is_none()
+                || input.principal_attributes.department_id().is_some())
             && (rule.condition.requested_model.is_none()
                 || input.request_attributes.requested_model().is_some())
             && (rule.condition.requested_tool.is_none()

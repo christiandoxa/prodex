@@ -132,6 +132,7 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
         &mut local_socket,
         &handshake_request,
         shared,
+        false,
     ) {
         runtime_proxy_log(
             shared,

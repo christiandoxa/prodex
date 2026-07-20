@@ -100,6 +100,8 @@ fn stored_user() -> RuntimeGatewayScimUser {
         team_id: Some("team-a".to_string()),
         project_id: None,
         user_id: Some("user-a".to_string()),
+        group_ids: vec!["engineering".to_string()],
+        department_id: Some("research".to_string()),
         budget_id: None,
         allowed_key_prefixes: vec!["team-a-".to_string()],
         created_at_epoch: 1,
@@ -120,6 +122,8 @@ fn stored_records_round_trip_without_secret_projection_or_epoch_wrap() {
     let user_record = runtime_gateway_scim_user_record(&user).unwrap();
     assert_eq!(user_record.id, user_id());
     assert_eq!(user_record.user_name, "alice@example.com");
+    assert_eq!(user_record.group_ids, ["engineering"]);
+    assert_eq!(user_record.department_id.as_deref(), Some("research"));
     assert_eq!(user_record.updated_at_unix_ms, 2_000);
 
     let mut overflow = key;
@@ -193,6 +197,8 @@ fn scim_direct_and_operations_json_map_to_the_same_typed_patch() {
         "active": false,
         "urn:prodex:params:scim:schemas:gateway:2.0:User": {
             "tenant_id": "tenant-a",
+            "group_ids": ["engineering", "platform"],
+            "department_id": "research",
             "allowed_key_prefixes": ["team-a-"]
         }
     }))
@@ -207,13 +213,23 @@ fn scim_direct_and_operations_json_map_to_the_same_typed_patch() {
         direct.tenant_id,
         ApplicationPatchValue::Set("tenant-a".to_string())
     );
+    assert_eq!(
+        direct.group_ids,
+        ApplicationPatchValue::Set(vec!["engineering".to_string(), "platform".to_string()])
+    );
+    assert_eq!(
+        direct.department_id,
+        ApplicationPatchValue::Set("research".to_string())
+    );
 
     let operations = runtime_gateway_scim_patch(&serde_json::json!({
         "Operations": [
             {"op": "replace", "path": "userName", "value": "alice@example.com"},
             {"op": "remove", "path": "displayName"},
             {"op": "replace", "path": "active", "value": false},
-            {"op": "replace", "path": "tenant_id", "value": "tenant-a"}
+            {"op": "replace", "path": "tenant_id", "value": "tenant-a"},
+            {"op": "replace", "path": "group_ids", "value": ["engineering", "platform"]},
+            {"op": "replace", "path": "department_id", "value": "research"}
         ]
     }))
     .unwrap();
@@ -221,6 +237,8 @@ fn scim_direct_and_operations_json_map_to_the_same_typed_patch() {
     assert_eq!(operations.display_name, direct.display_name);
     assert_eq!(operations.active, direct.active);
     assert_eq!(operations.tenant_id, direct.tenant_id);
+    assert_eq!(operations.group_ids, direct.group_ids);
+    assert_eq!(operations.department_id, direct.department_id);
 }
 
 #[test]

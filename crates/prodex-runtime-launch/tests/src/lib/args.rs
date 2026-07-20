@@ -92,6 +92,7 @@ fn runtime_proxy_passthrough_args_add_realtime_sidecar_overrides() {
             OsString::from("-c"),
             OsString::from("experimental_realtime_ws_model=\"old\""),
             OsString::from("exec"),
+            OsString::from("hello"),
         ],
     )
     .into_iter()
@@ -110,6 +111,30 @@ fn runtime_proxy_passthrough_args_add_realtime_sidecar_overrides() {
         arg == "experimental_realtime_ws_model=\"old\""
             || arg == "--config=experimental_realtime_ws_model=\"old\""
     }));
+    assert_eq!(args.last().map(String::as_str), Some("hello"));
+}
+
+#[test]
+fn runtime_proxy_passthrough_args_insert_local_provider_override_before_prompt() {
+    let args = runtime_proxy_codex_passthrough_args(
+        Some(RuntimeProxyCodexEndpoint {
+            listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
+            openai_mount_path: "/v1",
+            local_model_provider_id: Some("prodex-local"),
+            realtime_ws_base_url: None,
+            realtime_ws_model: None,
+        }),
+        &[OsString::from("exec"), OsString::from("hello")],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    assert!(args.windows(2).any(|window| {
+        window[0] == "-c"
+            && window[1] == "model_providers.prodex-local.base_url=\"http://127.0.0.1:4455/v1\""
+    }));
+    assert_eq!(args.last().map(String::as_str), Some("hello"));
 }
 
 #[test]

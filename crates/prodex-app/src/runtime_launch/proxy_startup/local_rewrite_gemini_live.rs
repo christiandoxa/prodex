@@ -7,7 +7,7 @@ use crate::{
     WsMessage, WsRole, WsSocket, acquire_runtime_proxy_active_request_slot_with_wait,
     build_runtime_proxy_text_response, mark_runtime_proxy_local_overload, runtime_proxy_log,
     runtime_proxy_log_field, runtime_proxy_next_request_id, runtime_proxy_structured_log_message,
-    runtime_set_upstream_websocket_io_timeout,
+    runtime_set_upstream_websocket_read_timeout,
 };
 use anyhow::{Context, Result};
 use prodex_provider_core::gemini_provider_core_live_provider_stream_error;
@@ -384,8 +384,11 @@ fn handle_runtime_gemini_live_tcp_stream(
         let _ = local_socket.close(None);
         return Ok(());
     };
-    runtime_set_upstream_websocket_io_timeout(&mut upstream_socket, Some(GEMINI_LIVE_PUMP_TIMEOUT))
-        .context("failed to configure Gemini Live upstream pump timeout")?;
+    runtime_set_upstream_websocket_read_timeout(
+        &mut upstream_socket,
+        Some(GEMINI_LIVE_PUMP_TIMEOUT),
+    )
+    .context("failed to configure Gemini Live upstream pump timeout")?;
     runtime_proxy_log(
         &shared.runtime_shared,
         runtime_proxy_structured_log_message(

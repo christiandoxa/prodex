@@ -14,7 +14,6 @@ fn control_plane_policy() -> RuntimePolicyFile {
         r#"
 version = 1
 service_mode = "control-plane"
-
 [secrets]
 production = true
 projected_root = "/run/secrets/prodex"
@@ -58,7 +57,6 @@ fn governance_authority_tenants_are_typed_unique_and_bounded() {
     let duplicate = parse_policy(
         r#"
 version = 1
-
 [governance]
 authority_tenants = [
   "00000000-0000-7000-8000-000000000001",
@@ -89,7 +87,6 @@ fn governance_policy_rules_are_strict_typed_and_bounded() {
     let valid = parse_policy(
         r#"
 version = 1
-
 [[governance.policy_rules]]
 id = "deny.revoked.api"
 effect = "deny"
@@ -191,6 +188,9 @@ channel = "cli"
         .collect();
     assert!(validate_runtime_policy_file(&too_many, Path::new("policy.toml")).is_err());
 }
+
+#[path = "validate_organization.rs"]
+mod organization;
 
 #[test]
 fn governance_inspection_patterns_enforce_bounded_tenant_scoped_globs() {

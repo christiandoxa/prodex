@@ -299,10 +299,7 @@ pub fn runtime_proxy_local_model_provider_codex_args(
     }
 
     if !replaced {
-        let insert_at = args
-            .iter()
-            .position(|arg| arg == "--")
-            .unwrap_or(args.len());
+        let insert_at = codex_config_override_insertion_index(&args);
         args.splice(
             insert_at..insert_at,
             [OsString::from("-c"), OsString::from(provider_base_override)],
@@ -400,10 +397,7 @@ fn runtime_proxy_realtime_codex_args(
 
     for (index, (key, value)) in overrides.iter().enumerate() {
         if !replaced[index] {
-            let insert_at = args
-                .iter()
-                .position(|arg| arg == "--")
-                .unwrap_or(args.len());
+            let insert_at = codex_config_override_insertion_index(&args);
             args.splice(
                 insert_at..insert_at,
                 [
@@ -414,6 +408,12 @@ fn runtime_proxy_realtime_codex_args(
         }
     }
     args
+}
+
+fn codex_config_override_insertion_index(args: &[OsString]) -> usize {
+    first_codex_positional_arg_index(args)
+        .or_else(|| args.iter().position(|arg| arg == "--"))
+        .unwrap_or(args.len())
 }
 
 fn runtime_proxy_matching_realtime_override(

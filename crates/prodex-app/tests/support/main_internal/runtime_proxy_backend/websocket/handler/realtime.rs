@@ -17,17 +17,10 @@ pub(super) fn maybe_handle_realtime_sideband(
                 "instructions": "backend prompt"
             }
         }),
-        2 => serde_json::json!({
-            "type": "conversation.item.added",
-            "item": {
-                "id": "item-realtime"
-            }
-        }),
+        2 => return true,
         3 => serde_json::json!({
-            "type": "response.done",
-            "response": {
-                "id": "resp-realtime"
-            }
+            "type": "output_audio.delta",
+            "delta": "fixture-audio"
         }),
         _ => serde_json::json!({
             "type": "error",

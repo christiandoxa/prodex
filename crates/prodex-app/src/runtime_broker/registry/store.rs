@@ -314,6 +314,7 @@ mod tests {
             executable_path: None,
             executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+            realtime_ws_addr: None,
         }
     }
 

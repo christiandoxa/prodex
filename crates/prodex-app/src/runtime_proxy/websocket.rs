@@ -30,7 +30,7 @@ use runtime_proxy_crate::{
     runtime_websocket_target_from_parts,
 };
 
-fn runtime_websocket_error_log_value(error: &str) -> String {
+pub(super) fn runtime_websocket_error_log_value(error: &str) -> String {
     redaction_redact_secret_like_text(error).replace('\n', " ")
 }
 
@@ -39,8 +39,9 @@ pub(super) fn run_runtime_proxy_websocket_session(
     local_socket: &mut RuntimeLocalWebSocket,
     handshake_request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
+    realtime_duplex: bool,
 ) -> Result<()> {
-    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut websocket_session = RuntimeWebsocketSessionState::with_realtime_duplex(realtime_duplex);
     loop {
         match local_socket.read() {
             Ok(WsMessage::Text(text)) => {
@@ -73,6 +74,17 @@ pub(super) fn run_runtime_proxy_websocket_session(
                     shared,
                     websocket_session: &mut websocket_session,
                 })?;
+                if websocket_session.is_realtime_duplex() && websocket_session.has_socket() {
+                    let result = run_runtime_realtime_websocket_duplex_session(
+                        session_id,
+                        local_socket,
+                        handshake_request,
+                        shared,
+                        &mut websocket_session,
+                    );
+                    websocket_session.reset();
+                    return result;
+                }
             }
             Ok(WsMessage::Binary(_)) => {
                 runtime_proxy_log(

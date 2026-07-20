@@ -5,7 +5,7 @@ use super::local_rewrite_gateway_store_file::{
 };
 use super::local_rewrite_gateway_store_types::{
     RuntimeGatewayVirtualKeySource, RuntimeGatewayVirtualKeyStoreFile,
-    runtime_gateway_virtual_key_entry_from_stored,
+    runtime_gateway_apply_scim_policy_attributes, runtime_gateway_virtual_key_entry_from_stored,
 };
 use super::*;
 
@@ -14,7 +14,7 @@ pub(super) use atomic::{
     RuntimeGatewayAdminAtomicWrite, runtime_gateway_mutate_admin_key_store_atomic,
 };
 
-fn runtime_gateway_apply_admin_virtual_key_store(
+pub(super) fn runtime_gateway_apply_admin_virtual_key_store(
     shared: &RuntimeLocalRewriteProxyShared,
     store: &RuntimeGatewayVirtualKeyStoreFile,
 ) {
@@ -46,6 +46,7 @@ fn runtime_gateway_apply_admin_virtual_key_store(
             next.push(entry);
         }
     }
+    runtime_gateway_apply_scim_policy_attributes(&mut next, &store.scim_users);
     *entries = next;
 }
 

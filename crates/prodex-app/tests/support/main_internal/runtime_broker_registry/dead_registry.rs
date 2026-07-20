@@ -40,6 +40,7 @@ pub(super) fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_regi
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("dead broker registry should save");
@@ -113,6 +114,7 @@ pub(super) fn find_compatible_runtime_broker_registry_prunes_dead_registry_witho
         executable_path: None,
         executable_sha256: None,
         openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
     };
     save_runtime_broker_registry(&paths, broker_key, &registry)
         .expect("dead compatible registry should save");

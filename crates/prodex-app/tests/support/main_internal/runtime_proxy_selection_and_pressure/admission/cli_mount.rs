@@ -223,6 +223,20 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
         ),
         "https://chatgpt.com/backend-api/codex/realtime/calls"
     );
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
+            "/backend-api/prodex/realtime?intent=conversation"
+        ),
+        "https://chatgpt.com/backend-api/codex/realtime?intent=conversation"
+    );
+    assert_eq!(
+        runtime_proxy_upstream_url(
+            "https://chatgpt.com/backend-api",
+            "/backend-api/prodex/live/call-123"
+        ),
+        "https://chatgpt.com/backend-api/codex/live/call-123"
+    );
 }
 
 #[test]

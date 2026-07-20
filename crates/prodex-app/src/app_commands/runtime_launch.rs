@@ -372,9 +372,7 @@ impl<'a> RuntimeLaunchPreparationBuilder<'a> {
         let managed = self.selected_profile_is_managed()?;
         if managed {
             ensure_managed_runtime_launch_home_under_root(&self.paths, &self.selection.codex_home)?;
-            // ponytail: keep launch hot path out of full shared-session maintenance;
-            // targeted resume repair runs before child launch, and full maintenance already runs
-            // after child exit.
+            // ponytail: only targeted resume repair belongs here; full maintenance runs after exit.
             prepare_managed_codex_home_for_runtime_launch(&self.paths, &self.selection.codex_home)?;
         }
 
@@ -770,7 +768,9 @@ fn start_runtime_proxy_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string(),
         local_model_provider_id: None,
-        realtime_ws_base_url: None,
+        realtime_ws_base_url: proxy
+            .realtime_ws_sidecar_addr
+            .map(|addr| format!("http://{addr}{RUNTIME_PROXY_OPENAI_MOUNT_PATH}/realtime")),
         realtime_ws_model: None,
         lease_dir: paths.root.join(if fixed {
             "runtime-fixed-proxy-leases"
@@ -825,9 +825,9 @@ fn start_local_rewrite_proxy_endpoint(
         openai_mount_path: RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH.to_string(),
         local_model_provider_id: Some(local_model_provider_id.to_string()),
         realtime_ws_base_url: proxy
-            .gemini_live_sidecar_addr
+            .realtime_ws_sidecar_addr
             .map(|addr| format!("http://{addr}")),
-        realtime_ws_model: proxy.gemini_live_sidecar_model.clone(),
+        realtime_ws_model: proxy.realtime_ws_model.clone(),
         lease_dir: paths.root.join("runtime-local-proxy-leases"),
         broker_session_affinity_control: None,
         _lease: None,

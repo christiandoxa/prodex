@@ -136,6 +136,8 @@ fn typed_attribute_selectors_match_and_missing_values_fail_closed() {
                 team_id: Some(PolicySelector::new("team-a").unwrap()),
                 project_id: Some(PolicySelector::new("project-a").unwrap()),
                 user_id: Some(PolicySelector::new("user-a").unwrap()),
+                group_id: Some(PolicySelector::new("engineering").unwrap()),
+                department_id: Some(PolicySelector::new("research").unwrap()),
                 requested_model: Some(PolicySelector::new("model-a").unwrap()),
                 requested_tool: Some(PolicySelector::new("shell").unwrap()),
                 requested_modality: Some(DataModality::Audio),
@@ -151,8 +153,15 @@ fn typed_attribute_selectors_match_and_missing_values_fail_closed() {
     .unwrap();
     let route = CanonicalRoute::new("responses").unwrap();
     let capabilities = prodex_domain::CapabilitySet::new(Vec::new());
-    let principal_attributes =
-        PrincipalPolicyAttributes::new(Some("team-a"), Some("project-a"), Some("user-a")).unwrap();
+    let groups = vec!["platform".to_string(), "engineering".to_string()];
+    let principal_attributes = PrincipalPolicyAttributes::new_with_organization(
+        Some("team-a"),
+        Some("project-a"),
+        Some("user-a"),
+        &groups,
+        Some("research"),
+    )
+    .unwrap();
     let tools = vec!["shell".to_string()];
     let request_attributes = RequestPolicyAttributes::new(
         Some("model-a"),
@@ -202,6 +211,8 @@ fn typed_attribute_selectors_match_and_missing_values_fail_closed() {
         "team-a",
         "project-a",
         "user-a",
+        "engineering",
+        "research",
         "model-a",
         "shell",
         "incident-a",
@@ -222,16 +233,30 @@ fn typed_request_attributes_are_bounded_and_condition_debug_is_redacted() {
         RequestPolicyAttributes::new(Some(&overlong_model), &[], Vec::new(), None, 1),
         Err(GovernancePolicyError::InvalidToken)
     );
+    let too_many_groups = vec!["group".to_string(); 129];
+    assert_eq!(
+        PrincipalPolicyAttributes::new_with_organization(None, None, None, &too_many_groups, None,),
+        Err(GovernancePolicyError::AttributeLimitExceeded)
+    );
 
     let condition = PolicyRuleCondition {
         team_id: Some(PolicySelector::new("team-secret").unwrap()),
+        group_id: Some(PolicySelector::new("group-secret").unwrap()),
+        department_id: Some(PolicySelector::new("department-secret").unwrap()),
         requested_model: Some(PolicySelector::new("model-secret").unwrap()),
         requested_tool: Some(PolicySelector::new("tool-secret").unwrap()),
         break_glass_scope: Some(PolicySelector::new("scope-secret").unwrap()),
         ..condition()
     };
     let rendered = format!("{condition:?}");
-    for secret in ["team-secret", "model-secret", "tool-secret", "scope-secret"] {
+    for secret in [
+        "team-secret",
+        "group-secret",
+        "department-secret",
+        "model-secret",
+        "tool-secret",
+        "scope-secret",
+    ] {
         assert!(!rendered.contains(secret));
     }
 }

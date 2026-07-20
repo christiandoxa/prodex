@@ -185,12 +185,31 @@ function validateTestMatrix(content, matrixPath = TEST_MATRIX_PATH) {
     errors.push(`${matrixPath}: tests must be a non-empty array`);
     return errors;
   }
+  const ids = new Set();
   parsed.tests.forEach((test, index) => {
     if (typeof test?.id !== "string" || test.id.trim() === "") {
       errors.push(`${matrixPath}: tests[${index}].id must be a non-empty string`);
+    } else if (ids.has(test.id)) {
+      errors.push(`${matrixPath}: tests[${index}].id '${test.id}' is duplicated`);
+    } else {
+      ids.add(test.id);
     }
     if (!TEST_MATRIX_STATUSES.has(test?.implementation_status)) {
       errors.push(`${matrixPath}: tests[${index}].implementation_status is invalid`);
+    }
+    if (
+      !Array.isArray(test?.evidence) ||
+      test.evidence.length === 0 ||
+      test.evidence.some((item) => typeof item !== "string" || item.trim() === "")
+    ) {
+      errors.push(`${matrixPath}: tests[${index}].evidence must contain non-empty strings`);
+    } else if (
+      ["tested", "implemented"].includes(test.implementation_status) &&
+      test.evidence.some((item) => /\b(?:pending|planned|todo)\b/iu.test(item))
+    ) {
+      errors.push(
+        `${matrixPath}: tests[${index}].evidence contradicts implementation_status '${test.implementation_status}'`,
+      );
     }
   });
   return errors;
@@ -352,14 +371,26 @@ function runSelfTest() {
 
   const plannedMatrix = JSON.stringify({
     schema_version: 1,
-    tests: [{ id: "SEC-TEST-001", implementation_status: "planned" }],
+    tests: [
+      {
+        id: "SEC-TEST-001",
+        implementation_status: "planned",
+        evidence: ["design evidence only"],
+      },
+    ],
   });
   if (validateTestMatrix(plannedMatrix, "test-matrix.json").length !== 0) {
     throw new Error("self-test failed: valid incomplete test matrix rejected");
   }
   const invalidMatrix = JSON.stringify({
     schema_version: 1,
-    tests: [{ id: "SEC-TEST-001", implementation_status: "complete" }],
+    tests: [
+      {
+        id: "SEC-TEST-001",
+        implementation_status: "complete",
+        evidence: ["test evidence"],
+      },
+    ],
   });
   if (
     !validateTestMatrix(invalidMatrix, "test-matrix.json").some((error) =>
@@ -367,6 +398,48 @@ function runSelfTest() {
     )
   ) {
     throw new Error("self-test failed: invalid test matrix status accepted");
+  }
+  const contradictoryMatrix = JSON.stringify({
+    schema_version: 1,
+    tests: [
+      {
+        id: "SEC-TEST-001",
+        implementation_status: "tested",
+        evidence: ["database validation pending"],
+      },
+    ],
+  });
+  if (
+    !validateTestMatrix(contradictoryMatrix, "test-matrix.json").some((error) =>
+      error.includes("contradicts implementation_status"),
+    )
+  ) {
+    throw new Error("self-test failed: contradictory test matrix evidence accepted");
+  }
+  const duplicateMatrix = JSON.stringify({
+    schema_version: 1,
+    tests: [
+      { id: "SEC-TEST-001", implementation_status: "planned", evidence: ["first"] },
+      { id: "SEC-TEST-001", implementation_status: "planned", evidence: ["second"] },
+    ],
+  });
+  if (
+    !validateTestMatrix(duplicateMatrix, "test-matrix.json").some((error) =>
+      error.includes("is duplicated"),
+    )
+  ) {
+    throw new Error("self-test failed: duplicate test matrix id accepted");
+  }
+  const emptyEvidenceMatrix = JSON.stringify({
+    schema_version: 1,
+    tests: [{ id: "SEC-TEST-001", implementation_status: "planned", evidence: [] }],
+  });
+  if (
+    !validateTestMatrix(emptyEvidenceMatrix, "test-matrix.json").some((error) =>
+      error.includes("evidence must contain non-empty strings"),
+    )
+  ) {
+    throw new Error("self-test failed: empty test matrix evidence accepted");
   }
 
   const incompleteWorkflow = "name: CI\n- name: Enforce enterprise boundary guards\n  run: npm run ci:enterprise-docs-guard\n";

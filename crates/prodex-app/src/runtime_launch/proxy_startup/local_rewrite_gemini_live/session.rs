@@ -9,7 +9,7 @@ use super::GEMINI_LIVE_IDLE_SLEEP;
 use super::local_rewrite_gemini_live_translation::RuntimeGeminiLiveState;
 use crate::{
     RuntimeUpstreamWebSocket, WsMessage, WsSocket, runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_structured_log_message, runtime_set_upstream_websocket_io_timeout,
+    runtime_proxy_structured_log_message, runtime_set_upstream_websocket_read_timeout,
 };
 use anyhow::{Context, Result};
 use prodex_application::ApplicationResponseObligationPlan;
@@ -297,7 +297,7 @@ fn runtime_gemini_live_drain_upstream<S>(
 where
     S: Read + Write,
 {
-    runtime_set_upstream_websocket_io_timeout(upstream_socket, Some(timeout))
+    runtime_set_upstream_websocket_read_timeout(upstream_socket, Some(timeout))
         .context("failed to set Gemini Live drain timeout")?;
     loop {
         match upstream_socket.read() {

@@ -212,6 +212,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             executable_path: None,
             executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+            realtime_ws_addr: None,
         },
     )
     .expect("dead broker registry should save");
@@ -239,6 +240,7 @@ fn preferred_runtime_broker_listen_addr_only_reuses_dead_registry_ports() {
             executable_path: None,
             executable_sha256: None,
             openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+            realtime_ws_addr: None,
         },
     )
     .expect("live broker registry should save");

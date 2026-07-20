@@ -242,8 +242,8 @@ struct RuntimeRotationProxy {
     worker_threads: Vec<thread::JoinHandle<()>>,
     accept_worker_count: usize,
     listen_addr: std::net::SocketAddr,
-    gemini_live_sidecar_addr: Option<std::net::SocketAddr>,
-    gemini_live_sidecar_model: Option<String>,
+    realtime_ws_sidecar_addr: Option<std::net::SocketAddr>,
+    realtime_ws_model: Option<String>,
     log_path: PathBuf,
     active_request_count: Arc<AtomicUsize>,
     #[cfg(test)]
@@ -270,18 +270,28 @@ fn runtime_set_upstream_websocket_io_timeout(
     socket: &mut RuntimeUpstreamWebSocket,
     timeout: Option<Duration>,
 ) -> io::Result<()> {
+    runtime_set_upstream_websocket_read_timeout(socket, timeout)?;
     match socket.get_mut() {
         MaybeTlsStream::Plain(stream) => {
-            stream.set_read_timeout(timeout)?;
             stream.set_write_timeout(timeout)?;
         }
         MaybeTlsStream::Rustls(stream) => {
-            stream.sock.set_read_timeout(timeout)?;
             stream.sock.set_write_timeout(timeout)?;
         }
         _ => {}
     }
     Ok(())
+}
+
+fn runtime_set_upstream_websocket_read_timeout(
+    socket: &mut RuntimeUpstreamWebSocket,
+    timeout: Option<Duration>,
+) -> io::Result<()> {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => stream.set_read_timeout(timeout),
+        MaybeTlsStream::Rustls(stream) => stream.sock.set_read_timeout(timeout),
+        _ => Ok(()),
+    }
 }
 
 fn runtime_websocket_timeout_error(err: &WsError) -> bool {

@@ -21,5 +21,6 @@ fn test_registry() -> RuntimeBrokerRegistry {
         executable_path: Some("/tmp/prodex".to_string()),
         executable_sha256: Some("abc123".to_string()),
         openai_mount_path: Some("/backend-api/prodex".to_string()),
+        realtime_ws_addr: None,
     }
 }

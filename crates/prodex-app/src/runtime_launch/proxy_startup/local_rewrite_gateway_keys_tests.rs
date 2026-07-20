@@ -62,6 +62,8 @@ fn key_store_load_filters_malformed_scim_rows_from_active_state() {
         team_id: None,
         project_id: None,
         user_id: Some(prodex_domain::PrincipalId::new().to_string()),
+        group_ids: Vec::new(),
+        department_id: None,
         budget_id: None,
         allowed_key_prefixes: vec!["team-a-".to_string()],
         created_at_epoch: 1,

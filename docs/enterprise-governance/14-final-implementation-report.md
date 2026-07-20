@@ -156,11 +156,12 @@ original eligible set.
    session indexes across replicas.
 9. Policy-selected execution approval is request-digest/revision bound,
    quorum-gated, atomically single-use, and exposed through content-free admin
-   HTTP. Bounded break-glass approvals are separate, expiring, use-limited,
-   audited, and enforced for retention purge without becoming a generic bypass.
-10. Group/department ABAC attributes are not supplied by the current identity
-    evidence contract. Tenant, principal, role, project, classification,
-    provider and revision attributes are enforced.
+   HTTP. Break-glass approval is a separate, independently approved,
+   one-hour-bounded and revocable credential enforced only for bounded,
+   mandatorily audited retention purge; it is not a generic bypass.
+10. SCIM-linked group and department attributes are cached on matching active
+    virtual-key identities and evaluated by the typed PDP. The linkage requires
+    one unambiguous same-tenant `user_id` match and fails closed otherwise.
 11. Configured `gateway.workload_identity` verifies JWT/JWKS issuer, audience,
     tenant, subject, and scope. With `mtls_required`, the direct Rustls listener
     verifies the client chain and requires JWT `cnf.x5t#S256` binding to the

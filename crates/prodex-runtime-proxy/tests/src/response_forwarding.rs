@@ -50,7 +50,7 @@ fn filters_connection_named_text_response_headers() {
 }
 
 #[test]
-fn preserves_codex_0142_backend_response_headers() {
+fn preserves_codex_0145_backend_response_headers() {
     let headers = runtime_forward_text_response_headers([
         ("x-request-id", "req-0142"),
         ("openai-model", "gpt-5"),
@@ -59,6 +59,12 @@ fn preserves_codex_0142_backend_response_headers() {
         ("x-codex-primary-used-percent", "12.5"),
         ("x-codex-primary-window-minutes", "60"),
         ("x-codex-credits-has-credits", "true"),
+        ("x-codex-credits-unlimited", "false"),
+        ("x-codex-credits-balance", ""),
+        (
+            "x-codex-rate-limit-reached-type",
+            "workspace_member_usage_limit_reached",
+        ),
         ("x-codex-turn-state", "turn-state-0142"),
         ("x-codex-safety-buffering-enabled", "true"),
         ("x-codex-safety-buffering-faster-model", "gpt-5-mini"),
@@ -83,6 +89,12 @@ fn preserves_codex_0142_backend_response_headers() {
             (
                 "x-codex-credits-has-credits".to_string(),
                 "true".to_string()
+            ),
+            ("x-codex-credits-unlimited".to_string(), "false".to_string()),
+            ("x-codex-credits-balance".to_string(), "".to_string()),
+            (
+                "x-codex-rate-limit-reached-type".to_string(),
+                "workspace_member_usage_limit_reached".to_string()
             ),
             (
                 "x-codex-turn-state".to_string(),

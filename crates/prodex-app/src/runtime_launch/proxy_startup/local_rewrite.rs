@@ -398,8 +398,8 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         worker_threads,
         accept_worker_count: worker_count,
         listen_addr,
-        gemini_live_sidecar_addr,
-        gemini_live_sidecar_model: gemini_live_sidecar_addr.map(|_| {
+        realtime_ws_sidecar_addr: gemini_live_sidecar_addr,
+        realtime_ws_model: gemini_live_sidecar_addr.map(|_| {
             super::local_rewrite_gemini_live::runtime_gemini_live_default_model().to_string()
         }),
         log_path,

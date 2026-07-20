@@ -431,6 +431,8 @@ mod tests {
                 team_id: None,
                 project_id: None,
                 user_id: None,
+                group_ids: Vec::new(),
+                department_id: None,
                 budget_id: None,
                 allowed_key_prefixes: Vec::new(),
                 created_at_epoch: 10,
