@@ -470,12 +470,24 @@ pub(super) fn connect_runtime_proxy_upstream_websocket_with_timeout(
             resolved_addrs,
             attempted_addrs,
         )),
+        Err(WsHandshakeError::Failure(WsError::Io(err)))
+            if matches!(
+                err.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ) =>
+        {
+            Err(runtime_websocket_handshake_timeout_error())
+        }
         Err(WsHandshakeError::Failure(err)) => Err(err),
-        Err(WsHandshakeError::Interrupted(_)) => Err(WsError::Io(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "upstream websocket handshake interrupted before completion",
-        ))),
+        Err(WsHandshakeError::Interrupted(_)) => Err(runtime_websocket_handshake_timeout_error()),
     }
+}
+
+fn runtime_websocket_handshake_timeout_error() -> WsError {
+    WsError::Io(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "upstream websocket handshake timed out before completion",
+    ))
 }
 
 pub(super) fn runtime_configure_upstream_tcp_stream(

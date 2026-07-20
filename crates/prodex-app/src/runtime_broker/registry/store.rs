@@ -530,6 +530,8 @@ mod tests {
         save_runtime_broker_capability(&paths, "broker", "instance", &capability).unwrap();
         fs::set_permissions(&capability_path, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(load_runtime_broker_capability(&paths, "broker", "instance").is_err());
+        remove_runtime_broker_capability(&paths, "broker");
+        assert!(!capability_path.exists());
 
         let _ = fs::remove_dir_all(paths.root);
     }

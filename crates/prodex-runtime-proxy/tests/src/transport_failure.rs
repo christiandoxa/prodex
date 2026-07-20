@@ -11,6 +11,10 @@ fn classifies_transport_failure_messages() {
         Some(RuntimeTransportFailureKind::TlsHandshake)
     );
     assert_eq!(
+        runtime_transport_failure_kind_from_message("websocket handshake timed out"),
+        Some(RuntimeTransportFailureKind::ConnectTimeout)
+    );
+    assert_eq!(
         runtime_transport_failure_kind_from_message("stream closed before response.completed"),
         Some(RuntimeTransportFailureKind::UpstreamClosedBeforeCommit)
     );
