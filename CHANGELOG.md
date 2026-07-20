@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.327.0 - 2026-07-20
+
+### Misc
+
+- Complete audited Codex and governance passthrough (`d3d4005`)
+
 ## 0.326.0 - 2026-07-20
 
 ### Runtime
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Allow large Codex request bodies (`303a1ac`)
-
-## 0.315.0 - 2026-07-18
-
-### CLI
-
-- Restore cross-profile desktop history (`6cb01a7`)
