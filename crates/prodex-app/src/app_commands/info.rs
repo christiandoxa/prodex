@@ -29,6 +29,8 @@ pub(crate) fn collect_info_quota_aggregate(
             live_profiles: 0,
             snapshot_profiles: 0,
             unavailable_profiles: 0,
+            five_hour_profiles_with_data: 0,
+            weekly_profiles_with_data: 0,
             five_hour_pool_remaining: 0,
             weekly_pool_remaining: 0,
             earliest_five_hour_reset_at: None,

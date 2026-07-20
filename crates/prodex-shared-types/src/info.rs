@@ -6,6 +6,8 @@ pub struct InfoQuotaAggregate {
     pub live_profiles: usize,
     pub snapshot_profiles: usize,
     pub unavailable_profiles: usize,
+    pub five_hour_profiles_with_data: usize,
+    pub weekly_profiles_with_data: usize,
     pub five_hour_pool_remaining: i64,
     pub weekly_pool_remaining: i64,
     pub earliest_five_hour_reset_at: Option<i64>,

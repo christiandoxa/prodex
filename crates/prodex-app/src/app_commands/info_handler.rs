@@ -122,7 +122,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             "Codex 5h pool".to_string(),
             format_info_pool_remaining(
                 quota.five_hour_pool_remaining,
-                quota.profiles_with_data(),
+                quota.five_hour_profiles_with_data,
                 quota.earliest_five_hour_reset_at,
             ),
         ),
@@ -130,14 +130,14 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
             "Codex weekly pool".to_string(),
             format_info_pool_remaining(
                 quota.weekly_pool_remaining,
-                quota.profiles_with_data(),
+                quota.weekly_profiles_with_data,
                 quota.earliest_weekly_reset_at,
             ),
         ),
         (
             "Codex 5h runway".to_string(),
             format_info_runway(
-                quota.profiles_with_data(),
+                quota.five_hour_profiles_with_data,
                 quota.five_hour_pool_remaining,
                 quota.earliest_five_hour_reset_at,
                 five_hour_runway.as_ref(),
@@ -147,7 +147,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
         (
             "Codex weekly runway".to_string(),
             format_info_runway(
-                quota.profiles_with_data(),
+                quota.weekly_profiles_with_data,
                 quota.weekly_pool_remaining,
                 quota.earliest_weekly_reset_at,
                 weekly_runway.as_ref(),

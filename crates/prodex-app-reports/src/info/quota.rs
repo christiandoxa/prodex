@@ -14,6 +14,8 @@ pub fn build_info_quota_aggregate(
         live_profiles: 0,
         snapshot_profiles: 0,
         unavailable_profiles: 0,
+        five_hour_profiles_with_data: 0,
+        weekly_profiles_with_data: 0,
         five_hour_pool_remaining: 0,
         weekly_pool_remaining: 0,
         earliest_five_hour_reset_at: None,
@@ -45,32 +47,40 @@ pub fn build_info_quota_aggregate(
             continue;
         };
 
-        let Some((five_hour, weekly)) = info_main_window_snapshots_at(&usage, now) else {
+        let five_hour = required_main_window_snapshot_at(&usage, "5h", now);
+        let weekly = required_main_window_snapshot_at(&usage, "weekly", now);
+        if five_hour.is_none() && weekly.is_none() {
             aggregate.unavailable_profiles += 1;
             continue;
-        };
+        }
 
         match source {
             InfoQuotaSource::LiveProbe => aggregate.live_profiles += 1,
             InfoQuotaSource::PersistedSnapshot => aggregate.snapshot_profiles += 1,
         }
-        aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
-        aggregate.weekly_pool_remaining += weekly.remaining_percent;
-        if five_hour.reset_at != i64::MAX {
-            aggregate.earliest_five_hour_reset_at = Some(
-                aggregate
-                    .earliest_five_hour_reset_at
-                    .map_or(five_hour.reset_at, |current| {
-                        current.min(five_hour.reset_at)
-                    }),
-            );
+        if let Some(five_hour) = five_hour {
+            aggregate.five_hour_profiles_with_data += 1;
+            aggregate.five_hour_pool_remaining += five_hour.remaining_percent;
+            if five_hour.reset_at != i64::MAX {
+                aggregate.earliest_five_hour_reset_at = Some(
+                    aggregate
+                        .earliest_five_hour_reset_at
+                        .map_or(five_hour.reset_at, |current| {
+                            current.min(five_hour.reset_at)
+                        }),
+                );
+            }
         }
-        if weekly.reset_at != i64::MAX {
-            aggregate.earliest_weekly_reset_at = Some(
-                aggregate
-                    .earliest_weekly_reset_at
-                    .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
-            );
+        if let Some(weekly) = weekly {
+            aggregate.weekly_profiles_with_data += 1;
+            aggregate.weekly_pool_remaining += weekly.remaining_percent;
+            if weekly.reset_at != i64::MAX {
+                aggregate.earliest_weekly_reset_at = Some(
+                    aggregate
+                        .earliest_weekly_reset_at
+                        .map_or(weekly.reset_at, |current| current.min(weekly.reset_at)),
+                );
+            }
         }
     }
 
