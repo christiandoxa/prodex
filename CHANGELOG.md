@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.326.0 - 2026-07-20
+
+### Runtime
+
+- Support Codex realtime v3 passthrough (`9a327c3`)
+
 ## 0.325.0 - 2026-07-20
 
 ### CLI
@@ -72,9 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Restore cross-profile desktop history (`6cb01a7`)
-
-## 0.314.0 - 2026-07-18
-
-### CLI
-
-- Persist chat history index (`e56691b`)
