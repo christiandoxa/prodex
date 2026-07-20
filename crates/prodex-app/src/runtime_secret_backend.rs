@@ -119,7 +119,7 @@ pub(crate) fn delete_runtime_secret(paths: &AppPaths, path: &Path) {
                     SecretProviderResult::Failed
                 },
             );
-            if selection.kind() == SecretBackendKind::Keyring {
+            if deleted.is_err() || selection.kind() == SecretBackendKind::Keyring {
                 remove_legacy_file_secret(&location);
             }
         }

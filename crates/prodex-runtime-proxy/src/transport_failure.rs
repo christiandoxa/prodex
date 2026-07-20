@@ -62,16 +62,16 @@ const RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES: &[RuntimeTransportFailureMessageR
         ],
     },
     RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::TlsHandshake,
-        needles: &["tls", "handshake", "certificate"],
-    },
-    RuntimeTransportFailureMessageRule {
         kind: RuntimeTransportFailureKind::ConnectRefused,
         needles: &["connection refused"],
     },
     RuntimeTransportFailureMessageRule {
         kind: RuntimeTransportFailureKind::ConnectTimeout,
         needles: &["timed out", "timeout"],
+    },
+    RuntimeTransportFailureMessageRule {
+        kind: RuntimeTransportFailureKind::TlsHandshake,
+        needles: &["tls", "handshake", "certificate"],
     },
     RuntimeTransportFailureMessageRule {
         kind: RuntimeTransportFailureKind::ConnectReset,

@@ -462,11 +462,14 @@ mod tests {
         let err = anyhow::anyhow!(
             "calibration save failed\nAuthorization: Bearer calibration-token\napi_key=calibration-key"
         )
-        .context("smart context token calibration save failed");
+        .context("smart context calibration persistence failed");
         let message = runtime_smart_context_token_calibration_error_log_value(&err);
 
         assert!(!message.contains('\n'));
-        assert!(message.contains("smart context token calibration save failed"));
+        assert!(
+            message.contains("smart context calibration persistence failed"),
+            "unexpected redacted error chain: {message}"
+        );
         assert!(message.contains("Authorization: Bearer <redacted>"));
         assert!(message.contains("api_key=<redacted>"));
         assert!(!message.contains("calibration-token"));

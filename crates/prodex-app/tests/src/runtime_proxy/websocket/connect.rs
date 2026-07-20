@@ -170,7 +170,7 @@ fn websocket_hard_affinity_connect_failure_does_not_return_retryable_transport_a
 }
 
 #[test]
-fn websocket_interrupted_handshake_returns_transport_attempt_instead_of_panicking() {
+fn websocket_timed_out_handshake_returns_transport_attempt_instead_of_panicking() {
     let _guard = acquire_test_runtime_lock();
     let _env_lock = TestEnvVarGuard::lock();
     let _http_proxy = TestEnvVarGuard::unset("HTTP_PROXY");
@@ -235,8 +235,12 @@ fn websocket_interrupted_handshake_returns_transport_attempt_instead_of_panickin
         .expect("stalled upstream thread should finish");
     let log = read_websocket_test_log_after_marker(&shared.log_path, "upstream_connect_failure");
     assert!(
-        log.contains("upstream websocket handshake interrupted before completion"),
-        "interrupted handshake should be logged as transport failure: {log}"
+        log.contains("upstream_connect_timeout")
+            && log.contains("class=connect_timeout")
+            && log.contains(
+                "profile_transport_failure profile=main route=websocket class=connect_timeout"
+            ),
+        "timed-out handshake should be logged as connect timeout: {log}"
     );
     let _ = std::fs::remove_file(&shared.log_path);
 }

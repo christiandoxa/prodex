@@ -19,15 +19,16 @@
       "chore(release): release 0.329.0",
       "refactor(runtime): split gateway conversation admission",
       "test(runtime): align default-feature regression contracts",
-      "fix(kiro): bound metadata discovery processes"
+      "fix(kiro): bound metadata discovery processes",
+      "fix(runtime): harden timeout and secret cleanup"
     ],
     "caps": {
-      "maxFiles": 57,
-      "maxBehaviorFiles": 44,
-      "maxLines": 1704,
-      "maxFileLines": 210
+      "maxFiles": 65,
+      "maxBehaviorFiles": 51,
+      "maxLines": 1790,
+      "maxFileLines": 202
     },
-    "reason": "Reviewed the complete 0.329.0 provider-state hardening and GitHub-only release range, including the focused gateway admission split, repaired default-feature regression contracts, bounded Kiro metadata and ACP process lifecycle, synchronized Cargo, npm, documentation, lockfile, and changelog metadata after the full all-features suite, strict Clippy, release preparation, security scanning, and tracked-diff identifier review."
+    "reason": "Reviewed the complete 0.329.0 provider-state hardening and GitHub-only release range, including the focused gateway admission split, repaired default-feature regression contracts, bounded Kiro metadata and ACP process lifecycle, normalized WebSocket handshake timeouts, fail-closed broker capability cleanup, synchronized root and fuzz Cargo locks, npm, documentation, and changelog metadata after the full all-features suite, strict Clippy, release preparation, security scanning, and tracked-diff identifier review."
   },
   {
     "id": "audited-codex-governance-feature-0.327.0",
