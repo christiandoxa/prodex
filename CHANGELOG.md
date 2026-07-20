@@ -2,6 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.329.0 - 2026-07-20
+
+### Runtime
+
+- Harden timeout and secret cleanup (`078701b`)
+- Isolate provider conversation state (`b0dc453`)
+
+### Misc
+
+- Bound metadata discovery processes (`789cd2c`)
+
 ## 0.328.0 - 2026-07-20
 
 ### Misc
@@ -74,7 +85,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Complete audited feature implementations (`650bfa9`)
-
-## 0.317.0 - 2026-07-19
-
-- No grouped changes.
