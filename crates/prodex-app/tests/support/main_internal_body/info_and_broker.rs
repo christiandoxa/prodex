@@ -63,6 +63,43 @@ fn build_info_quota_aggregate_uses_live_and_snapshot_data() {
 }
 
 #[test]
+fn build_info_quota_aggregate_keeps_weekly_data_without_five_hour_data() {
+    let now = 1_000;
+    let reports = vec![RunProfileProbeReport {
+        name: "main".to_string(),
+        order_index: 0,
+        auth: AuthSummary {
+            label: "chatgpt".to_string(),
+            quota_compatible: true,
+        },
+        result: Ok(UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(WindowPair {
+                primary_window: None,
+                secondary_window: Some(UsageWindow {
+                    used_percent: Some(40),
+                    reset_at: Some(2_000),
+                    limit_window_seconds: Some(604_800),
+                }),
+            }),
+            code_review_rate_limit: None,
+            rate_limit_reset_credits: None,
+            additional_rate_limits: Vec::new(),
+        }),
+    }];
+
+    let aggregate = build_info_quota_aggregate(&reports, &BTreeMap::new(), now);
+
+    assert_eq!(aggregate.live_profiles, 1);
+    assert_eq!(aggregate.unavailable_profiles, 0);
+    assert_eq!(aggregate.five_hour_profiles_with_data, 0);
+    assert_eq!(aggregate.weekly_profiles_with_data, 1);
+    assert_eq!(aggregate.weekly_pool_remaining, 60);
+    assert_eq!(aggregate.earliest_weekly_reset_at, Some(2_000));
+}
+
+#[test]
 fn format_info_provider_summary_counts_all_provider_kinds() {
     let profiles = BTreeMap::from([
         (
