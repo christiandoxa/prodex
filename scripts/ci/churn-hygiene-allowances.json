@@ -1,5 +1,34 @@
 [
   {
+    "id": "audited-codex-governance-feature-0.327.0",
+    "requiredSubjects": [
+      "fix: complete audited Codex and governance passthrough",
+      "chore(ci): record reviewed 0.327.0 module split"
+    ],
+    "caps": {
+      "maxFiles": 88,
+      "maxBehaviorFiles": 76,
+      "maxLines": 4700,
+      "maxFileLines": 710
+    },
+    "reason": "Reviewed the Codex realtime v3 full-duplex passthrough, workspace rate-limit headers, modality-safe Presidio traversal, group and department ABAC across SCIM and durable backends, launch argument ordering, deterministic quota rendering test, governance evidence, and focused module splits; verified with the full all-features suite, 495 runtime proxy regressions, strict Clippy, complete preflight and boundary guards, secret and supply-chain scans, and tracked-diff identifier review."
+  },
+  {
+    "id": "audited-codex-governance-release-0.327.0",
+    "requiredSubjects": [
+      "fix: complete audited Codex and governance passthrough",
+      "chore(ci): record reviewed 0.327.0 module split",
+      "chore(release): release 0.327.0"
+    ],
+    "caps": {
+      "maxFiles": 102,
+      "maxBehaviorFiles": 76,
+      "maxLines": 5100,
+      "maxFileLines": 710
+    },
+    "reason": "Reviewed the complete 0.327.0 feature and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata after the full suite, strict Clippy, complete preflight, security guards, and tracked-diff secret and identifier review."
+  },
+  {
     "id": "audited-runtime-and-operations-feature-0.324.0",
     "requiredSubjects": [
       "fix: complete audited runtime and operations features"
