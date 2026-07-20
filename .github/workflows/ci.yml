@@ -248,15 +248,7 @@ jobs:
              [ "${before}" != "0000000000000000000000000000000000000000" ] &&
              git rev-parse --verify --quiet "${before}^{commit}" >/dev/null &&
              git rev-parse --verify --quiet "${after}^{commit}" >/dev/null; then
-            mapfile -t commits < <(git rev-list --reverse "${before}..${after}")
-            if [ "${#commits[@]}" -eq 0 ]; then
-              npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"
-              exit 0
-            fi
-            for commit in "${commits[@]}"; do
-              parent="$(git rev-parse "${commit}^")"
-              npm run ci:churn-hygiene:check -- --base "${parent}" --head "${commit}"
-            done
+            npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"
           else
             npm run ci:churn-hygiene:check
           fi

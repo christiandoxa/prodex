@@ -38,6 +38,19 @@ export function validateWindowsSecurityJob(contents) {
   return violations;
 }
 
+export function validateProcessGuard(contents) {
+  const job = workflowJob(contents, "process-guard");
+  if (!job) return [".github/workflows/ci.yml: missing process-guard job"];
+  const violations = [];
+  if (!job.includes('npm run ci:churn-hygiene:check -- --base "${before}" --head "${after}"')) {
+    violations.push(".github/workflows/ci.yml: process-guard must check the complete push range");
+  }
+  if (job.includes("for commit in") || job.includes("git rev-list --reverse")) {
+    violations.push(".github/workflows/ci.yml: process-guard must not split push allowances per commit");
+  }
+  return violations;
+}
+
 export function validateWorkflow(filePath, contents) {
   const violations = [];
   let rustActions = 0;
@@ -125,6 +138,17 @@ function selfTest() {
     1,
   );
   assert.equal(validateWindowsSecurityJob("jobs:\n  fmt:\n    runs-on: ubuntu-latest\n").length, 1);
+  const processJob = `jobs:
+  process-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          before="before"
+          after="after"
+          npm run ci:churn-hygiene:check -- --base "\${before}" --head "\${after}"
+`;
+  assert.deepEqual(validateProcessGuard(processJob), []);
+  assert.equal(validateProcessGuard(`${processJob}          for commit in commits; do :; done\n`).length, 1);
 }
 
 async function main() {
@@ -135,7 +159,9 @@ async function main() {
     const filePath = `.github/workflows/${fileName}`;
     const contents = await fs.readFile(path.join(workflowDir, fileName), "utf8");
     violations.push(...validateWorkflow(filePath, contents));
-    if (fileName === "ci.yml") violations.push(...validateWindowsSecurityJob(contents));
+    if (fileName === "ci.yml") {
+      violations.push(...validateWindowsSecurityJob(contents), ...validateProcessGuard(contents));
+    }
   }
   violations.push(...validateDockerfile(await fs.readFile(path.join(repoRoot, "Dockerfile"), "utf8")));
   violations.push(...validateCompose(await fs.readFile(path.join(repoRoot, "compose.yaml"), "utf8")));
