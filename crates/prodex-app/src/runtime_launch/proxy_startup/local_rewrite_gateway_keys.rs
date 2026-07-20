@@ -3,10 +3,13 @@ use super::local_rewrite::{
     RuntimeGatewayVirtualKeyUsageDelta, RuntimeLocalRewriteProxyShared,
     schedule_runtime_gateway_virtual_key_usage_save,
 };
-use super::local_rewrite_application_boundary::runtime_gateway_stable_id;
 use super::local_rewrite_application_data_plane::{
     RuntimeGatewayApplicationAdmission, RuntimeGatewayApplicationDataPlaneError,
     runtime_gateway_application_data_plane_admission,
+};
+use super::local_rewrite_gateway_admission::{
+    RuntimeGatewayVirtualKeyAdmissionFailure, RuntimeGatewayVirtualKeyAdmissionOutcome,
+    runtime_gateway_conversation_namespace,
 };
 use super::local_rewrite_gateway_backend_connection::runtime_gateway_sqlite_open;
 use super::local_rewrite_gateway_config::RuntimeGatewayStateStore;
@@ -37,9 +40,8 @@ use prodex_application::{
     ApplicationVirtualKeyAdmissionPlan, plan_application_virtual_key_admission,
 };
 use prodex_domain::{
-    ApprovalId, ApprovalState, BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey,
-    PrincipalPolicyAttributes, RequestId, ReservationRecord, ReservationRequest, TenantId,
-    UsageAmount,
+    BudgetLimit, BudgetSnapshot, CallId, IdempotencyKey, PrincipalPolicyAttributes, RequestId,
+    ReservationRecord, ReservationRequest, TenantId, UsageAmount,
 };
 use prodex_gateway_core::{
     GatewayVirtualKeyAdmissionRequest, GatewayVirtualKeyReservationContext,
@@ -51,23 +53,6 @@ use std::path::Path;
 
 const RUNTIME_GATEWAY_RESERVATION_TTL_MS: u64 = 60_000;
 
-fn runtime_gateway_conversation_namespace(
-    tenant_id: &TenantId,
-    identity_kind: &str,
-    identity: &str,
-) -> String {
-    let tenant_id = tenant_id.to_string();
-    runtime_gateway_stable_id(
-        "prodex:gateway-conversation:v1",
-        &[
-            tenant_id.as_bytes(),
-            identity_kind.as_bytes(),
-            identity.as_bytes(),
-        ],
-    )
-    .to_string()
-}
-
 pub(super) enum RuntimeGatewayDurableReservationError {
     Rejected(runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection),
     Failed,
@@ -77,27 +62,6 @@ pub(super) enum RuntimeGatewayDurableReservationError {
 pub(super) struct RuntimeGatewayDurableReservationState {
     pub(super) storage_key: prodex_storage::TenantStorageKey,
     pub(super) record: ReservationRecord,
-}
-
-pub(super) struct RuntimeGatewayVirtualKeyAdmissionOutcome {
-    pub(super) namespace: Option<String>,
-    pub(super) application: RuntimeGatewayApplicationAdmission,
-}
-
-pub(super) struct RuntimeGatewayVirtualKeyAdmissionFailure {
-    pub(super) rejection: runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection,
-    pub(super) approval: Option<(ApprovalId, ApprovalState)>,
-}
-
-impl From<runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection>
-    for RuntimeGatewayVirtualKeyAdmissionFailure
-{
-    fn from(rejection: runtime_proxy_crate::RuntimeGatewayVirtualKeyRejection) -> Self {
-        Self {
-            rejection,
-            approval: None,
-        }
-    }
 }
 
 pub(super) fn runtime_gateway_virtual_key_entries_is_empty(
