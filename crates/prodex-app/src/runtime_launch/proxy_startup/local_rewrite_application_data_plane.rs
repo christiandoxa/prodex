@@ -1586,7 +1586,7 @@ mod tests {
     #[test]
     fn governed_registry_advertises_only_executable_adapter_capabilities() {
         let anthropic = runtime_gateway_provider_executable_capabilities(ProviderId::Anthropic);
-        assert!(!anthropic.contains(ModelCapability::RemoteCompact));
+        assert!(anthropic.contains(ModelCapability::RemoteCompact));
         assert!(!anthropic.contains(ModelCapability::Vision));
         assert!(!anthropic.contains(ModelCapability::WebSocket));
 
@@ -1610,7 +1610,7 @@ mod tests {
             snapshot.for_tenant(tenant, ProviderEndpoint::Responses, &Default::default());
         assert!(responses.providers[0].enabled);
         assert!(
-            !snapshot
+            snapshot
                 .for_tenant(
                     tenant,
                     ProviderEndpoint::ResponsesCompact,

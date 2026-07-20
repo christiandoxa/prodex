@@ -301,7 +301,9 @@ fn production_gateway_open_paths_no_longer_advertise_bootstrap_escape_hatch() {
     let sqlite_bootstrap_const = ["const RUNTIME_GATEWAY_SQLITE_BOOTSTRAP_SCHEMA", "_SQL"].concat();
     let postgres_bootstrap_const =
         ["const RUNTIME_GATEWAY_POSTGRES_BOOTSTRAP_SCHEMA", "_SQL"].concat();
-    let tests_start = source.rfind("#[cfg(test)]\nmod tests {").unwrap();
+    let tests_start = source
+        .rfind("\n#[cfg(test)]")
+        .expect("external test module marker should exist");
     let production = &source[..tests_start];
 
     assert!(!production.contains("PRODEX_GATEWAY_ALLOW_REQUEST_PATH_SCHEMA_BOOTSTRAP"));

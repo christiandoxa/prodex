@@ -234,12 +234,6 @@ mod tests {
         let conn = rusqlite::Connection::open(path).unwrap();
         conn.execute_batch(
             r#"
-            CREATE TABLE prodex_gateway_schema_migrations (
-                version INTEGER PRIMARY KEY,
-                applied_at_epoch INTEGER NOT NULL
-            );
-            INSERT INTO prodex_gateway_schema_migrations (version, applied_at_epoch)
-            VALUES (1, 1);
             CREATE TABLE prodex_gateway_virtual_key_usage (
                 key_name TEXT PRIMARY KEY COLLATE NOCASE,
                 minute_epoch INTEGER NOT NULL DEFAULT 0,

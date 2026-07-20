@@ -416,16 +416,15 @@ fn minimal_harness_rejects_structured_instructions_with_redacted_400() {
 }
 
 #[test]
-fn minimal_harness_bypasses_compact_requests() {
+fn minimal_harness_preserves_compact_input_for_local_emulation() {
     let root = temp_root("harness-minimal-compact");
     let paths = app_paths_for_root(root);
-    let upstream = TestUpstream::start();
     let proxy = start_openai_harness_proxy(
         &paths,
-        format!("http://{}/v1", upstream.addr),
+        "http://127.0.0.1:9/v1".to_string(),
         prodex_provider_core::HarnessMode::Minimal,
     );
-    let body = br#"{ "model":"gpt-5.4", "instructions":{"structured":true}, "input":"keep" }"#;
+    let body = br#"{"model":"gpt-5.4","instructions":{"structured":true},"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"keep"}]}]}"#;
 
     let response = reqwest::blocking::Client::new()
         .post(format!("http://{}/v1/responses/compact", proxy.listen_addr))
@@ -434,5 +433,12 @@ fn minimal_harness_bypasses_compact_requests() {
         .send()
         .unwrap();
 
-    assert_eq!(response.status().as_u16(), 501);
+    assert_eq!(response.status().as_u16(), 200);
+    let response: serde_json::Value = response.json().unwrap();
+    assert!(
+        response["output"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("keep")
+    );
 }
