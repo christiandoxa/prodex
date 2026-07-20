@@ -326,10 +326,11 @@ fn concurrent_refresh_leases_keep_single_owner_past_ttl() {
     use std::sync::{Arc, Barrier};
 
     const WORKERS: usize = 8;
+    let lease_ttl = Duration::from_millis(200);
     let root = temp_dir("refresh-lease-concurrency");
     let coordinator = Arc::new(
         RefreshLeaseCoordinator::new(&root)
-            .with_lease_ttl(Duration::from_millis(15))
+            .with_lease_ttl(lease_ttl)
             .with_wait_timeout(Duration::from_secs(2))
             .with_poll_interval(Duration::from_millis(1)),
     );
@@ -348,7 +349,7 @@ fn concurrent_refresh_leases_keep_single_owner_past_ttl() {
                     match coordinator.acquire(sensitive_key).unwrap() {
                         RefreshLeaseDecision::Owner(owner) => {
                             owners.fetch_add(1, Ordering::SeqCst);
-                            std::thread::sleep(Duration::from_millis(75));
+                            std::thread::sleep(lease_ttl * 3);
                             owner
                                 .commit_result("{\"access_token\":\"shared-result\"}")
                                 .unwrap();
