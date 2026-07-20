@@ -63,6 +63,23 @@ fn normalizes_prodex_openai_mount_paths() {
         .as_ref(),
         "/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas"
     );
+    assert_eq!(
+        runtime_proxy_normalize_openai_path("/backend-api/prodex/live/call-123").as_ref(),
+        "/backend-api/codex/live/call-123"
+    );
+}
+
+#[test]
+fn classifies_realtime_v3_live_paths() {
+    assert!(is_runtime_realtime_call_path("/v1/live"));
+    assert!(is_runtime_realtime_websocket_path("/v1/live"));
+    assert!(is_runtime_realtime_websocket_path(
+        "/backend-api/prodex/live/call-123?intent=quicksilver"
+    ));
+    assert!(!is_runtime_realtime_call_path("/v1/live/call-123"));
+    assert!(!is_runtime_realtime_websocket_path(
+        "/v1/live/call-123/extra"
+    ));
 }
 
 #[test]
