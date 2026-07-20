@@ -2,6 +2,19 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.325.0 - 2026-07-20
+
+### CLI
+
+- Preserve partial quota windows (`f461c25`)
+
+### Deps
+
+- Bump serde from 1.0.228 to 1.0.229 in the cargo group (#31) (`82e0e8e`)
+- Bump debian from `60eac75` to `7b140f3` (#35) (`29c02d3`)
+- Bump rust from `7d0723d` to `8fa55b2` (#34) (`6381419`)
+- Bump the fuzz-cargo group in /fuzz with 2 updates (#32) (`be9d156`)
+
 ## 0.324.0 - 2026-07-20
 
 ### Runtime
@@ -65,11 +78,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### CLI
 
 - Persist chat history index (`e56691b`)
-
-## 0.313.0 - 2026-07-18
-
-### Misc
-
-- Document adaptive route decision (`64daec0`)
-- Detect current legacy schema (`b0ec18a`)
-- Persist desktop chat history (`f8d814e`)
