@@ -210,7 +210,7 @@ checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.1",
+ "syn 3.0.2",
 ]
 
 [[package]]
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "prodex-domain",
  "url",
@@ -1163,14 +1163,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-core"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "serde",
  "sha2 0.11.0",
@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -1225,14 +1225,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1249,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "base64",
  "serde",
@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -1266,7 +1266,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "anyhow",
  "prodex-authn",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "keyring",
  "libc",
@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.326.0"
+version = "0.327.0"
 dependencies = [
  "prodex-domain",
 ]
@@ -1450,7 +1450,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.1",
+ "syn 3.0.2",
 ]
 
 [[package]]
@@ -1474,7 +1474,7 @@ checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.1",
+ "syn 3.0.2",
 ]
 
 [[package]]
@@ -1561,9 +1561,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.1"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5edbec4ed188954a10c12c038215f8ce7606b2d5c973cd8dc43e8795065c5f2f"
+checksum = "a207d6d6a2b7fc470b80443726053f18a2481b7e1eee970597051596567987a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1611,7 +1611,7 @@ checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.1",
+ "syn 3.0.2",
 ]
 
 [[package]]
