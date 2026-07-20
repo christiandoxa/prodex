@@ -76,6 +76,11 @@ export const DEFAULT_DUPLICATE_BUDGET = Object.freeze([
     reason: "the native Secret Service keyring backend and current application/storage crypto resolve sha2 0.10 and 0.11.",
   },
   {
+    name: "syn",
+    maxVersions: 2,
+    reason: "serde_derive uses syn 3 while the remaining proc-macro ecosystem still resolves syn 2.",
+  },
+  {
     name: "thiserror",
     maxVersions: 2,
     reason: "portable PTY support pulls filedescriptor on thiserror 1 while tungstenite uses thiserror 2.",
