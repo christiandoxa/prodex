@@ -39,6 +39,7 @@ mod local_rewrite_gateway_admin_router;
 mod local_rewrite_gateway_admin_scim;
 mod local_rewrite_gateway_admin_sessions;
 mod local_rewrite_gateway_admin_store_mutation;
+mod local_rewrite_gateway_admission;
 mod local_rewrite_gateway_backend_connection;
 mod local_rewrite_gateway_billing_csv;
 mod local_rewrite_gateway_billing_summary;

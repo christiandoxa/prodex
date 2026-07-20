@@ -191,7 +191,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
-    "maxLines": 1545,
+    "maxLines": 1544,
     "reason": "Gateway launch composes durable tenant discovery, governed snapshot authorities, audit/session workers, bounded accounting queues, immutable harness diagnostics, refresh, and SIEM workers; capped until authority bootstrap moves to a focused module."
   },
   {
@@ -241,8 +241,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",
-    "maxLines": 942,
-    "reason": "Gateway virtual-key admission carries trusted team, project, user, group, and department scope into the governed PIP after request-auth and SCIM linkage moved to focused modules."
+    "maxLines": 936,
+    "reason": "Gateway virtual-key admission carries trusted team, project, user, group, and department scope into the governed PIP after request-auth, conversation admission state, and SCIM linkage moved to focused modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_provider_registry.rs",

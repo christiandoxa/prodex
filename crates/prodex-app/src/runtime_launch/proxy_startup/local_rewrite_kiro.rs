@@ -167,11 +167,9 @@ pub(super) fn send_runtime_kiro_upstream_request(
             });
         }
     };
-
     let value: Value =
         serde_json::from_slice(&body).context("failed to parse Codex Responses request JSON")?;
     let stream = stream_mode == Streaming;
-
     let translated = runtime_provider_chat_compatible_request_body(
         &body,
         &conversations,

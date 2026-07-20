@@ -1,5 +1,33 @@
 [
   {
+    "id": "provider-conversation-hardening-feature-0.329.0",
+    "requiredSubjects": [
+      "fix(runtime): isolate provider conversation state"
+    ],
+    "caps": {
+      "maxFiles": 29,
+      "maxBehaviorFiles": 28,
+      "maxLines": 900,
+      "maxFileLines": 210
+    },
+    "reason": "Reviewed provider conversation isolation across tenant and virtual-key namespaces, bounded conversation retention, request-owned translation context, dead compatibility-wrapper removal, and production-path regressions; verified with the full all-features suite, strict Clippy, release preparation, code-graph impact review, Gitleaks, and tracked-diff identifier scanning."
+  },
+  {
+    "id": "provider-conversation-hardening-release-0.329.0",
+    "requiredSubjects": [
+      "fix(runtime): isolate provider conversation state",
+      "chore(release): release 0.329.0",
+      "refactor(runtime): split gateway conversation admission"
+    ],
+    "caps": {
+      "maxFiles": 46,
+      "maxBehaviorFiles": 33,
+      "maxLines": 1360,
+      "maxFileLines": 210
+    },
+    "reason": "Reviewed the complete 0.329.0 provider-state hardening and GitHub-only release range, including the focused gateway admission split, synchronized Cargo, npm, documentation, lockfile, and changelog metadata after the full all-features suite, strict Clippy, release preparation, security scanning, and tracked-diff identifier review."
+  },
+  {
     "id": "audited-codex-governance-feature-0.327.0",
     "requiredSubjects": [
       "fix: complete audited Codex and governance passthrough",
