@@ -123,7 +123,7 @@ impl RefreshLeaseCoordinator {
                     }
                     return Ok(RefreshLeaseDecision::Owner(owner));
                 }
-                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(err) if refresh_lease_contention_error(&err) => {}
                 Err(err) => return Err(RefreshLeaseError::io(&paths.lock_path, err)),
             }
 
@@ -546,8 +546,11 @@ fn cleanup_stale_lock(path: &Path, ttl: Duration) -> Result<(), RefreshLeaseErro
         Ok(Some(opened)) => opened,
         Ok(None) => return Ok(()),
         Err(error) if unsafe_entry_error(&error) => {
-            remove_entry(path)?;
-            return Ok(());
+            return match secure_file::remove_untrusted_entry(path) {
+                Ok(()) => Ok(()),
+                Err(error) if refresh_lease_contention_error(&error) => Ok(()),
+                Err(error) => Err(RefreshLeaseError::io(path, error)),
+            };
         }
         Err(error) => return Err(RefreshLeaseError::io(path, error)),
     };
@@ -609,6 +612,35 @@ fn try_lock_refresh_lease(file: &File) -> io::Result<bool> {
         Ok(()) => Ok(true),
         Err(fs::TryLockError::WouldBlock) => Ok(false),
         Err(error) => Err(io::Error::other(error)),
+    }
+}
+
+fn refresh_lease_contention_error(error: &io::Error) -> bool {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::AlreadyExists | io::ErrorKind::WouldBlock
+    ) {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{
+            ERROR_ACCESS_DENIED, ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION,
+        };
+
+        matches!(
+            error.raw_os_error(),
+            Some(code)
+                if code == ERROR_ACCESS_DENIED as i32
+                    || code == ERROR_LOCK_VIOLATION as i32
+                    || code == ERROR_SHARING_VIOLATION as i32
+        )
+    }
+
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 

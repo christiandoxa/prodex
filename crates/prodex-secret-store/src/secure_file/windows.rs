@@ -147,11 +147,27 @@ impl Directory {
     pub(super) fn create_private_file(&self, name: &OsStr) -> io::Result<File> {
         self.require_path_identity()?;
         let path = self.path.join(name);
-        let file = open_regular(&path, true)?;
-        validate_regular(&file)?;
-        set_private_acl(&file, false)?;
-        validate_acl(&file, AclUse::PrivateFile)?;
-        Ok(file)
+        let created = open_regular(&path, true)?;
+        let result = (|| {
+            validate_regular(&created)?;
+            set_private_acl(&created, false)?;
+            validate_acl(&created, AclUse::PrivateFile)?;
+
+            // Publish a share-delete handle only after the ACL is complete. The
+            // creation handle prevents another process from deleting the path
+            // while it observes the inherited, not-yet-protected ACL.
+            let file = open_private_regular(&path)?;
+            validate_regular(&file)?;
+            if file_identity(&created)? != file_identity(&file)? {
+                return Err(permission_denied("secret file changed during creation"));
+            }
+            Ok(file)
+        })();
+        drop(created);
+        if result.is_err() {
+            let _ = fs::remove_file(&path);
+        }
+        result
     }
 
     pub(super) fn replace(&self, from: &OsStr, to: &OsStr, file: &File) -> io::Result<()> {
@@ -273,12 +289,27 @@ fn open_regular(path: &Path, create: bool) -> io::Result<File> {
     };
     options
         .access_mode(access)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .share_mode(if create {
+            FILE_SHARE_READ | FILE_SHARE_WRITE
+        } else {
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+        })
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     if create {
         options.write(true).create_new(true);
     }
     options.open(path)
+}
+
+fn open_private_regular(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .access_mode(FILE_GENERIC_READ | FILE_GENERIC_WRITE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
 }
 
 fn validate_directory(file: &File) -> io::Result<()> {
