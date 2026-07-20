@@ -5,9 +5,14 @@ use super::{
 };
 use anyhow::{Context, Result, bail};
 use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+const RUNTIME_KIRO_ACP_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RuntimeKiroAcpBootstrapResult {
@@ -29,12 +34,26 @@ pub(crate) fn runtime_kiro_acp_bootstrap_with_command(
     cwd: &Path,
     extra_env: &[(OsString, OsString)],
 ) -> Result<RuntimeKiroAcpBootstrapResult> {
+    runtime_kiro_acp_bootstrap_with_command_and_timeout(
+        command,
+        cwd,
+        extra_env,
+        RUNTIME_KIRO_ACP_BOOTSTRAP_TIMEOUT,
+    )
+}
+
+pub(crate) fn runtime_kiro_acp_bootstrap_with_command_and_timeout(
+    command: &OsStr,
+    cwd: &Path,
+    extra_env: &[(OsString, OsString)],
+    timeout: Duration,
+) -> Result<RuntimeKiroAcpBootstrapResult> {
     let mut child = Command::new(command)
         .arg("acp")
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .envs(extra_env.iter().cloned())
         .spawn()
         .with_context(|| {
@@ -43,7 +62,7 @@ pub(crate) fn runtime_kiro_acp_bootstrap_with_command(
                 command.to_string_lossy()
             )
         })?;
-    let result = runtime_kiro_acp_bootstrap_child(&mut child, cwd);
+    let result = runtime_kiro_acp_bootstrap_child(&mut child, cwd, timeout);
     let _ = child.kill();
     let _ = child.wait();
     result
@@ -80,7 +99,7 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options(
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .envs(extra_env.iter().cloned())
         .spawn()
         .with_context(|| {
@@ -98,6 +117,7 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options(
 fn runtime_kiro_acp_bootstrap_child(
     child: &mut std::process::Child,
     cwd: &Path,
+    timeout: Duration,
 ) -> Result<RuntimeKiroAcpBootstrapResult> {
     let mut stdin = BufWriter::new(
         child
@@ -129,38 +149,35 @@ fn runtime_kiro_acp_bootstrap_child(
         .stdout
         .take()
         .context("failed to capture Kiro ACP stdout")?;
-    let mut stderr = child
-        .stderr
-        .take()
-        .context("failed to capture Kiro ACP stderr")?;
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
+    let lines = runtime_kiro_acp_line_receiver(stdout);
+    let deadline = Instant::now() + timeout;
     let mut initialize = None;
     let mut session = None;
     let mut notifications = Vec::new();
-    while reader
-        .read_line(&mut line)
-        .context("failed to read Kiro ACP stdout")?
-        > 0
-    {
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            bail!("Kiro ACP bootstrap timed out");
+        };
+        let line = match lines.recv_timeout(remaining) {
+            Ok(Ok(line)) => line,
+            Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
+            Err(mpsc::RecvTimeoutError::Timeout) => bail!("Kiro ACP bootstrap timed out"),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let current = line.trim();
         if current.is_empty() {
-            line.clear();
             continue;
         }
         let envelope = RuntimeKiroAcpEnvelope::parse(current)?;
         if let Some(error) = &envelope.error {
             if matches!(envelope.id, Some(0 | 1)) {
-                let stderr_text = runtime_kiro_acp_read_stderr(&mut stderr);
                 bail!(
-                    "Kiro ACP bootstrap failed for request {:?}: {}{}",
+                    "Kiro ACP bootstrap failed for request {:?}: {}",
                     envelope.id,
-                    error.message,
-                    runtime_kiro_acp_stderr_suffix(&stderr_text)
+                    error.message
                 );
             }
             notifications.push(envelope);
-            line.clear();
             continue;
         }
         match envelope.id {
@@ -171,22 +188,10 @@ fn runtime_kiro_acp_bootstrap_child(
         if initialize.is_some() && session.is_some() {
             break;
         }
-        line.clear();
     }
 
-    let stderr_text = runtime_kiro_acp_read_stderr(&mut stderr);
-    let initialize = initialize.with_context(|| {
-        format!(
-            "Kiro ACP bootstrap did not return initialize result{}",
-            runtime_kiro_acp_stderr_suffix(&stderr_text)
-        )
-    })?;
-    let session = session.with_context(|| {
-        format!(
-            "Kiro ACP bootstrap did not return session/new result{}",
-            runtime_kiro_acp_stderr_suffix(&stderr_text)
-        )
-    })?;
+    let initialize = initialize.context("Kiro ACP bootstrap did not return initialize result")?;
+    let session = session.context("Kiro ACP bootstrap did not return session/new result")?;
     Ok(RuntimeKiroAcpBootstrapResult {
         initialize,
         session,
@@ -228,10 +233,6 @@ fn runtime_kiro_acp_prompt_turn_child(
         .stdout
         .take()
         .context("failed to capture Kiro ACP stdout")?;
-    let mut stderr = child
-        .stderr
-        .take()
-        .context("failed to capture Kiro ACP stderr")?;
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
     let mut initialize = None;
@@ -283,25 +284,10 @@ fn runtime_kiro_acp_prompt_turn_child(
     }
     drop(stdin);
 
-    let stderr_text = runtime_kiro_acp_read_stderr(&mut stderr);
-    let initialize = initialize.with_context(|| {
-        format!(
-            "Kiro ACP prompt turn did not return initialize result{}",
-            runtime_kiro_acp_stderr_suffix(&stderr_text)
-        )
-    })?;
-    let session = session.with_context(|| {
-        format!(
-            "Kiro ACP prompt turn did not return session/new result{}",
-            runtime_kiro_acp_stderr_suffix(&stderr_text)
-        )
-    })?;
-    let prompt_response = prompt_response.with_context(|| {
-        format!(
-            "Kiro ACP prompt turn did not return session/prompt response{}",
-            runtime_kiro_acp_stderr_suffix(&stderr_text)
-        )
-    })?;
+    let initialize = initialize.context("Kiro ACP prompt turn did not return initialize result")?;
+    let session = session.context("Kiro ACP prompt turn did not return session/new result")?;
+    let prompt_response =
+        prompt_response.context("Kiro ACP prompt turn did not return session/prompt response")?;
     Ok(RuntimeKiroAcpPromptTurnResult {
         initialize,
         session,
@@ -310,17 +296,24 @@ fn runtime_kiro_acp_prompt_turn_child(
     })
 }
 
-fn runtime_kiro_acp_read_stderr(stderr: &mut impl Read) -> String {
-    let mut stderr_text = String::new();
-    let _ = stderr.read_to_string(&mut stderr_text);
-    stderr_text
-}
-
-fn runtime_kiro_acp_stderr_suffix(stderr: &str) -> String {
-    let stderr = stderr.trim();
-    if stderr.is_empty() {
-        String::new()
-    } else {
-        format!("; stderr: {stderr}")
-    }
+fn runtime_kiro_acp_line_receiver(
+    stdout: std::process::ChildStdout,
+) -> mpsc::Receiver<std::io::Result<String>> {
+    let (sender, receiver) = mpsc::sync_channel(16);
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) if sender.send(Ok(line)).is_err() => break,
+                Ok(_) => {}
+                Err(error) => {
+                    let _ = sender.send(Err(error));
+                    break;
+                }
+            }
+        }
+    });
+    receiver
 }
