@@ -5,6 +5,8 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::str;
 
+const MAX_DECODED_UPSTREAM_PAYLOAD_BYTES: usize = 128 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct UpstreamPayloadEvent {
     pub(crate) timestamp: String,
@@ -73,6 +75,14 @@ fn readable_upstream_payload(payload_bytes: &[u8], fields: &BTreeMap<String, Str
         && upstream_payload_is_readable_text(payload)
     {
         return payload.to_string();
+    }
+    if payload_bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
+        && let Ok(decoded) =
+            zstd::bulk::decompress(payload_bytes, MAX_DECODED_UPSTREAM_PAYLOAD_BYTES)
+        && let Ok(payload) = String::from_utf8(decoded)
+        && upstream_payload_is_readable_text(&payload)
+    {
+        return payload;
     }
 
     if let Some(path) = upstream_payload_binary_path(fields) {
@@ -439,6 +449,26 @@ mod tests {
         let event = upstream_payload_event_from_runtime_line(&line).unwrap();
         assert_eq!(event.request, Some(9));
         assert_eq!(event.payload, "{\"input\":\"hello <EMAIL_ADDRESS>\"}");
+    }
+
+    #[test]
+    fn decodes_zstd_upstream_payload_events() {
+        let payload = br#"{"model":"gpt-5-codex","input":"hello"}"#;
+        let compressed = zstd::stream::encode_all(payload.as_slice(), 0).unwrap();
+        let encoded = BASE64_STANDARD.encode(&compressed);
+        let line = format!(
+            "[2026-06-20 12:00:00.000 +07:00] upstream_payload request=9 transport=http route=responses profile=main bytes={} logged_bytes={} truncated=false payload_b64={encoded}",
+            compressed.len(),
+            compressed.len()
+        );
+
+        let event = upstream_payload_event_from_runtime_line(&line).unwrap();
+
+        assert_eq!(event.payload, String::from_utf8_lossy(payload));
+        assert_eq!(
+            render_upstream_payload_lines(&event.payload, 80)[0],
+            "model=gpt-5-codex"
+        );
     }
 
     #[test]
