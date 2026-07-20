@@ -6,8 +6,9 @@ use std::ffi::OsString;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-
+#[path = "kiro_command.rs"]
+mod command;
+use command::run_kiro_metadata_command;
 #[path = "kiro_environment.rs"]
 mod environment;
 use environment::discover_kiro_database_path;
@@ -682,12 +683,13 @@ fn native_kiro_model_catalog(
     cwd: &Path,
     extra_env: &[(OsString, OsString)],
 ) -> Result<Vec<Value>> {
-    let output = Command::new(command)
-        .args(["chat", "--list-models", "--format", "json"])
-        .current_dir(cwd)
-        .envs(extra_env.iter().cloned())
-        .output()
-        .context("failed to query the Kiro model catalog")?;
+    let output = run_kiro_metadata_command(
+        command,
+        &["chat", "--list-models", "--format", "json"],
+        Some(cwd),
+        extra_env,
+    )
+    .context("failed to query the Kiro model catalog")?;
     if !output.status.success() {
         bail!("Kiro model catalog command failed with {}", output.status);
     }
@@ -784,9 +786,7 @@ fn kiro_hex(bytes: &[u8]) -> String {
 }
 
 fn read_kiro_whoami_json() -> Result<Value> {
-    let output = Command::new(kiro_bin())
-        .args(["whoami", "--format", "json"])
-        .output()
+    let output = run_kiro_metadata_command(&kiro_bin(), &["whoami", "--format", "json"], None, &[])
         .context("failed to execute Kiro CLI")?;
     if !output.status.success() {
         bail!(

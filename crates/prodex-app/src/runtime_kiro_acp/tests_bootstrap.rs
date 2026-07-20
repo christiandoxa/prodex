@@ -1,5 +1,6 @@
 use super::*;
 use std::ffi::OsString;
+use std::time::{Duration, Instant};
 
 #[test]
 fn kiro_acp_builds_initialize_and_session_requests() {
@@ -109,6 +110,32 @@ fn kiro_acp_bootstrap_reads_initialize_session_and_notifications() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn kiro_acp_bootstrap_times_out_and_terminates_the_agent() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_dir("bootstrap-timeout");
+    let fake_agent = root.join("fake-kiro-timeout");
+    fs::write(&fake_agent, "#!/bin/sh\nexec sleep 5\n").unwrap();
+    let mut permissions = fs::metadata(&fake_agent).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_agent, permissions).unwrap();
+    let started = Instant::now();
+
+    let error = runtime_kiro_acp_bootstrap_with_command_and_timeout(
+        fake_agent.as_os_str(),
+        &root,
+        &[],
+        Duration::from_millis(50),
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("timed out"));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn kiro_acp_model_catalog_maps_session_models() {
     let session = RuntimeKiroAcpNewSessionResult {
@@ -157,6 +184,24 @@ fn kiro_acp_prompt_turn_sends_prompt_after_session_bootstrap() {
         result.notifications[0].method.as_deref(),
         Some("_kiro.dev/metadata")
     );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn kiro_acp_prompt_turn_does_not_wait_for_agent_exit() {
+    let root = temp_dir("prompt-turn-linger");
+    let fake_agent = write_fake_kiro_prompt_agent(&root);
+    let started = Instant::now();
+
+    runtime_kiro_acp_prompt_turn_with_command(
+        fake_agent.as_os_str(),
+        &root,
+        &[(OsString::from("LINGER_AFTER_RESPONSE"), OsString::from("1"))],
+        "hello from prodex",
+    )
+    .expect("prompt turn should stop after the terminal response");
+
+    assert!(started.elapsed() < Duration::from_secs(2));
     let _ = fs::remove_dir_all(root);
 }
 

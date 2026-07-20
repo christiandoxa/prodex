@@ -115,6 +115,7 @@ impl Drop for ProfileCommandsTestDir {
 
 struct ProfileCommandsTestEnv {
     _home_guard: TestEnvVarGuard,
+    _kiro_bin_guard: TestEnvVarGuard,
     _prodex_guard: TestEnvVarGuard,
     _shared_override_guard: TestEnvVarGuard,
 }
@@ -128,6 +129,10 @@ impl ProfileCommandsTestEnv {
         profile_commands_create_private_test_dir(&prodex_home.join("profiles"));
         Self {
             _home_guard: TestEnvVarGuard::set("HOME", &home.display().to_string()),
+            _kiro_bin_guard: TestEnvVarGuard::set(
+                "PRODEX_KIRO_BIN",
+                &root.join("missing-kiro-cli").display().to_string(),
+            ),
             _prodex_guard: TestEnvVarGuard::set("PRODEX_HOME", &prodex_home.display().to_string()),
             _shared_override_guard: TestEnvVarGuard::unset("PRODEX_SHARED_CODEX_HOME"),
         }
