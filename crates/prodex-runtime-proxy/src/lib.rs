@@ -307,12 +307,18 @@ pub fn runtime_proxy_long_lived_queue_wait_budget(
 
 pub fn is_runtime_realtime_call_path(path_and_query: &str) -> bool {
     let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
-    path_without_query(normalized_path_and_query.as_ref()).ends_with("/realtime/calls")
+    let path = path_without_query(normalized_path_and_query.as_ref());
+    path.ends_with("/realtime/calls") || path.ends_with("/live")
 }
 
 pub fn is_runtime_realtime_websocket_path(path_and_query: &str) -> bool {
     let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
-    path_without_query(normalized_path_and_query.as_ref()).ends_with("/realtime")
+    let path = path_without_query(normalized_path_and_query.as_ref());
+    path.ends_with("/realtime")
+        || path.ends_with("/live")
+        || path
+            .rsplit_once("/live/")
+            .is_some_and(|(_, call_id)| !call_id.is_empty() && !call_id.contains('/'))
 }
 
 pub fn runtime_request_previous_response_id(request: &RuntimeProxyRequest) -> Option<String> {

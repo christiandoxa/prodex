@@ -185,6 +185,12 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
     assert!(is_runtime_realtime_websocket_path(
         "/backend-api/codex/realtime?call_id=call-123"
     ));
+    assert!(is_runtime_realtime_call_path(
+        "/backend-api/codex/live"
+    ));
+    assert!(is_runtime_realtime_websocket_path(
+        "/backend-api/codex/live/call-123"
+    ));
     assert!(is_runtime_responses_path(
         "/backend-api/prodex/v0.2.99/responses"
     ));
@@ -196,6 +202,9 @@ fn runtime_proxy_accepts_legacy_openai_prefix() {
     ));
     assert!(is_runtime_realtime_websocket_path(
         "/backend-api/prodex/v0.2.99/realtime?call_id=call-123"
+    ));
+    assert!(is_runtime_realtime_websocket_path(
+        "/backend-api/prodex/v0.2.99/live/call-123"
     ));
     assert!(!is_runtime_realtime_websocket_path(
         "/backend-api/prodex/v0.2.99/realtime/calls"

@@ -250,11 +250,14 @@ pub fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
 pub fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "session.updated"
+        "session.started"
+            | "session.updated"
             | "conversation.item.added"
             | "conversation.item.done"
+            | "delegation.created"
             | "response.cancelled"
             | "response.done"
+            | "turn.done"
             | "error"
     )
 }

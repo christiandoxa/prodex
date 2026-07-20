@@ -299,8 +299,19 @@ fn websocket_event_kind_helpers_match_stream_boundaries() {
     assert!(!runtime_proxy_precommit_hold_event_kind(
         "response.completed"
     ));
-    assert!(runtime_realtime_websocket_terminal_event_kind(
-        "response.done"
+    for event_type in [
+        "session.started",
+        "delegation.created",
+        "turn.done",
+        "response.done",
+    ] {
+        assert!(
+            runtime_realtime_websocket_terminal_event_kind(event_type),
+            "{event_type}"
+        );
+    }
+    assert!(!runtime_realtime_websocket_terminal_event_kind(
+        "output_audio.delta"
     ));
     assert!(is_runtime_terminal_event(
         r#"{"type":"response.completed"}"#
