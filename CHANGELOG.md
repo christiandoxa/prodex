@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.334.0 - 2026-07-21
+
+### CLI
+
+- Show process list and harden TUI input (`1c708d6`)
+
 ## 0.333.0 - 2026-07-21
 
 ### CLI
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Harden Codex input on VTE terminals (`5095669`)
-
-## 0.322.0 - 2026-07-19
-
-### Runtime
-
-- Honor Presidio opt-in and fail-open (`86ae8bf`)
