@@ -238,6 +238,7 @@ struct RuntimeGatewaySideEffectSnapshot {
 struct RuntimeRotationProxy {
     runtime_config: Arc<RuntimeConfig>,
     server: Arc<TinyServer>,
+    draining: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     worker_threads: Vec<thread::JoinHandle<()>>,
     accept_worker_count: usize,

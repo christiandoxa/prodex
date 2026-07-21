@@ -1,7 +1,7 @@
 use super::*;
 use prodex_domain::{
-    ApprovalAction, ApprovalRecord, ApprovalState, ApprovalTransition, ApprovalTransitionRequest,
-    AuditOutcome, compute_audit_chain_digest, transition_approval,
+    ApprovalAction, ApprovalKind, ApprovalRecord, ApprovalState, ApprovalTransition,
+    ApprovalTransitionRequest, AuditOutcome, compute_audit_chain_digest, transition_approval,
 };
 use std::fmt;
 
@@ -16,19 +16,23 @@ pub fn plan_approval_vote_transition(
     request: &ApprovalVoteRequest,
     action: ApprovalAction,
 ) -> Result<ApprovalVoteTransitionDecision, GovernanceRepositoryError> {
-    if !matches!(
-        action,
-        ApprovalAction::Approve
-            | ApprovalAction::Reject
-            | ApprovalAction::Cancel
-            | ApprovalAction::Activate
-    ) {
+    let supported = match action {
+        ApprovalAction::Approve | ApprovalAction::Reject | ApprovalAction::Cancel => true,
+        ApprovalAction::Activate => matches!(
+            current.kind,
+            ApprovalKind::Execution | ApprovalKind::BreakGlass
+        ),
+        ApprovalAction::Supersede => current.kind == ApprovalKind::BreakGlass,
+        ApprovalAction::RollBack => false,
+    };
+    if !supported {
         return Err(GovernanceRepositoryError::InvalidInput);
     }
-    if action != ApprovalAction::Activate {
+    if !matches!(
+        (current.kind, action),
+        (ApprovalKind::Execution, ApprovalAction::Activate)
+    ) {
         crate::governance_support::require_control_plane_admin(request.tenant_id, &request.actor)?;
-    } else if current.kind != prodex_domain::ApprovalKind::Execution {
-        return Err(GovernanceRepositoryError::InvalidInput);
     }
     match transition_approval(ApprovalTransitionRequest {
         record: current,
@@ -57,18 +61,15 @@ pub struct GovernanceRevisionLifecycleUpdate {
 pub fn plan_approval_revision_lifecycle_update(
     record: &ApprovalRecord,
 ) -> Result<Option<GovernanceRevisionLifecycleUpdate>, GovernanceRepositoryError> {
-    if record.kind == prodex_domain::ApprovalKind::Execution {
+    let Some(kind) = crate::governance_support::approval_artifact_kind(record.kind)? else {
         return Ok(None);
-    }
+    };
     let state = match record.state {
         ApprovalState::Approved => "approved",
         ApprovalState::Rejected => "rejected",
         _ => return Ok(None),
     };
-    Ok(Some(GovernanceRevisionLifecycleUpdate {
-        kind: crate::governance_support::artifact_kind_for_approval(record.kind)?,
-        state,
-    }))
+    Ok(Some(GovernanceRevisionLifecycleUpdate { kind, state }))
 }
 
 pub fn denied_approval_audit_outbox(

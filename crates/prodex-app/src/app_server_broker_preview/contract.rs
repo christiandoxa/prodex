@@ -209,9 +209,28 @@ pub(crate) fn app_server_broker_contract_json() -> serde_json::Value {
             }
         },
         "errors": {
-            "quota": "json-rpc-error-planned",
-            "rate_limit": "json-rpc-error-planned",
-            "overload": "json-rpc-error-planned"
+            "upstream_jsonrpc": "passthrough",
+            "validation_failure": "fail-closed-transport-termination",
+            "broker_owned_quota_translation": false
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn broker_contract_preserves_upstream_error_semantics() {
+        let contract = app_server_broker_contract_json();
+        assert_eq!(contract["errors"]["upstream_jsonrpc"], "passthrough");
+        assert_eq!(
+            contract["errors"]["validation_failure"],
+            "fail-closed-transport-termination"
+        );
+        assert_eq!(
+            contract["errors"]["broker_owned_quota_translation"],
+            serde_json::Value::Bool(false)
+        );
+    }
 }

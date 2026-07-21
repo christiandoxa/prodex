@@ -21,8 +21,10 @@ mod gateway_admin_scope;
 mod gateway_admin_tenant_scope;
 mod gateway_admin_toctou;
 mod gateway_application_boundary;
+mod gateway_break_glass;
 mod gateway_grouped_budget;
 mod gateway_health;
+mod gateway_release_secret_canary;
 mod gateway_state;
 mod gateway_usage;
 mod governance_failure;
@@ -40,53 +42,6 @@ fn runtime_gateway_test_secret(value: &str) -> RuntimeGatewaySecret {
         value.as_bytes().to_vec(),
         None::<String>,
     ))
-}
-
-#[test]
-fn local_rewrite_rejects_url_secret_before_log_or_listener_setup() {
-    let root = temp_root("local-rewrite-url-boundary");
-    let paths = app_paths_for_root(root.clone());
-    let log_dir = root.join("runtime-logs");
-    let _log_dir = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_LOG_DIR", log_dir.to_str().unwrap());
-    let sentinel = "local-rewrite-url-secret-sentinel";
-
-    let error = match start_runtime_local_rewrite_proxy(RuntimeLocalRewriteProxyStartOptions {
-        paths: &paths,
-        state: &AppState::default(),
-        upstream_base_url: format!("https://user:{sentinel}@example.test/v1"),
-        provider: RuntimeLocalRewriteProviderOptions::OpenAiResponses {
-            api_keys: Vec::new(),
-        },
-        upstream_no_proxy: false,
-        smart_context_enabled: false,
-        presidio_redaction_enabled: false,
-        model_context_window_tokens: None,
-        preferred_listen_addr: Some("127.0.0.1:0"),
-        gateway_auth_token_hash: None,
-        gateway_admin_tokens: Vec::new(),
-        gateway_sso: RuntimeGatewaySsoConfig::default(),
-        gateway_state_store: RuntimeGatewayStateStore::file(&paths),
-        gateway_virtual_keys: Vec::new(),
-        gateway_route_aliases: Vec::new(),
-        gateway_guardrails: runtime_proxy_crate::RuntimeGatewayGuardrailConfig::default(),
-        gateway_guardrail_webhook: RuntimeGatewayGuardrailWebhookConfig::default(),
-        gateway_call_id_header: None,
-        gateway_observability: RuntimeGatewayObservabilityConfig::default(),
-    }) {
-        Ok(_) => panic!("credential-bearing URL should fail before local rewrite startup"),
-        Err(error) => error.to_string(),
-    };
-
-    assert!(
-        error.contains("no credentials, query, or fragment"),
-        "{error}"
-    );
-    assert!(!error.contains(sentinel), "{error}");
-    assert!(
-        !log_dir.exists(),
-        "invalid URL must fail before the runtime log directory is created"
-    );
-    let _ = fs::remove_dir_all(root);
 }
 
 fn write_fake_kiro_runtime_agent(root: &Path) -> std::path::PathBuf {

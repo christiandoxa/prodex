@@ -291,6 +291,16 @@ fn runtime_local_rewrite_canonical_context<'target>(
     {
         return Err(state.respond(response));
     }
+    if shared
+        .gateway_draining
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(state.reject(build_runtime_proxy_json_error_response(
+            503,
+            "service_unavailable",
+            "gateway is draining",
+        )));
+    }
     Ok(RuntimeLocalRewriteCanonicalRequest(state))
 }
 

@@ -94,7 +94,10 @@ impl RuntimeGatewayApplication {
         &self,
         handler_request: GatewayHandlerRequest,
     ) -> GatewayHandlerResult {
-        if self.shutdown.load(Ordering::Acquire) {
+        if self.shutdown.load(Ordering::Acquire)
+            || (self.shared.gateway_draining.load(Ordering::Acquire)
+                && !runtime_gateway_route_is_health(handler_request.route))
+        {
             return Err(GatewayHandlerError::Unavailable);
         }
         let permit = try_acquire_gateway_request_permit(
@@ -211,23 +214,30 @@ impl RuntimeGatewayApplication {
     }
 
     pub(crate) fn shutdown_and_drain(&self, timeout: Duration) -> bool {
-        self.shutdown.store(true, Ordering::Release);
+        self.shared.gateway_draining.store(true, Ordering::Release);
         self.request_slots.close();
-        self.health_slots.close();
         let deadline = Instant::now() + timeout;
-        while self.request_slots.available_permits() != self.request_limit
-            || self.health_slots.available_permits() != HEALTH_REQUEST_LIMIT
-            || self
-                .shared
-                .gateway_background_task_count
-                .load(Ordering::Acquire)
-                != 0
-        {
-            if Instant::now() >= deadline {
-                return false;
+        let requests_drained = loop {
+            let drained = self.request_slots.available_permits() == self.request_limit
+                && self
+                    .shared
+                    .gateway_background_task_count
+                    .load(Ordering::Acquire)
+                    == 0;
+            if drained || Instant::now() >= deadline {
+                break drained;
             }
             thread::sleep(Duration::from_millis(10));
-        }
+        };
+        self.shutdown.store(true, Ordering::Release);
+        self.health_slots.close();
+        let health_drained = loop {
+            let drained = self.health_slots.available_permits() == HEALTH_REQUEST_LIMIT;
+            if drained || Instant::now() >= deadline {
+                break drained;
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
         let workers_finished = loop {
             let finished = self
                 .worker_threads
@@ -245,7 +255,7 @@ impl RuntimeGatewayApplication {
             }
         }
         runtime_proxy_flush_logs_for_path(&self.shared.runtime_shared.log_path);
-        workers_finished
+        requests_drained && health_drained && workers_finished
     }
 }
 
@@ -324,6 +334,7 @@ fn client_ip_is_private(client_ip: std::net::IpAddr) -> bool {
 
 impl Drop for RuntimeGatewayApplication {
     fn drop(&mut self) {
+        self.shared.gateway_draining.store(true, Ordering::Release);
         self.shutdown.store(true, Ordering::Release);
         self.request_slots.close();
         self.health_slots.close();
@@ -355,17 +366,11 @@ fn detach_unfinished_workers(workers: &mut Vec<thread::JoinHandle<()>>) -> usize
 }
 
 fn try_acquire_gateway_request_permit(
-    route: prodex_gateway_http::GatewayHttpRouteKind,
+    route: GatewayHttpRouteKind,
     request_slots: &Arc<Semaphore>,
     health_slots: &Arc<Semaphore>,
 ) -> Result<Arc<tokio::sync::OwnedSemaphorePermit>, GatewayHandlerError> {
-    let health_request = matches!(
-        route,
-        prodex_gateway_http::GatewayHttpRouteKind::HealthLive
-            | prodex_gateway_http::GatewayHttpRouteKind::HealthReady
-            | prodex_gateway_http::GatewayHttpRouteKind::HealthStartup
-    );
-    let slots = if health_request {
+    let slots = if runtime_gateway_route_is_health(route) {
         health_slots
     } else {
         request_slots
@@ -377,6 +382,15 @@ fn try_acquire_gateway_request_permit(
             TryAcquireError::Closed => GatewayHandlerError::Unavailable,
             TryAcquireError::NoPermits => GatewayHandlerError::Overloaded,
         })
+}
+
+fn runtime_gateway_route_is_health(route: GatewayHttpRouteKind) -> bool {
+    matches!(
+        route,
+        GatewayHttpRouteKind::HealthLive
+            | GatewayHttpRouteKind::HealthReady
+            | GatewayHttpRouteKind::HealthStartup
+    )
 }
 
 struct CancelBodyPumpOnDrop(Option<oneshot::Sender<()>>);

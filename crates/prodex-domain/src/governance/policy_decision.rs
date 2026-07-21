@@ -855,9 +855,9 @@ pub fn evaluate_governance_policy(
         });
     }
 
-    let mut effect = policy.default_effect;
+    let mut effect = PolicyEffect::Allow;
     let mut obligations = Vec::new();
-    let mut reason_codes = Vec::new();
+    let mut reasons = Vec::new();
     for rule in policy
         .rules
         .iter()
@@ -865,19 +865,20 @@ pub fn evaluate_governance_policy(
     {
         effect = effect.max(rule.effect);
         obligations.extend(rule.obligations.iter().cloned());
-        reason_codes.push(rule.reason_code.clone());
+        reasons.push(rule.reason_code.clone());
     }
-    if reason_codes.is_empty() {
-        reason_codes.push(PolicyReasonCode::new("policy.default")?);
+    if reasons.is_empty() {
+        effect = policy.default_effect;
+        reasons.push(PolicyReasonCode::new("policy.default")?);
     }
     obligations.sort();
     obligations.dedup();
-    reason_codes.sort();
-    reason_codes.dedup();
+    reasons.sort();
+    reasons.dedup();
     if obligations.len() > MAX_POLICY_OBLIGATIONS {
         return Err(GovernancePolicyError::ObligationLimitExceeded);
     }
-    if reason_codes.len() > MAX_POLICY_REASON_CODES {
+    if reasons.len() > MAX_POLICY_REASON_CODES {
         return Err(GovernancePolicyError::ReasonLimitExceeded);
     }
     if effect == PolicyEffect::Deny {
@@ -886,7 +887,7 @@ pub fn evaluate_governance_policy(
     Ok(PolicyDecision {
         effect,
         obligations,
-        reason_codes,
+        reason_codes: reasons,
         policy_revision: policy.revision,
         valid_until_unix_ms: policy.valid_until_unix_ms,
     })

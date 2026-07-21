@@ -1,5 +1,9 @@
 # Prodex Architecture Audit and Milestone Plan
 
+> Historical refactor journal. Current architecture and supported behavior are
+> documented in `docs/architecture.md`, `docs/provider-conformance.md`, and
+> `docs/enterprise-governance/implementation-ledger.md`.
+
 This note captures the current repository state before the next structural refactor.
 
 It is based on the current worktree, not intent.

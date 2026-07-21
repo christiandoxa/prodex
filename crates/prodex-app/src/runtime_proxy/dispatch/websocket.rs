@@ -19,6 +19,16 @@ pub(super) fn capture_runtime_proxy_websocket_request(
     }
 }
 
+fn runtime_proxy_websocket_response_inspection_policy(
+    rollout: prodex_config::GovernanceRolloutMode,
+) -> Option<(&'static str, bool)> {
+    match rollout {
+        prodex_config::GovernanceRolloutMode::Off => None,
+        prodex_config::GovernanceRolloutMode::Observe => Some(("observe", false)),
+        prodex_config::GovernanceRolloutMode::Enforce => Some(("enforce", true)),
+    }
+}
+
 pub(crate) fn proxy_runtime_responses_websocket_request(
     request_id: u64,
     request: tiny_http::Request,
@@ -46,6 +56,38 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
             "Runtime websocket proxy only supports Codex responses and realtime endpoints.",
         ));
         return;
+    }
+
+    if let Some((rollout, requires_https)) = runtime_proxy_websocket_response_inspection_policy(
+        shared.runtime_config.governance.inspection,
+    ) {
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "native_websocket_response_inspection",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "websocket"),
+                    runtime_proxy_log_field("coverage", "unsupported"),
+                    runtime_proxy_log_field("rollout", rollout),
+                    runtime_proxy_log_field(
+                        "action",
+                        if requires_https {
+                            "https_fallback"
+                        } else {
+                            "observe"
+                        },
+                    ),
+                ],
+            ),
+        );
+        if requires_https {
+            let _ = request.respond(build_runtime_proxy_text_response(
+                501,
+                "governance enforcement requires the HTTPS Responses transport",
+            ));
+            return;
+        }
     }
 
     let handshake_request = capture_runtime_proxy_websocket_request(&request);
@@ -173,4 +215,27 @@ fn build_runtime_proxy_websocket_upgrade_response(
         .with_header(upgrade)
         .with_header(connection)
         .with_header(accept))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_websocket_response_inspection_fails_closed_only_in_enforce_rollout() {
+        use prodex_config::GovernanceRolloutMode::{Enforce, Observe, Off};
+
+        assert_eq!(
+            runtime_proxy_websocket_response_inspection_policy(Off),
+            None
+        );
+        assert_eq!(
+            runtime_proxy_websocket_response_inspection_policy(Observe),
+            Some(("observe", false))
+        );
+        assert_eq!(
+            runtime_proxy_websocket_response_inspection_policy(Enforce),
+            Some(("enforce", true))
+        );
+    }
 }

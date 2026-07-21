@@ -1,5 +1,10 @@
 # Prodex Enterprise Readiness Audit
 
+> Historical implementation journal. For current support and release evidence,
+> use `docs/enterprise-governance/implementation-ledger.md` and
+> `docs/enterprise-governance/test-matrix.json`. Numbered ADR links removed from
+> the repository are historical references, not active specifications.
+
 This audit maps the priority enterprise findings to the current boundary work,
 regression coverage, decisions, and known migration gaps. It is intentionally
 evidence-oriented so future refactors can preserve Prodex runtime invariants
@@ -1155,12 +1160,11 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0664-gateway-admin-ledger-export-limit.md`, and
   `docs/adr/0010-runtime-request-body-limit.md`, and
   `docs/adr/1061-legacy-gateway-signal-drain.md`.
-- **Remaining gap:** The remaining `tiny_http` and mutex-backed
-  compatibility paths in `prodex-app` are now staged behind an explicit async
-  serve migration contract (`docs/adr/0983-async-serve-composition-root-staging.md`),
-  but the actual gateway/control-plane serve adapters and the separate
-  loopback-only `dashboard` / `expose` migrations still need to land before the
-  legacy compatibility code can be removed.
+- **Current boundary:** Dedicated `prodex-gateway serve` and
+  `prodex-control-plane serve` use the async reloadable gateway server. The
+  remaining `tiny_http` and mutex-backed paths are loopback compatibility
+  adapters such as `dashboard` and `expose`; removing them is a compatibility
+  cleanup, not missing dedicated-server composition.
 
 ### 12. Dependency Inversion Must Keep Domain and Shared Logic Clean
 

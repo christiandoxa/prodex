@@ -7,10 +7,7 @@ use std::{
 
 impl RuntimeRotationProxy {
     pub(crate) fn shutdown_and_drain(&self, timeout: Duration) -> bool {
-        self.shutdown.store(true, Ordering::SeqCst);
-        for _ in 0..self.accept_worker_count {
-            self.server.unblock();
-        }
+        self.draining.store(true, Ordering::SeqCst);
         runtime_proxy_log_to_path(
             &self.log_path,
             &format!(
@@ -19,6 +16,10 @@ impl RuntimeRotationProxy {
             ),
         );
         let drained = wait_for_active_requests(&self.active_request_count, timeout);
+        self.shutdown.store(true, Ordering::SeqCst);
+        for _ in 0..self.accept_worker_count {
+            self.server.unblock();
+        }
         runtime_proxy_log_to_path(
             &self.log_path,
             &format!(
