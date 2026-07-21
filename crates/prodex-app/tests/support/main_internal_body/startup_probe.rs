@@ -58,9 +58,9 @@ fn invalid_runtime_policy_does_not_block_doctor_or_profile_recovery() {
     assert!(validate_command_runtime_policy(&doctor).is_ok());
     assert!(validate_command_runtime_policy(&profiles).is_ok());
     assert!(validate_command_runtime_policy(&runtime).is_err());
-    doctor.execute().expect("doctor should diagnose invalid policy");
-    profiles
-        .execute()
+    crate::command_dispatch::execute_command(doctor)
+        .expect("doctor should diagnose invalid policy");
+    crate::command_dispatch::execute_command(profiles)
         .expect("profile recovery should ignore invalid policy");
 
     clear_runtime_policy_cache();

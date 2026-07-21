@@ -115,6 +115,10 @@ pub(crate) fn build_info_quota_aggregate(
 }
 
 pub(crate) fn collect_prodex_processes() -> Vec<ProdexProcessInfo> {
+    try_collect_prodex_processes().unwrap_or_default()
+}
+
+pub(crate) fn try_collect_prodex_processes() -> Result<Vec<ProdexProcessInfo>> {
     let current_pid = std::process::id();
     let current_basename = std::env::current_exe().ok().and_then(|path| {
         path.file_name()
@@ -122,20 +126,25 @@ pub(crate) fn collect_prodex_processes() -> Vec<ProdexProcessInfo> {
             .map(ToOwned::to_owned)
     });
 
-    let mut processes = collect_process_rows()
+    let mut processes = try_collect_process_rows()?
         .into_iter()
         .filter_map(|row| {
             classify_prodex_process_row(row, current_pid, current_basename.as_deref())
         })
         .collect::<Vec<_>>();
     processes.sort_by_key(|process| process.pid);
-    processes
+    Ok(processes)
 }
 
 pub(crate) fn collect_process_rows() -> Vec<ProcessRow> {
-    collect_process_rows_from_proc()
-        .or_else(|| collect_process_rows_from_ps().ok())
-        .unwrap_or_default()
+    try_collect_process_rows().unwrap_or_default()
+}
+
+pub(crate) fn try_collect_process_rows() -> Result<Vec<ProcessRow>> {
+    match collect_process_rows_from_proc() {
+        Some(rows) if !rows.is_empty() => Ok(rows),
+        _ => collect_process_rows_from_ps(),
+    }
 }
 
 pub(crate) fn collect_process_rows_from_proc() -> Option<Vec<ProcessRow>> {

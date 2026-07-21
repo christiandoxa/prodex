@@ -48,10 +48,12 @@ fn active_runtime_log_paths_filter_to_runtime_processes() {
     let processes = vec![
         ProdexProcessInfo {
             pid: 200,
+            command: "run".to_string(),
             runtime: true,
         },
         ProdexProcessInfo {
             pid: 201,
+            command: "info".to_string(),
             runtime: false,
         },
     ];
@@ -68,6 +70,35 @@ fn active_runtime_log_paths_filter_to_runtime_processes() {
         paths,
         vec![PathBuf::from("/tmp/prodex-runtime-200-new.log")]
     );
+}
+
+#[test]
+fn process_classification_uses_canonical_cli_semantics() {
+    let rows = parse_ps_process_rows(concat!(
+        "  100 prodex /usr/local/bin/prodex\n",
+        "  101 prodex /usr/local/bin/prodex fix this bug\n",
+        "  102 prodex /usr/local/bin/prodex s\n",
+        "  103 prodex /usr/local/bin/prodex super doctor\n",
+        "  104 prodex /usr/local/bin/prodex info\n",
+    ));
+    let processes = rows
+        .into_iter()
+        .map(|row| {
+            classify_prodex_process_row(row, 999, Some("prodex"))
+                .expect("prodex row should be classified")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(processes[0].command, "run");
+    assert!(processes[0].runtime);
+    assert_eq!(processes[1].command, "run");
+    assert!(processes[1].runtime);
+    assert_eq!(processes[2].command, "super");
+    assert!(processes[2].runtime);
+    assert_eq!(processes[3].command, "capability");
+    assert!(!processes[3].runtime);
+    assert_eq!(processes[4].command, "info");
+    assert!(!processes[4].runtime);
 }
 
 #[test]

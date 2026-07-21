@@ -2819,6 +2819,7 @@ name = "prodex-app-reports"
 version = "0.334.0"
 dependencies = [
  "chrono",
+ "prodex-cli",
  "prodex-quota",
  "prodex-runtime-quota",
  "prodex-runtime-tuning",

@@ -21,6 +21,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) const RUNTIME_GOAL_SESSION_NOTIFY_COMMAND: &str = "__runtime-goal-session-notify";
 const RUNTIME_GOAL_SESSION_HOOK_TIMEOUT_SECS: u64 = 5;
+const RUNTIME_GOAL_SESSION_NOTIFY_MAX_PAYLOAD_BYTES: u64 = 64 * 1024;
 #[cfg(not(windows))]
 const RUNTIME_GOAL_SESSION_HOOK_KEY: &str = "/<session-flags>/config.toml:session_start:0:0";
 #[cfg(windows)]
@@ -417,28 +418,36 @@ pub(super) fn runtime_goal_session_hook_hash(command: &str) -> String {
     format!("sha256:{hex}")
 }
 
-pub(crate) fn handle_runtime_goal_session_notify_if_requested() -> bool {
+pub(crate) fn handle_runtime_goal_session_notify_if_requested() -> Result<bool> {
     let mut args = env::args_os().skip(1);
     if args.next().as_deref() != Some(OsStr::new(RUNTIME_GOAL_SESSION_NOTIFY_COMMAND)) {
-        return false;
+        return Ok(false);
     }
-    let marker_path = args.next().map(PathBuf::from);
+    let marker_path = args
+        .next()
+        .map(PathBuf::from)
+        .context("runtime goal session notify requires a marker path")?;
     let payload_arg = args.next();
-    if args.next().is_none()
-        && let Some(marker_path) = marker_path
-    {
-        let payload = payload_arg.or_else(|| {
+    if args.next().is_some() {
+        bail!("runtime goal session notify accepts at most one payload argument");
+    }
+    let payload = match payload_arg {
+        Some(payload) => payload,
+        None => {
             let mut payload = String::new();
             std::io::stdin()
+                .lock()
+                .take(RUNTIME_GOAL_SESSION_NOTIFY_MAX_PAYLOAD_BYTES + 1)
                 .read_to_string(&mut payload)
-                .ok()
-                .map(|_| OsString::from(payload))
-        });
-        if let Some(payload) = payload {
-            let _ = write_runtime_goal_session_marker(&marker_path, &payload);
+                .context("failed to read runtime goal session notify payload")?;
+            if payload.len() as u64 > RUNTIME_GOAL_SESSION_NOTIFY_MAX_PAYLOAD_BYTES {
+                bail!("runtime goal session notify payload exceeds 64 KiB");
+            }
+            OsString::from(payload)
         }
-    }
-    true
+    };
+    write_runtime_goal_session_marker(&marker_path, &payload)?;
+    Ok(true)
 }
 
 pub(super) fn write_runtime_goal_session_marker(marker_path: &Path, payload: &OsStr) -> Result<()> {

@@ -117,7 +117,6 @@ pub(crate) use app_state::*;
 use audit_log::*;
 pub(crate) use cli_args::*;
 pub(crate) use codex_config::*;
-use command_dispatch::CommandDispatchExt;
 pub(crate) use core_constants::*;
 use dashboard::*;
 use expose::*;
@@ -412,11 +411,12 @@ mod runtime_request_id_tests {
 }
 
 pub fn main_entry() {
-    if app_commands::runtime_launch::goal_resume::handle_runtime_goal_session_notify_if_requested()
-    {
-        return;
-    }
-    if let Err(err) = run() {
+    let result = match app_commands::runtime_launch::goal_resume::handle_runtime_goal_session_notify_if_requested() {
+        Ok(true) => Ok(()),
+        Ok(false) => run(),
+        Err(err) => Err(err),
+    };
+    if let Err(err) = result {
         if main_entry_error_is_broken_pipe(&err) {
             return;
         }
@@ -449,16 +449,16 @@ fn main_entry_error_message(err: &anyhow::Error) -> String {
 fn run() -> Result<()> {
     let command = parse_cli_command_or_exit();
     create_codex_home_if_missing(&AppPaths::discover()?.root)?;
-    if command.should_show_update_notice() {
+    if command_dispatch::command_should_show_update_notice(&command) {
         let _ = show_update_notice_if_available(&command);
     }
     validate_command_runtime_policy(&command)?;
     schedule_prodex_auto_runtime_housekeeping(&command);
-    command.execute()
+    command_dispatch::execute_command(command)
 }
 
 fn validate_command_runtime_policy(command: &Commands) -> Result<()> {
-    if command.requires_valid_runtime_policy() {
+    if command.launches_runtime() {
         ensure_runtime_policy_valid()?;
     }
     Ok(())

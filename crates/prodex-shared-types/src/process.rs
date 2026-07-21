@@ -8,5 +8,6 @@ pub struct ProcessRow {
 #[derive(Debug, Clone)]
 pub struct ProdexProcessInfo {
     pub pid: u32,
+    pub command: String,
     pub runtime: bool,
 }

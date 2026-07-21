@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 chrono = { workspace = true }
+prodex_cli = { workspace = true }
 prodex_quota = { workspace = true }
 prodex_runtime_quota = { workspace = true }
 prodex_runtime_tuning = { workspace = true }

@@ -291,6 +291,7 @@ fn parse_ps_process_rows_and_classify_runtime_prodex_process() {
         .expect("prodex row should be classified");
 
     assert_eq!(process.pid, 111);
+    assert_eq!(process.command, "run");
     assert!(process.runtime);
     assert!(classify_prodex_process_row(rows[1].clone(), 999, Some("prodex")).is_none());
 }

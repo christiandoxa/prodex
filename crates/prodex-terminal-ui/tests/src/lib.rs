@@ -106,9 +106,10 @@ fn status_panel_draws_on_test_backend() {
 
 #[test]
 fn info_process_summary_preserves_pid_limit() {
+    let processes = (10..17).map(|pid| format!("{pid}/run"));
     assert_eq!(
-        format_info_process_summary_display(7, 2, 10..17, 6),
-        "Yes (7 total, 2 runtime; pids: 10, 11, 12, 13, 14, 15 (+1 more))"
+        format_info_process_summary_display(7, 2, processes, 6),
+        "Yes (7 total, 2 runtime; processes: 10/run, 11/run, 12/run, 13/run, 14/run, 15/run (+1 more))"
     );
 }
 
