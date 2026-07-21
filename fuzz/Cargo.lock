@@ -894,9 +894,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.187"
+version = "0.2.188"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7743783ea728ef5c31194c6590797eed286449b4a4e87d626d8a51f0a94e732"
+checksum = "22053b6a34f84abc97f9129e61334f40174659a1b9bd18c970b83db6a9a6348b"
 
 [[package]]
 name = "libfuzzer-sys"
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "prodex-domain",
  "url",
@@ -1163,14 +1163,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-core"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "serde",
  "sha2 0.11.0",
@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -1225,14 +1225,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -1249,7 +1249,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "base64",
  "serde",
@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -1266,7 +1266,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "anyhow",
  "prodex-authn",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "keyring",
  "libc",
@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.332.0"
+version = "0.333.0"
 dependencies = [
  "prodex-domain",
 ]
