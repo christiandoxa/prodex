@@ -2,12 +2,23 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.330.0 - 2026-07-21
+
+### Misc
+
+- Close audited governance gaps (`253e493`)
+
 ## 0.329.0 - 2026-07-20
 
 ### Runtime
 
 - Harden timeout and secret cleanup (`078701b`)
 - Isolate provider conversation state (`b0dc453`)
+
+### CLI
+
+- Preserve Windows ACL handle rights (`35f520f`)
+- Harden Windows lease contention (`45fb27c`)
 
 ### Misc
 
@@ -79,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Skip tool schemas during PII inspection (`68fc84e`)
-
-## 0.318.0 - 2026-07-19
-
-### Misc
-
-- Complete audited feature implementations (`650bfa9`)
