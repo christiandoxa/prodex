@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.333.0 - 2026-07-21
+
+### CLI
+
+- Harden quota retry, terminal input, and update freshness (`4ca3c46`)
+
 ## 0.332.0 - 2026-07-21
 
 ### Runtime
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Honor Presidio opt-in and fail-open (`86ae8bf`)
-
-## 0.321.0 - 2026-07-19
-
-### Runtime
-
-- Complete audited runtime and governance features (`f5c4302`)
