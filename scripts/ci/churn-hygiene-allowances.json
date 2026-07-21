@@ -1,5 +1,19 @@
 [
   {
+    "id": "audited-production-completion-release-0.331.0",
+    "requiredSubjects": [
+      "fix(gateway): close audited production gaps",
+      "chore(release): release 0.331.0"
+    ],
+    "caps": {
+      "maxFiles": 46,
+      "maxBehaviorFiles": 29,
+      "maxLines": 750,
+      "maxFileLines": 124
+    },
+    "reason": "Reviewed the complete 0.331.0 production audit and GitHub-only release range, including effective dedicated-listener configuration, control-plane authentication separation, atomic policy reloads, deployment-policy alignment, serialized PostgreSQL migrations, collision-free live fixtures, container-independent backup drills, private profile filesystem permissions, synchronized release metadata, and operational documentation; verified with focused regressions, repeated live PostgreSQL and Redis suites, concurrent migration and backup/restore drills, the full locked all-features suite, strict Clippy, complete preflight and production guards, supply-chain checks, and tracked-diff secret and identifier scanning."
+  },
+  {
     "id": "provider-conversation-hardening-feature-0.329.0",
     "requiredSubjects": [
       "fix(runtime): isolate provider conversation state"
