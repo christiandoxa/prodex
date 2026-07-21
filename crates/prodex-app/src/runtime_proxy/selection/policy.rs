@@ -23,8 +23,8 @@ pub(crate) struct RuntimeCandidateAffinity<'a> {
     pub(crate) trusted_previous_response_affinity: bool,
 }
 
+#[cfg(test)]
 impl<'a> RuntimeCandidateAffinity<'a> {
-    #[allow(dead_code)]
     pub(crate) fn new(
         route_kind: RuntimeRouteKind,
         candidate_name: &'a str,

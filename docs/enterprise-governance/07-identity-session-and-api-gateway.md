@@ -5,8 +5,11 @@ services, compatibility routes, HTTP/SSE and WebSocket traffic. Existing
 virtual-key authentication, scopes, tenant-aware application boundaries,
 runtime admission and session/affinity primitives are reusable. The production
 edge validates trusted proxies and a shared authority revocation epoch refreshes
-session caches; anonymous compatibility paths, human/workload identity parity,
-mTLS peer verification and deployed multi-replica validation remain gaps.
+session caches. Enterprise and bank data-plane admission rejects the legacy
+root bearer compatibility identity. Native OIDC/workload JWT validation,
+Rustls client-certificate verification, and JWT certificate binding are
+implemented; managed IdP/PKI rotation and deployed multi-replica validation
+remain environment acceptance work.
 [`10-unified-gateway-and-identity.md`](10-unified-gateway-and-identity.md).
 
 ## Entry sequence

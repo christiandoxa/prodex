@@ -22,9 +22,15 @@ pub(super) enum Command {
 pub(super) struct ServeArgs {
     #[arg(long, value_name = "ADDR")]
     pub listen: Option<String>,
-    #[arg(long, value_name = "PATH", requires = "config_publication_replica")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        conflicts_with = "config_publication_postgres"
+    )]
     pub config_publication_transport: Option<PathBuf>,
-    #[arg(long, value_name = "ID", requires = "config_publication_transport")]
+    #[arg(long, conflicts_with = "config_publication_transport")]
+    pub config_publication_postgres: bool,
+    #[arg(long, value_name = "ID")]
     pub config_publication_replica: Option<String>,
 }
 
@@ -46,14 +52,28 @@ pub(super) struct DeliverArgs {
 pub(super) struct PublishArgs {
     #[arg(long, value_name = "path")]
     pub event: PathBuf,
-    #[arg(long, value_name = "path")]
-    pub transport: PathBuf,
+    #[arg(
+        long,
+        value_name = "path",
+        required_unless_present = "postgres",
+        conflicts_with = "postgres"
+    )]
+    pub transport: Option<PathBuf>,
+    #[arg(long, required_unless_present = "transport")]
+    pub postgres: bool,
 }
 
 #[derive(Args, Debug, PartialEq, Eq)]
 pub(super) struct CompactArgs {
-    #[arg(long, value_name = "path")]
-    pub transport: PathBuf,
+    #[arg(
+        long,
+        value_name = "path",
+        required_unless_present = "postgres",
+        conflicts_with = "postgres"
+    )]
+    pub transport: Option<PathBuf>,
+    #[arg(long, required_unless_present = "transport")]
+    pub postgres: bool,
     #[arg(long, value_name = "n", default_value_t = 0)]
     pub retain: usize,
 }
@@ -131,7 +151,8 @@ mod tests {
             parse_from(["compact-config-publication", "--transport", "transport"]),
             Ok(Invocation::Command(Command::CompactConfigPublication(
                 CompactArgs {
-                    transport: PathBuf::from("transport"),
+                    transport: Some(PathBuf::from("transport")),
+                    postgres: false,
                     retain: 0
                 }
             )))
@@ -145,6 +166,7 @@ mod tests {
             Ok(Invocation::Command(Command::Serve(ServeArgs {
                 listen: Some("127.0.0.1:8080".to_string()),
                 config_publication_transport: None,
+                config_publication_postgres: false,
                 config_publication_replica: None,
             })))
         );
@@ -167,7 +189,8 @@ mod tests {
             Ok(Invocation::Command(Command::PublishConfigPublication(
                 PublishArgs {
                     event: PathBuf::from("event.json"),
-                    transport: PathBuf::from("transport")
+                    transport: Some(PathBuf::from("transport")),
+                    postgres: false,
                 }
             )))
         );
@@ -181,7 +204,8 @@ mod tests {
             ]),
             Ok(Invocation::Command(Command::CompactConfigPublication(
                 CompactArgs {
-                    transport: PathBuf::from("transport"),
+                    transport: Some(PathBuf::from("transport")),
+                    postgres: false,
                     retain: 7
                 }
             )))
@@ -191,6 +215,18 @@ mod tests {
     #[test]
     fn typed_parser_rejects_missing_required_paths_and_invalid_retain() {
         assert!(parse_from(["plan-http-control-plane"]).is_err());
+        assert!(parse_from(["publish-config-publication", "--event", "event.json"]).is_err());
+        assert!(
+            parse_from([
+                "publish-config-publication",
+                "--event",
+                "event.json",
+                "--transport",
+                "transport",
+                "--postgres",
+            ])
+            .is_err()
+        );
         assert!(
             parse_from([
                 "compact-config-publication",

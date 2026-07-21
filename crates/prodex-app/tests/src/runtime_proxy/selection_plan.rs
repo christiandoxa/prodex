@@ -95,7 +95,6 @@ fn candidate_plan_reuses_supplied_ready_candidates_without_rebuilding() {
         vec!["second"]
     );
     assert_eq!(plan.ready_candidates[0].order_index, 0);
-    assert_eq!(plan.ready_candidates[0].provider_priority, 7);
     assert_eq!(
         plan.ready_candidates[0].quota_source,
         RuntimeQuotaSource::PersistedSnapshot

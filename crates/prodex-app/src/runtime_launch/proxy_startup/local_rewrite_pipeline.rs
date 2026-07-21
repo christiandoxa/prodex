@@ -504,6 +504,7 @@ fn runtime_local_rewrite_authorize_data_plane<'target>(
         virtual_key.as_ref(),
         legacy_authorized,
         shared.gateway_auth_token_hash.is_some() || admin_configured,
+        shared.runtime_shared.runtime_config.governance.mode,
     );
     if let Some(workload_credential) = workload_credential {
         credential.evidence = Some(workload_credential);

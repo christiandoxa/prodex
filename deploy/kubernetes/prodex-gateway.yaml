@@ -234,6 +234,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: prodex-gateway-config
+          env:
+            - name: PRODEX_CONFIG_PUBLICATION_REPLICA_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           readinessProbe:
             httpGet:
               path: /readyz
@@ -586,6 +591,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: prodex-control-plane-config
+          env:
+            - name: PRODEX_CONFIG_PUBLICATION_REPLICA_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           readinessProbe:
             httpGet:
               path: /readyz

@@ -1354,9 +1354,10 @@ while moving legacy adapter code behind enterprise boundaries.
   `cargo test -q --test enterprise_binaries -- --test-threads=1`
   exercises the current dedicated binary OTLP export/fallback matrix end to
   end.
-- **Remaining gap:** Carry the same OTLP exporter path into the future async
-  `serve` composition root so long-lived gateway/control-plane traffic emits the
-  same native telemetry without relying on one-shot command wiring.
+- **Current resolution:** Dedicated async `serve` composition roots now emit
+  bounded, low-cardinality `gateway.request` OTLP/HTTP logs through a bounded
+  background queue. Request handling never waits for collector I/O, and a
+  default export timeout bounds worker stalls when no timeout override is set.
 
 ### 14. Config and Policy Cache Need Revision and Last-Known-Good Semantics
 
@@ -1691,10 +1692,14 @@ while moving legacy adapter code behind enterprise boundaries.
   `docs/adr/0977-config-publication-replicated-file-transport.md`, and
   `docs/adr/0984-config-publication-broker-transport-staging.md`, and
   `docs/adr/1055-runtime-policy-reload-atomic-cache-replacement.md`.
-- **Remaining gap:** Non-shared-storage publication transport is now staged
-  behind an explicit broker-backed outbox/watch contract, but the actual broker
-  composition-root adapter still needs to land before this path is fully
-  topology-neutral.
+- **Current resolution:** PostgreSQL migration schema 14 provides a durable
+  configuration-publication event outbox, registered replicas, per-replica
+  acknowledgements, bounded polling, advisory-lock ownership, idempotent
+  publication, database-clock replica leases, and fully-acknowledged compaction
+  that retains a reload checkpoint. The filesystem adapter remains
+  available for a genuine shared-storage topology. Both transports carry only
+  revision identifiers and activation targets; deploying policy content to each
+  runtime root remains an explicit deployment boundary.
 
 ## Cross-Cutting Release Gates
 

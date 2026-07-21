@@ -141,10 +141,13 @@ boundaries are being introduced. Those paths must be migrated behind
 `prodex-application`, `prodex-gateway-http`, `prodex-control-plane`, and storage
 adapter crates with characterization tests for transport transparency,
 continuation affinity, upstream error compatibility, and CLI compatibility.
-The live config-publication adapter supports one durable shared-filesystem
-transport. Non-shared-storage publication remains unsupported until a real
-durable outbox/watch adapter exists; separate node-local roots must not be
-treated as replicas of one transport.
+The live config-publication adapter supports both a durable shared-filesystem
+transport and a PostgreSQL outbox with replica-scoped acknowledgements and
+advisory-lock ownership. Separate node-local roots must not be treated as
+replicas of one filesystem transport. Publication records carry revision IDs
+and activation targets only; policy artifact distribution remains a separate
+deployment responsibility and must make the candidate policy available at each
+runtime root before publishing the notification.
 Last-known-good runtime policy can delay an intended policy update until retry
 succeeds. Reload failures must remain observable, and urgent revocation must use
 an explicit fail-closed invalidation path.

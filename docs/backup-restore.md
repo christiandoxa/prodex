@@ -11,8 +11,8 @@ Back up all durable tenant-owned gateway state before upgrades, schema changes,
 provider credential rotation, or disaster-recovery drills:
 
 - `policy.toml` and non-secret gateway configuration.
-- config-publication transport outbox/ack state when the shared filesystem
-  transport is active.
+- config-publication event, replica, and acknowledgement state in PostgreSQL,
+  or its outbox/ack state when the shared filesystem transport is active.
 - virtual-key store.
 - usage counters.
 - append-only billing ledger.
@@ -96,7 +96,10 @@ Drill acceptance:
 
 PostgreSQL is the durable source of truth for multi-replica deployments. Use a
 consistent dump or your managed database backup facility. Store WAL/PITR backups
-outside the cluster.
+outside the cluster. A full database dump includes
+`prodex_config_publication_events`, `prodex_config_publication_replicas`, and
+`prodex_config_publication_acks`; do not exclude those tables when PostgreSQL
+publication is enabled.
 
 Backup:
 
@@ -131,6 +134,8 @@ Drill acceptance:
 - no duplicate ledger rows for the same call ID after restore.
 - usage totals match ledger summary for sampled tenants.
 - cross-tenant admin reads still fail safely.
+- every restored configuration-publication acknowledgement references an
+  existing event and registered replica.
 
 ### Automated PostgreSQL drill
 

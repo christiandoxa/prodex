@@ -6,7 +6,7 @@ import { git } from "./guard-common.mjs";
 import { repoRoot } from "../npm/common.mjs";
 
 export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
-  dead_code: 5,
+  dead_code: 2,
   "unused_imports": 6,
   "clippy::large_enum_variant": 5,
   "clippy::result_large_err": 2,
@@ -17,10 +17,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
 export const TEST_ONLY_DEAD_CODE_ALLOW_CAP = 24;
 
 export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
-  "dead_code|crates/prodex-app/src/runtime_proxy/selection/policy.rs|pub(crate) fn new(",
-  "dead_code|crates/prodex-app/src/runtime_proxy/selection_plan.rs|provider_priority: usize,",
   "dead_code|crates/prodex-app/src/runtime_proxy/websocket_message/auth.rs|pub(in crate::runtime_proxy) fn runtime_profile_auth_summary_for_selection(",
-  "dead_code|crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs|impl RuntimeLocalRewriteRequestContext {",
   "dead_code|crates/prodex-app/src/lib.rs|mod runtime_kiro_acp;",
   "unused_imports|crates/prodex-app/src/runtime_anthropic.rs|pub(super) use anthropic::{",
   "unused_imports|crates/prodex-app/src/runtime_background/probe_refresh.rs|pub(crate) use queue::note_runtime_probe_refresh_progress;",

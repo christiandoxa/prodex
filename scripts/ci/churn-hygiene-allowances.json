@@ -1,5 +1,32 @@
 [
   {
+    "id": "audited-distributed-runtime-boundaries-feature-0.332.0",
+    "requiredSubjects": [
+      "feat(enterprise): harden distributed runtime boundaries"
+    ],
+    "caps": {
+      "maxFiles": 40,
+      "maxBehaviorFiles": 30,
+      "maxLines": 1900,
+      "maxFileLines": 325
+    },
+    "reason": "Reviewed the whole-repository production audit fixes for enterprise-only root-bearer rejection, origin-allowlisted background JWKS planning, bounded asynchronous live OTLP export, durable PostgreSQL configuration publication with replica leases and acknowledgements, live reload wiring, deployment identity, dead-code removal, and corrected operational documentation; verified with focused regressions, a disposable PostgreSQL execution proof, the full locked all-features suite, strict Clippy, complete preflight and boundary guards, code-graph reindexing, and tracked-diff secret and identifier review."
+  },
+  {
+    "id": "audited-distributed-runtime-boundaries-release-0.332.0",
+    "requiredSubjects": [
+      "feat(enterprise): harden distributed runtime boundaries",
+      "chore(release): release 0.332.0"
+    ],
+    "caps": {
+      "maxFiles": 110,
+      "maxBehaviorFiles": 95,
+      "maxLines": 2800,
+      "maxFileLines": 400
+    },
+    "reason": "Reviewed the complete 0.332.0 production-audit and GitHub-only release range, including synchronized Cargo, npm, documentation, lockfile, and changelog metadata after release preparation, full locked all-features tests, strict Clippy, complete preflight and security guards, disposable PostgreSQL transport proof, code-graph coverage, and tracked-diff secret and identifier review."
+  },
+  {
     "id": "audited-production-completion-release-0.331.0",
     "requiredSubjects": [
       "fix(gateway): close audited production gaps",

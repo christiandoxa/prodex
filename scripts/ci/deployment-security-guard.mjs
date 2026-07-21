@@ -551,6 +551,9 @@ export function validateDeploymentSecurity(inputs) {
     if (!/envFrom:\s*\n\s*-\s*configMapRef:\s*\n\s*name:\s*prodex-gateway-config/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway workload must keep prodex-gateway-config envFrom`);
     }
+    if (!/name:\s*PRODEX_CONFIG_PUBLICATION_REPLICA_ID\s*\n\s*valueFrom:\s*\n\s*fieldRef:\s*\n\s*fieldPath:\s*metadata\.name/u.test(gatewayDeployment)) {
+      checks.push(`${kubernetesPath}: gateway config-publication replica ID must come from the pod name`);
+    }
     if (/secretRef:\s*\n\s*name:\s*prodex-control-plane-secrets/u.test(gatewayDeployment)) {
       checks.push(`${kubernetesPath}: gateway workload must not mount prodex-control-plane-secrets`);
     }
@@ -615,6 +618,9 @@ export function validateDeploymentSecurity(inputs) {
     }
     if (!/envFrom:\s*\n\s*-\s*configMapRef:\s*\n\s*name:\s*prodex-control-plane-config/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must use its dedicated runtime ConfigMap`);
+    }
+    if (!/name:\s*PRODEX_CONFIG_PUBLICATION_REPLICA_ID\s*\n\s*valueFrom:\s*\n\s*fieldRef:\s*\n\s*fieldPath:\s*metadata\.name/u.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane config-publication replica ID must come from the pod name`);
     }
     if (!/mountPath:\s*\/var\/lib\/prodex\/policy\.toml[\s\S]*?subPath:\s*policy\.toml/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must mount its policy.toml ConfigMap`);
@@ -907,6 +913,11 @@ spec:
       envFrom:
         - configMapRef:
             name: prodex-gateway-config
+      env:
+        - name: PRODEX_CONFIG_PUBLICATION_REPLICA_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
       volumeMounts:
         - name: prodex-gateway-secrets
           mountPath: /run/secrets/prodex
@@ -946,6 +957,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: prodex-control-plane-config
+          env:
+            - name: PRODEX_CONFIG_PUBLICATION_REPLICA_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           lifecycle:
             preStop:
               exec:
@@ -1524,6 +1540,16 @@ export function runSelfTest() {
     validateDeploymentSecurity({
       ...valid,
       kubernetes: valid.kubernetes.replace(
+        "      env:\n        - name: PRODEX_CONFIG_PUBLICATION_REPLICA_ID\n          valueFrom:\n            fieldRef:\n              fieldPath: metadata.name\n",
+        "",
+      ),
+    }).some((error) => error.includes("gateway config-publication replica ID")),
+    "gateway config-publication replica identity accepted without pod binding",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
         "        - name: prodex-gateway-secrets\n          mountPath: /run/secrets/prodex\n          readOnly: true\n",
         "",
       ),
@@ -1766,6 +1792,16 @@ export function runSelfTest() {
       ),
     }).some((error) => error.includes("must not be consumed through env or envFrom")),
     "control-plane secret envFrom accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "          env:\n            - name: PRODEX_CONFIG_PUBLICATION_REPLICA_ID\n              valueFrom:\n                fieldRef:\n                  fieldPath: metadata.name\n",
+        "",
+      ),
+    }).some((error) => error.includes("control-plane config-publication replica ID")),
+    "control-plane config-publication replica identity accepted without pod binding",
   );
   assertSelfTest(
     validateDeploymentSecurity({

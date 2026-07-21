@@ -212,13 +212,20 @@ affected key name. Values are snapshotted before the listener is bound and do
 not change until restart.
 
 Dedicated `prodex-gateway serve` and `prodex-control-plane serve` processes can
-consume the replicated file publication transport continuously with
-`--config-publication-transport <PATH> --config-publication-replica <ID>`.
-Each replica polls once per second, validates and loads the candidate policy,
-constructs a replacement application, reloads edge/TLS configuration, swaps
-the live application atomically, and drains the previous instance. A replica
-acknowledgement is written only after all activation steps succeed; failures
-preserve the active application and remain eligible for retry.
+consume configuration publication continuously from either a replicated file
+transport with `--config-publication-transport <PATH>` or the configured
+PostgreSQL authority with `--config-publication-postgres`. Supply the consumer
+identity with `--config-publication-replica <ID>` or
+`PRODEX_CONFIG_PUBLICATION_REPLICA_ID`; every concurrently running process must
+have a unique stable ID. Each replica polls once per second, validates and
+loads the policy already deployed at its runtime root, constructs a replacement
+application, reloads edge/TLS configuration, swaps the live application
+atomically, and drains the previous instance. An acknowledgement is persisted
+only after all activation steps succeed; failures preserve the active
+application and remain eligible for retry. Publication records intentionally
+contain revision IDs and targets rather than policy content or credentials, so
+deploy the candidate `policy.toml` to every runtime root before publishing its
+notification.
 
 Example:
 

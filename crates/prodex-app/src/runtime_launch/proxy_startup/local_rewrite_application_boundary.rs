@@ -156,7 +156,10 @@ pub(super) fn runtime_gateway_data_plane_credential(
     virtual_key: Option<&runtime_proxy_crate::RuntimeGatewayVirtualKey>,
     legacy_data_plane_authorized: bool,
     authentication_configured: bool,
+    governance_mode: prodex_config::GovernanceMode,
 ) -> RuntimeGatewayVerifiedCredential {
+    let legacy_data_plane_authorized =
+        legacy_data_plane_authorized && governance_mode.allows_anonymous_compatibility();
     let principal = virtual_key
         .map(runtime_gateway_virtual_key_principal)
         .or_else(|| legacy_data_plane_authorized.then(runtime_gateway_bearer_principal));
@@ -525,6 +528,7 @@ mod tests {
                         virtual_key.as_ref(),
                         legacy_data_plane_authorized,
                         authentication_configured,
+                        prodex_config::GovernanceMode::Personal,
                     );
                     assert_eq!(
                         runtime_gateway_application_data_plane_authorization(&request, credential)
@@ -538,13 +542,38 @@ mod tests {
     }
 
     #[test]
+    fn legacy_root_bearer_is_personal_mode_only() {
+        let target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
+        let request = application_request_context(&target);
+
+        for mode in [
+            prodex_config::GovernanceMode::Personal,
+            prodex_config::GovernanceMode::EnterpriseObserve,
+            prodex_config::GovernanceMode::EnterpriseEnforce,
+            prodex_config::GovernanceMode::BankEnforce,
+        ] {
+            let credential = runtime_gateway_data_plane_credential(None, true, true, mode);
+            assert_eq!(
+                runtime_gateway_application_data_plane_authorization(&request, credential).is_ok(),
+                mode == prodex_config::GovernanceMode::Personal,
+                "mode={mode:?}",
+            );
+        }
+    }
+
+    #[test]
     fn application_gate_binds_typed_tenant_and_control_plane_role() {
         let data_target = CanonicalRequestTarget::parse("/v1/responses").unwrap();
         let data = application_request_context(&data_target);
         let key = virtual_key();
         let authorized = runtime_gateway_application_data_plane_authorization(
             &data,
-            runtime_gateway_data_plane_credential(Some(&key), false, true),
+            runtime_gateway_data_plane_credential(
+                Some(&key),
+                false,
+                true,
+                prodex_config::GovernanceMode::Personal,
+            ),
         )
         .unwrap();
         assert_eq!(
@@ -695,7 +724,12 @@ mod tests {
         let key = virtual_key();
         let authorized = runtime_gateway_application_data_plane_authorization(
             &request,
-            runtime_gateway_data_plane_credential(Some(&key), false, true),
+            runtime_gateway_data_plane_credential(
+                Some(&key),
+                false,
+                true,
+                prodex_config::GovernanceMode::Personal,
+            ),
         )
         .unwrap();
         assert_eq!(authorized.request().request_id(), request_id);

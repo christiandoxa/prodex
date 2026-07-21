@@ -87,6 +87,23 @@ pub(super) struct ResolvedGatewayLaunchConfig {
     pub(super) credential_fingerprint: [u8; 32],
 }
 
+pub(crate) fn resolve_config_publication_postgres_transport(
+    paths: &AppPaths,
+    gateway: &prodex_runtime_policy::RuntimePolicyGatewaySettings,
+    secrets: &prodex_runtime_policy::RuntimePolicySecretsSettings,
+) -> Result<(String, prodex_storage_postgres_runtime::PostgresTlsConfig)> {
+    let resolver = GatewaySecretResolver::from_policy(secrets)?;
+    match gateway_state_store_config_with_resolver(
+        paths,
+        gateway,
+        &resolver,
+        &RuntimeGatewayLaunchEnvironment::default(),
+    )? {
+        RuntimeGatewayStateStore::Postgres { url, tls, .. } => Ok((url, tls)),
+        _ => bail!("Postgres config publication requires gateway.state.backend=postgres"),
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct GatewayCredentialRefreshTemplate {
     sso: RuntimeGatewaySsoConfig,

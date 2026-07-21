@@ -152,13 +152,20 @@ use runtime_local_provider_config::*;
 use runtime_persistence::*;
 use runtime_policy::*;
 pub use runtime_policy::{
+    ConfigPublicationPostgresCompactionPlan, ConfigPublicationPostgresDeliveryPlan,
+    ConfigPublicationPostgresPublishPlan, ConfigPublicationPostgresTransport,
     ConfigPublicationTransportCompactionPlan, ConfigPublicationTransportDeliveryPlan,
     ConfigPublicationTransportPublishPlan, RuntimePolicyPublicationDeliveryPlan,
     clear_runtime_policy_cache, compact_config_publication_transport,
+    compact_postgres_config_publication_transport,
     deliver_config_publication_event_to_gateway_runtime,
     deliver_pending_config_publication_events_to_gateway_runtime,
     deliver_pending_config_publication_events_with_activation,
+    deliver_pending_postgres_config_publication_events_to_gateway_runtime,
+    deliver_pending_postgres_config_publication_events_with_activation,
     publish_config_publication_event_to_gateway_transport,
+    publish_config_publication_event_to_postgres_transport,
+    runtime_config_publication_postgres_transport,
 };
 pub fn migrate_gateway_compatibility_state_sqlite(path: &Path) -> anyhow::Result<()> {
     runtime_launch::runtime_gateway_sqlite_migrate_compatibility_state(path)

@@ -12,6 +12,9 @@ use prodex_observability::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod postgres_publication;
+pub use postgres_publication::*;
+
 use prodex_runtime_policy::RuntimePolicyCacheInvalidationPlan;
 pub use prodex_runtime_policy::clear_runtime_policy_cache;
 pub(super) use prodex_runtime_policy::{
@@ -286,6 +289,16 @@ impl ConfigPublicationTransportEventFile {
         let targets: [ConfigPublicationEventTarget; 2] = targets
             .try_into()
             .map_err(|_| anyhow!("configuration publication event is incomplete"))?;
+        let expected_event_id = config_publication_transport_event_id(
+            self.tenant_id,
+            self.activated_revision_id,
+            self.previous_active_revision_id,
+            self.last_known_good_revision_id,
+            &self.targets,
+        );
+        if self.event_id != expected_event_id {
+            bail!("configuration publication event integrity check failed");
+        }
         Ok(ConfigPublicationEventPlan {
             tenant_id: self.tenant_id,
             activated_revision_id: self.activated_revision_id,
@@ -471,6 +484,7 @@ fn write_config_publication_transport_json(path: &Path, bytes: &[u8]) -> Result<
 
 fn validate_config_publication_transport_replica(replica: &str) -> Result<()> {
     if replica.is_empty()
+        || replica.len() > 128
         || !replica
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
