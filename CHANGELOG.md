@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.335.0 - 2026-07-21
+
+### Misc
+
+- Harden process reporting and internal helpers (`7cb9042`)
+
 ## 0.334.0 - 2026-07-21
 
 ### CLI
 
+- Keep paste guard out of exec (`f1d27d2`)
 - Show process list and harden TUI input (`1c708d6`)
 
 ## 0.333.0 - 2026-07-21
@@ -84,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Complete audited runtime and operations features (`9c96750`)
-
-## 0.323.0 - 2026-07-19
-
-### Runtime
-
-- Harden Codex input on VTE terminals (`5095669`)
