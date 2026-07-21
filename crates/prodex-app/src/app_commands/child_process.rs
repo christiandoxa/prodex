@@ -52,6 +52,15 @@ pub(crate) fn codex_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> Chil
     prodex_runtime_launch::codex_child_plan(codex_bin(), codex_home, args, SUPER_LOCAL_PROVIDER_ID)
 }
 
+pub(crate) fn codex_tui_child_plan(codex_home: PathBuf, args: Vec<OsString>) -> ChildProcessPlan {
+    prodex_runtime_launch::codex_tui_child_plan(
+        codex_bin(),
+        codex_home,
+        args,
+        SUPER_LOCAL_PROVIDER_ID,
+    )
+}
+
 pub(crate) fn remove_provider_secret_env(child: &mut ChildProcessPlan) {
     let mut removed = BTreeSet::<OsString>::from_iter(child.removed_env.iter().cloned());
     removed.extend(PROVIDER_SECRET_ENV_KEYS.into_iter().map(OsString::from));

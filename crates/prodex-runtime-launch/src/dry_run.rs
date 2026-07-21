@@ -58,7 +58,7 @@ pub fn runtime_launch_dry_run_plan(
             (caveman_home.clone(), Some(caveman_home))
         }
     };
-    let mut child = codex_child_plan(binary, codex_home, runtime_args, local_provider_id);
+    let mut child = codex_tui_child_plan(binary, codex_home, runtime_args, local_provider_id);
     if upstream_no_proxy && runtime_proxy.is_none() {
         remove_upstream_proxy_env(&mut child);
     }

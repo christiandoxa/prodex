@@ -18,7 +18,14 @@ fn runtime_launch_dry_run_plan_builds_caveman_placeholder_cleanup() {
 
     let expected_home = managed_root.join(".prodex-overlay-dry-run-from-main");
     assert_eq!(plan.child.codex_home, expected_home);
-    assert_eq!(plan.child.args, vec![OsString::from("exec")]);
+    assert_eq!(
+        plan.child.args,
+        vec![
+            OsString::from("exec"),
+            OsString::from("-c"),
+            OsString::from("disable_paste_burst=true"),
+        ]
+    );
     assert_eq!(plan.cleanup_paths, vec![expected_home]);
 }
 
