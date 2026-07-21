@@ -147,6 +147,17 @@ fn codex_tui_child_plan_disables_paste_burst_without_explicit_override() {
             OsString::from("disable_paste_burst=false"),
         ]
     );
+    assert_eq!(
+        plan(vec![
+            OsString::from("exec"),
+            OsString::from("summarize concisely"),
+        ])
+        .args,
+        vec![
+            OsString::from("exec"),
+            OsString::from("summarize concisely"),
+        ]
+    );
 }
 
 #[test]

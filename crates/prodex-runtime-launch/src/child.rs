@@ -116,8 +116,9 @@ pub fn codex_tui_child_plan(
     local_provider_id: &str,
 ) -> ChildProcessPlan {
     // Avoid delayed single-character inserts from Codex's fallback paste heuristic.
-    if codex_config::codex_cli_config_override_value(&args, CODEX_TUI_DISABLE_PASTE_BURST_KEY)
-        .is_none()
+    if !crate::args::is_codex_exec_invocation(&args)
+        && codex_config::codex_cli_config_override_value(&args, CODEX_TUI_DISABLE_PASTE_BURST_KEY)
+            .is_none()
     {
         args.splice(
             0..0,
