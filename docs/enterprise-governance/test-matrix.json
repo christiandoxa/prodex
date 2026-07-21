@@ -227,14 +227,15 @@
       "modes": ["enterprise_enforce", "bank_enforce"],
       "test_type": "state_machine_security",
       "expected": "Non-active, expired, revoked or out-of-scope approvals deny; tenant, credential-scope, retention and audit invariants remain enforced.",
-      "implementation_status": "implemented",
+      "implementation_status": "tested",
       "evidence_required": "Approval lifecycle, exact scope/expiry authorization, durable storage and mandatory-audit tests.",
       "evidence": [
         "break_glass_requires_separate_scope_reason_expiry_and_audit",
         "application_break_glass_action_selects_append_only_audit_storage_plan",
         "application_break_glass_denial_is_audited_when_expired",
         "break_glass_approval_round_trips_as_non_revision_approval",
-        "resource_action_authorization_denies_break_glass_scope_bypass"
+        "resource_action_authorization_denies_break_glass_scope_bypass",
+        "gateway_break_glass_http_enforces_scope_expiry_revocation_and_audit"
       ]
     },
     {
@@ -361,12 +362,13 @@
       "modes": ["enterprise_observe", "enterprise_enforce", "bank_enforce"],
       "test_type": "static_dynamic_security",
       "expected": "Raw canary values are rejected at boundaries and absent from every captured artifact.",
-      "implementation_status": "partial",
+      "implementation_status": "tested",
       "evidence_required": "Existing redaction/secret-store tests plus end-to-end canary scan.",
       "evidence": [
         "governed_routing_debug_output_contains_no_tenant_region_revision_or_secret_reference",
         "guardrail_webhook_policy_reason_is_stable_and_content_free",
-        "end-to-end release canary scan pending"
+        "local_rewrite_rejects_url_secret_before_log_or_listener_setup",
+        "gateway_release_secret_canaries_only_reach_the_authorized_upstream"
       ]
     },
     {

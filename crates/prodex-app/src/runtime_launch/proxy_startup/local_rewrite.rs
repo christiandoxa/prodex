@@ -390,10 +390,10 @@ pub(super) fn start_runtime_local_rewrite_proxy_with_file_access(
         secret_refresh,
         true,
     )?;
-
     Ok(RuntimeRotationProxy {
         runtime_config: Arc::clone(&runtime_config),
         server,
+        draining: Arc::clone(&shared.gateway_draining),
         shutdown,
         worker_threads,
         accept_worker_count: worker_count,
@@ -684,7 +684,7 @@ pub(super) fn prepare_runtime_local_rewrite_application(
         )),
         gateway_background_task_count: Arc::new(AtomicUsize::new(0)),
         allow_local_file_access,
-        gateway_draining: Arc::clone(&shutdown),
+        gateway_draining: Arc::new(AtomicBool::new(false)),
     });
     let shared = RuntimeLocalRewriteRequestContext {
         process,

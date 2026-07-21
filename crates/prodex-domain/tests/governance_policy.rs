@@ -398,6 +398,48 @@ fn policy_artifact(rules: Vec<GovernancePolicyRule>) -> GovernancePolicyArtifact
 }
 
 #[test]
+fn default_deny_allows_an_explicit_matching_rule() {
+    let tenant_id = TenantId::new();
+    let tenant = TenantContext { tenant_id };
+    let principal = Principal::new(
+        PrincipalId::new(),
+        Some(tenant_id),
+        PrincipalKind::User,
+        Role::Operator,
+        CredentialScope::DataPlane,
+    );
+    let policy = compile_governance_policy(policy_artifact(vec![policy_rule(
+        "allow-explicit",
+        condition(),
+        Vec::new(),
+    )]))
+    .unwrap();
+    let route = CanonicalRoute::new("/v1/responses").unwrap();
+    let capabilities = prodex_domain::CapabilitySet::new(Vec::new());
+
+    let decision =
+        evaluate_governance_policy(&policy, &input(tenant, &principal, &route, &capabilities))
+            .unwrap();
+
+    assert_eq!(decision.effect, PolicyEffect::Allow);
+    let fallback = compile_governance_policy(policy_artifact(Vec::new())).unwrap();
+    assert_eq!(
+        evaluate_governance_policy(
+            &fallback,
+            &input(
+                TenantContext { tenant_id },
+                &principal,
+                &route,
+                &capabilities
+            ),
+        )
+        .unwrap()
+        .effect,
+        PolicyEffect::Deny
+    );
+}
+
+#[test]
 fn policy_compilation_rejects_conflicting_obligations() {
     let selector = |value| PolicySelector::new(value).unwrap();
     let conflicts = vec![

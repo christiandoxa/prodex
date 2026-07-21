@@ -41,7 +41,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 3744,
+    "maxLines": 3699,
     "reason": "Local rewrite cross-provider regression coverage remains capped after harness-mode cases and governance-failure behavior moved to focused sibling modules; provider-specific cases continue to split from the shared harness."
   },
   {
@@ -236,7 +236,7 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_governance.rs",
-    "maxLines": 958,
+    "maxLines": 866,
     "reason": "Runtime governance compiles built-in and tenant policy snapshots plus compiler regressions after principal-selector DTO translation moved to its focused module."
   },
   {
@@ -251,8 +251,8 @@
   },
   {
     "file": "crates/prodex-domain/src/governance/policy_decision.rs",
-    "maxLines": 940,
-    "reason": "The pure governance PDP keeps typed conditions, obligations, conflict analysis, and deterministic evaluation together after bounded principal attributes moved to a focused module."
+    "maxLines": 941,
+    "reason": "The pure governance PDP keeps typed conditions, obligations, conflict analysis, and deterministic default-deny evaluation together after bounded principal attributes moved to a focused module."
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",

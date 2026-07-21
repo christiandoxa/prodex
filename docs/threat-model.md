@@ -141,9 +141,10 @@ boundaries are being introduced. Those paths must be migrated behind
 `prodex-application`, `prodex-gateway-http`, `prodex-control-plane`, and storage
 adapter crates with characterization tests for transport transparency,
 continuation affinity, upstream error compatibility, and CLI compatibility.
-Non-shared-storage config-publication deployments also remain dependent on the
-broker-backed transport staging captured in ADR 0984 until a real outbox/watch
-adapter replaces the shared-filesystem composition-root path.
+The live config-publication adapter supports one durable shared-filesystem
+transport. Non-shared-storage publication remains unsupported until a real
+durable outbox/watch adapter exists; separate node-local roots must not be
+treated as replicas of one transport.
 Last-known-good runtime policy can delay an intended policy update until retry
 succeeds. Reload failures must remain observable, and urgent revocation must use
 an explicit fail-closed invalidation path.

@@ -217,7 +217,6 @@ fn gateway_operational_health_exposes_active_policy_version() {
 
 #[test]
 fn gateway_readyz_fails_while_draining_without_failing_livez_or_startupz() {
-    let _workers = crate::TestEnvVarGuard::set("PRODEX_RUNTIME_PROXY_WORKER_COUNT", "5");
     let root = temp_root("gateway-health-draining");
     let paths = app_paths_for_root(root);
     let upstream = TestUpstream::start_n(0);
@@ -247,7 +246,7 @@ fn gateway_readyz_fails_while_draining_without_failing_livez_or_startupz() {
     .expect("gateway proxy should start");
 
     proxy
-        .shutdown
+        .draining
         .store(true, std::sync::atomic::Ordering::SeqCst);
 
     let client = reqwest::blocking::Client::new();
@@ -285,6 +284,15 @@ fn gateway_readyz_fails_while_draining_without_failing_livez_or_startupz() {
         assert_eq!(body["ready"], true);
         assert_eq!(body["draining"], true);
     }
+
+    let response = client
+        .post(format!("http://{}/v1/responses", proxy.listen_addr))
+        .json(&serde_json::json!({"model": "gpt-5", "input": "hello"}))
+        .send()
+        .expect("data-plane request should be sent");
+    assert_eq!(response.status().as_u16(), 503);
+    let body: serde_json::Value = response.json().expect("error response should be json");
+    assert_eq!(body["error"]["code"], "service_unavailable");
 }
 
 #[test]

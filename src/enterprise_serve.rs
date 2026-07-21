@@ -98,7 +98,7 @@ fn run_enterprise_serve(
             let application = handler_applications.load_full();
             async move { application.handle(request).await }
         })
-        .map_err(|_| "gateway server failed".to_string());
+        .map_err(|error| format!("gateway server failed: {error}"));
     watcher_shutdown.store(true, Ordering::SeqCst);
     if let Some(watcher) = watcher {
         let _ = watcher.join();

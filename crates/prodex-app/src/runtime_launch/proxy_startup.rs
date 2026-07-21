@@ -566,6 +566,7 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     Ok(RuntimeRotationProxy {
         runtime_config: Arc::clone(&runtime_config),
         server,
+        draining: Arc::clone(&shutdown),
         shutdown,
         worker_threads,
         accept_worker_count: worker_count,

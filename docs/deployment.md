@@ -261,12 +261,11 @@ with a 15-second pre-stop delay before the bounded backend drain.
 The gateway ConfigMap sets `PRODEX_GATEWAY_REPLICA_COUNT=3` and
 `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`, and the gateway
 `ExternalSecret` includes both PostgreSQL and Redis URLs. This declares the
-intended production accounting-concurrency topology, but the compatibility
-runtime behind the dedicated data-plane entrypoint still rejects startup in
-that mode until durable
-reservation admission is wired:
-PostgreSQL remains the durable ledger/counter source of truth while Redis is
-only used for rate limiting, cache, and coordination primitives.
+production accounting-concurrency topology. Startup accepts it only when the
+declared replica count is at least two, PostgreSQL is the durable
+ledger/counter authority, and Redis is the rebuildable rate-limit, cache, and
+coordination backend. Invalid multi-replica claims fail before the listener is
+bound.
 
 If the deployment also uses the current replicated file transport for
 configuration publication, mount one shared durable filesystem path that is
@@ -283,9 +282,9 @@ prodex-control-plane compact-config-publication --transport <shared-path> --reta
 already acknowledged and can retain the newest acknowledged records for
 inspection. Shared-storage deployments should run that command periodically so
 transport outbox/ack files do not grow without bound. Non-shared-storage
-topologies still need the broker-backed publication transport staged in
-`docs/adr/0984-config-publication-broker-transport-staging.md`; separate
-node-local or cluster-local transport roots are not equivalent.
+topologies are not supported by this transport; separate node-local or
+cluster-local roots are not equivalent. Use one durable shared path or leave
+live configuration publication disabled.
 
 The namespace default-deny policy has no allow rules. The gateway and
 control-plane NetworkPolicies intentionally avoid unbounded
