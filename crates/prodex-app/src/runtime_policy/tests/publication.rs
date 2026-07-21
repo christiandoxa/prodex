@@ -1,12 +1,15 @@
 #![cfg(test)]
 
 use super::{
-    ConfigPublicationEventPlan, ConfigPublicationEventTarget, PolicyRevisionId, TenantId,
-    clear_runtime_policy_cache, compact_config_publication_transport,
-    config_publication_transport_ack_dir, deliver_config_publication_event_to_gateway_runtime,
+    ConfigPublicationEventPlan, ConfigPublicationEventTarget, ConfigPublicationPostgresTransport,
+    PolicyRevisionId, TenantId, clear_runtime_policy_cache, compact_config_publication_transport,
+    compact_postgres_config_publication_transport, config_publication_transport_ack_dir,
+    deliver_config_publication_event_to_gateway_runtime,
     deliver_pending_config_publication_events_to_gateway_runtime,
     deliver_pending_config_publication_events_with_activation,
+    deliver_pending_postgres_config_publication_events_to_gateway_runtime,
     publish_config_publication_event_to_gateway_transport,
+    publish_config_publication_event_to_postgres_transport,
 };
 use anyhow::bail;
 use std::path::PathBuf;
@@ -231,6 +234,50 @@ fn config_publication_transport_rejects_invalid_replica_ids() {
             .to_string()
             .contains("invalid config publication replica id")
     );
+    let overlong = "a".repeat(129);
+    assert!(
+        deliver_pending_config_publication_events_to_gateway_runtime(
+            &transport_dir.root,
+            &overlong,
+            &policy_dir.root,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("invalid config publication replica id")
+    );
+}
+
+#[test]
+fn config_publication_transport_rejects_tampered_events_before_activation() {
+    let policy_dir = TestPolicyDir::new();
+    policy_dir.write_policy(3);
+    let transport_dir = TestTransportDir::new();
+    let publication = publish_config_publication_event_to_gateway_transport(
+        &complete_event(),
+        &transport_dir.root,
+    )
+    .unwrap();
+    let mut event: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&publication.event_path).unwrap()).unwrap();
+    event["activated_revision_id"] = serde_json::json!(PolicyRevisionId::new());
+    std::fs::write(
+        &publication.event_path,
+        serde_json::to_vec_pretty(&event).unwrap(),
+    )
+    .unwrap();
+
+    let error = deliver_pending_config_publication_events_to_gateway_runtime(
+        &transport_dir.root,
+        "gateway-a",
+        &policy_dir.root,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("integrity check failed"));
+    assert!(
+        !config_publication_transport_ack_dir(&transport_dir.root, "gateway-a")
+            .join(format!("{}.ack.json", publication.event_id))
+            .exists()
+    );
 }
 
 #[test]
@@ -309,4 +356,118 @@ fn config_publication_transport_compaction_skips_events_without_all_replica_acks
     assert_eq!(compaction.removed_event_count, 0);
     assert_eq!(compaction.retained_event_count, 1);
     assert!(publish.event_path.exists());
+}
+
+#[test]
+fn postgres_config_publication_transport_is_idempotent_replica_scoped_and_compactable() {
+    let Some(url) = std::env::var("PRODEX_TEST_POSTGRES_URL").ok() else {
+        eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
+        return;
+    };
+    let tls = prodex_storage_postgres_runtime::PostgresTlsConfig::explicit_disable();
+    crate::runtime_launch::runtime_gateway_postgres_migrate_enterprise_state(&url, &tls).unwrap();
+    let mut client = prodex_storage_postgres_runtime::connect_blocking(&url, &tls).unwrap();
+    client
+        .batch_execute(
+            "TRUNCATE prodex_config_publication_acks, \
+             prodex_config_publication_replicas, \
+             prodex_config_publication_events CASCADE",
+        )
+        .unwrap();
+    drop(client);
+    let transport = ConfigPublicationPostgresTransport {
+        database_url: zeroize::Zeroizing::new(url),
+        tls,
+    };
+    let policy_dir = TestPolicyDir::new();
+    policy_dir.write_policy(3);
+    let first_event = complete_event();
+    let mut second_event = complete_event();
+    second_event.activated_revision_id = PolicyRevisionId::new();
+
+    let first =
+        publish_config_publication_event_to_postgres_transport(&first_event, &transport).unwrap();
+    let repeat =
+        publish_config_publication_event_to_postgres_transport(&first_event, &transport).unwrap();
+    let _second =
+        publish_config_publication_event_to_postgres_transport(&second_event, &transport).unwrap();
+    assert_eq!(first.event_id, repeat.event_id);
+
+    let gateway_a = deliver_pending_postgres_config_publication_events_to_gateway_runtime(
+        &transport,
+        "gateway-a",
+        &policy_dir.root,
+    )
+    .unwrap();
+    assert_eq!(gateway_a.delivered_event_count, 2);
+    assert_eq!(
+        deliver_pending_postgres_config_publication_events_to_gateway_runtime(
+            &transport,
+            "gateway-a",
+            &policy_dir.root,
+        )
+        .unwrap()
+        .delivered_event_count,
+        0
+    );
+    assert_eq!(
+        deliver_pending_postgres_config_publication_events_to_gateway_runtime(
+            &transport,
+            "gateway-b",
+            &policy_dir.root,
+        )
+        .unwrap()
+        .delivered_event_count,
+        2
+    );
+
+    let compaction = compact_postgres_config_publication_transport(&transport, 1).unwrap();
+    assert_eq!(compaction.replica_count, 2);
+    assert_eq!(compaction.eligible_event_count, 2);
+    assert_eq!(compaction.removed_event_count, 1);
+    assert_eq!(compaction.retained_event_count, 1);
+
+    let mut third_event = complete_event();
+    third_event.activated_revision_id = PolicyRevisionId::new();
+    publish_config_publication_event_to_postgres_transport(&third_event, &transport).unwrap();
+    assert_eq!(
+        deliver_pending_postgres_config_publication_events_to_gateway_runtime(
+            &transport,
+            "gateway-a",
+            &policy_dir.root,
+        )
+        .unwrap()
+        .delivered_event_count,
+        1
+    );
+    let mut client = prodex_storage_postgres_runtime::connect_blocking(
+        transport.database_url.as_str(),
+        &transport.tls,
+    )
+    .unwrap();
+    client
+        .execute(
+            "UPDATE prodex_config_publication_replicas \
+             SET registered_at_unix_ms = 0, last_seen_at_unix_ms = 0 \
+             WHERE replica_id = 'gateway-b'",
+            &[],
+        )
+        .unwrap();
+    drop(client);
+
+    let compaction = compact_postgres_config_publication_transport(&transport, 0).unwrap();
+    assert_eq!(compaction.replica_count, 1);
+    assert_eq!(compaction.eligible_event_count, 2);
+    assert_eq!(compaction.removed_event_count, 1);
+    assert_eq!(compaction.retained_event_count, 1);
+    assert_eq!(
+        deliver_pending_postgres_config_publication_events_to_gateway_runtime(
+            &transport,
+            "gateway-b",
+            &policy_dir.root,
+        )
+        .unwrap()
+        .delivered_event_count,
+        1
+    );
 }

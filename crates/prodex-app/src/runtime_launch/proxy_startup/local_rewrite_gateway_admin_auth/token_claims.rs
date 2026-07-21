@@ -241,7 +241,7 @@ fn runtime_gateway_verified_oidc_token(
     })
 }
 
-fn runtime_gateway_oidc_validation_policy(
+pub(super) fn runtime_gateway_oidc_validation_policy(
     config: &RuntimeGatewayOidcConfig,
 ) -> Result<OidcValidationPolicy> {
     OidcValidationPolicy::new(

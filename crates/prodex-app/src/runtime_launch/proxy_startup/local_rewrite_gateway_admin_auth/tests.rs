@@ -131,6 +131,57 @@ fn oidc_http_cache_ttl_allows_zero_and_rejects_invalid_values() {
 }
 
 #[test]
+fn oidc_background_refresh_uses_the_authn_planner_and_origin_allowlist() {
+    let config = RuntimeGatewayOidcConfig {
+        issuer: "https://issuer.example.com/tenant".to_string(),
+        audience: "prodex".to_string(),
+        jwks_url: Some("https://keys.example.com/jwks.json".to_string()),
+        jwks_origin_allowlist: vec!["https://keys.example.com".to_string()],
+        user_claim: "sub".to_string(),
+        role_claim: "role".to_string(),
+        tenant_claim: "tenant_id".to_string(),
+        key_prefixes_claim: "key_prefixes".to_string(),
+        authentication_strength: None,
+    };
+    let now = Instant::now();
+    let now_unix_ms = 1_000_000;
+    let fresh = RuntimeGatewayOidcJwksSnapshot {
+        jwks: jsonwebtoken::jwk::JwkSet {
+            keys: vec![jsonwebtoken::jwk::Jwk {
+                common: Default::default(),
+                algorithm: jsonwebtoken::jwk::AlgorithmParameters::RSA(
+                    jsonwebtoken::jwk::RSAKeyParameters {
+                        n: "AQAB".to_string(),
+                        e: "AQAB".to_string(),
+                        ..Default::default()
+                    },
+                ),
+            }],
+        },
+        fetched_at: now,
+        fresh_for: Duration::from_secs(60),
+        stale_for: Duration::from_secs(60),
+    };
+    let expired = RuntimeGatewayOidcJwksSnapshot {
+        fetched_at: now - Duration::from_secs(121),
+        ..fresh
+    };
+
+    assert!(
+        !runtime_gateway_oidc_refresh_plan_due(
+            &config,
+            Some(&expired),
+            expired.fetched_at + Duration::from_secs(1),
+            now_unix_ms,
+        )
+        .unwrap()
+    );
+    assert!(
+        runtime_gateway_oidc_refresh_plan_due(&config, Some(&expired), now, now_unix_ms,).unwrap()
+    );
+}
+
+#[test]
 fn oidc_refresh_failure_backoff_uses_positive_env_override() {
     let _guard =
         crate::TestEnvVarGuard::set(RUNTIME_GATEWAY_OIDC_REFRESH_FAILURE_BACKOFF_ENV, "75");

@@ -268,10 +268,34 @@ ledger/counter authority, and Redis is the rebuildable rate-limit, cache, and
 coordination backend. Invalid multi-replica claims fail before the listener is
 bound.
 
-If the deployment also uses the current replicated file transport for
-configuration publication, mount one shared durable filesystem path that is
-visible to the control-plane publisher and every gateway replica. The current
-one-shot operational flow is:
+Multi-replica deployments should use the PostgreSQL configuration-publication
+transport after migration schema 14 is installed. Give every live consumer a
+unique stable replica ID, normally from the Kubernetes pod name through
+`PRODEX_CONFIG_PUBLICATION_REPLICA_ID`, then start it with
+`--config-publication-postgres`. The operational flow is:
+
+```bash
+prodex-control-plane publish-config-publication --event <path> --postgres
+prodex-gateway serve --config-publication-postgres
+prodex-control-plane compact-config-publication --postgres --retain 10
+```
+
+The transport is a durable notification channel, not a policy-content or
+secret channel. Roll out the validated candidate `policy.toml` to every runtime
+root before publishing its revision notification. A consumer acknowledges a
+record only after it builds and atomically activates the replacement
+application; failed activation remains eligible for retry. Compaction removes
+only records acknowledged by every registered replica and can retain the newest
+acknowledged records for inspection. PostgreSQL consumer batches are bounded
+and an advisory lock prevents two processes from claiming one replica ID.
+Compaction expires replicas that have not renewed their database-clock lease for
+five minutes and always preserves at least the newest fully acknowledged event,
+even when `--retain 0` is requested, so a returning replica can trigger a reload
+of the current local policy.
+
+Single-node or shared-storage deployments may instead mount one durable
+filesystem path visible to the control-plane publisher and every gateway
+replica:
 
 ```bash
 prodex-control-plane publish-config-publication --event <path> --transport <shared-path>
@@ -279,13 +303,9 @@ prodex-gateway consume-config-publication --transport <shared-path> --replica <g
 prodex-control-plane compact-config-publication --transport <shared-path> --retain 10
 ```
 
-`compact-config-publication` only removes records that every known replica has
-already acknowledged and can retain the newest acknowledged records for
-inspection. Shared-storage deployments should run that command periodically so
-transport outbox/ack files do not grow without bound. Non-shared-storage
-topologies are not supported by this transport; separate node-local or
-cluster-local roots are not equivalent. Use one durable shared path or leave
-live configuration publication disabled.
+Run compaction periodically so transport records do not grow without bound.
+Separate node-local or cluster-local roots are not equivalent to one replicated
+filesystem transport; use one durable shared path or PostgreSQL.
 
 The namespace default-deny policy has no allow rules. The gateway and
 control-plane NetworkPolicies intentionally avoid unbounded

@@ -2,7 +2,12 @@ use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Value, json};
 use std::fmt;
-use std::sync::OnceLock;
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+    mpsc::{SyncSender, sync_channel},
+};
+use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -74,6 +79,84 @@ impl ZeroizeOnDrop for OtlpHttpLogExportConfig {}
 
 pub(super) const INVALID_OTLP_HTTP_ENDPOINT: &str = "invalid OTLP HTTP endpoint";
 const MAX_OTLP_HTTP_ENDPOINT_BYTES: usize = 4 * 1024;
+const DEFAULT_OTLP_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+const OTLP_HTTP_LOG_QUEUE_CAPACITY: usize = 256;
+
+struct OtlpHttpLogEvent {
+    event_name: &'static str,
+    attributes: Vec<OtlpLogAttribute>,
+}
+
+pub(crate) struct OtlpHttpLogSink {
+    sender: Option<SyncSender<OtlpHttpLogEvent>>,
+    shutdown: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl OtlpHttpLogSink {
+    pub(crate) fn from_env(
+        service_name: &'static str,
+        scope_name: &'static str,
+    ) -> Result<Option<Self>, String> {
+        let Some(config) = otlp_http_log_export_config_from_env()? else {
+            return Ok(None);
+        };
+        Self::start(config, service_name, scope_name).map(Some)
+    }
+
+    pub(super) fn start(
+        config: OtlpHttpLogExportConfig,
+        service_name: &'static str,
+        scope_name: &'static str,
+    ) -> Result<Self, String> {
+        let (sender, receiver) = sync_channel::<OtlpHttpLogEvent>(OTLP_HTTP_LOG_QUEUE_CAPACITY);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let worker = std::thread::Builder::new()
+            .name("prodex-otlp-log-export".to_string())
+            .spawn(move || {
+                while !worker_shutdown.load(Ordering::SeqCst) {
+                    let event = match receiver.recv_timeout(Duration::from_millis(100)) {
+                        Ok(event) => event,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    };
+                    let _ = export_otlp_http_log(
+                        &config,
+                        service_name,
+                        scope_name,
+                        event.event_name,
+                        event.attributes,
+                    );
+                }
+            })
+            .map_err(|err| format!("failed to start OTLP log exporter: {err}"))?;
+        Ok(Self {
+            sender: Some(sender),
+            shutdown,
+            worker: Some(worker),
+        })
+    }
+
+    pub(crate) fn try_export(&self, event_name: &'static str, attributes: Vec<OtlpLogAttribute>) {
+        if let Some(sender) = self.sender.as_ref() {
+            let _ = sender.try_send(OtlpHttpLogEvent {
+                event_name,
+                attributes,
+            });
+        }
+    }
+}
+
+impl Drop for OtlpHttpLogSink {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        self.sender.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
 
 pub(super) fn validate_otlp_http_endpoint(endpoint: &str) -> Result<reqwest::Url, String> {
     if endpoint.is_empty()
@@ -251,9 +334,7 @@ pub(super) fn export_otlp_http_log(
                 event_name,
                 attributes,
             ));
-    if let Some(timeout) = config.timeout {
-        request = request.timeout(timeout);
-    }
+    request = request.timeout(config.timeout.unwrap_or(DEFAULT_OTLP_HTTP_TIMEOUT));
     request
         .send()
         .and_then(|response| response.error_for_status())

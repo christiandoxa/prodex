@@ -1,6 +1,6 @@
 # Enterprise Governance Implementation Ledger
 
-Last updated: 2026-07-14 (Asia/Jakarta).
+Last updated: 2026-07-21 (Asia/Jakarta).
 
 This ledger is the authoritative progress index for the five-phase enterprise
 governance program. Status values are:
@@ -53,7 +53,7 @@ No row is complete merely because adjacent infrastructure exists.
 | --- | --- | --- | --- |
 | P2-01 | Four-level monotonic classification model | tested | `classification_is_deterministic_and_monotonic` |
 | P2-02 | Versioned compiled classification rules with checksum, activation, rollback, and LKG | tested | Canonical checksum plus generic SQLite/PostgreSQL lifecycle, activation, LKG and rollback tests |
-| P2-03 | Trusted labels can raise; audited authorization required to lower | tested | `classification_and_coverage_only_move_conservatively` and `rule_publication_rejects_duplicate_or_weakened_rules` |
+| P2-03 | Trusted labels can raise; production classification cannot lower | tested | `classification_and_coverage_only_move_conservatively` and `rule_publication_rejects_duplicate_or_weakened_rules`; declassification is intentionally outside the current product contract |
 | P2-04 | Unsupported or partial coverage is explicit policy input | tested | `inspection_failure_mode_matrix_preserves_shadow_and_fail_closed_semantics` covers unsupported modalities and detector failures across observe, enforce, and bank modes |
 | P2-05 | Typed request and response obligations | tested | `obligation_matrix_preserves_classification_and_observe_enforce_semantics` and `request_and_session_obligations_return_stable_typed_violations` |
 | P2-06 | Structured request masking preserves provider schemas | tested | `mask_obligation_requires_explicit_masking_evidence` and schema-aware walker tests |
@@ -106,8 +106,8 @@ No row is complete merely because adjacent infrastructure exists.
 
 | ID | Requirement | Status | Evidence or next proof |
 | --- | --- | --- | --- |
-| P5-01 | CLI, IDE, API, and supported machine channels share one authenticated application boundary | tested | Production/application boundary guards cover forwarded HTTP, compact, SSE, WebSocket and Gemini routes |
-| P5-02 | OIDC PKCE/device or supported human flow, bearer validation, service identity, and mTLS | tested | Gateway browser Authorization Code with PKCE S256, Redis-shared one-time state and sessions, secure cookie login/callback/logout, signed back-channel logout, workload JWT/JWKS/scope verification, Rustls client-certificate validation, and JWT `cnf.x5t#S256` peer binding are wired and covered by focused runtime tests; deployment IdP/PKI rotation remains acceptance evidence |
+| P5-01 | CLI, IDE, API, and supported machine channels share one authenticated application boundary | tested | Production/application boundary guards cover forwarded HTTP, compact, SSE, WebSocket and Gemini routes; the synthetic root bearer compatibility principal is restricted to personal mode |
+| P5-02 | OIDC PKCE/device or supported human flow, bearer validation, service identity, and mTLS | tested | Gateway browser Authorization Code with PKCE S256, Redis-shared one-time state and sessions, secure cookie login/callback/logout, signed back-channel logout, workload JWT/JWKS/scope verification, origin-allowlisted background JWKS refresh planning, Rustls client-certificate validation, and JWT `cnf.x5t#S256` peer binding are wired and covered by focused runtime tests; deployment IdP/PKI rotation remains acceptance evidence |
 | P5-03 | Canonical routes, limits, deadlines, concurrency, distributed rate/quota, overload | implemented | Existing gateway controls cover much of this; governance sequence integration remains |
 | P5-04 | Trusted proxies, safe client metadata, browser CSRF/Origin/Host/cookies | tested | Edge tests prove peer preservation, exact trusted proxies, bounded client derivation, forwarding-header stripping, explicit non-loopback Host authority, PKCE state/nonce validation, Secure/HttpOnly/SameSite browser sessions, Redis-backed multi-replica continuity, and local plus signed back-channel logout invalidation |
 | P5-05 | Typed session binding, timeouts, revocation, concurrency, re-auth/MFA, network risk, revision pinning | tested | Authority hydration, atomic admission/revoke+audit/outbox, owner-bound current-session self-revoke, and `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly` prove shared-authority invalidation; deployed two-gateway chaos and re-auth/MFA remain pending |
@@ -116,8 +116,8 @@ No row is complete merely because adjacent infrastructure exists.
 | P5-08 | SQLite local compatibility and enterprise migration tests | tested | `all_governance_artifact_kinds_use_revisioned_authority`, cross-tenant/CAS/LKG/audit/outbox tests |
 | P5-09 | External secret/Vault-compatible provider, leases, rotation, TLS identity, zeroization | tested | Bounded projected-secret adapter is the production Vault Agent/CSI boundary; direct Vault HTTP authority is intentionally unsupported |
 | P5-10 | Append-only durable audit and SIEM exporter operations | tested | Bounded audit writer/export API, SQLite exporter tests and live PostgreSQL outbox operations passed |
-| P5-11 | Low-cardinality metrics, alerts, SLOs, and runbooks | implemented | Live authn, authz, tenant-isolation, policy, and secret-provider counters feed the checked-in Prometheus rules and Grafana dashboard; pager routing and achieved environment SLOs remain deployment evidence |
-| P5-12 | Hardened Compose/Kubernetes, least privilege, HA, drain, deny-default network policy | implemented | Existing artifacts cover much; bank governance/Vault/SIEM egress and tests remain |
+| P5-11 | Low-cardinality metrics, alerts, SLOs, and runbooks | implemented | Live authn, authz, tenant-isolation, policy, and secret-provider counters feed the checked-in Prometheus rules and Grafana dashboard; dedicated serve roots export bounded asynchronous `gateway.request` OTLP logs; pager routing and achieved environment SLOs remain deployment evidence |
+| P5-12 | Hardened Compose/Kubernetes, least privilege, HA, drain, deny-default network policy | implemented | Existing artifacts plus the durable PostgreSQL configuration-publication outbox/replica-ack transport cover source-level HA boundaries; bank governance/Vault/SIEM egress and deployed tests remain |
 | P5-13 | Encrypted backup, isolated restore, audit/policy/registry verification, and DR drills | tested | AES-256-GCM disposable PostgreSQL backup/isolated restore passed with final synthetic RPO 1.813 s and RTO 1.280 s; tenant/governance fingerprints, RLS, policy/provider/session/audit/SIEM links remained intact; production KMS/PITR and regional cutover remain deployment evidence |
 | P5-14 | Phase 5 identity/session/RLS/Vault/audit/deployment/restore/chaos tests | implemented | Identity/session/config/deployment, live PostgreSQL/RLS/SIEM, fuzz, stress and restore gates passed; two-gateway chaos remains deployment acceptance work |
 | P5-X | Phase 5 exit: governed channel parity and tested bank profile | implemented | Governed HTTP, browser OIDC, workload JWT, and direct mTLS channels pass in-process guards; managed IdP/PKI rotation, failover, external SIEM delivery, and deployed multi-replica chaos remain environment acceptance blockers |

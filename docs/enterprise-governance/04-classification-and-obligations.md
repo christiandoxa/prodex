@@ -25,7 +25,7 @@ that plan through application admission and provider dispatch.
 | Request-path propagation | Implemented for migrated local rewrite HTTP and text WebSocket paths | The inspection plan reaches application admission and provider dispatch; coverage, classification, and finding count are logged without match content |
 | Versioned compiled classification rules and checksum | Implemented | Tenant-scoped immutable classification artifacts compile to revision/checksum-bound snapshots with activation, rollback, and LKG loading |
 | Route, capability, tenant, session, and risk rules | Implemented | The application planner evaluates typed classification requests against the active compiled snapshot and carries session and environment context |
-| Authorized declassification operation | Planned | No production lowering path exists, which is safe but incomplete operationally |
+| Authorized declassification operation | Intentionally unsupported | Production classification is monotonic and exposes no lowering path; any future declassification workflow requires a separate versioned threat model, approval contract, and audit design |
 | Typed request and response obligations | Implemented | The PDP returns typed masking, response-inspection, coverage, modality, provider, and output-limit obligations enforced by the application/runtime boundary |
 | Observe/enforce/bank decision modes | Implemented | Personal, enterprise-observe, enterprise-enforce, and bank-enforce modes have typed failure behavior and validation |
 
@@ -33,6 +33,11 @@ The current runtime defaults migrated requests to `Internal`. It does not use
 an `Unknown` routeable placeholder and it cannot lower a prior classification.
 Those properties combine with revisioned rules and policy-owned obligations in
 the production application boundary.
+
+Classification lowering is deliberately outside the current product contract.
+Operators must start a new governed context after correcting source data or
+policy; no administrative shortcut can mutate an existing session or request to
+a lower classification.
 
 ## Classification Contract
 

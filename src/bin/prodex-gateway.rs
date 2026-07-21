@@ -5,8 +5,10 @@
 
 use prodex::{
     DedicatedServerMode, GatewayMigrationTarget, OtlpLogAttribute,
-    deliver_pending_config_publication_events_to_gateway_runtime, otlp_http_log_export_status,
-    run_enterprise_serve_or_exit, run_gateway_migrate,
+    deliver_pending_config_publication_events_to_gateway_runtime,
+    deliver_pending_postgres_config_publication_events_to_gateway_runtime,
+    otlp_http_log_export_status, run_enterprise_serve_or_exit, run_gateway_migrate,
+    runtime_config_publication_postgres_transport,
 };
 use std::path::PathBuf;
 
@@ -20,12 +22,14 @@ USAGE:
     prodex-gateway migrate --backend sqlite --path <PATH>
     prodex-gateway migrate --backend postgres --url-ref <NAME> --secret-provider <PROVIDER> --secret-root <PATH> [--tls-mode verify-full|disable] [--tls-ca <PATH>]
     prodex-gateway migrate --backend postgres --url-env <ENV> [--tls-mode verify-full|disable] [--tls-ca <PATH>]
-    prodex-gateway serve [--listen <ADDR>] [--config-publication-transport <PATH> --config-publication-replica <ID>]
-    prodex-gateway consume-config-publication --transport <PATH> --replica <ID> --root <PATH>
+    prodex-gateway serve [--listen <ADDR>] [(--config-publication-transport <PATH>|--config-publication-postgres) [--config-publication-replica <ID>]]
+    prodex-gateway consume-config-publication (--transport <PATH>|--postgres) --replica <ID> --root <PATH>
 
 STATUS:
     The dedicated data-plane composition root uses an async, route-isolated
     listener with bounded in-process application execution.
+    PRODEX_CONFIG_PUBLICATION_REPLICA_ID supplies the replica ID when the
+    corresponding serve argument is omitted.
 ";
 
 const GATEWAY_SERVICE_NAME: &str = "prodex-gateway";
@@ -50,8 +54,14 @@ enum MigrationTarget {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+enum ConfigPublicationConsumptionTransport {
+    File(PathBuf),
+    Postgres,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 struct ConfigPublicationConsumptionTarget {
-    transport: PathBuf,
+    transport: ConfigPublicationConsumptionTransport,
     replica: String,
     root: PathBuf,
 }
@@ -79,6 +89,46 @@ fn encode_config_publication_consumption_summary(
     );
     serde_json::to_string_pretty(&serde_json::json!({
         "transport_root": delivery.transport_root,
+        "replica": delivery.replica,
+        "root": delivery.root,
+        "delivered_event_count": delivery.delivered_event_count,
+        "runtime_policy_version": delivery.runtime_policy_version,
+        "otlp_log_export": otlp_log_export,
+        "delivery_metrics": delivery.delivery_metrics.iter().map(|metric| {
+            serde_json::json!({
+                "metric_name": metric.metric_name,
+                "target": metric.target_label.as_metric_label().map(|(_, value)| value).unwrap_or("invalid"),
+                "result": metric.result_label.as_metric_label().map(|(_, value)| value).unwrap_or("invalid"),
+                "increment": metric.increment,
+            })
+        }).collect::<Vec<_>>(),
+    }))
+    .map_err(|err| format!("failed to encode config publication consumption summary: {err}"))
+}
+
+fn encode_postgres_config_publication_consumption_summary(
+    delivery: &prodex::ConfigPublicationPostgresDeliveryPlan,
+) -> Result<String, String> {
+    let otlp_log_export = otlp_http_log_export_status(
+        GATEWAY_SERVICE_NAME,
+        GATEWAY_SCOPE_NAME,
+        GATEWAY_CONFIG_PUBLICATION_CONSUME_EVENT_NAME,
+        {
+            let mut attributes = vec![OtlpLogAttribute::u64(
+                "delivered_event_count",
+                delivery.delivered_event_count as u64,
+            )];
+            if let Some(version) = delivery.runtime_policy_version {
+                attributes.push(OtlpLogAttribute::u64(
+                    "runtime_policy_version",
+                    version as u64,
+                ));
+            }
+            attributes
+        },
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "transport": "postgres",
         "replica": delivery.replica,
         "root": delivery.root,
         "delivered_event_count": delivery.delivered_event_count,
@@ -178,13 +228,28 @@ fn run_consume_config_publication(
     target: Result<ConfigPublicationConsumptionTarget, String>,
 ) -> Result<(), String> {
     let target = target?;
-    let delivery = deliver_pending_config_publication_events_to_gateway_runtime(
-        &target.transport,
-        &target.replica,
-        &target.root,
-    )
-    .map_err(|err| err.to_string())?;
-    let output = encode_config_publication_consumption_summary(&delivery)?;
+    let output = match target.transport {
+        ConfigPublicationConsumptionTransport::File(transport) => {
+            let delivery = deliver_pending_config_publication_events_to_gateway_runtime(
+                &transport,
+                &target.replica,
+                &target.root,
+            )
+            .map_err(|err| err.to_string())?;
+            encode_config_publication_consumption_summary(&delivery)?
+        }
+        ConfigPublicationConsumptionTransport::Postgres => {
+            let transport =
+                runtime_config_publication_postgres_transport().map_err(|err| err.to_string())?;
+            let delivery = deliver_pending_postgres_config_publication_events_to_gateway_runtime(
+                &transport,
+                &target.replica,
+                &target.root,
+            )
+            .map_err(|err| err.to_string())?;
+            encode_postgres_config_publication_consumption_summary(&delivery)?
+        }
+    };
     println!("{output}");
     Ok(())
 }
@@ -268,12 +333,22 @@ where
     I: IntoIterator<Item = String>,
 {
     let mut transport = None;
+    let mut postgres = false;
     let mut replica = None;
     let mut root = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--transport" => transport = args.next().map(PathBuf::from),
+            "--transport" if transport.is_none() => {
+                transport = args.next().map(PathBuf::from);
+            }
+            "--transport" => {
+                return Err("consume-config-publication accepts --transport only once".to_string());
+            }
+            "--postgres" if !postgres => postgres = true,
+            "--postgres" => {
+                return Err("consume-config-publication accepts --postgres only once".to_string());
+            }
             "--replica" => replica = args.next(),
             "--root" => root = args.next().map(PathBuf::from),
             "--help" | "-h" => return Err(HELP.to_string()),
@@ -284,9 +359,22 @@ where
             }
         }
     }
+    let transport = match (transport, postgres) {
+        (Some(path), false) => ConfigPublicationConsumptionTransport::File(path),
+        (None, true) => ConfigPublicationConsumptionTransport::Postgres,
+        (None, false) => {
+            return Err(
+                "consume-config-publication requires --transport <PATH> or --postgres".to_string(),
+            );
+        }
+        (Some(_), true) => {
+            return Err(
+                "consume-config-publication accepts either --transport or --postgres".to_string(),
+            );
+        }
+    };
     Ok(ConfigPublicationConsumptionTarget {
-        transport: transport
-            .ok_or_else(|| "consume-config-publication requires --transport <PATH>".to_string())?,
+        transport,
         replica: replica
             .ok_or_else(|| "consume-config-publication requires --replica <ID>".to_string())?,
         root: root
@@ -436,7 +524,32 @@ mod tests {
             )
             .unwrap(),
             ConfigPublicationConsumptionTarget {
-                transport: PathBuf::from("/tmp/transport"),
+                transport: ConfigPublicationConsumptionTransport::File(PathBuf::from(
+                    "/tmp/transport"
+                )),
+                replica: "gateway-a".to_string(),
+                root: PathBuf::from("/tmp/root"),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_postgres_config_publication_consumption_target() {
+        assert_eq!(
+            parse_config_publication_args(
+                [
+                    "--postgres",
+                    "--replica",
+                    "gateway-a",
+                    "--root",
+                    "/tmp/root"
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
+            .unwrap(),
+            ConfigPublicationConsumptionTarget {
+                transport: ConfigPublicationConsumptionTransport::Postgres,
                 replica: "gateway-a".to_string(),
                 root: PathBuf::from("/tmp/root"),
             }

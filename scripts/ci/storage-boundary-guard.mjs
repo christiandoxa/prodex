@@ -124,6 +124,19 @@ const OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST = Object.freeze({
     "--test-threads=1",
   ],
 });
+const OPTIONAL_POSTGRES_CONFIG_PUBLICATION_TEST = Object.freeze({
+  command: "cargo",
+  args: [
+    "test",
+    "-q",
+    "-p",
+    "prodex-app",
+    "--lib",
+    "postgres_config_publication_transport_is_idempotent_replica_scoped_and_compactable",
+    "--",
+    "--test-threads=1",
+  ],
+});
 
 function sorted(values) {
   return [...values].sort((left, right) => left.localeCompare(right));
@@ -361,6 +374,11 @@ async function main() {
   await runCommand(
     OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST.command,
     OPTIONAL_POSTGRES_GATEWAY_GROUPED_REQUEST_TEST.args,
+    { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
+  );
+  await runCommand(
+    OPTIONAL_POSTGRES_CONFIG_PUBLICATION_TEST.command,
+    OPTIONAL_POSTGRES_CONFIG_PUBLICATION_TEST.args,
     { env: { PRODEX_TEST_POSTGRES_URL: postgresUrl } },
   );
 }

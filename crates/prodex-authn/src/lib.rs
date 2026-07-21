@@ -555,6 +555,24 @@ pub fn plan_oidc_jwks_refresh(
     now_unix_ms: u64,
     mode: OidcRefreshRuntimeMode,
 ) -> Result<OidcJwksRefreshPlan, AuthenticationError> {
+    plan_oidc_jwks_refresh_with_origin_allowlist(
+        policy,
+        configured_jwks_url,
+        std::iter::empty::<&str>(),
+        jwks_snapshot,
+        now_unix_ms,
+        mode,
+    )
+}
+
+pub fn plan_oidc_jwks_refresh_with_origin_allowlist<'a>(
+    policy: &OidcValidationPolicy,
+    configured_jwks_url: Option<&str>,
+    allowed_jwks_origins: impl IntoIterator<Item = &'a str>,
+    jwks_snapshot: Option<&JwksCacheSnapshot>,
+    now_unix_ms: u64,
+    mode: OidcRefreshRuntimeMode,
+) -> Result<OidcJwksRefreshPlan, AuthenticationError> {
     let decision = evaluate_jwks_refresh(jwks_snapshot, now_unix_ms);
     match decision {
         JwksRefreshDecision::UseFresh => Ok(OidcJwksRefreshPlan {
@@ -573,9 +591,13 @@ pub fn plan_oidc_jwks_refresh(
         }
         JwksRefreshDecision::UseStaleWhileRevalidate
         | JwksRefreshDecision::RefreshNow
-        | JwksRefreshDecision::Unavailable => {
-            plan_oidc_refresh_source(policy, configured_jwks_url, decision, mode)
-        }
+        | JwksRefreshDecision::Unavailable => plan_oidc_refresh_source(
+            policy,
+            configured_jwks_url,
+            allowed_jwks_origins,
+            decision,
+            mode,
+        ),
         JwksRefreshDecision::UseLastKnownGoodDuringBackoff => Ok(OidcJwksRefreshPlan {
             issuer: policy.issuer.clone(),
             decision,
@@ -584,17 +606,22 @@ pub fn plan_oidc_jwks_refresh(
     }
 }
 
-fn plan_oidc_refresh_source(
+fn plan_oidc_refresh_source<'a>(
     policy: &OidcValidationPolicy,
     configured_jwks_url: Option<&str>,
+    allowed_jwks_origins: impl IntoIterator<Item = &'a str>,
     decision: JwksRefreshDecision,
     mode: OidcRefreshRuntimeMode,
 ) -> Result<OidcJwksRefreshPlan, AuthenticationError> {
     if mode == OidcRefreshRuntimeMode::GatewayRequestPath {
         return Err(AuthenticationError::JwksRefreshForbiddenOnRequestPath);
     }
-    let endpoints = OidcEndpointPolicy::new(policy.issuer.as_str(), configured_jwks_url)
-        .map_err(map_endpoint_validation_error)?;
+    let endpoints = OidcEndpointPolicy::with_jwks_origin_allowlist(
+        policy.issuer.as_str(),
+        configured_jwks_url,
+        allowed_jwks_origins,
+    )
+    .map_err(map_endpoint_validation_error)?;
     let source = match configured_jwks_url {
         Some(_) => OidcRefreshSource::Jwks {
             url: endpoints

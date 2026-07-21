@@ -186,20 +186,7 @@ impl RuntimeGovernanceAuthority {
     }
 }
 
-#[allow(dead_code)]
 impl RuntimeLocalRewriteRequestContext {
-    pub(super) fn swap_committed_governance_artifact(
-        &self,
-        tenant_id: prodex_domain::TenantId,
-        artifact: &[u8],
-    ) -> Result<()> {
-        self.swap_committed_governance_artifact_kind(
-            tenant_id,
-            prodex_storage::GovernanceArtifactKind::Policy,
-            artifact,
-        )
-    }
-
     pub(super) fn swap_committed_governance_artifact_kind(
         &self,
         tenant_id: prodex_domain::TenantId,

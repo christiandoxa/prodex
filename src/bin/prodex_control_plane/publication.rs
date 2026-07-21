@@ -2,8 +2,11 @@ use std::path::Path;
 
 use prodex::{
     OtlpLogAttribute, compact_config_publication_transport,
+    compact_postgres_config_publication_transport,
     deliver_config_publication_event_to_gateway_runtime, otlp_http_log_export_status,
     publish_config_publication_event_to_gateway_transport,
+    publish_config_publication_event_to_postgres_transport,
+    runtime_config_publication_postgres_transport,
 };
 use prodex_config::{ConfigPublicationEventPlan, ConfigPublicationEventTarget};
 use prodex_control_plane::{
@@ -80,21 +83,55 @@ pub(super) fn deliver(event_path: &Path, root: &Path) -> Result<String, String> 
     encode_configuration_publication_delivery_summary(&delivery)
 }
 
-pub(super) fn publish(event_path: &Path, transport: &Path) -> Result<String, String> {
+pub(super) fn publish(
+    event_path: &Path,
+    transport: Option<&Path>,
+    postgres: bool,
+) -> Result<String, String> {
     let event = load_config_publication_event(event_path)?;
-    let publication = publish_config_publication_event_to_gateway_transport(&event, transport)
-        .map_err(|err| err.to_string())?;
-    encode_configuration_publication_publish_summary(
-        &publication.transport_root,
-        &publication.event_path,
-        publication.event_id.as_str(),
-    )
+    match (transport, postgres) {
+        (Some(transport), false) => {
+            let publication =
+                publish_config_publication_event_to_gateway_transport(&event, transport)
+                    .map_err(|err| err.to_string())?;
+            encode_configuration_publication_publish_summary(
+                &publication.transport_root,
+                &publication.event_path,
+                publication.event_id.as_str(),
+            )
+        }
+        (None, true) => {
+            let transport =
+                runtime_config_publication_postgres_transport().map_err(|err| err.to_string())?;
+            let publication =
+                publish_config_publication_event_to_postgres_transport(&event, &transport)
+                    .map_err(|err| err.to_string())?;
+            encode_postgres_configuration_publication_publish_summary(&publication.event_id)
+        }
+        _ => Err("configuration publication requires exactly one transport".to_string()),
+    }
 }
 
-pub(super) fn compact(transport: &Path, retain: usize) -> Result<String, String> {
-    let compaction =
-        compact_config_publication_transport(transport, retain).map_err(|err| err.to_string())?;
-    encode_configuration_publication_compaction_summary(&compaction)
+pub(super) fn compact(
+    transport: Option<&Path>,
+    postgres: bool,
+    retain: usize,
+) -> Result<String, String> {
+    match (transport, postgres) {
+        (Some(transport), false) => {
+            let compaction = compact_config_publication_transport(transport, retain)
+                .map_err(|err| err.to_string())?;
+            encode_configuration_publication_compaction_summary(&compaction)
+        }
+        (None, true) => {
+            let transport =
+                runtime_config_publication_postgres_transport().map_err(|err| err.to_string())?;
+            let compaction = compact_postgres_config_publication_transport(&transport, retain)
+                .map_err(|err| err.to_string())?;
+            encode_postgres_configuration_publication_compaction_summary(&compaction)
+        }
+        _ => Err("configuration publication requires exactly one transport".to_string()),
+    }
 }
 
 fn load_config_publication_request(
@@ -222,6 +259,23 @@ fn encode_configuration_publication_publish_summary(
     .map_err(|err| format!("failed to encode publication transport summary: {err}"))
 }
 
+fn encode_postgres_configuration_publication_publish_summary(
+    event_id: &str,
+) -> Result<String, String> {
+    let otlp_log_export = otlp_http_log_export_status(
+        CONTROL_PLANE_SERVICE_NAME,
+        CONTROL_PLANE_SCOPE_NAME,
+        CONTROL_PLANE_CONFIGURATION_PUBLICATION_PUBLISH_EVENT_NAME,
+        vec![OtlpLogAttribute::bool("published", true)],
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "transport": "postgres",
+        "event_id": event_id,
+        "otlp_log_export": otlp_log_export,
+    }))
+    .map_err(|err| format!("failed to encode publication transport summary: {err}"))
+}
+
 fn encode_configuration_publication_delivery_summary(
     delivery: &prodex::RuntimePolicyPublicationDeliveryPlan,
 ) -> Result<String, String> {
@@ -284,6 +338,37 @@ fn encode_configuration_publication_compaction_summary(
     );
     serde_json::to_string_pretty(&serde_json::json!({
         "transport_root": compaction.transport_root,
+        "replica_count": compaction.replica_count,
+        "eligible_event_count": compaction.eligible_event_count,
+        "removed_event_count": compaction.removed_event_count,
+        "retained_event_count": compaction.retained_event_count,
+        "otlp_log_export": otlp_log_export,
+    }))
+    .map_err(|err| format!("failed to encode compaction summary: {err}"))
+}
+
+fn encode_postgres_configuration_publication_compaction_summary(
+    compaction: &prodex::ConfigPublicationPostgresCompactionPlan,
+) -> Result<String, String> {
+    let otlp_log_export = otlp_http_log_export_status(
+        CONTROL_PLANE_SERVICE_NAME,
+        CONTROL_PLANE_SCOPE_NAME,
+        CONTROL_PLANE_CONFIGURATION_PUBLICATION_COMPACT_EVENT_NAME,
+        vec![
+            OtlpLogAttribute::u64("replica_count", compaction.replica_count as u64),
+            OtlpLogAttribute::u64(
+                "eligible_event_count",
+                compaction.eligible_event_count as u64,
+            ),
+            OtlpLogAttribute::u64("removed_event_count", compaction.removed_event_count as u64),
+            OtlpLogAttribute::u64(
+                "retained_event_count",
+                compaction.retained_event_count as u64,
+            ),
+        ],
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "transport": "postgres",
         "replica_count": compaction.replica_count,
         "eligible_event_count": compaction.eligible_event_count,
         "removed_event_count": compaction.removed_event_count,

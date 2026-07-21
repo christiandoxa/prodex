@@ -1,7 +1,8 @@
 use crate::{
-    INITIAL_TENANT_ACCOUNTING_MIGRATION, PostgresBackendOpenMode, PostgresBackendOpenPlan,
-    PostgresMigration, PostgresMigrationPhase, PostgresMigrationPlan, PostgresMigrationVersion,
-    PostgresRuntimeMode, PostgresStoragePlanError,
+    CONFIG_PUBLICATION_TRANSPORT_MIGRATION, INITIAL_TENANT_ACCOUNTING_MIGRATION,
+    PostgresBackendOpenMode, PostgresBackendOpenPlan, PostgresMigration, PostgresMigrationPhase,
+    PostgresMigrationPlan, PostgresMigrationVersion, PostgresRuntimeMode, PostgresStoragePlanError,
+    REQUIRED_POSTGRES_SCHEMA_VERSION,
 };
 
 pub const GROUPED_REQUEST_BUDGET_MIGRATION: PostgresMigration = PostgresMigration {
@@ -33,7 +34,6 @@ CREATE TABLE IF NOT EXISTS prodex_policy_revisions (
     CHECK (artifact_checksum <> ''),
     CHECK (lifecycle_state IN ('draft', 'pending_approval', 'approved', 'active', 'superseded', 'rolled_back', 'rejected', 'expired'))
 );
-
 CREATE TABLE IF NOT EXISTS prodex_policy_pointers (
     tenant_id UUID PRIMARY KEY REFERENCES prodex_tenants(tenant_id),
     active_revision_id UUID,
@@ -859,9 +859,8 @@ pub const POSTGRES_MIGRATIONS: &[PostgresMigration] = &[
     SESSION_REVOCATION_EPOCH_MIGRATION,
     RESERVATION_STORAGE_SCOPE_MIGRATION,
     AUDIT_LEGAL_HOLD_MIGRATION,
+    CONFIG_PUBLICATION_TRANSPORT_MIGRATION,
 ];
-pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(13);
-
 pub fn plan_postgres_migrations(
     mode: PostgresRuntimeMode,
 ) -> Result<PostgresMigrationPlan, PostgresStoragePlanError> {

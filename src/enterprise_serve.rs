@@ -5,14 +5,20 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use arc_swap::ArcSwap;
+use prodex_gateway_http::{GatewayHttpRouteKind, GatewayHttpRoutePlane};
 use prodex_gateway_server::{
-    GatewayServerBrowserSecurity, GatewayServerConfig, GatewayServerMode,
+    GatewayHandlerError, GatewayServerBrowserSecurity, GatewayServerConfig, GatewayServerMode,
     GatewayServerReloadHandle, serve_with_handler_reloadable,
 };
+
+use crate::enterprise_observability::{OtlpHttpLogSink, OtlpLogAttribute};
+
+const GATEWAY_REQUEST_EVENT_NAME: &str = "gateway.request";
+const CONFIG_PUBLICATION_REPLICA_ENV: &str = "PRODEX_CONFIG_PUBLICATION_REPLICA_ID";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DedicatedServerMode {
@@ -20,14 +26,20 @@ pub enum DedicatedServerMode {
     ControlPlane,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
+enum LiveConfigPublicationTransport {
+    File(PathBuf),
+    Postgres(prodex_app::ConfigPublicationPostgresTransport),
+}
+
+#[derive(Debug)]
 struct LiveConfigPublication {
-    transport: PathBuf,
+    transport: LiveConfigPublicationTransport,
     replica: String,
     root: PathBuf,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct EnterpriseServeOptions {
     listen_addr: Option<SocketAddr>,
     publication: Option<LiveConfigPublication>,
@@ -49,6 +61,11 @@ fn run_enterprise_serve(
     args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let options = parse_serve_options(mode, args)?;
+    let (service_name, scope_name) = match mode {
+        DedicatedServerMode::DataPlane => ("prodex-gateway", "prodex.gateway"),
+        DedicatedServerMode::ControlPlane => ("prodex-control-plane", "prodex.control-plane"),
+    };
+    let otlp_log_sink = OtlpHttpLogSink::from_env(service_name, scope_name)?.map(Arc::new);
     let gateway_policy = prodex_app::runtime_policy_gateway().unwrap_or_default();
     let listen_addr = resolve_serve_listen_addr(
         mode,
@@ -98,10 +115,40 @@ fn run_enterprise_serve(
         )
     });
     let handler_applications = Arc::clone(&applications);
+    let handler_otlp_log_sink = otlp_log_sink.clone();
     let server_result =
         serve_with_handler_reloadable(server_config, server_reload, move |request| {
             let application = handler_applications.load_full();
-            async move { application.handle(request).await }
+            let otlp_log_sink = handler_otlp_log_sink.clone();
+            let method = gateway_http_method_label(request.request.method().as_str());
+            let route = request.route;
+            let started_at = Instant::now();
+            async move {
+                let result = application.handle(request).await;
+                if let Some(otlp_log_sink) = otlp_log_sink.as_ref() {
+                    let status = match result.as_ref() {
+                        Ok(response) => response.response.status().as_u16(),
+                        Err(error) => gateway_handler_error_status(*error),
+                    };
+                    otlp_log_sink.try_export(
+                        GATEWAY_REQUEST_EVENT_NAME,
+                        vec![
+                            OtlpLogAttribute::string("http.request.method", method),
+                            OtlpLogAttribute::string("gateway.route", gateway_route_label(route)),
+                            OtlpLogAttribute::string(
+                                "gateway.plane",
+                                gateway_route_plane_label(route.plane()),
+                            ),
+                            OtlpLogAttribute::u64("http.response.status_code", u64::from(status)),
+                            OtlpLogAttribute::u64(
+                                "duration_ms",
+                                started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                            ),
+                        ],
+                    );
+                }
+                result
+            }
         })
         .map_err(|error| format!("gateway server failed: {error}"));
     watcher_shutdown.store(true, Ordering::SeqCst);
@@ -118,6 +165,68 @@ fn run_enterprise_serve(
         return Err("gateway application drain timed out".to_string());
     }
     Ok(())
+}
+
+fn gateway_http_method_label(method: &str) -> &'static str {
+    match method {
+        "GET" => "GET",
+        "POST" => "POST",
+        "PUT" => "PUT",
+        "PATCH" => "PATCH",
+        "DELETE" => "DELETE",
+        "HEAD" => "HEAD",
+        "OPTIONS" => "OPTIONS",
+        "CONNECT" => "CONNECT",
+        "TRACE" => "TRACE",
+        _ => "OTHER",
+    }
+}
+
+fn gateway_route_plane_label(plane: Option<GatewayHttpRoutePlane>) -> &'static str {
+    match plane {
+        Some(GatewayHttpRoutePlane::DataPlane) => "data",
+        Some(GatewayHttpRoutePlane::ControlPlane) => "control",
+        Some(GatewayHttpRoutePlane::Health) => "health",
+        None => "unknown",
+    }
+}
+
+fn gateway_route_label(route: GatewayHttpRouteKind) -> &'static str {
+    match route {
+        GatewayHttpRouteKind::DataPlaneResponses => "responses",
+        GatewayHttpRouteKind::DataPlaneCompact => "compact",
+        GatewayHttpRouteKind::DataPlaneWebSocket => "websocket",
+        GatewayHttpRouteKind::DataPlaneQuota => "quota",
+        GatewayHttpRouteKind::DataPlaneChatCompletions => "chat_completions",
+        GatewayHttpRouteKind::DataPlaneEmbeddings => "embeddings",
+        GatewayHttpRouteKind::DataPlaneImagesGenerations => "images_generations",
+        GatewayHttpRouteKind::DataPlaneImagesEdits => "images_edits",
+        GatewayHttpRouteKind::DataPlaneImagesVariations => "images_variations",
+        GatewayHttpRouteKind::DataPlaneAudioSpeech => "audio_speech",
+        GatewayHttpRouteKind::DataPlaneAudioTranscriptions => "audio_transcriptions",
+        GatewayHttpRouteKind::DataPlaneAudioTranslations => "audio_translations",
+        GatewayHttpRouteKind::DataPlaneBatches => "batches",
+        GatewayHttpRouteKind::DataPlaneBatch => "batch",
+        GatewayHttpRouteKind::DataPlaneRerank => "rerank",
+        GatewayHttpRouteKind::DataPlaneA2a => "a2a",
+        GatewayHttpRouteKind::DataPlaneMessages => "messages",
+        GatewayHttpRouteKind::DataPlaneModels => "models",
+        GatewayHttpRouteKind::DataPlaneModel => "model",
+        GatewayHttpRouteKind::ControlPlane => "control_plane",
+        GatewayHttpRouteKind::HealthLive => "health_live",
+        GatewayHttpRouteKind::HealthReady => "health_ready",
+        GatewayHttpRouteKind::HealthStartup => "health_startup",
+        GatewayHttpRouteKind::Unknown => "unknown",
+    }
+}
+
+fn gateway_handler_error_status(error: GatewayHandlerError) -> u16 {
+    match error {
+        GatewayHandlerError::InvalidRequest | GatewayHandlerError::InvalidRequestTarget => 400,
+        GatewayHandlerError::RequestBodyTooLarge => 413,
+        GatewayHandlerError::Overloaded => 503,
+        GatewayHandlerError::Unavailable => 502,
+    }
 }
 
 fn gateway_server_config(
@@ -161,22 +270,44 @@ fn deliver_live_config_publications(
     applications: &Arc<ArcSwap<prodex_app::GatewayApplication>>,
     server_reload: &GatewayServerReloadHandle,
 ) -> Result<(), String> {
-    prodex_app::deliver_pending_config_publication_events_with_activation(
-        &publication.transport,
-        &publication.replica,
-        &publication.root,
-        |_| {
-            activate_live_gateway_configuration(
-                mode,
-                policy_mode,
-                listen_addr,
-                server_mode,
-                applications,
-                server_reload,
+    match &publication.transport {
+        LiveConfigPublicationTransport::File(transport) => {
+            prodex_app::deliver_pending_config_publication_events_with_activation(
+                transport,
+                &publication.replica,
+                &publication.root,
+                |_| {
+                    activate_live_gateway_configuration(
+                        mode,
+                        policy_mode,
+                        listen_addr,
+                        server_mode,
+                        applications,
+                        server_reload,
+                    )
+                },
             )
-        },
-    )
-    .map(|_| ())
+            .map(|_| ())
+        }
+        LiveConfigPublicationTransport::Postgres(transport) => {
+            prodex_app::deliver_pending_postgres_config_publication_events_with_activation(
+                transport,
+                &publication.replica,
+                &publication.root,
+                |_| {
+                    activate_live_gateway_configuration(
+                        mode,
+                        policy_mode,
+                        listen_addr,
+                        server_mode,
+                        applications,
+                        server_reload,
+                    )
+                },
+            )
+            .map(|_| ())
+        }
+    }
     .map_err(|error| format!("failed to consume live configuration publication: {error}"))
 }
 
@@ -308,11 +439,24 @@ fn resolve_serve_listen_addr(
 }
 
 fn parse_serve_options(
+    mode: DedicatedServerMode,
+    args: impl Iterator<Item = String>,
+) -> Result<EnterpriseServeOptions, String> {
+    parse_serve_options_with_replica_env(
+        mode,
+        args,
+        std::env::var(CONFIG_PUBLICATION_REPLICA_ENV).ok(),
+    )
+}
+
+fn parse_serve_options_with_replica_env(
     _mode: DedicatedServerMode,
     mut args: impl Iterator<Item = String>,
+    publication_replica_env: Option<String>,
 ) -> Result<EnterpriseServeOptions, String> {
     let mut listen = None;
     let mut publication_transport = None;
+    let mut publication_postgres = false;
     let mut publication_replica = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -331,6 +475,12 @@ fn parse_serve_options(
             "--config-publication-transport" => {
                 return Err("serve accepts --config-publication-transport only once".to_string());
             }
+            "--config-publication-postgres" if !publication_postgres => {
+                publication_postgres = true;
+            }
+            "--config-publication-postgres" => {
+                return Err("serve accepts --config-publication-postgres only once".to_string());
+            }
             "--config-publication-replica" if publication_replica.is_none() => {
                 publication_replica = Some(args.next().ok_or_else(|| {
                     "serve requires a value after --config-publication-replica".to_string()
@@ -347,27 +497,62 @@ fn parse_serve_options(
         .map(str::parse)
         .transpose()
         .map_err(|_| "invalid serve listen address".to_string())?;
-    let publication = match (publication_transport, publication_replica) {
-        (None, None) => None,
-        (Some(transport), Some(replica))
+    if publication_transport.is_some() && publication_postgres {
+        return Err(
+            "serve config publication accepts either filesystem or Postgres transport".to_string(),
+        );
+    }
+    if publication_replica.is_none() && (publication_transport.is_some() || publication_postgres) {
+        publication_replica = publication_replica_env;
+    }
+    let publication = match (
+        publication_transport,
+        publication_postgres,
+        publication_replica,
+    ) {
+        (None, false, None) => None,
+        (Some(transport), false, Some(replica))
             if !replica.is_empty()
+                && replica.len() <= 128
                 && replica.bytes().all(|byte| {
                     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
                 }) =>
         {
             Some(LiveConfigPublication {
-                transport,
+                transport: LiveConfigPublicationTransport::File(transport),
                 replica,
                 root: prodex_app::runtime_policy_root()
                     .map_err(|error| format!("failed to resolve runtime policy root: {error}"))?,
             })
         }
-        (Some(_), Some(_)) => {
+        (None, true, Some(replica))
+            if !replica.is_empty()
+                && replica.len() <= 128
+                && replica.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
+                }) =>
+        {
+            Some(LiveConfigPublication {
+                transport: LiveConfigPublicationTransport::Postgres(
+                    prodex_app::runtime_config_publication_postgres_transport().map_err(
+                        |error| {
+                            format!(
+                                "failed to configure Postgres config publication transport: {error}"
+                            )
+                        },
+                    )?,
+                ),
+                replica,
+                root: prodex_app::runtime_policy_root()
+                    .map_err(|error| format!("failed to resolve runtime policy root: {error}"))?,
+            })
+        }
+        (Some(_), false, Some(_)) | (None, true, Some(_)) => {
             return Err("serve config publication replica is invalid".to_string());
         }
         _ => {
             return Err(
-                "serve config publication requires both --config-publication-transport and --config-publication-replica"
+                "serve config publication requires a transport and a replica from --config-publication-replica or PRODEX_CONFIG_PUBLICATION_REPLICA_ID"
                     .to_string(),
             );
         }
@@ -452,8 +637,36 @@ mod tests {
         )
         .unwrap();
         let publication = options.publication.unwrap();
-        assert_eq!(publication.transport, PathBuf::from("/tmp/config-events"));
+        assert!(matches!(
+            publication.transport,
+            LiveConfigPublicationTransport::File(ref path)
+                if path == &PathBuf::from("/tmp/config-events")
+        ));
         assert_eq!(publication.replica, "gateway-a");
         assert_eq!(publication.root, prodex_app::runtime_policy_root().unwrap());
+
+        let options = parse_serve_options_with_replica_env(
+            DedicatedServerMode::DataPlane,
+            [
+                "--config-publication-transport".to_string(),
+                "/tmp/config-events".to_string(),
+            ]
+            .into_iter(),
+            Some("gateway-pod-0".to_string()),
+        )
+        .unwrap();
+        assert_eq!(options.publication.unwrap().replica, "gateway-pod-0");
+        assert!(
+            parse_serve_options_with_replica_env(
+                DedicatedServerMode::DataPlane,
+                [
+                    "--config-publication-transport".to_string(),
+                    "/tmp/config-events".to_string(),
+                ]
+                .into_iter(),
+                Some("invalid/replica".to_string()),
+            )
+            .is_err()
+        );
     }
 }

@@ -350,7 +350,9 @@ boundary.
 
 1. Add the four-level classification engine, monotonic merge, bounded reason
    codes, and revisioned compiled rule snapshot.
-2. Add trusted-label raising and an explicit audited declassification boundary.
+2. Add trusted-label raising and keep classification lowering unavailable; any
+   future declassification workflow requires a separately versioned approval,
+   audit, and threat-model contract.
 3. Carry inspection summary, coverage, classification, and revisions in the
    immutable governed request context.
 4. Persist only minimum session classification and revision metadata; bind it

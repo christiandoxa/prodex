@@ -17,16 +17,18 @@ Control-plane entrypoint.
 USAGE:
     prodex-control-plane --help
     prodex-control-plane --version
-    prodex-control-plane serve [--listen <ADDR>] [--config-publication-transport <PATH> --config-publication-replica <ID>]
+    prodex-control-plane serve [--listen <ADDR>] [(--config-publication-transport <PATH>|--config-publication-postgres) [--config-publication-replica <ID>]]
     prodex-control-plane plan-config-publication --request <path>
     prodex-control-plane plan-http-control-plane --request <path>
     prodex-control-plane deliver-config-publication --event <path> --root <path>
-    prodex-control-plane publish-config-publication --event <path> --transport <path>
-    prodex-control-plane compact-config-publication --transport <path> [--retain <n>]
+    prodex-control-plane publish-config-publication --event <path> (--transport <path>|--postgres)
+    prodex-control-plane compact-config-publication (--transport <path>|--postgres) [--retain <n>]
 
 STATUS:
     The dedicated control-plane composition root uses an async listener that
     rejects data-plane routes and dispatches through the in-process application.
+    PRODEX_CONFIG_PUBLICATION_REPLICA_ID supplies the replica ID when the
+    corresponding serve argument is omitted.
 ";
 
 const CONTROL_PLANE_SERVICE_NAME: &str = "prodex-control-plane";
@@ -65,6 +67,9 @@ fn dispatch(command: Command) {
                     transport.to_string_lossy().into_owned(),
                 ]);
             }
+            if args.config_publication_postgres {
+                serve_args.push("--config-publication-postgres".to_string());
+            }
             if let Some(replica) = args.config_publication_replica {
                 serve_args.extend(["--config-publication-replica".to_string(), replica]);
             }
@@ -79,10 +84,10 @@ fn dispatch(command: Command) {
         Command::PlanHttpControlPlane(args) => http_plan::run(&args.request),
         Command::DeliverConfigPublication(args) => publication::deliver(&args.event, &args.root),
         Command::PublishConfigPublication(args) => {
-            publication::publish(&args.event, &args.transport)
+            publication::publish(&args.event, args.transport.as_deref(), args.postgres)
         }
         Command::CompactConfigPublication(args) => {
-            publication::compact(&args.transport, args.retain)
+            publication::compact(args.transport.as_deref(), args.postgres, args.retain)
         }
     };
 

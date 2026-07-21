@@ -18,6 +18,53 @@ pub struct PostgresMigration {
     pub sql: &'static str,
 }
 
+pub const REQUIRED_POSTGRES_SCHEMA_VERSION: PostgresMigrationVersion = PostgresMigrationVersion(14);
+
+pub const CONFIG_PUBLICATION_TRANSPORT_MIGRATION: PostgresMigration = PostgresMigration {
+    version: PostgresMigrationVersion(14),
+    phase: PostgresMigrationPhase::Expand,
+    name: "014_config_publication_transport",
+    sql: r#"
+-- System-scoped transport metadata. Event payloads contain revision identifiers
+-- and target names only; policy content and credentials are never stored here.
+CREATE TABLE IF NOT EXISTS prodex_config_publication_events (
+    event_id TEXT PRIMARY KEY,
+    published_at_unix_ms BIGINT NOT NULL,
+    event_payload JSONB NOT NULL,
+    CHECK (event_id ~ '^[0-9a-f]{64}$'),
+    CHECK (published_at_unix_ms >= 0),
+    CHECK (jsonb_typeof(event_payload) = 'object'),
+    CHECK (event_payload ->> 'event_id' = event_id),
+    CHECK (octet_length(event_payload::text) <= 65536)
+);
+
+CREATE TABLE IF NOT EXISTS prodex_config_publication_replicas (
+    replica_id TEXT PRIMARY KEY,
+    registered_at_unix_ms BIGINT NOT NULL,
+    last_seen_at_unix_ms BIGINT NOT NULL,
+    CHECK (char_length(replica_id) BETWEEN 1 AND 128),
+    CHECK (replica_id ~ '^[A-Za-z0-9._-]+$'),
+    CHECK (registered_at_unix_ms >= 0),
+    CHECK (last_seen_at_unix_ms >= registered_at_unix_ms)
+);
+
+CREATE TABLE IF NOT EXISTS prodex_config_publication_acks (
+    replica_id TEXT NOT NULL REFERENCES prodex_config_publication_replicas(replica_id)
+        ON DELETE CASCADE,
+    event_id TEXT NOT NULL REFERENCES prodex_config_publication_events(event_id)
+        ON DELETE CASCADE,
+    delivered_at_unix_ms BIGINT NOT NULL,
+    PRIMARY KEY (replica_id, event_id),
+    CHECK (delivered_at_unix_ms >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS prodex_config_publication_events_order_idx
+    ON prodex_config_publication_events (published_at_unix_ms, event_id);
+CREATE INDEX IF NOT EXISTS prodex_config_publication_acks_event_idx
+    ON prodex_config_publication_acks (event_id, replica_id);
+"#,
+};
+
 pub const INITIAL_TENANT_ACCOUNTING_MIGRATION: PostgresMigration = PostgresMigration {
     version: PostgresMigrationVersion(1),
     phase: PostgresMigrationPhase::Expand,

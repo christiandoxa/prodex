@@ -178,8 +178,6 @@ pub(crate) struct RuntimeResponsePlannedCandidate {
     pub(crate) auth_failure_active: bool,
     pub(crate) quota_guard_reason: Option<&'static str>,
     pub(crate) inflight_soft_limited: bool,
-    #[allow(dead_code)]
-    provider_priority: usize,
 }
 
 impl RuntimeResponsePlannedCandidate {
@@ -384,7 +382,6 @@ fn runtime_response_planned_candidate_from_proxy(
         auth_failure_active: candidate.auth_failure_active,
         quota_guard_reason: candidate.quota_guard_reason,
         inflight_soft_limited: candidate.inflight_soft_limited,
-        provider_priority: candidate.provider_priority,
     }
 }
 

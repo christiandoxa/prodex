@@ -1,8 +1,10 @@
 use super::super::local_rewrite::{
     RuntimeGatewayOidcHttpCacheEntry, RuntimeLocalRewriteProxyShared,
 };
+use super::super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use super::super::*;
 use super::endpoint_policy::{RuntimeGatewayOidcEndpoint, RuntimeGatewayOidcEndpointPolicy};
+use super::token_claims::runtime_gateway_oidc_validation_policy;
 use super::transport::runtime_gateway_oidc_send;
 use crate::read_blocking_response_body_with_limit;
 use jsonwebtoken::jwk::JwkSet;
@@ -132,8 +134,8 @@ pub(in super::super) fn runtime_gateway_run_oidc_background_refresh_loop(
     let ttl = shared.runtime_shared.runtime_config.oidc.http_cache_ttl;
     let mut last_refresh_failed = false;
     loop {
-        if runtime_gateway_oidc_cache_refresh_due(&shared, ttl) {
-            match super::runtime_gateway_prefetch_oidc_cache(&shared) {
+        match runtime_gateway_oidc_background_refresh_due(&shared) {
+            Ok(true) => match super::runtime_gateway_prefetch_oidc_cache(&shared) {
                 Ok(()) => last_refresh_failed = false,
                 Err(_err) => {
                     last_refresh_failed = true;
@@ -148,6 +150,20 @@ pub(in super::super) fn runtime_gateway_run_oidc_background_refresh_loop(
                         ),
                     );
                 }
+            },
+            Ok(false) => {}
+            Err(_err) => {
+                last_refresh_failed = true;
+                runtime_proxy_log_to_path(
+                    &shared.runtime_shared.log_path,
+                    &runtime_proxy_structured_log_message(
+                        "gateway_oidc_refresh_plan_failed",
+                        [runtime_proxy_log_field(
+                            "error_kind",
+                            "gateway_oidc_refresh_plan_failed",
+                        )],
+                    ),
+                );
             }
         }
         let poll_interval = if last_refresh_failed {
@@ -168,6 +184,59 @@ pub(in super::super) fn runtime_gateway_run_oidc_background_refresh_loop(
             break;
         }
     }
+}
+
+fn runtime_gateway_oidc_background_refresh_due(
+    shared: &RuntimeLocalRewriteProxyShared,
+) -> Result<bool> {
+    let now = Instant::now();
+    let now_unix_ms = runtime_gateway_unix_epoch_millis();
+    let admin_due = match shared.gateway_sso.oidc.as_ref() {
+        Some(config) => runtime_gateway_oidc_refresh_plan_due(
+            config,
+            shared.gateway_oidc_jwks_snapshot.load_full().as_deref(),
+            now,
+            now_unix_ms,
+        )?,
+        None => false,
+    };
+    let workload_due = match shared.gateway_sso.workload_identity.as_ref() {
+        Some(workload) => runtime_gateway_oidc_refresh_plan_due(
+            &workload.oidc,
+            shared.gateway_workload_jwks_snapshot.load_full().as_deref(),
+            now,
+            now_unix_ms,
+        )?,
+        None => false,
+    };
+
+    Ok(admin_due || workload_due)
+}
+
+pub(super) fn runtime_gateway_oidc_refresh_plan_due(
+    config: &RuntimeGatewayOidcConfig,
+    snapshot: Option<&RuntimeGatewayOidcJwksSnapshot>,
+    now: Instant,
+    now_unix_ms: u64,
+) -> Result<bool> {
+    #[cfg(test)]
+    if super::endpoint_policy::runtime_gateway_oidc_test_policy_is_allowed(config) {
+        return Ok(snapshot.is_none_or(|snapshot| {
+            now.saturating_duration_since(snapshot.fetched_at) >= snapshot.fresh_for
+        }));
+    }
+
+    let policy = runtime_gateway_oidc_validation_policy(config)?;
+    let snapshot = snapshot.map(|snapshot| snapshot.domain_snapshot_at(now, now_unix_ms));
+    let plan = prodex_authn::plan_oidc_jwks_refresh_with_origin_allowlist(
+        &policy,
+        config.jwks_url.as_deref(),
+        config.jwks_origin_allowlist.iter().map(String::as_str),
+        snapshot.as_ref(),
+        now_unix_ms,
+        prodex_authn::OidcRefreshRuntimeMode::ControlPlaneBackground,
+    )?;
+    Ok(plan.source.is_some())
 }
 
 pub(super) fn runtime_gateway_oidc_fetch_json(
@@ -470,22 +539,6 @@ pub(super) fn runtime_gateway_oidc_background_refresh_sleep(
         })
         .unwrap_or(fallback);
     runtime_gateway_oidc_background_refresh_interval(ttl)
-}
-
-pub(super) fn runtime_gateway_oidc_cache_refresh_due(
-    shared: &RuntimeLocalRewriteProxyShared,
-    ttl: Duration,
-) -> bool {
-    let Ok(cache) = shared.gateway_oidc_http_cache.lock() else {
-        return true;
-    };
-    if cache.is_empty() || ttl.is_zero() {
-        return true;
-    }
-    let now = Instant::now();
-    cache.values().any(|entry| {
-        now.duration_since(entry.fetched_at) >= runtime_gateway_oidc_cache_entry_ttl(entry, ttl)
-    })
 }
 
 pub(super) fn runtime_gateway_oidc_cache_entry_ttl(
