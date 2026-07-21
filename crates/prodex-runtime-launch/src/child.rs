@@ -6,7 +6,6 @@ use std::path::PathBuf;
 const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
 const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
 const CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV: &str = "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT";
-const VTE_VERSION_ENV: &str = "VTE_VERSION";
 const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -120,11 +119,10 @@ pub fn codex_child_plan_with_env(
     let local_provider_hosts = local_proxy_bypass_hosts_from_args(&args, local_provider_id);
     let mut extra_env =
         local_proxy_bypass_env_for_hosts_and_env(&local_provider_hosts, environment);
-    // VTE terminals can surface phantom input when Codex enables enhanced key reporting.
-    if environment.iter().any(|(key, _)| key == VTE_VERSION_ENV)
-        && !environment
-            .iter()
-            .any(|(key, _)| key == CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV)
+    // Enhanced key reporting can surface phantom input even when launchers hide terminal identity.
+    if !environment
+        .iter()
+        .any(|(key, _)| key == CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV)
     {
         extra_env.push((
             CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV,

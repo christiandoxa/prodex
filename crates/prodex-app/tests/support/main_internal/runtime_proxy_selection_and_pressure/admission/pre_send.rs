@@ -242,7 +242,7 @@ fn standard_get_waits_for_ready_profile_inflight_relief() {
 }
 
 #[test]
-fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
+fn scripted_backend_fault_explicit_quota_429_retries_ready_profile_past_soft_inflight_limit() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
             RuntimeProxyBackendFaultStep::explicit_quota_429(
@@ -250,13 +250,20 @@ fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
                 "main-account",
             ),
         ]));
-    let harness = RuntimeProxyProfileHarnessBuilder::new()
+    let mut harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
         .active_profile("main")
         .current_profile("main")
         .upstream_base_url(backend.base_url())
         .build();
+    let tuning = &mut std::sync::Arc::make_mut(&mut harness.shared_mut().runtime_config).tuning;
+    tuning.profile_inflight_soft_limit = 4;
+    tuning.profile_inflight_hard_limit = 8;
+    harness
+        .shared()
+        .lane_admission
+        .set_profile_inflight("second", 6);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
@@ -285,6 +292,11 @@ fn scripted_backend_fault_explicit_quota_429_rotates_to_ready_profile() {
         backend.responses_accounts(),
         vec!["main-account".to_string(), "second-account".to_string()]
     );
+    let log = fs::read_to_string(&harness.shared().log_path).expect("runtime log should be readable");
+    assert!(log.contains(
+        "transport=http quota_last_chance profile=second failed_profile=main"
+    ));
+    assert!(log.contains("transport=http committed profile=second"));
 }
 
 #[test]

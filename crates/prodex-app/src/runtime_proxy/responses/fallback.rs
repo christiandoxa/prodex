@@ -40,6 +40,7 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
     affinity_state: &mut RuntimeResponsesAffinityState,
     excluded_profiles: &mut BTreeSet<String>,
     last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
+    quota_last_chance_profile: &mut Option<String>,
 ) -> Result<Option<RuntimeResponsesDirectCurrentFallbackAction>> {
     if !affinity_state.allows_direct_current_profile_fallback(
         fallback.previous_response_id,
@@ -153,17 +154,18 @@ pub(super) fn try_runtime_responses_direct_current_profile_fallback(
                     ),
                 );
             }
-            if !runtime_has_route_eligible_quota_fallback(
+            if !prepare_runtime_responses_quota_fallback(
                 fallback.shared,
+                fallback.request_id,
                 &profile_name,
-                &BTreeSet::new(),
-                RuntimeRouteKind::Responses,
+                fallback.prompt_cache_key,
+                excluded_profiles,
+                quota_last_chance_profile,
             )? {
                 return Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Return(
                     Box::new(response),
                 )));
             }
-            excluded_profiles.insert(profile_name);
             *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
             Ok(Some(RuntimeResponsesDirectCurrentFallbackAction::Continue))
         }

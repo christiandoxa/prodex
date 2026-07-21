@@ -8,6 +8,7 @@ pub(super) struct RuntimeResponsesQuotaBlocked<'a> {
     pub(super) profile_name: String,
     pub(super) response: RuntimeResponsesReply,
     pub(super) request_model_name: Option<&'a str>,
+    pub(super) prompt_cache_key: Option<&'a str>,
     pub(super) previous_response_id: Option<&'a str>,
     pub(super) request_turn_state: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
@@ -16,6 +17,7 @@ pub(super) struct RuntimeResponsesQuotaBlocked<'a> {
         Option<RuntimePreviousResponseFreshFallbackShape>,
     pub(super) affinity_state: &'a mut RuntimeResponsesAffinityState,
     pub(super) auto_redeemed_profiles: &'a mut BTreeSet<String>,
+    pub(super) quota_last_chance_profile: &'a mut Option<String>,
     pub(super) excluded_profiles: &'a mut BTreeSet<String>,
     pub(super) last_failure: &'a mut Option<(RuntimeUpstreamFailureResponse, bool)>,
 }
@@ -29,6 +31,7 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         profile_name,
         response,
         request_model_name,
+        prompt_cache_key,
         previous_response_id,
         request_turn_state,
         request_session_id,
@@ -36,6 +39,7 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         previous_response_fresh_fallback_shape,
         affinity_state,
         auto_redeemed_profiles,
+        quota_last_chance_profile,
         excluded_profiles,
         last_failure,
     } = quota_blocked;
@@ -101,16 +105,53 @@ pub(super) fn handle_runtime_responses_quota_blocked(
             ),
         );
     }
-    if !runtime_has_route_eligible_quota_fallback(
+    if !prepare_runtime_responses_quota_fallback(
         shared,
+        request_id,
         &profile_name,
-        &BTreeSet::new(),
-        RuntimeRouteKind::Responses,
+        prompt_cache_key,
+        excluded_profiles,
+        quota_last_chance_profile,
     )? {
         return Ok(Some(response));
     }
 
-    excluded_profiles.insert(profile_name);
     *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
     Ok(None)
+}
+
+pub(super) fn prepare_runtime_responses_quota_fallback(
+    shared: &RuntimeRotationProxyShared,
+    request_id: u64,
+    profile_name: &str,
+    prompt_cache_key: Option<&str>,
+    excluded_profiles: &mut BTreeSet<String>,
+    quota_last_chance_profile: &mut Option<String>,
+) -> Result<bool> {
+    excluded_profiles.insert(profile_name.to_string());
+    if runtime_has_route_eligible_quota_fallback(
+        shared,
+        profile_name,
+        excluded_profiles,
+        RuntimeRouteKind::Responses,
+    )? {
+        return Ok(true);
+    }
+    let Some(fallback_profile) = runtime_quota_last_chance_profile_for_route(
+        shared,
+        excluded_profiles,
+        RuntimeRouteKind::Responses,
+        prompt_cache_key,
+    )?
+    else {
+        return Ok(false);
+    };
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http quota_last_chance profile={fallback_profile} failed_profile={profile_name}"
+        ),
+    );
+    *quota_last_chance_profile = Some(fallback_profile);
+    Ok(true)
 }

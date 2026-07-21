@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_ui::{print_wrapped_stderr, section_header};
 
-pub const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = if cfg!(test) { 5 } else { 21_600 };
+pub const UPDATE_CHECK_CACHE_TTL_SECONDS: i64 = 300;
 pub const UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS: i64 = if cfg!(test) { 1 } else { 300 };
 const UPDATE_CHECK_HTTP_CONNECT_TIMEOUT_MS: u64 = if cfg!(test) { 200 } else { 800 };
 const UPDATE_CHECK_HTTP_READ_TIMEOUT_MS: u64 = if cfg!(test) { 400 } else { 1200 };
@@ -576,6 +576,11 @@ mod tests {
         assert!(!version_is_newer("1.0.0-rc.1", "1.0.0"));
         assert!(!version_is_newer("1.invalid.0", "1.0.0"));
         assert!(!version_is_newer("1.0.0", "invalid"));
+    }
+
+    #[test]
+    fn cached_update_refreshes_within_five_minutes() {
+        assert_eq!(update_check_cache_ttl_seconds("0.3.1", "0.3.0"), 300);
     }
 
     #[test]
