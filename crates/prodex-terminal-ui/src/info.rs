@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InfoLoadSummaryDisplay {
     pub log_count: usize,
@@ -83,30 +85,34 @@ pub struct RuntimeTuningTransportDisplay {
     pub profile_inflight_hard_limit: usize,
 }
 
-pub fn format_info_process_summary_display(
+pub fn format_info_process_summary_display<I, T>(
     total_count: usize,
     runtime_count: usize,
-    pids: impl IntoIterator<Item = u32>,
-    max_visible_pids: usize,
-) -> String {
+    processes: I,
+    max_visible_processes: usize,
+) -> String
+where
+    I: IntoIterator<Item = T>,
+    T: Display,
+{
     if total_count == 0 {
         return "No".to_string();
     }
 
-    let pid_list = pids
+    let process_list = processes
         .into_iter()
-        .take(max_visible_pids)
-        .map(|pid| pid.to_string())
+        .take(max_visible_processes)
+        .map(|process| process.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    let remaining = total_count.saturating_sub(max_visible_pids);
+    let remaining = total_count.saturating_sub(max_visible_processes);
     let extra = if remaining > 0 {
         format!(" (+{remaining} more)")
     } else {
         String::new()
     };
 
-    format!("Yes ({total_count} total, {runtime_count} runtime; pids: {pid_list}{extra})")
+    format!("Yes ({total_count} total, {runtime_count} runtime; processes: {process_list}{extra})")
 }
 
 pub fn format_info_load_summary_display(

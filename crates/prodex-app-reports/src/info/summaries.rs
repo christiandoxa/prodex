@@ -5,7 +5,9 @@ pub fn format_info_process_summary(processes: &[ProdexProcessInfo]) -> String {
     terminal_ui::format_info_process_summary_display(
         processes.len(),
         runtime_count,
-        processes.iter().map(|process| process.pid),
+        processes
+            .iter()
+            .map(|process| format!("{}/{}", process.pid, process.command)),
         6,
     )
 }

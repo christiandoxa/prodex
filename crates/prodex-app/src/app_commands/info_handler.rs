@@ -6,14 +6,14 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use terminal_ui::{
-    format_field_lines_with_layout, print_stdout_line, render_panel, text_width, tui_border_style,
-    tui_connected_header_block, tui_secondary_style, tui_title_style,
+    format_field_lines_with_layout, text_width, tui_border_style, tui_connected_header_block,
+    tui_secondary_style, tui_title_style,
 };
 
 use crate::{
     AppPaths, AppState, AppStateIoExt, InfoArgs, InfoQuotaWindow, RuntimeConfig, codex_cli_version,
     collect_active_runtime_log_paths, collect_info_quota_aggregate,
-    collect_info_runtime_load_summary, collect_info_token_usage_summary, collect_prodex_processes,
+    collect_info_runtime_load_summary, collect_info_token_usage_summary,
     collect_recent_runtime_log_paths, collect_runtime_broker_metrics_targets,
     collect_runtime_tuning_snapshot, estimate_info_runway, format_audit_logs_summary,
     format_info_codex_version, format_info_load_summary, format_info_pool_remaining,
@@ -24,7 +24,7 @@ use crate::{
     format_runtime_policy_summary, format_runtime_proxy_contract_summary,
     format_runtime_proxy_preset, format_runtime_tuning_budgets, format_runtime_tuning_transport,
     format_runtime_tuning_workers, format_secret_backend_summary, print_panel,
-    runtime_policy_summary,
+    runtime_policy_summary, try_collect_prodex_processes,
 };
 
 pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
@@ -38,7 +38,12 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
     let prodex_version_summary = format_info_prodex_version(&paths)?;
     let codex_version_summary = format_info_codex_version(&paths, codex_cli_version())?;
     let quota = collect_info_quota_aggregate(&paths, &state, now);
-    let processes = collect_prodex_processes();
+    let process_result = try_collect_prodex_processes();
+    let process_summary = match &process_result {
+        Ok(processes) => format_info_process_summary(processes),
+        Err(err) => format!("Unavailable ({err})"),
+    };
+    let processes = process_result.unwrap_or_default();
     let runtime_logs = collect_active_runtime_log_paths(&processes);
     let runtime_load = collect_info_runtime_load_summary(&runtime_logs, now);
     let runtime_process_count = processes.iter().filter(|process| process.runtime).count();
@@ -106,10 +111,7 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
         ),
         ("Prodex version".to_string(), prodex_version_summary),
         ("Codex version".to_string(), codex_version_summary),
-        (
-            "Prodex processes".to_string(),
-            format_info_process_summary(&processes),
-        ),
+        ("Prodex processes".to_string(), process_summary),
         (
             "Recent load".to_string(),
             format_info_load_summary(&runtime_load, runtime_process_count),
@@ -167,11 +169,6 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
 
 fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
     let height = info_panel_tui_height(fields);
-    // Ratatui clamps oversized inline viewports, which would hide trailing fields.
-    if terminal::size().is_ok_and(|(_, terminal_height)| height > terminal_height) {
-        print_stdout_line(&render_panel("Info", fields))?;
-        return Ok(());
-    }
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         print_panel("Info", fields)?;
         return Ok(());

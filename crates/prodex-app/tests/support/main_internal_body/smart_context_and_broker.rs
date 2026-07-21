@@ -352,9 +352,15 @@ fn runtime_broker_and_update_commands_skip_prodex_update_notice() {
         codex_args: vec![OsString::from("hello")],
     });
 
-    assert!(!runtime_broker.should_show_update_notice());
-    assert!(!update.should_show_update_notice());
-    assert!(run.should_show_update_notice());
+    assert!(!crate::command_dispatch::command_should_show_update_notice(
+        &runtime_broker
+    ));
+    assert!(!crate::command_dispatch::command_should_show_update_notice(
+        &update
+    ));
+    assert!(crate::command_dispatch::command_should_show_update_notice(
+        &run
+    ));
 }
 
 #[test]

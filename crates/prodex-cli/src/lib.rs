@@ -196,6 +196,65 @@ pub enum Commands {
     McpJsonlBridge(McpJsonlBridgeArgs),
 }
 
+impl Commands {
+    pub fn launches_runtime(&self) -> bool {
+        matches!(
+            self,
+            Self::Gui(_)
+                | Self::Run(_)
+                | Self::Caveman(_)
+                | Self::Rtk(_)
+                | Self::Playwright(_)
+                | Self::Ponytail(_)
+                | Self::Super(_)
+                | Self::Expose(_)
+                | Self::Gateway(_)
+                | Self::Claude(_)
+                | Self::RuntimeBroker(_)
+        )
+    }
+
+    pub fn process_label(&self) -> &'static str {
+        match self {
+            Self::Profile(_) => "profile",
+            Self::UseProfile(_) => "use",
+            Self::Current => "current",
+            Self::Info(_) => "info",
+            Self::Status(_) => "status",
+            Self::Log(_) => "log",
+            Self::Session(_) => "session",
+            Self::Doctor(_) => "doctor",
+            Self::Setup(_) => "setup",
+            Self::Capability(_) => "capability",
+            Self::Audit(_) => "audit",
+            Self::Context(_) => "context",
+            Self::Cleanup(_) => "cleanup",
+            Self::Presidio(_) => "presidio",
+            Self::Login(_) => "login",
+            Self::Logout(_) => "logout",
+            Self::Update(_) => "update",
+            Self::Quota(_) => "quota",
+            Self::Redeem(_) => "redeem",
+            Self::Ping(_) => "ping",
+            Self::Gui(_) => "gui",
+            Self::Dashboard(_) => "dashboard",
+            Self::Run(_) => "run",
+            Self::Caveman(_) => "caveman",
+            Self::Rtk(_) => "rtk",
+            Self::Playwright(_) => "playwright",
+            Self::Ponytail(_) => "ponytail",
+            Self::Super(_) => "super",
+            Self::Expose(_) => "expose",
+            Self::AppServerBroker(_) => "app-server-broker",
+            Self::Gateway(_) => "gateway",
+            Self::Claude(_) => "claude",
+            Self::RuntimeBroker(_) => "__runtime-broker",
+            Self::GeminiCompatRefresh(_) => "__gemini-compat-refresh",
+            Self::McpJsonlBridge(_) => "__mcp-jsonl-bridge",
+        }
+    }
+}
+
 pub fn parse_cli_command_from<I, T>(args: I) -> std::result::Result<Commands, clap::Error>
 where
     I: IntoIterator<Item = T>,

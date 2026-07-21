@@ -1,4 +1,5 @@
 use super::*;
+use prodex_cli::Commands;
 
 pub fn parse_ps_process_rows(text: &str) -> Vec<ProcessRow> {
     let mut rows = Vec::new();
@@ -36,9 +37,15 @@ pub fn classify_prodex_process_row(
         return None;
     }
 
+    let command = prodex_process_row_command(&row, current_basename);
     Some(ProdexProcessInfo {
         pid: row.pid,
-        runtime: prodex_process_row_is_runtime(&row, current_basename),
+        command: command
+            .as_ref()
+            .map(Commands::process_label)
+            .unwrap_or("unknown")
+            .to_string(),
+        runtime: command.as_ref().is_some_and(Commands::launches_runtime),
     })
 }
 
@@ -49,9 +56,17 @@ pub fn is_prodex_process_row(row: &ProcessRow, current_basename: Option<&str>) -
 }
 
 pub fn prodex_process_row_is_runtime(row: &ProcessRow, current_basename: Option<&str>) -> bool {
-    prodex_process_row_argv_span(row, current_basename)
-        .and_then(|args| args.get(1))
-        .is_some_and(|arg| arg == "run" || arg == "__runtime-broker")
+    prodex_process_row_command(row, current_basename)
+        .as_ref()
+        .is_some_and(Commands::launches_runtime)
+}
+
+fn prodex_process_row_command(
+    row: &ProcessRow,
+    current_basename: Option<&str>,
+) -> Option<Commands> {
+    let args = prodex_process_row_argv_span(row, current_basename)?;
+    prodex_cli::parse_cli_command_from(args.iter().cloned()).ok()
 }
 
 pub fn prodex_process_row_argv_span<'a>(

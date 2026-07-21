@@ -1,4 +1,3 @@
-pub(crate) use super::shared_codex_fs::remove_dir_if_exists;
 use crate::{AppPaths, AppState, fetch_usage, map_parallel, read_auth_json_text};
 use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
@@ -187,7 +186,6 @@ pub(crate) fn unique_profile_name_for_email(
     email: &str,
 ) -> String {
     prodex_profile_identity::unique_profile_name_for_email(email, |candidate| {
-        reclaim_stale_managed_profile_path(paths, state, candidate);
         profile_name_is_available(paths, state, candidate)
     })
 }
@@ -198,16 +196,6 @@ pub(crate) fn profile_name_is_available(
     candidate: &str,
 ) -> bool {
     !state.profiles.contains_key(candidate) && !paths.managed_profiles_root.join(candidate).exists()
-}
-
-fn reclaim_stale_managed_profile_path(paths: &AppPaths, state: &AppState, candidate: &str) {
-    if state.profiles.contains_key(candidate) {
-        return;
-    }
-    let candidate_path = paths.managed_profiles_root.join(candidate);
-    if candidate_path.exists() {
-        let _ = remove_dir_if_exists(&candidate_path);
-    }
 }
 
 #[cfg(test)]

@@ -295,7 +295,7 @@ fn remove_profile_refuses_symlink_managed_profiles_root() {
 }
 
 #[test]
-fn unique_profile_name_reclaims_untracked_managed_directory() {
+fn unique_profile_name_preserves_untracked_managed_directory() {
     let temp_dir = TestDir::isolated();
     let state = AppState::default();
     let paths = AppPaths {
@@ -311,11 +311,11 @@ fn unique_profile_name_reclaims_untracked_managed_directory() {
 
     assert_eq!(
         unique_profile_name_for_email(&paths, &state, "main@example.com"),
-        "main_example.com"
+        "main_example.com-2"
     );
     assert!(
-        !stale_dir.exists(),
-        "untracked managed directory should be reclaimed before suffixing"
+        stale_dir.join("stale.txt").exists(),
+        "profile naming must not delete an untracked managed directory"
     );
 }
 

@@ -27,46 +27,17 @@ pub(crate) fn command_exit_error(code: i32, message: impl Into<String>) -> anyho
     })
 }
 
-pub(crate) trait CommandDispatchExt {
-    fn execute(self) -> Result<()>;
-    fn requires_valid_runtime_policy(&self) -> bool;
-    fn should_show_update_notice(&self) -> bool;
+pub(crate) fn command_should_show_update_notice(command: &Commands) -> bool {
+    !matches!(
+        command,
+        Commands::RuntimeBroker(_)
+            | Commands::Update(_)
+            | Commands::GeminiCompatRefresh(_)
+            | Commands::McpJsonlBridge(_)
+    )
 }
 
-impl CommandDispatchExt for Commands {
-    fn execute(self) -> Result<()> {
-        execute_command(self)
-    }
-
-    fn requires_valid_runtime_policy(&self) -> bool {
-        matches!(
-            self,
-            Commands::Gui(_)
-                | Commands::Run(_)
-                | Commands::Caveman(_)
-                | Commands::Rtk(_)
-                | Commands::Playwright(_)
-                | Commands::Ponytail(_)
-                | Commands::Super(_)
-                | Commands::Expose(_)
-                | Commands::Gateway(_)
-                | Commands::Claude(_)
-                | Commands::RuntimeBroker(_)
-        )
-    }
-
-    fn should_show_update_notice(&self) -> bool {
-        !matches!(
-            self,
-            Commands::RuntimeBroker(_)
-                | Commands::Update(_)
-                | Commands::GeminiCompatRefresh(_)
-                | Commands::McpJsonlBridge(_)
-        )
-    }
-}
-
-fn execute_command(command: Commands) -> Result<()> {
+pub(crate) fn execute_command(command: Commands) -> Result<()> {
     match command {
         Commands::Profile(command) => execute_profile_command(command),
         Commands::UseProfile(args) => handle_set_active_profile(args),

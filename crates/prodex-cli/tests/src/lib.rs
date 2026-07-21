@@ -7,6 +7,7 @@ mod expose;
 mod external_provider;
 mod harness;
 mod ping;
+mod process_reporting;
 mod redeem;
 mod runtime_features;
 mod session_tail;
