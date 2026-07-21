@@ -155,7 +155,7 @@ impl RuntimeLaunchStrategy for CavemanLaunchStrategy {
             child.args = desktop.args.clone();
             child
         } else {
-            codex_child_plan(overlay_home.clone(), runtime_args)
+            codex_tui_child_plan(overlay_home.clone(), runtime_args)
         };
         if self.provider_runtime_uses_local_proxy_auth() {
             force_codex_api_key_auth_for_provider_runtime(&mut child);

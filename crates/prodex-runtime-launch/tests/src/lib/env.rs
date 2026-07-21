@@ -119,6 +119,37 @@ fn codex_child_plan_disables_keyboard_enhancement_by_default_without_override() 
 }
 
 #[test]
+fn codex_tui_child_plan_disables_paste_burst_without_explicit_override() {
+    let plan = |args| {
+        codex_tui_child_plan(
+            OsString::from("codex"),
+            PathBuf::from("/tmp/prodex-codex-home"),
+            args,
+            "prodex-local",
+        )
+    };
+
+    assert_eq!(
+        plan(Vec::new()).args,
+        vec![
+            OsString::from("-c"),
+            OsString::from("disable_paste_burst=true"),
+        ]
+    );
+    assert_eq!(
+        plan(vec![
+            OsString::from("-c"),
+            OsString::from("disable_paste_burst=false"),
+        ])
+        .args,
+        vec![
+            OsString::from("-c"),
+            OsString::from("disable_paste_burst=false"),
+        ]
+    );
+}
+
+#[test]
 fn child_process_hardening_strips_dynamic_loader_env_unless_allowed() {
     let removed = child_process_hardening_removed_env_from(&environment(&[
         ("LD_PRELOAD", "/tmp/inject.so"),

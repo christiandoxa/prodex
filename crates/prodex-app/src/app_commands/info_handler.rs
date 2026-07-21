@@ -6,8 +6,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use terminal_ui::{
-    format_field_lines_with_layout, text_width, tui_border_style, tui_connected_header_block,
-    tui_secondary_style, tui_title_style,
+    format_field_lines_with_layout, print_stdout_line, render_panel, text_width, tui_border_style,
+    tui_connected_header_block, tui_secondary_style, tui_title_style,
 };
 
 use crate::{
@@ -167,6 +167,11 @@ pub(crate) fn handle_info(args: InfoArgs) -> Result<()> {
 
 fn print_info_panel(fields: &[(String, String)]) -> Result<()> {
     let height = info_panel_tui_height(fields);
+    // Ratatui clamps oversized inline viewports, which would hide trailing fields.
+    if terminal::size().is_ok_and(|(_, terminal_height)| height > terminal_height) {
+        print_stdout_line(&render_panel("Info", fields))?;
+        return Ok(());
+    }
     let Some(mut terminal) = crate::try_inline_stdout_terminal(height) else {
         print_panel("Info", fields)?;
         return Ok(());

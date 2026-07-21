@@ -6,6 +6,8 @@ use std::path::PathBuf;
 const LOCAL_PROXY_BYPASS_ENV_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
 const LOCAL_PROXY_BYPASS_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "::1"];
 const CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV: &str = "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT";
+const CODEX_TUI_DISABLE_PASTE_BURST_KEY: &str = "disable_paste_burst";
+const CODEX_TUI_DISABLE_PASTE_BURST_OVERRIDE: &str = "disable_paste_burst=true";
 const UPSTREAM_PROXY_ENV_KEYS: [&str; 8] = [
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -105,6 +107,27 @@ pub fn codex_child_plan(
         local_provider_id,
         &env::vars_os().collect::<Vec<_>>(),
     )
+}
+
+pub fn codex_tui_child_plan(
+    binary: OsString,
+    codex_home: PathBuf,
+    mut args: Vec<OsString>,
+    local_provider_id: &str,
+) -> ChildProcessPlan {
+    // Avoid delayed single-character inserts from Codex's fallback paste heuristic.
+    if codex_config::codex_cli_config_override_value(&args, CODEX_TUI_DISABLE_PASTE_BURST_KEY)
+        .is_none()
+    {
+        args.splice(
+            0..0,
+            [
+                OsString::from("-c"),
+                OsString::from(CODEX_TUI_DISABLE_PASTE_BURST_OVERRIDE),
+            ],
+        );
+    }
+    codex_child_plan(binary, codex_home, args, local_provider_id)
 }
 
 #[doc(hidden)]
