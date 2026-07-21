@@ -27,7 +27,10 @@ use self::previous_response::{
     RuntimeResponsesPreviousResponseNotFoundContextInput,
     runtime_responses_previous_response_not_found_context,
 };
-use self::quota_blocked::{RuntimeResponsesQuotaBlocked, handle_runtime_responses_quota_blocked};
+use self::quota_blocked::{
+    RuntimeResponsesQuotaBlocked, handle_runtime_responses_quota_blocked,
+    prepare_runtime_responses_quota_fallback,
+};
 
 fn runtime_responses_stale_continuation_reply() -> RuntimeResponsesReply {
     RuntimeResponsesReply::Buffered(RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
@@ -106,6 +109,7 @@ pub(crate) fn proxy_runtime_responses_request(
         explicit_request_session_id: explicit_request_session_id.as_ref(),
     })?;
     let mut auto_redeemed_profiles = BTreeSet::new();
+    let mut quota_last_chance_profile = None;
     let mut loop_state = RuntimePrecommitLoopState::<RuntimeUpstreamFailureResponse>::new();
 
     loop {
@@ -156,6 +160,7 @@ pub(crate) fn proxy_runtime_responses_request(
                 &mut affinity_state,
                 &mut loop_state.excluded_profiles,
                 &mut loop_state.last_failure,
+                &mut quota_last_chance_profile,
             )? {
                 match action {
                     RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
@@ -170,17 +175,21 @@ pub(crate) fn proxy_runtime_responses_request(
             ));
         }
 
-        let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
-            shared,
-            affinity_state.candidate_selection(
-                &loop_state.excluded_profiles,
-                previous_response_id.as_deref(),
-                prompt_cache_key.as_deref(),
-            ),
-            Some(request_id),
-            request_model_name.as_deref(),
-        )?
-        else {
+        let candidate_name = if let Some(profile_name) = quota_last_chance_profile.take() {
+            Some(profile_name)
+        } else {
+            select_runtime_response_candidate_for_route_with_request(
+                shared,
+                affinity_state.candidate_selection(
+                    &loop_state.excluded_profiles,
+                    previous_response_id.as_deref(),
+                    prompt_cache_key.as_deref(),
+                ),
+                Some(request_id),
+                request_model_name.as_deref(),
+            )?
+        };
+        let Some(candidate_name) = candidate_name else {
             runtime_proxy_log(
                 shared,
                 format!(
@@ -254,6 +263,7 @@ pub(crate) fn proxy_runtime_responses_request(
                 &mut affinity_state,
                 &mut loop_state.excluded_profiles,
                 &mut loop_state.last_failure,
+                &mut quota_last_chance_profile,
             )? {
                 match action {
                     RuntimeResponsesDirectCurrentFallbackAction::Continue => continue,
@@ -370,6 +380,7 @@ pub(crate) fn proxy_runtime_responses_request(
                         profile_name,
                         response,
                         request_model_name: request_model_name.as_deref(),
+                        prompt_cache_key: prompt_cache_key.as_deref(),
                         previous_response_id: previous_response_id.as_deref(),
                         request_turn_state: request_turn_state.as_deref(),
                         request_session_id: request_session_id.as_deref(),
@@ -377,6 +388,7 @@ pub(crate) fn proxy_runtime_responses_request(
                         previous_response_fresh_fallback_shape,
                         affinity_state: &mut affinity_state,
                         auto_redeemed_profiles: &mut auto_redeemed_profiles,
+                        quota_last_chance_profile: &mut quota_last_chance_profile,
                         excluded_profiles: &mut loop_state.excluded_profiles,
                         last_failure: &mut loop_state.last_failure,
                     })?

@@ -84,7 +84,7 @@ fn codex_child_plan_applies_codex_sandbox_removed_env() {
 }
 
 #[test]
-fn codex_child_plan_disables_keyboard_enhancement_only_for_vte_without_override() {
+fn codex_child_plan_disables_keyboard_enhancement_by_default_without_override() {
     let plan = |environment: Vec<(OsString, OsString)>| {
         codex_child_plan_with_env(
             OsString::from("codex"),
@@ -102,15 +102,18 @@ fn codex_child_plan_disables_keyboard_enhancement_only_for_vte_without_override(
     };
 
     assert_eq!(
+        keyboard_override(&plan(environment(&[]))),
+        Some("1".to_string())
+    );
+    assert_eq!(
         keyboard_override(&plan(environment(&[("VTE_VERSION", "7600")]))),
         Some("1".to_string())
     );
-    assert_eq!(keyboard_override(&plan(environment(&[]))), None);
     assert_eq!(
-        keyboard_override(&plan(environment(&[
-            ("VTE_VERSION", "7600"),
-            ("CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT", "0"),
-        ]))),
+        keyboard_override(&plan(environment(&[(
+            "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT",
+            "0",
+        )]))),
         None
     );
 }

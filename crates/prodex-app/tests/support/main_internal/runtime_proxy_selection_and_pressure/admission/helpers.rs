@@ -9,6 +9,10 @@ impl RuntimeProxyProfileHarness {
     pub(super) fn shared(&self) -> &RuntimeRotationProxyShared {
         &self.shared
     }
+
+    pub(super) fn shared_mut(&mut self) -> &mut RuntimeRotationProxyShared {
+        &mut self.shared
+    }
 }
 
 pub(super) struct RuntimeProxyProfileHarnessBuilder {
