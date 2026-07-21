@@ -34,8 +34,7 @@ pub(crate) fn write_copilot_runtime_model_catalog(
     codex_home: &Path,
     model_catalog: &[serde_json::Value],
 ) -> Result<()> {
-    fs::create_dir_all(codex_home)
-        .with_context(|| format!("failed to create {}", codex_home.display()))?;
+    prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let catalog_path = codex_home.join(COPILOT_RUNTIME_MODEL_CATALOG_FILE);
     let catalog = json!({ "models": model_catalog });
     let contents = serde_json::to_string_pretty(&catalog)
@@ -159,8 +158,7 @@ fn write_external_model_catalog(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<PathBuf> {
-    fs::create_dir_all(codex_home)
-        .with_context(|| format!("failed to create {}", codex_home.display()))?;
+    prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
     let catalog = json!({
         "models": external_catalog_models(

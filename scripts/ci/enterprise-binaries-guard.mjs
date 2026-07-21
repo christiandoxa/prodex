@@ -61,7 +61,8 @@ function validateBinary(binary) {
 
 function validateServeComposition(source) {
   const errors = [];
-  const applicationStart = "prodex_app::start_policy_gateway_application_for_mode(policy_mode)";
+  const applicationStart =
+    "prodex_app::start_policy_gateway_application_for_mode_at(policy_mode, listen_addr)";
   const asyncFront = "serve_with_handler_reloadable(";
   const applicationDispatch = "application.handle(request).await";
   const applicationDrain = "application.shutdown_and_drain(drain_timeout)";
@@ -83,8 +84,8 @@ function validateServeComposition(source) {
       `${SERVE_COMPOSITION_PATH}: in-process application must drain after the async server stops`,
     ],
     [
-      "applications.swap(candidate)",
-      `${SERVE_COMPOSITION_PATH}: live reload must atomically replace the active application`,
+      ".reload_with_activation(&server_config, || applications.swap(activated))",
+      `${SERVE_COMPOSITION_PATH}: live reload must atomically publish edge and application state`,
     ],
     [
       "previous.shutdown_and_drain(drain_timeout)",
@@ -105,7 +106,7 @@ function validateServeComposition(source) {
   if (dispatch < serve || dispatch > drain) {
     errors.push(`${SERVE_COMPOSITION_PATH}: in-process dispatch must remain inside the serve phase`);
   }
-  if ((source.match(/start_policy_gateway_application_for_mode\s*\(/gu) ?? []).length !== 2) {
+  if ((source.match(/start_policy_gateway_application_for_mode_at\s*\(/gu) ?? []).length !== 2) {
     errors.push(
       `${SERVE_COMPOSITION_PATH}: dedicated serve must own initial and live-reload application lifecycles`,
     );
@@ -128,21 +129,22 @@ function runSelfTest() {
     throw new Error("self-test failed: forbidden pattern did not match");
   }
   const validServe = `
-    let application = prodex_app::start_policy_gateway_application_for_mode(policy_mode);
+    let application = prodex_app::start_policy_gateway_application_for_mode_at(policy_mode, listen_addr);
     let server_result = serve_with_handler_reloadable(
       GatewayServerConfig::production(listen_addr, server_mode),
       move |request| async move { application.handle(request).await },
     );
     application.shutdown_and_drain(drain_timeout);
-    let candidate = prodex_app::start_policy_gateway_application_for_mode(policy_mode);
-    let previous = applications.swap(candidate);
+    let candidate = prodex_app::start_policy_gateway_application_for_mode_at(policy_mode, listen_addr);
+    let activated = candidate.clone();
+    let previous = server_reload.reload_with_activation(&server_config, || applications.swap(activated));
     previous.shutdown_and_drain(drain_timeout);
   `;
   if (validateServeComposition(validServe).length !== 0) {
     throw new Error("self-test failed: valid in-process serve composition was rejected");
   }
   const loopbackLegacy = validServe
-    .replace("start_policy_gateway_application_for_mode(policy_mode)", 'start_policy_gateway_backend(Some("127.0.0.1:0".to_string()))')
+    .replace("start_policy_gateway_application_for_mode_at(policy_mode, listen_addr)", 'start_policy_gateway_backend(Some("127.0.0.1:0".to_string()))')
     .replace("serve_with_handler_reloadable(", "serve(")
     .replace("move |request| async move { application.handle(request).await },", "backend.listen_addr(),");
   if (validateServeComposition(loopbackLegacy).length === 0) {

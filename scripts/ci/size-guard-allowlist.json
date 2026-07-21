@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 896,
-    "reason": "Runtime launch command routing, provider selection, fixed harness resolution, and session/runtime entry planning remain capped after live goal recovery moved to its focused module."
+    "maxLines": 897,
+    "reason": "Runtime launch command routing now carries the dedicated server's exact listener into policy validation while provider selection, harness resolution, and session/runtime entry planning remain together."
   },
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
@@ -176,13 +176,13 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_external_provider_config.rs",
-    "maxLines": 984,
+    "maxLines": 982,
     "reason": "External provider catalog generation now imports Kiro model metadata alongside Copilot while preserving exact secret/config validation; capped until provider-specific catalog loading splits out."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",
-    "maxLines": 1580,
-    "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh; SCIM organization and canonical OIDC evidence now live in focused nested fixtures, and the remaining legacy matrix stays capped."
+    "maxLines": 1589,
+    "reason": "Gateway admin auth coverage proves background-only OIDC discovery/JWKS refresh and repeatable live PostgreSQL SCIM compatibility fixtures; the remaining legacy matrix stays capped."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_state.rs",
@@ -256,13 +256,13 @@
   },
   {
     "file": "crates/prodex-gateway-server/src/lib.rs",
-    "maxLines": 1150,
-    "reason": "The async gateway server owns transport peer trust, bounded forwarded-chain parsing, browser edge enforcement, body limits, upgrades, and graceful drain; capped until edge request validation splits out."
+    "maxLines": 1170,
+    "reason": "The async gateway server owns transport peer trust, bounded forwarded-chain parsing, browser edge enforcement, atomic edge/application reload barriers, body limits, upgrades, and graceful drain."
   },
   {
     "file": "crates/prodex-gateway-server/src/tests.rs",
-    "maxLines": 983,
-    "reason": "Gateway server integration coverage keeps canonical targets, streaming limits, overload, trusted proxy, forwarding privacy, live edge-security reload, Host/Origin/CSRF, and expected-host cases in one harness."
+    "maxLines": 1005,
+    "reason": "Gateway server integration coverage keeps canonical targets, streaming limits, overload, trusted proxy, forwarding privacy, atomic live edge/application reload, Host/Origin/CSRF, and expected-host cases in one harness."
   },
   {
     "file": "crates/prodex-storage-postgres-runtime/src/governance/repository_core.rs",

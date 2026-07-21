@@ -181,7 +181,8 @@ pub fn migrate_gateway_enterprise_state_postgres(
     runtime_launch::runtime_gateway_postgres_migrate_enterprise_state(url, tls)
 }
 pub use gateway_application::{
-    GatewayApplication, start_policy_gateway_application, start_policy_gateway_application_for_mode,
+    GatewayApplication, start_policy_gateway_application,
+    start_policy_gateway_application_for_mode, start_policy_gateway_application_for_mode_at,
 };
 pub use gateway_backend::{
     GatewayBackend, start_policy_gateway_backend, start_policy_gateway_backend_for_mode,

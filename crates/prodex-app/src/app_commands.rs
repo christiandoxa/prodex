@@ -75,8 +75,9 @@ pub(crate) fn start_policy_gateway_backend_inner(
 
 pub(crate) fn start_policy_gateway_application_inner(
     service_mode: RuntimePolicyServiceMode,
+    preferred_listen_addr: Option<String>,
 ) -> Result<GatewayApplication> {
-    runtime_launch::start_policy_gateway_application_inner(service_mode)
+    runtime_launch::start_policy_gateway_application_inner(service_mode, preferred_listen_addr)
 }
 
 pub(super) fn handle_super(args: SuperArgs) -> Result<()> {

@@ -1,7 +1,8 @@
 use super::{
-    RUNTIME_GATEWAY_SCHEMA_VERSION, RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS,
-    runtime_gateway_schema_key, runtime_gateway_schema_mark_ensured,
-    runtime_gateway_schema_should_ensure, runtime_gateway_sqlite_create_current_schema_for_tests,
+    RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL, RUNTIME_GATEWAY_SCHEMA_VERSION,
+    RUNTIME_GATEWAY_SQLITE_COMPATIBILITY_MIGRATIONS, runtime_gateway_schema_key,
+    runtime_gateway_schema_mark_ensured, runtime_gateway_schema_should_ensure,
+    runtime_gateway_sqlite_create_current_schema_for_tests,
     runtime_gateway_sqlite_migrate_compatibility_state, runtime_gateway_sqlite_open,
 };
 use rusqlite::Connection;
@@ -265,6 +266,15 @@ fn sqlite_compatibility_migrations_are_versioned_and_idempotent() {
     assert_eq!(max_version, RUNTIME_GATEWAY_SCHEMA_VERSION);
 
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn postgres_migrations_use_one_bounded_advisory_lock() {
+    assert!(RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL.contains("lock_timeout = '30s'"));
+    assert!(
+        RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL
+            .contains("pg_advisory_lock(hashtextextended('prodex.gateway.schema.migrations', 0))")
+    );
 }
 
 #[test]

@@ -35,10 +35,9 @@ impl IdempotentClient for reqwest::blocking::Client {
 }
 
 fn idempotent(request: RequestBuilder) -> RequestBuilder {
-    static NEXT_KEY: AtomicUsize = AtomicUsize::new(1);
     request.header(
         "Idempotency-Key",
-        format!("test-{}", NEXT_KEY.fetch_add(1, Ordering::Relaxed)),
+        format!("test-{}", prodex_domain::RequestId::new()),
     )
 }
 

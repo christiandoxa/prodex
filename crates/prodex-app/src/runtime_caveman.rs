@@ -210,6 +210,7 @@ fn force_codex_api_key_auth_for_provider_runtime(child: &mut ChildProcessPlan) {
 }
 
 fn write_provider_runtime_codex_auth(codex_home: &std::path::Path) -> Result<()> {
+    prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let auth_path = codex_home.join("auth.json");
     let auth_json = serde_json::json!({
         "auth_mode": "apikey",

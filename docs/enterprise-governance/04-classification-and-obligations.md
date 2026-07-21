@@ -226,8 +226,8 @@ active:
 | JSON nesting | 32 levels | Stable inspection-limit failure |
 | Inspectable JSON values | 256 | Stable inspection-limit failure |
 | Inspectable JSON text | 1 MiB | Stable inspection-limit failure |
-| Classification rules | Not implemented | Published finite limit and bounded worst-case evaluation |
-| Obligations and set members | Not implemented | Published finite limits; no request-path allocation proportional to untrusted infinity |
+| Classification rules | 128 | Reject excess during rule-set compilation; evaluation is bounded by the compiled snapshot |
+| Obligations and set members | 64 per rule/merged decision | Reject excess before activation; selector-derived allow/deny sets share the same finite ceiling |
 
 All stage deadlines derive from the request deadline. Classification and
 obligation merge are side-effect-free and network-free. Detector calls remain

@@ -281,8 +281,7 @@ fn write_deepseek_model_catalog(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<PathBuf> {
-    fs::create_dir_all(codex_home)
-        .with_context(|| format!("failed to create {}", codex_home.display()))?;
+    prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let catalog_path = codex_home.join(DEEPSEEK_MODEL_CATALOG_FILE);
     let catalog = json!({
         "models": deepseek_catalog_models(model, context_window, auto_compact_token_limit)

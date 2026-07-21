@@ -1313,6 +1313,7 @@ fn gateway_scim_create_keeps_compat_shape_on_postgres_backend() {
         eprintln!("skipping: PRODEX_TEST_POSTGRES_URL is not set");
         return;
     };
+    let user_name = format!("postgres-{}@example.com", prodex_domain::PrincipalId::new());
 
     let root = temp_root("gateway-scim-postgres-compat");
     let paths = app_paths_for_root(root);
@@ -1364,7 +1365,7 @@ fn gateway_scim_create_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .json(&serde_json::json!({"userName": "postgres@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .json(&serde_json::json!({"userName": user_name.clone(), "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("postgres SCIM create request should be sent");
     let created_status = created.status().as_u16();
@@ -1377,7 +1378,7 @@ fn gateway_scim_create_keeps_compat_shape_on_postgres_backend() {
     );
     let created: serde_json::Value =
         serde_json::from_str(&created_body).expect("postgres SCIM create json");
-    assert_eq!(created["userName"], "postgres@example.com");
+    assert_eq!(created["userName"], user_name);
     assert_eq!(created["externalId"], serde_json::Value::Null);
     assert_eq!(created["displayName"], serde_json::Value::Null);
 }
@@ -1432,6 +1433,10 @@ fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
     })
     .expect("gateway proxy should start");
     let client = reqwest::blocking::Client::new();
+    let user_name = format!(
+        "postgres-update-{}@example.com",
+        prodex_domain::PrincipalId::new()
+    );
 
     let created = client
         .idempotent_post(format!(
@@ -1439,7 +1444,7 @@ fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .json(&serde_json::json!({"userName": "postgres-update@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .json(&serde_json::json!({"userName": user_name.clone(), "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("postgres SCIM create request should be sent");
     let created_status = created.status().as_u16();
@@ -1476,7 +1481,7 @@ fn gateway_scim_update_keeps_compat_shape_on_postgres_backend() {
     );
     let updated: serde_json::Value =
         serde_json::from_str(&updated_body).expect("postgres SCIM update json");
-    assert_eq!(updated["userName"], "postgres-update@example.com");
+    assert_eq!(updated["userName"], user_name);
     assert_eq!(updated["displayName"], "Postgres Update");
     assert_eq!(updated["externalId"], serde_json::Value::Null);
 }
@@ -1531,6 +1536,10 @@ fn gateway_scim_delete_keeps_compat_shape_on_postgres_backend() {
     })
     .expect("gateway proxy should start");
     let client = reqwest::blocking::Client::new();
+    let user_name = format!(
+        "postgres-delete-{}@example.com",
+        prodex_domain::PrincipalId::new()
+    );
 
     let created = client
         .idempotent_post(format!(
@@ -1538,7 +1547,7 @@ fn gateway_scim_delete_keeps_compat_shape_on_postgres_backend() {
             proxy.listen_addr
         ))
         .bearer_auth(admin_token)
-        .json(&serde_json::json!({"userName": "postgres-delete@example.com", "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
+        .json(&serde_json::json!({"userName": user_name, "tenant_id": prodex_domain::TenantId::new().to_string(), "user_id": prodex_domain::PrincipalId::new().to_string()}))
         .send()
         .expect("postgres SCIM create request should be sent");
     let created_status = created.status().as_u16();
