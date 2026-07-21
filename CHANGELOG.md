@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.331.0 - 2026-07-21
+
+### Misc
+
+- Close audited production gaps (`d6b0a3a`)
+
 ## 0.330.0 - 2026-07-21
 
 ### Misc
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Preserve Presidio JSON field boundaries (`6364e68`)
-
-## 0.319.0 - 2026-07-19
-
-### Runtime
-
-- Skip tool schemas during PII inspection (`68fc84e`)
