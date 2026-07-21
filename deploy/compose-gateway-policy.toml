@@ -5,6 +5,8 @@ projected_root = "/run/secrets"
 projected_provider = "compose"
 
 [gateway]
+listen_addr = "0.0.0.0:4000"
+expected_host = "127.0.0.1:4000"
 require_auth = true
 auth_token_ref = { provider = "compose", name = "PRODEX_GATEWAY_TOKEN" }
 provider_api_key_ref = { provider = "compose", name = "OPENAI_API_KEY" }

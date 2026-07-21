@@ -1,9 +1,10 @@
 use super::{
-    RUNTIME_GATEWAY_SCHEMA_VERSION, runtime_gateway_postgres_index_exists,
-    runtime_gateway_postgres_observed_schema_version, runtime_gateway_postgres_table_exists,
-    runtime_gateway_postgres_table_has_column, runtime_gateway_sqlite_index_exists,
-    runtime_gateway_sqlite_observed_schema_version, runtime_gateway_sqlite_open_for_migration,
-    runtime_gateway_sqlite_table_exists, runtime_gateway_sqlite_table_has_column,
+    RUNTIME_GATEWAY_SCHEMA_VERSION, runtime_gateway_postgres_acquire_migration_lock,
+    runtime_gateway_postgres_index_exists, runtime_gateway_postgres_observed_schema_version,
+    runtime_gateway_postgres_table_exists, runtime_gateway_postgres_table_has_column,
+    runtime_gateway_sqlite_index_exists, runtime_gateway_sqlite_observed_schema_version,
+    runtime_gateway_sqlite_open_for_migration, runtime_gateway_sqlite_table_exists,
+    runtime_gateway_sqlite_table_has_column,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use postgres::Client as PostgresClient;
@@ -93,6 +94,7 @@ pub(crate) fn runtime_gateway_postgres_migrate_enterprise_state(
 ) -> Result<usize> {
     let mut client = prodex_storage_postgres_runtime::connect_blocking(url, tls)
         .context("failed to connect to gateway postgres state")?;
+    runtime_gateway_postgres_acquire_migration_lock(&mut client)?;
     apply_postgres_migrations(&mut client)
 }
 

@@ -46,11 +46,12 @@ pub(crate) fn start_gateway_backend(args: GatewayArgs) -> Result<GatewayBackend>
 
 pub(crate) fn start_policy_gateway_application(
     service_mode: prodex_runtime_policy::RuntimePolicyServiceMode,
+    preferred_listen_addr: Option<String>,
 ) -> Result<GatewayApplication> {
     let (runtime, provider_name, auth_required) = start_gateway_runtime_for_service_mode(
         GatewayArgs {
             command: None,
-            listen: None,
+            listen: preferred_listen_addr,
             provider: None,
             harness: None,
             base_url: None,

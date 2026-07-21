@@ -304,6 +304,8 @@ fn sqlite_key_store_round_trips_keys_and_scim_users() {
     runtime_gateway_sqlite_create_current_schema_for_tests(&path).unwrap();
     let mut conn = runtime_gateway_sqlite_open(&path).unwrap();
     let tx = conn.transaction().unwrap();
+    let tenant_id = prodex_domain::TenantId::new().to_string();
+    let principal_id = prodex_domain::PrincipalId::new().to_string();
     let store = RuntimeGatewayVirtualKeyStoreFile {
         version: runtime_gateway_virtual_key_store_version(),
         keys: vec![RuntimeGatewayStoredVirtualKey {
@@ -313,7 +315,7 @@ fn sqlite_key_store_round_trips_keys_and_scim_users() {
             )
             .hash_base64(),
             virtual_key_id: Some(prodex_domain::VirtualKeyId::new().to_string()),
-            tenant_id: Some("tenant".to_string()),
+            tenant_id: Some(tenant_id.clone()),
             team_id: None,
             project_id: None,
             user_id: None,
@@ -328,16 +330,16 @@ fn sqlite_key_store_round_trips_keys_and_scim_users() {
             updated_at_epoch: 2,
         }],
         scim_users: vec![RuntimeGatewayScimUser {
-            id: "user-1".to_string(),
+            id: principal_id.clone(),
             user_name: "user@example.com".to_string(),
             external_id: None,
             display_name: Some("User".to_string()),
             active: true,
             role: Some("admin".to_string()),
-            tenant_id: Some("tenant".to_string()),
+            tenant_id: Some(tenant_id),
             team_id: None,
             project_id: None,
-            user_id: Some("user-1".to_string()),
+            user_id: Some(principal_id),
             group_ids: vec!["engineering".to_string()],
             department_id: Some("research".to_string()),
             budget_id: None,
@@ -371,6 +373,7 @@ fn postgres_key_store_round_trips_keys_and_scim_users() {
     };
     runtime_gateway_postgres_create_current_schema_for_tests(&url);
     let tenant_id = prodex_domain::TenantId::new().to_string();
+    let principal_id = prodex_domain::PrincipalId::new().to_string();
     let store = RuntimeGatewayVirtualKeyStoreFile {
         version: runtime_gateway_virtual_key_store_version(),
         keys: vec![RuntimeGatewayStoredVirtualKey {
@@ -395,7 +398,7 @@ fn postgres_key_store_round_trips_keys_and_scim_users() {
             updated_at_epoch: 2,
         }],
         scim_users: vec![RuntimeGatewayScimUser {
-            id: format!("user-{}", prodex_domain::PrincipalId::new()),
+            id: principal_id.clone(),
             user_name: format!("user-{}@example.com", prodex_domain::PrincipalId::new()),
             external_id: None,
             display_name: Some("User".to_string()),
@@ -404,7 +407,7 @@ fn postgres_key_store_round_trips_keys_and_scim_users() {
             tenant_id: Some(tenant_id),
             team_id: None,
             project_id: None,
-            user_id: Some("user-1".to_string()),
+            user_id: Some(principal_id),
             group_ids: vec!["engineering".to_string()],
             department_id: Some("research".to_string()),
             budget_id: None,

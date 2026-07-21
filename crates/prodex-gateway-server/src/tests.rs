@@ -64,6 +64,28 @@ fn reload_handle_swaps_edge_security_for_new_connections() {
     );
 }
 
+#[test]
+fn reload_activation_is_atomic_with_request_snapshots() {
+    let mut config = GatewayServerConfig::production(
+        "127.0.0.1:4000".parse().unwrap(),
+        GatewayServerMode::DataPlane,
+    );
+    let reload = GatewayServerReloadHandle::new(&config).unwrap();
+    let applications = arc_swap::ArcSwap::from_pointee("old");
+    config.edge_security.expected_host = "new.example.com".to_string();
+
+    let previous = reload
+        .reload_with_activation(&config, || {
+            assert!(reload.transition.try_read().is_err());
+            applications.swap(Arc::new("new"))
+        })
+        .unwrap();
+
+    assert_eq!(*previous, "old");
+    assert_eq!(**applications.load(), "new");
+    assert_eq!(reload.load().edge_security.expected_host, "new.example.com");
+}
+
 #[tokio::test]
 async fn reload_applies_edge_security_to_existing_connection() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

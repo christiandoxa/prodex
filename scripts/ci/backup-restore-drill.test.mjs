@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +10,7 @@ import {
   decryptBackupArtifact,
   encryptBackupArtifact,
   parseThreshold,
+  waitForPublishedPostgres,
 } from "./backup-restore-drill.mjs";
 
 test("parseThreshold accepts positive values and rejects invalid limits", () => {
@@ -89,6 +91,23 @@ test("backup artifact encryption round-trips and rejects tampering", async () =>
   } finally {
     key.fill(0);
     await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("published Postgres readiness only requires a reachable TCP endpoint", async () => {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    await waitForPublishedPostgres(address.port);
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
   }
 });
 

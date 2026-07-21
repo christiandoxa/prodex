@@ -7,6 +7,10 @@ use postgres::Client as PostgresClient;
 use rusqlite::{Connection, OptionalExtension};
 
 const RUNTIME_GATEWAY_SCHEMA_VERSION: i64 = 4;
+const RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL: &str = r#"
+    SET lock_timeout = '30s';
+    SELECT pg_advisory_lock(hashtextextended('prodex.gateway.schema.migrations', 0));
+    "#;
 const RUNTIME_GATEWAY_SQLITE_SCHEMA_MIGRATIONS_TABLE_SQL: &str = r#"
             PRAGMA foreign_keys = ON;
             CREATE TABLE IF NOT EXISTS prodex_gateway_schema_migrations (
@@ -274,8 +278,15 @@ pub(crate) fn runtime_gateway_postgres_migrate_compatibility_state(
 ) -> Result<()> {
     let mut client = prodex_storage_postgres_runtime::connect_blocking(url, tls)
         .context("failed to connect to gateway postgres state")?;
+    runtime_gateway_postgres_acquire_migration_lock(&mut client)?;
     runtime_gateway_postgres_apply_compatibility_migrations(&mut client)?;
     Ok(())
+}
+
+fn runtime_gateway_postgres_acquire_migration_lock(client: &mut PostgresClient) -> Result<()> {
+    client
+        .batch_execute(RUNTIME_GATEWAY_POSTGRES_MIGRATION_LOCK_SQL)
+        .context("failed to acquire gateway postgres migration lock")
 }
 
 #[cfg(test)]

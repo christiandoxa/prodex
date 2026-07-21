@@ -90,11 +90,14 @@ fn gateway_postgres_grouped_request_budget_is_atomic_across_two_proxies_and_keys
     let client = reqwest::blocking::Client::new();
     let tenant_id = prodex_domain::TenantId::new().to_string();
     let budget_id = format!("shared-{}", prodex_domain::RequestId::new());
+    let key_suffix = prodex_domain::VirtualKeyId::new();
+    let alpha_name = format!("grouped-alpha-{key_suffix}");
+    let beta_name = format!("grouped-beta-{key_suffix}");
     let alpha = create_grouped_key(
         &client,
         proxy_a.listen_addr,
         admin_token,
-        "grouped-alpha",
+        &alpha_name,
         &tenant_id,
         &budget_id,
     );
@@ -102,7 +105,7 @@ fn gateway_postgres_grouped_request_budget_is_atomic_across_two_proxies_and_keys
         &client,
         proxy_a.listen_addr,
         admin_token,
-        "grouped-beta",
+        &beta_name,
         &tenant_id,
         &budget_id,
     );

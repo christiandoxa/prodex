@@ -61,8 +61,7 @@ pub(crate) fn write_profile_openai_compatible_base_url(
     }
 
     if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+        prodex_shared_codex_fs::create_codex_home_if_missing(parent)?;
     }
 
     let config = ProdexProfileLocalConfig {

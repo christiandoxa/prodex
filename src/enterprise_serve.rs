@@ -29,7 +29,7 @@ struct LiveConfigPublication {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EnterpriseServeOptions {
-    listen_addr: SocketAddr,
+    listen_addr: Option<SocketAddr>,
     publication: Option<LiveConfigPublication>,
 }
 
@@ -49,7 +49,12 @@ fn run_enterprise_serve(
     args: impl Iterator<Item = String>,
 ) -> Result<(), String> {
     let options = parse_serve_options(mode, args)?;
-    let listen_addr = options.listen_addr;
+    let gateway_policy = prodex_app::runtime_policy_gateway().unwrap_or_default();
+    let listen_addr = resolve_serve_listen_addr(
+        mode,
+        options.listen_addr,
+        gateway_policy.listen_addr.as_deref(),
+    )?;
     let (policy_mode, server_mode) = match mode {
         DedicatedServerMode::DataPlane => (
             prodex_app::RuntimePolicyServiceMode::Gateway,
@@ -61,7 +66,7 @@ fn run_enterprise_serve(
         ),
     };
     let application = Arc::new(
-        prodex_app::start_policy_gateway_application_for_mode(policy_mode)
+        prodex_app::start_policy_gateway_application_for_mode_at(policy_mode, listen_addr)
             .map_err(|error| format!("failed to start gateway application: {error}"))?,
     );
     let applications = Arc::new(ArcSwap::from(application));
@@ -183,8 +188,9 @@ fn activate_live_gateway_configuration(
     applications: &Arc<ArcSwap<prodex_app::GatewayApplication>>,
     server_reload: &GatewayServerReloadHandle,
 ) -> anyhow::Result<()> {
-    let candidate = Arc::new(prodex_app::start_policy_gateway_application_for_mode(
+    let candidate = Arc::new(prodex_app::start_policy_gateway_application_for_mode_at(
         policy_mode,
+        listen_addr,
     )?);
     let server_config = match gateway_server_config(mode, listen_addr, server_mode) {
         Ok(config) => config,
@@ -193,11 +199,16 @@ fn activate_live_gateway_configuration(
             anyhow::bail!(error);
         }
     };
-    if let Err(error) = server_reload.reload(&server_config) {
-        let _ = candidate.shutdown_and_drain(Duration::from_secs(1));
-        return Err(error);
-    }
-    let previous = applications.swap(candidate);
+    let activated = Arc::clone(&candidate);
+    let previous = match server_reload
+        .reload_with_activation(&server_config, || applications.swap(activated))
+    {
+        Ok(previous) => previous,
+        Err(error) => {
+            let _ = candidate.shutdown_and_drain(Duration::from_secs(1));
+            return Err(error);
+        }
+    };
     let drain_timeout = Duration::from_millis(
         prodex_gateway_http::GatewayHttpPolicy::production_default().connection_drain_timeout_ms,
     );
@@ -277,17 +288,29 @@ fn parse_listen_addr(
     mode: DedicatedServerMode,
     args: impl Iterator<Item = String>,
 ) -> Result<SocketAddr, String> {
-    parse_serve_options(mode, args).map(|options| options.listen_addr)
+    let options = parse_serve_options(mode, args)?;
+    resolve_serve_listen_addr(mode, options.listen_addr, None)
 }
 
-fn parse_serve_options(
+fn resolve_serve_listen_addr(
     mode: DedicatedServerMode,
-    mut args: impl Iterator<Item = String>,
-) -> Result<EnterpriseServeOptions, String> {
+    explicit: Option<SocketAddr>,
+    configured: Option<&str>,
+) -> Result<SocketAddr, String> {
     let default = match mode {
         DedicatedServerMode::DataPlane => "127.0.0.1:4000",
         DedicatedServerMode::ControlPlane => "127.0.0.1:4100",
     };
+    explicit
+        .map(Ok)
+        .unwrap_or_else(|| configured.unwrap_or(default).parse())
+        .map_err(|_| "invalid gateway listen address".to_string())
+}
+
+fn parse_serve_options(
+    _mode: DedicatedServerMode,
+    mut args: impl Iterator<Item = String>,
+) -> Result<EnterpriseServeOptions, String> {
     let mut listen = None;
     let mut publication_transport = None;
     let mut publication_replica = None;
@@ -321,8 +344,8 @@ fn parse_serve_options(
     }
     let listen_addr = listen
         .as_deref()
-        .unwrap_or(default)
-        .parse()
+        .map(str::parse)
+        .transpose()
         .map_err(|_| "invalid serve listen address".to_string())?;
     let publication = match (publication_transport, publication_replica) {
         (None, None) => None,
@@ -379,6 +402,11 @@ mod tests {
                 ["--listen".to_string(), "invalid".to_string()].into_iter(),
             ),
             Err("invalid serve listen address".to_string())
+        );
+        assert_eq!(
+            resolve_serve_listen_addr(DedicatedServerMode::DataPlane, None, Some("0.0.0.0:4400"))
+                .unwrap(),
+            "0.0.0.0:4400".parse().unwrap()
         );
     }
 

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
+import { createConnection } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -425,14 +426,24 @@ async function waitForPostgres(containerId) {
   throw new Error("temporary Postgres container did not become ready");
 }
 
-async function waitForPublishedPostgres(port) {
+export async function waitForPublishedPostgres(port) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
-      await run(
-        "psql",
-        ["-h", "127.0.0.1", "-p", String(port), "-U", "postgres", "-d", sourceDatabase, "-c", "select 1"],
-        { capture: true, env: { PGPASSWORD: "postgres" } },
-      );
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        const socket = createConnection({ host: "127.0.0.1", port });
+        const finish = (error) => {
+          if (settled) return;
+          settled = true;
+          socket.destroy();
+          if (error) reject(error);
+          else resolve();
+        };
+        socket.setTimeout(1_000);
+        socket.once("connect", () => finish());
+        socket.once("error", finish);
+        socket.once("timeout", () => finish(new Error("published Postgres endpoint timed out")));
+      });
       return;
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 1000));

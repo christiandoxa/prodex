@@ -10,10 +10,9 @@ use prodex_cli::{
 };
 use serde_json::json;
 use std::ffi::OsString;
-use std::fs;
 use std::path::Path;
 #[cfg(test)]
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 const LOCAL_MODEL_CATALOG_FILE: &str = "prodex-local-model-catalog.json";
 
@@ -122,8 +121,7 @@ fn write_local_model_catalog(
     auto_compact_token_limit: u64,
 ) -> Result<()> {
     if let Some(parent) = catalog_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+        prodex_shared_codex_fs::create_codex_home_if_missing(parent)?;
     }
     let catalog = json!({
         "models": [local_catalog_model(model, context_window, auto_compact_token_limit)]

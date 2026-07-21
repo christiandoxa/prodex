@@ -272,8 +272,9 @@ pub(super) fn handle_gateway(args: GatewayArgs) -> Result<()> {
 
 pub(crate) fn start_policy_gateway_application_inner(
     service_mode: RuntimePolicyServiceMode,
+    preferred_listen_addr: Option<String>,
 ) -> Result<GatewayApplication> {
-    gateway_startup::start_policy_gateway_application(service_mode)
+    gateway_startup::start_policy_gateway_application(service_mode, preferred_listen_addr)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -46,6 +46,8 @@ data:
     projected_provider = "kubernetes"
 
     [gateway]
+    listen_addr = "0.0.0.0:4000"
+    expected_host = "prodex-gateway.prodex.svc.cluster.local:4000"
     require_auth = true
     auth_token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_TOKEN" }
     provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
@@ -85,6 +87,10 @@ data:
     production = true
     projected_root = "/run/secrets/prodex"
     projected_provider = "kubernetes"
+
+    [gateway]
+    listen_addr = "0.0.0.0:4100"
+    expected_host = "prodex-control-plane.prodex.svc.cluster.local:4100"
 
     [gateway.state]
     backend = "postgres"

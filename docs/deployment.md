@@ -245,9 +245,10 @@ Job is labeled separately, uses the dedicated `prodex-gateway-migration`
 ServiceAccount, mounts only `prodex-gateway-migration-secrets` as private projected files, and has
 a dedicated egress-only NetworkPolicy that permits DNS
 and PostgreSQL but not Redis, provider HTTPS, or ingress. The current migrator
-ensures the compatibility schema; migration status/history, advisory locking,
-and the complete versioned expand/contract workflow remain required before the
-database migration contract is considered complete.
+records enterprise migration checksum history, serializes PostgreSQL migrators
+with a bounded advisory lock, and records/ensures compatibility schema versions. Destructive
+contract migrations still require release-specific expand/backfill/contract
+evidence before they are added to the catalog.
 
 The same manifest runs a single `prodex-control-plane` replica behind its own
 `Service` and restricted `NetworkPolicy`. The dedicated binary explicitly

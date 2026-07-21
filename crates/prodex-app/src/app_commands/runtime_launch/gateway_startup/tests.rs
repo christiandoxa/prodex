@@ -101,6 +101,25 @@ fn runtime_config_failure_precedes_secret_resolution_and_bind() {
 }
 
 #[test]
+fn policy_application_validates_the_actual_non_loopback_listener() {
+    let root = temp_root("gateway-policy-application-listener");
+    let _home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+    let _gateway_token = TestEnvVarGuard::unset("PRODEX_GATEWAY_TOKEN");
+
+    let error = start_policy_gateway_application(
+        prodex_runtime_policy::RuntimePolicyServiceMode::Gateway,
+        Some("0.0.0.0:4000".to_string()),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        error.contains("refusing to bind unauthenticated gateway on non-loopback address"),
+        "{error}"
+    );
+}
+
+#[test]
 fn workers_reuse_the_pre_start_runtime_config_snapshot() {
     let root = temp_root("gateway-runtime-config-snapshot");
     let _prodex_home = TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());

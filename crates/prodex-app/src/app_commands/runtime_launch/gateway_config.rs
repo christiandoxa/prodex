@@ -312,7 +312,9 @@ pub(super) fn resolve_gateway_launch_config_for_service_mode(
         Some(_) => bail!("gateway.listen_addr must be non-empty without whitespace"),
         None => "127.0.0.1:4000".to_string(),
     };
-    gateway_validate_listen_auth(&listen_addr, auth.auth_required)?;
+    if service_mode == prodex_runtime_policy::RuntimePolicyServiceMode::Gateway {
+        gateway_validate_listen_auth(&listen_addr, auth.auth_required)?;
+    }
     if runtime_config.governance.mode == prodex_config::GovernanceMode::BankEnforce
         && !gateway_private_listen_address(&listen_addr)
     {
@@ -433,7 +435,7 @@ mod tests {
         let paths = AppPaths::discover().unwrap();
         let args = GatewayArgs {
             command: None,
-            listen: Some("127.0.0.1:0".to_string()),
+            listen: Some("0.0.0.0:4100".to_string()),
             provider: None,
             harness: None,
             base_url: None,

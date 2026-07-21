@@ -331,6 +331,8 @@ export function validateDeploymentSecurity(inputs) {
     ["version = 1", "runtime policy version"],
     ['projected_root = "/run/secrets"', "Compose projected secret root"],
     ['projected_provider = "compose"', "Compose projected secret provider"],
+    ['listen_addr = "0.0.0.0:4000"', "actual Compose gateway listen address"],
+    ['expected_host = "127.0.0.1:4000"', "exact Compose gateway authority"],
     ["require_auth = true", "gateway authentication requirement"],
     ['auth_token_ref = { provider = "compose", name = "PRODEX_GATEWAY_TOKEN" }', "gateway token SecretRef"],
     ['provider_api_key_ref = { provider = "compose", name = "OPENAI_API_KEY" }', "OpenAI API key SecretRef"],
@@ -430,6 +432,12 @@ export function validateDeploymentSecurity(inputs) {
     if (!/\[\[gateway\.admin_tokens\]\]/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must define admin token bindings`);
     }
+    if (!/(?:^|\n)\s*listen_addr\s*=\s*"0\.0\.0\.0:4000"\s*$/mu.test(gatewayPolicyConfig)) {
+      checks.push(`${kubernetesPath}: gateway policy must match the Deployment listen address`);
+    }
+    if (!/(?:^|\n)\s*expected_host\s*=\s*"prodex-gateway\.prodex\.svc\.cluster\.local:4000"\s*$/mu.test(gatewayPolicyConfig)) {
+      checks.push(`${kubernetesPath}: gateway policy must declare the exact in-cluster authority`);
+    }
     if (!/(?:^|\n)\s*token_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_METRICS_TOKEN"\s*\}/u.test(gatewayPolicyConfig)) {
       checks.push(`${kubernetesPath}: gateway policy must bind the metrics token projected reference`);
     }
@@ -469,6 +477,8 @@ export function validateDeploymentSecurity(inputs) {
       [/(?:^|\n)\s*production\s*=\s*true\s*$/mu, "production projected-secret mode"],
       [/projected_root\s*=\s*"\/run\/secrets\/prodex"/u, "projected secret root"],
       [/projected_provider\s*=\s*"kubernetes"/u, "projected Kubernetes secret provider"],
+      [/(?:^|\n)\s*listen_addr\s*=\s*"0\.0\.0\.0:4100"\s*$/mu, "actual control-plane listen address"],
+      [/(?:^|\n)\s*expected_host\s*=\s*"prodex-control-plane\.prodex\.svc\.cluster\.local:4100"\s*$/mu, "exact in-cluster control-plane authority"],
       [/\[gateway\.state\]/u, "shared state section"],
       [/(?:^|\n)\s*backend\s*=\s*"postgres"\s*$/mu, "PostgreSQL shared state backend"],
       [/postgres_url_ref\s*=\s*\{\s*provider\s*=\s*"kubernetes",\s*name\s*=\s*"PRODEX_GATEWAY_POSTGRES_URL"\s*\}/u, "projected PostgreSQL URL"],
@@ -833,6 +843,8 @@ projected_root = "/run/secrets"
 projected_provider = "compose"
 
 [gateway]
+listen_addr = "0.0.0.0:4000"
+expected_host = "127.0.0.1:4000"
 require_auth = true
 auth_token_ref = { provider = "compose", name = "PRODEX_GATEWAY_TOKEN" }
 provider_api_key_ref = { provider = "compose", name = "OPENAI_API_KEY" }
@@ -982,6 +994,8 @@ data:
     projected_provider = "kubernetes"
 
     [gateway]
+    listen_addr = "0.0.0.0:4000"
+    expected_host = "prodex-gateway.prodex.svc.cluster.local:4000"
     require_auth = true
     auth_token_ref = { provider = "kubernetes", name = "PRODEX_GATEWAY_TOKEN" }
     provider_api_key_ref = { provider = "kubernetes", name = "OPENAI_API_KEY" }
@@ -1013,6 +1027,10 @@ data:
     production = true
     projected_root = "/run/secrets/prodex"
     projected_provider = "kubernetes"
+
+    [gateway]
+    listen_addr = "0.0.0.0:4100"
+    expected_host = "prodex-control-plane.prodex.svc.cluster.local:4100"
 
     [gateway.state]
     backend = "postgres"

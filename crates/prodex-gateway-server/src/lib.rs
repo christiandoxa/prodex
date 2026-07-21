@@ -7,7 +7,7 @@ use std::{
     fmt,
     future::Future,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::{Arc, RwLock},
     time::Duration,
 };
 
@@ -210,7 +210,10 @@ struct GatewayServerRuntimeSecurity {
 }
 
 #[derive(Clone)]
-pub struct GatewayServerReloadHandle(Arc<ArcSwap<GatewayServerRuntimeSecurity>>);
+pub struct GatewayServerReloadHandle {
+    security: Arc<ArcSwap<GatewayServerRuntimeSecurity>>,
+    transition: Arc<RwLock<()>>,
+}
 
 impl fmt::Debug for GatewayServerReloadHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -222,20 +225,36 @@ impl fmt::Debug for GatewayServerReloadHandle {
 impl GatewayServerReloadHandle {
     pub fn new(config: &GatewayServerConfig) -> Result<Self> {
         config.validate()?;
-        Ok(Self(Arc::new(ArcSwap::from_pointee(
-            gateway_server_runtime_security(config)?,
-        ))))
+        Ok(Self {
+            security: Arc::new(ArcSwap::from_pointee(gateway_server_runtime_security(
+                config,
+            )?)),
+            transition: Arc::new(RwLock::new(())),
+        })
     }
 
     pub fn reload(&self, config: &GatewayServerConfig) -> Result<()> {
+        self.reload_with_activation(config, || ())
+    }
+
+    /// Publishes transport security and dependent handler state under one request barrier.
+    pub fn reload_with_activation<T>(
+        &self,
+        config: &GatewayServerConfig,
+        activate: impl FnOnce() -> T,
+    ) -> Result<T> {
         config.validate()?;
-        self.0
-            .store(Arc::new(gateway_server_runtime_security(config)?));
-        Ok(())
+        let security = Arc::new(gateway_server_runtime_security(config)?);
+        let _transition = self
+            .transition
+            .write()
+            .map_err(|_| anyhow::anyhow!("gateway server reload lock is poisoned"))?;
+        self.security.store(security);
+        Ok(activate())
     }
 
     fn load(&self) -> Arc<GatewayServerRuntimeSecurity> {
-        self.0.load_full()
+        self.security.load_full()
     }
 }
 
@@ -757,6 +776,9 @@ where
         Some(headers) => headers,
         None => return Ok(json_error(StatusCode::BAD_REQUEST, INVALID_REQUEST)),
     };
+    let Ok(reload_transition) = state.reload.transition.try_read() else {
+        return Ok(json_error(StatusCode::SERVICE_UNAVAILABLE, LOCAL_OVERLOAD));
+    };
     let edge_security = Arc::clone(&state.reload.load().edge_security);
     let peer_is_trusted_proxy = edge_security.trusted_proxies.contains(&peer_addr.ip());
     let client_ip =
@@ -834,12 +856,10 @@ where
         route,
         request: Request::from_parts(parts, Limited::new(body, state.max_request_body_bytes)),
     };
-    let handled = match timeout(
-        state.response_header_timeout,
-        (state.handler.as_ref())(request),
-    )
-    .await
-    {
+    // Reload-coupled handler state must be snapshotted while this read barrier is held.
+    let handled = (state.handler.as_ref())(request);
+    drop(reload_transition);
+    let handled = match timeout(state.response_header_timeout, handled).await {
         Err(_) => return Ok(json_error(StatusCode::GATEWAY_TIMEOUT, BACKEND_TIMEOUT)),
         Ok(Err(error)) => return Ok(handler_error_response(error)),
         Ok(Ok(handled)) => handled,
