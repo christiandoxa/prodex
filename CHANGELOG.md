@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.332.0 - 2026-07-21
+
+### Runtime
+
+- Harden distributed runtime boundaries (`71f9ea5`)
+
 ## 0.331.0 - 2026-07-21
 
 ### Misc
@@ -84,9 +90,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Runtime
 
 - Complete audited runtime and governance features (`f5c4302`)
-
-## 0.320.0 - 2026-07-19
-
-### Runtime
-
-- Preserve Presidio JSON field boundaries (`6364e68`)
