@@ -221,7 +221,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 924,
+    "maxLines": 925,
     "reason": "Runtime policy types carry gateway harness selection, governance authority, lifecycle, session, audit, retention, and secret-backend configuration after rule-condition schema ownership moved to its focused module."
   },
   {

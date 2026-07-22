@@ -583,9 +583,8 @@ mod tests {
     use prodex_domain::{CredentialScope, TenantId};
 
     mod bank;
-    mod policy_artifact;
-    mod policy_effect;
-    use policy_effect::policy_effect;
+    mod policy;
+    use policy::policy_effect;
 
     #[test]
     fn committed_activation_swap_changes_subsequent_pdp_without_cross_tenant_fallback() {
