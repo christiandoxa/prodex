@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.338.0 - 2026-07-22
+
+### Runtime
+
+- Close audited runtime and governance gaps (`014ce83`)
+
 ## 0.337.0 - 2026-07-22
 
 ### Misc
@@ -78,9 +84,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Complete audited Codex and governance passthrough (`6f955c3`)
-
-## 0.326.0 - 2026-07-20
-
-### Runtime
-
-- Support Codex realtime v3 passthrough (`96a4908`)

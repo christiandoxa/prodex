@@ -314,7 +314,7 @@ checksum = "ae36dc4177970ef04fde5178d3e2429882def40e57a451f919c098f72baa6cec"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -591,9 +591,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.2"
+version = "4.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd059f9da4f5c36b3787f65d38ccaab1cc315f07b01f89abc8359ee6a8205011"
+checksum = "d91e0c145792ef73a6ad36d27c75ac09f1832222a3c209689d90f534685ee5b7"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -613,14 +613,14 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.6.1"
+version = "4.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2ce8604710f6733aa641a2b3731eaa1e8b3d9973d5e3565da11800813f997a9"
+checksum = "d012d2b9d65aca7f18f4d9878a045bc17899bba951561ba5ec3c2ba1eed9a061"
 dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -1513,9 +1513,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55281c53a1894c864990125767da440a4e630446785086f52523b20033b74498"
+checksum = "d22053281f852e11534f5198498373cbb59295120a20771d90f7ed1897490a72"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1911,9 +1911,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.186"
+version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libm"
@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "prodex"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2720,7 +2720,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2816,7 +2816,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-app-reports"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "chrono",
  "prodex-cli",
@@ -2832,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-application"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-authn",
  "prodex-authz",
@@ -2852,7 +2852,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-audit-log"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2865,7 +2865,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-authn"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
  "url",
@@ -2873,18 +2873,18 @@ dependencies = [
 
 [[package]]
 name = "prodex-authz"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-bench-support"
-version = "0.337.0"
+version = "0.338.0"
 
 [[package]]
 name = "prodex-caveman-assets"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2895,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-cli"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "clap",
  "prodex-provider-core",
@@ -2905,21 +2905,21 @@ dependencies = [
 
 [[package]]
 name = "prodex-codex-config"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "toml",
 ]
 
 [[package]]
 name = "prodex-config"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-context"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2930,7 +2930,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-control-plane"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-config",
  "prodex-domain",
@@ -2938,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-core"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2957,7 +2957,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-core"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-authz",
  "prodex-domain",
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-http"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
  "prodex-gateway-core",
@@ -2980,7 +2980,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-gateway-server"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2997,7 +2997,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-housekeeping"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-core",
  "prodex-state",
@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-mcp-stdio"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -3014,14 +3014,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-observability"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-presidio"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "prodex-cli",
@@ -3034,7 +3034,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -3051,7 +3051,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-profile-identity"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3062,7 +3062,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-core"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "base64",
  "serde",
@@ -3071,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-provider-spi"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
  "prodex-provider-core",
@@ -3079,7 +3079,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-proxy-config"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -3088,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-quota"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3103,14 +3103,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-redaction"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "prodex-runtime-anthropic"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3121,7 +3121,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-runtime-state",
  "serde",
@@ -3131,14 +3131,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-broker-log"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-capabilities"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-runtime-anthropic",
  "prodex-runtime-proxy",
@@ -3147,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-claude"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3162,7 +3162,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-cookies"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-doctor"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3185,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-gemini-cli-compat"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3195,7 +3195,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-launch"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "prodex-codex-config",
@@ -3211,7 +3211,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-log"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-runtime-proxy",
  "serde_json",
@@ -3219,14 +3219,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-metrics"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-runtime-broker",
 ]
 
 [[package]]
 name = "prodex-runtime-policy"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "prodex-authn",
@@ -3241,7 +3241,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-proxy"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "base64",
  "prodex-gateway-core",
@@ -3255,7 +3255,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-quota"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "chrono",
  "prodex-quota",
@@ -3267,14 +3267,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-state"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "prodex-runtime-store"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-runtime-state",
  "prodex-state",
@@ -3284,11 +3284,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-runtime-tuning"
-version = "0.337.0"
+version = "0.338.0"
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "keyring",
  "libc",
@@ -3300,7 +3300,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-session-store"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3313,7 +3313,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-codex-fs"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3327,7 +3327,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-shared-types"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-quota",
  "prodex-runtime-proxy",
@@ -3337,7 +3337,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-state"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3345,14 +3345,14 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
 ]
 
 [[package]]
 name = "prodex-storage-postgres"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "postgres",
  "prodex-domain",
@@ -3361,7 +3361,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-postgres-runtime"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "deadpool-postgres",
  "postgres",
@@ -3380,7 +3380,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-redis"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3388,7 +3388,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-redis-runtime"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage-redis",
@@ -3398,7 +3398,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-sqlite"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3407,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-storage-sqlite-runtime"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "prodex-domain",
  "prodex-storage",
@@ -3419,7 +3419,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-terminal-ui"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -3429,7 +3429,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-update-notice"
-version = "0.337.0"
+version = "0.338.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4029,7 +4029,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4053,7 +4053,7 @@ checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4330,9 +4330,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.2"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a207d6d6a2b7fc470b80443726053f18a2481b7e1eee970597051596567987a3"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4430,7 +4430,7 @@ checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.2",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -4535,9 +4535,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.0"
+version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d988bcd52dbe076d3d46903332f58c912b87a2c49b1428419a5845154762ffee"
+checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
  "bytes",
  "libc",
@@ -4612,13 +4612,14 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.18"
+version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
+checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
 dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "libc",
  "pin-project-lite",
  "tokio",
 ]
@@ -5311,9 +5312,9 @@ dependencies = [
 
 [[package]]
 name = "xxhash-rust"
-version = "0.8.17"
+version = "0.8.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "985eec839aaf2a1270af8f4ebcf63cf9401cfd90f0902f97c28d9f104ffbde72"
+checksum = "aee1b19627c7c60102ab80d3a9cbe18de90bfe03bfa6c3715447681f0e8c8af6"
 
 [[package]]
 name = "yoke"
@@ -5412,18 +5413,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.54"
+version = "0.8.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7cbbc0a705a0fd05cc3676525980d2bf5a9bc4adac6d6475209a7887cf59d19"
+checksum = "b5a105cd7b140f6eeec8acff2ea38135d3cab283ada58540f629fe51e46696eb"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.54"
+version = "0.8.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2e817b7b52d0c7358d3246da9d69935ebb18116b2b102b4230dac079b4862f5"
+checksum = "0fe976fb70c78cd64cccfe3a6fc142244e8a77b70959b30faf9d0ac37ee228eb"
 dependencies = [
  "proc-macro2",
  "quote",
