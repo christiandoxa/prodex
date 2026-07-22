@@ -129,6 +129,7 @@ pub(crate) struct RuntimeGatewayOidcConfig {
     pub(crate) tenant_claim: String,
     pub(crate) key_prefixes_claim: String,
     pub(crate) authentication_strength: Option<String>,
+    pub(crate) reauthentication_max_age_seconds: Option<u64>,
 }
 
 impl fmt::Debug for RuntimeGatewayOidcConfig {
@@ -148,6 +149,13 @@ impl fmt::Debug for RuntimeGatewayOidcConfig {
             .field(
                 "authentication_strength",
                 &self.authentication_strength.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "reauthentication_max_age_seconds",
+                &self
+                    .reauthentication_max_age_seconds
+                    .as_ref()
+                    .map(|_| "<redacted>"),
             )
             .finish()
     }
@@ -544,6 +552,7 @@ mod tests {
                 tenant_claim: "prodex_tenant".to_string(),
                 key_prefixes_claim: "prodex_key_prefixes".to_string(),
                 authentication_strength: None,
+                reauthentication_max_age_seconds: None,
             }),
             browser: None,
             workload_identity: None,

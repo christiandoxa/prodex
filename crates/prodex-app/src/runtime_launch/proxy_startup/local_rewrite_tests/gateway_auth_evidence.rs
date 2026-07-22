@@ -44,6 +44,7 @@ fn gateway_oidc_missing_scope_claims_preserves_scim_role_and_tenant_fallback() {
                 tenant_claim: "prodex_tenant".to_string(),
                 key_prefixes_claim: "prodex_key_prefixes".to_string(),
                 authentication_strength: None,
+                reauthentication_max_age_seconds: None,
             }),
             browser: None,
             workload_identity: None,

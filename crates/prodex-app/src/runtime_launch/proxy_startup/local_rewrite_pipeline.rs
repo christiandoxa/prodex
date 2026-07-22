@@ -176,6 +176,10 @@ enum RuntimeLocalRewritePipelineExit {
 type RuntimeLocalRewritePipelineResult<T> = Result<T, RuntimeLocalRewritePipelineExit>;
 
 impl RuntimeLocalRewriteRequestState<'_> {
+    fn deadline_expired(&self) -> bool {
+        self.context.deadline().is_expired_at(Instant::now())
+    }
+
     fn reply(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineReply {
         RuntimeLocalRewritePipelineReply {
             request: self.request,
@@ -191,6 +195,14 @@ impl RuntimeLocalRewriteRequestState<'_> {
     fn respond(self, response: tiny_http::ResponseBox) -> RuntimeLocalRewritePipelineExit {
         RuntimeLocalRewritePipelineExit::Responded(Box::new(self.reply(response)))
     }
+}
+
+fn runtime_local_rewrite_request_timeout_response() -> tiny_http::ResponseBox {
+    build_runtime_proxy_json_error_response(
+        504,
+        "request_timeout",
+        "gateway request deadline exceeded",
+    )
 }
 
 impl RuntimeLocalRewritePipelineExit {
@@ -319,6 +331,7 @@ fn runtime_local_rewrite_application_context_rejection(
         prodex_gateway_http::GatewayHttpErrorStatus::BadRequest => 400,
         prodex_gateway_http::GatewayHttpErrorStatus::MethodNotAllowed => 405,
         prodex_gateway_http::GatewayHttpErrorStatus::PayloadTooLarge => 413,
+        prodex_gateway_http::GatewayHttpErrorStatus::RequestHeaderFieldsTooLarge => 431,
         prodex_gateway_http::GatewayHttpErrorStatus::InternalServerError => 500,
     };
     build_runtime_proxy_json_error_response(status, response.code, response.message)
@@ -329,6 +342,9 @@ fn runtime_local_rewrite_authenticate<'target>(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAuthenticatedRequest<'target>> {
     let mut state = canonical.0;
+    if state.deadline_expired() {
+        return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     if let Some(response) = runtime_gateway_browser_auth_response(&mut state.request, shared) {
         return Err(state.respond(response));
     }
@@ -581,6 +597,9 @@ fn runtime_local_rewrite_bounded_admission<'target>(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAdmittedRequest<'target>> {
     let mut state = authenticated.0;
+    if state.deadline_expired() {
+        return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     if state.context.plane() == prodex_gateway_http::GatewayHttpRoutePlane::DataPlane {
         let Some(application) = state.application.as_ref() else {
             return Err(state.reject(build_runtime_proxy_json_error_response(
@@ -643,6 +662,11 @@ fn runtime_local_rewrite_dispatch_websocket<'target>(
     admitted: RuntimeLocalRewriteAdmittedRequest<'target>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteAdmittedRequest<'target>> {
+    if admitted.0.deadline_expired() {
+        return Err(admitted
+            .0
+            .reject(runtime_local_rewrite_request_timeout_response()));
+    }
     if !admitted.0.request.is_websocket_upgrade() {
         return Ok(admitted);
     }
@@ -682,6 +706,9 @@ fn runtime_local_rewrite_capture_body<'target>(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteCapturedRequest<'target>> {
     let mut state = admitted.0;
+    if state.deadline_expired() {
+        return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     let mut captured = match state
         .request
         .capture(shared.runtime_shared.runtime_config.max_request_body_bytes)
@@ -692,6 +719,9 @@ fn runtime_local_rewrite_capture_body<'target>(
             return Err(state.reject(response));
         }
     };
+    if state.deadline_expired() {
+        return Err(state.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     captured.path_and_query = state.context.target().path_and_query().to_string();
     Ok(RuntimeLocalRewriteCapturedRequest { state, captured })
 }

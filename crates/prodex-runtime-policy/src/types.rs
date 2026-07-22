@@ -235,6 +235,9 @@ pub enum RuntimeGovernancePolicyObligation {
     SessionAbsoluteTimeoutSeconds {
         value: u32,
     },
+    MinimumAuthenticationStrength {
+        value: u8,
+    },
     RequireReauthentication,
     RequireMfa,
     AuditDetail {
@@ -510,6 +513,7 @@ pub struct RuntimePolicyGatewaySsoSettings {
     pub remote_human: Option<bool>,
     pub required_scope: Option<String>,
     pub authentication_strength: Option<String>,
+    pub reauthentication_max_age_seconds: Option<u64>,
     pub browser_flow: Option<bool>,
     pub pkce_method: Option<String>,
     pub oidc_authorization_url: Option<String>,

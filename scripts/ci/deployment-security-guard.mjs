@@ -122,7 +122,6 @@ const REQUIRED_CONTROL_PLANE_MARKERS = Object.freeze([
   ['args: ["serve", "--listen", "0.0.0.0:4100"]', "explicit control-plane listen address"],
   ["service_mode = \"control-plane\"", "typed control-plane runtime policy mode"],
   ["PRODEX_CONTROL_PLANE_ADMIN_TOKEN", "projected control-plane admin token"],
-  ["replicas: 1", "live single-replica control-plane deployment"],
   ["terminationGracePeriodSeconds: 45", "control-plane termination grace period"],
   ['command: ["sh", "-c", "sleep 15"]', "control-plane pre-stop drain delay"],
   ["port: 4100", "control-plane service port"],
@@ -601,8 +600,15 @@ export function validateDeploymentSecurity(inputs) {
     if (!/^\s*serviceAccountName:\s*prodex-control-plane\s*$/mu.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must use prodex-control-plane service account`);
     }
-    if (!/^\s*replicas:\s*1\s*$/mu.test(controlPlaneDeployment)) {
-      checks.push(`${kubernetesPath}: control-plane Deployment must run exactly one replica`);
+    if (!/^\s*replicas:\s*3\s*$/mu.test(controlPlaneDeployment)) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must start with three replicas`);
+    }
+    if (
+      !/topologySpreadConstraints:[\s\S]*?topologyKey:\s*topology\.kubernetes\.io\/zone[\s\S]*?topologyKey:\s*kubernetes\.io\/hostname[\s\S]*?whenUnsatisfiable:\s*DoNotSchedule/u.test(
+        controlPlaneDeployment,
+      )
+    ) {
+      checks.push(`${kubernetesPath}: control-plane Deployment must spread across zones and nodes`);
     }
     if (!/^\s*args:\s*\["serve",\s*"--listen",\s*"0\.0\.0\.0:4100"\]\s*$/mu.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane Deployment must listen explicitly on 0.0.0.0:4100`);
@@ -669,6 +675,29 @@ export function validateDeploymentSecurity(inputs) {
     if (/prodex-gateway-secrets|prodex-gateway-policy|OPENAI_API_KEY|PRODEX_GATEWAY_TOKEN\b/u.test(controlPlaneDeployment)) {
       checks.push(`${kubernetesPath}: control-plane workload must not mount gateway or provider capabilities`);
     }
+  }
+  const controlPlanePdb = kubernetesDocumentByKindAndName(
+    kubernetes,
+    "PodDisruptionBudget",
+    "prodex-control-plane",
+  );
+  if (!controlPlanePdb || !/^\s*minAvailable:\s*2\s*$/mu.test(controlPlanePdb)) {
+    checks.push(`${kubernetesPath}: control-plane PodDisruptionBudget must keep two replicas available`);
+  }
+  const controlPlaneHpa = kubernetesDocumentByKindAndName(
+    kubernetes,
+    "HorizontalPodAutoscaler",
+    "prodex-control-plane",
+  );
+  if (
+    !controlPlaneHpa ||
+    !/^\s*minReplicas:\s*3\s*$/mu.test(controlPlaneHpa) ||
+    !/^\s*maxReplicas:\s*12\s*$/mu.test(controlPlaneHpa) ||
+    !/scaleTargetRef:[\s\S]*?kind:\s*Deployment[\s\S]*?name:\s*prodex-control-plane/u.test(
+      controlPlaneHpa,
+    )
+  ) {
+    checks.push(`${kubernetesPath}: control-plane autoscaling must target three to twelve replicas`);
   }
   const migrationJob = kubernetesDocumentByKindAndName(kubernetes, "Job", "prodex-gateway-migration");
   if (!migrationJob) {
@@ -941,7 +970,7 @@ kind: Deployment
 metadata:
   name: prodex-control-plane
 spec:
-  replicas: 1
+  replicas: 3
   template:
     spec:
       serviceAccountName: prodex-control-plane
@@ -950,6 +979,11 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      topologySpreadConstraints:
+        - topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+        - topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
       containers:
         - name: prodex-control-plane
           command: ["/usr/local/bin/prodex-control-plane"]
@@ -996,6 +1030,22 @@ spec:
         - name: control-plane-policy
           configMap:
             name: prodex-control-plane-policy
+---
+kind: PodDisruptionBudget
+metadata:
+  name: prodex-control-plane
+spec:
+  minAvailable: 2
+---
+kind: HorizontalPodAutoscaler
+metadata:
+  name: prodex-control-plane
+spec:
+  minReplicas: 3
+  maxReplicas: 12
+  scaleTargetRef:
+    kind: Deployment
+    name: prodex-control-plane
 ---
 kind: ConfigMap
 metadata:
@@ -1652,7 +1702,7 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("topologySpreadConstraints:", ""),
+      kubernetes: valid.kubernetes.replaceAll("topologySpreadConstraints:", ""),
     }).some((error) => error.includes("gateway pod topology spreading")),
     "missing gateway topology spread constraints accepted",
   );
@@ -1738,9 +1788,33 @@ export function runSelfTest() {
   assertSelfTest(
     validateDeploymentSecurity({
       ...valid,
-      kubernetes: valid.kubernetes.replace("  replicas: 1\n  template:", "  replicas: 0\n  template:"),
-    }).some((error) => error.includes("exactly one replica")),
+      kubernetes: valid.kubernetes.replace("  replicas: 3\n  template:", "  replicas: 0\n  template:"),
+    }).some((error) => error.includes("start with three replicas")),
     "scaled-to-zero control-plane accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace(
+        "      topologySpreadConstraints:\n        - topologyKey: topology.kubernetes.io/zone\n          whenUnsatisfiable: ScheduleAnyway\n        - topologyKey: kubernetes.io/hostname\n          whenUnsatisfiable: DoNotSchedule\n",
+        "",
+      ),
+    }).some((error) => error.includes("spread across zones and nodes")),
+    "control-plane without topology spreading accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace("  minAvailable: 2", "  minAvailable: 1"),
+    }).some((error) => error.includes("keep two replicas available")),
+    "single-available control-plane disruption budget accepted",
+  );
+  assertSelfTest(
+    validateDeploymentSecurity({
+      ...valid,
+      kubernetes: valid.kubernetes.replace("  minReplicas: 3", "  minReplicas: 1"),
+    }).some((error) => error.includes("three to twelve replicas")),
+    "single-replica control-plane autoscaling floor accepted",
   );
   assertSelfTest(
     validateDeploymentSecurity({

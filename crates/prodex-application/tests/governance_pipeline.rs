@@ -92,6 +92,7 @@ fn application_pipeline_classifies_before_policy_evaluation() {
                 network_zone: NetworkZone::Unknown,
                 authentication_strength: 1,
                 mfa_satisfied: false,
+                reauthentication_satisfied: false,
             },
         },
     )

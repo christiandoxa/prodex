@@ -71,6 +71,7 @@ pub(super) fn test_governance_plan(
                 network_zone: NetworkZone::Unknown,
                 authentication_strength: 1,
                 mfa_satisfied: false,
+                reauthentication_satisfied: false,
             },
         },
     )

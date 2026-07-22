@@ -3,7 +3,7 @@ use super::super::local_rewrite_gateway_util::runtime_gateway_unix_epoch_millis;
 use super::super::*;
 use super::cache::runtime_gateway_log_jwks_snapshot_age_metric;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
-use prodex_authn::TokenClaims;
+use prodex_authn::{TokenClaims, VerifiedAuthenticationAssurance};
 use prodex_domain::{
     Audience, CredentialScope, Issuer, JwksCacheSnapshot, JwtAlgorithm, OidcValidationPolicy,
     PrincipalId, PrincipalKind, TenantId,
@@ -23,6 +23,7 @@ pub(in super::super) struct RuntimeGatewayVerifiedOidcToken {
     expires_at_unix_ms: u64,
     not_before_unix_ms: Option<u64>,
     now_unix_ms: u64,
+    assurance: VerifiedAuthenticationAssurance,
 }
 
 impl RuntimeGatewayVerifiedOidcToken {
@@ -82,6 +83,10 @@ impl RuntimeGatewayVerifiedOidcToken {
     pub(in super::super) fn now_unix_ms(&self) -> u64 {
         self.now_unix_ms
     }
+
+    pub(in super::super) fn assurance(&self) -> VerifiedAuthenticationAssurance {
+        self.assurance
+    }
 }
 
 #[cfg(test)]
@@ -112,6 +117,7 @@ pub(in super::super) fn runtime_gateway_test_verified_oidc_token() -> RuntimeGat
         expires_at_unix_ms: 9_000,
         not_before_unix_ms: Some(1_000),
         now_unix_ms: 2_000,
+        assurance: VerifiedAuthenticationAssurance::phishing_resistant().reauthenticated(),
     }
 }
 
@@ -227,6 +233,18 @@ fn runtime_gateway_verified_oidc_token(
         .ok_or_else(|| anyhow::anyhow!("gateway OIDC token is missing expiration"))?;
     let not_before_unix_ms = runtime_gateway_oidc_numeric_date_ms(&claims, "nbf")?;
     let policy = runtime_gateway_oidc_validation_policy(config)?;
+    let assurance = if require_authentication_strength {
+        runtime_gateway_oidc_assurance(
+            config.authentication_strength.as_deref(),
+            runtime_gateway_oidc_reauthentication_satisfied(
+                &claims,
+                config.reauthentication_max_age_seconds,
+                now_unix_ms,
+            )?,
+        )
+    } else {
+        VerifiedAuthenticationAssurance::default()
+    };
     Ok(RuntimeGatewayVerifiedOidcToken {
         claims,
         policy,
@@ -238,7 +256,24 @@ fn runtime_gateway_verified_oidc_token(
         expires_at_unix_ms,
         not_before_unix_ms,
         now_unix_ms,
+        assurance,
     })
+}
+
+fn runtime_gateway_oidc_assurance(
+    expected: Option<&str>,
+    reauthentication_satisfied: bool,
+) -> VerifiedAuthenticationAssurance {
+    let assurance = match expected {
+        Some("phishing_resistant") => VerifiedAuthenticationAssurance::phishing_resistant(),
+        Some("mfa") => VerifiedAuthenticationAssurance::mfa(),
+        _ => VerifiedAuthenticationAssurance::single_factor(),
+    };
+    if reauthentication_satisfied {
+        assurance.reauthenticated()
+    } else {
+        assurance
+    }
 }
 
 pub(super) fn runtime_gateway_oidc_validation_policy(
@@ -302,6 +337,25 @@ fn runtime_gateway_require_oidc_authentication_strength(
         bail!("gateway OIDC token authentication strength is missing or invalid");
     }
     Ok(())
+}
+
+fn runtime_gateway_oidc_reauthentication_satisfied(
+    claims: &BTreeMap<String, serde_json::Value>,
+    max_age_seconds: Option<u64>,
+    now_unix_ms: u64,
+) -> Result<bool> {
+    let Some(max_age_seconds) = max_age_seconds else {
+        return Ok(false);
+    };
+    let auth_time_unix_ms = runtime_gateway_oidc_numeric_date_ms(claims, "auth_time")?
+        .ok_or_else(|| anyhow::anyhow!("gateway OIDC token is missing authentication time"))?;
+    let age = now_unix_ms
+        .checked_sub(auth_time_unix_ms)
+        .ok_or_else(|| anyhow::anyhow!("gateway OIDC token authentication time is invalid"))?;
+    if age > max_age_seconds.saturating_mul(1_000) {
+        bail!("gateway OIDC token authentication is stale");
+    }
+    Ok(true)
 }
 
 fn runtime_gateway_oidc_numeric_date_ms(
@@ -462,5 +516,34 @@ mod authentication_strength_tests {
         claims.insert("acr".to_string(), serde_json::json!("phishing_resistant"));
         runtime_gateway_require_oidc_authentication_strength(&claims, Some("phishing_resistant"))
             .unwrap();
+        assert_eq!(
+            runtime_gateway_oidc_assurance(Some("phishing_resistant"), false),
+            VerifiedAuthenticationAssurance::phishing_resistant(),
+        );
+        assert_eq!(
+            runtime_gateway_oidc_assurance(Some("mfa"), false),
+            VerifiedAuthenticationAssurance::mfa(),
+        );
+        assert_eq!(
+            runtime_gateway_oidc_assurance(Some("mfa"), true),
+            VerifiedAuthenticationAssurance::mfa().reauthenticated(),
+        );
+        assert_eq!(
+            runtime_gateway_oidc_assurance(None, false),
+            VerifiedAuthenticationAssurance::single_factor(),
+        );
+    }
+
+    #[test]
+    fn reauthentication_requires_a_fresh_auth_time_claim() {
+        let now = 2_000_000;
+        let mut claims = BTreeMap::new();
+        assert!(runtime_gateway_oidc_reauthentication_satisfied(&claims, Some(300), now).is_err());
+        claims.insert("auth_time".to_string(), serde_json::json!(1_701));
+        assert!(runtime_gateway_oidc_reauthentication_satisfied(&claims, Some(300), now).unwrap());
+        claims.insert("auth_time".to_string(), serde_json::json!(1_699));
+        assert!(runtime_gateway_oidc_reauthentication_satisfied(&claims, Some(300), now).is_err());
+        claims.insert("auth_time".to_string(), serde_json::json!(2_001));
+        assert!(runtime_gateway_oidc_reauthentication_satisfied(&claims, Some(300), now).is_err());
     }
 }

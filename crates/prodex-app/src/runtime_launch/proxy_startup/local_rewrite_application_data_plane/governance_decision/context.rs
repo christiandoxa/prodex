@@ -46,17 +46,20 @@ pub(super) fn build_governance_context<'a>(
     } else {
         RequestRisk::Low
     };
+    let assurance = authorized.assurance();
     let environment = EnvironmentContext {
         network_zone,
-        authentication_strength: 1,
-        mfa_satisfied: false,
+        authentication_strength: assurance.authentication_strength(),
+        mfa_satisfied: assurance.mfa_satisfied(),
+        reauthentication_satisfied: assurance.reauthentication_satisfied(),
     };
     let channel = Channel::Api;
     let now_seconds = runtime_gateway_unix_epoch_millis() / 1_000;
-    let session_snapshot =
+    let mut session_snapshot =
         shared
             .governance_sessions
             .snapshot(captured, tenant, principal, channel, now_seconds);
+    session_snapshot.policy.mfa_satisfied = assurance.mfa_satisfied();
 
     Ok(GovernanceDecisionContext {
         tenant,

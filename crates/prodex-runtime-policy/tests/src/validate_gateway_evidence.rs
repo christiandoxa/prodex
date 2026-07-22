@@ -11,7 +11,7 @@ fn parse_policy(input: &str) -> RuntimePolicyFile {
 }
 
 #[test]
-fn governance_policy_rejects_unavailable_gateway_evidence() {
+fn governance_policy_accepts_verified_authentication_evidence_only() {
     let base = parse_policy(
         r#"
 version = 1
@@ -28,9 +28,20 @@ reason_code = "policy.allow"
     policy.governance.policy_rules[0]
         .condition
         .minimum_authentication_strength = Some(2);
+    policy.governance.policy_rules[0].obligations = vec![
+        RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value: 2 },
+        RuntimeGovernancePolicyObligation::RequireMfa,
+        RuntimeGovernancePolicyObligation::RequireReauthentication,
+    ];
+    validate_runtime_policy_file(&policy, Path::new("policy.toml")).unwrap();
+
+    let mut policy = base.clone();
+    policy.governance.policy_rules[0]
+        .condition
+        .minimum_authentication_strength = Some(4);
     let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
-        .expect_err("unverified authentication strength must be rejected");
-    assert!(error.to_string().contains("authentication evidence"));
+        .expect_err("out-of-range authentication strength must be rejected");
+    assert!(error.to_string().contains("between 1 and 3"));
 
     let mut policy = base.clone();
     policy.governance.policy_rules[0].condition.action =
@@ -48,14 +59,10 @@ reason_code = "policy.allow"
 
     let mut policy = base;
     policy.governance.policy_rules[0].obligations =
-        vec![RuntimeGovernancePolicyObligation::RequireMfa];
+        vec![RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value: 4 }];
     let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
-        .expect_err("unfulfillable MFA obligation must be rejected");
-    assert!(
-        error
-            .to_string()
-            .contains("unavailable reauthentication or MFA")
-    );
+        .expect_err("out-of-range authentication obligation must be rejected");
+    assert!(error.to_string().contains("between 1 and 3"));
 }
 
 #[test]

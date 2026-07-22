@@ -55,6 +55,7 @@ fn input<'a>(
             network_zone: NetworkZone::TrustedInternal,
             authentication_strength: 3,
             mfa_satisfied: true,
+            reauthentication_satisfied: true,
         },
     }
 }

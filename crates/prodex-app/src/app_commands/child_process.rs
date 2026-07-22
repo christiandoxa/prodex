@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -97,6 +97,7 @@ fn run_child_plan_inner(
     for (key, value) in &plan.extra_env {
         command.env(key, value);
     }
+    reset_terminal_keyboard_enhancement_best_effort(plan);
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to execute {}", plan.binary.to_string_lossy()))?;
@@ -117,6 +118,13 @@ fn run_child_plan_inner(
     }
     .with_context(|| format!("failed to wait for {}", plan.binary.to_string_lossy()))?;
     Ok(status)
+}
+
+fn reset_terminal_keyboard_enhancement_best_effort(plan: &ChildProcessPlan) {
+    if !plan.reset_terminal_keyboard_enhancement || !io::stdout().is_terminal() {
+        return;
+    }
+    let _ = crossterm::execute!(io::stdout(), crossterm::event::PopKeyboardEnhancementFlags);
 }
 
 fn wait_for_monitored_child(

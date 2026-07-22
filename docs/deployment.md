@@ -209,8 +209,9 @@ baseline with:
 - non-root pod execution, read-only root filesystems, dropped Linux
   capabilities, `RuntimeDefault` seccomp, no privilege escalation, resource
   requests/limits, and `/livez`, `/readyz`, and `/startupz` probes.
-- gateway topology spread constraints across zones and nodes so multi-replica
-  deployments are not silently concentrated onto one failure domain.
+- gateway and control-plane topology spread constraints across zones and nodes
+  so multi-replica deployments are not silently concentrated onto one failure
+  domain.
 - a gateway termination grace period plus `preStop` delay so Kubernetes rolling
   updates and evictions give readiness removal and connection draining time to
   settle before SIGTERM.
@@ -250,14 +251,17 @@ with a bounded advisory lock, and records/ensures compatibility schema versions.
 contract migrations still require release-specific expand/backfill/contract
 evidence before they are added to the catalog.
 
-The same manifest runs a single `prodex-control-plane` replica behind its own
-`Service` and restricted `NetworkPolicy`. The dedicated binary explicitly
+The same manifest runs three `prodex-control-plane` replicas behind their own
+`Service`, `PodDisruptionBudget`, `HorizontalPodAutoscaler`, and restricted
+`NetworkPolicy`. The dedicated binary explicitly
 requests `service_mode = "control-plane"` and listens on `0.0.0.0:4100`; normal
 gateway startup rejects that policy. Its ExternalSecret contains only the
 projected admin token plus PostgreSQL and Redis connection references. The
 workload mounts those values as read-only files rather than importing secrets
-through `env` or `envFrom`, and it uses a 45-second termination grace period
-with a 15-second pre-stop delay before the bounded backend drain.
+through `env` or `envFrom`, spreads replicas across zones and nodes, keeps at
+least two replicas available during voluntary disruption, and uses a 45-second
+termination grace period with a 15-second pre-stop delay before the bounded
+backend drain.
 
 The gateway ConfigMap sets `PRODEX_GATEWAY_REPLICA_COUNT=3` and
 `PRODEX_REQUIRE_MULTI_REPLICA_ACCOUNTING_CHECKS=true`, and the gateway

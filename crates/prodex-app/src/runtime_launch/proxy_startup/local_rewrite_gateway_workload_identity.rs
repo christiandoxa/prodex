@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use prodex_authn::{
-    VerifiedCredentialEvidence, VerifiedMtlsPeerEvidence, VerifiedOidcCredentialEvidence,
-    VerifiedOidcRoleEvidence, VerifiedWorkloadCredentialEvidence,
+    VerifiedAuthenticationAssurance, VerifiedCredentialEvidence, VerifiedMtlsPeerEvidence,
+    VerifiedOidcCredentialEvidence, VerifiedOidcRoleEvidence, VerifiedWorkloadCredentialEvidence,
 };
 use prodex_domain::{CredentialScope, Principal, PrincipalId, PrincipalKind, Role, TenantId};
 
@@ -100,6 +100,7 @@ fn runtime_gateway_workload_evidence_from_verified(
                 ),
                 resolved_principal: principal,
                 now_unix_ms: token.now_unix_ms(),
+                assurance: VerifiedAuthenticationAssurance::workload(config.mtls_required),
             }),
             expected_issuer,
             expected_audience,
@@ -189,6 +190,7 @@ mod tests {
                 tenant_claim: "prodex_tenant".to_string(),
                 key_prefixes_claim: String::new(),
                 authentication_strength: None,
+                reauthentication_max_age_seconds: None,
             },
             subject_claim: "sub".to_string(),
             tenant_claim: "prodex_tenant".to_string(),

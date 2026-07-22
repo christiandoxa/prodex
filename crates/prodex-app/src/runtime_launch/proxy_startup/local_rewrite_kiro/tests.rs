@@ -10,6 +10,21 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[test]
+fn kiro_streaming_reader_times_out_while_the_worker_is_silent() {
+    let (_sender, receiver) = mpsc::channel();
+    let mut reader = RuntimeKiroStreamingReader {
+        receiver,
+        pending: Cursor::new(Vec::new()),
+        finished: false,
+        idle_timeout: Duration::from_millis(10),
+    };
+
+    let error = reader.read(&mut [0_u8; 1]).unwrap_err();
+
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+}
+
 fn write_fake_kiro_compact_agent(root: &Path) -> std::path::PathBuf {
     let script = root.join("fake-kiro-compact");
     fs::write(
@@ -332,18 +347,4 @@ fn kiro_semantic_compact_summary_uses_acp_turn() {
     .expect("semantic compact summary should succeed");
     assert_eq!(summary, "FAKE NATIVE KIRO COMPACT SUMMARY");
     let _ = fs::remove_dir_all(&root);
-}
-
-#[test]
-fn kiro_stderr_error_context_is_bounded_and_content_free() {
-    let secret = b"Bearer secret-sentinel\nuser@example.com\nmore";
-    let mut stderr = std::io::Cursor::new(secret.as_slice());
-
-    let marker = runtime_kiro_read_stderr(&mut stderr);
-    let suffix = runtime_kiro_stderr_suffix(&marker);
-
-    assert_eq!(stderr.position(), 1);
-    assert_eq!(suffix, "; subprocess reported an error");
-    assert!(!suffix.contains("secret-sentinel"));
-    assert!(!suffix.contains("example.com"));
 }

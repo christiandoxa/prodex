@@ -8,6 +8,64 @@ use prodex_domain::{
 
 use crate::{AuthenticationError, TokenClaims, validate_oidc_token_claims};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VerifiedAuthenticationAssurance {
+    authentication_strength: u8,
+    mfa_satisfied: bool,
+    reauthentication_satisfied: bool,
+}
+
+impl VerifiedAuthenticationAssurance {
+    pub const fn single_factor() -> Self {
+        Self {
+            authentication_strength: 1,
+            mfa_satisfied: false,
+            reauthentication_satisfied: false,
+        }
+    }
+
+    pub const fn mfa() -> Self {
+        Self {
+            authentication_strength: 2,
+            mfa_satisfied: true,
+            reauthentication_satisfied: false,
+        }
+    }
+
+    pub const fn phishing_resistant() -> Self {
+        Self {
+            authentication_strength: 3,
+            mfa_satisfied: true,
+            reauthentication_satisfied: false,
+        }
+    }
+
+    pub const fn reauthenticated(mut self) -> Self {
+        self.reauthentication_satisfied = true;
+        self
+    }
+
+    pub const fn workload(mtls_verified: bool) -> Self {
+        Self {
+            authentication_strength: if mtls_verified { 3 } else { 2 },
+            mfa_satisfied: false,
+            reauthentication_satisfied: false,
+        }
+    }
+
+    pub const fn authentication_strength(self) -> u8 {
+        self.authentication_strength
+    }
+
+    pub const fn mfa_satisfied(self) -> bool {
+        self.mfa_satisfied
+    }
+
+    pub const fn reauthentication_satisfied(self) -> bool {
+        self.reauthentication_satisfied
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct VerifiedOidcCredentialEvidence {
     pub policy: OidcValidationPolicy,
@@ -16,6 +74,7 @@ pub struct VerifiedOidcCredentialEvidence {
     pub role_evidence: VerifiedOidcRoleEvidence,
     pub resolved_principal: Principal,
     pub now_unix_ms: u64,
+    pub assurance: VerifiedAuthenticationAssurance,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -45,6 +104,7 @@ impl fmt::Debug for VerifiedOidcCredentialEvidence {
             .field("role_evidence", &"<redacted>")
             .field("resolved_principal", &"<redacted>")
             .field("now_unix_ms", &"<redacted>")
+            .field("assurance", &self.assurance)
             .finish()
     }
 }
@@ -54,6 +114,16 @@ pub enum VerifiedCredentialEvidence {
     Principal(Principal),
     Oidc(Box<VerifiedOidcCredentialEvidence>),
     Workload(VerifiedWorkloadCredentialEvidence),
+}
+
+impl VerifiedCredentialEvidence {
+    pub const fn assurance(&self) -> VerifiedAuthenticationAssurance {
+        match self {
+            Self::Principal(_) => VerifiedAuthenticationAssurance::single_factor(),
+            Self::Oidc(evidence) => evidence.assurance,
+            Self::Workload(evidence) => evidence.credential.assurance,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -366,6 +436,7 @@ mod tests {
             role_evidence: VerifiedOidcRoleEvidence::TrustedMissingClaimFallback(Role::Admin),
             resolved_principal: resolved.clone(),
             now_unix_ms: 2_000,
+            assurance: VerifiedAuthenticationAssurance::mfa().reauthenticated(),
         };
         assert_eq!(
             authenticate_verified_credential(VerifiedCredentialAuthenticationRequest {
@@ -392,6 +463,7 @@ mod tests {
             role_evidence: VerifiedOidcRoleEvidence::TrustedMissingClaimFallback(Role::Admin),
             resolved_principal: resolved,
             now_unix_ms: 2_000,
+            assurance: VerifiedAuthenticationAssurance::mfa().reauthenticated(),
         };
         assert_eq!(
             authenticate_verified_credential(VerifiedCredentialAuthenticationRequest {
@@ -446,6 +518,7 @@ mod tests {
                 ),
                 resolved_principal: workload.clone(),
                 now_unix_ms: 2_000,
+                assurance: VerifiedAuthenticationAssurance::workload(true),
             }),
             expected_issuer: issuer,
             expected_audience: audience,
@@ -455,6 +528,10 @@ mod tests {
                 bound_principal_id: workload.id,
             }),
         };
+        assert_eq!(
+            VerifiedCredentialEvidence::Workload(evidence.clone()).assurance(),
+            VerifiedAuthenticationAssurance::workload(true),
+        );
         assert_eq!(
             authenticate_verified_credential(VerifiedCredentialAuthenticationRequest {
                 evidence: Some(VerifiedCredentialEvidence::Workload(evidence.clone())),
@@ -492,6 +569,7 @@ mod tests {
                         role_evidence: VerifiedOidcRoleEvidence::Claim(role_mapper()),
                         resolved_principal: resolved.clone(),
                         now_unix_ms: 2_000,
+                        assurance: VerifiedAuthenticationAssurance::mfa().reauthenticated(),
                     },
                 ))),
                 required_scope: Some(CredentialScope::ControlPlane),
@@ -523,10 +601,11 @@ mod tests {
             role_evidence: VerifiedOidcRoleEvidence::TrustedMissingClaimFallback(Role::Admin),
             resolved_principal: resolved,
             now_unix_ms: 2_000,
+            assurance: VerifiedAuthenticationAssurance::mfa().reauthenticated(),
         };
         assert_eq!(
             format!("{oidc:?}"),
-            "VerifiedOidcCredentialEvidence { policy: \"<redacted>\", jwks_snapshot: \"<redacted>\", claims: \"<redacted>\", role_evidence: \"<redacted>\", resolved_principal: \"<redacted>\", now_unix_ms: \"<redacted>\" }",
+            "VerifiedOidcCredentialEvidence { policy: \"<redacted>\", jwks_snapshot: \"<redacted>\", claims: \"<redacted>\", role_evidence: \"<redacted>\", resolved_principal: \"<redacted>\", now_unix_ms: \"<redacted>\", assurance: VerifiedAuthenticationAssurance { authentication_strength: 2, mfa_satisfied: true, reauthentication_satisfied: true } }",
         );
         let request = VerifiedCredentialAuthenticationRequest {
             evidence: Some(VerifiedCredentialEvidence::Oidc(Box::new(oidc))),

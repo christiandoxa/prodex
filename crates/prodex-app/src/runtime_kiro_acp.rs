@@ -1,10 +1,11 @@
 pub(crate) use self::process::{
     RuntimeKiroAcpPromptTurnResult, runtime_kiro_acp_bootstrap_with_command,
-    runtime_kiro_acp_prompt_turn_with_command_and_options,
+    runtime_kiro_acp_line_receiver, runtime_kiro_acp_prompt_turn_with_command_and_options,
 };
 #[cfg(test)]
 pub(crate) use self::process::{
     runtime_kiro_acp_bootstrap_with_command_and_timeout, runtime_kiro_acp_prompt_turn_with_command,
+    runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout,
 };
 #[cfg(test)]
 pub(crate) use self::protocol::{

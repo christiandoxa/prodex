@@ -155,7 +155,9 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
     let oidc_enabled = sso.oidc_issuer.is_some()
         || sso.oidc_audience.is_some()
         || sso.oidc_jwks_url.is_some()
-        || !sso.oidc_jwks_origin_allowlist.is_empty();
+        || !sso.oidc_jwks_origin_allowlist.is_empty()
+        || sso.authentication_strength.is_some()
+        || sso.reauthentication_max_age_seconds.is_some();
     if sso.remote_human == Some(true) && !oidc_enabled {
         bail!(
             "gateway.sso.remote_human in {} requires exact OIDC issuer and audience",
@@ -179,6 +181,15 @@ pub(super) fn validate_gateway_sso(policy: &RuntimePolicyFile, path: &Path) -> R
     {
         bail!(
             "gateway.sso.authentication_strength in {} must be mfa or phishing_resistant",
+            path.display()
+        );
+    }
+    if sso
+        .reauthentication_max_age_seconds
+        .is_some_and(|seconds| seconds == 0 || seconds > 86_400)
+    {
+        bail!(
+            "gateway.sso.reauthentication_max_age_seconds in {} must be between 1 and 86400",
             path.display()
         );
     }

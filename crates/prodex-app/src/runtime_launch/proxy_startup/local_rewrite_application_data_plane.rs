@@ -254,6 +254,9 @@ pub(super) fn runtime_gateway_application_http_policy(
             shared.runtime_shared.runtime_config.max_request_body_bytes,
         )
         .unwrap_or(usize::MAX),
+        max_header_count: defaults.max_header_count,
+        max_header_bytes: defaults.max_header_bytes,
+        max_single_header_bytes: defaults.max_single_header_bytes,
         request_timeout_ms: defaults.request_timeout_ms.max(stream_idle_timeout_ms),
         stream_idle_timeout_ms,
         max_concurrent_streams: u32::try_from(shared.runtime_shared.active_request_limit)

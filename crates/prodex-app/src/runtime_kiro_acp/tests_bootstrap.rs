@@ -205,6 +205,35 @@ fn kiro_acp_prompt_turn_does_not_wait_for_agent_exit() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn kiro_acp_prompt_turn_times_out_and_terminates_the_agent() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_dir("prompt-turn-timeout");
+    let fake_agent = root.join("fake-kiro-timeout");
+    fs::write(&fake_agent, "#!/bin/sh\nexec sleep 5\n").unwrap();
+    let mut permissions = fs::metadata(&fake_agent).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_agent, permissions).unwrap();
+    let started = Instant::now();
+
+    let error = runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
+        fake_agent.as_os_str(),
+        &root,
+        &[],
+        None,
+        None,
+        "hello from prodex",
+        Duration::from_millis(50),
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("timed out"));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn kiro_acp_prompt_turn_passes_selected_model_to_agent() {
     let root = temp_dir("prompt-turn-model");

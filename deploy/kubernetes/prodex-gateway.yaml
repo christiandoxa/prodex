@@ -559,7 +559,7 @@ metadata:
     app.kubernetes.io/name: prodex-control-plane
     app.kubernetes.io/component: control-plane
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: prodex-control-plane
@@ -579,6 +579,19 @@ spec:
         fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: prodex-control-plane
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: prodex-control-plane
       containers:
         - name: prodex-control-plane
           image: ghcr.io/christiandoxa/prodex@sha256:b148ccaa87b9601fe367313b3a734129372b12c473a2bf32bdf177bcb7a4289c
@@ -689,6 +702,37 @@ spec:
     - name: http
       port: 4100
       targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prodex-control-plane
+  namespace: prodex
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodex-control-plane
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: prodex-control-plane
+  namespace: prodex
+spec:
+  minReplicas: 3
+  maxReplicas: 12
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: prodex-control-plane
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

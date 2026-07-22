@@ -26,7 +26,7 @@ use crate::runtime_kiro_acp::{
     RuntimeKiroAcpClientInfo, RuntimeKiroAcpEnvelope, RuntimeKiroAcpPromptTurnResult,
     RuntimeKiroAcpSessionNotification, RuntimeKiroAcpSessionUpdate,
     runtime_kiro_acp_chat_assistant_messages_from_prompt_turn, runtime_kiro_acp_initialize_request,
-    runtime_kiro_acp_prompt_turn_with_command_and_options,
+    runtime_kiro_acp_line_receiver, runtime_kiro_acp_prompt_turn_with_command_and_options,
     runtime_kiro_acp_responses_value_from_prompt_turn, runtime_kiro_acp_session_new_request,
     runtime_kiro_acp_session_prompt_request,
 };
@@ -49,12 +49,12 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
-use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Write};
+use std::io::{self, BufWriter, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Runtime as TokioRuntime;
 
 fn runtime_kiro_rewrite_options() -> RuntimeDeepSeekRewriteOptions {
@@ -522,6 +522,13 @@ fn runtime_kiro_streaming_reader(
         .unwrap_or_else(|| PathBuf::from(default_command));
     let profile_name = auth.profile_name.clone();
     let async_runtime = shared.runtime_shared.async_runtime.clone();
+    let idle_timeout = Duration::from_millis(
+        shared
+            .runtime_shared
+            .runtime_config
+            .tuning
+            .stream_idle_timeout_ms,
+    );
     let (sender, receiver) = mpsc::channel();
     let error_sender = sender.clone();
     schedule_runtime_kiro_blocking_work(&async_runtime, move || {
@@ -538,6 +545,7 @@ fn runtime_kiro_streaming_reader(
             requested_effort,
             chat_completions_route,
             conversations,
+            idle_timeout,
         );
         if let Err(err) = result {
             let _ = error_sender.send(RuntimeKiroStreamingChunk::Error(io::Error::other(
@@ -549,6 +557,7 @@ fn runtime_kiro_streaming_reader(
         receiver,
         pending: Cursor::new(Vec::new()),
         finished: false,
+        idle_timeout,
     })
 }
 
@@ -566,6 +575,7 @@ fn runtime_kiro_streaming_worker(
     requested_effort: Option<String>,
     chat_completions_route: bool,
     conversations: RuntimeDeepSeekConversationStore,
+    idle_timeout: Duration,
 ) -> Result<()> {
     let mut acp_command = Command::new(command);
     acp_command.arg("acp");
@@ -587,7 +597,7 @@ fn runtime_kiro_streaming_worker(
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .envs(extra_env.iter().cloned())
         .spawn()
         .with_context(|| format!("failed to start Kiro ACP agent {}", command.display()))?;
@@ -621,12 +631,7 @@ fn runtime_kiro_streaming_worker(
             .stdout
             .take()
             .context("failed to capture Kiro ACP stdout")?;
-        let mut stderr = child
-            .stderr
-            .take()
-            .context("failed to capture Kiro ACP stderr")?;
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
+        let lines = runtime_kiro_acp_line_receiver(stdout);
         let mut initialize = None;
         let mut session = None;
         let mut prompt_response = None;
@@ -648,14 +653,17 @@ fn runtime_kiro_streaming_worker(
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "kiro-cli".to_string());
 
-        while reader
-            .read_line(&mut line)
-            .context("failed to read Kiro ACP stdout")?
-            > 0
-        {
+        loop {
+            let line = match lines.recv_timeout(idle_timeout) {
+                Ok(Ok(line)) => line,
+                Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    anyhow::bail!("Kiro ACP stream timed out waiting for output")
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
             let current = line.trim();
             if current.is_empty() {
-                line.clear();
                 continue;
             }
             let envelope = RuntimeKiroAcpEnvelope::parse(current)?;
@@ -695,7 +703,6 @@ fn runtime_kiro_streaming_worker(
                         .into_bytes(),
                     ))?;
                 }
-                line.clear();
                 continue;
             }
             match envelope.id {
@@ -732,7 +739,6 @@ fn runtime_kiro_streaming_worker(
                     notifications.push(envelope);
                 }
             }
-            line.clear();
         }
         drop(stdin);
 
@@ -749,25 +755,12 @@ fn runtime_kiro_streaming_worker(
             ))?;
         }
 
-        let stderr_text = runtime_kiro_read_stderr(&mut stderr);
-        let initialize = initialize.with_context(|| {
-            format!(
-                "Kiro ACP streaming turn did not return initialize result{}",
-                runtime_kiro_stderr_suffix(&stderr_text)
-            )
-        })?;
-        let session = session.with_context(|| {
-            format!(
-                "Kiro ACP streaming turn did not return session/new result{}",
-                runtime_kiro_stderr_suffix(&stderr_text)
-            )
-        })?;
-        let prompt_response = prompt_response.with_context(|| {
-            format!(
-                "Kiro ACP streaming turn did not return session/prompt response{}",
-                runtime_kiro_stderr_suffix(&stderr_text)
-            )
-        })?;
+        let initialize =
+            initialize.context("Kiro ACP streaming turn did not return initialize result")?;
+        let session =
+            session.context("Kiro ACP streaming turn did not return session/new result")?;
+        let prompt_response = prompt_response
+            .context("Kiro ACP streaming turn did not return session/prompt response")?;
         let turn = RuntimeKiroAcpPromptTurnResult {
             initialize,
             session,
@@ -1082,25 +1075,6 @@ fn runtime_kiro_created_at() -> u64 {
         .unwrap_or(0)
 }
 
-fn runtime_kiro_read_stderr(stderr: &mut impl Read) -> String {
-    let mut marker = [0_u8; 1];
-    stderr
-        .read(&mut marker)
-        .ok()
-        .filter(|read| *read != 0)
-        .map(|_| "present".to_string())
-        .unwrap_or_default()
-}
-
-fn runtime_kiro_stderr_suffix(stderr: &str) -> String {
-    let stderr = stderr.trim();
-    if stderr.is_empty() {
-        String::new()
-    } else {
-        "; subprocess reported an error".to_string()
-    }
-}
-
 enum RuntimeKiroStreamingChunk {
     Data(Vec<u8>),
     Error(io::Error),
@@ -1111,6 +1085,7 @@ struct RuntimeKiroStreamingReader {
     receiver: Receiver<RuntimeKiroStreamingChunk>,
     pending: Cursor<Vec<u8>>,
     finished: bool,
+    idle_timeout: Duration,
 }
 
 impl Read for RuntimeKiroStreamingReader {
@@ -1123,14 +1098,20 @@ impl Read for RuntimeKiroStreamingReader {
             if self.finished {
                 return Ok(0);
             }
-            match self.receiver.recv() {
+            match self.receiver.recv_timeout(self.idle_timeout) {
                 Ok(RuntimeKiroStreamingChunk::Data(bytes)) => {
                     self.pending = Cursor::new(bytes);
                 }
                 Ok(RuntimeKiroStreamingChunk::Error(err)) => return Err(err),
-                Ok(RuntimeKiroStreamingChunk::End) | Err(_) => {
+                Ok(RuntimeKiroStreamingChunk::End) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                     self.finished = true;
                     return Ok(0);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "Kiro ACP stream timed out waiting for output",
+                    ));
                 }
             }
         }

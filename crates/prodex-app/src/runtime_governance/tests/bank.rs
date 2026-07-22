@@ -105,7 +105,7 @@ fn bank_snapshot_denies_unsupported_inspection() {
             action: GovernedAction::InvokeModel,
             route: &route,
             data: prodex_domain::DataPolicyContext {
-                classification: DataClassification::Internal,
+                classification: DataClassification::Restricted,
                 inspection_coverage: InspectionCoverage::Full,
             },
             request_risk: RequestRisk::Low,
@@ -119,6 +119,7 @@ fn bank_snapshot_denies_unsupported_inspection() {
                 network_zone: NetworkZone::TrustedInternal,
                 authentication_strength: 3,
                 mfa_satisfied: true,
+                reauthentication_satisfied: true,
             },
         },
     )
@@ -139,5 +140,10 @@ fn bank_snapshot_denies_unsupported_inspection() {
         decision
             .obligations
             .contains(&GovernanceObligation::DenyFallbackOutsideEligibility)
+    );
+    assert!(
+        decision
+            .obligations
+            .contains(&GovernanceObligation::MinimumAuthenticationStrength(3))
     );
 }

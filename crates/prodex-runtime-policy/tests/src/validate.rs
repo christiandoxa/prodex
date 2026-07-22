@@ -374,6 +374,7 @@ oidc_issuer = "https://idp.example.com"
 oidc_audience = "prodex-bank"
 required_scope = "control_plane"
 authentication_strength = "phishing_resistant"
+reauthentication_max_age_seconds = 300
 
 [gateway.observability]
 sinks = ["siem"]
@@ -474,6 +475,11 @@ fn bank_governance_deployment_matrix_fails_closed() {
             "phishing_resistant",
         ),
         (
+            "reauthentication_max_age_seconds = 300",
+            "reauthentication_max_age_seconds = 901",
+            "reauthentication within 900 seconds",
+        ),
+        (
             "classification_default = \"restricted\"",
             "classification_default = \"confidential\"",
             "restricted default classification",
@@ -515,6 +521,10 @@ fn identity_edge_config_rejects_incomplete_or_untrusted_configuration() {
             "version = 1\n[gateway.sso]\nbrowser_flow = true\npkce_method = \"S256\"\n",
             "requires exact OIDC",
         ),
+        (
+            "version = 1\n[gateway.sso]\noidc_issuer = \"https://identity.example.com\"\noidc_audience = \"prodex\"\nreauthentication_max_age_seconds = 0\n",
+            "between 1 and 86400",
+        ),
     ] {
         let error = validate_runtime_policy_file(&parse_policy(input), Path::new("policy.toml"))
             .expect_err("unsafe identity edge configuration must fail closed");
@@ -550,6 +560,8 @@ remote_human = true
 required_scope = "control_plane"
 oidc_issuer = "https://identity.example.com"
 oidc_audience = "prodex-console"
+authentication_strength = "phishing_resistant"
+reauthentication_max_age_seconds = 300
 browser_flow = true
 pkce_method = "S256"
 oidc_authorization_url = "https://identity.example.com/oauth2/authorize"

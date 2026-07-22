@@ -54,6 +54,7 @@ fn attribute_restriction_plan(
                 network_zone: NetworkZone::Unknown,
                 authentication_strength: 1,
                 mfa_satisfied: false,
+                reauthentication_satisfied: false,
             },
             response_transport: ApplicationResponseTransport::Unary,
             response_inspection_coverage: InspectionCoverage::Unsupported,
@@ -132,6 +133,7 @@ fn allow_tool_obligations_form_one_allow_set() {
                 network_zone: NetworkZone::Unknown,
                 authentication_strength: 1,
                 mfa_satisfied: false,
+                reauthentication_satisfied: false,
             },
             response_transport: ApplicationResponseTransport::Unary,
             response_inspection_coverage: InspectionCoverage::Unsupported,
@@ -181,6 +183,7 @@ fn mask_obligation_requires_explicit_masking_evidence() {
                     network_zone: NetworkZone::Unknown,
                     authentication_strength: 1,
                     mfa_satisfied: false,
+                    reauthentication_satisfied: false,
                 },
                 response_transport: ApplicationResponseTransport::Unary,
                 response_inspection_coverage: InspectionCoverage::Unsupported,
@@ -222,6 +225,7 @@ fn plan(
                 network_zone: NetworkZone::Local,
                 authentication_strength: 2,
                 mfa_satisfied: true,
+                reauthentication_satisfied: true,
             },
             response_transport: transport,
             response_inspection_coverage: coverage,
@@ -389,6 +393,8 @@ fn request_and_session_obligations_return_stable_typed_violations() {
             GovernanceObligation::DisableTools,
             GovernanceObligation::MaxInputTokens(4),
             GovernanceObligation::SessionIdleTimeoutSeconds(3),
+            GovernanceObligation::MinimumAuthenticationStrength(3),
+            GovernanceObligation::RequireReauthentication,
             GovernanceObligation::RequireMfa,
         ]),
         ApplicationObligationContext {
@@ -415,6 +421,7 @@ fn request_and_session_obligations_return_stable_typed_violations() {
                 network_zone: NetworkZone::Unknown,
                 authentication_strength: 1,
                 mfa_satisfied: false,
+                reauthentication_satisfied: false,
             },
             response_transport: ApplicationResponseTransport::Unary,
             response_inspection_coverage: InspectionCoverage::Unsupported,
@@ -428,6 +435,8 @@ fn request_and_session_obligations_return_stable_typed_violations() {
             ApplicationObligationViolation::ToolsDisabled,
             ApplicationObligationViolation::InputTokenLimitExceeded,
             ApplicationObligationViolation::SessionIdleTimeout,
+            ApplicationObligationViolation::AuthenticationStrengthRequired,
+            ApplicationObligationViolation::ReauthenticationRequired,
             ApplicationObligationViolation::MfaRequired,
         ]
     );
@@ -440,6 +449,8 @@ fn request_and_session_obligations_return_stable_typed_violations() {
             "tools_disabled",
             "input_token_limit_exceeded",
             "session_idle_timeout",
+            "authentication_strength_required",
+            "reauthentication_required",
             "mfa_required",
         ]
     );

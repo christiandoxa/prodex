@@ -216,6 +216,7 @@ fn runtime_gateway_admin_credential_evidence(
                 ),
                 resolved_principal: principal,
                 now_unix_ms: token.now_unix_ms(),
+                assurance: token.assurance(),
             }))
         }
     }

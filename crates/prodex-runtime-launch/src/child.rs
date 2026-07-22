@@ -36,6 +36,7 @@ pub struct ChildProcessPlan {
     pub codex_home: PathBuf,
     pub extra_env: Vec<(OsString, OsString)>,
     pub removed_env: Vec<OsString>,
+    pub reset_terminal_keyboard_enhancement: bool,
 }
 
 impl std::fmt::Debug for ChildProcessPlan {
@@ -64,6 +65,7 @@ impl ChildProcessPlan {
             codex_home,
             extra_env: Vec::new(),
             removed_env: Vec::new(),
+            reset_terminal_keyboard_enhancement: false,
         }
     }
 
@@ -128,7 +130,9 @@ pub fn codex_tui_child_plan(
             ],
         );
     }
-    codex_child_plan(binary, codex_home, args, local_provider_id)
+    let mut plan = codex_child_plan(binary, codex_home, args, local_provider_id);
+    plan.reset_terminal_keyboard_enhancement = true;
+    plan
 }
 
 #[doc(hidden)]
@@ -144,15 +148,10 @@ pub fn codex_child_plan_with_env(
     let mut extra_env =
         local_proxy_bypass_env_for_hosts_and_env(&local_provider_hosts, environment);
     // Enhanced key reporting can surface phantom input even when launchers hide terminal identity.
-    if !environment
-        .iter()
-        .any(|(key, _)| key == CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV)
-    {
-        extra_env.push((
-            CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV,
-            OsString::from("1"),
-        ));
-    }
+    extra_env.push((
+        CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT_ENV,
+        OsString::from("1"),
+    ));
     ChildProcessPlan::new(binary, codex_home)
         .with_args(args)
         .with_extra_env(extra_env)

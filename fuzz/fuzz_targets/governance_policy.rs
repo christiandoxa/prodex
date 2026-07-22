@@ -97,6 +97,7 @@ fuzz_target!(|input: &[u8]| {
             network_zone: NetworkZone::Unknown,
             authentication_strength: 1,
             mfa_satisfied: false,
+            reauthentication_satisfied: false,
         },
     };
     let first = evaluate_governance_policy(&policy, &policy_input);

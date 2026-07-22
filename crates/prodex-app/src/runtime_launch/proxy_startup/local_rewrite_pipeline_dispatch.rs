@@ -11,10 +11,10 @@ use super::{
     runtime_gateway_application_provider_dispatch_attempt,
     runtime_gateway_application_provider_retry_precommit, runtime_kiro_compact_response_parts,
     runtime_kiro_model_catalog_from_provider, runtime_kiro_models_buffered_response,
-    runtime_local_rewrite_response_with_call_id, runtime_provider_error_class,
-    runtime_provider_models_buffered_response, runtime_provider_request_ledger_message,
-    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
-    send_runtime_local_rewrite_upstream_request,
+    runtime_local_rewrite_request_timeout_response, runtime_local_rewrite_response_with_call_id,
+    runtime_provider_error_class, runtime_provider_models_buffered_response,
+    runtime_provider_request_ledger_message, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message, send_runtime_local_rewrite_upstream_request,
 };
 use crate::runtime_proxy::{
     RuntimeHeapTrimmedBufferedResponseParts, build_runtime_proxy_response_from_parts,
@@ -23,11 +23,17 @@ use crate::runtime_proxy::{
 use prodex_provider_core::ProviderErrorClass;
 use prodex_provider_spi::ProviderRetryCause;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 pub(super) fn runtime_local_rewrite_dispatch_compact<'target>(
     request: RuntimeLocalRewriteDispatchReadyRequest<'target>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteDispatchReadyRequest<'target>> {
+    if request.state.deadline_expired() {
+        return Err(request
+            .state
+            .reject(runtime_local_rewrite_request_timeout_response()));
+    }
     if !path_without_query(&request.captured.path_and_query).ends_with("/responses/compact") {
         return Ok(request);
     }
@@ -88,6 +94,11 @@ pub(super) fn runtime_local_rewrite_dispatch_builtin_models<'target>(
     request: RuntimeLocalRewriteDispatchReadyRequest<'target>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteDispatchReadyRequest<'target>> {
+    if request.state.deadline_expired() {
+        return Err(request
+            .state
+            .reject(runtime_local_rewrite_request_timeout_response()));
+    }
     let Some(response) = runtime_local_rewrite_builtin_models_response(
         request.state.request_id,
         &request.captured,
@@ -152,6 +163,11 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
     mut request: RuntimeLocalRewriteDispatchReadyRequest<'_>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<()> {
+    if request.state.deadline_expired() {
+        return Err(request
+            .state
+            .reject(runtime_local_rewrite_request_timeout_response()));
+    }
     runtime_local_rewrite_log_governance_decision(&request, shared);
     let response_governance =
         super::super::local_rewrite_response::RuntimeGatewayResponseGovernance {
@@ -177,6 +193,9 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
     };
     let mut selected_response = None;
     for attempt_index in 0..candidate_count {
+        if request.state.deadline_expired() {
+            break;
+        }
         let provider_dispatch = if attempt_index == 0 {
             let Some(dispatch) = primary_dispatch.take() else {
                 continue;
@@ -196,12 +215,19 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
             }
         };
         let selected_shared = provider_dispatch.selected_shared(shared);
-        match send_runtime_local_rewrite_upstream_request(
+        let started_at = Instant::now();
+        let result = send_runtime_local_rewrite_upstream_request(
             request.state.request_id,
             &request.captured,
             &selected_shared,
             &provider_dispatch,
-        ) {
+        );
+        runtime_local_rewrite_record_provider_metric(
+            selected_shared.provider.bridge_kind(),
+            &result,
+            started_at.elapsed(),
+        );
+        match result {
             Ok(response)
                 if runtime_local_rewrite_buffered_provider_fallback_class(
                     &response,
@@ -241,6 +267,14 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
             }
         }
     }
+    if request.state.deadline_expired() {
+        if let Some(guard) = request.state.guards.route_load.as_mut() {
+            guard.mark_error();
+        }
+        return Err(request
+            .state
+            .reject(runtime_local_rewrite_request_timeout_response()));
+    }
     let Some((response, selected_shared)) = selected_response else {
         if let Some(guard) = request.state.guards.route_load.as_mut() {
             guard.mark_error();
@@ -275,6 +309,41 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
         response_governance,
     );
     Ok(())
+}
+
+fn runtime_local_rewrite_record_provider_metric(
+    provider: RuntimeProviderBridgeKind,
+    result: &anyhow::Result<RuntimeLocalRewriteUpstreamResult>,
+    duration: std::time::Duration,
+) {
+    let provider = match provider {
+        RuntimeProviderBridgeKind::OpenAiResponses => prodex_observability::ProviderKind::OpenAi,
+        RuntimeProviderBridgeKind::Anthropic => prodex_observability::ProviderKind::Anthropic,
+        RuntimeProviderBridgeKind::Gemini => prodex_observability::ProviderKind::Gemini,
+        RuntimeProviderBridgeKind::Copilot
+        | RuntimeProviderBridgeKind::DeepSeek
+        | RuntimeProviderBridgeKind::Kiro => prodex_observability::ProviderKind::Other,
+    };
+    let result = match result {
+        Err(_) => prodex_observability::ProviderResultClass::TransportError,
+        Ok(response) => runtime_local_rewrite_provider_result_class(response.status()),
+    };
+    crate::record_runtime_provider_metric(
+        provider,
+        result,
+        duration.as_millis().try_into().unwrap_or(u64::MAX),
+    );
+}
+
+fn runtime_local_rewrite_provider_result_class(
+    status: u16,
+) -> prodex_observability::ProviderResultClass {
+    match status {
+        200..=399 => prodex_observability::ProviderResultClass::Success,
+        429 => prodex_observability::ProviderResultClass::RateLimited,
+        503 => prodex_observability::ProviderResultClass::Overloaded,
+        _ => prodex_observability::ProviderResultClass::ProviderError,
+    }
 }
 
 fn runtime_local_rewrite_buffered_provider_fallback_class(
@@ -445,6 +514,19 @@ pub(super) fn runtime_gateway_operational_probe_response(
     } else {
         "overloaded"
     };
+    let probe_metric = match probe {
+        "livez" => prodex_observability::HealthProbeKind::Live,
+        "readyz" => prodex_observability::HealthProbeKind::Ready,
+        _ => prodex_observability::HealthProbeKind::Startup,
+    };
+    let result_metric = if draining {
+        prodex_observability::HealthProbeResult::Draining
+    } else if overloaded {
+        prodex_observability::HealthProbeResult::Degraded
+    } else {
+        prodex_observability::HealthProbeResult::Passing
+    };
+    crate::record_runtime_health_probe_metric(probe_metric, result_metric);
     let body = serde_json::json!({
         "object": "gateway.health",
         "probe": probe,

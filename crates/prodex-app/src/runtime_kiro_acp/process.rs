@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const RUNTIME_KIRO_ACP_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(5);
+const RUNTIME_KIRO_ACP_PROMPT_TURN_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RuntimeKiroAcpBootstrapResult {
@@ -87,6 +88,26 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options(
     effort: Option<&str>,
     prompt: &str,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
+    runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
+        command,
+        cwd,
+        extra_env,
+        model,
+        effort,
+        prompt,
+        RUNTIME_KIRO_ACP_PROMPT_TURN_TIMEOUT,
+    )
+}
+
+pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options_and_timeout(
+    command: &OsStr,
+    cwd: &Path,
+    extra_env: &[(OsString, OsString)],
+    model: Option<&str>,
+    effort: Option<&str>,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<RuntimeKiroAcpPromptTurnResult> {
     let mut command = Command::new(command);
     command.arg("acp");
     if let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) {
@@ -108,7 +129,7 @@ pub(crate) fn runtime_kiro_acp_prompt_turn_with_command_and_options(
                 command.get_program().to_string_lossy()
             )
         })?;
-    let result = runtime_kiro_acp_prompt_turn_child(&mut child, cwd, prompt);
+    let result = runtime_kiro_acp_prompt_turn_child(&mut child, cwd, prompt, timeout);
     let _ = child.kill();
     let _ = child.wait();
     result
@@ -203,6 +224,7 @@ fn runtime_kiro_acp_prompt_turn_child(
     child: &mut std::process::Child,
     cwd: &Path,
     prompt: &str,
+    timeout: Duration,
 ) -> Result<RuntimeKiroAcpPromptTurnResult> {
     let mut stdin = BufWriter::new(
         child
@@ -233,21 +255,25 @@ fn runtime_kiro_acp_prompt_turn_child(
         .stdout
         .take()
         .context("failed to capture Kiro ACP stdout")?;
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
+    let lines = runtime_kiro_acp_line_receiver(stdout);
+    let deadline = Instant::now() + timeout;
     let mut initialize = None;
     let mut session = None;
     let mut prompt_response = None;
     let mut notifications = Vec::new();
     let mut prompt_sent = false;
-    while reader
-        .read_line(&mut line)
-        .context("failed to read Kiro ACP stdout")?
-        > 0
-    {
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            bail!("Kiro ACP prompt turn timed out");
+        };
+        let line = match lines.recv_timeout(remaining) {
+            Ok(Ok(line)) => line,
+            Ok(Err(error)) => return Err(error).context("failed to read Kiro ACP stdout"),
+            Err(mpsc::RecvTimeoutError::Timeout) => bail!("Kiro ACP prompt turn timed out"),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let current = line.trim();
         if current.is_empty() {
-            line.clear();
             continue;
         }
         let envelope = RuntimeKiroAcpEnvelope::parse(current)?;
@@ -264,7 +290,6 @@ fn runtime_kiro_acp_prompt_turn_child(
                 .context("failed to flush Kiro ACP session/prompt request")?;
             prompt_sent = true;
             session = Some(parsed_session);
-            line.clear();
             continue;
         }
         match envelope.id {
@@ -280,7 +305,6 @@ fn runtime_kiro_acp_prompt_turn_child(
             }
             _ => notifications.push(envelope),
         }
-        line.clear();
     }
     drop(stdin);
 
@@ -296,7 +320,7 @@ fn runtime_kiro_acp_prompt_turn_child(
     })
 }
 
-fn runtime_kiro_acp_line_receiver(
+pub(crate) fn runtime_kiro_acp_line_receiver(
     stdout: std::process::ChildStdout,
 ) -> mpsc::Receiver<std::io::Result<String>> {
     let (sender, receiver) = mpsc::sync_channel(16);

@@ -275,12 +275,10 @@ fn validate_governance_policy_rules(
         if rule
             .condition
             .minimum_authentication_strength
-            .is_some_and(|strength| strength > 1)
-            || rule.condition.environment_mfa_satisfied == Some(true)
-            || rule.condition.session_mfa_satisfied == Some(true)
+            .is_some_and(|strength| !(1..=3).contains(&strength))
         {
             bail!(
-                "gateway governance policy requires authentication evidence that the data plane cannot verify in {}",
+                "gateway governance policy authentication strength must be between 1 and 3 in {}",
                 path.display()
             );
         }
@@ -337,11 +335,11 @@ fn validate_governance_policy_rules(
         for obligation in &rule.obligations {
             if matches!(
                 obligation,
-                RuntimeGovernancePolicyObligation::RequireReauthentication
-                    | RuntimeGovernancePolicyObligation::RequireMfa
+                RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value }
+                    if !(1..=3).contains(value)
             ) {
                 bail!(
-                    "gateway governance policy obligation requires unavailable reauthentication or MFA evidence in {}",
+                    "gateway governance policy obligation authentication strength must be between 1 and 3 in {}",
                     path.display()
                 );
             }
@@ -486,9 +484,12 @@ fn validate_bank_deployment(policy: &RuntimePolicyFile, path: &Path) -> Result<(
         || sso.oidc_audience.is_none()
         || sso.required_scope.as_deref() != Some("control_plane")
         || sso.authentication_strength.as_deref() != Some("phishing_resistant")
+        || sso
+            .reauthentication_max_age_seconds
+            .is_none_or(|seconds| seconds > 900)
     {
         bail!(
-            "bank governance mode requires exact remote human OIDC issuer, audience, control_plane scope, and phishing_resistant authentication in {}",
+            "bank governance mode requires exact remote human OIDC issuer, audience, control_plane scope, phishing_resistant authentication, and reauthentication within 900 seconds in {}",
             path.display()
         );
     }

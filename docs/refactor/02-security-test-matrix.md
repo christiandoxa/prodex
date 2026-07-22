@@ -91,7 +91,7 @@ Windows runtime-pass claim until its first successful CI run.
 | Unused direct dependencies | pinned `cargo-machete 0.9.2 --with-metadata` | `.github/workflows/ci.yml` | pass |
 | Release integrity | SPDX SBOM, attestations, and verified `SHA256SUMS` | `.github/workflows/standalone-release.yml` | pass |
 | Credential leak scan | digest-pinned Gitleaks and CLI/URL capability guard | `.github/workflows/ci.yml`; `scripts/ci/secret-boundary-guard.mjs` | pass |
-| Production secret projection | gateway, control-plane, and migration commands resolve projected `SecretRef` files | `compose.yaml`; `deploy/compose-gateway-policy.toml`; `deploy/kubernetes/prodex-gateway.yaml`; `src/bin/prodex-gateway.rs`; `src/bin/prodex-control-plane.rs`; `src/enterprise_serve.rs` | pass: dedicated data-plane and control-plane policies use typed projected secrets; the control plane has its own non-provider policy and one-replica deployment |
+| Production secret projection | gateway, control-plane, and migration commands resolve projected `SecretRef` files | `compose.yaml`; `deploy/compose-gateway-policy.toml`; `deploy/kubernetes/prodex-gateway.yaml`; `src/bin/prodex-gateway.rs`; `src/bin/prodex-control-plane.rs`; `src/enterprise_serve.rs` | pass: dedicated data-plane and control-plane policies use typed projected secrets; the control plane has its own non-provider policy and three-replica deployment |
 
 ## Characterization Order
 

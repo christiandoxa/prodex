@@ -142,6 +142,7 @@ fn oidc_background_refresh_uses_the_authn_planner_and_origin_allowlist() {
         tenant_claim: "tenant_id".to_string(),
         key_prefixes_claim: "key_prefixes".to_string(),
         authentication_strength: None,
+        reauthentication_max_age_seconds: None,
     };
     let now = Instant::now();
     let now_unix_ms = 1_000_000;
@@ -648,6 +649,7 @@ fn oidc_discovery_policy_rejects_issuer_and_jwks_origin_changes() {
         tenant_claim: "prodex_tenant".to_string(),
         key_prefixes_claim: "prodex_key_prefixes".to_string(),
         authentication_strength: None,
+        reauthentication_max_age_seconds: None,
     };
     let policy = RuntimeGatewayOidcEndpointPolicy::from_config(&config).unwrap();
     assert!(

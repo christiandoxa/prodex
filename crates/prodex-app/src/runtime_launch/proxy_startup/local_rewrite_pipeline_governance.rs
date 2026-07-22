@@ -33,6 +33,11 @@ pub(super) fn runtime_local_rewrite_prepare_constraints<'target, 'shared>(
     mut request: RuntimeLocalRewriteCapturedRequest<'target>,
     shared: &'shared RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewritePreparedRequest<'target, 'shared>> {
+    if request.state.deadline_expired() {
+        return Err(request
+            .state
+            .reject(runtime_local_rewrite_request_timeout_response()));
+    }
     let mut constraints = match runtime_gateway_prepare_constraint_plan(
         request.state.request_id,
         &request.captured,
@@ -143,6 +148,9 @@ pub(super) fn runtime_local_rewrite_dispatch_control_plane<'target, 'shared>(
     mut request: RuntimeLocalRewritePreparedRequest<'target, 'shared>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewritePreparedRequest<'target, 'shared>> {
+    if request.state.deadline_expired() {
+        return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     if let Some(response) = runtime_gateway_admin_response(
         request.state.request_id,
         &request.captured,
@@ -167,6 +175,9 @@ pub(super) fn runtime_local_rewrite_pre_reservation_governance<'target, 'shared>
     mut request: RuntimeLocalRewritePreparedRequest<'target, 'shared>,
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteGovernedRequest<'target, 'shared>> {
+    if request.state.deadline_expired() {
+        return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     if let Some(block) = runtime_proxy_crate::runtime_gateway_guardrail_block(
         &request.captured.body,
         &shared.gateway_guardrails,
@@ -237,6 +248,9 @@ pub(super) fn runtime_local_rewrite_reserve_virtual_key<'target, 'shared>(
     shared: &RuntimeLocalRewriteProxyShared,
 ) -> RuntimeLocalRewritePipelineResult<RuntimeLocalRewriteReservedRequest<'target, 'shared>> {
     let mut request = governed.0;
+    if request.state.deadline_expired() {
+        return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     let application = match request.state.application.as_ref() {
         Some(application) => application,
         None => {
@@ -371,6 +385,9 @@ pub(super) fn runtime_local_rewrite_post_reservation_governance<'target, 'shared
         mut request,
         application_admission,
     } = reserved;
+    if request.state.deadline_expired() {
+        return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     if let Some(block) = runtime_gateway_guardrail_webhook_block(
         "pre",
         request.state.request_id,
@@ -482,6 +499,9 @@ pub(super) fn runtime_local_rewrite_apply_constraints<'target>(
         mut request,
         application_admission,
     } = reserved;
+    if request.state.deadline_expired() {
+        return Err(request.reject(runtime_local_rewrite_request_timeout_response()));
+    }
     let (route_load, transformed) = match request.constraints.as_mut() {
         Some(plan) => match plan.apply(&mut request.captured) {
             Ok(result) => result,
@@ -523,5 +543,6 @@ use super::{
     runtime_gateway_audit_data_plane_presidio_redaction_failed,
     runtime_gateway_audit_data_plane_virtual_key_rejected, runtime_gateway_guardrail_webhook_block,
     runtime_gateway_prepare_constraint_plan, runtime_gateway_virtual_key_admission,
-    runtime_proxy_log, runtime_proxy_log_field, runtime_proxy_structured_log_message,
+    runtime_local_rewrite_request_timeout_response, runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_structured_log_message,
 };

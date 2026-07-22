@@ -10,13 +10,9 @@ pub(super) fn validate_runtime_governance_supported_evidence(
     if rule
         .condition
         .minimum_authentication_strength
-        .is_some_and(|strength| strength > 1)
-        || rule.condition.environment_mfa_satisfied == Some(true)
-        || rule.condition.session_mfa_satisfied == Some(true)
+        .is_some_and(|strength| !(1..=3).contains(&strength))
     {
-        anyhow::bail!(
-            "gateway governance policy requires authentication evidence that the data plane cannot verify"
-        );
+        anyhow::bail!("gateway governance policy authentication strength must be between 1 and 3");
     }
     if matches!(
         rule.condition.action,
@@ -34,11 +30,11 @@ pub(super) fn validate_runtime_governance_supported_evidence(
     if rule.obligations.iter().any(|obligation| {
         matches!(
             obligation,
-            Obligation::RequireReauthentication | Obligation::RequireMfa
+            Obligation::MinimumAuthenticationStrength { value } if !(1..=3).contains(value)
         )
     }) {
         anyhow::bail!(
-            "gateway governance policy obligation requires unavailable reauthentication or MFA evidence"
+            "gateway governance policy obligation authentication strength must be between 1 and 3"
         );
     }
     Ok(())
