@@ -19,9 +19,10 @@ pub use compatibility::{
     authenticate_compatibility_request,
 };
 pub use evidence::{
-    VerifiedCredentialAuthenticationError, VerifiedCredentialAuthenticationRequest,
-    VerifiedCredentialEvidence, VerifiedMtlsPeerEvidence, VerifiedOidcCredentialEvidence,
-    VerifiedOidcRoleEvidence, VerifiedWorkloadCredentialEvidence, authenticate_verified_credential,
+    VerifiedAuthenticationAssurance, VerifiedCredentialAuthenticationError,
+    VerifiedCredentialAuthenticationRequest, VerifiedCredentialEvidence, VerifiedMtlsPeerEvidence,
+    VerifiedOidcCredentialEvidence, VerifiedOidcRoleEvidence, VerifiedWorkloadCredentialEvidence,
+    authenticate_verified_credential,
 };
 
 use std::error::Error;

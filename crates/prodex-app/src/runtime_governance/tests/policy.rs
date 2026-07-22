@@ -81,6 +81,7 @@ pub(super) fn policy_effect(
                 network_zone: NetworkZone::Unknown,
                 authentication_strength: 1,
                 mfa_satisfied: false,
+                reauthentication_satisfied: false,
             },
         },
     )
@@ -118,7 +119,7 @@ fn rejects_non_api_channel_selectors() {
 }
 
 #[test]
-fn serialized_policy_artifact_rejects_unavailable_gateway_evidence() {
+fn serialized_policy_artifact_accepts_verified_authentication_evidence_only() {
     let rule = || RuntimeGovernancePolicyRule {
         id: "unavailable-evidence".to_string(),
         condition: Default::default(),
@@ -136,9 +137,18 @@ fn serialized_policy_artifact_rejects_unavailable_gateway_evidence() {
         )
     };
 
-    let mut unsupported = rule();
-    unsupported.condition.minimum_authentication_strength = Some(2);
-    assert!(compile(unsupported).is_err());
+    let mut supported = rule();
+    supported.condition.minimum_authentication_strength = Some(2);
+    supported.obligations = vec![
+        RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value: 2 },
+        RuntimeGovernancePolicyObligation::RequireMfa,
+        RuntimeGovernancePolicyObligation::RequireReauthentication,
+    ];
+    assert!(compile(supported).is_ok());
+
+    let mut invalid = rule();
+    invalid.condition.minimum_authentication_strength = Some(4);
+    assert!(compile(invalid).is_err());
 
     let mut unsupported = rule();
     unsupported.condition.action = Some(RuntimeGovernancePolicyAction::UseTool);
@@ -148,7 +158,8 @@ fn serialized_policy_artifact_rejects_unavailable_gateway_evidence() {
     unsupported.condition.network_zone = Some(RuntimeGovernancePolicyNetworkZone::Partner);
     assert!(compile(unsupported).is_err());
 
-    let mut unsupported = rule();
-    unsupported.obligations = vec![RuntimeGovernancePolicyObligation::RequireMfa];
-    assert!(compile(unsupported).is_err());
+    let mut invalid = rule();
+    invalid.obligations =
+        vec![RuntimeGovernancePolicyObligation::MinimumAuthenticationStrength { value: 4 }];
+    assert!(compile(invalid).is_err());
 }

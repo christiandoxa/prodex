@@ -713,6 +713,7 @@ mod tests {
             codex_home: PathBuf::from("/tmp/prodex-caveman-test"),
             extra_env: Vec::new(),
             removed_env: vec![OsString::from("CODEX_SANDBOX")],
+            reset_terminal_keyboard_enhancement: false,
         };
 
         clear_rtk_auto_wrap_control_env(&mut child);
@@ -744,6 +745,7 @@ mod tests {
                 ),
             ],
             removed_env: vec![OsString::from("EXISTING_REMOVED_ENV")],
+            reset_terminal_keyboard_enhancement: false,
         };
 
         force_codex_api_key_auth_for_provider_runtime(&mut child);

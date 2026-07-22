@@ -164,9 +164,62 @@ fn data_plane_response_route_requires_post_trace_and_body_limit() {
 }
 
 #[test]
+fn request_headers_are_bounded_before_routing() {
+    let mut too_many = request("/v1/responses");
+    too_many
+        .headers
+        .push(GatewayHttpHeader::new("x-extra", "value"));
+    let error = plan_gateway_http_request(
+        GatewayHttpPolicy {
+            max_header_count: 1,
+            ..GatewayHttpPolicy::production_default()
+        },
+        too_many,
+    )
+    .unwrap_err();
+    assert_eq!(error, GatewayHttpPlanError::HeaderCountExceeded);
+
+    let error = plan_gateway_http_request(
+        GatewayHttpPolicy {
+            max_header_bytes: 64,
+            max_single_header_bytes: 32,
+            ..GatewayHttpPolicy::production_default()
+        },
+        request("/v1/responses"),
+    )
+    .unwrap_err();
+    assert_eq!(error, GatewayHttpPlanError::HeaderFieldBytesExceeded);
+
+    let mut too_large = request("/v1/responses");
+    too_large
+        .headers
+        .push(GatewayHttpHeader::new("x-extra", "x".repeat(20)));
+    let error = plan_gateway_http_request(
+        GatewayHttpPolicy {
+            max_header_bytes: 80,
+            max_single_header_bytes: 70,
+            ..GatewayHttpPolicy::production_default()
+        },
+        too_large,
+    )
+    .unwrap_err();
+    assert_eq!(error, GatewayHttpPlanError::HeaderBytesExceeded);
+    assert_eq!(error.to_string(), "HTTP headers are too large");
+    let response = plan_gateway_http_error_response(&error);
+    assert_eq!(
+        response.status,
+        GatewayHttpErrorStatus::RequestHeaderFieldsTooLarge
+    );
+    assert_eq!(response.code, "request_headers_too_large");
+}
+
+#[test]
 fn execution_plan_captures_bounded_async_adapter_contract() {
     let policy = GatewayHttpPolicy {
         max_body_bytes: 1024,
+        max_header_count: 128,
+        max_header_bytes: 64 * 1024,
+        max_single_header_bytes: 16 * 1024,
         request_timeout_ms: 10_000,
         stream_idle_timeout_ms: 1_500,
         max_concurrent_streams: 64,

@@ -187,6 +187,7 @@ fn gateway_workload_identity_config(
                 .unwrap_or_else(|| "prodex_tenant".to_string()),
             key_prefixes_claim: String::new(),
             authentication_strength: None,
+            reauthentication_max_age_seconds: None,
         },
         subject_claim: workload
             .subject_claim
@@ -248,10 +249,19 @@ fn gateway_sso_oidc_config(
     {
         bail!("gateway.sso.authentication_strength is invalid");
     }
+    if policy
+        .sso
+        .reauthentication_max_age_seconds
+        .is_some_and(|seconds| seconds == 0 || seconds > 86_400)
+    {
+        bail!("gateway.sso.reauthentication_max_age_seconds is invalid");
+    }
     let Some(issuer) = policy.sso.oidc_issuer.as_deref() else {
         if policy.sso.oidc_audience.is_some()
             || policy.sso.oidc_jwks_url.is_some()
             || !policy.sso.oidc_jwks_origin_allowlist.is_empty()
+            || policy.sso.authentication_strength.is_some()
+            || policy.sso.reauthentication_max_age_seconds.is_some()
         {
             bail!("gateway.sso OIDC requires oidc_issuer and oidc_audience");
         }
@@ -308,6 +318,7 @@ fn gateway_sso_oidc_config(
             "prodex_key_prefixes",
         )?,
         authentication_strength: policy.sso.authentication_strength.clone(),
+        reauthentication_max_age_seconds: policy.sso.reauthentication_max_age_seconds,
     }))
 }
 

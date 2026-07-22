@@ -177,6 +177,16 @@ fn runtime_gateway_browser_login(
         .append_pair("nonce", &nonce)
         .append_pair("code_challenge", &code_challenge)
         .append_pair("code_challenge_method", "S256");
+    if let Some(max_age_seconds) = shared
+        .gateway_sso
+        .oidc
+        .as_ref()
+        .and_then(|oidc| oidc.reauthentication_max_age_seconds)
+    {
+        authorization_url
+            .query_pairs_mut()
+            .append_pair("max_age", &max_age_seconds.to_string());
+    }
     Ok(redirect_response(
         302,
         authorization_url.as_str(),

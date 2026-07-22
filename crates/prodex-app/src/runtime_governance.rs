@@ -5,8 +5,8 @@ use prodex_domain::{
     ClassificationRuleSetChecksum, ClassificationRuleSetRevisionId, DataClassification,
     DataModality, GovernanceObligation, GovernancePolicyArtifact, GovernancePolicyRule,
     GovernancePolicyRuleId, GovernedAction, InspectionCoverage, NetworkZone, PolicyEffect,
-    PolicyReasonCode, PolicyRuleCondition, PolicySelector, ProviderTrustTier, RequestRisk,
-    compile_classification_rule_set, compile_governance_policy,
+    PolicyReasonCode, PolicyRuleCondition, PolicySelector, PrincipalKind, ProviderTrustTier,
+    RequestRisk, compile_classification_rule_set, compile_governance_policy,
 };
 use prodex_runtime_policy::{RuntimeGovernanceMode, RuntimePolicyGovernanceSettings};
 use std::collections::BTreeMap;
@@ -330,12 +330,51 @@ fn runtime_builtin_governance_rules(
         vec![
             GovernanceObligation::MinimumProviderTrust(ProviderTrustTier::RestrictedApproved),
             GovernanceObligation::RequireLocalExecution,
-            GovernanceObligation::RequireMfa,
-            GovernanceObligation::RequireReauthentication,
             GovernanceObligation::AuditDetail(AuditDetailLevel::Elevated),
         ],
         "policy.restricted_controls",
     )?);
+    rules.push(runtime_governance_rule(
+        "builtin.restricted-user-authentication",
+        PolicyRuleCondition {
+            principal_kind: Some(PrincipalKind::User),
+            minimum_classification: Some(DataClassification::Restricted),
+            ..runtime_governance_condition()
+        },
+        PolicyEffect::Allow,
+        vec![
+            GovernanceObligation::MinimumAuthenticationStrength(2),
+            GovernanceObligation::RequireMfa,
+            GovernanceObligation::RequireReauthentication,
+        ],
+        "policy.restricted_user_authentication",
+    )?);
+    for (id, principal_kind) in [
+        (
+            "builtin.restricted-service-authentication",
+            PrincipalKind::ServiceAccount,
+        ),
+        (
+            "builtin.restricted-virtual-key-authentication",
+            PrincipalKind::VirtualKey,
+        ),
+        (
+            "builtin.restricted-break-glass-authentication",
+            PrincipalKind::BreakGlass,
+        ),
+    ] {
+        rules.push(runtime_governance_rule(
+            id,
+            PolicyRuleCondition {
+                principal_kind: Some(principal_kind),
+                minimum_classification: Some(DataClassification::Restricted),
+                ..runtime_governance_condition()
+            },
+            PolicyEffect::Allow,
+            vec![GovernanceObligation::MinimumAuthenticationStrength(3)],
+            "policy.restricted_strong_authentication",
+        )?);
+    }
     Ok(rules)
 }
 
@@ -540,6 +579,9 @@ fn runtime_governance_policy_obligation(
         }
         Obligation::SessionAbsoluteTimeoutSeconds { value } => {
             GovernanceObligation::SessionAbsoluteTimeoutSeconds(*value)
+        }
+        Obligation::MinimumAuthenticationStrength { value } => {
+            GovernanceObligation::MinimumAuthenticationStrength(*value)
         }
         Obligation::RequireReauthentication => GovernanceObligation::RequireReauthentication,
         Obligation::RequireMfa => GovernanceObligation::RequireMfa,

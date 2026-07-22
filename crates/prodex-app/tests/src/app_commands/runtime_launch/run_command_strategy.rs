@@ -358,6 +358,7 @@ fn run_strategy_auto_routes_gemini_resume_sessions_to_provider_bridge() {
             OsString::from("keep-me"),
         )],
         removed_env: vec![OsString::from("EXISTING_REMOVED_ENV")],
+        reset_terminal_keyboard_enhancement: false,
     };
     isolate_auto_external_provider_child_env(strategy.auto_external_provider, &mut child);
 

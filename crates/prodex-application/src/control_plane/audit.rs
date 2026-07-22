@@ -199,6 +199,7 @@ pub enum ApplicationControlPlaneAuditCorrelationErrorStatus {
     BadRequest,
     MethodNotAllowed,
     PayloadTooLarge,
+    RequestHeaderFieldsTooLarge,
     ServiceUnavailable,
 }
 
@@ -310,6 +311,9 @@ pub fn plan_application_control_plane_audit_correlation_error_response(
                     }
                     GatewayHttpErrorStatus::PayloadTooLarge => {
                         ApplicationControlPlaneAuditCorrelationErrorStatus::PayloadTooLarge
+                    }
+                    GatewayHttpErrorStatus::RequestHeaderFieldsTooLarge => {
+                        ApplicationControlPlaneAuditCorrelationErrorStatus::RequestHeaderFieldsTooLarge
                     }
                     GatewayHttpErrorStatus::InternalServerError => {
                         ApplicationControlPlaneAuditCorrelationErrorStatus::ServiceUnavailable

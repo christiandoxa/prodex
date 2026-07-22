@@ -221,9 +221,10 @@ catalog contains only two expand migrations. They do not prove this lifecycle.
   unknown commit outcome into duplicate approval consumption, ledger events,
   audit events, or provider invocation.
 
-The checked-in gateway Deployment is a useful three-replica scaffold. The
-single-replica control-plane Deployment and missing exporter/worker workloads
-remain gaps.
+The checked-in gateway and control-plane Deployments are three-replica
+scaffolds with disruption budgets, autoscaling, and zone/node topology spread.
+Dedicated exporter/worker workloads remain deployment-specific when operators
+choose not to run the bounded background workers in those services.
 
 ### PostgreSQL
 

@@ -1334,6 +1334,7 @@ pub(super) fn spawn_runtime_local_rewrite_workers(
                                 })
                         }) {
                         Ok(metric) => {
+                            crate::record_runtime_siem_outbox_health_metric(&metric);
                             let status = metric
                                 .status_label
                                 .as_metric_label()

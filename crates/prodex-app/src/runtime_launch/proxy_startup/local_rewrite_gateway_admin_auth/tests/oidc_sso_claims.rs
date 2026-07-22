@@ -202,6 +202,7 @@ fn oidc_configured_user_claim_must_be_exact_when_present() {
         tenant_claim: "prodex_tenant".to_string(),
         key_prefixes_claim: "prodex_key_prefixes".to_string(),
         authentication_strength: None,
+        reauthentication_max_age_seconds: None,
     };
     let malformed_configured_claim = BTreeMap::from([
         (

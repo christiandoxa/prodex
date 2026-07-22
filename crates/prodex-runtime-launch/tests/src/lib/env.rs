@@ -114,7 +114,7 @@ fn codex_child_plan_disables_keyboard_enhancement_by_default_without_override() 
             "CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT",
             "0",
         )]))),
-        None
+        Some("1".to_string())
     );
 }
 
@@ -136,6 +136,7 @@ fn codex_tui_child_plan_disables_paste_burst_without_explicit_override() {
             OsString::from("disable_paste_burst=true"),
         ]
     );
+    assert!(plan(Vec::new()).reset_terminal_keyboard_enhancement);
     assert_eq!(
         plan(vec![
             OsString::from("-c"),
@@ -157,6 +158,15 @@ fn codex_tui_child_plan_disables_paste_burst_without_explicit_override() {
             OsString::from("exec"),
             OsString::from("summarize concisely"),
         ]
+    );
+    assert!(
+        !codex_child_plan(
+            OsString::from("codex"),
+            PathBuf::from("/tmp/prodex-codex-home"),
+            Vec::new(),
+            "prodex-local",
+        )
+        .reset_terminal_keyboard_enhancement
     );
 }
 

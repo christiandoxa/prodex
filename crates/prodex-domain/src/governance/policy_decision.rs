@@ -144,6 +144,7 @@ pub struct EnvironmentContext {
     pub network_zone: NetworkZone,
     pub authentication_strength: u8,
     pub mfa_satisfied: bool,
+    pub reauthentication_satisfied: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -342,6 +343,7 @@ pub enum GovernanceObligation {
     RequireResponseInspection,
     SessionIdleTimeoutSeconds(u32),
     SessionAbsoluteTimeoutSeconds(u32),
+    MinimumAuthenticationStrength(u8),
     RequireReauthentication,
     RequireMfa,
     AuditDetail(AuditDetailLevel),
@@ -385,6 +387,7 @@ fn policy_obligation_safe_debug(obligation: &GovernanceObligation) -> &'static s
         GovernanceObligation::SessionAbsoluteTimeoutSeconds(_) => {
             "session_absolute_timeout_seconds"
         }
+        GovernanceObligation::MinimumAuthenticationStrength(_) => "minimum_authentication_strength",
         GovernanceObligation::RequireReauthentication => "require_reauthentication",
         GovernanceObligation::RequireMfa => "require_mfa",
         GovernanceObligation::AuditDetail(_) => "audit_detail",
@@ -736,6 +739,7 @@ fn governance_obligation_bound_is_invalid(obligation: &GovernanceObligation) -> 
             | GovernanceObligation::MaxContextTokens(0)
             | GovernanceObligation::SessionIdleTimeoutSeconds(0)
             | GovernanceObligation::SessionAbsoluteTimeoutSeconds(0)
+            | GovernanceObligation::MinimumAuthenticationStrength(0)
     )
 }
 

@@ -75,6 +75,7 @@ pub enum ApplicationObligationViolation {
     SessionRevoked,
     SessionIdleTimeout,
     SessionAbsoluteTimeout,
+    AuthenticationStrengthRequired,
     ReauthenticationRequired,
     MfaRequired,
 }
@@ -98,6 +99,7 @@ impl ApplicationObligationViolation {
             Self::SessionRevoked => "session_revoked",
             Self::SessionIdleTimeout => "session_idle_timeout",
             Self::SessionAbsoluteTimeout => "session_absolute_timeout",
+            Self::AuthenticationStrengthRequired => "authentication_strength_required",
             Self::ReauthenticationRequired => "reauthentication_required",
             Self::MfaRequired => "mfa_required",
         }
@@ -215,7 +217,14 @@ pub fn plan_application_obligation_execution(
             {
                 violations.push(ApplicationObligationViolation::SessionAbsoluteTimeout);
             }
-            GovernanceObligation::RequireReauthentication => {
+            GovernanceObligation::MinimumAuthenticationStrength(minimum)
+                if context.environment.authentication_strength < *minimum =>
+            {
+                violations.push(ApplicationObligationViolation::AuthenticationStrengthRequired);
+            }
+            GovernanceObligation::RequireReauthentication
+                if !context.environment.reauthentication_satisfied =>
+            {
                 violations.push(ApplicationObligationViolation::ReauthenticationRequired);
             }
             GovernanceObligation::RequireMfa

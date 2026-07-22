@@ -78,6 +78,9 @@ pub enum GatewayHttpPlanError {
         max: usize,
         actual: usize,
     },
+    HeaderCountExceeded,
+    HeaderBytesExceeded,
+    HeaderFieldBytesExceeded,
     MethodNotAllowed {
         route: GatewayHttpRouteKind,
         method: GatewayHttpMethod,
@@ -98,6 +101,9 @@ impl fmt::Display for GatewayHttpPlanError {
             Self::Policy(err) => err.fmt(f),
             Self::InvalidRequestTarget(err) => err.fmt(f),
             Self::BodyTooLarge { .. } => write!(f, "HTTP body is too large"),
+            Self::HeaderCountExceeded
+            | Self::HeaderBytesExceeded
+            | Self::HeaderFieldBytesExceeded => write!(f, "HTTP headers are too large"),
             Self::MethodNotAllowed { .. } => write!(f, "HTTP method is not allowed"),
             Self::MissingTraceContext => write!(f, "required request metadata is missing"),
             Self::DuplicateTraceContext
@@ -118,6 +124,7 @@ pub enum GatewayHttpErrorStatus {
     BadRequest,
     MethodNotAllowed,
     PayloadTooLarge,
+    RequestHeaderFieldsTooLarge,
     InternalServerError,
 }
 
@@ -141,6 +148,13 @@ pub fn plan_gateway_http_error_response(
             status: GatewayHttpErrorStatus::PayloadTooLarge,
             code: "request_body_too_large",
             message: "request body is too large",
+        },
+        GatewayHttpPlanError::HeaderCountExceeded
+        | GatewayHttpPlanError::HeaderBytesExceeded
+        | GatewayHttpPlanError::HeaderFieldBytesExceeded => GatewayHttpErrorResponsePlan {
+            status: GatewayHttpErrorStatus::RequestHeaderFieldsTooLarge,
+            code: "request_headers_too_large",
+            message: "request headers are too large",
         },
         GatewayHttpPlanError::MethodNotAllowed { .. } => GatewayHttpErrorResponsePlan {
             status: GatewayHttpErrorStatus::MethodNotAllowed,
@@ -202,6 +216,7 @@ pub fn plan_gateway_http_request(
     request: GatewayHttpRequestMeta,
 ) -> Result<GatewayHttpPlan, GatewayHttpPlanError> {
     policy.validate().map_err(GatewayHttpPlanError::Policy)?;
+    validate_header_limits(policy, &request.headers)?;
     let target = CanonicalRequestTarget::parse(request.path)
         .map_err(GatewayHttpPlanError::InvalidRequestTarget)?;
     if request.body_len > policy.max_body_bytes {
@@ -236,6 +251,33 @@ pub fn plan_gateway_http_request(
         preserved_upstream_headers,
         stripped_headers,
     })
+}
+
+fn validate_header_limits(
+    policy: GatewayHttpPolicy,
+    headers: &[GatewayHttpHeader],
+) -> Result<(), GatewayHttpPlanError> {
+    if headers.len() > policy.max_header_count {
+        return Err(GatewayHttpPlanError::HeaderCountExceeded);
+    }
+    let mut total = 0_usize;
+    for header in headers {
+        let bytes = header
+            .name
+            .len()
+            .checked_add(header.value.len())
+            .ok_or(GatewayHttpPlanError::HeaderBytesExceeded)?;
+        if bytes > policy.max_single_header_bytes {
+            return Err(GatewayHttpPlanError::HeaderFieldBytesExceeded);
+        }
+        total = total
+            .checked_add(bytes)
+            .ok_or(GatewayHttpPlanError::HeaderBytesExceeded)?;
+        if total > policy.max_header_bytes {
+            return Err(GatewayHttpPlanError::HeaderBytesExceeded);
+        }
+    }
+    Ok(())
 }
 
 pub fn plan_gateway_http_execution(

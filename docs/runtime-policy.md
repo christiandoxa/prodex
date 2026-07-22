@@ -123,7 +123,8 @@ hash instead of the source path.
 | `gateway.sso.default_role` | none | `viewer` | Compatibility setting retained for existing policy files. Missing or invalid role claims resolve to `viewer`; configure an explicit SSO/OIDC or SCIM admin role instead. |
 | `gateway.sso.remote_human` | none | `false` | Declare remote human administration. When enabled, the policy requires the control-plane OIDC scope and complete browser-edge settings. |
 | `gateway.sso.required_scope` | none | `control_plane` for human OIDC | Exact credential scope for human OIDC. Values other than `control_plane` fail closed. |
-| `gateway.sso.authentication_strength` | none | empty | Optional required authentication strength: `mfa` or `phishing_resistant`. |
+| `gateway.sso.authentication_strength` | none | empty | Optional exact required OIDC `acr`: `mfa` or `phishing_resistant`. Verified values become trusted governance MFA/authentication-strength evidence. |
+| `gateway.sso.reauthentication_max_age_seconds` | none | empty | Optional fresh-authentication window from 1 through 86400 seconds. Tokens must carry a valid `auth_time` within this window; browser login sends the matching OIDC `max_age`. Bank mode requires at most 900 seconds. |
 | `gateway.sso.browser_flow` | none | `false` | Enable OIDC Authorization Code browser login at `/v1/prodex/gateway/auth/login`, callback, logout, and signed POST-only back-channel logout routes. State/session records are bounded in-process for local mode and shared through coordination Redis in the accepted multi-replica topology; cookies are Secure, HttpOnly, and SameSite. |
 | `gateway.sso.pkce_method` | none | required with browser flow | Must be exact `S256`; weaker or missing PKCE fails closed. |
 | `gateway.sso.oidc_authorization_url` / `oidc_token_url` | none | required with browser flow | Exact issuer-origin HTTPS endpoints. Redirects, userinfo, query/fragment policy violations, and unsafe origins are rejected. |
@@ -384,12 +385,12 @@ defaulting to text. Provider eligibility is expressed through typed obligations
 and the separately activated provider registry/routing artifacts, not free-form
 policy attributes.
 
-Gateway publication also rejects selectors requiring evidence the current data
-plane cannot verify: authentication strength above 1, affirmative session or
-environment MFA, partner network zone, `use_tool`, and `mutate_control_plane`.
-`require_reauthentication` and `require_mfa` obligations are rejected instead of
-creating permanently unsatisfied policies. Add them only after a trusted
-credential/session flow supplies and refreshes that evidence.
+Gateway publication accepts authentication strength from verified OIDC `acr` or
+workload identity, MFA from verified human OIDC, and reauthentication only from
+a bounded OIDC `auth_time` window. Missing evidence fails the matching selector
+or obligation closed. Strength values outside 1 through 3, partner network zone,
+`use_tool`, and `mutate_control_plane` remain rejected because the current data
+plane cannot produce trustworthy evidence for them.
 
 Effects are `allow`, `require_approval`, and `deny`. A deny rule cannot carry
 obligations. Typed obligation kinds are `mask_finding`,
@@ -399,6 +400,7 @@ obligations. Typed obligation kinds are `mask_finding`,
 `max_input_tokens`, `max_output_tokens`, `max_context_tokens`,
 `require_response_inspection`, `session_idle_timeout_seconds`,
 `session_absolute_timeout_seconds`, `audit_detail`, `require_human_approval`,
+`minimum_authentication_strength`, `require_reauthentication`, `require_mfa`,
 `retention_seconds`, and `deny_fallback_outside_eligibility`. Rules are limited
 to 256 and obligations to 64 per rule. Unknown fields, missing required rule
 fields, invalid tokens/selectors, zero positive bounds, and over-limit artifacts

@@ -1,10 +1,11 @@
 use std::error::Error;
 use std::fmt;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use prodex_authn::{
-    VerifiedCredentialAuthenticationError, VerifiedCredentialAuthenticationRequest,
-    VerifiedCredentialEvidence, authenticate_verified_credential,
+    VerifiedAuthenticationAssurance, VerifiedCredentialAuthenticationError,
+    VerifiedCredentialAuthenticationRequest, VerifiedCredentialEvidence,
+    authenticate_verified_credential,
 };
 use prodex_authz::{
     BoundaryAuthorizationError, BoundaryKind, authorize_boundary_role, authorize_boundary_scope,
@@ -39,6 +40,16 @@ impl ApplicationRequestDeadline {
 
     pub fn is_expired_at(self, now: Instant) -> bool {
         now >= self.0
+    }
+
+    pub fn remaining_at(self, now: Instant) -> Option<Duration> {
+        self.0
+            .checked_duration_since(now)
+            .filter(|remaining| !remaining.is_zero())
+    }
+
+    pub fn remaining(self) -> Option<Duration> {
+        self.remaining_at(Instant::now())
     }
 }
 
@@ -204,6 +215,7 @@ impl fmt::Debug for ApplicationRequestContext<'_> {
 pub struct ApplicationAuthenticatedRequestContext<'a> {
     request: ApplicationRequestContext<'a>,
     principal: Option<Principal>,
+    assurance: VerifiedAuthenticationAssurance,
 }
 
 impl<'a> ApplicationAuthenticatedRequestContext<'a> {
@@ -214,6 +226,10 @@ impl<'a> ApplicationAuthenticatedRequestContext<'a> {
     pub fn principal(&self) -> Option<&Principal> {
         self.principal.as_ref()
     }
+
+    pub const fn assurance(&self) -> VerifiedAuthenticationAssurance {
+        self.assurance
+    }
 }
 
 impl fmt::Debug for ApplicationAuthenticatedRequestContext<'_> {
@@ -221,6 +237,7 @@ impl fmt::Debug for ApplicationAuthenticatedRequestContext<'_> {
         f.debug_struct("ApplicationAuthenticatedRequestContext")
             .field("request", &self.request)
             .field("principal", &self.principal.as_ref().map(|_| "<redacted>"))
+            .field("assurance", &self.assurance)
             .finish()
     }
 }
@@ -240,6 +257,10 @@ impl<'a> ApplicationAuthorizedRequestContext<'a> {
 
     pub fn principal(&self) -> Option<&Principal> {
         self.authenticated.principal.as_ref()
+    }
+
+    pub const fn assurance(&self) -> VerifiedAuthenticationAssurance {
+        self.authenticated.assurance
     }
 
     pub const fn tenant_context(&self) -> Option<TenantContext> {
@@ -373,12 +394,20 @@ pub fn plan_application_request_authentication_from_evidence(
     evidence: Option<VerifiedCredentialEvidence>,
     anonymous_allowed: bool,
 ) -> Result<ApplicationAuthenticatedRequestContext<'_>, VerifiedCredentialAuthenticationError> {
+    let assurance = evidence
+        .as_ref()
+        .map(VerifiedCredentialEvidence::assurance)
+        .unwrap_or_default();
     let principal = authenticate_verified_credential(VerifiedCredentialAuthenticationRequest {
         evidence,
         required_scope: request.required_credential_scope,
         anonymous_allowed,
     })?;
-    Ok(ApplicationAuthenticatedRequestContext { request, principal })
+    Ok(ApplicationAuthenticatedRequestContext {
+        request,
+        principal,
+        assurance,
+    })
 }
 
 pub fn plan_application_data_plane_authorization(
@@ -518,6 +547,16 @@ mod tests {
     }
 
     #[test]
+    fn request_deadline_exposes_only_positive_remaining_budget() {
+        let now = Instant::now();
+        let deadline = ApplicationRequestDeadline::at(now + Duration::from_millis(50));
+
+        assert_eq!(deadline.remaining_at(now), Some(Duration::from_millis(50)));
+        assert_eq!(deadline.remaining_at(now + Duration::from_millis(50)), None);
+        assert_eq!(deadline.remaining_at(now + Duration::from_millis(51)), None);
+    }
+
+    #[test]
     fn canonical_context_and_verified_evidence_are_one_scope_gate() {
         let data_target = CanonicalRequestTarget::parse("/v1/responses?stream=true").unwrap();
         let data = request_context(&data_target);
@@ -532,6 +571,10 @@ mod tests {
             false,
         )
         .unwrap();
+        assert_eq!(
+            authenticated.assurance(),
+            VerifiedAuthenticationAssurance::single_factor(),
+        );
         assert!(std::ptr::eq(authenticated.request().target(), &data_target,));
         assert!(
             plan_application_request_authentication_from_evidence(

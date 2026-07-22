@@ -190,6 +190,7 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
             network_zone: NetworkZone::TrustedInternal,
             authentication_strength: 3,
             mfa_satisfied: true,
+            reauthentication_satisfied: true,
         },
     };
     c.bench_function("governance_policy_representative", |b| {
@@ -252,6 +253,7 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
                         network_zone: NetworkZone::TrustedInternal,
                         authentication_strength: 3,
                         mfa_satisfied: true,
+                        reauthentication_satisfied: true,
                     },
                     response_transport: ApplicationResponseTransport::ServerSentEvents,
                     response_inspection_coverage: InspectionCoverage::Full,
@@ -324,6 +326,7 @@ fn benchmark_governance_hot_paths(c: &mut Criterion) {
                         network_zone: NetworkZone::TrustedInternal,
                         authentication_strength: 3,
                         mfa_satisfied: true,
+                        reauthentication_satisfied: true,
                     },
                     response_transport: ApplicationResponseTransport::ServerSentEvents,
                     response_inspection_coverage: InspectionCoverage::Full,

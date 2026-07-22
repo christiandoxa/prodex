@@ -606,6 +606,9 @@ fn application_control_plane_audit_correlation_status_label(
             "method_not_allowed"
         }
         ApplicationControlPlaneAuditCorrelationErrorStatus::PayloadTooLarge => "payload_too_large",
+        ApplicationControlPlaneAuditCorrelationErrorStatus::RequestHeaderFieldsTooLarge => {
+            "request_header_fields_too_large"
+        }
         ApplicationControlPlaneAuditCorrelationErrorStatus::ServiceUnavailable => {
             "service_unavailable"
         }

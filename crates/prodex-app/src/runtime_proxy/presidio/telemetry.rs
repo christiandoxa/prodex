@@ -116,6 +116,7 @@ pub(super) fn runtime_emit_inspection_metric(
     ) else {
         return;
     };
+    crate::record_runtime_inspection_metric(&metric);
     if let Ok(message) = runtime_inspection_metric_message(&metric) {
         runtime_proxy_log(shared, message);
     }

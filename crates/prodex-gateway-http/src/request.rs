@@ -64,6 +64,9 @@ impl fmt::Debug for GatewayHttpRequestMeta {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GatewayHttpPolicy {
     pub max_body_bytes: usize,
+    pub max_header_count: usize,
+    pub max_header_bytes: usize,
+    pub max_single_header_bytes: usize,
     pub request_timeout_ms: u64,
     pub stream_idle_timeout_ms: u64,
     pub max_concurrent_streams: u32,
@@ -75,6 +78,9 @@ impl GatewayHttpPolicy {
     pub const fn production_default() -> Self {
         Self {
             max_body_bytes: 16 * 1024 * 1024,
+            max_header_count: 128,
+            max_header_bytes: 64 * 1024,
+            max_single_header_bytes: 16 * 1024,
             request_timeout_ms: 120_000,
             stream_idle_timeout_ms: 30_000,
             max_concurrent_streams: 1_024,
@@ -86,6 +92,15 @@ impl GatewayHttpPolicy {
     pub fn validate(self) -> Result<(), GatewayHttpPolicyError> {
         if self.max_body_bytes == 0 {
             return Err(GatewayHttpPolicyError::ZeroBodyLimit);
+        }
+        if self.max_header_count == 0
+            || self.max_header_bytes == 0
+            || self.max_single_header_bytes == 0
+        {
+            return Err(GatewayHttpPolicyError::ZeroHeaderLimit);
+        }
+        if self.max_single_header_bytes > self.max_header_bytes {
+            return Err(GatewayHttpPolicyError::SingleHeaderLimitExceedsTotal);
         }
         if self.request_timeout_ms == 0 || self.stream_idle_timeout_ms == 0 {
             return Err(GatewayHttpPolicyError::ZeroTimeout);
@@ -106,6 +121,8 @@ impl GatewayHttpPolicy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GatewayHttpPolicyError {
     ZeroBodyLimit,
+    ZeroHeaderLimit,
+    SingleHeaderLimitExceedsTotal,
     ZeroTimeout,
     StreamTimeoutExceedsRequestTimeout,
     ZeroConcurrencyLimit,
@@ -116,6 +133,8 @@ impl fmt::Display for GatewayHttpPolicyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroBodyLimit
+            | Self::ZeroHeaderLimit
+            | Self::SingleHeaderLimitExceedsTotal
             | Self::ZeroTimeout
             | Self::StreamTimeoutExceedsRequestTimeout
             | Self::ZeroConcurrencyLimit
