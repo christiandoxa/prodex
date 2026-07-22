@@ -2,6 +2,12 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.336.0 - 2026-07-22
+
+### Misc
+
+- Harden provider launches and session recovery (`5d6a757`)
+
 ## 0.335.0 - 2026-07-21
 
 ### Misc
@@ -85,9 +91,3 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Bump debian from `60eac75` to `7b140f3` (#35) (`7c093ba`)
 - Bump rust from `7d0723d` to `8fa55b2` (#34) (`1fe6689`)
 - Bump the fuzz-cargo group in /fuzz with 2 updates (#32) (`db8aa3a`)
-
-## 0.324.0 - 2026-07-20
-
-### Runtime
-
-- Complete audited runtime and operations features (`9c96750`)
