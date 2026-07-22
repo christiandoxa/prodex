@@ -5,16 +5,18 @@ use prodex_domain::{
     ClassificationRuleSetChecksum, ClassificationRuleSetRevisionId, DataClassification,
     DataModality, GovernanceObligation, GovernancePolicyArtifact, GovernancePolicyRule,
     GovernancePolicyRuleId, GovernedAction, InspectionCoverage, NetworkZone, PolicyEffect,
-    PolicyReasonCode, PolicyRuleCondition, PolicySelector, PrincipalKind, ProviderTrustTier,
-    RequestRisk, compile_classification_rule_set, compile_governance_policy,
+    PolicyReasonCode, PolicyRuleCondition, PolicySelector, ProviderTrustTier, RequestRisk,
+    compile_classification_rule_set, compile_governance_policy,
 };
 use prodex_runtime_policy::{RuntimeGovernanceMode, RuntimePolicyGovernanceSettings};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
+mod builtin_authentication;
 mod runtime_governance_selectors;
 mod runtime_governance_validation;
+use builtin_authentication::runtime_builtin_authentication_rules;
 use runtime_governance_selectors::runtime_governance_principal_selectors;
 use runtime_governance_validation::validate_runtime_governance_supported_evidence;
 
@@ -334,47 +336,7 @@ fn runtime_builtin_governance_rules(
         ],
         "policy.restricted_controls",
     )?);
-    rules.push(runtime_governance_rule(
-        "builtin.restricted-user-authentication",
-        PolicyRuleCondition {
-            principal_kind: Some(PrincipalKind::User),
-            minimum_classification: Some(DataClassification::Restricted),
-            ..runtime_governance_condition()
-        },
-        PolicyEffect::Allow,
-        vec![
-            GovernanceObligation::MinimumAuthenticationStrength(2),
-            GovernanceObligation::RequireMfa,
-            GovernanceObligation::RequireReauthentication,
-        ],
-        "policy.restricted_user_authentication",
-    )?);
-    for (id, principal_kind) in [
-        (
-            "builtin.restricted-service-authentication",
-            PrincipalKind::ServiceAccount,
-        ),
-        (
-            "builtin.restricted-virtual-key-authentication",
-            PrincipalKind::VirtualKey,
-        ),
-        (
-            "builtin.restricted-break-glass-authentication",
-            PrincipalKind::BreakGlass,
-        ),
-    ] {
-        rules.push(runtime_governance_rule(
-            id,
-            PolicyRuleCondition {
-                principal_kind: Some(principal_kind),
-                minimum_classification: Some(DataClassification::Restricted),
-                ..runtime_governance_condition()
-            },
-            PolicyEffect::Allow,
-            vec![GovernanceObligation::MinimumAuthenticationStrength(3)],
-            "policy.restricted_strong_authentication",
-        )?);
-    }
+    rules.extend(runtime_builtin_authentication_rules()?);
     Ok(rules)
 }
 
