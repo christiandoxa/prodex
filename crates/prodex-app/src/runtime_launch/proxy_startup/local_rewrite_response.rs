@@ -8,7 +8,8 @@ use super::local_rewrite_response_guardrails::{
     RuntimeGatewayGuardrailStreamPlan, runtime_gateway_guardrail_stream_body,
 };
 use super::local_rewrite_response_spend::{
-    emit_runtime_gateway_response_spend_event_for_body, runtime_gateway_spend_stream_body,
+    RuntimeGatewaySpendTermination, emit_runtime_gateway_response_spend_event_for_body,
+    runtime_gateway_spend_stream_body,
 };
 use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, RuntimeHeapTrimmedBufferedResponseParts,
@@ -39,6 +40,7 @@ pub(super) struct RuntimeGatewayResponseGovernance {
     pub(super) obligations: Option<prodex_application::ApplicationResponseObligationPlan>,
     pub(super) audit_context:
         Option<super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
+    pub(super) spend_termination: RuntimeGatewaySpendTermination,
 }
 
 fn runtime_local_rewrite_invalid_response(
@@ -337,6 +339,7 @@ pub(super) fn respond_runtime_local_rewrite_stream(
         shared,
         governance.obligations,
         governance.audit_context,
+        governance.spend_termination,
     ) {
         Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(body)) => {
             streaming.body = body;
@@ -384,6 +387,7 @@ pub(super) fn respond_runtime_local_rewrite_proxy_request(
                 streaming_response.status,
                 captured,
                 shared,
+                governance.spend_termination.clone(),
             );
             let streaming = RuntimeStreamingResponse {
                 status: streaming_response.status,

@@ -11,6 +11,10 @@ use prodex_domain::ReservationReconciliationReason;
 use prodex_provider_core::{ProviderModelCost, estimate_text_tokens, extract_usage_tokens};
 use prodex_provider_spi::ProviderRetryStage;
 use std::io::Read;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Instant;
 
 const RUNTIME_GATEWAY_SPEND_STREAM_CAPTURE_MAX_BYTES: usize = 2 * 1024 * 1024;
@@ -29,6 +33,30 @@ impl RuntimeGatewayStreamTermination {
             Self::Interrupted => ReservationReconciliationReason::StreamInterrupted,
             Self::Cancelled => ReservationReconciliationReason::Cancelled,
         }
+    }
+}
+
+#[derive(Clone, Default)]
+pub(super) struct RuntimeGatewaySpendTermination(Arc<AtomicBool>);
+
+impl RuntimeGatewaySpendTermination {
+    pub(super) fn mark_policy_interrupted(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn policy_interrupted(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+fn runtime_gateway_stream_drop_termination(
+    policy_interrupted: bool,
+    committed: bool,
+) -> RuntimeGatewayStreamTermination {
+    if policy_interrupted || !committed {
+        RuntimeGatewayStreamTermination::Interrupted
+    } else {
+        RuntimeGatewayStreamTermination::Cancelled
     }
 }
 
@@ -105,6 +133,7 @@ pub(super) fn runtime_gateway_spend_stream_body(
     status: u16,
     captured: &RuntimeProxyRequest,
     shared: &RuntimeLocalRewriteProxyShared,
+    termination: RuntimeGatewaySpendTermination,
 ) -> Box<dyn Read + Send> {
     let provider_kind = shared.provider.bridge_kind();
     let model = runtime_provider_model_from_body(&captured.body);
@@ -132,6 +161,7 @@ pub(super) fn runtime_gateway_spend_stream_body(
         cost,
         emitted: false,
         stream_committed: false,
+        termination,
     })
 }
 
@@ -152,6 +182,7 @@ struct RuntimeGatewaySpendStreamReader {
     cost: ProviderModelCost,
     emitted: bool,
     stream_committed: bool,
+    termination: RuntimeGatewaySpendTermination,
 }
 
 impl RuntimeGatewaySpendStreamReader {
@@ -246,13 +277,13 @@ impl Drop for RuntimeGatewaySpendStreamReader {
         if self.emitted {
             return;
         }
-        let reason = if runtime_gateway_application_provider_stage_is_committed(
-            ProviderRetryStage::AfterCancellation,
-        ) {
-            RuntimeGatewayStreamTermination::Cancelled.reconciliation_reason()
-        } else {
-            RuntimeGatewayStreamTermination::Interrupted.reconciliation_reason()
-        };
+        let reason = runtime_gateway_stream_drop_termination(
+            self.termination.policy_interrupted(),
+            runtime_gateway_application_provider_stage_is_committed(
+                ProviderRetryStage::AfterCancellation,
+            ),
+        )
+        .reconciliation_reason();
         self.emit_once(reason);
     }
 }
@@ -274,6 +305,23 @@ mod tests {
         assert_eq!(
             RuntimeGatewayStreamTermination::Cancelled.reconciliation_reason(),
             ReservationReconciliationReason::Cancelled,
+        );
+    }
+
+    #[test]
+    fn policy_interruption_overrides_drop_cancellation() {
+        let termination = RuntimeGatewaySpendTermination::default();
+        assert!(!termination.policy_interrupted());
+        termination.mark_policy_interrupted();
+        assert!(termination.policy_interrupted());
+        assert!(termination.clone().policy_interrupted());
+        assert_eq!(
+            runtime_gateway_stream_drop_termination(true, true),
+            RuntimeGatewayStreamTermination::Interrupted
+        );
+        assert_eq!(
+            runtime_gateway_stream_drop_termination(false, true),
+            RuntimeGatewayStreamTermination::Cancelled
         );
     }
 }

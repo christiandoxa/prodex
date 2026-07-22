@@ -272,6 +272,38 @@ fn validate_governance_policy_rules(
                 path.display()
             );
         }
+        if rule
+            .condition
+            .minimum_authentication_strength
+            .is_some_and(|strength| strength > 1)
+            || rule.condition.environment_mfa_satisfied == Some(true)
+            || rule.condition.session_mfa_satisfied == Some(true)
+        {
+            bail!(
+                "gateway governance policy requires authentication evidence that the data plane cannot verify in {}",
+                path.display()
+            );
+        }
+        if matches!(
+            rule.condition.action,
+            Some(
+                crate::types::RuntimeGovernancePolicyAction::UseTool
+                    | crate::types::RuntimeGovernancePolicyAction::MutateControlPlane
+            )
+        ) {
+            bail!(
+                "gateway governance policy action selector is not produced by the data plane in {}",
+                path.display()
+            );
+        }
+        if rule.condition.network_zone
+            == Some(crate::types::RuntimeGovernancePolicyNetworkZone::Partner)
+        {
+            bail!(
+                "gateway governance partner network selector requires unavailable trusted zone evidence in {}",
+                path.display()
+            );
+        }
         for selector in [
             rule.condition.team_id.as_deref(),
             rule.condition.project_id.as_deref(),
@@ -303,6 +335,16 @@ fn validate_governance_policy_rules(
             );
         }
         for obligation in &rule.obligations {
+            if matches!(
+                obligation,
+                RuntimeGovernancePolicyObligation::RequireReauthentication
+                    | RuntimeGovernancePolicyObligation::RequireMfa
+            ) {
+                bail!(
+                    "gateway governance policy obligation requires unavailable reauthentication or MFA evidence in {}",
+                    path.display()
+                );
+            }
             let selector = match obligation {
                 RuntimeGovernancePolicyObligation::AllowProvider { selector }
                 | RuntimeGovernancePolicyObligation::DenyProvider { selector }
@@ -564,6 +606,9 @@ fn validate_policy_version(policy: &RuntimePolicyFile, path: &Path) -> Result<()
 #[cfg(test)]
 #[path = "../tests/src/validate_adaptive.rs"]
 mod adaptive_tests;
+#[cfg(test)]
+#[path = "../tests/src/validate_gateway_evidence.rs"]
+mod gateway_evidence_tests;
 #[cfg(test)]
 #[path = "../tests/src/validate.rs"]
 mod tests;

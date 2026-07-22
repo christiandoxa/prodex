@@ -38,6 +38,9 @@ pub use self::types::{
     RuntimePolicySecretsFile, RuntimePolicySecretsSettings, RuntimePolicyServiceMode,
     RuntimePolicySummary,
 };
+
+pub const MAX_GATEWAY_GUARDRAIL_KEYWORDS: usize = 128;
+pub const MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES: usize = 4 * 1024;
 pub use self::validate::{
     MAX_GOVERNANCE_AUTHORITY_TENANTS, RuntimePolicyValidationErrors, RuntimePolicyValidationIssue,
     RuntimePolicyValidationSection, validate_runtime_governance_settings,

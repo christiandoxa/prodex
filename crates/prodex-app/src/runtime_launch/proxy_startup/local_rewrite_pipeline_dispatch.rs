@@ -163,6 +163,7 @@ pub(super) fn runtime_local_rewrite_dispatch_provider(
                     )
                 },
             ),
+            spend_termination: Default::default(),
         };
     let candidate_count = request
         .application_admission

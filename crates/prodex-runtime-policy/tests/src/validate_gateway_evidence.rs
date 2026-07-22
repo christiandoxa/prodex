@@ -1,0 +1,79 @@
+use super::validate_runtime_policy_file;
+use crate::{
+    MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES, MAX_GATEWAY_GUARDRAIL_KEYWORDS,
+    RuntimeGovernancePolicyAction, RuntimeGovernancePolicyNetworkZone,
+    RuntimeGovernancePolicyObligation, RuntimePolicyFile,
+};
+use std::path::Path;
+
+fn parse_policy(input: &str) -> RuntimePolicyFile {
+    toml::from_str(input).expect("policy TOML should parse")
+}
+
+#[test]
+fn governance_policy_rejects_unavailable_gateway_evidence() {
+    let base = parse_policy(
+        r#"
+version = 1
+[[governance.policy_rules]]
+id = "allow.api"
+effect = "allow"
+obligations = []
+reason_code = "policy.allow"
+[governance.policy_rules.condition]
+"#,
+    );
+
+    let mut policy = base.clone();
+    policy.governance.policy_rules[0]
+        .condition
+        .minimum_authentication_strength = Some(2);
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("unverified authentication strength must be rejected");
+    assert!(error.to_string().contains("authentication evidence"));
+
+    let mut policy = base.clone();
+    policy.governance.policy_rules[0].condition.action =
+        Some(RuntimeGovernancePolicyAction::UseTool);
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("unproduced action must be rejected");
+    assert!(error.to_string().contains("action selector"));
+
+    let mut policy = base.clone();
+    policy.governance.policy_rules[0].condition.network_zone =
+        Some(RuntimeGovernancePolicyNetworkZone::Partner);
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("unverified partner zone must be rejected");
+    assert!(error.to_string().contains("partner network selector"));
+
+    let mut policy = base;
+    policy.governance.policy_rules[0].obligations =
+        vec![RuntimeGovernancePolicyObligation::RequireMfa];
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("unfulfillable MFA obligation must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("unavailable reauthentication or MFA")
+    );
+}
+
+#[test]
+fn guardrail_keywords_are_bounded() {
+    let mut policy = parse_policy("version = 1");
+    policy.gateway.guardrails.blocked_output_keywords =
+        vec!["x".repeat(MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES + 1)];
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("oversized output keyword should be rejected");
+    assert!(error.to_string().contains("must be at most"), "{error:#}");
+
+    let mut policy = parse_policy("version = 1");
+    policy.gateway.guardrails.blocked_keywords =
+        vec!["x".to_string(); MAX_GATEWAY_GUARDRAIL_KEYWORDS + 1];
+    let error = validate_runtime_policy_file(&policy, Path::new("policy.toml"))
+        .expect_err("unbounded keyword list should be rejected");
+    assert!(
+        error.to_string().contains("must contain at most"),
+        "{error:#}"
+    );
+}
