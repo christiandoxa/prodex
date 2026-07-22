@@ -20,7 +20,7 @@ pub use resolve_error::*;
 
 use repair_transaction::SessionRepairTransaction;
 use session_file::{read_session_file_to_string, visit_session_lines};
-use state_db_index::collect_state_db_rollout_paths;
+use state_db_index::{collect_state_db_rollout_paths, repair_state_db_rollout_path};
 
 const SESSIONS_DIR: &str = "sessions";
 const ARCHIVED_SESSIONS_DIR: &str = "archived_sessions";
@@ -279,12 +279,14 @@ pub fn repair_resume_session_metadata_prefix(
     }
     for candidate in exact_paths {
         let repair_selector = candidate.resolved_session_id.as_deref().unwrap_or(selector);
-        if repair_session_file_metadata_prefix(
+        let repaired = repair_session_file_metadata_prefix(
             shared_codex_root,
             &candidate.path,
             repair_selector,
             true,
-        )? {
+        )?;
+        repair_state_db_rollout_path(shared_codex_root, &candidate.path)?;
+        if repaired {
             return Ok(Some(candidate.path));
         }
     }
@@ -312,8 +314,8 @@ pub fn repair_resume_session_metadata_prefix(
             });
         }
     }
-    if prefix_paths.len() == 1
-        && repair_session_file_metadata_prefix(
+    if prefix_paths.len() == 1 {
+        let repaired = repair_session_file_metadata_prefix(
             shared_codex_root,
             &prefix_paths[0].path,
             prefix_paths[0]
@@ -321,9 +323,11 @@ pub fn repair_resume_session_metadata_prefix(
                 .as_deref()
                 .unwrap_or(selector),
             true,
-        )?
-    {
-        return Ok(Some(prefix_paths[0].path.clone()));
+        )?;
+        repair_state_db_rollout_path(shared_codex_root, &prefix_paths[0].path)?;
+        if repaired {
+            return Ok(Some(prefix_paths[0].path.clone()));
+        }
     }
 
     Ok(None)
@@ -500,8 +504,18 @@ fn collect_resume_repair_candidate_paths(
 ) -> Result<Vec<SessionRepairCandidate>> {
     let mut paths = Vec::new();
     let mut session_paths = Vec::new();
-    collect_session_paths(&root.join(SESSIONS_DIR), &mut session_paths)?;
-    collect_session_paths(&root.join(ARCHIVED_SESSIONS_DIR), &mut session_paths)?;
+    let selector_is_full = full_codex_session_id(selector).is_some();
+    if selector_is_full {
+        collect_exact_session_paths(&root.join(SESSIONS_DIR), selector, &mut session_paths)?;
+        collect_exact_session_paths(
+            &root.join(ARCHIVED_SESSIONS_DIR),
+            selector,
+            &mut session_paths,
+        )?;
+    } else {
+        collect_session_paths(&root.join(SESSIONS_DIR), &mut session_paths)?;
+        collect_session_paths(&root.join(ARCHIVED_SESSIONS_DIR), &mut session_paths)?;
+    }
     paths.extend(
         session_paths
             .into_iter()
@@ -512,6 +526,20 @@ fn collect_resume_repair_candidate_paths(
             }),
     );
     collect_state_db_rollout_paths(root, selector, &mut paths);
+    if selector_is_full && paths.is_empty() {
+        let mut fallback_paths = Vec::new();
+        collect_session_paths(&root.join(SESSIONS_DIR), &mut fallback_paths)?;
+        collect_session_paths(&root.join(ARCHIVED_SESSIONS_DIR), &mut fallback_paths)?;
+        paths.extend(
+            fallback_paths
+                .into_iter()
+                .map(|path| SessionRepairCandidate {
+                    path,
+                    state_db_match_kind: None,
+                    resolved_session_id: None,
+                }),
+        );
+    }
     paths.sort_by(|left, right| left.path.cmp(&right.path));
 
     let mut deduped: Vec<SessionRepairCandidate> = Vec::with_capacity(paths.len());

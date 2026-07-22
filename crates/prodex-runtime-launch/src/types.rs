@@ -32,6 +32,7 @@ pub struct RuntimeProxyCodexEndpoint<'a> {
     pub listen_addr: SocketAddr,
     pub openai_mount_path: &'a str,
     pub local_model_provider_id: Option<&'a str>,
+    pub force_http_responses: bool,
     pub realtime_ws_base_url: Option<&'a str>,
     pub realtime_ws_model: Option<&'a str>,
 }

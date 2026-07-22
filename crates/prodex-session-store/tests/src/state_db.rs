@@ -1,6 +1,81 @@
 use super::*;
 
 #[test]
+fn repair_resume_session_metadata_prefix_ignores_unrelated_state_database_schema() {
+    let root = test_temp_dir("session-repair-unrelated-state-schema");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let sessions = root.join("sessions/2026/06/14");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_path = sessions.join(format!("rollout-2026-06-14-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        "{\"type\":\"event\",\"payload\":{\"message\":\"existing session\"}}\n",
+    )
+    .expect("session should be written");
+    let connection = rusqlite::Connection::open(root.join("state_4.sqlite"))
+        .expect("unrelated state db should open");
+    connection
+        .execute("CREATE TABLE unrelated (id TEXT PRIMARY KEY)", [])
+        .expect("unrelated table should be created");
+    drop(connection);
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(session_path.as_path()));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repair_resume_session_metadata_prefix_repoints_stale_overlay_rollout_path() {
+    let root = test_temp_dir("session-repair-state-db-stale-overlay");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0928";
+    let sessions = root.join("sessions/2026/06/14");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_path = sessions.join(format!("rollout-2026-06-14T23-32-19-{session_id}.jsonl"));
+    fs::write(
+        &session_path,
+        format!(
+            "{{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"timestamp\":\"2026-06-14T23:32:19Z\",\"cwd\":\"/home/test-user/project\",\"originator\":\"codex-cli\",\"cli_version\":\"0.145.0\"}}}}\n"
+        ),
+    )
+    .expect("session should be written");
+    let stale_path = root
+        .with_file_name(".prodex-overlay-12345-0")
+        .join(session_path.strip_prefix(&root).unwrap());
+    let db_path = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should open");
+    connection
+        .execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL)",
+            [],
+        )
+        .expect("threads table should be created");
+    connection
+        .execute(
+            "INSERT INTO threads (id, rollout_path) VALUES (?1, ?2)",
+            rusqlite::params![session_id, stale_path.display().to_string()],
+        )
+        .expect("thread row should be created");
+    drop(connection);
+
+    let repaired =
+        repair_resume_session_metadata_prefix(&root, session_id).expect("repair should succeed");
+    let connection = rusqlite::Connection::open(&db_path).expect("state db should reopen");
+    let rollout_path: String = connection
+        .query_row(
+            "SELECT rollout_path FROM threads WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .expect("rollout path should read");
+
+    assert_eq!(repaired, None);
+    assert_eq!(rollout_path, session_path.display().to_string());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_uses_state_db_rollout_path() {
     let root = test_temp_dir("session-repair-state-db-rollout");
     fs::create_dir_all(&root).expect("root should be created");

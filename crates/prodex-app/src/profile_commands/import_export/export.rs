@@ -1,4 +1,6 @@
-use super::super::kiro::{KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE};
+use super::super::kiro::{
+    KIRO_CREDENTIALS_FILE, KIRO_MODEL_CATALOG_FILE, prepare_kiro_cli_data_dir,
+};
 use super::super::manage::print_profile_panel;
 use super::passwords::{resolve_export_password, resolve_export_password_mode};
 use super::*;
@@ -28,7 +30,7 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
         .transpose()?
         .unwrap_or_else(default_profile_export_path);
     prodex_profile_export::write_profile_export_bundle(&output_path, &encoded)?;
-    audit_log_event_best_effort(
+    audit_log_event(
         "profile",
         "export",
         "success",
@@ -39,7 +41,7 @@ pub(crate) fn handle_export_profiles(args: ExportProfileArgs) -> Result<()> {
             "output_path": output_path.display().to_string(),
             "active_profile": payload.active_profile.clone(),
         }),
-    );
+    )?;
 
     let fields = prodex_profile_export::profile_export_summary_fields(
         prodex_profile_export::ProfileExportSummary {
@@ -109,6 +111,7 @@ fn exported_provider_secret_files(
             Ok(Vec::new())
         }
         ProfileProvider::Kiro { .. } => {
+            prepare_kiro_cli_data_dir(&profile.codex_home)?;
             let mut files = vec![read_exported_secret_file(
                 &profile.codex_home,
                 KIRO_CREDENTIALS_FILE,

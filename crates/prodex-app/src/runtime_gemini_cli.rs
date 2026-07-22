@@ -1,8 +1,8 @@
 use crate::{
     PreparedRuntimeLaunch, RuntimeLaunchRequest, RuntimeLaunchStrategy, RuntimeProxyEndpoint,
     agy_bin, clear_rtk_auto_wrap_control_env, copilot_bin, execute_runtime_launch, gemini_bin,
-    kiro_bin, kiro_cli_data_dir_env, prepare_prodex_overlay_home, prepend_child_path,
-    read_kiro_auth_secret, refresh_gemini_oauth_secret_if_needed, write_kiro_cli_data_dir,
+    kiro_bin, kiro_cli_data_dir_env, prepare_kiro_cli_data_dir, prepare_prodex_overlay_home,
+    prepend_child_path, refresh_gemini_oauth_secret_if_needed,
 };
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
@@ -209,7 +209,6 @@ impl RuntimeLaunchStrategy for SuperNativeCliLaunchStrategy {
                     .with_args(launch_args)
                     .with_extra_env(runtime_super_kiro_cli_profile_env(
                         &prepared.codex_home,
-                        &overlay_home,
                         proxy_url,
                     )?)
                     .with_removed_env(KIRO_REMOVED_ENV_KEYS)
@@ -464,12 +463,9 @@ fn runtime_cli_arg_sets_model(arg: &OsString) -> bool {
 
 fn runtime_super_kiro_cli_profile_env(
     codex_home: &Path,
-    overlay_home: &Path,
     proxy_url: &str,
 ) -> Result<Vec<(OsString, OsString)>> {
-    let secret = read_kiro_auth_secret(codex_home)?;
-    let data_dir = overlay_home.join("kiro-data");
-    write_kiro_cli_data_dir(&data_dir, &secret)?;
+    let (data_dir, secret) = prepare_kiro_cli_data_dir(codex_home)?;
     let mut env = kiro_cli_data_dir_env(&data_dir);
     if let Some(region) = secret.region.filter(|value| !value.trim().is_empty()) {
         env.push((OsString::from("AWS_REGION"), OsString::from(region)));

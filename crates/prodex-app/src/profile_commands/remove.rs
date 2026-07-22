@@ -6,12 +6,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::{
-    AppPaths, AppState, AppStateIoExt, ProfileEntry, RemoveProfileArgs,
-    audit_log_event_best_effort, load_runtime_continuation_journal_with_recovery,
-    load_runtime_continuations_with_recovery, runtime_continuation_journal_file_path,
-    runtime_continuation_journal_last_good_file_path, runtime_continuations_file_path,
-    runtime_continuations_last_good_file_path, save_runtime_continuation_journal_for_profiles,
-    save_runtime_continuations_for_profiles,
+    AppPaths, AppState, AppStateIoExt, ProfileEntry, RemoveProfileArgs, audit_log_event,
+    load_runtime_continuation_journal_with_recovery, load_runtime_continuations_with_recovery,
+    runtime_continuation_journal_file_path, runtime_continuation_journal_last_good_file_path,
+    runtime_continuations_file_path, runtime_continuations_last_good_file_path,
+    save_runtime_continuation_journal_for_profiles, save_runtime_continuations_for_profiles,
 };
 
 #[derive(Debug)]
@@ -171,7 +170,7 @@ fn print_bulk_profile_removal_result(
     state: &AppState,
     removed_profiles: &[RemovedProfileRecord],
 ) -> Result<()> {
-    audit_log_event_best_effort(
+    audit_log_event(
         "profile",
         "remove",
         "success",
@@ -182,7 +181,7 @@ fn print_bulk_profile_removal_result(
             "deleted_home_count": removed_profiles.iter().filter(|profile| profile.deleted_home).count(),
             "active_profile": state.active_profile.clone(),
         }),
-    );
+    )?;
 
     let mut fields = vec![
         (
@@ -222,7 +221,7 @@ fn print_single_profile_removal_result(
     state: &AppState,
     removed_profile: RemovedProfileRecord,
 ) -> Result<()> {
-    audit_log_event_best_effort(
+    audit_log_event(
         "profile",
         "remove",
         "success",
@@ -233,7 +232,7 @@ fn print_single_profile_removal_result(
             "codex_home": removed_profile.codex_home.display().to_string(),
             "active_profile": state.active_profile.clone(),
         }),
-    );
+    )?;
 
     let fields = vec![
         (

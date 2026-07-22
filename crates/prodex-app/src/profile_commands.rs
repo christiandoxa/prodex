@@ -25,9 +25,8 @@ pub(crate) use self::import_export::{
     handle_import_profiles, repair_profile_import_auth_journals,
 };
 pub(crate) use self::kiro::{
-    KIRO_MODEL_CATALOG_FILE, create_private_kiro_temp_root, handle_import_kiro_profile,
-    kiro_cli_data_dir_env, parse_kiro_model_catalog_text, read_kiro_auth_secret,
-    write_kiro_cli_data_dir,
+    KIRO_MODEL_CATALOG_FILE, handle_import_kiro_profile, kiro_cli_data_dir_env,
+    parse_kiro_model_catalog_text, prepare_kiro_cli_data_dir, read_kiro_auth_secret,
 };
 pub(crate) use self::login::handle_codex_login;
 pub(crate) use self::logout::handle_codex_logout;

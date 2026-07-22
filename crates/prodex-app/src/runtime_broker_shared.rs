@@ -48,6 +48,7 @@ pub(super) struct RuntimeProxyEndpoint {
     pub(super) listen_addr: std::net::SocketAddr,
     pub(super) openai_mount_path: String,
     pub(super) local_model_provider_id: Option<String>,
+    pub(super) force_http_responses: bool,
     pub(super) realtime_ws_base_url: Option<String>,
     pub(super) realtime_ws_model: Option<String>,
     pub(super) lease_dir: PathBuf,
@@ -63,6 +64,7 @@ impl std::fmt::Debug for RuntimeProxyEndpoint {
             .field("listen_addr", &self.listen_addr)
             .field("openai_mount_path", &self.openai_mount_path)
             .field("local_model_provider_id", &self.local_model_provider_id)
+            .field("force_http_responses", &self.force_http_responses)
             .field("realtime_ws_base_url", &self.realtime_ws_base_url)
             .field("realtime_ws_model", &self.realtime_ws_model)
             .field("lease_dir", &self.lease_dir)

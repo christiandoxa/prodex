@@ -34,12 +34,12 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
                 .save(&paths)
                 .context("failed to save repaired import auth rollback state")?;
         }
-        audit_log_event_best_effort(
+        audit_log_event(
             "profile",
             "repair_import_auth_journals",
             "success",
             serde_json::json!({ "repaired": repaired }),
-        );
+        )?;
         Some(repaired)
     } else {
         None

@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/app_commands/runtime_launch.rs",
-    "maxLines": 897,
-    "reason": "Runtime launch command routing now carries the dedicated server's exact listener into policy validation while provider selection, harness resolution, and session/runtime entry planning remain together."
+    "maxLines": 876,
+    "reason": "Core runtime preparation still owns provider selection, harness resolution, proxy startup, and session entry planning; command-server managed stdio logic lives in its focused module and this cap is ratcheted to the remaining core."
   },
   {
     "file": "crates/prodex-app/src/app_commands/capability.rs",
@@ -11,8 +11,8 @@
   },
   {
     "file": "crates/prodex-app/src/dashboard.rs",
-    "maxLines": 1133,
-    "reason": "The local control-plane JSON endpoints, provider/model catalog assembly, mutation audit emission, and dashboard tests remain capped after HTTP serving, browser launch, request parsing, and response transport moved to dashboard/server.rs."
+    "maxLines": 1135,
+    "reason": "The local control-plane JSON endpoints now surface mutation-audit persistence failures while provider/model catalog assembly and dashboard tests remain capped after HTTP transport moved to dashboard/server.rs."
   },
   {
     "file": "crates/prodex-app/src/profile_commands/login.rs",
@@ -26,8 +26,8 @@
   },
   {
     "file": "crates/prodex-app/src/profile_commands/kiro.rs",
-    "maxLines": 1145,
-    "reason": "Kiro profile import and catalog refresh remain capped after data-directory discovery and environment compatibility moved to a focused module."
+    "maxLines": 998,
+    "reason": "Kiro profile import and catalog refresh remain capped after persistent credential-store handling, data-directory discovery, and environment compatibility moved to focused modules."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_application_data_plane.rs",
@@ -36,8 +36,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
-    "maxLines": 1168,
-    "reason": "Kiro ACP process lifecycle, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped after pure protocol shaping moved to provider-core."
+    "maxLines": 1141,
+    "reason": "Kiro ACP process lifecycle, streaming sequence state, conversation persistence, and runtime metadata orchestration remain capped after ephemeral credential overlays were removed and pure protocol shaping moved to provider-core."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
@@ -91,7 +91,7 @@
   },
   {
     "file": "crates/prodex-cli/src/runtime_args.rs",
-    "maxLines": 1190,
+    "maxLines": 1188,
     "reason": "Provider-aware runtime and gateway argument parsing remains capped after Super compatibility validation moved to a focused module."
   },
   {
@@ -176,8 +176,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_external_provider_config.rs",
-    "maxLines": 982,
-    "reason": "External provider catalog generation now imports Kiro model metadata alongside Copilot while preserving exact secret/config validation; capped until provider-specific catalog loading splits out."
+    "maxLines": 983,
+    "reason": "External provider catalog generation includes the Codex 0.145 reasoning-summary schema field while preserving exact secret/config validation; capped until provider-specific catalog loading splits out."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/gateway_admin_auth.rs",

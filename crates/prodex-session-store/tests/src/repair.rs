@@ -161,6 +161,35 @@ fn repair_resume_session_metadata_prefix_moves_late_metadata_to_start() {
 }
 
 #[test]
+fn repair_resume_session_metadata_prefix_prefers_exact_rollout_path() {
+    let root = test_temp_dir("session-repair-prefers-exact-path");
+    let sessions = root.join("sessions/2026/06/13");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    let session_id = "019ebd01-c881-74c0-b01d-7fdf5bd4dd32";
+    let target = sessions.join(format!("rollout-2026-06-13T02-04-31-{session_id}.jsonl"));
+    let unrelated = sessions.join("000-legacy.jsonl");
+    fs::write(
+        &target,
+        "{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\"}\n",
+    )
+    .expect("target should be written");
+    let unrelated_raw = format!(
+        "{{\"timestamp\":\"2026-06-13T02:04:31Z\",\"type\":\"event\"}}\n{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\"}}}}\n"
+    );
+    fs::write(&unrelated, &unrelated_raw).expect("unrelated session should be written");
+
+    let repaired = repair_resume_session_metadata_prefix(&root, session_id)
+        .expect("exact session repair should succeed");
+
+    assert_eq!(repaired.as_deref(), Some(target.as_path()));
+    assert_eq!(
+        fs::read_to_string(&unrelated).expect("unrelated session should remain readable"),
+        unrelated_raw
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_transaction_aborts_and_cleans_up_after_concurrent_append() {
     let root = test_temp_dir("session-repair-concurrent-append");
     let sessions = root.join("sessions/2026/07/16");

@@ -49,6 +49,10 @@ impl RuntimeConfig {
         Self::from_environment(paths, environment)
     }
 
+    pub(crate) fn force_http_response_transport(&self) -> bool {
+        self.governance.inspection != prodex_config::GovernanceRolloutMode::Off
+    }
+
     #[cfg(any(test, feature = "bench-support"))]
     pub(crate) fn compatibility_current() -> Self {
         let paths = prodex_core::AppPaths::discover()

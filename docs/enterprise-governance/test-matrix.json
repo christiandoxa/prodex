@@ -435,6 +435,9 @@
       "evidence": [
         "provider_route_mapping_covers_forwarded_data_plane_routes",
         "anonymous_compatibility_owns_typed_provider_dispatch",
+        "runtime_proxy_passthrough_args_force_governed_responses_to_http",
+        "command_server_managed_stdio_routes_model_traffic_through_runtime_proxy",
+        "response_governance_forces_runtime_proxy_for_single_profile",
         "production-boundary-guard.mjs",
         "application-boundary-guard.mjs"
       ]

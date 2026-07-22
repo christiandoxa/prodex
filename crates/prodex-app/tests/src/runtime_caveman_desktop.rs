@@ -44,6 +44,7 @@ fn desktop_plan_persists_proxy_config_and_shares_chat_state() {
         listen_addr: "127.0.0.1:2455".parse().unwrap(),
         openai_mount_path: "/openai/v1".to_string(),
         local_model_provider_id: None,
+        force_http_responses: false,
         realtime_ws_base_url: None,
         realtime_ws_model: None,
         lease_dir: root.join("leases"),

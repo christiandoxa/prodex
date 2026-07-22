@@ -255,6 +255,36 @@ fn prepare_runtime_launch_uses_active_kiro_profile_for_kiro_cli_routing() {
             .and_then(RuntimeProxyEndpoint::kiro_connect_proxy_url)
             .is_some()
     );
+
+    let prepared = prepare_runtime_launch(RuntimeLaunchRequest {
+        profile: None,
+        allow_auto_rotate: false,
+        auto_redeem: false,
+        skip_quota_check: true,
+        base_url: Some("https://kiro.dev"),
+        upstream_no_proxy: false,
+        include_code_review: false,
+        smart_context_enabled: true,
+        presidio_redaction_enabled: false,
+        model_context_window_tokens: None,
+        gemini_thinking_budget_tokens: None,
+        force_runtime_proxy: false,
+        model_provider_override: Some(SUPER_KIRO_PROVIDER_ID),
+        profile_v2_name: None,
+        external_provider: Some("kiro"),
+        external_provider_api_key: None,
+    })
+    .expect("Kiro provider launch should use the local ACP rewrite bridge");
+    let runtime_proxy = prepared.runtime_proxy.as_ref().unwrap();
+    assert_eq!(
+        runtime_proxy.local_model_provider_id.as_deref(),
+        Some(SUPER_KIRO_PROVIDER_ID)
+    );
+    assert_eq!(
+        runtime_proxy.openai_mount_path,
+        RUNTIME_LOCAL_REWRITE_PROXY_MOUNT_PATH
+    );
+    assert!(runtime_proxy.kiro_connect_proxy_url().is_none());
 }
 
 #[test]

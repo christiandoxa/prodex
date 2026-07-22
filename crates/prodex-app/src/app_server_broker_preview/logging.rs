@@ -173,9 +173,12 @@ fn app_server_broker_log_scalar(value: &Value) -> String {
     redaction_redact_secret_like_text(&rendered)
 }
 
-pub(super) fn app_server_broker_audit_preview_summary(mode: &str, summary: &Value) {
+pub(super) fn app_server_broker_audit_preview_summary(
+    mode: &str,
+    summary: &Value,
+) -> anyhow::Result<()> {
     let report = &summary["report"];
-    let _ = crate::append_audit_event(
+    crate::append_audit_event(
         "app_server_broker",
         "preview_session",
         "observed",
@@ -196,7 +199,7 @@ pub(super) fn app_server_broker_audit_preview_summary(mode: &str, summary: &Valu
             },
             "policy_flag_counts": report["policy_flag_counts"],
         }),
-    );
+    )
 }
 
 pub(super) fn app_server_broker_log_preview_summary(log_path: &std::path::Path, summary: &Value) {

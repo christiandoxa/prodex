@@ -603,6 +603,7 @@ fn runtime_proxy_codex_endpoint(
         listen_addr: proxy.listen_addr,
         openai_mount_path: &proxy.openai_mount_path,
         local_model_provider_id: proxy.local_model_provider_id.as_deref(),
+        force_http_responses: proxy.force_http_responses,
         realtime_ws_base_url: proxy.realtime_ws_base_url.as_deref(),
         realtime_ws_model: proxy.realtime_ws_model.as_deref(),
     })

@@ -49,6 +49,7 @@ fn runtime_proxy_passthrough_args_rewrite_local_provider_base_url() {
             listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
             openai_mount_path: "/v1",
             local_model_provider_id: Some("prodex-local"),
+            force_http_responses: false,
             realtime_ws_base_url: None,
             realtime_ws_model: None,
         }),
@@ -85,6 +86,7 @@ fn runtime_proxy_passthrough_args_add_realtime_sidecar_overrides() {
             listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
             openai_mount_path: "/v1",
             local_model_provider_id: Some("prodex-gemini"),
+            force_http_responses: false,
             realtime_ws_base_url: Some("http://127.0.0.1:4555"),
             realtime_ws_model: Some("gemini-3.1-flash-live-preview"),
         }),
@@ -121,6 +123,7 @@ fn runtime_proxy_passthrough_args_insert_local_provider_override_before_prompt()
             listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
             openai_mount_path: "/v1",
             local_model_provider_id: Some("prodex-local"),
+            force_http_responses: false,
             realtime_ws_base_url: None,
             realtime_ws_model: None,
         }),
@@ -133,6 +136,46 @@ fn runtime_proxy_passthrough_args_insert_local_provider_override_before_prompt()
     assert!(args.windows(2).any(|window| {
         window[0] == "-c"
             && window[1] == "model_providers.prodex-local.base_url=\"http://127.0.0.1:4455/v1\""
+    }));
+    assert_eq!(args.last().map(String::as_str), Some("hello"));
+}
+
+#[test]
+fn runtime_proxy_passthrough_args_force_governed_responses_to_http() {
+    let args = runtime_proxy_codex_passthrough_args(
+        Some(RuntimeProxyCodexEndpoint {
+            listen_addr: "127.0.0.1:4455".parse().expect("socket addr"),
+            openai_mount_path: "/v1",
+            local_model_provider_id: None,
+            force_http_responses: true,
+            realtime_ws_base_url: None,
+            realtime_ws_model: None,
+        }),
+        &[
+            OsString::from("exec"),
+            OsString::from("-c"),
+            OsString::from("model_provider=\"openai\""),
+            OsString::from("hello"),
+        ],
+    )
+    .into_iter()
+    .map(|arg| arg.to_string_lossy().into_owned())
+    .collect::<Vec<_>>();
+
+    let governed_provider = args
+        .iter()
+        .rposition(|arg| arg == "model_provider=\"prodex-openai-governed-http\"")
+        .expect("governed provider override should exist");
+    let user_provider = args
+        .iter()
+        .position(|arg| arg == "model_provider=\"openai\"")
+        .expect("user provider override should remain visible");
+    assert!(governed_provider > user_provider);
+    assert!(args.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.supports_websockets=false"
+    }));
+    assert!(args.iter().any(|arg| {
+        arg == "model_providers.prodex-openai-governed-http.base_url=\"http://127.0.0.1:4455/v1\""
     }));
     assert_eq!(args.last().map(String::as_str), Some("hello"));
 }

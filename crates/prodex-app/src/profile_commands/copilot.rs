@@ -13,7 +13,7 @@ use super::manage::print_profile_panel;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ImportProfileArgs, ProfileEntry, ProfileProvider,
     QUOTA_HTTP_CONNECT_TIMEOUT_MS, QUOTA_HTTP_READ_TIMEOUT_MS,
-    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, absolutize, audit_log_event_best_effort,
+    RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, absolutize, audit_log_event,
     create_codex_home_if_missing, ensure_path_is_unique, format_response_body,
     managed_profile_home_path, prepare_managed_codex_home, read_blocking_response_body_with_limit,
 };
@@ -120,7 +120,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
             }
             state.save(&paths)?;
 
-            audit_log_event_best_effort(
+            audit_log_event(
                 "profile",
                 "import_copilot",
                 "success",
@@ -133,7 +133,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
                     "activated": state.active_profile.as_deref() == Some(existing_name.as_str()),
                     "updated_existing": true,
                 }),
-            );
+            )?;
 
             let fields = copilot_profile_import_summary_fields(CopilotProfileImportSummary {
                 profile_name: existing_name.clone(),
@@ -182,7 +182,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
     }
     state.save(&paths)?;
 
-    audit_log_event_best_effort(
+    audit_log_event(
         "profile",
         "import_copilot",
         "success",
@@ -196,7 +196,7 @@ pub(crate) fn handle_import_copilot_profile(args: &ImportProfileArgs) -> Result<
             "codex_home": codex_home.display().to_string(),
             "updated_existing": false,
         }),
-    );
+    )?;
 
     let fields = copilot_profile_import_summary_fields(CopilotProfileImportSummary {
         profile_name: profile_name.clone(),

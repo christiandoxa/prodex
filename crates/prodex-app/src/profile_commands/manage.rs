@@ -14,10 +14,10 @@ use terminal_ui::{
 
 use crate::{
     AddProfileArgs, AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider,
-    ProfileProviderExt, ProfileSelector, absolutize, audit_log_event_best_effort,
-    collect_profile_summaries, copy_codex_home, create_codex_home_if_missing, default_codex_home,
-    ensure_path_is_unique, fetch_profile_identity, find_profile_by_identity,
-    managed_profile_home_path, prepare_managed_codex_home, print_panel, read_auth_json_text,
+    ProfileProviderExt, ProfileSelector, absolutize, audit_log_event, collect_profile_summaries,
+    copy_codex_home, create_codex_home_if_missing, default_codex_home, ensure_path_is_unique,
+    fetch_profile_identity, find_profile_by_identity, managed_profile_home_path,
+    prepare_managed_codex_home, print_panel, read_auth_json_text,
     repair_missing_active_profile_and_save, resolve_profile_name, update_existing_profile_auth,
 };
 
@@ -84,7 +84,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
         let updated_profile_name = updated.profile_name.clone();
         let updated_codex_home = updated.codex_home.clone();
         state.save(&paths)?;
-        audit_log_event_best_effort(
+        audit_log_event(
             "profile",
             "add",
             "success",
@@ -98,7 +98,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
                 "codex_home": updated_codex_home.display().to_string(),
                 "activated": state.active_profile.as_deref() == Some(updated_profile_name.as_str()),
             }),
-        );
+        )?;
 
         let mut fields = vec![
             (
@@ -164,7 +164,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
     }
 
     state.save(&paths)?;
-    audit_log_event_best_effort(
+    audit_log_event(
         "profile",
         "add",
         "success",
@@ -176,7 +176,7 @@ pub(crate) fn handle_add_profile(args: AddProfileArgs) -> Result<()> {
             "codex_home": codex_home.display().to_string(),
             "source_home": source_home.as_ref().map(|path| path.display().to_string()),
         }),
-    );
+    )?;
 
     let storage_message = if source_home.is_some() {
         "Source copied into managed profile home.".to_string()
@@ -289,7 +289,7 @@ pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()>
         .profiles
         .get(&name)
         .with_context(|| format!("profile '{}' disappeared from state", name))?;
-    audit_log_event_best_effort(
+    audit_log_event(
         "profile",
         "set_active",
         "success",
@@ -297,7 +297,7 @@ pub(crate) fn handle_set_active_profile(selector: ProfileSelector) -> Result<()>
             "profile_name": name.clone(),
             "codex_home": profile.codex_home.display().to_string(),
         }),
-    );
+    )?;
 
     let fields = vec![
         ("Result".to_string(), format!("Active profile: {name}")),

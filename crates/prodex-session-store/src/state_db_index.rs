@@ -1,7 +1,7 @@
 use super::{
-    SessionRepairCandidate, SessionRepairMatchKind, full_codex_session_id,
-    is_session_metadata_file, session_id_matches_selector, session_path_id_matches_selector,
-    session_path_id_matching_selector,
+    SessionRepairCandidate, SessionRepairMatchKind, codex_session_id_from_path,
+    full_codex_session_id, is_session_metadata_file, session_id_matches_selector,
+    session_path_id_matches_selector, session_path_id_matching_selector,
 };
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
@@ -25,6 +25,55 @@ pub(super) fn collect_state_db_rollout_paths(
             paths.append(&mut rollout_paths);
         }
     }
+}
+
+pub(super) fn repair_state_db_rollout_path(root: &Path, session_path: &Path) -> Result<()> {
+    if !path_is_contained_regular_file(root, session_path) {
+        return Ok(());
+    }
+    let Some(session_id) = codex_session_id_from_path(session_path) else {
+        return Ok(());
+    };
+    let Some(rollout_path) = session_path.to_str() else {
+        return Ok(());
+    };
+    let thread_id = format!("thread_{session_id}");
+
+    for entry in fs::read_dir(root).with_context(|| format!("failed to read {}", root.display()))? {
+        let db_path = entry
+            .with_context(|| format!("failed to read entry in {}", root.display()))?
+            .path();
+        if !is_codex_state_db_path(&db_path) {
+            continue;
+        }
+        let Ok(connection) =
+            Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        else {
+            continue;
+        };
+        let Ok(needs_repair) = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM threads WHERE (id = ?1 OR id = ?2) AND rollout_path != ?3)",
+                rusqlite::params![session_id, thread_id, rollout_path],
+                |row| row.get::<_, bool>(0),
+            ) else {
+            continue;
+        };
+        drop(connection);
+        if !needs_repair {
+            continue;
+        }
+        let connection = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .with_context(|| {
+            format!("failed to open state db {} for repair", db_path.display())
+        })?;
+        connection
+            .execute(
+                "UPDATE threads SET rollout_path = ?1 WHERE (id = ?2 OR id = ?3) AND rollout_path != ?1",
+                rusqlite::params![rollout_path, session_id, thread_id],
+            )
+            .with_context(|| format!("failed to repair state db {}", db_path.display()))?;
+    }
+    Ok(())
 }
 
 fn is_codex_state_db_path(path: &Path) -> bool {
