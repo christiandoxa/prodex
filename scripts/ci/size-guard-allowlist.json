@@ -221,7 +221,7 @@
   },
   {
     "file": "crates/prodex-runtime-policy/src/types.rs",
-    "maxLines": 925,
+    "maxLines": 924,
     "reason": "Runtime policy types carry gateway harness selection, governance authority, lifecycle, session, audit, retention, and secret-backend configuration after rule-condition schema ownership moved to its focused module."
   },
   {
@@ -233,11 +233,6 @@
     "file": "crates/prodex-storage-sqlite-runtime/tests/governance_repository.rs",
     "maxLines": 1580,
     "reason": "SQLite governance integration coverage proves lifecycle, bounded durable tenant discovery, approval idempotency and denial audit, session revisions/revocation, audit integrity, export, and SIEM outbox behavior."
-  },
-  {
-    "file": "crates/prodex-app/src/runtime_governance.rs",
-    "maxLines": 866,
-    "reason": "Runtime governance compiles built-in and tenant policy snapshots plus compiler regressions after principal-selector DTO translation moved to its focused module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gateway_keys.rs",

@@ -8,7 +8,6 @@ pub use governance_condition::RuntimeGovernancePolicyRuleCondition;
 pub const PRODEX_POLICY_FILE_NAME: &str = "policy.toml";
 pub const PRODEX_POLICY_VERSION: u32 = 1;
 pub const PRODEX_RUNTIME_PROXY_PRESET_ENV: &str = "PRODEX_RUNTIME_PROXY_PRESET";
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimePolicyServiceMode {

@@ -161,8 +161,8 @@ hash instead of the source path.
 | `gateway.observability.http_schema` | none | `generic` | Exact HTTP export payload schema: `generic`, `otel`, `datadog`, or `langfuse`. Unsupported values fail closed. |
 | `gateway.observability.http_bearer_token_env` | none | empty | Exact whitespace-free environment variable name containing a bearer token for `gateway.observability.http_endpoint`; configured refs must resolve to a non-empty, whitespace-free token. |
 | `gateway.observability.http_bearer_token_ref` | none | empty | Projected telemetry-export bearer-token reference. Mutually exclusive with `http_bearer_token_env`. |
-| `gateway.guardrails.blocked_keywords` | none | empty | Case-insensitive pre-call keyword blocks applied before upstream send. |
-| `gateway.guardrails.blocked_output_keywords` | none | empty | Case-insensitive output keyword blocks. Buffered responses are replaced with `403 policy_violation`; streaming responses are stopped and logged when a keyword is observed. |
+| `gateway.guardrails.blocked_keywords` | none | empty | Case-insensitive pre-call keyword blocks applied before upstream send; at most 128 entries and 4096 bytes per entry. |
+| `gateway.guardrails.blocked_output_keywords` | none | empty | Case-insensitive output keyword blocks; at most 128 entries and 4096 bytes per entry. Buffered responses are replaced with `403 policy_violation`; streaming responses hold possible match prefixes, then terminate with an error when a keyword is observed. |
 | `gateway.guardrails.allowed_models` | none | empty | Optional pre-call allowlist for request `model` values, checked before route alias rewrite. |
 | `gateway.guardrails.presidio_redaction` | CLI `--presidio` / `--no-presidio` | `false` | Enable Presidio request-body redaction for gateway traffic. |
 | `gateway.guardrails.prompt_injection_detection` | none | `false` | Enable built-in prompt-injection heuristic checks before upstream send. |
@@ -384,6 +384,13 @@ defaulting to text. Provider eligibility is expressed through typed obligations
 and the separately activated provider registry/routing artifacts, not free-form
 policy attributes.
 
+Gateway publication also rejects selectors requiring evidence the current data
+plane cannot verify: authentication strength above 1, affirmative session or
+environment MFA, partner network zone, `use_tool`, and `mutate_control_plane`.
+`require_reauthentication` and `require_mfa` obligations are rejected instead of
+creating permanently unsatisfied policies. Add them only after a trusted
+credential/session flow supplies and refreshes that evidence.
+
 Effects are `allow`, `require_approval`, and `deny`. A deny rule cannot carry
 obligations. Typed obligation kinds are `mask_finding`,
 `minimum_provider_trust`, `allow_provider`, `deny_provider`,
@@ -391,11 +398,11 @@ obligations. Typed obligation kinds are `mask_finding`,
 `require_region`, `disable_tools`, `allow_tool`, `allow_model`, `allow_modality`,
 `max_input_tokens`, `max_output_tokens`, `max_context_tokens`,
 `require_response_inspection`, `session_idle_timeout_seconds`,
-`session_absolute_timeout_seconds`, `require_reauthentication`, `require_mfa`,
-`audit_detail`, `require_human_approval`, `retention_seconds`, and
-`deny_fallback_outside_eligibility`. Rules are limited to 256 and obligations to
-64 per rule. Unknown fields, missing required rule fields, invalid tokens/selectors,
-zero positive bounds, and over-limit artifacts are rejected before activation.
+`session_absolute_timeout_seconds`, `audit_detail`, `require_human_approval`,
+`retention_seconds`, and `deny_fallback_outside_eligibility`. Rules are limited
+to 256 and obligations to 64 per rule. Unknown fields, missing required rule
+fields, invalid tokens/selectors, zero positive bounds, and over-limit artifacts
+are rejected before activation.
 
 `ClassificationRules` is a separate strict artifact activated through the
 `/v1/prodex/gateway/classification-rules` lifecycle. It owns both tenant detector

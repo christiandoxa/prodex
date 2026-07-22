@@ -12,11 +12,11 @@ post-commit termination without weakening affinity or no-mid-stream rotation.
 | Path | Current behavior | Remaining gap |
 | --- | --- | --- |
 | Buffered HTTP response | Successful bodies run typed inspection/masking and full-coverage/output-limit obligations before commit; denial is content-free and mandatory-audited when configured | Inspection remains bounded to supported response schemas and modalities |
-| HTTP streaming response | A 4 KiB pre-commit hold enforces coverage/output obligations, then an incremental bounded inspector handles split matches and output limits | A violation after commit terminates the stream; already released safe bytes cannot be recalled |
+| HTTP streaming response | A 4 KiB pre-commit hold enforces coverage/output obligations, then an incremental bounded inspector withholds every possible literal-match prefix and handles split matches and output limits | A violation after commit terminates the stream; already released safe bytes cannot be recalled |
 | Provider-normalized SSE | OpenAI-compatible, Gemini, Copilot, Anthropic, Kiro, and passthrough paths share the governed stream wrapper | Structured tool-call semantics remain limited to the adapter's normalized emitted bytes |
 | Generic Codex response under active inspection | Prodex-launched Codex uses a dedicated provider capability with `supports_websockets=false`, so response traffic enters the governed HTTPS/SSE path; a defensive direct WebSocket attempt records unsupported coverage in observe mode and is rejected before upgrade in enforce mode | Native upstream-to-client WebSocket frames remain transport-transparent, so non-Prodex clients in observe mode still have unsupported response coverage |
 | Gemini Live WebSocket response | Client frames are classified/governed; translated server events use incremental output inspection and output-limit obligations, closing with a policy code on denial | Binary provider output remains unsupported inspection coverage |
-| Usage reconciliation | Commit state is tracked at first delivery; post-commit policy termination is audited and cannot trigger provider rotation | The client observes transport termination rather than a replacement upstream error event |
+| Usage reconciliation | Commit state is tracked at first delivery; policy termination explicitly marks the spend reader interrupted, is audited, and cannot trigger provider rotation | The client observes transport termination rather than a replacement upstream error event |
 | Audit | Pre-commit material denial uses durable governance audit in enforcing modes; post-commit events remain content-free and bounded | External SIEM outage behavior still depends on the selected deployment mode and outbox worker |
 
 The stream guard detects configured literals across arbitrary read boundaries.
@@ -243,11 +243,12 @@ Existing focused tests verify that:
 - the configured token and matched keyword are absent from those logs;
 - generic provider retry planning denies retry after first byte or
   cancellation; and
-- stream accounting distinguishes completed, interrupted, and client-cancelled
-  terminal reasons in its own state model.
+- stream accounting distinguishes completed, policy-interrupted, provider-
+  interrupted, and client-cancelled terminal reasons.
 
-These tests do not prove that a policy guard currently sends the interrupted
-reason into reconciliation, nor do they cover typed response findings.
+Unit regressions prove literal-prefix holdback and policy-interrupted accounting
+selection. The deployment matrix still lacks an end-to-end durable
+reconciliation assertion and typed response findings.
 
 ### Phase 2 matrix
 

@@ -139,11 +139,25 @@ pub(super) fn validate_gateway_guardrails(policy: &RuntimePolicyFile, path: &Pat
             guardrails.blocked_output_keywords.as_slice(),
         ),
     ] {
+        if keywords.len() > crate::MAX_GATEWAY_GUARDRAIL_KEYWORDS {
+            bail!(
+                "gateway.guardrails.{field} in {} must contain at most {} entries",
+                path.display(),
+                crate::MAX_GATEWAY_GUARDRAIL_KEYWORDS
+            );
+        }
         for (index, keyword) in keywords.iter().enumerate() {
             if keyword.trim().is_empty() {
                 bail!(
                     "gateway.guardrails.{field}[{index}] in {} cannot be empty",
                     path.display()
+                );
+            }
+            if keyword.trim().len() > crate::MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES {
+                bail!(
+                    "gateway.guardrails.{field}[{index}] in {} must be at most {} bytes",
+                    path.display(),
+                    crate::MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES
                 );
             }
         }

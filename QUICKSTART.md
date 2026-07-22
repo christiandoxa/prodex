@@ -479,6 +479,8 @@ webhook_host_allowlist = ["guardrails.example"]
 webhook_phases = ["pre", "post"]
 ```
 
+Each keyword list accepts at most 128 entries and 4096 bytes per entry.
+
 Environment variables still override `policy.toml`.
 Use `prodex info` to inspect the resulting effective runtime tuning values.
 See [docs/runtime-policy.md](./docs/runtime-policy.md) for all `runtime`, `gateway`, and `runtime_proxy` keys, env overrides, defaults, and meanings.

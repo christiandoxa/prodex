@@ -35,6 +35,7 @@ pub(super) fn respond_runtime_passthrough_rewrite(
             status,
             captured,
             shared,
+            response_governance.spend_termination.clone(),
         );
         let streaming = RuntimeStreamingResponse {
             status,

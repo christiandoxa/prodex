@@ -1,4 +1,5 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
+use super::local_rewrite_response_spend::RuntimeGatewaySpendTermination;
 use crate::RuntimeRotationProxyShared;
 use prodex_application::ApplicationResponseObligationPlan;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
@@ -6,7 +7,9 @@ use std::io::{self, Cursor, Read};
 use std::path::Path;
 
 const RESPONSE_INSPECTION_PREFLIGHT_BYTES: usize = 4 * 1024;
-const RESPONSE_INSPECTION_WINDOW_BYTES: usize = 4 * 1024;
+const RESPONSE_INSPECTION_WINDOW_BYTES: usize =
+    prodex_runtime_policy::MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES;
+const RESPONSE_INSPECTION_READ_BYTES: usize = 8 * 1024;
 
 pub(super) enum RuntimeGatewayGuardrailStreamPlan {
     Allowed(Box<dyn Read + Send>),
@@ -20,6 +23,7 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
     shared: &RuntimeLocalRewriteProxyShared,
     obligations: Option<ApplicationResponseObligationPlan>,
     audit_context: Option<super::local_rewrite_governance_audit::RuntimeGovernanceAuditContext>,
+    termination: RuntimeGatewaySpendTermination,
 ) -> io::Result<RuntimeGatewayGuardrailStreamPlan> {
     let inspector =
         RuntimeGatewayIncrementalInspector::new(&shared.gateway_guardrails.blocked_output_keywords);
@@ -37,6 +41,7 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
                 || (plan.require_full_inspection
                     && plan.inspection_coverage != prodex_domain::InspectionCoverage::Full))
     }) {
+        termination.mark_policy_interrupted();
         let reason = obligations
             .filter(|plan| {
                 plan.require_full_inspection
@@ -73,21 +78,27 @@ pub(super) fn runtime_gateway_guardrail_stream_body(
         None
     };
     if let Some(reason) = precommit_reason {
+        termination.mark_policy_interrupted();
         if audit.block(reason, "precommit", "http").is_err() {
             return Ok(RuntimeGatewayGuardrailStreamPlan::AuditUnavailable);
         }
         return Ok(RuntimeGatewayGuardrailStreamPlan::Blocked(reason));
     }
 
+    let mut held = Vec::new();
+    let prefix = release_safe_bytes(&mut held, &prefix, inspector.holdback_bytes());
     Ok(RuntimeGatewayGuardrailStreamPlan::Allowed(Box::new(
         RuntimeGatewayGuardrailStreamReader {
-            prefix: Cursor::new(prefix),
+            pending: Cursor::new(prefix),
+            held,
             inner: body,
             inspector,
             audit,
             blocked: false,
-            emitted_bytes: read,
+            eof: false,
+            observed_bytes: read,
             maximum_bytes,
+            termination,
         },
     )))
 }
@@ -122,6 +133,10 @@ impl RuntimeGatewayIncrementalInspector {
         self.keywords.is_empty()
     }
 
+    fn holdback_bytes(&self) -> usize {
+        self.keep_bytes
+    }
+
     pub(super) fn inspect(&mut self, chunk: &[u8]) -> bool {
         if chunk.is_empty() || self.keywords.is_empty() {
             return false;
@@ -139,6 +154,13 @@ impl RuntimeGatewayIncrementalInspector {
         self.tail.extend_from_slice(&combined[keep_from..]);
         blocked
     }
+}
+
+fn release_safe_bytes(held: &mut Vec<u8>, chunk: &[u8], keep_bytes: usize) -> Vec<u8> {
+    let mut pending = std::mem::take(held);
+    pending.extend_from_slice(chunk);
+    *held = pending.split_off(pending.len().saturating_sub(keep_bytes));
+    pending
 }
 
 pub(super) fn runtime_gateway_guardrail_websocket_block(
@@ -172,20 +194,22 @@ impl RuntimeGatewayGuardrailAudit {
         commit_state: &'static str,
         transport: &'static str,
     ) -> Result<(), prodex_storage::GovernanceRepositoryError> {
-        if commit_state == "precommit"
-            && super::local_rewrite_governance_audit::runtime_governance_audit_is_durable(
-                &self.shared,
-            )
-            && let Some(context) = self.context.as_ref()
+        let result = if super::local_rewrite_governance_audit::runtime_governance_audit_is_durable(
+            &self.shared,
+        ) && let Some(context) = self.context.as_ref()
         {
             super::local_rewrite_governance_audit::persist_runtime_material_governance_audit(
                 &self.shared,
                 context,
                 self.request_id,
-                "response_precommit_block",
+                if commit_state == "precommit" {
+                    "response_precommit_block"
+                } else {
+                    "response_postcommit_block"
+                },
                 prodex_domain::AuditOutcome::Denied,
                 reason,
-            )?;
+            )
         } else {
             let payload = serde_json::json!({
                 "state_backend": self.state_backend,
@@ -207,7 +231,8 @@ impl RuntimeGatewayGuardrailAudit {
                 "failure",
                 payload,
             );
-        }
+            Ok(())
+        };
         crate::runtime_proxy_log(
             &self.runtime_shared,
             runtime_proxy_structured_log_message(
@@ -221,56 +246,82 @@ impl RuntimeGatewayGuardrailAudit {
                 ],
             ),
         );
-        Ok(())
+        result
     }
 }
 
 struct RuntimeGatewayGuardrailStreamReader {
-    prefix: Cursor<Vec<u8>>,
+    pending: Cursor<Vec<u8>>,
+    held: Vec<u8>,
     inner: Box<dyn Read + Send>,
     inspector: RuntimeGatewayIncrementalInspector,
     audit: RuntimeGatewayGuardrailAudit,
     blocked: bool,
-    emitted_bytes: usize,
+    eof: bool,
+    observed_bytes: usize,
     maximum_bytes: Option<usize>,
+    termination: RuntimeGatewaySpendTermination,
 }
 
 impl Read for RuntimeGatewayGuardrailStreamReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.blocked || buf.is_empty() {
+        if buf.is_empty() {
             return Ok(0);
         }
-        let read = self.prefix.read(buf)?;
+        let read = self.pending.read(buf)?;
         if read != 0 {
             return Ok(read);
         }
-        let read = self.inner.read(buf)?;
-        if read == 0 {
+        if self.blocked {
+            return Err(io::Error::other("response blocked by policy"));
+        }
+        if self.eof {
             return Ok(0);
         }
-        self.emitted_bytes = self.emitted_bytes.saturating_add(read);
-        let reason = if self.inspector.inspect(&buf[..read]) {
-            Some("blocked_output_keyword")
-        } else if self
-            .maximum_bytes
-            .is_some_and(|limit| self.emitted_bytes > limit)
-        {
-            Some("output_token_limit_exceeded")
-        } else {
-            None
-        };
-        if let Some(reason) = reason {
-            self.blocked = true;
-            self.audit.block(reason, "postcommit", "http").ok();
-            return Ok(0);
+
+        loop {
+            let mut chunk = [0_u8; RESPONSE_INSPECTION_READ_BYTES];
+            let read = self.inner.read(&mut chunk)?;
+            if read == 0 {
+                self.eof = true;
+                self.pending = Cursor::new(std::mem::take(&mut self.held));
+            } else {
+                self.observed_bytes = self.observed_bytes.saturating_add(read);
+                let reason = if self.inspector.inspect(&chunk[..read]) {
+                    Some("blocked_output_keyword")
+                } else if self
+                    .maximum_bytes
+                    .is_some_and(|limit| self.observed_bytes > limit)
+                {
+                    Some("output_token_limit_exceeded")
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    self.blocked = true;
+                    self.termination.mark_policy_interrupted();
+                    self.audit.block(reason, "postcommit", "http").ok();
+                    return Err(io::Error::other("response blocked by policy"));
+                }
+
+                self.pending = Cursor::new(release_safe_bytes(
+                    &mut self.held,
+                    &chunk[..read],
+                    self.inspector.holdback_bytes(),
+                ));
+            }
+
+            let read = self.pending.read(buf)?;
+            if read != 0 || self.eof {
+                return Ok(read);
+            }
         }
-        Ok(read)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RuntimeGatewayIncrementalInspector;
+    use super::{RuntimeGatewayIncrementalInspector, release_safe_bytes};
 
     #[derive(Clone, Copy)]
     enum ChunkMode {
@@ -329,6 +380,28 @@ mod tests {
             assert!(!inspector.inspect(&keyword.as_bytes()[..boundary]));
             assert!(inspector.inspect(&keyword.as_bytes()[boundary..]));
         }
+    }
+
+    #[test]
+    fn incremental_inspector_withholds_every_possible_keyword_prefix() {
+        let keyword = b"blocked-secret";
+        let mut inspector =
+            RuntimeGatewayIncrementalInspector::new(&[
+                String::from_utf8_lossy(keyword).into_owned()
+            ]);
+        let mut held = Vec::new();
+        let mut released = Vec::new();
+        for byte in &keyword[..keyword.len() - 1] {
+            assert!(!inspector.inspect(std::slice::from_ref(byte)));
+            released.extend(release_safe_bytes(
+                &mut held,
+                std::slice::from_ref(byte),
+                inspector.holdback_bytes(),
+            ));
+        }
+        assert!(released.is_empty());
+        assert!(inspector.inspect(&keyword[keyword.len() - 1..]));
+        assert_eq!(held, keyword[..keyword.len() - 1]);
     }
 
     #[test]

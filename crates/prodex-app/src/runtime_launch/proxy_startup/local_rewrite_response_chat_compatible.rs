@@ -104,7 +104,14 @@ pub(super) fn respond_runtime_chat_compatible_rewrite(
         } else {
             Box::new(reader)
         };
-        let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
+        let body = runtime_gateway_spend_stream_body(
+            body,
+            request_id,
+            status,
+            captured,
+            shared,
+            response_governance.spend_termination.clone(),
+        );
         let streaming = RuntimeStreamingResponse {
             status,
             headers,

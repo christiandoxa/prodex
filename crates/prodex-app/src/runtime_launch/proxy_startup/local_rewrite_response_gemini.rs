@@ -118,7 +118,14 @@ pub(super) fn respond_runtime_gemini_rewrite(
                 gemini: shared.runtime_shared.runtime_config.gemini.clone(),
             },
         ));
-        let body = runtime_gateway_spend_stream_body(body, request_id, status, captured, shared);
+        let body = runtime_gateway_spend_stream_body(
+            body,
+            request_id,
+            status,
+            captured,
+            shared,
+            response_governance.spend_termination.clone(),
+        );
         let streaming = RuntimeStreamingResponse {
             status,
             headers,

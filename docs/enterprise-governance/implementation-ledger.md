@@ -1,6 +1,6 @@
 # Enterprise Governance Implementation Ledger
 
-Last updated: 2026-07-21 (Asia/Jakarta).
+Last updated: 2026-07-22 (Asia/Jakarta).
 
 This ledger is the authoritative progress index for the five-phase enterprise
 governance program. Status values are:
@@ -110,7 +110,7 @@ No row is complete merely because adjacent infrastructure exists.
 | P5-02 | OIDC PKCE/device or supported human flow, bearer validation, service identity, and mTLS | tested | Gateway browser Authorization Code with PKCE S256, Redis-shared one-time state and sessions, secure cookie login/callback/logout, signed back-channel logout, workload JWT/JWKS/scope verification, origin-allowlisted background JWKS refresh planning, Rustls client-certificate validation, and JWT `cnf.x5t#S256` peer binding are wired and covered by focused runtime tests; deployment IdP/PKI rotation remains acceptance evidence |
 | P5-03 | Canonical routes, limits, deadlines, concurrency, distributed rate/quota, overload | implemented | Existing gateway controls cover much of this; governance sequence integration remains |
 | P5-04 | Trusted proxies, safe client metadata, browser CSRF/Origin/Host/cookies | tested | Edge tests prove peer preservation, exact trusted proxies, bounded client derivation, forwarding-header stripping, explicit non-loopback Host authority, PKCE state/nonce validation, Secure/HttpOnly/SameSite browser sessions, Redis-backed multi-replica continuity, and local plus signed back-channel logout invalidation |
-| P5-05 | Typed session binding, timeouts, revocation, concurrency, re-auth/MFA, network risk, revision pinning | tested | Authority hydration, atomic admission/revoke+audit/outbox, owner-bound current-session self-revoke, and `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly` prove shared-authority invalidation; deployed two-gateway chaos and re-auth/MFA remain pending |
+| P5-05 | Typed session binding, timeouts, revocation, concurrency, re-auth/MFA, network risk, revision pinning | in progress | Authority hydration, atomic admission/revoke+audit/outbox, owner-bound current-session self-revoke, and `cross_replica_revocation_epoch_invalidates_cached_sessions_promptly` prove shared-authority invalidation. Policy publication now rejects re-auth/MFA selectors and obligations until trusted evidence exists; deployed two-gateway chaos and the evidence flow remain pending. |
 | P5-06 | PostgreSQL authority, RLS, transaction tenant context, external migrations | tested | Disposable live PostgreSQL/TLS proof passed four runtime tests, migration/RLS guards and cross-tenant checks |
 | P5-07 | Redis only for rebuildable ephemeral coordination | tested | Existing architecture and guards enforce non-authoritative use |
 | P5-08 | SQLite local compatibility and enterprise migration tests | tested | `all_governance_artifact_kinds_use_revisioned_authority`, cross-tenant/CAS/LKG/audit/outbox tests |

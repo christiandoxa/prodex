@@ -47,16 +47,11 @@ pub(crate) fn gateway_guardrail_config(
             bail!("gateway.guardrails.allowed_models must be non-empty strings without whitespace");
         }
     }
-    for keyword in &policy.guardrails.blocked_keywords {
-        if keyword.trim().is_empty() {
-            bail!("gateway.guardrails.blocked_keywords entries cannot be blank");
-        }
-    }
-    for keyword in &policy.guardrails.blocked_output_keywords {
-        if keyword.trim().is_empty() {
-            bail!("gateway.guardrails.blocked_output_keywords entries cannot be blank");
-        }
-    }
+    validate_gateway_guardrail_keywords("blocked_keywords", &policy.guardrails.blocked_keywords)?;
+    validate_gateway_guardrail_keywords(
+        "blocked_output_keywords",
+        &policy.guardrails.blocked_output_keywords,
+    )?;
     Ok(runtime_proxy_crate::RuntimeGatewayGuardrailConfig {
         blocked_keywords: policy.guardrails.blocked_keywords.clone(),
         blocked_output_keywords: policy.guardrails.blocked_output_keywords.clone(),
@@ -67,6 +62,27 @@ pub(crate) fn gateway_guardrail_config(
             .unwrap_or(false),
         pii_redaction: policy.guardrails.pii_redaction.unwrap_or(false),
     })
+}
+
+fn validate_gateway_guardrail_keywords(field: &str, keywords: &[String]) -> Result<()> {
+    if keywords.len() > prodex_runtime_policy::MAX_GATEWAY_GUARDRAIL_KEYWORDS {
+        bail!(
+            "gateway.guardrails.{field} must contain at most {} entries",
+            prodex_runtime_policy::MAX_GATEWAY_GUARDRAIL_KEYWORDS
+        );
+    }
+    for keyword in keywords {
+        if keyword.trim().is_empty() {
+            bail!("gateway.guardrails.{field} entries cannot be blank");
+        }
+        if keyword.trim().len() > prodex_runtime_policy::MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES {
+            bail!(
+                "gateway.guardrails.{field} entries must be at most {} bytes",
+                prodex_runtime_policy::MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES
+            );
+        }
+    }
+    Ok(())
 }
 
 fn gateway_request_constraint_config(
@@ -198,4 +214,21 @@ pub(crate) fn gateway_guardrail_webhook_secret_with_resolver(
 
 fn gateway_exact_policy_identifier(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_whitespace)
+}
+
+#[cfg(test)]
+mod keyword_bound_tests {
+    use super::gateway_guardrail_config;
+
+    #[test]
+    fn rejects_unbounded_keyword_values() {
+        let mut policy = prodex_runtime_policy::RuntimePolicyGatewaySettings::default();
+        policy.guardrails.blocked_output_keywords =
+            vec!["x".repeat(prodex_runtime_policy::MAX_GATEWAY_GUARDRAIL_KEYWORD_BYTES + 1)];
+        assert!(gateway_guardrail_config(&policy).is_err());
+
+        policy.guardrails.blocked_output_keywords =
+            vec!["x".to_string(); prodex_runtime_policy::MAX_GATEWAY_GUARDRAIL_KEYWORDS + 1];
+        assert!(gateway_guardrail_config(&policy).is_err());
+    }
 }
