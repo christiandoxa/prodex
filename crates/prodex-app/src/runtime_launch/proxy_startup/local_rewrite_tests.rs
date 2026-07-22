@@ -119,7 +119,7 @@ print(json.dumps({"jsonrpc":"2.0","result":{"sessionId":"session-1","models":{"c
 third = json.loads(sys.stdin.readline())
 assert third["method"] == "session/prompt"
 print(json.dumps({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"agent_message_chunk","messageId":"msg_1","content":{"type":"text","text":"kiro says hi"}}}}), flush=True)
-time.sleep(0.3)
+time.sleep(0.1)
 print(json.dumps({"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":2}), flush=True)
 "#,
     )
